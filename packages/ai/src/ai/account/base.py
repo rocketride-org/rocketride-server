@@ -32,6 +32,37 @@
 
 import os
 from abc import ABC, abstractmethod
+from typing import NamedTuple
+
+
+class DbDecision(NamedTuple):
+    """Answer of ``AccountBase.authorize_db_target``.
+
+    Same shape as the SaaS ``extension.saas.datacore_access.DbDecision``:
+    callers read ``.allowed``, ``.reason`` and ``.owner_id`` and never import
+    either class.
+
+    ``owner_id`` names the database an allow approved: the team or user id
+    for the team and user scopes, '' for the org database and on every
+    denial. Provision exactly that id; never re-derive the target.
+
+    Truthiness follows ``allowed``. A plain NamedTuple is always truthy, so
+    ``if decision:`` would issue a DSN on every denial; here it cannot.
+    """
+
+    allowed: bool
+    reason: str
+    audit: bool = False
+    owner_id: str = ''
+
+    def __bool__(self) -> bool:
+        return self.allowed
+
+
+class OutOfCreditsError(RuntimeError):
+    """The org is out of credit; ``code`` is what clients receive."""
+
+    code = 'OUT_OF_CREDITS'
 
 
 class AccountBase(ABC):
@@ -297,6 +328,10 @@ class AccountBase(ABC):
         """
         return {'balances': {}}
 
+    async def check_spend(self, org_id: str) -> 'str | None':
+        """Why the org may not open a pipe, or None if it may. OSS has no balance, so it always may."""
+        return None
+
     async def get_transactions(
         self,
         org_id: str,
@@ -333,15 +368,43 @@ class AccountBase(ABC):
     # CLOUD DATABASE — env-gated broker call; raises when unconfigured
     # =========================================================================
 
-    async def resolve_db_dsn(self, client_id: str) -> str:
+    async def authorize_db_target(self, identity: dict, target: dict | None = None) -> DbDecision:
         """
-        Resolve the per-tenant database DSN for the RocketRide cloud DB nodes.
+        Decide whether a run (or caller) may receive a cloud database DSN.
+
+        Called before every ``resolve_db_dsn``: by the task engine at task
+        start, once per distinct ``(scope, target)`` its DB nodes ask for.
+        The SaaS edition overrides this with the live org/team/user check
+        and its audit log (``extension/saas``, SDD 4.4). This default is for
+        editions with no orgs or teams: one tenant, so only the org scope
+        exists and anything else is refused.
+
+        Args:
+            identity: ``{org_id, user_id, team_id, run_kind, owner_kind,
+                public_endpoint, path, task_id}``. Unused here.
+            target: ``{scope, team_id, user_id}``, or None for the org
+                database.
+
+        Returns:
+            DbDecision(allowed, reason, audit, owner_id). A denial is falsy;
+            an allow's owner_id is the id to provision ('' for the org
+            database, the only one this default allows).
+        """
+        scope = (target or {}).get('scope', 'org')
+        if scope == 'org':
+            return DbDecision(True, 'single_tenant')
+        return DbDecision(False, 'scope_needs_rocketride_cloud')
+
+    async def resolve_db_dsn(self, client_id: str, scope: str = 'org', owner_id: str = '') -> str:
+        """
+        Resolve the DSN of one RocketRide cloud database.
 
         The ``rocketride_sql`` / ``rocketride_vector`` / ``rocketride_graph``
-        nodes take no connection configuration.  Instead of reading
-        host/user/password, they resolve a ready connection string for the
-        caller's own provisioned cloud database, keyed by the authenticated
-        ``client_id`` (``userId``).  One database per tenant backs all three.
+        nodes take no connection configuration. The task engine calls this at
+        task start, after ``authorize_db_target`` allowed the target, and hands
+        the DSNs to the nodes (``ROCKETRIDE_DB_DSNS``). One database per
+        tenant backs all three node types. A tenant is an org, a team or a
+        user inside an org (datacore isolation SDD 4.1).
 
         Default implementation (both editions): call the data-core provisioner
         configured via server-side environment —
@@ -350,20 +413,23 @@ class AccountBase(ABC):
             ROCKETRIDE_DB_BROKER_TOKEN  its Bearer token (from ASM/k8s; never
                                         hardcoded)
 
-        ``POST {url} {"tenant_id": client_id}`` -> ``{"database", "role",
-        "dsn", "created"}`` (only ``dsn`` is read here).
-        The endpoint is idempotent (same tenant -> same DSN; the per-tenant
-        password is derived, not stored), so this method is safe to call on
-        every task start with no caching or persistence on this side.
+        Org scope sends ``{"tenant_id": client_id}`` (unchanged, so existing
+        org databases keep their name and password). Team and user scope send
+        ``{"scope", "org_id": client_id, "owner_id"}``, and the provisioner
+        builds the key. The response is ``{"database", "role", "dsn",
+        "created"}`` (only ``dsn`` is read). The endpoint is idempotent (same
+        tenant -> same DSN; the password is derived, not stored), so this is
+        safe to call on every task start with no caching on this side.
 
         When the environment is not configured (the open-source default), this
         raises: the cloud databases require a RocketRide cloud deployment.
-        A SaaS overlay may still override this method entirely.
 
         Args:
-            client_id: The authenticated connection identity (``userId``).
-                Passed verbatim as the broker's ``tenant_id`` (the provisioner
-                owns slugging/hashing it into a database name).
+            client_id: The tenant's org id. On an edition with no orgs, the
+                user id (the task engine passes ``org_id or client_id``).
+            scope: ``'org'``, ``'team'`` or ``'user'``.
+            owner_id: The team id or user id for team and user scope. Must be
+                empty for org scope.
 
         Returns:
             A libpq/SQLAlchemy-compatible PostgreSQL DSN for the tenant DB
@@ -371,7 +437,9 @@ class AccountBase(ABC):
 
         Raises:
             NotImplementedError: broker environment not configured.
-            RuntimeError: the broker rejected the request or returned no DSN.
+            ValueError: empty id, unknown scope, or a scope/owner mismatch.
+            RuntimeError: the broker rejected the request (HTTP 409: the
+                database is retired or being deleted) or returned no DSN.
         """
         broker_url = os.environ.get('ROCKETRIDE_DB_BROKER_URL', '').strip()
         broker_token = os.environ.get('ROCKETRIDE_DB_BROKER_TOKEN', '').strip()
@@ -389,11 +457,22 @@ class AccountBase(ABC):
             )
         if not client_id or not client_id.strip():
             raise ValueError('resolve_db_dsn requires a non-empty client_id')
+        owner_id = (owner_id or '').strip()
+        if scope == 'org':
+            if owner_id:
+                raise ValueError('the org database takes no owner_id')
+            body = {'tenant_id': client_id.strip()}
+        elif scope in ('team', 'user'):
+            if not owner_id:
+                raise ValueError(f'a {scope} database needs an owner_id')
+            body = {'scope': scope, 'org_id': client_id.strip(), 'owner_id': owner_id}
+        else:
+            raise ValueError(f'unknown database scope: {scope!r}')
         self._check_broker_url(broker_url)
 
         import asyncio
 
-        return await asyncio.to_thread(self._call_db_broker, broker_url, broker_token, client_id.strip())
+        return await asyncio.to_thread(self._call_db_broker, broker_url, broker_token, body)
 
     @staticmethod
     def _check_broker_url(url: str) -> None:
@@ -421,8 +500,8 @@ class AccountBase(ABC):
         )
 
     @staticmethod
-    def _call_db_broker(url: str, token: str, tenant_id: str) -> str:
-        """Blocking POST to the provisioner; runs in a worker thread.
+    def _call_db_broker(url: str, token: str, body: dict) -> str:
+        """Blocking POST of ``body`` to the provisioner; runs in a worker thread.
 
         Stdlib-only on purpose: the account layer has no async-HTTP dependency,
         and one small request per task start does not justify adding one.
@@ -433,7 +512,7 @@ class AccountBase(ABC):
 
         request = urllib.request.Request(
             url,
-            data=json.dumps({'tenant_id': tenant_id}).encode('utf-8'),
+            data=json.dumps(body).encode('utf-8'),
             headers={
                 'Authorization': f'Bearer {token}',
                 'Content-Type': 'application/json',
@@ -445,8 +524,15 @@ class AccountBase(ABC):
                 body = json.loads(response.read().decode('utf-8'))
         except urllib.error.HTTPError as e:
             # 4xx = unknown/invalid tenant per the broker contract; 5xx = broker fault.
-            code = e.code
+            code, reason = e.code, e.reason
             e.close()
+            if code == 409:
+                # The provisioner refuses a retained or dropping tenant: its
+                # team was deleted or its user left the org. Only an operator
+                # /restore brings it back, so retrying will not help.
+                raise RuntimeError(
+                    f'this RocketRide cloud database has been retired and cannot be used (HTTP 409: {reason})'
+                ) from e
             raise RuntimeError(f'DB broker rejected provision for this account (HTTP {code})') from e
         except Exception as e:
             raise RuntimeError(f'DB broker unreachable: {e}') from e

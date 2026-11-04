@@ -52,6 +52,13 @@ const ENVIRONMENT_SECTION_ID = 'environment';
 /** The Settings section id the legacy 'account' overlay maps to. */
 const ACCOUNT_SECTION_ID = 'account:profile';
 
+/** sessionStorage flag the Profile workspace picker sets before committing a
+ *  switch: a freshly (re)mounted OverlayManager that finds it opens Settings
+ *  at the Profile section — continuity for the person who initiated the
+ *  switch there. sessionStorage, not state: the in-process rescope remounts
+ *  this component, and the rescope's reload FALLBACK replaces the page. */
+export const WORKSPACE_SWITCH_LAND_KEY = 'rr:workspace-switch-land';
+
 // =============================================================================
 // STYLES
 // =============================================================================
@@ -142,6 +149,23 @@ export const OverlayManager: React.FC<OverlayManagerProps> = ({ children }) => {
 		setSettingsSection(undefined);
 	}, []);
 
+	// --- Post-switch landing ---------------------------------------------------
+	// A workspace switch initiated from the Profile picker remounts this
+	// component (in-process rescope) or reloads the page (fallback); either
+	// way the picker's sessionStorage flag survives into this fresh mount and
+	// reopens Settings at Profile, so the person lands where they left off.
+	useEffect(() => {
+		try {
+			if (window.sessionStorage.getItem(WORKSPACE_SWITCH_LAND_KEY) !== '1') return;
+			window.sessionStorage.removeItem(WORKSPACE_SWITCH_LAND_KEY);
+		} catch {
+			return; // storage unavailable — land on the workbench
+		}
+		setOverlayState('settings');
+		setSettingsSection(ACCOUNT_SECTION_ID);
+		// eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only: the flag is consumed once per (re)mount
+	}, []);
+
 	// --- Open-overlay requests from guest apps -------------------------------
 	// Guest apps (e.g. home-ui's profile menu) can't reach `setOverlay`
 	// directly, so they emit `shell:openOverlay` over the event bus and the
@@ -182,8 +206,12 @@ export const OverlayManager: React.FC<OverlayManagerProps> = ({ children }) => {
 			{overlay !== null && (
 				<div style={styles.backdrop}>
 					{/* aria-label carries the overlay id (account/settings/…): the
-					    dialog itself has no visible heading to reference. */}
-					<div style={styles.dialog} role="dialog" aria-modal="true" aria-label={overlay}>
+					    dialog itself has no visible heading to reference.
+					    data-rr-overlay-root: the dialog IS the owning surface for
+					    every `contained` DetailPanel opened inside it — record
+					    drawers slide over (and dim) the whole dialog, chrome and
+					    nav included. */}
+					<div style={styles.dialog} role="dialog" aria-modal="true" aria-label={overlay} data-rr-overlay-root="1">
 						<button style={styles.dialogClose} onClick={closeOverlay} aria-label="Close" title="Close">
 							✕
 						</button>

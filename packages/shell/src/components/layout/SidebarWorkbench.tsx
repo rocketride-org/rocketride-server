@@ -62,14 +62,14 @@ import { createPortal } from 'react-dom';
 import { BxDockLeft, BxDotsHorizontal } from '../BoxIcon';
 import { ConnectionManager } from '../../connection/connection';
 import { useWorkspace } from '../workspace/WorkspaceContext';
-import type { ShellThemeConfig, ShellAccountConfig } from '../workspace/types';
+import type { ShellThemeConfig, ShellAccountConfig, ShellConfig } from '../workspace/types';
 import { applyContainerOrder, orderByPins } from '../../workspace/devToolPins';
 import { realmPrefsHub, typedPrefs, usePref } from '../workspace/prefsStore';
 import type { SidebarPrefsMap } from '../../workspace/devToolPins';
 import { appPartition } from '../../workspace/workspaceStore';
 import { TabControl } from '../tab-control/TabControl';
 import type { ViewMenu } from '../../types/viewMenu';
-import { SidebarFooter, SidebarFooterExtras, openPlatformDocs } from '../sidebar-footer/SidebarFooter';
+import { SidebarFooter } from '../sidebar-footer/SidebarFooter';
 import { useSidebarFooterMenu } from './useSidebarFooterMenu';
 import { SidebarCollapsedProvider } from '../sidebar-menu/SidebarCollapsedContext';
 import { SidebarActiveViewProvider } from '../sidebar-menu/SidebarActiveViewContext';
@@ -330,6 +330,8 @@ export interface SidebarWorkbenchProps {
 	onOverlay: (overlay: 'account' | 'settings' | 'environment') => void;
 	/** Server-probed edition flag — gates SaaS-only footer items. */
 	isSaas?: boolean;
+	/** Host-owned sidebar extras (ticker + docs) — absent in deep-app tabs. */
+	sidebarExtras?: ShellConfig['sidebarExtras'];
 }
 
 // =============================================================================
@@ -342,7 +344,7 @@ export interface SidebarWorkbenchProps {
  *
  * @param props - See {@link SidebarWorkbenchProps}.
  */
-const SidebarWorkbench: React.FC<SidebarWorkbenchProps> = ({ variant, themeConfig: _themeConfig, account, hideAppSwitcher, onOverlay, isSaas }) => {
+const SidebarWorkbench: React.FC<SidebarWorkbenchProps> = ({ variant, themeConfig: _themeConfig, account, hideAppSwitcher, onOverlay, isSaas, sidebarExtras }) => {
 	const { activeAppId, loadedApps } = useWorkspace();
 	const { sidebarContent, sidebarViews } = useHostChromeState();
 
@@ -566,7 +568,14 @@ const SidebarWorkbench: React.FC<SidebarWorkbenchProps> = ({ variant, themeConfi
 		if (!dragRef.current) return;
 		const next = dragRef.current.startWidth + (e.clientX - dragRef.current.startX);
 		if (next < SNAP_THRESHOLD) {
-			if (open) closePanel();
+			if (open) {
+				// Closing unmounts the sash mid-drag, so no pointerup will
+				// arrive — release the drag state here or a stale dragRef
+				// resizes the panel on a later hover.
+				dragRef.current = null;
+				setIsResizing(false);
+				closePanel();
+			}
 			return;
 		}
 		if (!open) setOpen(true);
@@ -670,18 +679,26 @@ const SidebarWorkbench: React.FC<SidebarWorkbenchProps> = ({ variant, themeConfi
 	);
 
 	// Panel header: the classic brand lockup (go-home button) + panel close.
+	// Deep-app tab: the lockup is static identity, not a way out — there is
+	// no home to go to.
 	const header = (
 		<div style={styles.header}>
-			<button
-				title="Go to home"
-				aria-label="Go to home"
-				onClick={() => ConnectionManager.getInstance().emit('shell:switchApp', { appId: homeAppId })}
-				onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--rr-bg-list-hover, var(--rr-bg-surface-alt))'; }}
-				onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-				style={{ display: 'flex', flex: 1, minWidth: 0, alignItems: 'center', padding: '2px 4px', borderRadius: 6, border: 'none', background: 'transparent', cursor: 'pointer', font: 'inherit', color: 'inherit', textAlign: 'left', transition: 'background 120ms ease' }}
-			>
-				<AppSwitcherButton collapsed={false} />
-			</button>
+			{hideAppSwitcher ? (
+				<div style={{ display: 'flex', flex: 1, minWidth: 0, alignItems: 'center', padding: '2px 4px' }}>
+					<AppSwitcherButton collapsed={false} />
+				</div>
+			) : (
+				<button
+					title="Go to home"
+					aria-label="Go to home"
+					onClick={() => ConnectionManager.getInstance().emit('shell:switchApp', { appId: homeAppId })}
+					onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--rr-bg-list-hover, var(--rr-bg-surface-alt))'; }}
+					onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+					style={{ display: 'flex', flex: 1, minWidth: 0, alignItems: 'center', padding: '2px 4px', borderRadius: 6, border: 'none', background: 'transparent', cursor: 'pointer', font: 'inherit', color: 'inherit', textAlign: 'left', transition: 'background 120ms ease' }}
+				>
+					<AppSwitcherButton collapsed={false} />
+				</button>
+			)}
 			{/* 'vscode' has NO close button here: clicking the active rail icon
 			    toggles the panel (the VS Code gesture), so a second control for
 			    the same verb is noise. 'cursor' has no rail — the header button
@@ -775,31 +792,35 @@ const SidebarWorkbench: React.FC<SidebarWorkbenchProps> = ({ variant, themeConfi
 								style={styles.railButton(open && hiddenViews.some((v) => v.id === activeView?.id), hoveredRailId === 'rr-rail-more')}
 							>
 								<BxDotsHorizontal size={RAIL_ICON} />
-								{moreOpen && moreBtnRef.current && createPortal(
-									(() => {
-										const rect = moreBtnRef.current.getBoundingClientRect();
-										return (
-											<div role="menu" style={{ ...styles.railMoreMenu, left: rect.right + 6, top: Math.min(rect.top, window.innerHeight - 320) }}>
-												{hiddenViews.map((v) => (
-													<button
-														key={v.id}
-														role="menuitem"
-														style={styles.railMenuItem(menuHoverId === v.id, open && activeView?.id === v.id)}
-														onMouseEnter={() => setMenuHoverId(v.id)}
-														onMouseLeave={() => setMenuHoverId(null)}
-														onMouseDown={(e) => { e.preventDefault(); activate(v.id); setMoreOpen(false); }}
-													>
-														<span style={{ display: 'flex', width: 16, height: 16, alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{v.icon}</span>
-														<span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{v.title}</span>
-														{v.badge != null && v.badge !== 0 && <span style={{ ...styles.railBadge, position: 'static' }}>{v.badge}</span>}
-													</button>
-												))}
-											</div>
-										);
-									})(),
-									document.body,
-								)}
 							</button>
+						)}
+						{/* Portalled as a SIBLING of the more button: as its child,
+						    menuitem clicks would bubble (through the React tree) into
+						    the button's own onClick toggle, and interactive controls
+						    would nest. */}
+						{hiddenViews.length > 0 && moreOpen && moreBtnRef.current && createPortal(
+							(() => {
+								const rect = moreBtnRef.current.getBoundingClientRect();
+								return (
+									<div role="menu" style={{ ...styles.railMoreMenu, left: rect.right + 6, top: Math.min(rect.top, window.innerHeight - 320) }}>
+										{hiddenViews.map((v) => (
+											<button
+												key={v.id}
+												role="menuitem"
+												style={styles.railMenuItem(menuHoverId === v.id, open && activeView?.id === v.id)}
+												onMouseEnter={() => setMenuHoverId(v.id)}
+												onMouseLeave={() => setMenuHoverId(null)}
+												onMouseDown={(e) => { e.preventDefault(); activate(v.id); setMoreOpen(false); }}
+											>
+												<span style={{ display: 'flex', width: 16, height: 16, alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{v.icon}</span>
+												<span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{v.title}</span>
+												{v.badge != null && v.badge !== 0 && <span style={{ ...styles.railBadge, position: 'static' }}>{v.badge}</span>}
+											</button>
+										))}
+									</div>
+								);
+							})(),
+							document.body,
 						)}
 					</div>
 					{/* The platform footer rides the rail so the account menu stays
@@ -812,7 +833,7 @@ const SidebarWorkbench: React.FC<SidebarWorkbenchProps> = ({ variant, themeConfi
 						userName={account.userName}
 						userEmail={account.userEmail}
 						menuItems={footerMenuItems}
-						onOpenDocs={open ? undefined : openPlatformDocs}
+						onOpenDocs={open ? undefined : sidebarExtras?.onOpenDocs}
 					/>
 				</div>
 
@@ -834,7 +855,7 @@ const SidebarWorkbench: React.FC<SidebarWorkbenchProps> = ({ variant, themeConfi
 					{/* The platform's channel at the panel's foot: announcements
 					    ticker + Documentation row. The account row stays on the
 					    rail — this is everything else the classic footer held. */}
-					<SidebarFooterExtras padded onOpenDocs={openPlatformDocs} />
+					{sidebarExtras?.render({ padded: true })}
 				</div>
 				{sash}
 			</div>
@@ -874,7 +895,7 @@ const SidebarWorkbench: React.FC<SidebarWorkbenchProps> = ({ variant, themeConfi
 						userName={account.userName}
 						userEmail={account.userEmail}
 						menuItems={footerMenuItems}
-						onOpenDocs={openPlatformDocs}
+						onOpenDocs={sidebarExtras?.onOpenDocs}
 					/>
 				</div>
 			)}
@@ -899,7 +920,7 @@ const SidebarWorkbench: React.FC<SidebarWorkbenchProps> = ({ variant, themeConfi
 					userName={account.userName}
 					userEmail={account.userEmail}
 					menuItems={footerMenuItems}
-					onOpenDocs={openPlatformDocs}
+					extras={sidebarExtras?.render()}
 				/>
 			</div>
 			{sash}

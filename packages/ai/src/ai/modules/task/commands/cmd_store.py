@@ -359,7 +359,14 @@ class StoreCommands(DAPConn):
             DAP response with body.bytesWritten.
         """
         fs = self._get_file_store()
-        written = await fs.put_json(args.get('path'), args.get('value'))
+        path = args.get('path')
+        if not isinstance(path, str) or not path:
+            return self.build_error(request, 'put_json requires a non-empty "path" string')
+        # A request that omits "value" must NOT write literal null over the
+        # target file — that is the data-loss class this command prevents.
+        if 'value' not in args:
+            return self.build_error(request, 'put_json requires a "value"')
+        written = await fs.put_json(path, args['value'])
         return self.build_response(request, body={'bytesWritten': written})
 
     async def _store_fs_get_json(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
@@ -375,7 +382,10 @@ class StoreCommands(DAPConn):
             DAP response with body.value.
         """
         fs = self._get_file_store()
-        value = await fs.get_json(args.get('path'))
+        path = args.get('path')
+        if not isinstance(path, str) or not path:
+            return self.build_error(request, 'get_json requires a non-empty "path" string')
+        value = await fs.get_json(path)
         return self.build_response(request, body={'value': value})
 
     async def _store_fs_delete(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:

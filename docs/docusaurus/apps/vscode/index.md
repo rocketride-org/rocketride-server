@@ -69,8 +69,9 @@ Need inspiration? Check out [awesome-rocketride](https://github.com/rocketride-o
 | `rocketride.deployment.local.engineVersion` | `string` | `"latest"`                  | Engine version for the local deployment target                                                                                            |
 | `rocketride.debug.busTrace`          | `boolean`  | `false`                          | Log every shell-bus message between the extension host and its webviews (very chatty — diagnostics only)                                  |
 
-VS Code configuration holds **connection settings only** — everything needed
-to reach a server. All other preferences (pipeline defaults such as TTL and
+VS Code configuration holds **connection, local-engine, and diagnostic
+settings only** — everything needed to reach (or run) a server, plus debug
+switches. All other preferences (pipeline defaults such as TTL and
 trace level, app paths, agent integrations) live in the **RocketRide Settings
 page** (gear icon → *RocketRide: Settings*): they are workspace settings
 stored on the connected server, so they follow you between VS Code and the
@@ -83,7 +84,6 @@ configured; there is no setting for it.
 | ------------------------------------------ | -------------------------------- |
 | `RocketRide: Settings`                     | Open extension settings          |
 | `RocketRide: Server Monitor`               | View server and pipeline status  |
-| `RocketRide: Add Dev Tool`                 | Pin a server dev tool to the sidebar's tab strip |
 | `RocketRide Pipeline: Create New Pipeline` | Create a new `.pipe` file        |
 | `RocketRide Pipeline: Run`                 | Run the selected pipeline        |
 | `RocketRide Pipeline: Stop Pipeline`       | Stop a running pipeline          |

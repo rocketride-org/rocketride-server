@@ -257,12 +257,13 @@ export const AgentConversationTool: React.FC<DevToolProps> = ({ docKey }) => {
  *
  * @param props.heading - Short card heading (the task family).
  * @param props.prompt - The full prompt sent verbatim on click.
+ * @param props.disabled - Blocks activation (mirrors the composer's connection gate).
  * @param props.onPick - Receives the prompt when the card is activated.
  */
-const ExampleCard: React.FC<{ heading: string; prompt: string; onPick: (prompt: string) => void }> = ({ heading, prompt, onPick }) => {
+const ExampleCard: React.FC<{ heading: string; prompt: string; disabled?: boolean; onPick: (prompt: string) => void }> = ({ heading, prompt, disabled = false, onPick }) => {
 	const [hovered, setHovered] = useState(false);
 	return (
-		<div style={{ ...styles.exampleCard, ...(hovered ? { background: CARD_HOVER_BG } : {}) }} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)} {...buttonize(() => onPick(prompt))}>
+		<div style={{ ...styles.exampleCard, ...(hovered && !disabled ? { background: CARD_HOVER_BG } : {}), ...(disabled ? { opacity: 0.5, cursor: 'default' } : {}) }} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)} {...buttonize(() => onPick(prompt), !disabled)}>
 			<div style={styles.exampleHeading}>{heading}</div>
 			<div style={styles.exampleText}>{prompt}</div>
 		</div>
@@ -363,7 +364,7 @@ const AgentConversation: React.FC<{ session: AgentSession; isConnected: boolean 
 			</div>
 			<div style={styles.exampleGrid}>
 				{EXAMPLE_PROMPTS.map((example) => (
-					<ExampleCard key={example.heading} heading={example.heading} prompt={example.prompt} onPick={handleSend} />
+					<ExampleCard key={example.heading} heading={example.heading} prompt={example.prompt} disabled={!isConnected} onPick={handleSend} />
 				))}
 			</div>
 		</div>

@@ -36,7 +36,7 @@
 // VS Code page webview unchanged.
 // =============================================================================
 
-import React, { useState, useEffect, useCallback, CSSProperties } from 'react';
+import React, { useState, useEffect, useCallback, useRef, CSSProperties } from 'react';
 import AccountView from '../modules/account/AccountView';
 import type { IDataGridPageRequest } from '../components/data-grid/DataGrid';
 import type { ConnectResult, AccountSection, ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, ProfileUpdate, BillingDetail, CreditBalance, TransactionsResult, UsageRollup } from 'rocketride';
@@ -150,14 +150,27 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 	/** Extracts a human-readable message from a thrown value. */
 	const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
-	/** Fetches the current user's profile from the server. */
-	const loadProfile = useCallback(async () => {
-		if (!client) return;
+	/**
+	 * Fetches the current user's profile from the server. Resolves true on
+	 * success; a failure is surfaced as sectionError and resolves false so a
+	 * caller that depends on the refresh (e.g. leaving an org) can tell.
+	 * Only the most recent request may update state: an older response that
+	 * lands after a newer one (e.g. a refresh started before a leave) is
+	 * dropped so it cannot restore a membership that no longer exists.
+	 */
+	const profileRequestSeq = useRef(0);
+	const loadProfile = useCallback(async (): Promise<boolean> => {
+		if (!client) return false;
+		const seq = ++profileRequestSeq.current;
 		try {
 			const body = await client.account.getProfile();
+			if (seq !== profileRequestSeq.current) return true;
 			setProfile(body);
+			return true;
 		} catch (e) {
+			if (seq !== profileRequestSeq.current) return false;
 			setSectionError(errMsg(e));
+			return false;
 		}
 	}, [client]);
 
@@ -379,8 +392,16 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 	useEffect(() => {
 		if (!reloadCounter || !client) return;
 		setSectionError(null);
-		if (section === 'profile') loadProfile();
-		else if (section === 'billing') loadBilling();
+		if (section === 'profile') {
+			loadProfile();
+			// The embedded Profile pane renders org, member, and team data
+			// too (see the upfront loader) — keep them fresh as well.
+			if (embeddedSection === 'profile') {
+				loadOrg();
+				loadMembers();
+				loadTeams();
+			}
+		} else if (section === 'billing') loadBilling();
 		else if (section === 'api-keys') {
 			loadProfile();
 			loadKeys();
@@ -429,7 +450,23 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 		async (orgId: string) => {
 			if (!client) return;
 			if (confirmWorkspaceSwitch && !confirmWorkspaceSwitch()) return;
-			await client.account.setDefaultOrg(orgId);
+			// The switch started HERE (the Profile picker), so after the rescope
+			// the shell should land back on the Profile section — in
+			// sessionStorage (not state) because the rescope remounts this whole
+			// tree, and its reload FALLBACK replaces the page outright. A
+			// push-initiated switch from another tab sets no flag and lands on
+			// the workbench as before. Key literal = OverlayManager's
+			// WORKSPACE_SWITCH_LAND_KEY (importing it would cycle:
+			// OverlayManager → SettingsProvider → AccountProvider).
+			try { window.sessionStorage.setItem('rr:workspace-switch-land', '1'); } catch { /* storage unavailable — land on the workbench */ }
+			try {
+				await client.account.setDefaultOrg(orgId);
+			} catch (err) {
+				// A failed switch must not leave the landing flag armed — the
+				// next unrelated mount would open Settings at Profile.
+				try { window.sessionStorage.removeItem('rr:workspace-switch-land'); } catch { /* ignore */ }
+				throw err;
+			}
 		},
 		[client, confirmWorkspaceSwitch]
 	);
@@ -444,6 +481,87 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 			await loadProfile();
 		},
 		[client, orgId, loadProfile]
+	);
+
+	/** Creates a new workspace. The server makes the caller its admin, switches
+	 *  their default org, and pushes `apaext_org_changed` — the shell's rescope
+	 *  path takes over from there, so the only client work is the landing flag
+	 *  (the switch started here, so land back on Profile). */
+	const handleCreateWorkspace = useCallback(
+		async (name: string) => {
+			if (!client) return;
+			// Same literal as OverlayManager's WORKSPACE_SWITCH_LAND_KEY (an
+			// import would cycle; see handleSetDefaultOrg).
+			try { window.sessionStorage.setItem('rr:workspace-switch-land', '1'); } catch { /* storage unavailable — land on the workbench */ }
+			try {
+				await client.account.createOrg(name);
+			} catch (err) {
+				// The switch never happened — don't leave a stale landing flag
+				// to hijack the NEXT unrelated mount of the settings overlay.
+				try { window.sessionStorage.removeItem('rr:workspace-switch-land'); } catch { /* ignore */ }
+				throw err;
+			}
+		},
+		[client]
+	);
+
+	/** Leaves a workspace. Leaving the CURRENT one makes the server re-point
+	 *  the default and push `apaext_org_changed` (the rescope takes over);
+	 *  leaving another just needs the memberships list re-read. The leave has
+	 *  already succeeded by then: a failed re-read is reported as such, never
+	 *  as a failed leave. */
+	const handleLeaveWorkspace = useCallback(
+		async (targetOrgId: string) => {
+			if (!client) return;
+			const leavingCurrent = targetOrgId === authUser?.organization?.id;
+			if (leavingCurrent) {
+				try { window.sessionStorage.setItem('rr:workspace-switch-land', '1'); } catch { /* storage unavailable */ }
+			}
+			try {
+				await client.account.leaveOrg(targetOrgId);
+			} catch (err) {
+				if (leavingCurrent) {
+					try { window.sessionStorage.removeItem('rr:workspace-switch-land'); } catch { /* ignore */ }
+				}
+				throw err;
+			}
+			if (!leavingCurrent && !(await loadProfile())) {
+				throw new Error('You left the workspace, but the workspace list could not be refreshed. Reload the page.');
+			}
+		},
+		[client, authUser, loadProfile]
+	);
+
+	/** Dry-run for the delete confirm dialog: member count + billing blocker. */
+	const handleDeleteWorkspacePrecheck = useCallback(
+		async (targetOrgId: string) => {
+			if (!client) throw new Error('Not connected');
+			return client.account.deleteOrgPrecheck(targetOrgId);
+		},
+		[client]
+	);
+
+	/** Deletes a workspace (admin-gated, destroys its data for all members).
+	 *  Same landing split as leave: current org → rescope path; another org →
+	 *  memberships re-read. */
+	const handleDeleteWorkspace = useCallback(
+		async (targetOrgId: string) => {
+			if (!client) return;
+			const deletingCurrent = targetOrgId === authUser?.organization?.id;
+			if (deletingCurrent) {
+				try { window.sessionStorage.setItem('rr:workspace-switch-land', '1'); } catch { /* storage unavailable */ }
+			}
+			try {
+				await client.account.deleteOrg(targetOrgId);
+			} catch (err) {
+				if (deletingCurrent) {
+					try { window.sessionStorage.removeItem('rr:workspace-switch-land'); } catch { /* ignore */ }
+				}
+				throw err;
+			}
+			if (!deletingCurrent) await loadProfile();
+		},
+		[client, authUser, loadProfile]
 	);
 
 	/** Deletes the user account. */
@@ -652,6 +770,10 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 				{...(embeddedSection !== undefined ? { embeddedSection } : {})}
 				{...(onNavigateSection !== undefined ? { onNavigateSection } : {})}
 				onRenameWorkspace={handleRenameWorkspace}
+				onCreateWorkspace={handleCreateWorkspace}
+				onLeaveWorkspace={handleLeaveWorkspace}
+				onDeleteWorkspace={handleDeleteWorkspace}
+				onDeleteWorkspacePrecheck={handleDeleteWorkspacePrecheck}
 				onSaveProfile={handleSaveProfile}
 				onSetDevTeam={handleSetDevTeam}
 				onSetDefaultOrg={handleSetDefaultOrg}

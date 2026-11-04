@@ -30,7 +30,7 @@ import { renderWebviewHtml } from './toolhost/frameworkProvider';
 import { ConnectionManager } from '../connection/connection';
 import { scanWorkspaceApps } from 'shared/tools/appdev';
 import { hostWorkspaceFs } from './toolhost/hostWorkspaceFs';
-import { ensureAppTrigger, ensureProjectId } from '../appdev/appMarker';
+import { ensureAppTrigger, ensureProjectId } from 'rocketride/app-pack';
 import { ensureDevSession, getDevSessionManager } from '../appdev/devSessionManager';
 import { vendorAppTypes } from '../appdev/appTypes';
 import type { BusHost } from './toolhost/busHost';
@@ -98,8 +98,9 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 		// The document: <folder>/<name>.rrapp — a contentless trigger created
 		// on demand. The working-copy projectId is ensured in the appManifest
 		// (package.json is the single home of app facts).
-		await ensureProjectId(app.folder);
-		const trigger = await ensureAppTrigger(app.folder, appId);
+		ensureProjectId(app.folder);
+		// SDK ensureAppTrigger returns the path; the editor open needs a Uri.
+		const trigger = vscode.Uri.file(ensureAppTrigger(app.folder, appId));
 		await vscode.commands.executeCommand('vscode.openWith', trigger, 'rocketride.appBuilder');
 	}
 
@@ -119,6 +120,7 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 		}
 		const panel = vscode.window.createWebviewPanel('rocketride.appBuilder.untitled', 'Untitled', vscode.ViewColumn.Active, {
 			enableScripts: true,
+			retainContextWhenHidden: true,
 			localResourceRoots: [this.context.extensionUri],
 		});
 		// No `app` stamp — the page-app bundle renders its unbound body (the
@@ -221,16 +223,20 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 		void this.connectionManager
 			.resolveAuthCredential()
 			.then((token) => {
-				if (token) this.busHost.retained.publish(`preview:app:${appId}:session`, { token });
+				// source 'window': the INHERITED credential — the webview keeps
+				// it in the inherit-gated slot, never the preview-session slot
+				// (host.preview.login publishes source 'preview' on this lane).
+				if (token) this.busHost.retained.publish(`preview:app:${appId}:session`, { token, source: 'window' });
 			})
 			.catch(() => {
 				/* signed out — the preview shows its sign-in prompt */
 			});
 
 		panel.onDidDispose(() => {
+			// The realm attachment belongs to THIS panel — always detach it.
+			detachRealm();
 			// A newer panel may own this app id now — never clear its state.
 			if (this.panels.get(appId) !== panel) return;
-			detachRealm();
 			this.panels.delete(appId);
 			this.lastWatch.delete(appId);
 			// Retract the app's retained topics — retention outlives the

@@ -458,9 +458,6 @@ export const PipelineEditor: React.FC<IPipelineEditorProps> = ({ project, host }
 	/** Where-live row / version-badge click → a deployment record drawer: the
 	 *  TEAM record without a sourceId, one source's record with it. */
 	const loadDeployment = useCallback((teamId: string, sourceId?: string): void => {
-		// The drawer's run state is push-driven: the team-scoped task monitor's
-		// events trigger the re-fetches (brokered refcounts dedupe).
-		void ConnectionManager.getInstance().getClient()?.addMonitor({ projectId: projectIdRef.current, source: '*', teamId: toWireTeamId(teamId) }, ['task']).catch(() => {});
 		fetchDeploymentOp(projectIdRef.current, teamId, sourceId).then(
 			(payload) => {
 				// Stale-drawer guard: only the OPEN record's result applies.
@@ -479,6 +476,24 @@ export const PipelineEditor: React.FC<IPipelineEditorProps> = ({ project, host }
 	useEffect(() => {
 		loadDeploymentRef.current = loadDeployment;
 	}, [loadDeployment]);
+
+	// The drawer's run state is push-driven: the team-scoped task monitor's
+	// events trigger the re-fetches. Armed once per opened team, released when
+	// the drawer closes, the team changes, or the editor unmounts.
+	const openTeamId = openDeployment?.teamId;
+	useEffect(() => {
+		if (!openTeamId) return;
+		const key = { projectId: projectIdRef.current, source: '*', teamId: toWireTeamId(openTeamId) };
+		let armed = false;
+		const client = ConnectionManager.getInstance().getClient();
+		void client?.addMonitor(key, ['task']).then(() => {
+			armed = true;
+		}).catch(() => {});
+		return () => {
+			if (!armed) return;
+			void ConnectionManager.getInstance().getClient()?.removeMonitor(key, ['task']).catch(() => {});
+		};
+	}, [openTeamId]);
 
 	const handleOpenDeployment = useCallback(
 		(teamId: string, sourceId?: string): void => {

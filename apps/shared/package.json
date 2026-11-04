@@ -76,8 +76,6 @@
     "typescript": "^5.3.0"
   },
   "exports": {
-    "./agent/*": "./src/agent/*",
-    "./workspace/*": "./src/workspace/*",
     "./api/*": "./src/api/*",
     "./components/*": "./src/components/*",
     "./services/*": "./src/services/*",

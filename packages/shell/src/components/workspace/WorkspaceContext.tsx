@@ -257,6 +257,18 @@ export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, wor
 		switchApp, updatePrefs, updateAppState, flushWorkspaceNow, updateSetting: writeSettingOverride, ensurePartition,
 	} = useWorkspaceState(client, isConnected, defaultAppId, workspaceDir, startupAppId);
 
+	// An in-process workspace rescope is about to unmount this tree and
+	// reconnect under another workspace. Flush the debounced write queue NOW,
+	// while the OLD connection is still up — a flush after the reconnect would
+	// write this workspace's state into the next one, and the page-reload path
+	// simply lost these writes (flushNow is forbidden on unload; a live-page
+	// teardown is exactly what it is for).
+	useEffect(() => {
+		return ConnectionManager.getInstance().on('shell:workspaceWillChange', () => {
+			flushWorkspaceNow();
+		});
+	}, [flushWorkspaceNow]);
+
 	// ── Settings registry + effective values ───────────────────────────────
 	// The registry flattens every desktop app's configuration (VSCode
 	// contributes.configuration shape) into one declaration index.  It rebuilds

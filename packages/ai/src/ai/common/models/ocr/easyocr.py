@@ -30,7 +30,9 @@ Output Format:
 """
 
 import io
+import itertools
 import logging
+import math
 import os
 import time
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -38,7 +40,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from ai.web.metrics import metrics
 from ai.common.utils.cuda_utils import model_gpu_gb
 from ..base import BaseLoader, get_model_server_address, ModelClient
-from .utils import preprocess_image_transparency, group_words_into_lines
+from .utils import preprocess_image_transparency, group_words_into_lines, raise_on_error, with_error_field
 
 logger = logging.getLogger('rocketlib.models.easyocr')
 
@@ -67,6 +69,47 @@ class EasyOCRLoader(BaseLoader):
     _DEFAULTS = {
         'languages': ['en'],
     }
+
+    # Text boxes recognized per GPU call. EasyOCR pads every crop of one call to the widest, so
+    # readtext(batch_size>1) on a whole page did ~4x the work on dense pages and changed the text;
+    # a call here holds crops of one padded width only, the width each crop gets alone anyway.
+    # A call's memory grows with crops x padded width (~1 MB per model height on english_g2), so it
+    # also stops at _RECOGNITION_WIDTH model heights, unless a single crop is wider
+    _RECOGNITION_BATCH = 16
+    _RECOGNITION_WIDTH = 256
+
+    @staticmethod
+    def _readtext(reader: Any, img_np: Any) -> List[Any]:
+        """``reader.readtext(img_np)``, recognizing crops of equal padded width together.
+
+        Each crop gets the input that readtext's default ``batch_size=1`` gives it, but batched GPU
+        kernels are not bit-identical to batch 1, so a low-confidence character can still differ.
+        The results come back in width order; ``group_words_into_lines`` sorts them by position.
+        """
+        from easyocr.utils import calculate_ratio, reformat_input
+
+        img, grey = reformat_input(img_np)
+        horizontal, free = reader.detect(img, reformat=False)
+        horizontal, free = horizontal[0], free[0]
+        max_y, max_x = grey.shape
+
+        def padded_width(box):
+            # in model heights, as get_image_list of easyocr 1.7.2 sizes the crop; its own ratio,
+            # since 1/(w/h) can round up past an integer h/w
+            width = min(box[1], max_x) - max(0, box[0])
+            height = min(box[3], max_y) - max(0, box[2])
+            return math.ceil(calculate_ratio(width, height)) if width > 0 and height > 0 else 1
+
+        result = []
+        for width, same in itertools.groupby(sorted(horizontal, key=padded_width), key=padded_width):
+            same = list(same)
+            batch = max(1, min(EasyOCRLoader._RECOGNITION_BATCH, EasyOCRLoader._RECOGNITION_WIDTH // width))
+            for i in range(0, len(same), batch):
+                result += reader.recognize(grey, same[i : i + batch], [], batch_size=batch, reformat=False)
+        # rotated boxes: one per call, as batch_size=1 reads them
+        for box in free:
+            result += reader.recognize(grey, [], [box], batch_size=EasyOCRLoader._RECOGNITION_BATCH, reformat=False)
+        return result
 
     @staticmethod
     def load(
@@ -261,7 +304,7 @@ class EasyOCRLoader(BaseLoader):
         dimensions = preprocessed.get('dimensions', [])
         device = models.get('device', 'cpu')
 
-        # Set the active CUDA device so tensors created inside readtext
+        # Set the active CUDA device so tensors created inside detect and recognize
         # (e.g. input preprocessing, workspace buffers) land on the same GPU
         # as the model weights that were pinned during load.
         import contextlib
@@ -278,7 +321,7 @@ class EasyOCRLoader(BaseLoader):
         for idx, img_np in enumerate(images):
             try:
                 with cuda_ctx:
-                    raw_results = reader.readtext(img_np)
+                    raw_results = EasyOCRLoader._readtext(reader, img_np)
 
                 # Convert EasyOCR format to standard box format
                 boxes = []
@@ -438,7 +481,7 @@ class EasyOCR:
 
         # Postprocess phase — extract text and bounding boxes
         t0 = time.perf_counter()
-        results = EasyOCRLoader.postprocess(self._model, raw_output, len(images), self.output_fields)
+        results = EasyOCRLoader.postprocess(self._model, raw_output, len(images), with_error_field(self.output_fields))
         t_post = (time.perf_counter() - t0) * 1000
 
         # Report all perf counters — same keys as model server response
@@ -464,7 +507,7 @@ class EasyOCR:
             result = self._client.send_command(
                 'rrext_ms_inference',
                 {
-                    'output_fields': self.output_fields,
+                    'output_fields': with_error_field(self.output_fields),
                     'data': image_bytes,  # Binary transfer via DAP data field
                 },
             )
@@ -476,6 +519,7 @@ class EasyOCR:
 
     def _format_result(self, result: Dict) -> Dict:
         """Format result to consistent output."""
+        raise_on_error('EasyOCR', result)
         return {
             'text': result.get('$text') or result.get('text', ''),
             'boxes': result.get('$boxes') or result.get('boxes', []),

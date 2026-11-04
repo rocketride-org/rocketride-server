@@ -233,7 +233,7 @@ function formatElapsed(sec: number): string {
  * @param props.app - App facts for the injected registration.
  * @param props.devEntry - The dev server's remoteEntry.js URL, when up.
  */
-const PreviewFrame: React.FC<{ url: string; reloadSeq: number; app: AppSummary | null; devEntry: string; devManifest?: Record<string, unknown>; authToken: string; inheritAuth: boolean; explicitAuthSeq: number }> = ({ url, reloadSeq, app, devEntry, devManifest, authToken, inheritAuth, explicitAuthSeq }) => {
+const PreviewFrame: React.FC<{ url: string; reloadSeq: number; app: AppSummary | null; devEntry: string; devManifest?: Record<string, unknown>; authToken: string; previewToken: string; inheritAuth: boolean; explicitAuthSeq: number }> = ({ url, reloadSeq, app, devEntry, devManifest, authToken, previewToken, inheritAuth, explicitAuthSeq }) => {
 	// Shell page lifecycle: 'loading' until the shell's dev hooks post
 	// devReady; 'unresponsive' when they never arrive (server down, wrong
 	// URL — the iframe would be sitting on a silent chrome error page);
@@ -260,8 +260,8 @@ const PreviewFrame: React.FC<{ url: string; reloadSeq: number; app: AppSummary |
 	// re-subscribing: the shell can boot ANY number of times inside one
 	// iframe mount (its auth flow navigates internally), and every boot
 	// must be re-injected.
-	const registrationRef = useRef<{ app: AppSummary | null; devEntry: string; devManifest?: Record<string, unknown>; authToken: string; inheritAuth: boolean }>({ app: null, devEntry: '', authToken: '', inheritAuth: true });
-	registrationRef.current = { app, devEntry, devManifest, authToken, inheritAuth };
+	const registrationRef = useRef<{ app: AppSummary | null; devEntry: string; devManifest?: Record<string, unknown>; authToken: string; previewToken: string; inheritAuth: boolean }>({ app: null, devEntry: '', authToken: '', previewToken: '', inheritAuth: true });
+	registrationRef.current = { app, devEntry, devManifest, authToken, previewToken, inheritAuth };
 	// Whether THIS shell page has been injected already. Every injection
 	// spawns a live container instance with its own HMR client — injecting
 	// per rebuild leaves zombie instances whose hot-update hashes are gone
@@ -276,8 +276,13 @@ const PreviewFrame: React.FC<{ url: string; reloadSeq: number; app: AppSummary |
 	 * differs, no-op when it matches), so re-answering is always safe.
 	 */
 	const postAuthState = useCallback((): void => {
-		const { authToken: token, inheritAuth: inherit } = registrationRef.current;
-		iframeRef.current?.contentWindow?.postMessage({ type: 'rrdev:auth', token: inherit && token ? token : '' }, shellOrigin);
+		// The PREVIEW's own session (explicit Sign In — a separate principal
+		// from the window) outranks inheritance and survives shell reboots:
+		// without this precedence, the post-reboot handshake answered '' when
+		// Inherit Auth was off and WIPED the credential the explicit sign-in
+		// had just delivered.
+		const { authToken: token, previewToken: preview, inheritAuth: inherit } = registrationRef.current;
+		iframeRef.current?.contentWindow?.postMessage({ type: 'rrdev:auth', token: preview || (inherit && token ? token : '') }, shellOrigin);
 	}, [shellOrigin]);
 
 	/** Posts the dev-remote registration into the (current) preview shell. */
@@ -327,14 +332,14 @@ const PreviewFrame: React.FC<{ url: string; reloadSeq: number; app: AppSummary |
 		}
 		postAuthState();
 		// eslint-disable-next-line react-hooks/exhaustive-deps -- fires on credential change only
-	}, [authToken]);
+	}, [authToken, previewToken]);
 
-	// Explicit sign-in result: deliver the credential regardless of the
-	// Inherit Auth gate — the user clicked Sign In.
+	// Explicit sign-in result: deliver the PREVIEW credential regardless of
+	// the Inherit Auth gate — the user clicked Sign In.
 	React.useEffect(() => {
 		if (explicitAuthSeq === 0) return;
-		const { authToken: token } = registrationRef.current;
-		if (token) iframeRef.current?.contentWindow?.postMessage({ type: 'rrdev:auth', token }, shellOrigin);
+		const { previewToken: preview } = registrationRef.current;
+		if (preview) iframeRef.current?.contentWindow?.postMessage({ type: 'rrdev:auth', token: preview }, shellOrigin);
 		// eslint-disable-next-line react-hooks/exhaustive-deps -- fires per explicit sign-in only
 	}, [explicitAuthSeq]);
 
@@ -489,6 +494,10 @@ const VscodeAppBuilder: React.FC<{ appId: string }> = ({ appId: stampedAppId }) 
 	// The extension's auth credential — handed to the preview shell so apps
 	// that require authentication render with a real signed-in session.
 	const [authToken, setAuthToken] = useState('');
+	// The PREVIEW's own session — minted by host.preview.login's separate
+	// PKCE flow, never the window's credential. Its own slot: overwriting
+	// authToken would conflate the two principals this split exists for.
+	const [previewToken, setPreviewToken] = useState('');
 	// Cache-buster-stripped dev entry — detects dev-server ORIGIN changes
 	// (watch restarts land on new ports; the old container is dead).
 	const prevDevEntryBaseRef = useRef('');
@@ -661,16 +670,23 @@ const VscodeAppBuilder: React.FC<{ appId: string }> = ({ appId: stampedAppId }) 
 			// The host's session handoff — a one-shot credential, RETAINED
 			// until applied; this page retracts after taking it.
 			cm.subscribe(`preview:app:${appId}:session`, (snap) => {
-				const session = snap as { token?: string } | undefined;
+				const session = snap as { token?: string; source?: 'window' | 'preview' } | undefined;
 				if (!session?.token) return;
-				setAuthToken(session.token);
 				cm.publish(`preview:app:${appId}:session`, undefined);
-				// A credential arriving for an EXPLICIT sign-in click gets
-				// delivered to the preview regardless of the Inherit Auth
-				// checkbox — the user just asked for it.
-				if (pendingExplicitLoginRef.current) {
-					pendingExplicitLoginRef.current = false;
-					setExplicitAuthSeq((n) => n + 1);
+				// TWO credentials ride this lane, routed by source: the
+				// WINDOW handoff (panel open — inherit-gated slot) and the
+				// PREVIEW's own sign-in (host.preview.login — delivered
+				// regardless of the Inherit Auth checkbox: the user just
+				// asked for it). Absent source reads as 'window' (the
+				// original publisher).
+				if (session.source === 'preview') {
+					setPreviewToken(session.token);
+					if (pendingExplicitLoginRef.current) {
+						pendingExplicitLoginRef.current = false;
+						setExplicitAuthSeq((n) => n + 1);
+					}
+				} else {
+					setAuthToken(session.token);
 				}
 			}),
 			// Platform events, derived realm-locally from the mirror's
@@ -768,6 +784,12 @@ const VscodeAppBuilder: React.FC<{ appId: string }> = ({ appId: stampedAppId }) 
 				void cm.request('host.preview.login', { app: stampedAppId } as never, { timeoutMs: LOGIN_TIMEOUT_MS }).catch(() => {
 					/* sign-in abandoned — the preview keeps its prompt */
 				});
+			} else if (data?.type === 'rrdev:signedOut') {
+				// The preview user signed out: drop the panel's preview session,
+				// or the next devReady handshake would resurrect it and make
+				// sign-out impossible to test.
+				setPreviewToken('');
+				pendingExplicitLoginRef.current = false;
 			} else if (data?.type === 'shell:devConsole' && data.text !== undefined) {
 				const row: ConsoleRow = { time: stamp(), level: data.level ?? 'log', text: `[preview] ${data.text}` };
 				emitConsole(row);
@@ -901,7 +923,7 @@ const VscodeAppBuilder: React.FC<{ appId: string }> = ({ appId: stampedAppId }) 
 
 	return (
 		<div style={styles.root}>
-			<AppBuilderScreen host={host} app={app} previewPane={proxyPreviewUrl && previewLive ? <PreviewFrame url={proxyPreviewUrl} reloadSeq={reloadSeq} app={app} devEntry={devEntry} devManifest={devManifest} authToken={authToken} inheritAuth={inheritAuth} explicitAuthSeq={explicitAuthSeq} /> : <PreviewInitializing status={watchStatus} subscribeConsole={subscribeConsole} />} />
+			<AppBuilderScreen host={host} app={app} previewPane={proxyPreviewUrl && previewLive ? <PreviewFrame url={proxyPreviewUrl} reloadSeq={reloadSeq} app={app} devEntry={devEntry} devManifest={devManifest} authToken={authToken} previewToken={previewToken} inheritAuth={inheritAuth} explicitAuthSeq={explicitAuthSeq} /> : <PreviewInitializing status={watchStatus} subscribeConsole={subscribeConsole} />} />
 		</div>
 	);
 };

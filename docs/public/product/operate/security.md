@@ -36,10 +36,11 @@ inherit the engine's full environment, only an allowlist:
 
 - process basics: `PATH`, `HOME`, locale, TLS and proxy settings
 - interpreter and ML runtime settings (`PYTHON*`, `HF_*`, `CUDA_*`, and similar)
-- every `ROCKETRIDE_` variable except four the engine removes:
+- every `ROCKETRIDE_` variable except five the engine removes:
   `ROCKETRIDE_DB_BROKER_URL`, `ROCKETRIDE_DB_BROKER_TOKEN`,
-  `ROCKETRIDE_DB_DSN`, and `ROCKETRIDE_DB_RESOLVE_ERROR`. A task that uses a
-  RocketRide database node then gets its own resolved `ROCKETRIDE_DB_DSN`.
+  `ROCKETRIDE_DB_DSNS`, `ROCKETRIDE_DB_DSN`, and `ROCKETRIDE_DB_RESOLVE_ERROR`.
+  A task that uses a RocketRide database node then gets `ROCKETRIDE_DB_DSNS`,
+  holding the DSN of each database the run was approved for.
   Any other `ROCKETRIDE_DB_*` name passes through like the rest.
 - what nodes and the task itself use directly: `RR_STORE_URL`,
   `RR_STORE_SECRET_KEY`, `RR_SIGNING_KEY`, `RR_BASE_URL`, `RR_CORS_ORIGINS`,
@@ -80,6 +81,15 @@ The engine binds to `localhost` by default:
 - **Source-node HTTP endpoints** (Webhook, Chat, Dropper) — the port is set
   per node in the pipeline config; 5567 is the conventional choice used in
   examples and integrations, not a fixed engine bind.
+- **Task data ports** — each running pipeline listens on `localhost`, on a port
+  from a pool that starts at `--base_port` (20000 by default), for the engine
+  only. It accepts a connection only with that pipeline run's own token, which
+  the engine keeps and replaces on every start; the pipeline's process is given
+  only a hash of it. The engine connects as soon as the process reports its
+  listener, and over that connection the process may ask the engine only for
+  the commands the engine registered for it — today one, `spend.check`, which
+  asks whether the run's own organization may open a pipe. Its `/status`
+  endpoint accepts only that token.
 
 Only the source-node HTTP port needs to be accessible to external callers when
 you're using a webhook-based source. Port 5565 is a management interface;

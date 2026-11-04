@@ -107,6 +107,11 @@ export function isDirectEndpointKey(key: string): boolean {
 
 const revivals = new Map<string, () => Promise<void>>();
 
+/** Live holders per direct endpoint key (resolve +1, release -1) — a
+ *  re-resolve of the same key must not be killed by the previous holder's
+ *  late release. */
+const holders = new Map<string, number>();
+
 /**
  * The revival for an endpoint key, when one is registered (direct endpoints
  * only). The session layer calls it when token resolution finds no task.
@@ -197,20 +202,30 @@ export async function resolveEndpoint(client: RocketRideClient, conn: SavedSqlCo
 	// The idle TTL can reap the task mid-session: register the re-`use` so
 	// the session can revive it when token resolution comes up empty.
 	revivals.set(endpoint.key, start);
+	holders.set(endpoint.key, (holders.get(endpoint.key) ?? 0) + 1);
 
 	return endpoint;
 }
 
 /**
- * Stops a direct connection's temp pipeline (best effort) and drops its
- * revival — called when the connection's last document closes, and before
- * deleting a direct connection. A no-op for non-direct keys.
+ * Releases one holder of a direct endpoint — called when a connection
+ * document closes, and before deleting a direct connection. The temp
+ * pipeline is stopped (best effort) and its revival dropped only when the
+ * LAST holder releases: a resolve that reused the key (same connection
+ * re-opened) must survive the previous holder's late release. A no-op for
+ * non-direct keys.
  *
  * @param client - The shell's RocketRide client.
  * @param endpointKey - The endpoint key whose temp pipeline to stop.
  */
 export async function releaseDirectEndpoint(client: RocketRideClient, endpointKey: string): Promise<void> {
 	if (!isDirectEndpointKey(endpointKey)) return;
+	const remaining = (holders.get(endpointKey) ?? 1) - 1;
+	if (remaining > 0) {
+		holders.set(endpointKey, remaining);
+		return;
+	}
+	holders.delete(endpointKey);
 	revivals.delete(endpointKey);
 	// Key shape `${projectId}:tools_1:${nodeId}` with a colon-free project id.
 	const projectId = endpointKey.split(':')[0];

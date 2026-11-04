@@ -151,6 +151,9 @@ const RocketApp: React.FC<ShellAppProps> = (_props) => {
 	const authUser = useAuthUser();
 	const { loaded, appState, updateAppState, flushWorkspaceNow, activeAppId, settings, updateSetting } = useWorkspace();
 	const [ready, setReady] = useState(false);
+	// Bootstrap failure (createWorkspace / Documents init) — renders in place
+	// of the "Initialising..." placeholder instead of hanging it forever.
+	const [bootError, setBootError] = useState<string | null>(null);
 
 	// --- Workspace scope (dev team → shared tree) -----------------------------
 
@@ -169,7 +172,9 @@ const RocketApp: React.FC<ShellAppProps> = (_props) => {
 	// bootstrap effect without retriggering it on every settings change.
 	const settingAutoCommit = settings['rocketride.pipeBuilder.autoCommit'] !== false;
 	const autoCommitRef = useRef(settingAutoCommit);
-	autoCommitRef.current = settingAutoCommit;
+	useEffect(() => {
+		autoCommitRef.current = settingAutoCommit;
+	}, [settingAutoCommit]);
 	// True while the auto-commit switch is held up by pending staged
 	// changes — drives the commit / discard / stay prompt below.
 	const [modeSwitchBlocked, setModeSwitchBlocked] = useState(false);
@@ -267,7 +272,9 @@ const RocketApp: React.FC<ShellAppProps> = (_props) => {
 		// performs its first read. An unmount mid-build only flags
 		// cancellation; the workspace itself lives for the document.
 		let cancelled = false;
+		setBootError(null);
 		void (async () => {
+		try {
 		const ws = await createWorkspace({ hostAppId: activeAppId, autoCommit: autoCommitRef.current, scope: workspaceScope });
 		if (cancelled) return;
 		// step: hand the agent this workspace's view, guides, scaffold, packer and dev sessions
@@ -311,6 +318,10 @@ const RocketApp: React.FC<ShellAppProps> = (_props) => {
 		}
 
 		setReady(true);
+		} catch (err) {
+			console.error('[RocketApp] bootstrap failed:', err);
+			if (!cancelled) setBootError(err instanceof Error ? err.message : String(err));
+		}
 		})();
 
 		return () => {
@@ -400,7 +411,15 @@ const RocketApp: React.FC<ShellAppProps> = (_props) => {
 	// SidebarProvider shares the singleton with the editor surface. Below the
 	// compact breakpoint the shell renders the classic drawer regardless of
 	// mode, where SidebarProvider falls back to its own tab strip.
-	if (!ready) return <AppLayout showStatus><div style={styles.welcome}>Initialising...</div></AppLayout>;
+	if (!ready) {
+		return (
+			<AppLayout showStatus>
+				<div style={styles.welcome}>
+					{bootError ? <span style={styles.statusError}>Workspace failed to initialise: {bootError}</span> : 'Initialising...'}
+				</div>
+			</AppLayout>
+		);
+	}
 	return (
 		<AppLayout sidebar={sidebar} sidebarMode="vscode" sidebarViews={sidebarViews} showStatus status={statusNode}>
 			<RocketAppReady docs={getDocs()!} />

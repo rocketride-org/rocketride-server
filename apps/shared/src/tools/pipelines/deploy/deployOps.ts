@@ -22,7 +22,8 @@
 
 import { ConnectionManager } from 'shell';
 import type { DeployArtifact, DeployHistoryEntry, RocketRideClient } from 'rocketride';
-import { resolveDeployTeams, mapVersionCards, mapHistoryRows, mapTeamDeploymentRows, mapScheduleRows, teamNameOf, mapDeploymentInfo, wireTeamIdOf } from './deployMapping';
+import { resolveDeployTeams, teamNameOf, wireTeamIdOf } from 'rocketride';
+import { mapVersionCards, mapHistoryRows, mapTeamDeploymentRows, mapScheduleRows, mapDeploymentInfo } from './deployMapping';
 import type { DeployTeamRefDTO, DeployVersionCardDTO, TeamDeploymentRowDTO, DeploymentLoadPayload } from './deployTypes';
 
 const cm = (): ConnectionManager => ConnectionManager.getInstance();
@@ -75,14 +76,14 @@ export async function fetchDeployLifecycle(projectId: string | undefined): Promi
 			client.deploy.list(),
 		]);
 		const deploymentRows = list.rows ?? [];
-		const teams = resolveDeployTeams(info, deploymentRows);
+		const teams = resolveDeployTeams({ getAccountInfo: () => info }, deploymentRows);
 		return {
 			versions: mapVersionCards((versions.rows ?? []) as DeployArtifact[]),
 			deployments: mapTeamDeploymentRows(deploymentRows, projectId, teams, info?.userId ?? ''),
 			teams,
 		};
 	} catch {
-		return { versions: [], deployments: [], teams: resolveDeployTeams(info, []) };
+		return { versions: [], deployments: [], teams: resolveDeployTeams({ getAccountInfo: () => info }, []) };
 	}
 }
 
@@ -171,7 +172,7 @@ export async function fetchDeployment(projectId: string, rawTeamId: string, sour
 
 	// Step 6: resolve teams (names + control) and map into view models.
 	const info = bus.getAccountInfo();
-	const teams = resolveDeployTeams(info, [dep]);
+	const teams = resolveDeployTeams({ getAccountInfo: () => info }, [dep]);
 	const components = Array.isArray(pipeline.components) ? (pipeline.components as Array<{ id?: string; name?: string }>) : [];
 	const sourceName = sourceId ? components.find((c) => c.id === sourceId)?.name || sourceId : undefined;
 	return {

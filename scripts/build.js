@@ -154,6 +154,8 @@ function parseArgs(args) {
 			options.simulateGpus = parseInt(arg.split('=')[1], 10);
 		} else if (arg === '--nodownload') {
 			options.nodownload = true;
+		} else if (arg.startsWith('--suffix=')) {
+			options.suffix = arg.substring('--suffix='.length);
 		} else if (arg.startsWith('--arch=')) {
 			const archValue = arg.substring('--arch='.length).toLowerCase();
 			if (archValue === 'arm' || archValue === 'arm64') {
@@ -300,6 +302,8 @@ Options:
   --sequential, -s    Run modules sequentially (default: parallel)
   --simulate-gpus=N   Simulate N virtual GPUs on cuda:0 (model_server:dev)
   --stamp=STAMP       Set build stamp
+  --suffix=NAME       Download the server from the server-v<version>-NAME release
+                      (an experimental release's tag_suffix) instead of a prerelease
   --system-compiler   Install a compatible clang system-wide via apt/dnf (needs --autoinstall + root)
   --taskserver=ADDR   Use existing task server (port or host:port) for tests/run
   --trace="a,b,c"     Enable trace output (passed to engine/tests)

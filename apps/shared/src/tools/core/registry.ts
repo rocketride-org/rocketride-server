@@ -52,7 +52,14 @@ import { TOOL_SETTINGS_GROUP, TOOL_SETTINGS_OWNER } from '../toolSettings';
 
 /** A builtin's manifest row: a real `AppManifestEntry` minus the loader —
  *  the one thing a builtin genuinely does not have (nothing to fetch). */
-export type BuiltinManifest = Omit<AppManifestEntry, 'load'>;
+export type BuiltinManifest = Omit<AppManifestEntry, 'load'> & {
+	/** The MAIN APP whose workspace partition stores this tool's prefs and
+	 *  setting deltas (e.g. the pipelines tool → 'rocketride.pipeBuilder'),
+	 *  so preferences follow the person across the tool and app surfaces of
+	 *  the same product. Absent, the tool's own manifest id is the storage
+	 *  identity — correct for store tools, whose tool id IS their app id. */
+	storageAppId?: string;
+};
 
 /** A builtin's descriptor: the slice of `AppDescriptor` a dev tool serves.
  *  No `app`/`branding` — a tool mounts in a host workbench, it never boots

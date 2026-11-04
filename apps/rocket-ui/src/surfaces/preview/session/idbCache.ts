@@ -53,8 +53,23 @@ function openDb(): Promise<IDBDatabase> {
 					if (!req.result.objectStoreNames.contains(store)) req.result.createObjectStore(store);
 				}
 			};
-			req.onsuccess = () => resolve(req.result);
+			req.onsuccess = () => {
+				const db = req.result;
+				// Yield to a later upgrade from another tab instead of blocking it.
+				db.onversionchange = () => {
+					db.close();
+					dbPromise = null;
+				};
+				resolve(db);
+			};
 			req.onerror = () => reject(req.error);
+			// A tab still holding an older version would otherwise leave the
+			// open pending forever — the cache is best-effort, so bail out.
+			req.onblocked = () => reject(new Error('appdev cache upgrade blocked by another tab'));
+		});
+		// Do not memoize a failed open — the next caller retries.
+		dbPromise.catch(() => {
+			dbPromise = null;
 		});
 	}
 	return dbPromise;

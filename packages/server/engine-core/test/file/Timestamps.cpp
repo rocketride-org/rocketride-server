@@ -29,6 +29,11 @@ TEST_CASE("file::Timestamps") {
     const auto tmpFilePath = test::testPath() / "timestamp_tmp.txt";
 
     SECTION("Creation Time") {
+        // File systems stamp files from a coarser clock than
+        // time::nowSystem(), and stamp the write a moment after the create.
+        // Truncated to whole seconds, either gap can show up as 1 second.
+        const std::time_t clockSlack = 1;
+
         auto beforeCreateTime = time::nowSystem();
 
         // Delete tmp file if exists
@@ -58,17 +63,24 @@ TEST_CASE("file::Timestamps") {
         std::time_t t_accessTime =
             std::chrono::system_clock::to_time_t(info->accessTime);
 
-        REQUIRE(t_beforeCreateTime <= t_createTime);
+        REQUIRE(t_beforeCreateTime - clockSlack <= t_createTime);
 
         REQUIRE(t_afterCreateTime >= t_createTime);
 
-        REQUIRE(t_modifyTime == t_createTime);
+        REQUIRE(t_modifyTime >= t_createTime);
+        REQUIRE(t_modifyTime - t_createTime <= clockSlack);
 
-        REQUIRE(t_accessTime == t_createTime);
+        REQUIRE(t_accessTime >= t_createTime);
+        REQUIRE(t_accessTime - t_createTime <= clockSlack);
 
 #ifdef ROCKETRIDE_PLAT_UNX
 #ifndef ROCKETRIDE_PLAT_MAC
-        REQUIRE(info->createTime == info->changeTime);
+        REQUIRE(info->changeTime.has_value());
+        std::time_t t_changeTime =
+            std::chrono::system_clock::to_time_t(*info->changeTime);
+
+        REQUIRE(t_changeTime >= t_createTime);
+        REQUIRE(t_changeTime - t_createTime <= clockSlack);
 #endif
 #endif
     }

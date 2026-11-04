@@ -17,8 +17,10 @@
  *     workspace by construction,
  *   - "Manage workspaces…" opens the standard right record-drawer: per-row
  *     Rename (admins, the old Organization tab), plus Leave / Delete / New
- *     workspace — GATED until the server ships the `rrext_account_org`
- *     create/leave/delete verbs (see docs/development/engine/rrext-account-org.md).
+ *     workspace — each action renders only when its callback prop is wired
+ *     (the VS Code host omits them). Leave is disabled for a workspace's
+ *     last admin, confirmed via the stock ConfirmDialog, and a server
+ *     refusal lands in the drawer's error Banner.
  */
 
 import React, { useMemo, useState } from 'react';
@@ -27,23 +29,13 @@ import { commonStyles } from '../../../themes/styles';
 import { Card } from '../../../components/card/Card';
 import { Button } from '../../../components/button/Button';
 import { DetailPanel } from '../../../components/detail-panel/DetailPanel';
+import { ConfirmDialog } from '../../../components/modal/ConfirmDialog';
 import { Banner } from '../../../components/banner/Banner';
 import type { ConnectResult, MemberRecord, TeamRecord, TeamDetail, ProfileUpdate } from '../types';
 import { ProfilePanel } from './ProfilePanel';
 import { MembersPanel } from './MembersPanel';
 import { TeamsPanel } from './TeamsPanel';
 import { Badge, Avatar } from './shared';
-
-// =============================================================================
-// FEATURE GATE
-// =============================================================================
-
-/** Whether the server ships the `rrext_account_org` create/leave/delete
- *  verbs (the Phase-0 backend contract). Until then the actions render
- *  DISABLED with an explanation — flipping this constant arms them. */
-const WORKSPACE_LIFECYCLE_VERBS = false;
-
-const GATE_TOOLTIP = 'Not available yet — requires server support for workspace create/leave/delete.';
 
 // =============================================================================
 // STYLES
@@ -61,7 +53,16 @@ const styles = {
 	drawerActions: { display: 'flex', gap: 6 } as CSSProperties,
 	drawerFoot: { paddingTop: 12 } as CSSProperties,
 	renameInput: { ...commonStyles.inputField, flex: 1, minWidth: 0 } as CSSProperties,
+	/** Muted hint beside a disabled Leave button (the workspace's last admin). */
+	leaveHint: { ...commonStyles.textMuted, fontSize: 11, maxWidth: 220, textAlign: 'right' } as CSSProperties,
 };
+
+// =============================================================================
+// CONSTANTS
+// =============================================================================
+
+/** Why Leave is disabled for the workspace's last admin (tooltip + inline hint). */
+const LAST_ADMIN_HINT = "You are this workspace's only admin — promote another member to admin first.";
 
 // =============================================================================
 // PROPS
@@ -85,6 +86,14 @@ export interface IProfileSectionProps {
 	onSetDefaultOrg: (orgId: string) => Promise<void>;
 	/** Renames ANY workspace the user administers (drawer per-row rename). */
 	onRenameWorkspace: (orgId: string, name: string) => Promise<void>;
+	/** Creates a new workspace (the server switches the caller into it). */
+	onCreateWorkspace?: (name: string) => Promise<void>;
+	/** Leaves a workspace (server enforces last-admin / last-workspace rules). */
+	onLeaveWorkspace?: (orgId: string) => Promise<void>;
+	/** Deletes a workspace (admin-gated; destroys its data for all members). */
+	onDeleteWorkspace?: (orgId: string) => Promise<void>;
+	/** Delete dry-run: member count + billing blocker for the confirm dialog. */
+	onDeleteWorkspacePrecheck?: (orgId: string) => Promise<{ members: number; subscriptionActive: boolean }>;
 	onInviteMember: IParamsOf<'invite'>;
 	onUpdateMemberRole: (userId: string, role: string) => Promise<void>;
 	onRemoveMember: (userId: string) => Promise<void>;
@@ -111,24 +120,85 @@ const ManageWorkspacesDrawer: React.FC<{
 	defaultOrgId: string | undefined;
 	onClose: () => void;
 	onRename: (orgId: string, name: string) => Promise<void>;
-}> = ({ memberships, defaultOrgId, onClose, onRename }) => {
+	onCreate?: ((name: string) => Promise<void>) | undefined;
+	onLeave?: ((orgId: string) => Promise<void>) | undefined;
+	onDelete?: ((orgId: string) => Promise<void>) | undefined;
+	onDeletePrecheck?: ((orgId: string) => Promise<{ members: number; subscriptionActive: boolean }>) | undefined;
+}> = ({ memberships, defaultOrgId, onClose, onRename, onCreate, onLeave, onDelete, onDeletePrecheck }) => {
 	const [renamingId, setRenamingId] = useState<string | null>(null);
 	const [renameValue, setRenameValue] = useState('');
+	const [creating, setCreating] = useState(false);
+	const [createValue, setCreateValue] = useState('');
 	const [error, setError] = useState<string | null>(null);
 	const [busy, setBusy] = useState(false);
+	// The workspace awaiting leave confirmation (stock ConfirmDialog), or null.
+	const [confirmLeave, setConfirmLeave] = useState<{ id: string; name: string } | null>(null);
+	// Leave in flight — disables the rows' buttons until the server answers.
+	const [leaving, setLeaving] = useState(false);
 
-	const commitRename = async (orgId: string): Promise<void> => {
-		if (!renameValue.trim()) return;
+	/** One failure surface for every drawer verb: run it, banner its error. */
+	const run = async (label: string, action: () => Promise<void>): Promise<void> => {
 		setBusy(true);
 		setError(null);
 		try {
-			await onRename(orgId, renameValue.trim());
-			setRenamingId(null);
+			await action();
 		} catch (e) {
-			setError(e instanceof Error ? e.message : 'Rename failed');
+			setError(e instanceof Error ? e.message : `${label} failed`);
 		} finally {
 			setBusy(false);
 		}
+	};
+
+	const commitRename = async (orgId: string): Promise<void> => {
+		if (!renameValue.trim()) return;
+		await run('Rename', async () => {
+			await onRename(orgId, renameValue.trim());
+			setRenamingId(null);
+		});
+	};
+
+	const commitCreate = async (): Promise<void> => {
+		if (!onCreate || !createValue.trim()) return;
+		await run('Create', async () => {
+			await onCreate(createValue.trim());
+			// Success switches the default org — the rescope replaces this UI.
+			setCreating(false);
+			setCreateValue('');
+		});
+	};
+
+	/** Leaves the confirmed workspace. A server refusal (e.g. its own
+	 *  last-admin guard) closes the confirm and banners the server's message. */
+	const commitLeave = async (): Promise<void> => {
+		if (!onLeave || !confirmLeave) return;
+		const target = confirmLeave;
+		setLeaving(true);
+		setError(null);
+		try {
+			await onLeave(target.id);
+			setConfirmLeave(null);
+		} catch (e) {
+			setConfirmLeave(null);
+			setError(e instanceof Error ? e.message : 'Leave failed');
+		} finally {
+			setLeaving(false);
+		}
+	};
+
+	const deleteWorkspace = async (orgId: string, name: string): Promise<void> => {
+		if (!onDelete) return;
+		await run('Delete', async () => {
+			// Dry-run first so the confirm can state the real blast radius; a
+			// server without the precheck still gets a (vaguer) confirm.
+			let detail = '';
+			if (onDeletePrecheck) {
+				const pre = await onDeletePrecheck(orgId);
+				if (pre.subscriptionActive) throw new Error('This workspace has an active subscription — cancel billing first.');
+				detail = pre.members === 1 ? ' You are its only member.' : ` All ${pre.members} members lose access.`;
+			}
+			if (!window.confirm(`Permanently delete "${name}"?${detail} Every pipeline, deployment, app, environment variable, and API key in it is destroyed. This cannot be undone.`)) return;
+			await onDelete(orgId);
+		});
 	};
 
 	return (
@@ -159,11 +229,15 @@ const ManageWorkspacesDrawer: React.FC<{
 								</div>
 								<div style={styles.drawerActions}>
 									{isAdmin && (
-										<Button variant="ghost" small onClick={() => { setRenamingId(o.id); setRenameValue(o.name); }}>Rename</Button>
+										<Button variant="ghost" small disabled={busy || leaving} onClick={() => { setRenamingId(o.id); setRenameValue(o.name); }}>Rename</Button>
 									)}
-									<Button variant="ghost" small disabled={!WORKSPACE_LIFECYCLE_VERBS} title={WORKSPACE_LIFECYCLE_VERBS ? undefined : GATE_TOOLTIP}>Leave</Button>
-									{isAdmin && (
-										<Button variant="ghost" small disabled={!WORKSPACE_LIFECYCLE_VERBS} title={WORKSPACE_LIFECYCLE_VERBS ? undefined : GATE_TOOLTIP}>Delete</Button>
+									{/* Last admin can't leave — the hint says what unblocks it. */}
+									{onLeave && o.isLastAdmin && <span style={styles.leaveHint}>{LAST_ADMIN_HINT}</span>}
+									{onLeave && (
+										<Button variant="ghost" small disabled={busy || leaving || !!o.isLastAdmin} title={o.isLastAdmin ? LAST_ADMIN_HINT : undefined} onClick={() => { setError(null); setConfirmLeave({ id: o.id, name: o.name }); }}>Leave</Button>
+									)}
+									{isAdmin && onDelete && (
+										<Button variant="ghost" small disabled={busy || leaving} onClick={() => void deleteWorkspace(o.id, o.name)}>Delete</Button>
 									)}
 								</div>
 							</>
@@ -171,11 +245,37 @@ const ManageWorkspacesDrawer: React.FC<{
 					</div>
 				);
 			})}
-			<div style={styles.drawerFoot}>
-				<Button variant="ghost" small disabled={!WORKSPACE_LIFECYCLE_VERBS} title={WORKSPACE_LIFECYCLE_VERBS ? undefined : GATE_TOOLTIP}>
-					New workspace…
-				</Button>
-			</div>
+			{onCreate && (
+				<div style={styles.drawerFoot}>
+					{creating ? (
+						<div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+							<input style={styles.renameInput} placeholder="Workspace name" value={createValue} onChange={(e) => setCreateValue(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void commitCreate(); }} data-rr-autofocus="true" />
+							<Button variant="primary" small disabled={busy || !createValue.trim()} onClick={() => void commitCreate()}>Create</Button>
+							<Button variant="ghost" small disabled={busy} onClick={() => { setCreating(false); setCreateValue(''); }}>Cancel</Button>
+						</div>
+					) : (
+						<Button variant="ghost" small disabled={busy || leaving} onClick={() => setCreating(true)}>
+							New workspace…
+						</Button>
+					)}
+				</div>
+			)}
+
+			{/* -- Leave confirmation (stock dialog). Leaving the ONLY workspace is
+			      allowed, but the confirm says what that means. -- */}
+			{confirmLeave && (
+				<ConfirmDialog
+					title="Leave workspace"
+					message={`Leave ${confirmLeave.name}? You will lose access to its teams and runs; anything you deployed stays with the workspace.${memberships.length === 1 ? ' This is your only workspace: you will have no workspace until you create or are invited to one.' : ''}`}
+					confirmLabel={leaving ? 'Leaving…' : 'Leave'}
+					confirmDisabled={leaving}
+					destructive
+					onConfirm={() => void commitLeave()}
+					onCancel={() => {
+						if (!leaving) setConfirmLeave(null);
+					}}
+				/>
+			)}
 		</DetailPanel>
 	);
 };
@@ -188,7 +288,7 @@ const ManageWorkspacesDrawer: React.FC<{
  * The collapsed Profile pane: identity + the workspace master card.
  */
 export const ProfileSection: React.FC<IProfileSectionProps> = (props) => {
-	const { profile, authUser, members, teams, teamDetail, activeTeamId, isOrgAdmin, isActiveTeamAdmin, onActiveTeamIdChange, onLoadTeamDetail, onSaveProfile, onSetDevTeam, onSetDefaultOrg, onRenameWorkspace, onInviteMember, onUpdateMemberRole, onRemoveMember, onResendInvite, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember } = props;
+	const { profile, authUser, members, teams, teamDetail, activeTeamId, isOrgAdmin, isActiveTeamAdmin, onActiveTeamIdChange, onLoadTeamDetail, onSaveProfile, onSetDevTeam, onSetDefaultOrg, onRenameWorkspace, onCreateWorkspace, onLeaveWorkspace, onDeleteWorkspace, onDeleteWorkspacePrecheck, onInviteMember, onUpdateMemberRole, onRemoveMember, onResendInvite, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember } = props;
 
 	const [manageOpen, setManageOpen] = useState(false);
 
@@ -197,7 +297,11 @@ export const ProfileSection: React.FC<IProfileSectionProps> = (props) => {
 	const defaultOrgId = profile?.defaultOrgId ?? org?.id;
 	const active = useMemo(() => memberships.find((o) => o.id === defaultOrgId) ?? org, [memberships, defaultOrgId, org]);
 	const activeTeams = active?.teams ?? [];
-	const devTeamId = profile?.devTeam || authUser?.devTeam || '';
+	// A stored devTeam can name a team from ANOTHER workspace after a switch;
+	// treating it as unset keeps the placeholder visible so the first team
+	// stays selectable (a foreign id matches no option and fires no onChange).
+	const rawDevTeamId = profile?.devTeam || authUser?.devTeam || '';
+	const devTeamId = activeTeams.some((t) => t.id === rawDevTeamId) ? rawDevTeamId : '';
 
 	return (
 		<section style={styles.stack}>
@@ -263,7 +367,7 @@ export const ProfileSection: React.FC<IProfileSectionProps> = (props) => {
 			</Card>
 
 			{manageOpen && (
-				<ManageWorkspacesDrawer memberships={memberships} defaultOrgId={defaultOrgId} onClose={() => setManageOpen(false)} onRename={onRenameWorkspace} />
+				<ManageWorkspacesDrawer memberships={memberships} defaultOrgId={defaultOrgId} onClose={() => setManageOpen(false)} onRename={onRenameWorkspace} onCreate={onCreateWorkspace} onLeave={onLeaveWorkspace} onDelete={onDeleteWorkspace} onDeletePrecheck={onDeleteWorkspacePrecheck} />
 			)}
 		</section>
 	);

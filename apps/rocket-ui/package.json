@@ -9,7 +9,7 @@
 	"appManifest": {
 		"id": "rocketride.pipeBuilder",
 		"projectId": "f648481f-cee8-4edd-95c6-c7bd192457d7",
-		"publisher": "Aparavi Software AG",
+		"publisher": "RocketRide",
 		"name": "Rocket Builder",
 		"description": "Design, run, and deploy AI pipelines visually.",
 		"readme": "./README.md",
@@ -390,7 +390,6 @@
 		"@fontsource/roboto-condensed": "~5.0.17",
 		"@babel/standalone": "^7.26.0",
 		"@fontsource/ubuntu-mono": "~5.0.20",
-		"@module-federation/rsbuild-plugin": "^2.5.1",
 		"@typescript/ata": "^0.9.8",
 		"@mui/icons-material": "~6.1.5",
 		"@mui/material": "~6.1.5",
@@ -433,6 +432,7 @@
 		"npm": ">=10.2.4"
 	},
 	"devDependencies": {
+		"@module-federation/rsbuild-plugin": "^2.5.1",
 		"@chromatic-com/storybook": "^1.7.0",
 		"@rsbuild/core": "~2.2.12",
 		"@rsbuild/plugin-react": "~2.0.1",

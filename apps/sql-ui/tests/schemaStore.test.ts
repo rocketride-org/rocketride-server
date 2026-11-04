@@ -31,12 +31,17 @@
 // What is asserted here is which TOOLS a refresh reaches for, because that is
 // the whole behaviour under test: whether a fresh read is attempted at all,
 // and whether a caller that needs one is made to wait for it.
+//
+// The store takes an SqlSession, not a client, so each test binds the REAL
+// session over a fake client — the tool log then still shows every call the
+// refresh caused, fallback reads included.
 // =============================================================================
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import type { RocketRideClient } from 'shell';
-import type { ISqlEndpoint } from '../src/connect';
+import type { SqlEndpoint } from '../src/connect';
+import { createSqlSession } from '../src/connect';
 import { refreshSchema } from '../src/schema/schemaStore';
 
 // =============================================================================
@@ -58,7 +63,7 @@ interface IFakeClient {
  * @param key - The endpoint key.
  * @returns The endpoint.
  */
-function endpointFor(key: string): ISqlEndpoint {
+function endpointFor(key: string): SqlEndpoint {
 	return {
 		key,
 		projectId: 'p1',
@@ -111,13 +116,14 @@ describe('refreshSchema — fresh reflection after a fallback', () => {
 			if (tool === 'refresh_schema' && countOf(tools, 'refresh_schema') === 1) throw new Error('task restarted');
 			return { database: 'shop', tables: {} };
 		});
+		const session = createSqlSession(client, endpoint);
 
-		await refreshSchema(client, endpoint, { fresh: true });
+		await refreshSchema(session, { fresh: true });
 		assert.equal(countOf(tools, 'refresh_schema'), 1);
 		// The first attempt fell back, so the snapshot came from get_schema.
 		assert.equal(countOf(tools, 'get_schema'), 1);
 
-		await refreshSchema(client, endpoint, { fresh: true });
+		await refreshSchema(session, { fresh: true });
 		assert.equal(countOf(tools, 'refresh_schema'), 2);
 		// The second attempt answered, so no fallback read was needed.
 		assert.equal(countOf(tools, 'get_schema'), 1);
@@ -132,12 +138,13 @@ describe('refreshSchema — fresh reflection after a fallback', () => {
 			if (tool === 'refresh_schema') throw new Error('no such tool');
 			return { database: 'shop', tables: {} };
 		});
+		const session = createSqlSession(client, endpoint);
 
-		await refreshSchema(client, endpoint, { fresh: true });
-		await refreshSchema(client, endpoint, { fresh: true });
+		await refreshSchema(session, { fresh: true });
+		await refreshSchema(session, { fresh: true });
 		assert.equal(countOf(tools, 'refresh_schema'), 2);
 
-		await refreshSchema(client, endpoint, { fresh: true });
+		await refreshSchema(session, { fresh: true });
 		assert.equal(countOf(tools, 'refresh_schema'), 2, 'the latch holds after two fallbacks');
 	});
 
@@ -150,11 +157,12 @@ describe('refreshSchema — fresh reflection after a fallback', () => {
 			if (tool === 'refresh_schema' && countOf(tools, 'refresh_schema') !== 2) throw new Error('flaky');
 			return { database: 'shop', tables: {} };
 		});
+		const session = createSqlSession(client, endpoint);
 
-		await refreshSchema(client, endpoint, { fresh: true });
-		await refreshSchema(client, endpoint, { fresh: true });
-		await refreshSchema(client, endpoint, { fresh: true });
-		await refreshSchema(client, endpoint, { fresh: true });
+		await refreshSchema(session, { fresh: true });
+		await refreshSchema(session, { fresh: true });
+		await refreshSchema(session, { fresh: true });
+		await refreshSchema(session, { fresh: true });
 		assert.equal(countOf(tools, 'refresh_schema'), 4);
 	});
 });
@@ -178,11 +186,12 @@ describe('refreshSchema — concurrency', () => {
 			if (tool === 'get_schema') await blocked;
 			return { database: 'shop', tables: {} };
 		});
+		const session = createSqlSession(client, endpoint);
 
-		const ordinary = refreshSchema(client, endpoint);
+		const ordinary = refreshSchema(session);
 		// Let the ordinary refresh reach its held `get_schema` call.
 		await new Promise((resolve) => { setTimeout(resolve, 0); });
-		const fresh = refreshSchema(client, endpoint, { fresh: true });
+		const fresh = refreshSchema(session, { fresh: true });
 		assert.equal(countOf(tools, 'refresh_schema'), 0, 'the queued fresh read has not jumped the queue');
 
 		release();
@@ -200,10 +209,11 @@ describe('refreshSchema — concurrency', () => {
 			await blocked;
 			return { database: 'shop', tables: {} };
 		});
+		const session = createSqlSession(client, endpoint);
 
-		const first = refreshSchema(client, endpoint);
+		const first = refreshSchema(session);
 		await new Promise((resolve) => { setTimeout(resolve, 0); });
-		const second = refreshSchema(client, endpoint);
+		const second = refreshSchema(session);
 		release();
 		await Promise.all([first, second]);
 		assert.equal(countOf(tools, 'get_schema'), 1);

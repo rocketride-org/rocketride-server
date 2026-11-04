@@ -26,9 +26,10 @@ import { existsSync } from 'fs';
 import { readFile } from 'fs/promises';
 import { spawn, ChildProcess } from 'child_process';
 import { ConnectionManager } from '../connection/connection';
-import { extractInstallCause, isTransientLockError, setWorkspaceInstallDelegate } from './appTypes';
+import { extractInstallCause, isTransientLockError } from 'rocketride/app-pack';
+import { setWorkspaceInstallDelegate } from './appTypes';
 import { getLogger } from '../shared/util/output';
-import { writeProxyConfig } from './proxyConfig';
+import { writeProxyConfig } from 'rocketride/app-dev';
 import type { IScannedWorkspaceApp as ScannedApp } from 'shared/tools/appdev';
 import type { AppScreenProvider, AppWatchStatus } from '../providers/AppScreenProvider';
 
@@ -332,7 +333,11 @@ export class DevSessionManager {
 			this.notify(app.id, { state: 'error', target: 'dev proxy', reason });
 			return;
 		}
-		const proc = spawn(process.execPath, [this.guardPath, String(process.pid), spawnArgs.shell ? '1' : '0', spawnArgs.cmd, ...spawnArgs.args, 'dev', '--config', proxyConfigPath], {
+		// shell:true (the pnpm fallback) joins arguments unquoted — quote any
+		// argument with whitespace so a spaced app path survives the shell.
+		const quoteForShell = (a: string): string => (spawnArgs.shell && /\s/.test(a) ? `"${a}"` : a);
+		const childArgs = [...spawnArgs.args, 'dev', '--config', proxyConfigPath].map(quoteForShell);
+		const proc = spawn(process.execPath, [this.guardPath, String(process.pid), spawnArgs.shell ? '1' : '0', spawnArgs.cmd, ...childArgs], {
 			cwd: app.folder,
 			env: { ...process.env, NO_COLOR: '1' },
 			// Never allocate a console window for the guard or its tree.

@@ -46,7 +46,7 @@
  * Code pane owns its whole save lifecycle.
  */
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { useShellConnection, ConnectionManager, createMirroredPrefsStore, scopedPrefs } from 'shell';
 import { appPartition } from 'shell/src/workspace/workspaceStore';
@@ -198,6 +198,51 @@ const AppBuilderProvider: React.FC<{
 	const iframeRef = useRef<HTMLIFrameElement | null>(null);
 	const debugWindowRef = useRef<Window | null>(null);
 
+	// ── Preview session (parity with the VS Code panel) ──────────────────
+	// Two principals, one precedence: the PREVIEW's own session (an explicit
+	// sign-in through the auth popup) outranks INHERITANCE of this builder
+	// shell's session, which the Inherit Auth checkbox gates. The devReady
+	// answer below is the single place the decision is applied.
+	const [inheritAuth, setInheritAuth] = useState(true);
+	const [previewToken, setPreviewToken] = useState('');
+	const previewAuthRef = useRef({ inherit: true, preview: '' });
+	previewAuthRef.current = { inherit: inheritAuth, preview: previewToken };
+
+	/** The definitive session answer for a preview boot (see above). */
+	const previewSessionToken = useCallback((): string => {
+		const { inherit, preview } = previewAuthRef.current;
+		// Through loadToken(), NOT raw localStorage: when this shell is
+		// itself an embedded dev preview (VS Code hosting), its adopted
+		// token lives in the frame-local store (devGate.tokenStore).
+		return preview || (inherit ? ConnectionManager.getInstance().loadToken() : '');
+	}, []);
+
+	// The auth popup's result (the preview's Sign In click): the popup
+	// broadcasts the fresh session over rr:auth. Capturing it HERE is what
+	// makes it stick — the preview frame's own copy is frame-local and dies
+	// on the adoption reboot, after which the devReady answer must carry it.
+	useEffect(() => {
+		const channel = new BroadcastChannel('rr:auth');
+		channel.onmessage = (e: MessageEvent) => {
+			const data = e.data as { type?: string; token?: string } | undefined;
+			if (data?.type === 'login' && data.token) setPreviewToken(data.token);
+		};
+		return () => channel.close();
+	}, []);
+
+	// Toggling Inherit Auth (or a preview session arriving/clearing) re-answers
+	// the RUNNING preview so it adopts the new state without waiting for a boot.
+	const authAnswerMountedRef = useRef(false);
+	useEffect(() => {
+		if (!authAnswerMountedRef.current) {
+			authAnswerMountedRef.current = true;
+			return;
+		}
+		const token = previewSessionToken();
+		iframeRef.current?.contentWindow?.postMessage({ type: 'rrdev:auth', token }, window.location.origin);
+		debugWindowRef.current?.postMessage({ type: 'rrdev:auth', token }, window.location.origin);
+	}, [inheritAuth, previewToken, previewSessionToken]);
+
 	// The preview page is AUTHORED by this builder (blob transport, injected
 	// __rrDevBoot — see devPreviewPage.ts); the legacy ?appid&rrdev=1 URL is
 	// only the fallback when the shell index cannot be fetched. The blob is
@@ -241,14 +286,17 @@ const AppBuilderProvider: React.FC<{
 			if (data?.type === 'shell:devReady') {
 				// step: ALWAYS answer with the definitive session state ('' =
 				// signed out) so any embedded dev shell boots authenticated.
-				// Through loadToken(), NOT raw localStorage: when this shell is
-				// itself an embedded dev preview (VS Code hosting), its adopted
-				// token lives in the frame-local store (devGate.tokenStore).
-				const token = ConnectionManager.getInstance().loadToken();
-				(e.source as Window).postMessage({ type: 'rrdev:auth', token }, window.location.origin);
+				// The answer applies the preview-session precedence (explicit
+				// preview sign-in > Inherit Auth > none — see above).
+				(e.source as Window).postMessage({ type: 'rrdev:auth', token: previewSessionToken() }, window.location.origin);
 				// step: the embedded preview and the debug tab both become
 				// the linked-injection target
 				void session.attachPreview(e.source as Window);
+			} else if (data?.type === 'rrdev:signedOut') {
+				// The preview user signed out: drop the preview session, or
+				// the next devReady answer would resurrect it and make
+				// sign-out impossible to test.
+				setPreviewToken('');
 			} else {
 				session.handlePreviewMessage(e.data as Record<string, unknown>);
 			}
@@ -302,6 +350,7 @@ const AppBuilderProvider: React.FC<{
 				// message handler above adopts it as the injection target
 				debugWindowRef.current = window.open(liveUrl, '_blank');
 			},
+			onSetInheritAuth: setInheritAuth,
 		});
 	}, [client, stored, appId, liveUrl, session, appdevPrefs]);
 
@@ -346,8 +395,8 @@ const AppBuilderProvider: React.FC<{
 
 	// ── Render ───────────────────────────────────────────────────────────
 	if (!isConnected) return <div style={styles.root}><div style={styles.loading}>Connect to a server to open the App Builder.</div></div>;
-	if (stored === undefined || !host || !app || !liveUrl) return <div style={styles.root}><div style={styles.loading}>Loading app&hellip;</div></div>;
 	if (stored === null) return <div style={styles.root}><div style={styles.loading}>No working copy for &quot;{appId}&quot; in your store.</div></div>;
+	if (stored === undefined || !host || !app || !liveUrl) return <div style={styles.root}><div style={styles.loading}>Loading app&hellip;</div></div>;
 
 	return (
 		<div style={styles.root}>

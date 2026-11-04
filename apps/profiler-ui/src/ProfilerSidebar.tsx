@@ -202,6 +202,7 @@ const ProfilerSidebar: React.FC<IProfilerSidebarProps> = ({ channel = localSideb
 					<span style={styles.fieldLabel}>Target</span>
 					<select
 						style={styles.select}
+						aria-label="Profiling target"
 						value={state.target}
 						onChange={(e) => channel.sendAction({ op: 'setTarget', target: e.target.value })}
 						disabled={active}
@@ -218,6 +219,7 @@ const ProfilerSidebar: React.FC<IProfilerSidebarProps> = ({ channel = localSideb
 					<span style={styles.fieldLabel}>Session name</span>
 					<input
 						type="text"
+						aria-label="Session name"
 						placeholder="Optional"
 						value={sessionName}
 						onChange={(e) => setSessionName(e.target.value)}

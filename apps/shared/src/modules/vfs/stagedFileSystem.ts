@@ -1774,18 +1774,21 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 		}
 		if (conflicts.length > 0) return { committed: 0, conflicts };
 
-		// step: replay — mkdirs shallow-first, writes, deletes deep-first
+		// step: replay — deletes deep-first FIRST (a directory tombstone must
+		// land before anything recreated beneath it, or the recursive base
+		// delete would remove the fresh write), then mkdirs shallow-first,
+		// then writes (the base write creates missing parent directories)
 		const paths = [...net.keys()];
 		const depth = (p: string) => p.split('/').length;
+		for (const p of paths.filter((x) => net.get(x)!.kind === 'tombstone' && !converged.has(x)).sort((a, b) => depth(b) - depth(a))) {
+			await this.changeBase([p], () => this.base.delete(p));
+		}
 		for (const p of paths.filter((x) => net.get(x)!.kind === 'mkdir').sort((a, b) => depth(a) - depth(b))) {
 			await this.base.mkdir(p);
 		}
 		for (const p of paths.filter((x) => net.get(x)!.kind === 'write')) {
 			const entry = net.get(p)! as Extract<LayerEntry, { kind: 'write' }>;
 			await this.writeBase(p, entry.content);
-		}
-		for (const p of paths.filter((x) => net.get(x)!.kind === 'tombstone' && !converged.has(x)).sort((a, b) => depth(b) - depth(a))) {
-			await this.changeBase([p], () => this.base.delete(p));
 		}
 
 		// step: sweep or retain the frozen layers; a working layer opened meanwhile stays
@@ -1842,16 +1845,22 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 	 * restore and the content the guard expects. With `uncommitted`, also the
 	 * layers not committed yet, which a commit called before the undo may retain.
 	 */
-	private undoPlan(layerId: string, uncommitted = false): { undoing: Layer[]; inverse: Map<string, UndoPath> } {
+	private undoPlan(layerId: string, uncommitted = false): { undoing: Layer[]; inverse: Map<string, UndoPath>; conflicts: StagedConflict[] } {
 		const idx = this.layerStack.findIndex((l) => l.id === layerId);
 		const undoing = idx < 0 ? [] : this.layerStack.slice(idx).filter((l) => l.committed || uncommitted);
 
 		// step: inverse per path = the OLDEST capture among undone layers;
 		// expected current = the NEWEST write among them
 		const inverse = new Map<string, UndoPath>();
+		const conflicts: StagedConflict[] = [];
 		for (const layer of undoing) {
 			for (const [p, entry] of layer.entries) {
 				if (entry.kind === 'mkdir') continue;
+				// step: a directory delete captured no contents — not undoable
+				if (entry.kind === 'tombstone' && entry.dir) {
+					conflicts.push({ path: p, reason: 'missing' });
+					continue;
+				}
 				const prior = inverse.get(p);
 				const expected = entry.kind === 'write' ? entry.content : null;
 				// step: oldest capture is the restore target; newest op is the guard
@@ -1859,7 +1868,7 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 				else prior.expected = expected;
 			}
 		}
-		return { undoing, inverse };
+		return { undoing, inverse, conflicts };
 	}
 
 	/** undoTurn() in its turn: the guard, the inverse replay and the drop of the undone history. */
@@ -1867,10 +1876,9 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 		await this.ready;
 		const idx = this.layerStack.findIndex((l) => l.id === layerId);
 		if (idx < 0 || !this.layerStack[idx].committed) throw new Error(`No such committed checkpoint: ${layerId}`);
-		const { undoing, inverse } = this.undoPlan(layerId);
+		const { undoing, inverse, conflicts } = this.undoPlan(layerId);
 
 		// step: guard — the base must still hold what these turns wrote
-		const conflicts: StagedConflict[] = [];
 		for (const [p, { expected }] of inverse) {
 			let current: string | null = null;
 			try {

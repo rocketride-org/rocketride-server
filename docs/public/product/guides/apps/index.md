@@ -267,7 +267,7 @@ Each property is a `SettingSchema` (`type`, `default`, `description`, `enum`, `r
 Settings are:
 - Rendered in the shell's Settings overlay (grouped by app)
 - Persisted to `.workspace/settings.json`
-- Available to your app via `useShellApiConfig()`, access as `config['mycompany.myApp.apiKey']`
+- Available to your app via `useWorkspace().settings`, access as `settings['mycompany.myApp.apiKey']` (effective values: declared defaults overlaid with the user's overrides)
 
 The shell contributes its own **General** section (keys under `rocketride.general.*`), which always appears first in the Settings overlay. Its keys are reserved — an app redeclaring one is ignored. `rocketride.general.sidebar` (`default` | `vscode` | `cursor` | `rocketride`, default `default`) picks the sidebar layout for every app: `default` defers to each app's declared `sidebarMode`, any other choice overrides it. `vscode`/`cursor` take effect only on apps that declare `sidebarViews`; apps with a classic `sidebar` node keep the classic column.
 
@@ -284,18 +284,28 @@ interface AppDescriptor {
   icon?: React.ReactNode;                  // Icon in app switcher
   branding: ShellBrandingConfig;           // Sidebar header branding
 
-  /** The app's ONE mount point — rendered raw in the client area. */
+  /** The app's ONE mount point — rendered raw in the client area. Required. */
   app: React.ComponentType<ShellAppProps>;
+
+  /** How the app would like the shell sidebar to open when it activates. */
+  sidebar?: 'expanded' | 'collapsed';
 
   /** Optional cross-app component catalog. Never mounted by the shell. */
   components?: {
     [key: string]: React.ComponentType<any>;
   };
+
+  /** Dev-tool mounts — see "Dev Tools" below. Optional; hosted workbenches
+      mount these directly instead of booting the full `app`. */
+  devToolFrame?: React.ComponentType<DevToolProps>;
+  devToolSidebar?: React.ComponentType<DevToolProps>;
 }
 ```
 
-- **`app`** is the single component the shell mounts in the client area; the app composes its own layout inside (columns, sidebar, status bar) with `<AppLayout>`
+- **`app`** is the single component the shell mounts in the client area; the app composes its own layout inside (columns, sidebar, status bar) with `<AppLayout>`. It is **required** even for apps that are primarily dev tools — a tool with no meaningful full-screen form still declares a minimal mount
+- **`sidebar`** lets an app ask for the shell sidebar collapsed on activation; absent means no opinion
 - **`components`** entries (e.g. `Canvas`, `Toolbar`, `DataGrid`) are never mounted by the shell but are loadable by other apps via `useAppComponent()`
+- **`devToolFrame`** / **`devToolSidebar`** are the dev-tool mount points (see [Dev Tools](#dev-tools))
 
 ### ShellBrandingConfig
 
@@ -494,7 +504,7 @@ useEffect(() => {
 | `shell:disconnected` | `{ reason: string; hasError: boolean }` | Shell → Apps | WebSocket connection lost |
 | `shell:login` | `{ user: ConnectResult }` | Shell → Apps | User authenticated |
 | `shell:logout` | `{}` | Shell → Apps | User logged out |
-| `shell:loginRequest` | `{ appId?: string }` | Apps → Shell | Request OAuth login (optionally targeting an app) |
+| `shell:loginRequest` | `{ appId?: string; register?: boolean; auto?: boolean; signupProperties?: SignupProperties }` | Apps → Shell | Request OAuth login (optionally targeting an app); `register` marks a sign-up intent; `auto` is set only by the shell's own auth gate, apps leave it unset |
 | `shell:logoutRequest` | `{}` | Apps → Shell | Request logout |
 | `shell:switchApp` | `{ appId: string }` | Apps → Shell | Switch the active app |
 | `shell:subscribe` | `{ app: AppManifestEntry, plan?: CheckoutPlan }` | Apps → Shell | Open subscription checkout for an app; optional `plan` preselects a tier and skips the picker (straight to payment) |
@@ -504,6 +514,7 @@ useEffect(() => {
 | `shell:themeChange` | `{ tokens: Record<string, string> }` | Shell → Apps | Theme CSS tokens changed |
 | `shell:statusChange` | `{ message: string \| null }` | Shell → Apps | Transient status bar text changed |
 | `shell:event` | `{ event: unknown }` | Server → Apps | Raw server event forwarded from WebSocket |
+| `shell:telemetry` | `TelemetryFact` (`{ event: string; props: Record<string, unknown>; ts: number; id: string }`) | Shell → Apps | A product-telemetry fact the shell observed (`auth:complete`), for the active app to forward to its analytics; `auth:start` and facts raised while no app listened come from `drainTelemetry()` (see [Telemetry facts](#telemetry-facts)) |
 | `shell:appsUpdated` | `{ apps: ShellAppEntry[] }` | Shell-internal | App list updated |
 | `shell:manifestRefresh` | `{ source: string }` | Shell-internal | App manifest re-fetched |
 | `shell:openOverlay` | `{ id: 'account' \| 'settings' \| 'environment' }` | Shell-internal | Open a shell overlay |
@@ -511,6 +522,25 @@ useEffect(() => {
 | `shell:viewActivated` | `{ viewId: string }` | Shell-internal | A shell view became active |
 
 The events marked **Shell-internal** exist only in the shell package's internal event map — they are not part of the `ShellEventMap` exported from `rocketride/app-sdk`, so external apps cannot emit or subscribe to them type-safely.
+
+### Telemetry facts
+
+The shell has no analytics SDK. It observes a few product facts itself (`auth:start` when it starts the OAuth redirect; `auth:complete` when the callback resolves an identity, with the account's new-user flag `is_new`, its waitlist state `waitlisted`, and `duration_ms`, the OAuth round trip in milliseconds from the redirect to the callback, null when it is not known) and hands them to the active app, which forwards them to its own analytics. `auth:start` is always held, never delivered live: the full-page redirect follows at once, so the app's drain on the callback page hands it over. Any other fact raised while no app is subscribed to `shell:telemetry` (the callback resolves before the app mounts) is held too: up to 32 facts, for 30 minutes, kept in the tab's sessionStorage so it survives a page load that never mounts the forwarding app (an embedded App Builder preview keeps them in memory only). A sign-out or a rejected credential drops the held facts.
+
+An app that forwards them drains the held facts once at its analytics init, then subscribes for the rest. Forward each fact once, keyed by its `id`, with `ts` as its event time, and only the properties your own event contract defines:
+
+```typescript
+import { connectionManager, type TelemetryFact } from 'rocketride/app-sdk';
+
+const forward = (fact: TelemetryFact) => analytics.capture(fact.event, fact.props, { timestamp: new Date(fact.ts) });
+
+for (const fact of connectionManager.drainTelemetry?.() ?? []) forward(fact);
+connectionManager.on('shell:telemetry', forward);
+```
+
+`drainTelemetry()` hands each held fact over once and clears the hold; a fact delivered live through `shell:telemetry` is not held. Shells that predate the channel have no `drainTelemetry` (an app can be served by an older shell), hence the optional call.
+
+**The home app's `./telemetry` entry.** On the shell's own waitlist screen no app renders, so nothing would drain the facts (the waitlisted sign-up's `auth:complete` among them). There the shell loads the home app's exposed `./telemetry` module and calls its default export with no arguments, once per page load. The function must not render anything; it starts the home app's analytics, which drain and subscribe as above. A throw is ignored, and a home build without the entry is skipped. Only the home app exposes it; other apps keep `./AppDescriptor` as their single entry.
 
 ### Extending the event map
 
@@ -925,7 +955,7 @@ const rows = client ? await client.listTasks({}) : [];
 const handle = await createMyOpsClient(channel).acquire(id);
 ```
 
-**Why two readiness hooks exist.** `useShellConnection().isConnected` is *this realm's* connection truth — the mirrored state of the one socket the realm client rides; gate engine calls on it. `useConnectionReady(channel)` reads the `host:connection` system topic — the **controller realm's** reachability, published by the host (never by a tool) and retained on the channel. Today both describe the same single socket; they stay distinct because hosts are growing *multiple connections* (the VS Code dev/deploy slots — see `host.envSlots`), where "my realm's client can reach the engine" and "the controller's connection is up" stop being the same question. Gate frame↔controller coordination on `useConnectionReady`, engine calls on your own realm's state.
+**Why two readiness hooks exist.** `useShellConnection().isConnected` is *this realm's* connection truth — the mirrored state of the one socket the realm client rides; gate engine calls on it. `useConnectionReady(channel)` reads the `host:connection` system topic — the **controller realm's** reachability, published by the host (never by a tool) and retained on the channel. Today both describe the same single socket; they stay distinct because hosts are growing *multiple connections* (the VS Code dev/deploy slots — see `host.envSlots`), where "my realm's client can reach the engine" and "the controller's connection is up" stop being the same question. Gate frame↔controller coordination on `useConnectionReady`, engine calls on your own realm's state. `useConnectionReady` is tri-state: `undefined` means no `host:connection` snapshot has arrived yet (unknown — render a waiting state, never a "disconnected" claim), `false` means the host said disconnected, `true` means ready; a plain `if (!ready)` guard treats the initial `undefined` like `false`, which is safe for gating but wrong for *displaying* a disconnect.
 
 There is no theme prop: dev-tool components are themed by the ambient `--rr-*` CSS custom properties of the document they mount into (the active shell theme in a browser; the editor-variable mapping in VS Code) — style exclusively with `var(--rr-*)` tokens. The tab icon hosts show comes from the manifest `icon`; the descriptor is loaded only when the tool is opened.
 
@@ -1027,10 +1057,35 @@ See the [Getting Started](#getting-started) section for the complete `rsbuild.co
 
 Key points:
 - The MF container `name` is derived automatically from `appManifest.id` in `package.json`
-- Always expose `./AppDescriptor` as the single MF entry point
+- Always expose `./AppDescriptor` as the single MF entry point (the home app also exposes `./telemetry`, see [Telemetry facts](#telemetry-facts))
 - `rocketride/app-sdk` must be a shared singleton so your app and the shell agree on one instance
 - React and react-dom must be shared singletons to avoid duplicate instances
 
 ---
 
 For the App Builder loop, see [App Builder](/guides/apps/app-builder).
+
+### Optional signup attribution
+
+`ConnectionManager.startOAuth(register, context)` and `shell:loginRequest` accept optional
+`signupProperties` analytics metadata. The shell validates and holds it in tab storage under
+active analytics consent, consumes it once on the OAuth callback, and passes it in the PKCE
+credential through a resolver that rechecks consent, privacy signals and expiry immediately before
+the SDK sends authentication. The encoded `cd_` credential uses the wire key `signup_properties`.
+Native `auth:start` and `auth:complete` telemetry facts contain no signup attribution. It never appears in the identity provider URL. Missing, expired or invalid context
+does not stop sign-in. Embedded developer previews do not touch the host tab's storage.
+
+Version 1 carries `experiment`, `experiment_revision`, `variant_id`, `assignment_id`, `exposure_id`,
+`landing_message_revision`, `exposed_at`, `expires_at`, `consent_version: 1`, and `schema_version: 1`.
+Times are milliseconds since epoch; expiry is fixed at 30 minutes after exposure. The account
+service validates its experiment/catalog separately. This context is untrusted analytics input
+and must never authorize access or establish account identity.
+
+The consent record is written by the SaaS consent banner in `rocketride-saas`, under
+`localStorage['rr_consent_v1']`. Its shared schema is
+`{ v: 1, choice: 'accepted' | 'rejected', at: number }`, where `at` is milliseconds since epoch.
+The shell accepts only `accepted` records up to 365 days old, with at most 60 seconds of future
+clock skew, and omits context under DNT or GPC. Missing, malformed or unavailable storage
+also omits context. Coordinate any change to this key or schema with both repositories.
+`CloudAuthProvider.signIn()` owns pending signup storage; `startOAuth()` passes validated context
+to it and stores context itself only on the legacy path without an auth provider.

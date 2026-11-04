@@ -291,7 +291,19 @@ const NewConnectionModal: React.FC<NewConnectionModalProps> = ({ editing, onClos
 	/** Persists the pipeline-bound record from the selected endpoint. */
 	const savePipeline = useCallback(() => {
 		const endpoint = endpoints.find((e: SqlEndpoint) => e.key === selectedKey);
-		if (!endpoint) { setError('Select a database node.'); return; }
+		if (!endpoint) {
+			// The saved node is not discoverable (its pipeline is stopped):
+			// keep the existing binding and apply the new name.
+			if (editing?.mode === 'pipeline' && selectedKey === `${editing.projectId}:${editing.source}:${editing.nodeId}`) {
+				const kept: SavedSqlConnection = { ...editing, name: name.trim() || editing.name };
+				commit(kept);
+				onSaved?.(kept);
+				onClose();
+				return;
+			}
+			setError('Select a database node.');
+			return;
+		}
 		const record: SavedSqlConnection = {
 			id: editing?.id ?? newConnectionId(),
 			mode: 'pipeline' as const,
@@ -410,7 +422,7 @@ const NewConnectionModal: React.FC<NewConnectionModalProps> = ({ editing, onClos
 							<div style={styles.listEmpty}>
 								{status === 'loading' || status === 'idle'
 									? 'Searching running pipelines…'
-									: 'No database nodes found. Start a pipeline containing a database node (MySQL, PostgreSQL, or ClickHouse), then reopen this dialog.'}
+									: 'No database nodes found. Start a pipeline containing a database node (MySQL, PostgreSQL, ClickHouse, or RocketRide SQL), then reopen this dialog.'}
 							</div>
 						)}
 						{endpoints.map((endpoint: SqlEndpoint) => (

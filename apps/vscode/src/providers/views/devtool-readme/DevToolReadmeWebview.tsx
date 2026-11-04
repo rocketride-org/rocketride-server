@@ -78,7 +78,7 @@ const DevToolReadmeWebview: React.FC = () => {
 	const row = connected ? catalog?.find((a) => a?.id === appId) : undefined;
 
 	if (installedIds === null || (connected && catalog === null) || !row) {
-		return <div style={statusStyle}>{installedIds === null || catalog === null ? 'Loading…' : connected ? 'This tool is no longer available on the server.' : 'Connect to a RocketRide server to view this tool.'}</div>;
+		return <div style={statusStyle}>{installedIds === null || (connected && catalog === null) ? 'Loading…' : connected ? 'This tool is no longer available on the server.' : 'Connect to a RocketRide server to view this tool.'}</div>;
 	}
 
 	// Engine-served icons are root-relative in the catalog; the page CSP

@@ -31,7 +31,7 @@ import { SidebarChrome, ToolPanel } from 'shared/tools/core/chrome/SidebarChrome
 import { ToolHostProvider, useArmedToolPeers } from 'shared/tools/core';
 import { useToolStrip } from 'shared/tools/core/chrome/useToolStrip';
 import type { BuiltinToolServices } from 'shared/tools/core';
-import { ConnectionManager, SidebarFooter, realmPrefsHub, createSidebarBusPeer, createWorkspaceFs } from 'shell';
+import { ConnectionManager, SidebarFooter, SidebarFooterExtras, realmPrefsHub, createSidebarBusPeer, createWorkspaceFs } from 'shell';
 import { appPartition } from 'shell/src/workspace/workspaceStore';
 import { applyContainerOrder, containerIdOf, readDevToolPins, DEV_TOOL_PINS_KEY } from 'shell/src/workspace/devToolPins';
 import { registerBuiltinTools } from 'shared/tools/builtins';
@@ -181,6 +181,12 @@ const SidebarViewWebview: React.FC = () => {
 	// (a SIGNAL — a tool panel gained focus; always applies).
 	useEffect(() => {
 		const cm = ConnectionManager.getInstance();
+		// Seed from the CURRENT state first — on() does not replay events, and
+		// the mirror replay may have fired before these listeners attached.
+		const applyAccount = (): void => setSubscribed(isAppSubscribed(cm.getAccountInfo(), PIPE_BUILDER_APP_ID));
+		const applyDevToolHost = (): void => setDevToolHost(cm.isConnected() ? { engineHttpUrl: (cm.getHttpUrl() || 'http://localhost:5565').replace(/\/$/, '') } : null);
+		applyAccount();
+		applyDevToolHost();
 		const offs = [
 			// ── Connection facts, derived from the mirrors ──────────────────
 			// Dev half: read the RAW status off the shell:status snapshot —
@@ -229,12 +235,10 @@ const SidebarViewWebview: React.FC = () => {
 				setUserEmail(a.userEmail || undefined);
 			}),
 			// Subscription gate — the shared predicate over the mirrored account.
-			cm.on('shell:accountUpdate', () => setSubscribed(isAppSubscribed(cm.getAccountInfo(), PIPE_BUILDER_APP_ID))),
+			cm.on('shell:accountUpdate', applyAccount),
 			// devToolSidebar mount facts: the MF entry URL only, derived from
 			// the mirrored engine base; no token ever crosses into this realm.
-			cm.on('shell:statusChange', () => {
-				setDevToolHost(cm.isConnected() ? { engineHttpUrl: (cm.getHttpUrl() || 'http://localhost:5565').replace(/\/$/, '') } : null);
-			}),
+			cm.on('shell:statusChange', applyDevToolHost),
 			// The strip's tool rows (RETAINED — the cached seed replays into
 			// any fresh webview; the slow compose replaces it in place). The
 			// PICKER list does not ride this: the panel asks the server
@@ -476,7 +480,7 @@ const SidebarViewWebview: React.FC = () => {
 		[connection.state, developmentMode, devProgressMessage, devProgressLog, deployConnectionState, deployTargetMode, deployProgressMessage, deployProgressLog, cloudConnected, subscribed, runCommand]
 	);
 
-	const footerSlot = <SidebarFooter collapsed={false} userName={userName} userEmail={userEmail} onOpenDocs={onOpenDocs} menuItems={footerMenuItems} />;
+	const footerSlot = <SidebarFooter collapsed={false} userName={userName} userEmail={userEmail} onOpenDocs={onOpenDocs} menuItems={footerMenuItems} extras={<SidebarFooterExtras onOpenDocs={onOpenDocs} />} />;
 
 	// ── Render ───────────────────────────────────────────────────────────────
 

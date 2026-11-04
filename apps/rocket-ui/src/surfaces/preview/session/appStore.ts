@@ -81,7 +81,7 @@ export function appPath(folder: string, rel = '', scope?: WorkspaceScope): strin
  * @returns The normalized relative path.
  */
 function safeRel(rel: string): string {
-	const normalized = rel.replace(/^\.\//, '');
+	const normalized = rel.replace(/\\/g, '/').replace(/^\.\//, '');
 	if (normalized.startsWith('/') || normalized.split('/').some((seg) => seg === '..' || seg === '')) {
 		throw new Error('Path escapes the app folder.');
 	}

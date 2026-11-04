@@ -66,10 +66,12 @@ import { labelFromKey, settingStoreOf } from '../components/workspace/settingsRe
 import type { RegistryEntry, RegistrySection, SettingsRegistry } from '../components/workspace/settingsRegistry';
 import type { SettingValue } from '../components/workspace/types';
 import { SidebarMenu } from '../components/sidebar-menu/SidebarMenu';
+import { Banner } from '../components/banner/Banner';
 import type { ViewMenu, ViewMenuEntry } from '../types/viewMenu';
 import EnvironmentProvider from './EnvironmentProvider';
 import AccountProvider from './AccountProvider';
 import { useAuthUser } from '../hooks/useAuthUser';
+import { lockedAppId } from '../util/devGate';
 
 // =============================================================================
 // CONSTANTS
@@ -94,6 +96,11 @@ const styles = {
 		height: '100%',
 		backgroundColor: 'var(--rr-bg-default)',
 		fontFamily: 'var(--rr-font-family)',
+		// The positioned ancestor for every `contained` DetailPanel opened from
+		// a settings pane (manage-workspaces, environment drawers): the drawer
+		// and its scrim must cover the WHOLE settings surface — nav sidebar
+		// included — not whichever inner pane happens to be positioned.
+		position: 'relative',
 	} as CSSProperties,
 	searchRow: {
 		display: 'flex',
@@ -545,6 +552,9 @@ export interface SettingsPageProps {
 	extraSections?: SettingsRichSection[];
 	/** Deep link: the nav section to open on mount. */
 	initialSectionId?: string;
+	/** Host notice rendered under the page heading (the cloud passes its
+	 *  signed-out warning here; absent = no banner row). */
+	banner?: React.ReactNode;
 }
 
 /**
@@ -552,7 +562,7 @@ export interface SettingsPageProps {
  * cloud mounts it via {@link SettingsProvider} (modal overlay), VS Code as an
  * editor tab over its mirrored stores.
  */
-export const SettingsPage: React.FC<SettingsPageProps> = ({ registry, overrides, updateSetting, hostStore, extraSections, initialSectionId }) => {
+export const SettingsPage: React.FC<SettingsPageProps> = ({ registry, overrides, updateSetting, hostStore, extraSections, initialSectionId, banner }) => {
 	// ── Committed values: workspace overrides ⊕ host-store values ──────────
 	// Host keys are disjoint from workspace keys (the registry routes each key
 	// to exactly one store), so the merge cannot collide.
@@ -853,7 +863,13 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ registry, overrides,
 	return (
 		<div style={styles.root}>
 			{/* ── Page heading ───────────────────────────────────── */}
-			<ContentHeader title="Settings" subtitle="Preferences for RocketRide and your installed apps. Only the values you change are saved. Everything else uses each app's default." />
+			{/* A deep-app (branded) tab never names the platform — the user is
+			    inside ONE app and must not see RocketRide mentioned. */}
+			<ContentHeader title="Settings" subtitle={lockedAppId()
+				? 'Only the values you change are saved. Everything else uses the app\'s default.'
+				: 'Preferences for RocketRide and your installed apps. Only the values you change are saved. Everything else uses each app\'s default.'} />
+
+			{banner}
 
 			{/* ── Search row ─────────────────────────────────────── */}
 			<div style={styles.searchRow}>
@@ -882,8 +898,12 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ registry, overrides,
 
 					{/* A selected RICH section owns the whole pane (its own footer
 					    included); the schema footer below still appears when the
-					    DRAFT is dirty, so pending schema edits are never stranded. */}
-					{activeRich && activeRich.render(richCtx)}
+					    DRAFT is dirty, so pending schema edits are never stranded.
+					    Keyed by section id: several rich sections render the same
+					    provider component at this position, and without a key
+					    React would reuse one instance across navigation, keeping
+					    the previous section's state and effects. */}
+					{activeRich && <React.Fragment key={activeRich.id}>{activeRich.render(richCtx)}</React.Fragment>}
 
 					{/* Rich sections matching a search render as section cards. */}
 					{richMatches.map((rich) => (
@@ -998,7 +1018,15 @@ const SettingsProvider: React.FC<ISettingsProviderProps> = ({ initialSectionId }
 		return sections;
 	}, [isSaas, appManifest]);
 
-	return <SettingsPage registry={settingsRegistry} overrides={settingsOverrides} updateSetting={updateSetting} extraSections={extraSections} {...(initialSectionId !== undefined ? { initialSectionId } : {})} />;
+	// Signed out, the workspace store never writes — changes would apply in
+	// memory and vanish on reload. Say so instead of failing silently.
+	const signedOutBanner = authUser ? undefined : (
+		<div style={{ marginBottom: 16 }}>
+			<Banner variant="warning">Signed out — setting changes apply to this session only and are not saved. Sign in to keep them.</Banner>
+		</div>
+	);
+
+	return <SettingsPage registry={settingsRegistry} overrides={settingsOverrides} updateSetting={updateSetting} extraSections={extraSections} {...(initialSectionId !== undefined ? { initialSectionId } : {})} {...(signedOutBanner !== undefined ? { banner: signedOutBanner } : {})} />;
 };
 
 export default SettingsProvider;

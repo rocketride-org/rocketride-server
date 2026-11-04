@@ -280,11 +280,11 @@ export class ConfigManager {
 		// Pipeline-family values are NOT re-read here: they come from the
 		// shared workspace settings via setWorkspaceSettings() (the bridge),
 		// so a config refresh keeps whatever the bridge last pushed.
-		this.config = {
-			...this.config,
-			development: await this.refreshGroupConfig('development'),
-			deployment: await this.refreshGroupConfig('deployment'),
-		};
+		const development = await this.refreshGroupConfig('development');
+		const deployment = await this.refreshGroupConfig('deployment');
+		// Spread AFTER the awaits so a setWorkspaceSettings() write that lands
+		// during them survives the merge.
+		this.config = { ...this.config, development, deployment };
 	}
 
 	/**

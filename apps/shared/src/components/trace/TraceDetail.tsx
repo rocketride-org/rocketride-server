@@ -989,6 +989,9 @@ export const TraceDetail: React.FC<ITraceDetailProps> = ({ traceId, projectId, f
 	const foldedEvents = useMemo(() => {
 		const folded: NonNullable<ReturnType<typeof parseTraceEvent>>[] = [];
 		for (const message of fetched?.events ?? []) {
+			// step: the fetched stream interleaves SSE narration with flow
+			// events — only apaevt_flow bodies are trace calls
+			if (message.event !== 'apaevt_flow') continue;
 			const parsed = parseTraceEvent((message as Record<string, any>)?.body ?? {});
 			if (parsed) folded.push(parsed);
 		}

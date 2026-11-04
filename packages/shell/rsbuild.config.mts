@@ -136,6 +136,10 @@ export default defineConfig(({ command }) => {
 					// /client/docs and /client/shell are engine routes that rocket-ui fetches.
 					'/client/': { target: 'http://localhost:5565' },
 					'/marketplace': { target: 'http://localhost:5565' },
+					// Endpoint UIs and URLs that running pipelines publish as {host}/... links.
+					'/dropper': { target: 'http://localhost:5565' },
+					'/chat': { target: 'http://localhost:5565' },
+					'/webhook': { target: 'http://localhost:5565' },
 					'/sitemap.xml': { target: 'http://localhost:5565' },
 					'/robots.txt': { target: 'http://localhost:5565' },
 					'/llms.txt': { target: 'http://localhost:5565' },

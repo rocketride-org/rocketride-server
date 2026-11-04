@@ -53,6 +53,10 @@ export function usePrefsHost(store: WorkspaceStore): void {
 
 		const impls: OpImplTable<PrefsHostOpMap> = {
 			'shell.setPref': async (p) => {
+				// step: load the partition first — a write landing during the
+				// attach's in-flight read would otherwise seed from defaults
+				// and flush a defaults-plus-one-key slice over the saved file
+				await store.ensurePartition(p.partition);
 				store.setPref(p.partition, p.key, p.value);
 			},
 			// Always publishes, even for an empty bag — a realm's `ready`
@@ -62,6 +66,7 @@ export function usePrefsHost(store: WorkspaceStore): void {
 				publish(p.partition);
 			},
 			'shell.updateSetting': async (p) => {
+				await store.ensurePartition(p.partition);
 				store.updateSetting(p.partition, p.key, p.value);
 			},
 			'shell.settings.attach': async (p) => {

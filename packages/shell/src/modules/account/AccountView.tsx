@@ -214,6 +214,14 @@ export interface IAccountViewProps {
 	onNavigateSection?: (sectionId: string) => void;
 	/** Renames ANY workspace by id (the manage-workspaces drawer). */
 	onRenameWorkspace?: (orgId: string, name: string) => Promise<void>;
+	/** Creates a new workspace; the server switches the caller into it. */
+	onCreateWorkspace?: (name: string) => Promise<void>;
+	/** Leaves a workspace the user belongs to (server enforces the rules). */
+	onLeaveWorkspace?: (orgId: string) => Promise<void>;
+	/** Deletes a workspace the user administers (destroys its data). */
+	onDeleteWorkspace?: (orgId: string) => Promise<void>;
+	/** Dry-run for the delete confirm: member count + billing blocker. */
+	onDeleteWorkspacePrecheck?: (orgId: string) => Promise<{ members: number; subscriptionActive: boolean }>;
 
 	// -- Callbacks (async, host handles actual server calls) --------------------
 	/** Persists updated profile fields. */
@@ -278,7 +286,7 @@ export interface IAccountViewProps {
  * to the host via async callback props defined in IAccountViewProps.
  */
 const AccountView: React.FC<IAccountViewProps> = (props) => {
-	const { isConnected, sectionError, profile, authUser, keys, org, members, teams, teamDetail, subscriptions, billingLoading, billingError, creditBalance, apps, onCancelSubscription, onOpenPortal, onSubscribe, transactions, usageByUser, usageByTeam, activeTasks, dashboardLoading, onTransactionPage, fetchTransactions, fetchTransactionDistinct, topupPlans, onBuyTopup, allPlans, onPurchaseTopup, onUpgradeSubscription, section, onSectionChange, activeTeamId, onActiveTeamIdChange, embeddedSection, onNavigateSection, onRenameWorkspace, onSaveProfile, onSetDevTeam, onSetDefaultOrg, onSaveOrgName, onCreateKey, onRevokeKey, onInviteMember, onUpdateMemberRole, onRemoveMember, onResendInvite, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, onLoadTeamDetail } = props;
+	const { isConnected, sectionError, profile, authUser, keys, org, members, teams, teamDetail, subscriptions, billingLoading, billingError, creditBalance, apps, onCancelSubscription, onOpenPortal, onSubscribe, transactions, usageByUser, usageByTeam, activeTasks, dashboardLoading, onTransactionPage, fetchTransactions, fetchTransactionDistinct, topupPlans, onBuyTopup, allPlans, onPurchaseTopup, onUpgradeSubscription, section, onSectionChange, activeTeamId, onActiveTeamIdChange, embeddedSection, onNavigateSection, onRenameWorkspace, onCreateWorkspace, onLeaveWorkspace, onDeleteWorkspace, onDeleteWorkspacePrecheck, onSaveProfile, onSetDevTeam, onSetDefaultOrg, onSaveOrgName, onCreateKey, onRevokeKey, onInviteMember, onUpdateMemberRole, onRemoveMember, onResendInvite, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, onLoadTeamDetail } = props;
 
 	// =========================================================================
 	// PERMISSION HELPERS
@@ -474,6 +482,10 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 								onSetDevTeam={async (id) => onSetDevTeam(id)}
 								onSetDefaultOrg={async (id) => onSetDefaultOrg(id)}
 								onRenameWorkspace={onRenameWorkspace ?? (async (_orgId, name) => onSaveOrgName(name))}
+								{...(onCreateWorkspace ? { onCreateWorkspace } : {})}
+								{...(onLeaveWorkspace ? { onLeaveWorkspace } : {})}
+								{...(onDeleteWorkspace ? { onDeleteWorkspace } : {})}
+								{...(onDeleteWorkspacePrecheck ? { onDeleteWorkspacePrecheck } : {})}
 								onInviteMember={onInviteMember}
 								onUpdateMemberRole={onUpdateMemberRole}
 								onRemoveMember={onRemoveMember}

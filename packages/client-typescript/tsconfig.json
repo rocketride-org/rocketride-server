@@ -24,6 +24,7 @@
 	"include": [
 		"./src/client/**/*",
 		"./src/app-pack/**/*",
+		"./src/app-dev/**/*",
 		"./src/app-scaffold/**/*",
 		"./src/app-sdk/**/*"
 	],

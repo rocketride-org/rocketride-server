@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV7 — never edit by hand
 // =============================================================================
-// Generated:     2026-10-25T15:19:04.448Z
-// Source commit: 8bc477cc91494ff00dac86a1a1ba6c5abf815269
+// Generated:     2026-10-27T23:30:07.217Z
+// Source commit: 574919e6007b0a46984b56f4528385c1c77a49fe
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -42,8 +42,6 @@ export declare const commonStyles: {
     section: React$1.CSSProperties;
     sectionHeader: React$1.CSSProperties;
     sectionHeaderLabel: React$1.CSSProperties;
-    paneHeaderActions: (visible: boolean) => React$1.CSSProperties;
-    paneHeaderButton: React$1.CSSProperties;
     buttonPrimary: React$1.CSSProperties;
     buttonDanger: React$1.CSSProperties;
     buttonDangerOutline: React$1.CSSProperties;
@@ -2057,7 +2055,13 @@ export interface CProfileReportResponse {
     /** Full pstats-formatted text report. */
     report: string;
 }
-/** A single node in the hierarchical call tree returned by rrext_cprofile_report_tree. */
+/**
+ * A single node in the hierarchical call tree returned by rrext_cprofile_report_tree.
+ *
+ * Below the first level the numbers are this path's share of the caller → callee
+ * totals (the profiler records pairs, not paths), so copies of one function add up
+ * to its totals. The exact per-function totals are in CProfileReportTreeResponse.functions.
+ */
 export interface CProfileTreeNode {
     /** Function name. */
     name: string;
@@ -2065,7 +2069,7 @@ export interface CProfileTreeNode {
     file: string;
     /** Source line number. */
     line: number;
-    /** Number of calls from the parent context. */
+    /** Number of calls from the parent context (this path's share, rounded). */
     ncalls: number;
     /** Total time spent in this function (excluding sub-calls). */
     tottime: number;
@@ -2074,10 +2078,30 @@ export interface CProfileTreeNode {
     /** Child function calls. */
     children: CProfileTreeNode[];
 }
+/** One function's totals over the whole session (or thread), as the text report prints them. */
+export interface CProfileFunctionStats {
+    /** Function name. */
+    name: string;
+    /** Source filename. */
+    file: string;
+    /** Source line number. */
+    line: number;
+    /** Total number of calls. */
+    ncalls: number;
+    /** Self time (excluding sub-calls), in seconds. */
+    tottime: number;
+    /** Cumulative time (including sub-calls), in seconds. */
+    cumtime: number;
+}
 /** Response from rrext_cprofile_report_tree. */
 export interface CProfileReportTreeResponse {
     /** Root node of the call tree (synthetic '<root>' wrapper). */
     tree: CProfileTreeNode | null;
+    /**
+     * Per-function totals, filtered like the tree by includeSystem but never pruned.
+     * Absent from servers that predate it.
+     */
+    functions?: CProfileFunctionStats[];
     /** How long the profiled threads ran — the selected thread, or all of them summed. */
     total_time: number;
     /** Total number of function calls recorded. */
@@ -3217,7 +3241,7 @@ export interface TASK_METRICS {
 /**
  * SDK version — automatically synced from package.json during build.
  */
-export declare const SDK_VERSION = "1.4.0";
+export declare const SDK_VERSION = "1.5.0";
 /**
  * Default protocol for connections when none is specified.
  */
@@ -4289,8 +4313,10 @@ declare class DeployApi {
      *   (default: `process.cwd()`).
      * @param options.comment - "What changed" note kept in the registry.
      * @param options.metadata - Extra metadata merged over the packed
-     *   defaults (e.g. projectId provenance); `appRoot` is always set from
-     *   the pack.
+     *   defaults; `appRoot` is always set from the pack, and `projectId`
+     *   provenance defaults to the working copy's appManifest projectId.
+     *   Deploying never writes it — the id is stamped at creation and by
+     *   the editor, so CI and read-only checkouts deploy unchanged.
      * @param options.onProgress - Receives one line per pack step (include
      *   checks, per-file adds, totals) for hosts that surface progress.
      * @returns The artifact entry for the new version.
@@ -4304,7 +4330,7 @@ declare class DeployApi {
     /**
      * Scaffolds a new app in the workspace — the programmatic twin of the
      * App Builder's New App wizard, rendering the identical templates
-     * (Node.js only). Writes `./apps/<slug>`, ensures the pnpm workspace
+     * (Node.js only). Writes `./apps/<slug>-ui`, ensures the pnpm workspace
      * file and ignore hygiene, vendors the connected server's shell +
      * client packages, and runs the workspace install. Scaffolding only —
      * nothing is deployed; the normal lifecycle (edit → `verifyApp` →
@@ -4312,8 +4338,10 @@ declare class DeployApi {
      *
      * @param slug - The app-name slug (lowercase; digits/-/_ after the
      *   first character). The id becomes `<developerId>.<slug>`.
-     * @param options - Template, display name, developer id (default
-     *   'local'), frame options, install toggle, `onProgress`, and
+     * @param options - Template, display name, developer id (default: this
+     *   client's organization developer id, else 'local' — the same
+     *   resolution as the New App wizard and `rocketride app create`),
+     *   frame options, install toggle, `onProgress`, and
      *   `workspaceRoot` (default `process.cwd()`). The server base URL for
      *   vendoring defaults to this client's own connection.
      * @returns The created app's identity and a report of what ran.
@@ -4982,7 +5010,6 @@ export declare class RocketRideClient extends DAPClient {
         code: string;
         verifier: string;
         redirectUri: string;
-        clientId?: string;
     }, options?: {
         uri?: string;
         timeout?: number;
@@ -5018,7 +5045,6 @@ export declare class RocketRideClient extends DAPClient {
         code: string;
         verifier: string;
         redirectUri: string;
-        clientId?: string;
     }, options?: {
         uri?: string;
         timeout?: number;
@@ -5722,38 +5748,53 @@ export declare class RocketRideClient extends DAPClient {
         state: string;
         deployedAt?: number;
     }>>;
+    /**
+     * Wait for one app version's server build to finish — deploying returns
+     * at once with `buildStatus: 'queued'`, and publish/submit/serve all
+     * gate on a finished ('ok') build. Polls the version rail.
+     *
+     * @param appId - App id
+     * @param registryVersion - Registry version number from the rail
+     * @param options.timeoutMs - Give up after this long (default 10 minutes)
+     * @param options.intervalMs - Poll interval (default 3 seconds)
+     * @param options.onStatus - Called whenever the build status changes
+     * @returns The version's rail entry once its build is 'ok'
+     * @throws Error when the build failed, the version is unknown, or the wait timed out
+     */
+    waitForAppBuild(appId: string, registryVersion: number, options?: {
+        timeoutMs?: number;
+        intervalMs?: number;
+        onStatus?: (status: string) => void;
+    }): Promise<Awaited<ReturnType<RocketRideClient["listDeployments"]>>[number]>;
+    /**
+     * The caller org's developer namespace — the `<developerId>` half of
+     * every app id it owns. Readable on both editions (OSS answers the
+     * fixed namespace its sessions carry; there is no Stripe Connect there).
+     *
+     * @returns `{developerId, stripeAccountId, stripeAccountStatus}`;
+     *   `developerId` is null until an org admin registers one
+     */
+    developerStatus(): Promise<{
+        developerId: string | null;
+        stripeAccountId: string | null;
+        stripeAccountStatus: string;
+    }>;
+    /**
+     * Claim the caller org's developer id slug (org.admin, self-service,
+     * SaaS only). Apps are then created as `<developerId>.<name>` and can
+     * publish beyond the workspace.
+     *
+     * @param developerId - The slug to claim (lowercase letters/underscores)
+     * @returns The server's registration record
+     */
+    registerDeveloper(developerId: string): Promise<Record<string, unknown>>;
     /** Read a file as a UTF-8 string. */
     fsReadString(path: string): Promise<string>;
     /** Write a UTF-8 string to a file. */
     fsWriteString(path: string, text: string): Promise<void>;
-    /**
-     * Read a JSON file.
-     *
-     * ONE round trip (`fs_get_json`), not open/read/close — see
-     * {@link fsWriteJson} for why that matters.
-     *
-     * @param path - Relative path within the account store
-     * @returns The parsed value
-     */
+    /** Read a JSON file. */
     fsReadJson<T = any>(path: string): Promise<T>;
-    /**
-     * Write an object as JSON.
-     *
-     * ONE round trip (`fs_put_json`). The handle sequence this used to run —
-     * fs_open, fs_write, fs_close — leaves a write handle open between
-     * messages, and the server commits that handle when the connection
-     * drops: a client that dies after fs_open replaces the file with an
-     * empty buffer. A browser reload mid-save was enough to zero a
-     * workspace file. A single request has no such window; one that never
-     * arrives leaves the file exactly as it was.
-     *
-     * The whole value travels in that one message, so this is for complete
-     * documents (it always was — the object is serialised in full either
-     * way). Large payloads still belong on the streaming handle API.
-     *
-     * @param path - Relative path within the account store
-     * @param obj - Any JSON-serialisable value
-     */
+    /** Write an object as JSON. */
     fsWriteJson(path: string, obj: any): Promise<void>;
     /**
      * Retrieve a server dashboard snapshot.
@@ -5828,7 +5869,8 @@ export declare class RocketRideClient extends DAPClient {
      * @param includeSystem - Keep stdlib/system functions in the tree (server default true).
      * @param thread   - Thread id from cprofileThreads() for that thread alone;
      *                   all threads merged when omitted.
-     * @returns Object containing the tree root, total_time, and total_calls.
+     * @returns Object containing the tree root, functions (exact per-function
+     *          totals; absent from older servers), total_time, and total_calls.
      */
     cprofileReportTree(target?: string | null, maxDepth?: number, minPct?: number, includeSystem?: boolean, thread?: number | null): Promise<CProfileReportTreeResponse>;
     /**
@@ -6019,18 +6061,106 @@ export declare class RocketRideClient extends DAPClient {
         timeout?: number;
     }): Promise<T>;
 }
+/**
+ * Parses a registry version argument, rejecting anything that is not a
+ * positive integer. A missing or non-numeric value would otherwise become
+ * NaN (null over JSON) or 0 — silently changing deployment state against an
+ * unspecified version.
+ *
+ * @param value - The raw version (number or numeric string).
+ * @returns The validated registry version (v1 is the first).
+ * @throws Error when the value is not a positive integer.
+ */
+export declare function parseRegistryVersion(value: unknown): number;
+/** The version-rail fields version picking reads. */
+export interface AppRailVersion {
+    registryVersion: number;
+    state: string;
+    buildStatus: string;
+}
+/**
+ * Picks the version a bare "publish this app" means: the NEWEST version that
+ * has not failed (review state or build). A newer version that is still
+ * building is the pick — callers wait for its build rather than silently
+ * publishing an older one.
+ *
+ * @param rows - The app's version rail (`listDeployments`), any order.
+ * @returns The picked row, or null when every version failed or none exist.
+ */
+export declare function pickPublishVersion<T extends AppRailVersion>(rows: T[]): T | null;
+/** One deploy target the caller can address. */
+export interface DeployTeamRef {
+    /** Team id, or '@me' for the caller's personal space. */
+    id: string;
+    /** Display name. */
+    name: string;
+    /** Caller holds task.control on this team (may deploy/pause/schedule). */
+    canControl: boolean;
+}
+/**
+ * Resolves the caller's deploy targets (names + control rights) from the
+ * authenticated identity:
+ *
+ * - '@me' (the personal space) comes first for any signed-in user — it
+ *   exists even with zero team memberships.
+ * - org.admin (and sys.admin) implies the FULL team permission set — the
+ *   server resolver's documented expansion; per-team rows only carry
+ *   explicit task.* grants for regular members.
+ * - Rosterless identities (the OSS single-team server) derive refs from the
+ *   deployment rows with control assumed — the server enforces the real
+ *   permission on every call. Personal (`user~`) rows never become targets.
+ *
+ * @param client - A connected client (its cached ConnectResult is read), or none.
+ * @param deployments - Deployment rows used as the rosterless fallback.
+ * @returns The addressable team refs.
+ */
+export declare function resolveDeployTeams(client: {
+    getAccountInfo(): ConnectResult | undefined;
+} | null | undefined, deployments: Deployment[]): DeployTeamRef[];
+/**
+ * Resolves a team id to its display name, falling back to the id. Personal
+ * (`user~`) owner keys render as "Me" for the caller's own space and
+ * "Personal" for another user's (admin visibility) — the raw guid never
+ * reaches a label.
+ *
+ * @param teams - The resolved team refs.
+ * @param teamId - The team id (or owner key) to resolve.
+ * @param ownUserId - The caller's user id ('' when unknown).
+ * @returns The display name, or the id when unknown.
+ */
+export declare function teamNameOf(teams: DeployTeamRef[], teamId: string, ownUserId?: string): string;
+/**
+ * Translates a row's owner key into the ADDRESSABLE team ref for API calls:
+ * the caller's own `user~{uid}` row is addressed as '@me' (the server never
+ * accepts raw owner keys); everything else passes through.
+ *
+ * @param teamId - The row's team id / owner key.
+ * @param ownUserId - The caller's user id ('' when unknown).
+ * @returns The team id to put on the wire.
+ */
+export declare function wireTeamIdOf(teamId: string, ownUserId: string): string;
+/**
+ * Resolves what a person typed as a team — '@me', a team id, or a team
+ * display name (case-insensitive) — to the id to send. An unknown value
+ * passes through unchanged (the server validates it; an admin may address
+ * a team outside their own roster).
+ *
+ * @param input - The typed team ('' = unscoped/default).
+ * @param teams - The caller's resolved team refs.
+ * @returns The team id to put on the wire.
+ * @throws Error when a name matches more than one team.
+ */
+export declare function resolveTeamArg(input: string, teams: DeployTeamRef[]): string;
+/**
+ * The registry name for a pipeline file whose JSON carries none — `.pipe`
+ * names live in FILENAMES, and every deploy surface renders pipelineName.
+ *
+ * @param filePath - The pipeline file path (either separator).
+ * @returns The basename without its `.pipe` / `.pipe.json` extension.
+ */
+export declare function pipelineNameFromPath(filePath: string): string;
 interface ShellConnectionState {
-    /**
-     * The realm's RocketRideClient, or `null` while the realm has none yet.
-     *
-     * In EVERY realm this is a real client: the root's socket-owning instance
-     * at a framework root, and elsewhere the realm client, whose requests
-     * ride the shell bus to the root's one socket. It stays `null` until the
-     * realm is ready to answer truthfully — at the root until `init()`, in a
-     * bus-mirrored realm until the first identity mirror lands (a client
-     * seeded from nothing would confidently report "logged out" over a live
-     * session).
-     */
+    /** The shared RocketRideClient instance, or `null` if not yet initialised. */
     client: RocketRideClient | null;
     /** `true` when the WebSocket is authenticated and connected. */
     isConnected: boolean;
@@ -6049,178 +6179,11 @@ interface ShellConnectionState {
  *
  * @example
  * ```tsx
- * // `client` is non-null in every CONNECTED realm (root or spoke) — gate
- * // actions on it, but never early-return your whole surface on a null
- * // client: while the shell is connecting (or before a spoke realm's first
- * // mirror delivery) that branch would render indefinitely. Render the
- * // surface in its disconnected/empty state instead.
  * const { client, isConnected } = useShellConnection();
- * const ready = isConnected && client !== null;
- * return <Toolbar onRun={ready ? () => client!.restart({ token }) : undefined} />;
+ * if (!client || !isConnected) return <div>Connecting...</div>;
  * ```
  */
 export declare function useShellConnection(): ShellConnectionState;
-/** Default per-request timeout — matches the tool-op lane's generosity
- *  (engine-side work can legitimately run long); override per call. */
-export declare const DEFAULT_BUS_REQUEST_TIMEOUT_MS = 120000;
-/** One operation's compile-time shape: params in, result out. */
-export interface ShellOpSpec<P, R> {
-    /** Phantom carriers — never read at runtime. */
-    readonly params: P;
-    readonly result: R;
-}
-/**
- * The base op map a domain's op vocabulary extends — the protocol-map
- * pattern (ShellConnectionEventMap, ToolOpMap) applied to the bus. A domain
- * declares, in its own module:
- *
- *   interface ClientOps extends ShellOpMap {
- *       'client.setTeam': ShellOpSpec<{ teamId: string }, void>;
- *   }
- *
- * The interface key is the wire name, so a typo'd string or drifted payload
- * shape fails to compile at both ends.
- */
-export interface ShellOpMap {
-}
-/** The params type of one op in a map. */
-export type ShellOpParams<O, K extends keyof O> = O[K] extends ShellOpSpec<infer P, unknown> ? P : never;
-/** The result type of one op in a map. */
-export type ShellOpResult<O, K extends keyof O> = O[K] extends ShellOpSpec<unknown, infer R> ? R : never;
-/** Per-request options. */
-export interface IBusRequestOptions {
-    /** Overrides {@link DEFAULT_BUS_REQUEST_TIMEOUT_MS}. */
-    timeoutMs?: number;
-}
-/** A registered op handler — a plain async function, no transport knowledge. */
-export type BusOpHandler = (params: unknown) => unknown | Promise<unknown>;
-/**
- * Where an unresolved op goes when this realm is bridged (set by
- * busBridge.ts). Absent on the framework root (nothing above it) and in
- * unbridged realms (tests, standalone).
- */
-export interface IBusForwarder {
-    /** Forwards a request; resolves/rejects with the remote outcome. */
-    request(op: string, params: unknown, timeoutMs: number): Promise<unknown>;
-    /** Forwards a fire-and-forget op invocation. */
-    emitOp(op: string, params: unknown): void;
-    /** Announces a local registration (routing entry at the root). */
-    register(op: string): void;
-    /** Withdraws a local registration. */
-    unregister(op: string): void;
-}
-/** Thrown when a request resolves to no handler anywhere. */
-export declare class BusNoHandlerError extends Error {
-    constructor(op: string);
-}
-/** The op lane of one realm's bus. */
-export interface IOpBus {
-    /**
-     * Registers THE handler for an op. One handler per name — a second
-     * registration throws (registration is the allowlist; ambiguity is a
-     * bug, not a fan-out).
-     *
-     * @param op - The wire name (`ns.verb` by convention).
-     * @param handler - Plain async function; its return value answers requests.
-     * @returns An unregister function.
-     */
-    handle(op: string, handler: BusOpHandler): () => void;
-    /**
-     * Invokes an op and awaits its result — local handler first, else the
-     * forwarder (the bridge to the framework root), else rejects with
-     * {@link BusNoHandlerError}.
-     */
-    request(op: string, params: unknown, opts?: IBusRequestOptions): Promise<unknown>;
-    /**
-     * Invokes an op fire-and-forget — the handler runs (local or forwarded),
-     * the return value is discarded, failures are debug-logged, an unknown
-     * op is DROPPED with a debug trace (never buffered at this layer).
-     */
-    emitOp(op: string, params: unknown): void;
-    /** True when THIS realm registered the op. */
-    hasHandler(op: string): boolean;
-    /** The ops this realm registered (the bridge announces these). */
-    localOps(): string[];
-    /** Wires the realm's upstream (bridge-owned; root has none). */
-    setForwarder(forwarder: IBusForwarder | null): void;
-    /** Observes registration changes (the bridge re-announces on change). */
-    onRegistrationChange(cb: (op: string, registered: boolean) => void): () => void;
-}
-/**
- * Creates one realm's op bus. ConnectionManager holds exactly one and
- * exposes it as `request`/`handle`/`emitOp`; the bridge and router build on
- * the same object.
- *
- * @returns The op bus.
- */
-/**
- * An implementation table for (a subset of) an op map: one function per op
- * name, FULLY typed against the map — params and result both derive from the
- * op's ShellOpSpec, so a drifted payload shape or wrong return type fails to
- * compile in the table itself. THE one way every domain registers —
- * clientOps, hostOps, and host-specific override tables all ride this.
- */
-export type OpImplTable<M extends ShellOpMap> = Partial<{
-    [K in keyof M]: (params: ShellOpParams<M, K>) => ShellOpResult<M, K> | Promise<ShellOpResult<M, K>>;
-}>;
-/**
- * Registers an implementation table on a bus. Per entry: skipped when the
- * host already registered its own override (`hasHandler`) or when listed in
- * `skip` — specific-before-shared is the composition rule.
- *
- * @param bus - The realm's op bus.
- * @param impls - One implementation per op name.
- * @param options - Ops to leave unregistered.
- * @returns Unregister-all function.
- */
-export declare function registerOpHandlers<M extends ShellOpMap>(bus: IOpBus, impls: OpImplTable<M>, options?: {
-    skip?: ReadonlySet<string>;
-}): () => void;
-export declare function createOpBus(): IOpBus;
-/** The typed facade over a bus for one op map. */
-export interface ITypedBusOps<O extends ShellOpMap> {
-    /** Awaits the op's result. */
-    request<K extends keyof O & string>(op: K, params: ShellOpParams<O, K>, opts?: IBusRequestOptions): Promise<ShellOpResult<O, K>>;
-    /** Fires the op without a result (same handler, return value discarded). */
-    emit<K extends keyof O & string>(op: K, params: ShellOpParams<O, K>): void;
-    /** Registers the op's handler. */
-    handle<K extends keyof O & string>(op: K, handler: (params: ShellOpParams<O, K>) => ShellOpResult<O, K> | Promise<ShellOpResult<O, K>>): () => void;
-}
-/**
- * Types one op map over a bus — the `typedToolChannel` convention applied
- * to the bus lane. Domains hold one of these; raw string ops never appear
- * at call sites.
- *
- * @param bus - The realm's op bus.
- * @returns The typed facade.
- */
-export declare function typedBusOps<O extends ShellOpMap>(bus: IOpBus): ITypedBusOps<O>;
-/** What {@link useShellApiKey} returns. */
-export interface ShellApiKeyState {
-    /** The key, or null — both once `loading` is false. */
-    apiKey: string | null;
-    /** True until the first answer (or failure) arrives. */
-    loading: boolean;
-    /** Why the request failed, or null. */
-    error: string | null;
-}
-/**
- * Fetches the connection's API key, from any realm.
- *
- * The deliberate replacement for `client.getApiKey()`, which throws in a
- * realm (see RocketRideClientProxy). Use it only when the credential itself
- * is needed — to hand to a non-SDK HTTP call, or to pass into a preview
- * frame. Engine work needs no key: the client already carries the session.
- *
- * @returns The key, with its loading and failure states.
- *
- * @example
- * ```tsx
- * const { apiKey, loading } = useShellApiKey();
- * if (loading) return <Spinner />;           // NOT "no key" — unknown yet
- * ```
- */
-export declare function useShellApiKey(): ShellApiKeyState;
 /**
  * Hook that returns the current authenticated user identity, or null if
  * the shell has not yet completed a successful connectClient() call.
@@ -6242,171 +6205,6 @@ export declare function useAuthUser(): ConnectResult | null;
  * @returns Always null in the current implementation.
  */
 export declare function useLogout(): (() => void) | null;
-/**
- * The raw pipe a HOST builds a channel over — the transport seam between a
- * tool's two mounts. Host-internal: tools never see one (DevToolProps
- * carries only the channel); hosts obtain theirs from the bus peers
- * (busPeer.ts) or a loopback (toolHost.ts).
- */
-export interface IToolPeer {
-    /** Send a message to the other mount (buffered briefly while it opens). */
-    post(message: unknown): void;
-    /** Subscribe to messages from the other mount; returns unsubscribe. */
-    subscribe(cb: (message: unknown) => void): () => void;
-}
-declare const ENVELOPE = "__rrtool";
-/** Default per-call timeout for the op lane — generous because engine-side
- *  statements can legitimately run long; override per call. */
-export declare const DEFAULT_OP_TIMEOUT_MS = 120000;
-/** Per-call options for the op lane. */
-export interface IToolCallOptions {
-    /** Overrides {@link DEFAULT_OP_TIMEOUT_MS}. */
-    timeoutMs?: number;
-}
-/** A correlated request on the wire. */
-export interface IToolCallMessage {
-    [ENVELOPE]: "call";
-    id: string;
-    op: string;
-    args?: unknown;
-}
-/** A correlated reply on the wire. */
-export interface IToolReplyMessage {
-    [ENVELOPE]: "reply";
-    id: string;
-    ok: boolean;
-    result?: unknown;
-    error?: string;
-}
-/**
- * Narrows a peer payload to a CALL — for the channel and the host relays
- * (which must exclude calls from retention).
- *
- * @param message - Any peer payload.
- * @returns The call message, or null.
- */
-export declare function asToolCallMessage(message: unknown): IToolCallMessage | null;
-/**
- * Narrows a peer payload to a REPLY — for the channel and the host relays
- * (which deliver replies to live subscribers only).
- *
- * @param message - Any peer payload.
- * @returns The reply message, or null.
- */
-export declare function asToolReplyMessage(message: unknown): IToolReplyMessage | null;
-/** A retained state snapshot on the wire. */
-export interface IToolStateMessage {
-    [ENVELOPE]: "state";
-    topic: string;
-    snapshot: unknown;
-}
-/** A fire-and-forget event on the wire. */
-export interface IToolEventMessage {
-    [ENVELOPE]: "event";
-    name: string;
-    payload?: unknown;
-}
-/**
- * Narrows a peer payload to a channel STATE message — for host relays
- * (retention, replay, no-summon) and the channel itself.
- *
- * @param message - Any peer payload.
- * @returns The state message, or null.
- */
-export declare function asToolStateMessage(message: unknown): IToolStateMessage | null;
-/**
- * Narrows a peer payload to a channel EVENT message.
- *
- * @param message - Any peer payload.
- * @returns The event message, or null.
- */
-export declare function asToolEventMessage(message: unknown): IToolEventMessage | null;
-/** Unsubscribe handle. */
-export type ToolChannelUnsubscribe = () => void;
-/**
- * The typed channel between a tool's controller (devToolSidebar) and its
- * document views (devToolFrame mounts). See the file header for the model.
- */
-export interface ToolChannel {
-    /**
-     * CONTROLLER ONLY: publish a state snapshot. Retained — late subscribers
-     * receive the latest immediately. One publisher per topic by contract.
-     *
-     * @param topic - Tool-scoped topic name (e.g. 'connections').
-     * @param snapshot - The full snapshot (replaces the previous one).
-     */
-    publishState(topic: string, snapshot: unknown): void;
-    /**
-     * Subscribe to a state topic. The retained snapshot (if any) is replayed
-     * synchronously before live updates.
-     *
-     * @param topic - The topic to follow.
-     * @param cb - Receives each snapshot.
-     * @returns Unsubscribe.
-     */
-    onState(topic: string, cb: (snapshot: unknown) => void): ToolChannelUnsubscribe;
-    /**
-     * Send an event to the other side (documents → controller, or
-     * controller → documents). Buffered by the host while the other side
-     * opens; an event MAY summon a closed window, so send only for user
-     * actions and directed commands.
-     *
-     * @param name - Tool-scoped event name (e.g. 'saveConnection').
-     * @param payload - Optional payload.
-     */
-    sendEvent(name: string, payload?: unknown): void;
-    /**
-     * Subscribe to an event by name. Events are not retained.
-     *
-     * @param name - The event name to follow.
-     * @param cb - Receives each payload.
-     * @returns Unsubscribe.
-     */
-    onEvent(name: string, cb: (payload: unknown) => void): ToolChannelUnsubscribe;
-    /**
-     * FRAME side of the op lane: ask the controller to execute one operation
-     * and await the result. Untyped core — tools call through the typed
-     * surface (createToolOpClient, toolOps.ts).
-     *
-     * Timeouts are honest: 'did not answer' is NOT 'did not happen' — the
-     * controller may still be executing. No automatic retries, ever.
-     *
-     * @param op - The op's wire name.
-     * @param args - The op's parameters.
-     * @param opts - Timeout override.
-     * @returns The handler's result.
-     */
-    call(op: string, args?: unknown, opts?: IToolCallOptions): Promise<unknown>;
-    /**
-     * CONTROLLER side of the op lane: serve one operation. Replaces any
-     * previous handler for the op. Untyped core — controllers register
-     * through the typed surface (createToolOpServer, toolOps.ts).
-     *
-     * Reply-iff-tracked: a CALL gets a correlated reply; a plain channel
-     * EVENT whose name matches a served op runs the same handler with NO
-     * reply (opt-in correlation — nothing dangles).
-     *
-     * @param op - The op's wire name.
-     * @param handler - Plain async function; a thrown error becomes the
-     *                  caller's rejection (its message crosses the wire).
-     * @returns Unregister for this op.
-     */
-    serveOp(op: string, handler: (params: unknown) => unknown): ToolChannelUnsubscribe;
-}
-/**
- * Builds a ToolChannel over a host transport pipe. Called by HOST mounts
- * (one channel per mount); tools receive the result as
- * {@link DevToolProps.channel} and never construct one themselves.
- *
- * The instance keeps a per-realm retained-snapshot map so a component that
- * subscribes after a snapshot arrived still gets it; cross-realm replay to
- * freshly attached documents is the host relay's job (it re-delivers its
- * retained state messages into the new realm, which lands here).
- *
- * @param peer - The mount's transport pipe (host-built; see IToolPeer).
- * @returns The channel.
- */
-export declare function createToolChannel(peer: IToolPeer): ToolChannel;
 /**
  * Props injected by the shell into the app's main `<App />` component.
  *
@@ -6470,19 +6268,6 @@ export interface WorkspaceState {
 /** Value types a setting may hold — mirrors the JSON primitive types. */
 export type SettingValue = string | number | boolean;
 /**
- * Where a setting's VALUE lives — a partition-routing axis, not new storage:
- *
- * - `'workspace'` (the default when absent) — the contributing owner's
- *   partition file in the current workspace (`<owner>.workspace.json`):
- *   app/project settings.
- * - `'user'` — the shell partition (`global.json`): the person's own
- *   settings within the workspace (theme, appearance).
- * - `'host'` — the running HOST's own store. A VS Code concept only (the
- *   extension's configuration store, for connection/machine settings); the
- *   cloud has no host store, and host-scoped entries never render there.
- */
-export type SettingStore = "host" | "workspace" | "user";
-/**
  * JSON-Schema-style declaration of a single setting.
  *
  * The shape is 100% format-compatible with a property entry in the VSCode
@@ -6535,20 +6320,6 @@ export interface SettingSchema {
     required?: boolean;
     /** Extension keyword: placeholder text for empty string inputs. */
     placeholder?: string;
-    /**
-     * Extension keyword: which store holds the value (see {@link SettingStore}).
-     * Absent = `'workspace'`. `'host'`-scoped settings must ALSO be declared in
-     * the VS Code extension's package.json `contributes.configuration` — the
-     * host store is VS Code configuration, and VS Code only stores declared keys.
-     */
-    store?: SettingStore;
-    /**
-     * Extension keyword: shell editions this setting applies to
-     * ('saas' | 'oss' | 'vscode' — the AppManifestEntry.shells vocabulary).
-     * Absent = every shell. The registry drops entries whose list excludes
-     * the running edition, so host-inapplicable settings never render.
-     */
-    shells?: string[];
 }
 /**
  * An app's settings contribution — the exact shape of the
@@ -6601,12 +6372,6 @@ interface AppManifestEntry$1 {
     /** Categories for filtering/grouping in the app store. */
     categories?: string[];
     /**
-     * Shell editions this app serves ('saas' | 'oss' | 'vscode'). Absent means
-     * the app works on every shell. Matches the catalog wire's `shell` filter
-     * vocabulary; hosts hide entries that do not name their edition.
-     */
-    shells?: string[];
-    /**
      * The app's settings contribution (VSCode `contributes.configuration`
      * shape).  Available at boot from the manifest — the settings registry is
      * flattened from the configurations of all desktop apps.
@@ -6618,13 +6383,6 @@ interface AppManifestEntry$1 {
      * a deployed pin's appVersion. Absent when the server sent none.
      */
     version?: string;
-    /**
-     * Registry version number the entry resolves to (the scope-walk winner) —
-     * present for published store apps; absent for built-ins and dev overlays.
-     * The desktop's version drop list matches on this (the wire identity),
-     * never the display semver.
-     */
-    registryVersion?: number;
     /** True when the entry is a dev-overlay override (live watch build). */
     dev?: boolean;
     /**
@@ -6691,99 +6449,6 @@ export interface AppDescriptor {
     components?: {
         [key: string]: React$1.ComponentType<any> | undefined;
     };
-    /**
-     * Dev-tool main surface — mounted DIRECTLY by a host workbench (the VS
-     * Code extension's tool panel, rocket-ui's tool document) instead of
-     * booting the full `app`. Declared by apps carrying the `devTool`
-     * manifest category. Must style exclusively via `var(--rr-*)` tokens —
-     * theming is the ambient CSS custom properties of the mounting document.
-     */
-    devToolFrame?: React$1.ComponentType<DevToolProps>;
-    /**
-     * Dev-tool sidebar — the tool's CONTROLLER, mounted by the host workbench
-     * in ITS sidebar (behind the tool's tab) while `devToolFrame` runs in the
-     * main surface. The two mounts may live in isolated documents (VS Code
-     * webviews). The controller owns AUTHORITY over the tool's shared state
-     * (refcounted/singleton coordination, owner-realm stores) — never
-     * transport: every realm holds its own working client
-     * (`useShellConnection().client`), and there is ONE socket per host
-     * process behind them all. Ephemeral UI coordination rides `peer`.
-     */
-    devToolSidebar?: React$1.ComponentType<DevToolProps>;
-}
-/**
- * Props every dev-tool component receives from its host workbench.
- *
- * NO client member — and none is needed: every mount's realm already holds a
- * working `RocketRideClient` via `useShellConnection().client` (the root's
- * real client, or the realm client whose requests ride the shell bus). There
- * is ONE socket per host process; a controller mount owns AUTHORITY to
- * coordinate its tool's shared state (refcounted endpoints, single-writer
- * stores, shared pollers), never the transport. Everything frame↔controller
- * rides `channel` — ops for that coordination, events for ephemeral UI
- * coordination, retained state for shared snapshots.
- *
- * NO peer member (removed 2026-10-21): the raw post/subscribe pipe is a
- * host-internal transport seam now (IToolPeer — hosts build the channel over
- * it). Tools never correlate or envelope by hand.
- *
- * No theme member: tools are themed by the ambient `--rr-*` CSS custom
- * properties of the document they mount into (the shell's active theme
- * in-browser; the VS Code webview's editor-variable mapping in the editor).
- */
-export interface DevToolProps {
-    /**
-     * The channel to this tool's OTHER mount (frame ↔ sidebar) — the tool's
-     * ONE transport surface, host-built over its relay (in-memory in-shell;
-     * across webviews in VS Code). Three lanes:
-     *
-     *   - STATE (controller → frames): retained per topic, replayed to late
-     *     subscribers; a publish never summons a window.
-     *   - EVENTS (either direction): fire-and-forget. Direction discipline: a
-     *     sidebar mount sends ONLY in response to a user action (an event to
-     *     a closed frame summons it — a tree click is an implicit "open the
-     *     tool"); the frame PUSHES its state whenever it changes, and the
-     *     host retains the last frame→sidebar payload so a (re)mounted
-     *     sidebar renders without asking. Mount-time handshakes from the
-     *     sidebar side are a bug: every pinned tool's sidebar mount boots
-     *     with the host sidebar, and an ask-on-mount would summon every
-     *     tool's frame.
-     *   - OPS (frame → controller, correlated): the typed request/response
-     *     lane — see toolOps.ts (createToolOpClient / createToolOpServer).
-     */
-    channel: ToolChannel;
-    /**
-     * Host documents — present on hosts that give one tool MULTIPLE top-level
-     * documents (e.g. one tab per database connection). `open` opens or
-     * focuses the tool document for `docKey` with the given tab title,
-     * mounting `devToolFrame` with that key in {@link DevToolProps.docKey};
-     * `close` closes it. Hosts without the capability omit the member — the
-     * tool falls back to its single-frame behavior (an event summons the
-     * frame).
-     */
-    documents?: {
-        /** Opens (or focuses) the tool document for one key. */
-        open(docKey: string, title: string): void;
-        /** Closes the tool document for one key (open elsewhere = no-op). */
-        close(docKey: string): void;
-    };
-    /**
-     * The document key this FRAME mount serves — set when the host opened it
-     * through `documents.open`. Absent on sidebar mounts and on a tool's
-     * single/default frame.
-     */
-    docKey?: string;
-    /**
-     * For SIDEBAR mounts on hosts with `documents`: the key of this tool's
-     * document currently fronted in the host's editor area, or null when the
-     * active editor is NOT one of this tool's documents (another tool, a
-     * text file). Hosts keep it live across tab switches, so a sidebar can
-     * follow the selection — highlight the fronted document's row, clear
-     * highlight and dependent panels on null. Omitted (undefined) by hosts
-     * that cannot tell and on frame mounts; a sidebar then falls back to its
-     * own signals (e.g. the frame's channel-event pushes).
-     */
-    activeDocKey?: string | null;
 }
 /**
  * Branding tokens for a specific app or the login screen.
@@ -6925,64 +6590,13 @@ export interface ShellConfig {
     /** Called once on mount before auth — use for initial theme application etc. */
     onInit?: () => void;
 }
-/** One registered settings contribution (a non-app contributor's section). */
-export interface SettingsContribution {
-    /** The contributor's app/tool id (also the section's stable id and the
-     *  OWNER of its keys — the partition workspace-scoped values route to). */
-    appId: string;
-    /** Display name — the section-title fallback when the configuration
-     *  declares none. */
-    name: string;
-    /** Shell editions this contribution serves (AppManifestEntry.shells
-     *  vocabulary); absent = every shell. Entry-level `schema.shells` filters
-     *  further within a contribution. */
-    shells?: string[];
-    /** The contributed settings (contributes.configuration shape). */
-    configuration: AppConfiguration;
-}
-/**
- * Registers a settings contribution. Re-registering an appId replaces the
- * previous contribution (idempotent for builtins that register at module
- * scope across remounts).
- *
- * @param contribution - The contributor's section.
- * @returns Unregister function — removes the contribution (store tools call
- *          it on unpin; builtins never do).
- */
-export declare function registerSettings(contribution: SettingsContribution): () => void;
-/**
- * The registered contributions, in registration order.
- *
- * @returns A snapshot array (safe to hold across registrations).
- */
-export declare function getSettingsContributions(): readonly SettingsContribution[];
-/**
- * Subscribes to contribution changes (register/replace/unregister).
- *
- * @param cb - Change callback.
- * @returns Unsubscribe function.
- */
-export declare function onSettingsContributionsChanged(cb: () => void): () => void;
-/** Shell editions a registry build can target (AppManifestEntry.shells
- *  vocabulary). Absent on a setting/contribution = applies to all. */
-export type ShellKind = "saas" | "oss" | "vscode";
-/**
- * Reserved pseudo-app id for the shell's own settings section.  Dotted like a
- * real app id so section ids stay uniform; no manifest entry ever carries it.
- */
-export declare const SHELL_SECTION_ID = "rocketride.shell";
-/** One declared setting: its full dotted key plus its schema. */
-export interface RegistryEntry {
+interface RegistryEntry {
     /** Full dotted setting key (e.g. 'rocketride.pipeBuilder.pipelineTraceLevel'). */
     key: string;
     /** The setting's JSON-Schema-style declaration. */
     schema: SettingSchema;
-    /** The contributing owner's id (first-wins) — where a workspace-scoped
-     *  value's delta lives ({@link SHELL_SECTION_ID} for shell keys). */
-    owner: string;
 }
-/** A nav section on the settings page — one per configuration title. */
-export interface RegistrySection {
+interface RegistrySection {
     /** Stable section id (the first contributing app's id). */
     id: string;
     /** Display title (configuration.title, falling back to the app name). */
@@ -6992,8 +6606,7 @@ export interface RegistrySection {
     /** Ordered setting entries (schema `order` first, then declaration order). */
     entries: RegistryEntry[];
 }
-/** The flattened settings registry consumed by the settings page and context. */
-export interface SettingsRegistry {
+interface SettingsRegistry {
     /** Nav sections in first-contribution order. */
     sections: RegistrySection[];
     /** Every declared schema keyed by full setting key. */
@@ -7001,68 +6614,6 @@ export interface SettingsRegistry {
     /** Default values for every key that declares one. */
     defaults: Record<string, SettingValue>;
 }
-/**
- * Derives the display label from the last segment of a setting key,
- * VSCode-style: 'pipelineTraceLevel' → "Pipeline Trace Level" and
- * 'pipelineTTL' → "Pipeline TTL" (acronym runs are preserved).
- *
- * @param key - Full dotted setting key.
- * @returns Human-readable label for the settings page row.
- */
-export declare function labelFromKey(key: string): string;
-/** Options for {@link buildSettingsRegistry}. */
-export interface RegistryBuildOptions {
-    /**
-     * The running shell edition. When given, entries (and whole contributions)
-     * whose `shells` list excludes it are dropped — host-inapplicable settings
-     * never enter the registry. Absent = no filtering (every entry included).
-     */
-    shell?: ShellKind;
-    /**
-     * Registered non-app contributions (builtin/dev tools, host blocks) — the
-     * caller passes getSettingsContributions() and rebuilds on its change
-     * feed. Folded after the shell's section, before desktop apps (first-wins
-     * dedupe protects shell and contribution keys from app redeclaration).
-     */
-    contributions?: readonly SettingsContribution[];
-}
-/**
- * Builds the settings registry from the current app manifest plus the
- * registered contributions.
- *
- * The shell's own configuration seeds the registry first, so "General" always
- * exists, tops the nav, and owns its keys.  Registered contributions follow
- * (builtins and pinned dev tools — see settingsContributions.ts), then only
- * apps on the user's desktop — an uninstalled app's settings never render.
- * Sections group by configuration title so contributors that declare a shared
- * title appear once; duplicate keys are deduplicated first-wins.
- *
- * @param appManifest - All app manifest entries (desktop + store).
- * @param options - Shell-edition filter and registered contributions.
- * @returns The flattened registry.
- */
-export declare function buildSettingsRegistry(appManifest: AppManifestEntry$1[], options?: RegistryBuildOptions): SettingsRegistry;
-/**
- * The store a setting's VALUE lives in — `schema.store`, defaulted to
- * `'workspace'`. The partition mapping (user → shell partition, workspace →
- * the entry's `owner` partition) is the VALUE layer's job; this helper only
- * normalizes the declaration.
- *
- * @param schema - The setting's declaration.
- * @returns The declared store, `'workspace'` when absent.
- */
-export declare function settingStoreOf(schema: SettingSchema): SettingStore;
-/**
- * Computes the effective settings map: every declared default overlaid with
- * the user's stored overrides.  Overrides for keys no longer in the registry
- * (uninstalled apps) pass through untouched so their values survive a
- * reinstall.
- *
- * @param registry  - The current settings registry.
- * @param overrides - The raw contents of settings.json (deltas only).
- * @returns Effective key → value map consumed by apps.
- */
-export declare function effectiveSettings(registry: SettingsRegistry, overrides: Record<string, SettingValue>): Record<string, SettingValue>;
 /**
  * Core connection states shared by all hosts.
  *
@@ -7338,32 +6889,6 @@ interface ShellAppEntry {
     description?: string;
 }
 /**
- * One platform notification (the `shell:notify` payload).
- *
- * A discriminated union — narrow on `kind`. New notification kinds are
- * APPENDED as union members; existing members never change shape, so
- * consumer narrowing stays valid (the same append-only rule as the event
- * map itself).
- *
- * Today every producer is PAGE-LOCAL (the event never rides the wire); a
- * server-pushed feed may later emit the same event, so consumers must not
- * assume the producer shares their realm beyond what the payload carries.
- */
-export type ShellNotification = 
-/**
- * A store-VFS file changed — any write through the app-dev VFS seam.
- * `uri` is the full store path; `origin` identifies the writer (a
- * dev-session id, or a verb like 'scaffold') so writers can skip their
- * own echo; `rev` is a page-monotonic write counter so a consumer
- * hearing one change over several transports can dedupe.
- */
-{
-    kind: "onFsChange";
-    uri: string;
-    origin: string;
-    rev: number;
-};
-/**
  * Canonical map of all shell event names to their payload shapes.
  *
  * Both shell and VSCode emit and listen to events from this map.
@@ -7462,38 +6987,6 @@ interface ShellConnectionEventMap {
      */
     "shell:appsUpdated": {
         apps: ShellAppEntry[];
-    };
-    /**
-     * The general platform notification bus — a typed union; narrow on
-     * `kind` (see {@link ShellNotification}). Page-local today: emitted by
-     * in-page producers (the app-dev VFS seam), never by the server.
-     */
-    "shell:notify": ShellNotification;
-    /**
-     * A dev tool's sidebar tab was selected in the host's sidebar chrome.
-     *
-     * Fired on EVERY selection (no deduplication). What activation means is
-     * the TOOL's decision, made in its devToolSidebar code: a single-pane
-     * tool opens its pane (`documents.open('', name)`); a per-document tool
-     * ignores the event. The FIRST selection is also what lazily mounts the
-     * tool's sidebar, so it arrives before the subscription exists — a tool
-     * that opens on activation therefore also opens on MOUNT (mounting IS
-     * the first activation) and uses this event for re-activations only.
-     */
-    "shell:toolSidebarActivated": {
-        appId: string;
-    };
-    /**
-     * A dev tool's sidebar tab stopped being the selected one — the user
-     * selected a different tab (another tool's, or a fixed mode). Fired
-     * before the successor's `shell:toolSidebarActivated`, and only on a
-     * real change: re-selecting the same tab deactivates nothing, and a
-     * sidebar reload or an externally synced highlight emits neither event.
-     * Typical use: a controller pauses discretionary work (polling,
-     * watchers) while its panel is out of view.
-     */
-    "shell:toolSidebarDeactivated": {
-        appId: string;
     };
     /**
      * Successful authentication — identity is now available.
@@ -7772,30 +7265,6 @@ on(event: 'shell:appsUpdated', handler: (payload: ShellConnectionEventMap['shell
  * @param handler - Callback invoked when the event fires.
  * @returns An unsubscribe function — call it to remove the handler.
  */
-on(event: 'shell:notify', handler: (payload: ShellConnectionEventMap['shell:notify']) => void): () => void;
-/**
- * Registers a handler for a typed shell event.
- *
- * @param event   - The event name from `ShellConnectionEventMap`.
- * @param handler - Callback invoked when the event fires.
- * @returns An unsubscribe function — call it to remove the handler.
- */
-on(event: 'shell:toolSidebarActivated', handler: (payload: ShellConnectionEventMap['shell:toolSidebarActivated']) => void): () => void;
-/**
- * Registers a handler for a typed shell event.
- *
- * @param event   - The event name from `ShellConnectionEventMap`.
- * @param handler - Callback invoked when the event fires.
- * @returns An unsubscribe function — call it to remove the handler.
- */
-on(event: 'shell:toolSidebarDeactivated', handler: (payload: ShellConnectionEventMap['shell:toolSidebarDeactivated']) => void): () => void;
-/**
- * Registers a handler for a typed shell event.
- *
- * @param event   - The event name from `ShellConnectionEventMap`.
- * @param handler - Callback invoked when the event fires.
- * @returns An unsubscribe function — call it to remove the handler.
- */
 on(event: 'shell:login', handler: (payload: ShellConnectionEventMap['shell:login']) => void): () => void;
 /**
  * Registers a handler for a typed shell event.
@@ -8035,36 +7504,6 @@ emit(event: 'shell:appsUpdated', payload: ShellConnectionEventMap['shell:appsUpd
  * @param event   - The event name from `ShellConnectionEventMap`.
  * @param payload - The payload matching the event's type.
  */
-emit(event: 'shell:notify', payload: ShellConnectionEventMap['shell:notify']): void;
-/**
- * Emits a typed shell event, dispatching to all registered handlers.
- *
- * Public so that any code (sidebar, home app, plugins) can fire UI
- * coordination events through the connection manager.
- *
- * @param event   - The event name from `ShellConnectionEventMap`.
- * @param payload - The payload matching the event's type.
- */
-emit(event: 'shell:toolSidebarActivated', payload: ShellConnectionEventMap['shell:toolSidebarActivated']): void;
-/**
- * Emits a typed shell event, dispatching to all registered handlers.
- *
- * Public so that any code (sidebar, home app, plugins) can fire UI
- * coordination events through the connection manager.
- *
- * @param event   - The event name from `ShellConnectionEventMap`.
- * @param payload - The payload matching the event's type.
- */
-emit(event: 'shell:toolSidebarDeactivated', payload: ShellConnectionEventMap['shell:toolSidebarDeactivated']): void;
-/**
- * Emits a typed shell event, dispatching to all registered handlers.
- *
- * Public so that any code (sidebar, home app, plugins) can fire UI
- * coordination events through the connection manager.
- *
- * @param event   - The event name from `ShellConnectionEventMap`.
- * @param payload - The payload matching the event's type.
- */
 emit(event: 'shell:login', payload: ShellConnectionEventMap['shell:login']): void;
 /**
  * Emits a typed shell event, dispatching to all registered handlers.
@@ -8234,13 +7673,6 @@ export interface IWorkspaceContext {
     appState: Record<string, unknown>;
     /** Update the opaque app-owned state via a functional updater. */
     updateAppState: (updater: (prev: Record<string, unknown>) => Record<string, unknown>) => void;
-    /**
-     * Writes the workspace's pending debounced state to disk NOW.
-     *
-     * Hand this to Documents as `WorkspaceBinding.flushNow` so a page
-     * teardown cannot strand the last change in a timer that never fires.
-     */
-    flushWorkspaceNow: () => void;
     /** ID of the currently active app. */
     activeAppId: string;
     /** Lightweight manifest entries for all apps — always available, no bundle load needed. */
@@ -8313,7 +7745,7 @@ export interface IWorkspaceContext {
     }) => void;
     /** Emit a named event to all subscribers. Does NOT mutate workspace state. */
     /** Emit a named event to all subscribers. Does NOT mutate workspace state. */
-emit: ((event: 'shell:connected', payload: ShellConnectionEventMap['shell:connected']) => void) & ((event: 'shell:disconnected', payload: ShellConnectionEventMap['shell:disconnected']) => void) & ((event: 'shell:statusMessage', payload: ShellConnectionEventMap['shell:statusMessage']) => void) & ((event: 'shell:statusChange', payload: ShellConnectionEventMap['shell:statusChange']) => void) & ((event: 'shell:error', payload: ShellConnectionEventMap['shell:error']) => void) & ((event: 'shell:event', payload: ShellConnectionEventMap['shell:event']) => void) & ((event: 'shell:accountUpdate', payload: ShellConnectionEventMap['shell:accountUpdate']) => void) & ((event: 'shell:orgChanged', payload: ShellConnectionEventMap['shell:orgChanged']) => void) & ((event: 'shell:servicesUpdated', payload: ShellConnectionEventMap['shell:servicesUpdated']) => void) & ((event: 'shell:appsUpdated', payload: ShellConnectionEventMap['shell:appsUpdated']) => void) & ((event: 'shell:notify', payload: ShellConnectionEventMap['shell:notify']) => void) & ((event: 'shell:toolSidebarActivated', payload: ShellConnectionEventMap['shell:toolSidebarActivated']) => void) & ((event: 'shell:toolSidebarDeactivated', payload: ShellConnectionEventMap['shell:toolSidebarDeactivated']) => void) & ((event: 'shell:login', payload: ShellConnectionEventMap['shell:login']) => void) & ((event: 'shell:logout', payload: ShellConnectionEventMap['shell:logout']) => void) & ((event: 'shell:loginRequest', payload: ShellConnectionEventMap['shell:loginRequest']) => void) & ((event: 'shell:logoutRequest', payload: ShellConnectionEventMap['shell:logoutRequest']) => void) & ((event: 'shell:switchApp', payload: ShellConnectionEventMap['shell:switchApp']) => void) & ((event: 'shell:subscribe', payload: ShellConnectionEventMap['shell:subscribe']) => void) & ((event: 'shell:unsubscribe', payload: ShellConnectionEventMap['shell:unsubscribe']) => void) & ((event: 'shell:myApps', payload: ShellConnectionEventMap['shell:myApps']) => void) & ((event: 'shell:openOverlay', payload: ShellConnectionEventMap['shell:openOverlay']) => void) & ((event: 'shell:sidebarCollapsing', payload: ShellConnectionEventMap['shell:sidebarCollapsing']) => void) & ((event: 'shell:setSidebarCollapsed', payload: ShellConnectionEventMap['shell:setSidebarCollapsed']) => void) & ((event: 'shell:themeChange', payload: ShellConnectionEventMap['shell:themeChange']) => void) & ((event: 'shell:viewActivated', payload: ShellConnectionEventMap['shell:viewActivated']) => void) & ((event: 'shell:manifestRefresh', payload: ShellConnectionEventMap['shell:manifestRefresh']) => void) & ((event: 'app:statusChanged', payload: ShellConnectionEventMap['app:statusChanged']) => void) & ((event: 'store:changed', payload: ShellConnectionEventMap['store:changed']) => void);
+emit: ((event: 'shell:connected', payload: ShellConnectionEventMap['shell:connected']) => void) & ((event: 'shell:disconnected', payload: ShellConnectionEventMap['shell:disconnected']) => void) & ((event: 'shell:statusMessage', payload: ShellConnectionEventMap['shell:statusMessage']) => void) & ((event: 'shell:statusChange', payload: ShellConnectionEventMap['shell:statusChange']) => void) & ((event: 'shell:error', payload: ShellConnectionEventMap['shell:error']) => void) & ((event: 'shell:event', payload: ShellConnectionEventMap['shell:event']) => void) & ((event: 'shell:accountUpdate', payload: ShellConnectionEventMap['shell:accountUpdate']) => void) & ((event: 'shell:orgChanged', payload: ShellConnectionEventMap['shell:orgChanged']) => void) & ((event: 'shell:servicesUpdated', payload: ShellConnectionEventMap['shell:servicesUpdated']) => void) & ((event: 'shell:appsUpdated', payload: ShellConnectionEventMap['shell:appsUpdated']) => void) & ((event: 'shell:login', payload: ShellConnectionEventMap['shell:login']) => void) & ((event: 'shell:logout', payload: ShellConnectionEventMap['shell:logout']) => void) & ((event: 'shell:loginRequest', payload: ShellConnectionEventMap['shell:loginRequest']) => void) & ((event: 'shell:logoutRequest', payload: ShellConnectionEventMap['shell:logoutRequest']) => void) & ((event: 'shell:switchApp', payload: ShellConnectionEventMap['shell:switchApp']) => void) & ((event: 'shell:subscribe', payload: ShellConnectionEventMap['shell:subscribe']) => void) & ((event: 'shell:unsubscribe', payload: ShellConnectionEventMap['shell:unsubscribe']) => void) & ((event: 'shell:myApps', payload: ShellConnectionEventMap['shell:myApps']) => void) & ((event: 'shell:openOverlay', payload: ShellConnectionEventMap['shell:openOverlay']) => void) & ((event: 'shell:sidebarCollapsing', payload: ShellConnectionEventMap['shell:sidebarCollapsing']) => void) & ((event: 'shell:setSidebarCollapsed', payload: ShellConnectionEventMap['shell:setSidebarCollapsed']) => void) & ((event: 'shell:themeChange', payload: ShellConnectionEventMap['shell:themeChange']) => void) & ((event: 'shell:viewActivated', payload: ShellConnectionEventMap['shell:viewActivated']) => void) & ((event: 'shell:manifestRefresh', payload: ShellConnectionEventMap['shell:manifestRefresh']) => void) & ((event: 'app:statusChanged', payload: ShellConnectionEventMap['app:statusChanged']) => void) & ((event: 'store:changed', payload: ShellConnectionEventMap['store:changed']) => void);
     /** Subscribe to a named event. Returns an unsubscribe function. */
     /** Subscribe to a named event. Returns an unsubscribe function. */
 on(event: 'shell:connected', handler: (payload: ShellConnectionEventMap['shell:connected']) => void): () => void;
@@ -8335,12 +7767,6 @@ on(event: 'shell:orgChanged', handler: (payload: ShellConnectionEventMap['shell:
 on(event: 'shell:servicesUpdated', handler: (payload: ShellConnectionEventMap['shell:servicesUpdated']) => void): () => void;
 /** Subscribe to a named event. Returns an unsubscribe function. */
 on(event: 'shell:appsUpdated', handler: (payload: ShellConnectionEventMap['shell:appsUpdated']) => void): () => void;
-/** Subscribe to a named event. Returns an unsubscribe function. */
-on(event: 'shell:notify', handler: (payload: ShellConnectionEventMap['shell:notify']) => void): () => void;
-/** Subscribe to a named event. Returns an unsubscribe function. */
-on(event: 'shell:toolSidebarActivated', handler: (payload: ShellConnectionEventMap['shell:toolSidebarActivated']) => void): () => void;
-/** Subscribe to a named event. Returns an unsubscribe function. */
-on(event: 'shell:toolSidebarDeactivated', handler: (payload: ShellConnectionEventMap['shell:toolSidebarDeactivated']) => void): () => void;
 /** Subscribe to a named event. Returns an unsubscribe function. */
 on(event: 'shell:login', handler: (payload: ShellConnectionEventMap['shell:login']) => void): () => void;
 /** Subscribe to a named event. Returns an unsubscribe function. */
@@ -8581,32 +8007,9 @@ export declare function useIframeBridge(iframeRef: React$1.RefObject<HTMLIFrameE
  */
 export declare function useAppComponent(appId: string, componentName: string): React$1.ComponentType<any> | null;
 export declare function useClickOutside(ref: React$1.RefObject<HTMLElement | null>, onClose: () => void): void;
-/**
- * A ref whose `.current` always holds the latest render's value.
- *
- * @param value - The value to track.
- * @returns A stable ref to the freshest value.
- */
-export declare function useLatest<T>(value: T): {
-    readonly current: T;
-};
-/** Options enabling the measured (clamp/flip) mode. */
-export interface FixedPopupOptions {
-    /** The popup element to measure — presence switches on the measured mode. */
-    popupRef?: React$1.RefObject<HTMLElement | null>;
-    /** Horizontal alignment against the trigger: left edges ('start', default) or right edges ('end'). */
-    align?: "start" | "end";
-    /** Gap between trigger and popup in px (default 4). */
-    gap?: number;
-    /** Minimum clearance from the viewport edges in px (default 8). */
-    margin?: number;
-    /** Also report the trigger's width (for popups that match it). */
-    matchWidth?: boolean;
-}
-export declare function useFixedPopupPosition(triggerRef: React$1.RefObject<HTMLElement | null>, isOpen: boolean, placement?: "below" | "above", options?: FixedPopupOptions): {
+export declare function useFixedPopupPosition(triggerRef: React$1.RefObject<HTMLElement | null>, isOpen: boolean, placement?: "below" | "above"): {
     top: number;
     left: number;
-    width?: number;
 } | null;
 /**
  * Returns the shared RocketRideClient instance, or `null` if not yet initialised.
@@ -8616,79 +8019,6 @@ export declare function useFixedPopupPosition(triggerRef: React$1.RefObject<HTML
  * new code.
  */
 export declare function getClient(): RocketRideClient | null;
-/** A topic subscriber. `undefined` delivers a retraction. */
-export type RetainedSubscriber = (snapshot: unknown) => void;
-/** The retained-topic registry — one per framework root, THE authority. */
-export interface IRetainedRegistry {
-    /**
-     * Replaces the topic's snapshot and fans out to every subscriber (local
-     * and, via the router's watcher, remote). `undefined` RETRACTS the topic:
-     * the entry is deleted and subscribers are notified with `undefined`.
-     */
-    publish(topic: string, snapshot: unknown): void;
-    /**
-     * Delivers a TRANSIENT payload to the topic's subscribers — same
-     * fan-out as publish, but nothing is stored: read() never sees it and
-     * late subscribers replay nothing. The N-subscriber ephemeral lane
-     * (cross-realm events) the one-owner op model cannot provide.
-     */
-    signal(topic: string, payload: unknown): void;
-    /**
-     * Subscribes to a topic. When a snapshot exists it is REPLAYED first
-     * (async, before any later publish); then every replacement AND every
-     * signal is delivered. Subscribing before the first publish is the
-     * natural case — the callback simply fires on that first publish.
-     *
-     * @returns Unsubscribe.
-     */
-    subscribe(topic: string, cb: RetainedSubscriber): () => void;
-    /** The current snapshot, or `undefined` when never published/retracted.
-     *  Synchronous — only the root (and in-realm users of a local registry)
-     *  can call this; bridged realms read through their async port. */
-    read(topic: string): unknown;
-    /**
-     * Watches EVERY topic change AND signal (the router's remote fan-out
-     * seam) — delivered synchronously with the publish/signal so the router
-     * can order its wire sends; local subscribers still get async delivery.
-     *
-     * @param cb - Receives (topic, value, transient) — transient marks a
-     *             signal (nothing stored).
-     * @returns Unsubscribe.
-     */
-    onChange(cb: (topic: string, value: unknown, transient: boolean) => void): () => void;
-    /** Every retained topic with its snapshot (a late realm's replay seed). */
-    entries(): Array<[
-        string,
-        unknown
-    ]>;
-}
-/**
- * Creates a retained-topic registry.
- *
- * @returns The registry.
- */
-export declare function createRetainedRegistry(): IRetainedRegistry;
-/**
- * What a realm's ConnectionManager speaks retained topics through. The root
- * realm's port IS its local registry; a bridged realm's port is installed by
- * attachRealmToRoot and rides the wire.
- */
-export interface IRetainedPort {
-    publish(topic: string, snapshot: unknown): void;
-    signal(topic: string, payload: unknown): void;
-    subscribe(topic: string, cb: RetainedSubscriber): () => void;
-    /** Async everywhere — a bridged realm cannot read the root's map
-     *  synchronously, and one signature keeps call sites portable. */
-    read(topic: string): Promise<unknown>;
-}
-/**
- * Adapts a local registry to the port shape (the root realm's port, and the
- * default for unbridged realms — tests, standalone).
- *
- * @param registry - The local registry.
- * @returns The port.
- */
-export declare function localRetainedPort(registry: IRetainedRegistry): IRetainedPort;
 /**
  * Options for ConnectionManager.initialize().
  */
@@ -8763,7 +8093,8 @@ export declare class ConnectionManager implements IConnectionManager {
     /**
      * Redirect the browser to the OAuth provider for authorization.
      *
-     * Delegates to the auth provider's ``signIn()`` method.
+     * Delegates to the auth provider's ``signIn()`` method. Falls back to
+     * the legacy PKCE flow if no auth provider is configured.
      *
      * @param register - Retained for compatibility; no longer changes the
      *                   destination. All flows land on Zitadel's login page
@@ -8818,16 +8149,7 @@ export declare class ConnectionManager implements IConnectionManager {
      * Clean up all resources. Called on page unload.
      */
     dispose(): Promise<void>;
-    /**
-     * Returns the RocketRideClient instance, or null if not initialized.
-     *
-     * In a BUS-MIRRORED realm this is the realm's own
-     * {@link RocketRideClientProxy} — a real client whose `call()` rides the
-     * bus to the root's socket. It appears once the first mirror delivery has
-     * seeded it, and not before: a client answering `isAuthenticated()` from
-     * an unseeded handshake would report a confident FALSE over a live
-     * session, which is worse than the null a caller already handles.
-     */
+    /** Returns the RocketRideClient instance, or null if not initialized. */
     getClient(): RocketRideClient | null;
     /** Returns true if the WebSocket is authenticated and connected. */
     isConnected(): boolean;
@@ -8851,9 +8173,9 @@ export declare class ConnectionManager implements IConnectionManager {
     clearToken(): void;
     /** Update the hasCredentials flag based on token availability. */
     updateCredentialsStatus(): void;
-    /** Read session-locked app ID from the tab-session store. */
+    /** Read session-locked app ID from sessionStorage. */
     getSessionAppId(): string;
-    /** Save session-locked app ID to the tab-session store. */
+    /** Save session-locked app ID to sessionStorage. */
     setSessionAppId(id: string): void;
     /** Read the pending app ID (set before OAuth redirect). */
     getPendingAppId(): string;
@@ -8966,30 +8288,6 @@ emit(event: 'shell:servicesUpdated', payload: ShellConnectionEventMap['shell:ser
  * @param payload - The payload matching the event's type.
  */
 emit(event: 'shell:appsUpdated', payload: ShellConnectionEventMap['shell:appsUpdated']): void;
-/**
- * Emit a typed shell event, dispatching to all registered handlers.
- * Also pushes to the debug log for the ALT+D panel.
- *
- * @param event   - The event name from ShellConnectionEventMap.
- * @param payload - The payload matching the event's type.
- */
-emit(event: 'shell:notify', payload: ShellConnectionEventMap['shell:notify']): void;
-/**
- * Emit a typed shell event, dispatching to all registered handlers.
- * Also pushes to the debug log for the ALT+D panel.
- *
- * @param event   - The event name from ShellConnectionEventMap.
- * @param payload - The payload matching the event's type.
- */
-emit(event: 'shell:toolSidebarActivated', payload: ShellConnectionEventMap['shell:toolSidebarActivated']): void;
-/**
- * Emit a typed shell event, dispatching to all registered handlers.
- * Also pushes to the debug log for the ALT+D panel.
- *
- * @param event   - The event name from ShellConnectionEventMap.
- * @param payload - The payload matching the event's type.
- */
-emit(event: 'shell:toolSidebarDeactivated', payload: ShellConnectionEventMap['shell:toolSidebarDeactivated']): void;
 /**
  * Emit a typed shell event, dispatching to all registered handlers.
  * Also pushes to the debug log for the ALT+D panel.
@@ -9212,30 +8510,6 @@ on(event: 'shell:appsUpdated', handler: (payload: ShellConnectionEventMap['shell
  * @param handler - Callback invoked when the event fires.
  * @returns An unsubscribe function.
  */
-on(event: 'shell:notify', handler: (payload: ShellConnectionEventMap['shell:notify']) => void): () => void;
-/**
- * Register a typed handler for a shell event.
- *
- * @param event   - The event name from ShellConnectionEventMap.
- * @param handler - Callback invoked when the event fires.
- * @returns An unsubscribe function.
- */
-on(event: 'shell:toolSidebarActivated', handler: (payload: ShellConnectionEventMap['shell:toolSidebarActivated']) => void): () => void;
-/**
- * Register a typed handler for a shell event.
- *
- * @param event   - The event name from ShellConnectionEventMap.
- * @param handler - Callback invoked when the event fires.
- * @returns An unsubscribe function.
- */
-on(event: 'shell:toolSidebarDeactivated', handler: (payload: ShellConnectionEventMap['shell:toolSidebarDeactivated']) => void): () => void;
-/**
- * Register a typed handler for a shell event.
- *
- * @param event   - The event name from ShellConnectionEventMap.
- * @param handler - Callback invoked when the event fires.
- * @returns An unsubscribe function.
- */
 on(event: 'shell:login', handler: (payload: ShellConnectionEventMap['shell:login']) => void): () => void;
 /**
  * Register a typed handler for a shell event.
@@ -9365,97 +8639,6 @@ on(event: 'store:changed', handler: (payload: ShellConnectionEventMap['store:cha
      * @returns An unsubscribe function.
      */
     onAny(handler: WildcardHandler): () => void;
-    /**
-     * Invokes an addressed op and awaits its result — the bus's second lane.
-     * Resolution: this realm's handler, else the bridge to the framework
-     * root (router: root handlers -> owning realm -> summon -> reject).
-     *
-     * Op names are `ns.verb` by convention (the `.`/`:` split against events
-     * is voluntary style; the bus matches full strings). Prefer the typed
-     * facade (`typedBusOps<MyOps>(cm.ops())`) at call sites.
-     *
-     * @param op - The op's wire name.
-     * @param params - The op's payload.
-     * @param opts - Timeout override.
-     * @returns The handler's result.
-     */
-    request(op: string, params: unknown, opts?: IBusRequestOptions): Promise<unknown>;
-    /**
-     * Fires an addressed op without awaiting a result — the SAME handler an
-     * equivalent request() would reach; its return value is discarded. The
-     * caller chooses the lane, not the name.
-     *
-     * @param op - The op's wire name.
-     * @param params - The op's payload.
-     */
-    emitOp(op: string, params: unknown): void;
-    /**
-     * Registers THE handler for an op — registration is the allowlist and
-     * the routing entry (one handler per name; a second registration
-     * throws). When this realm is bridged, the registration is announced to
-     * the root router so any realm can address the op.
-     *
-     * @param op - The op's wire name.
-     * @param handler - Plain async function answering the op.
-     * @returns An unregister function.
-     */
-    handle(op: string, handler: BusOpHandler): () => void;
-    /**
-     * The raw op bus — for the bridge/router (busBridge.ts) and the typed
-     * facade (`typedBusOps`). Application code prefers request/handle above.
-     *
-     * @returns This realm's op bus.
-     */
-    ops(): IOpBus;
-    /**
-     * Publishes a retained topic: the root's registry replaces the topic's
-     * snapshot and every subscriber (any realm) receives it; late subscribers
-     * replay it. `undefined` retracts. Doctrine (stated, not enforced): one
-     * writer per topic, static code-shaped names, immutable JSON-safe
-     * snapshots — see ops/retained.ts.
-     *
-     * @param topic - The topic name (e.g. 'shell:account').
-     * @param snapshot - The new current value, or undefined to retract.
-     */
-    publish(topic: string, snapshot: unknown): void;
-    /**
-     * Delivers a TRANSIENT payload to the topic's subscribers — same fan-out
-     * as publish, nothing stored: read() never sees it, late subscribers
-     * replay nothing. Cross-realm events with N readers.
-     *
-     * @param topic - The topic name.
-     * @param payload - The transient payload.
-     */
-    signal(topic: string, payload: unknown): void;
-    /**
-     * Subscribes to a retained topic. The current snapshot (when one exists)
-     * is replayed FIRST — async, never inside this call — then every
-     * replacement is delivered. Subscribing before the first publish is the
-     * natural case: the callback simply fires on that first publish.
-     *
-     * @param topic - The topic name.
-     * @param cb - Receives each snapshot (`undefined` = retraction).
-     * @returns Unsubscribe.
-     */
-    subscribe(topic: string, cb: RetainedSubscriber): () => void;
-    /**
-     * The topic's current snapshot, or undefined when never published (or
-     * retracted). Async everywhere — a bridged realm cannot read the root's
-     * map synchronously, and one signature keeps call sites portable.
-     *
-     * @param topic - The topic name.
-     * @returns The current snapshot.
-     */
-    read(topic: string): Promise<unknown>;
-    /**
-     * Installs the realm's retained transport — called ONCE by the bus-realm
-     * attachment with the wire port from attachRealmToRoot. Every existing
-     * subscription re-points to the new port (and replays off the root's
-     * authority), so subscribe-before-attach works.
-     *
-     * @param port - The wire-backed port.
-     */
-    setRetainedPort(port: IRetainedPort): void;
     /** Returns a snapshot of the debug log (newest last). */
     getDebugLog(): DebugLogEntry[];
     /** Clears all entries from the debug log. */
@@ -9487,854 +8670,6 @@ export declare function PrefsProvider({ value, children }: {
  * @returns The `{ getPref, setPref }` accessor.
  */
 export declare function usePrefs(): IPrefsApi;
-/** The app-state accessor: read one key, write one key. */
-export interface IAppStateApi {
-    /** Current value for `key`, or `undefined` if unset. Caller narrows. */
-    getAppState: (key: string) => unknown;
-    /** Persist `value` under `key` (shallow-merged into the app's slice). */
-    setAppState: (key: string, value: unknown) => void;
-}
-/**
- * Provides the app's state accessor to every shared component beneath it.
- *
- * Mount it where the relevant SLICE is owned — which for a documents-based app
- * is per document (one provider per open editor), not once at the app root.
- *
- * @param props.value - The `{ getAppState, setAppState }` implementation.
- * @param props.children - The subtree that may read it via {@link useAppState}.
- * @returns The provider element.
- */
-export declare function AppStateProvider({ value, children }: {
-    value: IAppStateApi;
-    children: React$1.ReactNode;
-}): React$1.ReactElement;
-/**
- * Reads the ambient app-state accessor. Returns a no-op accessor when no
- * provider is mounted, so callers never need to null-check.
- *
- * @returns The `{ getAppState, setAppState }` accessor.
- */
-export declare function useAppState(): IAppStateApi;
-/** One operation's compile-time shape: params in, result out. */
-export interface ToolOpSpec<P, R> {
-    /** Phantom carriers — never read at runtime. */
-    readonly params: P;
-    readonly result: R;
-}
-/**
- * The base op map every tool's op vocabulary extends. Deliberately empty —
- * ops are tool-private by nature (unlike state topics, where the host owns
- * a base set). A tool declares, in its own module:
- *
- *   interface MyOps extends ToolOpMap {
- *       'myTool.verb': ToolOpSpec<{ id: string }, MyResult>;
- *   }
- *
- * Op names are `<tool>.<verb>` by convention; the interface key is the wire
- * name, so a typo'd string or drifted payload shape fails to compile.
- */
-export interface ToolOpMap {
-}
-/** The params type of one op in a map. */
-export type ToolOpParams<O, K extends keyof O> = O[K] extends ToolOpSpec<infer P, unknown> ? P : never;
-/** The result type of one op in a map. */
-export type ToolOpResult<O, K extends keyof O> = O[K] extends ToolOpSpec<unknown, infer R> ? R : never;
-/**
- * The calling function a frame holds: ask this tool's controller to execute
- * an operation and await the result. Keys and both payload types come from
- * the tool's op map.
- */
-export type ToolControllerFn<O extends ToolOpMap = ToolOpMap> = <K extends keyof O & string>(op: K, params: ToolOpParams<O, K>, opts?: IToolCallOptions) => Promise<ToolOpResult<O, K>>;
-/**
- * The frame's typed controller function over its mount's channel.
- *
- * @param channel - The mount's channel (DevToolProps.channel).
- * @returns The calling function, typed by the tool's op map.
- */
-export declare function createToolOpClient<O extends ToolOpMap = ToolOpMap>(channel: ToolChannel): ToolControllerFn<O>;
-/** The controller-side registry, typed by the tool's op map. */
-export interface IToolOpServer<O extends ToolOpMap = ToolOpMap> {
-    /**
-     * Serves one operation. Replaces any previous handler for the op.
-     *
-     * @param op - The op's wire name (a key of the tool's op map).
-     * @param handler - Plain async function; a thrown error becomes the
-     *                  caller's rejection (its message crosses the wire).
-     * @returns Unregister for this op.
-     */
-    serve<K extends keyof O & string>(op: K, handler: (params: ToolOpParams<O, K>) => ToolOpResult<O, K> | Promise<ToolOpResult<O, K>>): () => void;
-    /** Unregisters everything this server registered. */
-    dispose(): void;
-}
-/**
- * The controller's typed op server over its mount's channel. One per
- * controller mount, created beside its state publishing.
- *
- * @param channel - The controller mount's channel (DevToolProps.channel).
- * @returns The registry, typed by the tool's op map.
- */
-export declare function createToolOpServer<O extends ToolOpMap = ToolOpMap>(channel: ToolChannel): IToolOpServer<O>;
-/** Wire name of the host connection topic (see toolProtocol.ts for the
- *  tool-facing surface; defined here so non-browser host processes get it
- *  without the React import chain). */
-export declare const HOST_CONNECTION_TOPIC = "host:connection";
-/**
- * The host-published `host:connection` state envelope — the ONE wire shape
- * both in-browser hosts (publishHostConnectionState) and the VS Code
- * extension host deliver.
- *
- * @param connected - Whether the host's server connection is up.
- * @returns The state message.
- */
-export declare function hostConnectionPayload(connected: boolean): IToolStateMessage;
-/** Most buffered payloads kept per direction (oldest evicted past this). */
-export declare const TOOL_RELAY_BUFFER_LIMIT = 64;
-/** The `host:connection` snapshot: the controller realm's connection to the
- *  RocketRide server. Frames hold no connection of their own — a frame's
- *  run/apply enablement derives from this replicated snapshot. */
-export interface IHostConnectionState {
-    /** Whether the controller realm's server connection is up. */
-    connected: boolean;
-}
-/**
- * The base STATE map — system topics every tool channel is born with,
- * published by the HOST (never by a tool). Tools extend this interface
- * with their own topics; `host:`-prefixed keys stay reserved for the base.
- */
-export interface ToolStateMap {
-    /** The controller realm's server-connection status. HOST-published: the
-     *  host is the one party that always knows it, whether or not the tool's
-     *  controller has ever run (a restored editor panel must read correctly
-     *  before its sidebar mount first boots). */
-    "host:connection": IHostConnectionState;
-}
-/**
- * The base EVENT map. Currently empty — tool-tab activation rides the shell
- * event bus (`shell:toolSidebarActivated`), not the tool channel. Tools
- * extend this interface with their own events; `host:`-prefixed keys stay
- * reserved for the base.
- */
-export interface ToolEventMap {
-}
-/**
- * A strict-typed view over a {@link ToolChannel}: every topic and event key
- * comes from the tool's protocol maps, every payload type checks at the
- * call site. Purely a compile-time view — the runtime object IS the
- * underlying channel.
- */
-export interface TypedToolChannel<S extends ToolStateMap = ToolStateMap, E extends ToolEventMap = ToolEventMap> {
-    /** CONTROLLER ONLY (hosts for `host:*` topics): publish a retained state
-     *  snapshot. Late subscribers receive the latest immediately. */
-    publishState<K extends keyof S & string>(topic: K, snapshot: S[K]): void;
-    /** Subscribe to a state topic; the retained snapshot (if any) replays
-     *  synchronously before live updates. */
-    onState<K extends keyof S & string>(topic: K, cb: (snapshot: S[K]) => void): ToolChannelUnsubscribe;
-    /** Send an event to the other side. Buffered while the other side opens;
-     *  an event MAY summon a closed window — send only for user actions and
-     *  directed commands. */
-    sendEvent<K extends keyof E & string>(name: K, payload: E[K]): void;
-    /** Subscribe to an event by name. Events are not retained. */
-    onEvent<K extends keyof E & string>(name: K, cb: (payload: E[K]) => void): ToolChannelUnsubscribe;
-}
-/**
- * Narrows a raw channel to the tool's typed protocol view. A cast, not a
- * wrapper: the returned object is the same channel instance.
- *
- * @param channel - The mount's channel (DevToolProps.channel, or one built
- *                  with createToolChannel).
- * @returns The same channel, typed by the tool's protocol maps.
- */
-export declare function typedToolChannel<S extends ToolStateMap = ToolStateMap, E extends ToolEventMap = ToolEventMap>(channel: ToolChannel): TypedToolChannel<S, E>;
-/**
- * The live snapshot of one state topic, or undefined until the first
- * (possibly retained) snapshot arrives.
- *
- * @param channel - The mount's typed channel.
- * @param topic - The topic to follow.
- * @returns The latest snapshot, or undefined.
- */
-export declare function useToolState<S extends ToolStateMap, E extends ToolEventMap, K extends keyof S & string>(channel: TypedToolChannel<S, E>, topic: K): S[K] | undefined;
-/**
- * Whether the controller realm's server connection is up, from the retained
- * `host:connection` system topic — TRI-STATE:
- *
- *   true       the host said connected
- *   false      the host said disconnected
- *   undefined  no snapshot has arrived — NO IDEA YET
- *
- * Absence of a snapshot is never evidence of a negative: render a waiting
- * state on undefined, never a "disconnected" claim (that lie cost a day).
- * Boolean gates (`if (!ready)`) keep working — undefined gates like false.
- *
- * @param channel - The mount's channel (raw or typed).
- * @returns The host's connection level, or undefined before the first snapshot.
- */
-export declare function useConnectionReady(channel: ToolChannel | TypedToolChannel): boolean | undefined;
-/**
- * Publishes the server-connection status into one tool channel's retention.
- * HOST-side: called per tool channel on every connection change (tools
- * never call it). The VS Code extension host mirrors this envelope by hand
- * in its DevToolBridge (it cannot import the browser bundle) — the wire
- * shape here and there must stay identical.
- *
- * @param channel - The tool channel to publish into.
- * @param connected - Whether the server connection is up.
- */
-export declare function publishHostConnectionState(channel: ToolChannel, connected: boolean): void;
-/**
- * The raw, string-keyed preference store a HOST implements. Tool and shell
- * code should not consume this directly — use {@link typedPrefs} for
- * compile-time keys, and hosts hand tools {@link scopedPrefs} partitions.
- */
-export interface PrefsStore {
-    /** The current hydrated snapshot (synchronous, from memory). */
-    snapshot(): Record<string, unknown>;
-    /** One key's current value (synchronous). */
-    get(key: string): unknown;
-    /** Writes one key (fire-and-forget merge; notifies subscribers). */
-    set(key: string, value: unknown): void;
-    /** Subscribe to any change; returns unsubscribe. */
-    subscribe(cb: () => void): () => void;
-    /** Resolves once the store has hydrated from its backend. */
-    readonly ready: Promise<void>;
-}
-/**
- * The SYSTEM partition's typed key map — shell-owned preferences every host
- * persists. Apps never read or write these through their scoped stores;
- * extending this interface is the shell's privilege alone (app prefs are
- * typed in the app's own module and never enter this map).
- */
-export interface ShellPrefsMap {
-    /** The sidebar chrome style ('rocketride' | 'vscode' | 'cursor'). */
-    sidebarMode?: string;
-    /** DataGrid layout blobs: tableId -> { persistence type -> blob }. */
-    tableLayouts?: Record<string, Record<string, unknown>>;
-}
-/** A strict-typed view over a store: keys and value types from one map. */
-export interface TypedPrefsStore<M> {
-    /** The current snapshot, typed by the map. */
-    snapshot(): Partial<M>;
-    /** One key's current value. */
-    get<K extends keyof M & string>(key: K): M[K] | undefined;
-    /** Writes one key. */
-    set<K extends keyof M & string>(key: K, value: M[K]): void;
-    /** Subscribe to any change; returns unsubscribe. */
-    subscribe(cb: () => void): () => void;
-    /** Resolves once hydrated. */
-    readonly ready: Promise<void>;
-}
-/**
- * Narrows a raw store to a typed view. A cast, not a wrapper — the runtime
- * object IS the underlying store.
- *
- * @param store - The raw store (host-provided, or a scoped partition).
- * @returns The same store, typed by the owner's key map.
- */
-export declare function typedPrefs<M>(store: PrefsStore): TypedPrefsStore<M>;
-/**
- * A derived store confined to one partition: every key maps to
- * `<partition>.<key>` in the backing store. This is how hosts hand an app
- * its prefs — the app's handle physically cannot address keys outside its
- * partition.
- *
- * @param store - The backing store.
- * @param partition - The partition name (e.g. `app:rocketride.sql`).
- * @returns The confined store.
- */
-export declare function scopedPrefs(store: PrefsStore, partition: string): PrefsStore;
-/** The retained topic carrying ONE partition's prefs. */
-export declare function prefsTopic(partition: string): string;
-/** The minimal bus surface a mirrored prefs store needs. */
-export interface IPrefsBus {
-    /** Subscribe to a retained topic (replays the current snapshot). */
-    subscribe(topic: string, cb: (snapshot: unknown) => void): () => void;
-    /** Fire-and-forget op to the workspace manager. */
-    emitOp(op: string, params: unknown): void;
-}
-/**
- * A MIRRORED prefs store for ONE partition — the shape every realm uses.
- *
- * Reads are SYNCHRONOUS off the realm's mirrored copy (never a round-trip,
- * which is the constraint grid persistence and boot paths impose). Writes go
- * to the manager as a fire-and-forget `shell.setPref`; it merges,
- * republishes, and debounces the dump, so every realm converges.
- *
- * `shell.prefs.attach` is what makes the first snapshot arrive: the registry
- * cannot tell the manager that someone subscribed, and a partition the
- * manager has not loaded has no retained value to replay. The realm
- * therefore DECLARES its partition and the manager publishes it — even when
- * empty, so `ready` resolves either way.
- *
- * @param bus - The realm's connection manager (subscribe + emitOp).
- * @param partition - The partition this store is confined to.
- * @returns The store plus a disposer for its subscription.
- */
-export declare function createMirroredPrefsStore(bus: IPrefsBus, partition: string): {
-    store: PrefsStore;
-    dispose(): void;
-};
-/** A realm's per-partition prefs stores, created on demand. */
-export interface IPrefsHub {
-    /** The mirrored store for one partition (cached per name). */
-    partition(name: string): PrefsStore;
-    /** Drops every subscription this hub opened. */
-    dispose(): void;
-}
-/**
- * THE prefs hub for this realm — one per page/webview, created over the
- * realm's bus on first use.
- *
- * Every consumer shares it, so a partition has exactly ONE mirrored store
- * and one subscription no matter how many components read it. Before this
- * existed each host built its own hub (and the dev-tool strip kept a third
- * store of its own), which meant several mirrors of the same partition
- * racing to answer the same question.
- *
- * Never dispose this from a component: it belongs to the realm, not to
- * whoever happened to read prefs first. `createPrefsHub` stays for the
- * cases that genuinely need an isolated hub (tests, a second bus).
- *
- * @param bus - The realm's bus; used only on the first call.
- * @returns The realm's hub.
- */
-export declare function realmPrefsHub(bus: IPrefsBus): IPrefsHub;
-export declare function createPrefsHub(bus: IPrefsBus): IPrefsHub;
-/**
- * The live value of one preference key (re-renders on store changes).
- *
- * @param store - The owner's typed store view.
- * @param key - The key to follow.
- * @returns The current value, or undefined before hydration / when unset.
- */
-export declare function usePref<M, K extends keyof M & string>(store: TypedPrefsStore<M>, key: K): M[K] | undefined;
-/** How a path differs from the base, for badges and review. */
-export type ChangeKind = "added" | "modified" | "deleted";
-/** One commit/undo blocker: the base moved underneath a staged change. */
-export interface StagedConflict {
-    path: string;
-    reason: "changed" | "missing" | "resurrected";
-}
-/** The outcome of commit(): all-or-nothing. */
-export interface CommitResult {
-    /** Paths written/deleted on the base (0 when conflicts exist). */
-    committed: number;
-    /** Non-empty means NOTHING was written. */
-    conflicts: StagedConflict[];
-}
-/** One staged layer's METADATA — entry contents never cross a realm. */
-export interface LayerMeta {
-    /** Stable id (uuid). */
-    id: string;
-    /** Display label (e.g. a turn title). */
-    label: string;
-    /** The agent session that produced it, when any. */
-    sessionId?: string;
-    /** True once commit() retained this layer as inert undo history. */
-    committed?: boolean;
-    /** Number of staged operations in the layer. */
-    entryCount: number;
-}
-/** The one-round-trip pending snapshot (`host.fs.pending`). */
-export interface PendingState {
-    /** Whether any non-retained staged operation exists. */
-    hasPending: boolean;
-    /** Staged path → how it differs from the base. */
-    changedPaths: Record<string, ChangeKind>;
-    /** Paths with unsaved editor overlays (dirty markers). */
-    dirtyPaths: string[];
-}
-/**
- * A write-through save was REFUSED because the base moved underneath the
- * buffer (someone else committed this path since it was opened) — the
- * VS Code "content of the file is newer" condition. The buffer is intact;
- * the caller resolves by comparing, overwriting deliberately (re-read then
- * re-save), or reverting.
- */
-export declare class StaleWriteError extends Error {
-    /** The refused path. */
-    readonly path: string;
-    constructor(path: string);
-}
-/**
- * The workspace-FS capability a host provides: files, globs, watches, AND
- * the full change-management surface. Hosts without staging (vscode)
- * answer the staging verbs trivially — a pending-changes UI simply shows
- * nothing pending, truthfully.
- */
-export interface WorkspaceFs {
-    /**
-     * Lists one directory's immediate entries.
-     *
-     * @param dir - Directory path ('' = the root).
-     * @returns Name + kind per entry.
-     */
-    list(dir: string): Promise<{
-        name: string;
-        type: "file" | "dir";
-    }[]>;
-    /**
-     * The type of a path, consulting the authority definitively.
-     *
-     * @param path - Path to classify.
-     * @returns 'file' | 'dir', or null when the path does not exist.
-     */
-    stat(path: string): Promise<"file" | "dir" | null>;
-    /**
-     * Reads one file's content (JSON-serializable; text files read as
-     * strings).
-     *
-     * @param path - The file.
-     * @returns The content.
-     */
-    read(path: string): Promise<unknown>;
-    /**
-     * Reads many files in one round-trip — the batch seam for bulk
-     * consumers (pack, export).
-     *
-     * @param paths - Paths to read.
-     * @returns Path → content; unreadable paths are omitted.
-     */
-    readMany(paths: string[]): Promise<Record<string, unknown>>;
-    /**
-     * Reads a file as UTF-8 text.
-     *
-     * @param path - The file.
-     * @returns The text.
-     */
-    readTextFile(path: string): Promise<string>;
-    /**
-     * Reads a file as base64, size-gated.
-     *
-     * @param path - The file.
-     * @param maxBytes - Files larger than this return null.
-     * @returns The base64 payload, or null (missing / too large).
-     */
-    readFileBase64(path: string, maxBytes: number): Promise<string | null>;
-    /**
-     * Writes one file (JSON-serializable content; strings for text).
-     *
-     * @param path - The file.
-     * @param content - The content, stored per the host's workspace.
-     */
-    write(path: string, content: unknown): Promise<void>;
-    /** Writes UTF-8 text. */
-    writeTextFile(path: string, text: string): Promise<void>;
-    /** Writes binary content carried as base64 (the bus's binary rule). */
-    writeFileBase64(path: string, dataB64: string): Promise<void>;
-    /** Renames a file or directory. */
-    rename(from: string, to: string): Promise<void>;
-    /**
-     * Deletes a file or directory.
-     *
-     * @param path - The target.
-     * @param recursive - Required truthy to delete a non-empty directory on
-     *                    hosts that distinguish (vscode); staged hosts
-     *                    shadow subtrees either way.
-     */
-    delete(path: string, recursive?: boolean): Promise<void>;
-    /** Creates a directory. */
-    mkdir(path: string): Promise<void>;
-    /** Re-walks the authority's inventory (no-op on direct-disk hosts). */
-    refresh(): Promise<void>;
-    /**
-     * Finds files by glob across the workspace.
-     *
-     * @param include - Include glob (e.g. '**​/*.rrapp').
-     * @param exclude - Optional exclude glob.
-     * @returns Paths in the host's spelling.
-     */
-    findFiles(include: string, exclude?: string): Promise<string[]>;
-    /**
-     * The workspace root paths — what result paths are made
-     * display-relative against (possibly empty on single-rooted virtual
-     * hosts).
-     */
-    workspaceRoots(): Promise<string[]>;
-    /**
-     * Watches globs for create/change/delete.
-     *
-     * @param globs - Include globs.
-     * @param onEvent - Receives each changed path; '' is the synthetic
-     *                  "re-evaluate everything" tick.
-     * @returns Unsubscribe.
-     */
-    watch(globs: string[], onEvent: (path: string) => void): () => void;
-    /** The pending snapshot — one round-trip for badges and gates. */
-    pending(): Promise<PendingState>;
-    /**
-     * One path's base-vs-staged comparison.
-     *
-     * @param path - The file.
-     * @returns Text pair; null side = does not exist there.
-     */
-    diff(path: string): Promise<{
-        before: string | null;
-        after: string | null;
-    }>;
-    /**
-     * Commits every pending staged operation to the base — all-or-nothing.
-     *
-     * @param options - retain: keep committed layers as inert undo history.
-     * @returns The outcome (conflicts mean nothing was written).
-     */
-    commit(options?: {
-        retain?: boolean;
-    }): Promise<CommitResult>;
-    /**
-     * Freezes the working layer as a named checkpoint.
-     *
-     * @param label - Display label.
-     * @param sessionId - Producing agent session, when any.
-     * @returns The new layer id, or null when nothing was pending.
-     */
-    checkpoint(label: string, sessionId?: string): Promise<string | null>;
-    /** Rolls staged state back to (and including) one layer. */
-    rollback(layerId: string): Promise<void>;
-    /** Un-commits one retained layer from the base (the undo of a commit). */
-    undoTurn(layerId: string): Promise<CommitResult>;
-    /**
-     * Discards pending staged changes.
-     *
-     * @param path - One path; omitted = everything pending.
-     */
-    discard(path?: string): Promise<void>;
-    /** The staged layers' metadata, oldest first (contents never cross). */
-    layers(): Promise<LayerMeta[]>;
-    /**
-     * Switches write-through (auto-commit) mode. Rejects when pending
-     * changes exist — commit or discard first. Always-on hosts no-op.
-     */
-    setWriteThrough(on: boolean): Promise<void>;
-    /** Resolves once persisted staged layers are rehydrated (trivial where
-     *  there is no staging). */
-    whenReady(): Promise<void>;
-}
-/**
- * Compiles one include glob to a RegExp over '/'-separated paths.
- * Supports `**` (any depth), `*` (within a segment), `?` (one char).
- *
- * @param glob - The glob.
- * @returns The matcher.
- */
-export declare function globToRegExp(glob: string): RegExp;
-/** The generic, host-wide capabilities a workbench hands its tools. */
-export interface ToolHostServices {
-    /** Opens an embedded host page/document by key (see file header). */
-    openPage: (key: string, title?: string) => void;
-    /** Opens a workspace FILE in the host's editor surface. */
-    openFile?: (path: string) => void;
-    /** Workspace/store file access for tool discovery. */
-    workspaceFs?: WorkspaceFs;
-    /** This tool's preference partition — PRE-SCOPED by the host (see
-     *  scopedPrefs): the handle physically cannot address another app's
-     *  keys, and system prefs are not reachable through it. */
-    prefs?: PrefsStore;
-    /** Subscription gate for run affordances. */
-    isSubscribed?: boolean;
-}
-/** The provider a host wraps its sidebar chrome in (one per realm; hosts
- *  may nest a second provider per tool to override `prefs` with that
- *  tool's scoped partition). */
-export declare const ToolHostProvider: import("react").Provider<ToolHostServices | null>;
-/**
- * The host services for the enclosing realm. Throws without a provider —
- * tools only mount inside a host's chrome. In-repo builtin tools call this
- * with their extended services type.
- *
- * @returns The services.
- */
-export declare function useToolHost<T extends ToolHostServices = ToolHostServices>(): T;
-/**
- * A dead-simple in-realm peer for tool mounts that have no isolated
- * counterpart document: posts loop back to this realm's own subscribers,
- * asynchronously (matching the real transports' macrotask semantics).
- * HOST-side — the result feeds createToolChannel, never a tool directly.
- *
- * @returns The loopback peer.
- */
-export declare function createLoopbackPeer(): IToolPeer;
-/** How long a summoned owner gets to register before waiting requests fail. */
-export declare const DEFAULT_SUMMON_TIMEOUT_MS = 30000;
-/** One side of a transport between two realms. */
-export interface IBusEndpoint {
-    /** Sends one message to the other side. */
-    post(message: unknown): void;
-    /** Subscribes to messages from the other side; returns unsubscribe. */
-    subscribe(cb: (message: unknown) => void): () => void;
-}
-/** What attaching a realm yields: the detach function and the realm's
- *  retained-topic port (install it on the realm's ConnectionManager). */
-export interface IRealmAttachment {
-    /** Detach (rejects this realm's in-flight outbound requests). */
-    detach: () => void;
-    /** The realm's retained-topic transport (publish/subscribe/read over
-     *  the wire — the root's registry is the authority). */
-    retained: IRetainedPort;
-}
-/**
- * Attaches a realm's op bus to the framework root over one endpoint.
- *
- * Outbound: unresolved requests/emitOps forward to the root; local
- * registrations are announced (including ones made before attach — the bus
- * replays them into the forwarder); retained publishes and topic interest
- * ride their own wire kinds. Inbound: requests from the root (ops THIS
- * realm registered) run against local handlers and answer by id; topic
- * deliveries dispatch to local subscribers.
- *
- * @param bus - This realm's op bus.
- * @param endpoint - Transport to the root.
- * @returns The attachment (detach + retained port).
- */
-export declare function attachRealmToRoot(bus: IOpBus, endpoint: IBusEndpoint): IRealmAttachment;
-/** Summon lookup: an activation thunk when the op's owner is INSTALLED but
- *  not yet registered, null otherwise. Installed-only is the caller's
- *  contract (pinned store tools + enabled builtins); summon NEVER installs. */
-export type SummonLookup = (op: string) => (() => void) | null;
-/** Router options. */
-export interface IBusRouterOptions {
-    /** The summon table (see {@link SummonLookup}). Absent = no summoning. */
-    summon?: SummonLookup;
-    /** How long a summoned owner gets to register. */
-    summonTimeoutMs?: number;
-    /** The root's retained-topic registry — THE authority realms publish to
-     *  and subscribe through. Absent = retained traffic from realms is
-     *  dropped (a root without the lane). */
-    retained?: IRetainedRegistry;
-}
-/** The framework root's router. */
-export interface IBusRouter {
-    /**
-     * Attaches one realm. Returns a detach function — detaching clears the
-     * realm's registrations and rejects every in-flight request routed to it.
-     *
-     * @param endpoint - Transport to the realm.
-     * @param label - For diagnostics ('sidebar', 'page:account', ...).
-     */
-    addRealm(endpoint: IBusEndpoint, label: string): () => void;
-    /**
-     * Pushes one fire-and-forget op to EVERY attached realm — the broker's
-     * mirror feed (connection/account/services state into each realm's local
-     * bus). Realms that registered no handler for the op drop it silently;
-     * this is the ONE root→all path, outside the registration routing.
-     */
-    broadcastEmitOp(op: string, params: unknown): void;
-    /** Disposes every realm attachment. */
-    dispose(): void;
-}
-/**
- * Creates the router over the ROOT's own op bus. The root's bus gets a
- * forwarder too, so root-initiated requests reach realm-registered ops
- * through the same resolution path.
- *
- * @param rootBus - The framework root's op bus (the broker registers here).
- * @param options - Summon configuration.
- * @returns The router.
- */
-export declare function createBusRouter(rootBus: IOpBus, options?: IBusRouterOptions): IBusRouter;
-/**
- * An in-process endpoint pair — the transport for two "realms" sharing one
- * JS realm (cloud root↔local attachments, tests). Delivery is a microtask,
- * matching postMessage semantics closely enough that code written against
- * one transport behaves on the other.
- *
- * @returns Two connected endpoints.
- */
-export declare function createLocalEndpointPair(): [
-    IBusEndpoint,
-    IBusEndpoint
-];
-declare const ERROR_MARKER = "__rrerr";
-interface IWireError {
-    /** Discriminant — present only on a serialized error. */
-    [ERROR_MARKER]: true;
-    /** The class name, for {@link rehydrateError}'s registry lookup. */
-    name: string;
-    /** The human-readable message. */
-    message: string;
-    /** The originating realm's stack, kept for the rethrown error's trace. */
-    stack?: string;
-    /** Own enumerable fields (`code`, `hint`, `dapResult`, `reason`, …). */
-    fields: Record<string, unknown>;
-}
-type IWireEnvelope = {
-    ok: true;
-    value: unknown;
-} | {
-    ok: false;
-    error: IWireError;
-};
-type C = RocketRideClient;
-type R<M extends (...args: never[]) => unknown> = Awaited<ReturnType<M>>;
-/** A monitor key — exactly what the SDK's addMonitor takes. */
-export type ClientMonitorKey = Parameters<C["addMonitor"]>[0];
-/**
- * The brokered client vocabulary, strictly typed.
- */
-export interface ClientOpMap extends ShellOpMap {
-    /**
-     * One DAP message on the root's socket — what `RocketRideClientProxy`
-     * routes `request()` through.
-     *
-     * The SDK's TRANSPORT chokepoint, deliberately lower than `call()`:
-     * everything that bypasses `call()` to reach DAP's binary member
-     * (`fsRead`, `fsReadMany`, the DataPipe writes) funnels here too, so one
-     * op carries the file operations as well as every command.
-     *
-     * The result is an {@link IWireEnvelope}, not the response: a failure must
-     * reach the realm as the SAME EXCEPTION CLASS it was thrown as, and a
-     * rejection cannot carry that across `postMessage` (see errorWire.ts).
-     * `openEnvelope` unwraps at the realm end.
-     */
-    "client.request": ShellOpSpec<{
-        message: DAPMessage;
-        timeout?: number;
-    }, IWireEnvelope>;
-    "client.addMonitor": ShellOpSpec<{
-        key: ClientMonitorKey;
-        types: string[];
-    }, R<C["addMonitor"]>>;
-    "client.removeMonitor": ShellOpSpec<{
-        key: ClientMonitorKey;
-        types: string[];
-    }, R<C["removeMonitor"]>>;
-    "client.log.openStream": ShellOpSpec<{
-        sessionId: string;
-        projectId: string;
-        source: string;
-        teamId?: string;
-    }, void>;
-    /** seek/getStatus/getTrace — gated on the runtime allowlist (the typed
-     *  map gives NO runtime guarantee at a process boundary). Result stays
-     *  `unknown`: it is the union of three methods' returns, dispatched by a
-     *  runtime string — callers narrow per method. */
-    "client.log.streamCall": ShellOpSpec<{
-        sessionId: string;
-        method: "seek" | "getStatus" | "getTrace";
-        args: unknown[];
-    }, unknown>;
-    /** LONG-LIVED: resolves at STREAM COMPLETION, not at start — callers pass
-     *  an explicit generous timeoutMs. pos=null means resume-from-position. */
-    "client.log.streamPlay": ShellOpSpec<{
-        sessionId: string;
-        pos: number | "live" | null;
-        speed: number;
-    }, void>;
-    "client.log.streamPause": ShellOpSpec<{
-        sessionId: string;
-    }, void>;
-    /** `event` is a live engine event forwarded verbatim — schemaless. */
-    "client.log.streamIngest": ShellOpSpec<{
-        sessionId: string;
-        event: unknown;
-    }, void>;
-    "client.log.streamClose": ShellOpSpec<{
-        sessionId: string;
-    }, void>;
-}
-/** What the registration needs from its host — the SDK client and liveness.
- *  Typed structurally so BOTH ConnectionManager classes (shell and the VS
- *  Code extension host's) satisfy it without a shared base. */
-export interface IClientOpsSource {
-    getClient(): unknown;
-    isConnected(): boolean;
-}
-/** Registration options. */
-export interface IClientOpsOptions {
-    /** Ops to leave UNREGISTERED (the VS Code root pre-registers its
-     *  broker-owned monitor pair; cloud registers everything). */
-    skip?: ReadonlySet<string>;
-}
-/**
- * Registers the brokered `client.*` surface on a framework root's bus.
- *
- * @param bus - The root's op bus.
- * @param source - The root's client accessor + liveness.
- * @param options - Ops to skip (host-specific overrides).
- * @returns Unregister-all function.
- */
-export declare function registerClientOps(bus: IOpBus, source: IClientOpsSource, options?: IClientOpsOptions): () => void;
-/**
- * Answers the realm's grid-config channel from a prefs store.
- *
- * @param store - The realm's SYSTEM-partition store (holds `tableLayouts`).
- */
-export declare function useGridConfigAnswering(store: PrefsStore): void;
-interface IBusPeerBus {
-    publish(topic: string, snapshot: unknown): void;
-    signal(topic: string, payload: unknown): void;
-    subscribe(topic: string, cb: (snapshot: unknown) => void): () => void;
-    read(topic: string): Promise<unknown>;
-    emitOp(op: string, params: unknown): void;
-}
-type Peer = IToolPeer;
-/**
- * The sidebar mount's peer for one tool. Create ONE per tool per realm and
- * keep it for the realm's lifetime (mounts subscribe and unsubscribe; the
- * peer's buffers and liveness tracking persist across remounts).
- *
- * @param appId - The tool's app id.
- * @param cm - The realm's bus verbs (its ConnectionManager).
- * @returns The peer.
- */
-export declare function createSidebarBusPeer(appId: string, cm: IBusPeerBus): Peer;
-/**
- * A frame realm's peer for one tool. A host may cache one per tool (the
- * channel built over it holds one standing subscription); MOUNT liveness is
- * announced separately via {@link announceFramePresence}.
- *
- * @param appId - The tool's app id.
- * @param cm - The realm's bus verbs (its ConnectionManager).
- * @returns The peer.
- */
-export declare function createFrameBusPeer(appId: string, cm: IBusPeerBus): Peer;
-/**
- * Announces one FRAME MOUNT of a tool to its sidebar peer — HELLO now, BYE
- * from the returned cleanup. HOST-side, one call per mount lifetime (a React
- * effect): the hello is what flips the sidebar peer to direct delivery and
- * flushes its buffered events, and the bye is what re-arms buffering and the
- * panel summon. Call it AFTER the mount's channel exists, so the flushed
- * buffer has a live subscriber to land on.
- *
- * Hosts whose panels can die without cleanup (VS Code webviews) also publish
- * the authoritative panel count on the presence topic; the hello is still
- * required there — it is the flush trigger.
- *
- * @param appId - The tool's app id.
- * @param cm - The realm's bus verbs (its ConnectionManager).
- * @returns Cleanup — says BYE.
- */
-export declare function announceFramePresence(appId: string, cm: IBusPeerBus): () => void;
-/** The tool-document URI prefix. */
-export declare const TOOL_DOC_PREFIX = "tool:";
-/**
- * Composes a tool document's URI.
- *
- * @param appId - The tool's app id.
- * @param docKey - The per-document key; '' (or omitted) = the generic frame.
- * @returns The document URI.
- */
-export declare function toolDocUri(appId: string, docKey?: string): string;
-/**
- * Parses a tool document's URI.
- *
- * @param uri - Any document URI.
- * @returns The appId and docKey ('' = the generic frame), or null when the
- *          URI is not a tool document.
- */
-export declare function parseToolDocUri(uri: string): {
-    appId: string;
-    docKey: string;
-} | null;
-/**
- * The active-doc key one tool's SIDEBAR should see for a fronted document:
- * the docKey when the document belongs to this tool ('' = generic frame),
- * or null when another document is fronted (clear highlight).
- *
- * @param uri - The fronted document's URI (or null/undefined when none).
- * @param appId - The sidebar's tool id.
- * @returns The per-tool activeDocKey value.
- */
-export declare function activeDocKeyFor(uri: string | null | undefined, appId: string): string | null;
 export declare class CloudAuthProvider implements IAuthProvider {
     /** Returns the singleton CloudAuthProvider instance. */
     static getInstance(): CloudAuthProvider;
@@ -10462,48 +8797,31 @@ export interface IVirtualFileSystem {
      */
     read(path: string): Promise<unknown>;
     /**
-     * OPTIONAL batch read: many paths in one backend round trip (transports
-     * with a native batch op implement it; decorators use it for cache
-     * misses). Same per-path content contract as read(); unreadable paths
-     * are omitted from the result rather than failing the batch.
-     *
-     * @param paths - Relative file paths.
-     * @returns Map of path to content for every readable path.
-     */
-    readMany?(paths: string[]): Promise<Record<string, unknown>>;
-    /**
      * Writes content to a file.  The content type matches what read() returns.
      *
      * @param path    - Relative file path.
      * @param content - The content to write.
-     * @param origin  - The writer's identity (a dev-session id, or a verb
-     *                  like 'user'/'agent'), carried into the backend's
-     *                  change announcement so listeners can suppress their
-     *                  own echoes. Backends choose their default when omitted.
      */
-    write(path: string, content: unknown, origin?: string): Promise<void>;
+    write(path: string, content: unknown): Promise<void>;
     /**
      * Renames a file or directory.
      *
      * @param oldPath - Current relative path.
      * @param newPath - New relative path.
-     * @param origin  - The writer's identity (see write()).
      */
-    rename(oldPath: string, newPath: string, origin?: string): Promise<void>;
+    rename(oldPath: string, newPath: string): Promise<void>;
     /**
      * Deletes a file or directory.
      *
      * @param path - Relative path to delete.
-     * @param origin - The writer's identity (see write()).
      */
-    delete(path: string, origin?: string): Promise<void>;
+    delete(path: string): Promise<void>;
     /**
      * Creates a directory.
      *
      * @param path - Relative directory path to create.
-     * @param origin - The writer's identity (see write()).
      */
-    mkdir(path: string, origin?: string): Promise<void>;
+    mkdir(path: string): Promise<void>;
 }
 /**
  * A no-op {@link IVirtualFileSystem} for hosts that drive the Explorer purely
@@ -10623,21 +8941,6 @@ export interface IExplorerProps {
     showChildActions?: boolean;
     /** Currently active/open file path (for highlight). */
     activeFilePath?: string;
-    /**
-     * Paths with unsaved edits — rendered as a trailing accent dot on the
-     * file row, rolled up onto collapsed ancestor directories. Distinct from
-     * `statuses` by design: status dots are liveness (running NOW), the
-     * modified dot is editor state; the two never share a glyph.
-     */
-    modifiedPaths?: ReadonlySet<string>;
-    /**
-     * Source-control change decorations, VS Code style: a trailing letter
-     * badge (M/A/D) plus a tinted filename per changed path, with ancestor
-     * directory names tinted so a change is visible inside a collapsed tree.
-     * Distinct from `modifiedPaths` (unsaved editor buffers) by design —
-     * saved-but-uncommitted is source-control state, dirty-in-editor is not.
-     */
-    decorations?: ReadonlyMap<string, "added" | "modified" | "deleted">;
     /** Called when the user clicks a file entry to open it. */
     onOpenFile: (path: string) => void;
     /**
@@ -10719,20 +9022,6 @@ export interface Editor {
 }
 /** Split orientation for layout containers. */
 export type SplitOrientation = "horizontal" | "vertical";
-/** Where the new group lands relative to the one being split. */
-export type SplitPosition = "before" | "after";
-/**
- * Transient descriptor of a tab drag in flight. Lives OUTSIDE DocumentsState
- * on purpose: HTML5 drag-and-drop hides the transfer payload until drop, so
- * hover-time validation (e.g. "don't offer an edge split to a group's only
- * tab") needs a side channel — and it must never reach workspace persistence.
- */
-export interface EditorDragSession {
-    /** The editor being dragged. */
-    editorId: string;
-    /** The group the drag started from. */
-    sourceGroupId: string;
-}
 /**
  * An editor group — a pane container that holds an ordered list of editors.
  */
@@ -10780,8 +9069,6 @@ export type LayoutNode = LayoutLeaf | LayoutSplit;
 type Public<T> = {
     [K in keyof T]: T[K];
 };
-type LateDocumentsVerbs = "requestCloseEditor" | "requestCloseGroup" | "saveActiveDocument" | "flushPersistence";
-type DocumentsLike = Omit<Public<Documents>, LateDocumentsVerbs> & Partial<Pick<Public<Documents>, LateDocumentsVerbs>>;
 /** Complete documents model state. */
 export interface DocumentsState {
     /** All open documents keyed by URI. */
@@ -10813,64 +9100,6 @@ export interface WorkspaceBinding {
     appState: Record<string, unknown>;
     /** Functional updater to write back to workspace appState. */
     updateAppState: (updater: (prev: Record<string, unknown>) => Record<string, unknown>) => void;
-    /**
-     * Optional: writes the workspace's own pending debounced state NOW.
-     *
-     * Documents debounces into appState and the workspace debounces appState
-     * to disk, so a flush that stops at the first stage still leaves the
-     * change in a timer. Supplying this pushes it down the whole chain.
-     *
-     * For a LIVE page only. This must NOT be wired to `pagehide`: the write
-     * rides the engine socket, and a reload closes it mid-flight — the
-     * server truncates the target file and never receives the body, which
-     * turned a workspace file into zero bytes. A half-second of debounce is
-     * worth losing; the workspace is not.
-     */
-    flushNow?: () => void;
-}
-/** What a dirty-close decision can be. */
-export type DirtyCloseChoice = "save" | "discard" | "cancel";
-/** One unsaved document a close is about to destroy. */
-export interface DirtyDocInfo {
-    /** The document URI. */
-    uri: string;
-    /** The tab label (the editor's label, or the URI). */
-    label: string;
-    /** True for a never-saved document — saving it needs a path first. */
-    isNew: boolean;
-    /** Whether this instance can save it without asking for a path. */
-    canSave: boolean;
-}
-/** The UI policy hooks for a {@link Documents} instance (see file header). */
-export interface DocumentsUi {
-    /**
-     * Decides what happens to documents whose LAST view is closing with
-     * unsaved changes. Called once per close with every affected document,
-     * so a group close asks one question rather than one per tab.
-     *
-     * Omit for the shell's Save/Discard/Cancel dialog; pass null to discard
-     * without asking.
-     */
-    confirmDirtyClose?: ((docs: readonly DirtyDocInfo[]) => Promise<DirtyCloseChoice>) | null;
-    /**
-     * Supplies a path for a never-saved document, so "Save" can be offered
-     * when closing one. Resolve null to abandon the save (the close is then
-     * cancelled too — the user asked to save and we could not).
-     *
-     * The shell has NO default here: a save-as dialog needs the file types
-     * of the app's own documents, which Documents cannot know. Without it,
-     * "Save" is simply not offered for new documents.
-     */
-    pickSavePath?: ((doc: DirtyDocInfo) => Promise<string | null>) | null;
-}
-/** Constructor options for {@link Documents}. */
-export interface DocumentsOptions {
-    /** Virtual file system for reading/writing document content. */
-    vfs?: IVirtualFileSystem | null;
-    /** Workspace binding for automatic persistence. */
-    workspace?: WorkspaceBinding;
-    /** Dirty-close and save-as policy (see {@link DocumentsUi}). */
-    ui?: DocumentsUi;
 }
 /**
  * VS Code-style document model.
@@ -10890,26 +9119,12 @@ export declare class Documents {
     /**
      * Creates a new Documents instance.
      *
-     * Accepts either the positional form (kept verbatim — it is in the frozen
-     * shell contract) or a single options bag, which is the only way to pass
-     * the {@link DocumentsUi} policy. The two are told apart by `read`: every
-     * IVirtualFileSystem has one, no DocumentsOptions does.
-     *
-     * @param vfsOrOptions - A virtual file system, or {@link DocumentsOptions}.
-     * @param workspace    - Optional workspace binding for automatic persistence
-     *                       (positional form only). When provided, state is
-     *                       restored from appState on creation and debounce-saved
-     *                       back on every change.
+     * @param vfs       - Virtual file system for reading/writing document content.
+     * @param workspace - Optional workspace binding for automatic persistence.
+     *                    When provided, state is restored from appState on creation
+     *                    and debounce-saved back on every change.
      */
-    constructor(vfsOrOptions?: IVirtualFileSystem | null | DocumentsOptions, workspace?: WorkspaceBinding);
-    /**
-     * Writes this instance's state through to persistence immediately,
-     * cancelling the pending debounce.
-     *
-     * Safe to call at any time and when nothing is pending: the write is an
-     * idempotent overwrite of the same value.
-     */
-    flushPersistence(): void;
+    constructor(vfs?: IVirtualFileSystem | null, workspace?: WorkspaceBinding);
     /**
      * Returns the current state snapshot without subscribing.
      *
@@ -10976,38 +9191,6 @@ export declare class Documents {
      */
     closeEditor(editorId: string): void;
     /**
-     * Closes one editor, asking about unsaved changes first.
-     *
-     * The prompt happens ONLY when this is the last view of a dirty
-     * document: closing one of two split views of the same document
-     * destroys nothing, so asking would be both spurious and dangerous
-     * (a "discard" would throw away content still on screen).
-     *
-     * @param editorId - The editor to close.
-     * @returns True when the editor closed; false when the user cancelled.
-     */
-    requestCloseEditor(editorId: string): Promise<boolean>;
-    /**
-     * Closes a group, asking once about every unsaved document it is the
-     * last home of ("3 files have unsaved changes").
-     *
-     * One aggregated question, never a loop: the dialog service allows one
-     * dialog at a time, so prompting per tab would ask about the first and
-     * silently refuse the rest.
-     *
-     * @param groupId - The group to close.
-     * @returns True when the group closed; false when the user cancelled.
-     */
-    requestCloseGroup(groupId: string): Promise<boolean>;
-    /**
-     * Saves the document in the active editor of the active group — the
-     * Ctrl+S verb, stated once instead of re-derived in every app's
-     * `tab:save` listener.
-     *
-     * @returns Resolves when the save completed (or there was nothing to do).
-     */
-    saveActiveDocument(): Promise<void>;
-    /**
      * Force-remove a document and all its editors from state, regardless of
      * dirty status. Used when the backing file has been deleted from disk —
      * any unsaved content is discarded.
@@ -11043,11 +9226,9 @@ export declare class Documents {
      *
      * @param groupId     - The group to split.
      * @param orientation - Split direction ('horizontal' = side-by-side, 'vertical' = stacked).
-     * @param position    - Which side of the original the new group lands on
-     *                      ('before' = left/top, 'after' = right/bottom). Defaults to 'after'.
      * @returns The new group's ID.
      */
-    splitGroup(groupId: string, orientation: SplitOrientation, position?: SplitPosition): string;
+    splitGroup(groupId: string, orientation: SplitOrientation): string;
     /**
      * Splits a group and opens the same document as the active editor in the
      * new pane.  If the source group has no active editor, creates an empty split.
@@ -11061,8 +9242,6 @@ export declare class Documents {
     splitGroupWithDocument(groupId: string, orientation: SplitOrientation): string;
     /**
      * Moves an editor from its current group to a different group.
-     * If the move empties the source group, the group is auto-collapsed from
-     * the layout tree (VS Code parity, same behavior as closeEditor).
      *
      * @param editorId      - The editor to move.
      * @param targetGroupId - The destination group.
@@ -11121,201 +9300,24 @@ export declare class Documents {
      */
     destroy(): void;
 }
+/**
+ * Explorer — a generic file tree panel like VS Code's EXPLORER.
+ *
+ * Renders a hierarchical file tree from a flat entries array.  Supports
+ * inline rename/create, context menus, status indicators, child items
+ * with action buttons, and tree/flat view toggle.
+ *
+ * The component is fully generic — it knows nothing about pipelines,
+ * sources, or any app-specific concepts.  The hosting container provides
+ * entries, statuses, and callbacks.
+ */
 export declare const Explorer: React$1.FC<IExplorerProps>;
-/** One entry of the cached tree inventory. */
-export interface VfsEntry {
-    /** Full relative path (POSIX, '' never appears — the root is implicit). */
-    path: string;
-    /** Entry type. */
-    type: "file" | "dir";
-}
-/**
- * A live content source layered over one file (typically an editor buffer).
- * While `isDirty()` is true, `read()` serves `getContent()` instead of the
- * cache/backend — the overlay is the current truth for that path.
- */
-export interface VfsOverlay {
-    /** The overlay's current content (same type the backend would return). */
-    getContent(): unknown;
-    /** Whether the overlay differs from the persisted content. */
-    isDirty(): boolean;
-}
-/** Constructor options for {@link CachedVfs}. */
-export interface CachedVfsOptions {
-    /**
-     * Directory NAMES `refresh()` never descends into (derived outputs like
-     * `node_modules`, `dist` — machine truth, not user truth).
-     */
-    skipDirs?: readonly string[];
-}
-/**
- * A caching, overlay-aware decorator over a backing {@link IVirtualFileSystem}.
- */
-export declare class CachedVfs implements IVirtualFileSystem {
-    /**
-     * @param backend - The backing VFS every miss and write goes through.
-     * @param options - See {@link CachedVfsOptions}.
-     */
-    constructor(backend: IVirtualFileSystem, options?: CachedVfsOptions);
-    /**
-     * Rebuilds the tree inventory with one recursive backend walk. Cached
-     * content of paths that vanished from the tree is dropped.
-     */
-    refresh(): Promise<void>;
-    /** The full cached inventory (files AND directories), sorted by path. */
-    listEntries(): VfsEntry[];
-    /** The cached type of a path (null = not in the tree). */
-    entryType(path: string): "file" | "dir" | null;
-    /**
-     * The type of a path, loading the tree inventory first when it has not
-     * been walked yet — the ASYNC counterpart of entryType() for callers
-     * that must have a real answer (e.g. a rename's directory guard).
-     *
-     * @param path - The relative path.
-     * @returns 'file' | 'dir', or null when the path does not exist.
-     */
-    stat(path: string): Promise<"file" | "dir" | null>;
-    /**
-     * Records an entry (plus its ancestor directories) without a backend
-     * round trip — for adopting externally announced changes.
-     *
-     * @param path - The relative path.
-     * @param type - The entry type.
-     */
-    upsert(path: string, type: "file" | "dir"): void;
-    /**
-     * Fills the content cache (and the tree) for one file WITHOUT a backend
-     * read — the seam for bulk loaders that fetch many files in one batch.
-     * Does not notify: bulk callers announce once when the sweep completes.
-     *
-     * @param path - The relative file path.
-     * @param content - The file's content.
-     */
-    prime(path: string, content: unknown): void;
-    /**
-     * Drops cached content — one path, or the whole cache when omitted. The
-     * next `read()` goes back to the overlay/backend.
-     *
-     * @param path - The relative file path (omit for all).
-     */
-    invalidate(path?: string): void;
-    /**
-     * The cached content of a path — the BASELINE an open editor buffer was
-     * read from (undefined = never read/primed). Synchronous and side-effect
-     * free: the freshness gate compares this against peekBase() before a
-     * write-through save.
-     *
-     * @param path - The relative file path.
-     * @returns The cached content, or undefined when not cached.
-     */
-    cachedContent(path: string): unknown;
-    /**
-     * Reads CURRENT backend truth, bypassing overlays AND the content cache
-     * — and deliberately NOT updating the cache: the cache is the baseline
-     * an open buffer was read from, and a freshness probe that replaced it
-     * would make the very conflict it just detected invisible to the next
-     * probe (a blind retry-save would then pass the gate).
-     *
-     * @param path - The relative file path.
-     * @returns The backend's current content.
-     */
-    peekBase(path: string): Promise<unknown>;
-    /**
-     * Registers a live content overlay for one file.
-     *
-     * @param path - The relative file path.
-     * @param overlay - The content producer.
-     * @returns Unregister function.
-     */
-    registerOverlay(path: string, overlay: VfsOverlay): () => void;
-    /** Whether a path has unsaved overlay edits. */
-    isDirty(path: string): boolean;
-    /** Every path whose overlay is currently dirty. */
-    dirtyPaths(): Set<string>;
-    /**
-     * Subscribes to change notifications (tree, cache, or dirty flips).
-     *
-     * @param listener - Invoked on every announced change.
-     * @returns Unsubscribe function.
-     */
-    subscribe(listener: () => void): () => void;
-    /**
-     * Announces a change to every subscriber. Public by design: overlay
-     * registrars call it when their dirty state flips — the VFS cannot see
-     * those transitions itself.
-     */
-    notify(): void;
-    /**
-     * Lists a directory from the tree cache (first call triggers the walk).
-     *
-     * @param dir - Relative directory path ('' for root).
-     */
-    list(dir: string): Promise<{
-        name: string;
-        type: "file" | "dir";
-    }[]>;
-    /**
-     * Reads one file: dirty overlay first, then the content cache, then the
-     * backend (whose result is cached).
-     *
-     * @param path - Relative file path.
-     */
-    read(path: string): Promise<unknown>;
-    /**
-     * Reads many files in one call: dirty overlays and cache hits answer
-     * locally; the misses go to the backend in ONE batch when it offers
-     * readMany (falling back to parallel single reads). Unreadable paths
-     * are OMITTED from the result rather than failing the batch.
-     *
-     * @param paths - Relative file paths.
-     * @returns Map of path to content for every readable path.
-     */
-    readMany(paths: string[]): Promise<Record<string, unknown>>;
-    /**
-     * Writes one file through the backend and updates the caches.
-     *
-     * @param path - Relative file path.
-     * @param content - The content to persist.
-     * @param origin - The writer's identity, forwarded to the backend.
-     */
-    write(path: string, content: unknown, origin?: string): Promise<void>;
-    /**
-     * Renames through the backend and migrates the cached state.
-     *
-     * @param oldPath - Current relative path.
-     * @param newPath - New relative path.
-     * @param origin - The writer's identity, forwarded to the backend.
-     */
-    rename(oldPath: string, newPath: string, origin?: string): Promise<void>;
-    /**
-     * Deletes through the backend and evicts the cached subtree.
-     *
-     * @param path - Relative path to delete.
-     * @param origin - The writer's identity, forwarded to the backend.
-     */
-    delete(path: string, origin?: string): Promise<void>;
-    /**
-     * Creates a directory through the backend and records it.
-     *
-     * @param path - Relative directory path.
-     * @param origin - The writer's identity, forwarded to the backend.
-     */
-    mkdir(path: string, origin?: string): Promise<void>;
-}
 /**
  * Props for the DocTabs component.
  */
 export interface DocTabsProps {
-    /**
-     * The Documents instance to read state from and dispatch actions to.
-     *
-     * The policy-aware verbs are OPTIONAL in this type on purpose: the
-     * frozen shell contract pins the Documents shape apps were built
-     * against, so requiring members added later would reject a perfectly
-     * good instance from a v5-era app. Absence is feature-detected below
-     * and falls back to the unconditional close.
-     */
-    docs: DocumentsLike;
+    /** The Documents instance to read state from and dispatch actions to. */
+    docs: Public<Documents>;
     /** The editor group whose tabs should be rendered. */
     groupId: string;
     /** Whether this group is the currently focused group. */
@@ -11344,7 +9346,7 @@ export declare const DocTabs: React$1.FC<DocTabsProps>;
  */
 export interface DocSplitLayoutProps {
     /** The Documents instance to read layout state from. */
-    docs: DocumentsLike;
+    docs: Public<Documents>;
     /** Render function for each leaf pane — receives groupId, returns JSX. */
     renderPane: (groupId: string) => React$1.ReactNode;
 }
@@ -11512,38 +9514,6 @@ export declare const BottomPanel: React$1.FC<BottomPanelProps>;
 export declare const DebugPanel: React$1.FC<{
     onClose: () => void;
 }>;
-/** The sidebar chrome an app asks the shell frame to render. */
-export type ShellSidebarMode = "rocketride" | "vscode" | "cursor";
-/**
- * One sidebar view container — an icon on the activity rail ('vscode') or an
- * entry in the panel's tab strip ('cursor'), selecting what the panel shows.
- *
- * `content` is OPTIONAL: a container without its own node shares the app's
- * registered `sidebar` content, and the shell announces the active container
- * through the active-view context (`useSidebarActiveView`) so that shared
- * node can switch what it presents. This is the one-data-instance path — an
- * app whose sidebar already multiplexes modes internally (a tab strip over
- * one state owner) adopts the rail without duplicating its data wiring.
- */
-export interface SidebarViewContainer {
-    /** Stable id — the active-view selection and persistence key. */
-    id: string;
-    /** Rail tooltip ('vscode') / tab label ('cursor') / panel header label. */
-    title: string;
-    /** The rail / tab glyph. Sized by the caller (20px reads well on the rail). */
-    icon: React$1.ReactNode;
-    /** Panel body when this container is active. Omitted = the shared
-        `sidebar` node serves this container (see the interface doc). */
-    content?: React$1.ReactNode;
-    /** Optional rail/tab badge (a count or a short marker). */
-    badge?: number | string;
-    /** Rail/tab position; declaration order where omitted. */
-    order?: number;
-    /** The container the panel opens on when the user has no stored choice.
-        Rail POSITION and startup DEFAULT are independent (VS Code opens on
-        Explorer; this platform opens on Agent). First container when unset. */
-    isDefault?: boolean;
-}
 /** Props for {@link AppLayout}. */
 export interface AppLayoutProps {
     /** The scrolling portion of the sidebar column. Present = two-column app;
@@ -11551,17 +9521,6 @@ export interface AppLayoutProps {
         inside read `useSidebarCollapsed()` to choose their collapsed
         (icon-rail) form. */
     sidebar?: React$1.ReactNode;
-    /** The sidebar chrome this app asks for. With a non-empty `sidebarViews`
-        an omitted mode renders the 'vscode' workbench; without declared views
-        the shell always clamps to 'rocketride' (the classic column — today's
-        behavior, untouched). 'cursor' is the tab-strip panel. The user's
-        `rocketride.general.sidebar` setting overrides the app's request. */
-    sidebarMode?: ShellSidebarMode;
-    /** The app's sidebar view containers — the data behind the richer
-        chromes. A container WITHOUT its own `content` shares the `sidebar`
-        node, which reads `useSidebarActiveView()` to present the selected
-        view (one data owner behind N rail icons). Ignored by 'rocketride'. */
-    sidebarViews?: SidebarViewContainer[];
     /** Show the status bar (stock connection identity). Defaults to false. */
     showStatus?: boolean;
     /** App content for the status bar's middle slot. Providing it implies
@@ -11607,121 +9566,18 @@ export interface IConfirmDialogProps {
  * @returns The confirm dialog element.
  */
 export declare function ConfirmDialog({ title, message, confirmLabel, cancelLabel, secondaryLabel, onConfirm, onCancel, onSecondary, destructive, confirmDisabled, }: IConfirmDialogProps): React$1.ReactElement;
-/** One selectable action in a {@link ChoiceDialog}. */
-export interface IChoiceOption {
-    /** Stable id resolved to the caller when this action is chosen. */
-    id: string;
-    /** Button label. */
-    label: string;
-    /** Render in the danger style (irreversible: discard, delete). */
-    destructive?: boolean;
-    /** Render as the affirmative action (primary style + initial focus). */
-    primary?: boolean;
-    /** Disable the button (e.g. an action unavailable in this state). */
-    disabled?: boolean;
-}
-/** Props for the {@link ChoiceDialog} component. */
-export interface IChoiceDialogProps {
-    /** Dialog title. */
-    title: string;
-    /** Body message — a plain string or a custom node. */
-    message: React$1.ReactNode;
-    /** The actions, in left-to-right render order. */
-    options: readonly IChoiceOption[];
-    /** Fired with the chosen option's id. */
-    onChoose: (id: string) => void;
-    /** Fired on Escape, the corner ✕, or a dismiss that chose nothing. */
-    onCancel: () => void;
-    /** Box width in px (defaults to the modal default). */
-    width?: number;
-}
-/**
- * Renders a dialog with any number of actions.
- *
- * @param props - {@link IChoiceDialogProps}.
- * @returns The dialog element.
- */
-export declare function ChoiceDialog({ title, message, options, onChoose, onCancel, width }: IChoiceDialogProps): React$1.ReactElement;
-/** A {@link showChoiceDialog} request. */
-export interface ChoiceDialogRequest {
-    /** Dialog title. */
-    title: string;
-    /** Body message — a plain string or a custom node. */
-    message: React$1.ReactNode;
-    /** The actions, in left-to-right render order (affirmative last). */
-    options: readonly IChoiceOption[];
-    /**
-     * Id resolved when the dialog is DISMISSED (Escape, the corner ✕, or a
-     * cancel option). Omit and a dismissal resolves null — indistinguishable
-     * from a call that could not be shown, so pass it whenever the
-     * difference matters.
-     */
-    cancelId?: string;
-    /** Box width in px (defaults to the modal default). */
-    width?: number;
-}
-/**
- * Shows a dialog with any number of actions in THIS realm and resolves with
- * the chosen option's id. Never rejects.
- *
- * Resolves `null` when the choice was never made: the dialog could not be
- * shown (another is already open), or it was dismissed and no `cancelId`
- * was given. A `null` must therefore never be treated as an affirmative —
- * the safe reading is always "do nothing".
- *
- * @param request - See {@link ChoiceDialogRequest}.
- * @returns The chosen option id, the `cancelId` on dismissal, or null.
- */
-export declare function showChoiceDialog(request: ChoiceDialogRequest): Promise<string | null>;
-/**
- * Shows the shell's confirmation dialog in THIS realm and resolves with
- * the user's choice. Never rejects; a call while another dialog is open
- * resolves false (no stacked modals).
- *
- * @param title - Dialog title.
- * @param message - Body message.
- * @param confirmLabel - Primary button label (default "Confirm").
- * @returns True when the user confirmed.
- */
-export declare function showConfirmDialog(title: string, message: string, confirmLabel?: string): Promise<boolean>;
 export declare const PopupRow: React$1.FC<{
     children: React$1.ReactNode;
     onClick?: (e: React$1.MouseEvent<HTMLDivElement>) => void;
 }>;
-export interface AnchoredPopupProps {
-    /** The trigger element the popup positions against. */
-    anchorRef: React$1.RefObject<HTMLElement | null>;
-    /** Whether the popup is open (closed renders nothing). */
-    open: boolean;
-    /** Dismissal callback (outside mousedown, Escape). */
-    onClose: () => void;
-    /** Preferred side of the anchor (default 'below'; flips when out of room). */
-    placement?: "below" | "above";
-    /** Horizontal alignment against the anchor (default 'start'). */
-    align?: "start" | "end";
-    /** Gap between anchor and popup in px (default 4). */
-    gap?: number;
-    /** Match the popup's width to the anchor's (split buttons, comboboxes). */
-    matchAnchorWidth?: boolean;
-    /** Visual chrome for the popup box (merged over the positional base). */
-    style?: React$1.CSSProperties;
-    children?: React$1.ReactNode;
-}
-export declare const AnchoredPopup: React$1.FC<AnchoredPopupProps>;
-interface IAccountProviderProps {
-    /** Starts a subscription flow (e.g. emit shell:subscribe toward a mounted
-     *  CheckoutFlow). Absent = no subscribe CTA, matching prior behavior. */
-    onSubscribe?: () => void;
-}
 /**
- * AccountView wrapper for any framework realm.
+ * Cloud-UI AccountView wrapper.
  *
- * Fetches account data via brokered `client.account.*` / `client.billing.*`
- * bus ops and delegates all rendering to the shared AccountView. Listens for
- * `shell:accountUpdate` events to keep the profile in sync with
- * server-pushed updates (socket-fed at a root; mirror-fed in a spoke realm).
+ * Fetches account data via DAP commands (`rrext_account_*`) and delegates
+ * all rendering to the shared AccountView. Listens for `shell:accountUpdate`
+ * bus events to keep the profile in sync with server-pushed updates.
  */
-export declare const AccountProvider: React$1.FC<IAccountProviderProps>;
+export declare const AccountProvider: React$1.FC;
 /**
  * Shell-owned settings overlay, VSCode-style, rendered entirely from the
  * settings registry.
@@ -11731,36 +9587,6 @@ export declare const AccountProvider: React$1.FC<IAccountProviderProps>;
  * every section.  All edits apply immediately (deltas-only persistence).
  */
 export declare const SettingsProvider: React$1.FC;
-interface CheckoutFlowProps {
-    /** Stripe publishable key from API config. */
-    stripeKey: string;
-    /** Organization ID from the authenticated identity. */
-    orgId: string;
-}
-/**
- * Listens for `shell:subscribe` events and renders the CheckoutModal
- * overlay when a user clicks "Subscribe" on a paid app.
- *
- * Wires up the Stripe checkout flow callbacks to the ConnectionManager's
- * billing API.
- */
-export declare const CheckoutFlow: React$1.FC<CheckoutFlowProps>;
-/** The bus surface the client needs (realm or root ConnectionManager). */
-export interface IWorkspaceFsBus {
-    request(op: string, params: unknown): Promise<unknown>;
-    emitOp(op: string, params: unknown): void;
-    /** Registers THIS realm's handler for a pushed op (registration-is-routing). */
-    handle(op: string, handler: (params: unknown) => void): () => void;
-}
-/**
- * The realm-side WorkspaceFs over the `host.fs.*` op family — one shared
- * instance per bus (repeat calls return it).
- *
- * @param bus - The realm's connection manager.
- * @returns The capability handed to tools (`ToolHostServices.workspaceFs`)
- *          or used directly by any component.
- */
-export declare function createWorkspaceFs(bus: IWorkspaceFsBus): WorkspaceFs;
 /**
  * Sent by the shell to an iframe immediately after the iframe posts `view:ready`.
  *
@@ -11847,12 +9673,6 @@ export interface ViewMenuEntry {
      * SidebarMenu; ignored by TabControl.
      */
     disabled?: boolean;
-    /**
-     * When true, the entry is a drag source AND drop target for TabControl's
-     * `onReorder` (reorderable tabs, e.g. the sidebar's pinned dev tools).
-     * Ignored by SidebarMenu, and by TabControl without `onReorder`.
-     */
-    draggable?: boolean;
     /**
      * Child entries, making this entry an expandable SECTION in SidebarMenu
      * (one level deep — children never declare children of their own). A
@@ -12391,19 +10211,6 @@ export interface ITabControlProps {
     onSelect: (id: string) => void;
     /** Right-aligned slot (e.g. expand icon). Optional. */
     trailing?: React$1.ReactNode;
-    /**
-     * Render each entry's `icon` INSTEAD of its label (the label becomes the
-     * tab's tooltip and accessible name). Entries without an icon keep their
-     * text label, so a mixed menu stays legible. Optional; default false.
-     */
-    iconsOnly?: boolean;
-    /**
-     * Enables drag-reordering of the entries marked `draggable` on the menu.
-     * Fired on drop with the dragged entry, the entry it was dropped on, and
-     * which side of it the drop landed. Entries without `draggable` are
-     * neither drag sources nor drop targets. Optional.
-     */
-    onReorder?: (dragId: string, targetId: string, position: "before" | "after") => void;
 }
 /**
  * Renders a ViewMenu as the top page strip.
@@ -12411,7 +10218,7 @@ export interface ITabControlProps {
  * @param props - {@link ITabControlProps}.
  * @returns The strip element.
  */
-export declare function TabControl({ menu, activeId, onSelect, trailing, iconsOnly, onReorder }: ITabControlProps): React$1.ReactElement;
+export declare function TabControl({ menu, activeId, onSelect, trailing }: ITabControlProps): React$1.ReactElement;
 /** One page body in the stack, keyed by its entry id in the panels map. */
 export interface ITabPanelPanel {
     /** The panel's rendered content. */
@@ -12433,37 +10240,6 @@ export interface ITabPanelProps {
 export declare function TabPanel({ panels, activeId }: ITabPanelProps): React$1.ReactElement;
 /** The one canonical close glyph (U+2715 MULTIPLICATION X) used by every dialog. */
 export declare const CLOSE_GLYPH = "\u2715";
-/**
- * Joins the shared overlay stack as the new topmost layer and (by default) locks
- * page scroll — the pre-lock overflow is captured by the first layer only, so a
- * later out-of-order close never re-enables scroll behind a still-open layer.
- *
- * `lockScroll: false` joins the stack (so Escape / focus-trap top-gating still
- * work) WITHOUT locking scroll — for a MODELESS overlay (e.g. a DetailPanel
- * palette floating over an interactive canvas) whose host surface must stay
- * scrollable/pannable behind it. The pre-lock overflow is still captured on the
- * first layer so the eventual restore is correct regardless of open order.
- *
- * @param lockScroll - Whether to lock `document.body` scroll while open (default true).
- * @returns The layer's identity token, for {@link isTopOverlayLayer} and
- *   {@link releaseOverlayLayer}.
- */
-export declare function acquireOverlayLayer(lockScroll?: boolean): object;
-/**
- * Whether `layer` is currently the topmost open overlay — the only layer that
- * may react to Escape / Tab.
- *
- * @param layer - The token returned by {@link acquireOverlayLayer}.
- * @returns True while the layer is top-of-stack.
- */
-export declare function isTopOverlayLayer(layer: object): boolean;
-/**
- * Removes a layer from the stack (indexOf, not pop, so out-of-order unmounts
- * are safe) and restores page scroll when the LAST layer is gone.
- *
- * @param layer - The token returned by {@link acquireOverlayLayer}.
- */
-export declare function releaseOverlayLayer(layer: object): void;
 /** Props for the {@link Modal} component. */
 export interface IModalProps {
     /** Header title — a plain string or a custom node. */
@@ -12613,71 +10389,6 @@ export interface ISidebarCollapsedGateProps {
  * @returns The children while expanded, or null while collapsed.
  */
 export declare const SidebarCollapsedGate: React$1.FC<ISidebarCollapsedGateProps>;
-/** The workbench's view selection, as shared sidebar content sees it. */
-export interface SidebarActiveView {
-    /** The active view container's id. */
-    activeViewId: string;
-    /** Ask the workbench to activate another container (also opens the panel). */
-    setActiveView: (id: string) => void;
-}
-/** Props for the {@link SidebarActiveViewProvider} component. */
-export interface ISidebarActiveViewProviderProps {
-    /** The workbench's current selection and setter. */
-    value: SidebarActiveView;
-    /** The sidebar-slot subtree that may read the selection. */
-    children: React$1.ReactNode;
-}
-/**
- * Provides the workbench's active-view selection to shared sidebar content.
- * Mounted by the shell's workbench frame around the panel's content slot.
- *
- * @param props - {@link ISidebarActiveViewProviderProps}.
- * @returns The provider element.
- */
-export declare const SidebarActiveViewProvider: React$1.FC<ISidebarActiveViewProviderProps>;
-/**
- * Reads the active-view selection, or null when no view-driven chrome
- * encloses this content (the classic sidebar column, tests). The compact
- * drawer of an app WITH declared views provides a selection too — only the
- * classic column yields null. Shared sidebar content uses the null case to
- * keep its own switcher.
- *
- * @returns The selection handle, or null under the classic chrome.
- */
-export declare function useSidebarActiveView(): SidebarActiveView | null;
-/** Options for {@link viewsFromMenu}. */
-export interface ViewsFromMenuOptions {
-    /**
-     * What becomes of top-level entries WITHOUT children (e.g. a Dashboard
-     * row above the sections):
-     *   'own-view' (default) — each loose entry becomes its own rail view,
-     *                          in declaration order alongside the sections.
-     *   'ignore'             — loose entries are dropped from the rail; the
-     *                          app keeps rendering them inside the panel.
-     */
-    looseEntries?: "own-view" | "ignore";
-    /** Id of the container the panel opens on by default (isDefault). */
-    defaultId?: string;
-}
-/**
- * Projects a ViewMenu's top level onto rail view containers (see the module
- * doc for the contract and the opt-in rule).
- *
- * @param menu - The app's existing menu — unchanged, still the one source.
- * @param options - See {@link ViewsFromMenuOptions}.
- * @returns Containers for `sidebarViews`, in declaration order.
- */
-export declare function viewsFromMenu(menu: ViewMenu, options?: ViewsFromMenuOptions): SidebarViewContainer[];
-/**
- * The active section's child entries, for panel bodies that render "the
- * current section's menu" — the usual companion to {@link viewsFromMenu}.
- *
- * @param menu - The same menu passed to viewsFromMenu.
- * @param activeViewId - The rail selection (from `useSidebarActiveView`).
- * @returns The active section's children ([] for loose entries — they ARE
- *          the destination, nothing nests beneath them).
- */
-export declare function menuSectionEntries(menu: ViewMenu, activeViewId: string): ViewMenuEntry[];
 /** A single item in the popup menu (or a submenu). */
 export interface SidebarFooterMenuItem {
     /** Unique key for React list rendering. */
@@ -13340,8 +11051,6 @@ export interface IChatViewProps {
     emptyTitle?: string;
     /** Description for the EmptyState shown when the conversation has no messages. */
     emptyDescription?: string;
-    /** Rich replacement for the stock EmptyState (e.g. example-prompt cards). */
-    emptySlot?: React$1.ReactNode;
     /** Optional node rendered before the input field (reserved for future attachments). */
     leadingInputSlot?: React$1.ReactNode;
 }
@@ -13351,16 +11060,6 @@ export interface UseChatMessagesOptions {
     welcomeMessage?: string;
     /** Seed messages to restore a previous conversation (preserves sender, timestamp, etc.). */
     initialMessages?: ChatMessage[];
-    /**
-     * Injected transport: when provided, sendMessage awaits this instead of the
-     * built-in chat API (the `client`/`authToken` arguments are then unused).
-     * Each returned TextResult renders as one bot message.
-     */
-    request?: (text: string) => Promise<TextResult[]>;
-}
-export interface TextResult {
-    text: string;
-    key: string;
 }
 /**
  * Renders the chat surface (message thread + composer).
@@ -13379,8 +11078,6 @@ interface MessageListProps {
     emptyTitle?: string;
     /** Description for the EmptyState shown when there are no messages. */
     emptyDescription?: string;
-    /** Rich replacement for the stock EmptyState (e.g. example-prompt cards). */
-    emptySlot?: React$1.ReactNode;
 }
 /**
  * Renders the scrollable message thread with scroll-locked autoscroll.
@@ -13407,7 +11104,7 @@ interface UseChatMessagesReturn {
  * setMessages directly. Direct setMessages calls bypass the messagesRef
  * sync and will cause sendMessage to build history from a stale snapshot.
  */
-export declare function useChatMessages({ welcomeMessage, initialMessages, request }?: UseChatMessagesOptions): UseChatMessagesReturn;
+export declare function useChatMessages({ welcomeMessage, initialMessages }?: UseChatMessagesOptions): UseChatMessagesReturn;
 /** Props for the {@link ConnectionCard} component. */
 export interface IConnectionCardProps {
     /** Optional source icon (rendered at 30px, inherits the card's icon colour). */
@@ -13595,12 +11292,6 @@ export type ThemeTokens = {
     "--rr-bg-paper": string;
     "--rr-bg-surface": string;
     "--rr-bg-surface-alt": string;
-    "--rr-doctabs-bg": string;
-    "--rr-doctabs-tab-active-bg": string;
-    "--rr-doctabs-tab-hover-bg": string;
-    "--rr-doctabs-fg-active": string;
-    "--rr-doctabs-fg-inactive": string;
-    "--rr-doctabs-border": string;
     "--rr-fg-titleBar-active": string;
     "--rr-fg-titleBar-inactive": string;
     "--rr-bg-titleBar-active": string;
@@ -13639,10 +11330,6 @@ export type ThemeTokens = {
     "--rr-btn-sm-font-size": string;
     "--rr-btn-sm-radius": string;
     "--rr-bg-input": string;
-    "--rr-bg-rail": string;
-    "--rr-bg-rail-hover": string;
-    "--rr-fg-rail": string;
-    "--rr-fg-rail-active": string;
     "--rr-bg-list-hover": string;
     "--rr-bg-list-active": string;
     "--rr-fg-list-active": string;
@@ -14194,137 +11881,6 @@ interface IAccountViewProps {
  * to the host via async callback props defined in IAccountViewProps.
  */
 export declare const AccountView: React$1.FC<IAccountViewProps>;
-/**
- * The app facts the desktop renders — a structural subset of BOTH manifest
- * entry shapes in play (the workspace's `AppManifestEntry` and the SDK's
- * ConnectResult entry), so `useWorkspace().appManifest` and
- * `useSubscriptions().desktopApps` assign unchanged.
- */
-export interface DesktopApp {
-    /** Stable unique app identifier. */
-    id: string;
-    /** Module Federation container name. */
-    moduleId: string;
-    /** Display name. */
-    name: string;
-    /** Short description shown on the card. */
-    description?: string;
-    /** URL to the app's icon. */
-    icon?: string;
-    /** Categories; the first one becomes the card's sublabel. */
-    categories?: string[];
-    /** Resolved app version (semver) for the version chip. */
-    version?: string;
-    /** Registry version number the entry resolves to (the current marker). */
-    registryVersion?: number;
-    /** True when the entry is a dev-overlay override (live watch build). */
-    dev?: boolean;
-}
-/** One rotating header quote with its attribution. */
-export interface DesktopQuote {
-    /** The quote text (rendered inside typographic quotes). */
-    quote: string;
-    /** Who said it. */
-    who: string;
-    /** Where it was said (venue, publication, platform). */
-    audience: string;
-    /** When (display string, e.g. "March 2023"). */
-    date: string;
-}
-/** One deduplicated row of the version drop list. */
-export interface DesktopVersionRow {
-    /** Registry version number (the launch key — monotonic, never semver-compared). */
-    registryVersion: number;
-    /** Artifact semver for display. */
-    appVersion: string;
-    /** Rung handles pinning this version (e.g. '@team', 'in review'). */
-    handles: string[];
-}
-/** A session version override as the desktop reads/writes it. */
-export interface DesktopVersionOverride {
-    /** Registry version number to serve. */
-    version: number;
-    /** Display semver of that version. */
-    appVersion?: string;
-}
-/**
- * Server/runtime operations behind the desktop's affordances.
- *
- * The component builds an internal default from the shell runtime (the
- * ConnectionManager client + session version overrides); hosts normally never
- * pass one. Every member is optional — a missing member hides only the
- * affordance it powers (e.g. no `applyVersionOverride` → the version chip is
- * a plain label).
- */
-export interface DesktopAdapter {
-    /** Built, servable versions for an app, newest first. */
-    listVersions?(appId: string): Promise<DesktopVersionRow[]>;
-    /** The caller org's developer id ('' when none is claimed). */
-    getDeveloperId?(): Promise<string>;
-    /**
-     * Subscribe to events that invalidate the developer id (org switch,
-     * sign-in/out). Returns the unsubscribe function.
-     */
-    onDeveloperIdChanged?(resolve: () => void): () => void;
-    /** Read an app's session version override, if any. */
-    getVersionOverride?(appId: string): DesktopVersionOverride | null;
-    /**
-     * Apply (or clear, with null) a session version override. May return
-     * 'reload-required' when only a fresh boot can register the change.
-     */
-    applyVersionOverride?(appId: string, moduleId: string, override: DesktopVersionOverride | null): string | void;
-    /** Remove an app from the user's desktop (keeps any subscription). */
-    removeApp?(appId: string): void;
-    /** Cancel a paid app's subscription (also removes it from the desktop). */
-    unsubscribeApp?(appId: string): void;
-    /** Subscription status for an app ('past_due' blocks launch). */
-    getStatus?(appId: string): string | undefined;
-}
-/** Props for the shared DesktopView component. */
-export interface DesktopViewProps {
-    /** Apps to show, in render order (hosts filter/sort before passing). */
-    apps: DesktopApp[];
-    /**
-     * Launch handler. Default: emit `shell:switchApp` on the connection
-     * manager — correct for every in-shell host.
-     */
-    onLaunch?: (appId: string) => void;
-    /** First name for the greeting; omitted → the nameless greeting pools. */
-    greetingName?: string;
-    /** Fixed header text replacing the greeting (e.g. a logged-out welcome). */
-    greetingOverride?: string;
-    /** Show the rotating quote column (default true). */
-    showQuote?: boolean;
-    /**
-     * Show the header row entirely (greeting + subtitle + quote; default
-     * true). False renders just the card grid — picker/compact surfaces.
-     */
-    showHeader?: boolean;
-    /**
-     * Allow the hover X + remove/unsubscribe popover (default true; the
-     * popover also needs the adapter's removeApp/unsubscribeApp members).
-     */
-    allowRemove?: boolean;
-    /** Theme-adaptive icon override; default is each app's manifest icon. */
-    resolveIcon?: (app: DesktopApp) => string | undefined;
-    /** Server adapter override; omit to use the built-in shell-runtime one. */
-    adapter?: DesktopAdapter;
-    /**
-     * CSS selector of the host's sticky header, used as the top boundary when
-     * placing the version drop list (absent → the viewport top).
-     */
-    popoverBoundarySelector?: string;
-    /** Message for the zero-apps state. */
-    emptyMessage?: string;
-    /** Extra styles merged onto the root (padding/width belong to the host). */
-    style?: React$1.CSSProperties;
-}
-/**
- * The shared desktop page content: greeting, rotating quote, app-card grid.
- *
- * @param props - {@link DesktopViewProps}.
- */
-export declare const DesktopView: React$1.FC<DesktopViewProps>;
 /** Possible environment scope levels. */
 export type EnvironmentScope = "org" | "team" | "user";
 /** Connection state and permissions for a single connection slot. */
@@ -14533,8 +12089,6 @@ export declare const shellApi: {
     readonly SidebarCollapsedProvider: import("react").FC<ISidebarCollapsedProviderProps>;
     readonly SidebarCollapsedGate: import("react").FC<ISidebarCollapsedGateProps>;
     readonly useSidebarCollapsed: typeof useSidebarCollapsed;
-    readonly SidebarActiveViewProvider: import("react").FC<ISidebarActiveViewProviderProps>;
-    readonly useSidebarActiveView: typeof useSidebarActiveView;
     readonly SidebarFooter: import("react").FC<SidebarFooterProps>;
     readonly DataGrid: <Row extends Record<string, unknown>>(props: IDataGridProps<Row> & {
         ref?: import("react").Ref<IDataGridHandle>;
@@ -14568,8 +12122,6 @@ export declare const shellApi: {
         section: import("react").CSSProperties;
         sectionHeader: import("react").CSSProperties;
         sectionHeaderLabel: import("react").CSSProperties;
-        paneHeaderActions: (visible: boolean) => import("react").CSSProperties;
-        paneHeaderButton: import("react").CSSProperties;
         buttonPrimary: import("react").CSSProperties;
         buttonDanger: import("react").CSSProperties;
         buttonDangerOutline: import("react").CSSProperties;
@@ -14618,58 +12170,11 @@ export declare const shellApi: {
         indicatorMuted: import("react").CSSProperties;
     };
     readonly useShellConnection: typeof useShellConnection;
-    readonly useShellApiKey: typeof useShellApiKey;
     readonly useAuthUser: typeof useAuthUser;
     readonly useLogout: typeof useLogout;
     readonly useWorkspace: typeof useWorkspace;
     readonly useClient: typeof useClient;
     readonly useShellEvent: typeof useShellEvent;
-    readonly useLatest: typeof useLatest;
-    readonly showConfirmDialog: typeof showConfirmDialog;
-    readonly createToolChannel: typeof createToolChannel;
-    readonly asToolStateMessage: typeof asToolStateMessage;
-    readonly asToolEventMessage: typeof asToolEventMessage;
-    readonly createToolOpClient: typeof createToolOpClient;
-    readonly createToolOpServer: typeof createToolOpServer;
-    readonly asToolCallMessage: typeof asToolCallMessage;
-    readonly asToolReplyMessage: typeof asToolReplyMessage;
-    readonly DEFAULT_OP_TIMEOUT_MS: number;
-    readonly typedToolChannel: typeof typedToolChannel;
-    readonly useToolState: typeof useToolState;
-    readonly useConnectionReady: typeof useConnectionReady;
-    readonly publishHostConnectionState: typeof publishHostConnectionState;
-    readonly HOST_CONNECTION_TOPIC: string;
-    readonly typedPrefs: typeof typedPrefs;
-    readonly scopedPrefs: typeof scopedPrefs;
-    readonly createMirroredPrefsStore: typeof createMirroredPrefsStore;
-    readonly createPrefsHub: typeof createPrefsHub;
-    readonly realmPrefsHub: typeof realmPrefsHub;
-    readonly usePref: typeof usePref;
-    readonly ToolHostProvider: import("react").Provider<ToolHostServices | null>;
-    readonly useToolHost: typeof useToolHost;
-    readonly createLoopbackPeer: typeof createLoopbackPeer;
-    readonly useGridConfigAnswering: typeof useGridConfigAnswering;
-    readonly hostConnectionPayload: typeof hostConnectionPayload;
-    readonly TOOL_RELAY_BUFFER_LIMIT: number;
-    readonly createSidebarBusPeer: typeof createSidebarBusPeer;
-    readonly createFrameBusPeer: typeof createFrameBusPeer;
-    readonly announceFramePresence: typeof announceFramePresence;
-    readonly toolDocUri: typeof toolDocUri;
-    readonly parseToolDocUri: typeof parseToolDocUri;
-    readonly activeDocKeyFor: typeof activeDocKeyFor;
-    readonly TOOL_DOC_PREFIX: string;
-    readonly createOpBus: typeof createOpBus;
-    readonly typedBusOps: typeof typedBusOps;
-    readonly registerOpHandlers: typeof registerOpHandlers;
-    readonly BusNoHandlerError: typeof BusNoHandlerError;
-    readonly DEFAULT_BUS_REQUEST_TIMEOUT_MS: number;
-    readonly attachRealmToRoot: typeof attachRealmToRoot;
-    readonly createBusRouter: typeof createBusRouter;
-    readonly createLocalEndpointPair: typeof createLocalEndpointPair;
-    readonly DEFAULT_SUMMON_TIMEOUT_MS: number;
-    readonly createRetainedRegistry: typeof createRetainedRegistry;
-    readonly localRetainedPort: typeof localRetainedPort;
-    readonly registerClientOps: typeof registerClientOps;
     readonly useIframeBridge: typeof useIframeBridge;
     readonly useSubscriptions: typeof useSubscriptions;
     readonly usePolling: typeof usePolling;
@@ -14679,7 +12184,6 @@ export declare const shellApi: {
     readonly useClickOutside: typeof useClickOutside;
     readonly useFixedPopupPosition: typeof useFixedPopupPosition;
     readonly usePrefs: typeof usePrefs;
-    readonly useAppState: typeof useAppState;
     readonly getClient: typeof getClient;
     readonly ConnectionManager: typeof ConnectionManager;
     readonly ConnectionState: typeof ConnectionState;
@@ -14687,10 +12191,8 @@ export declare const shellApi: {
     readonly ApiKeyAuthProvider: typeof ApiKeyAuthProvider;
     readonly WorkspaceProvider: import("react").FC<IWorkspaceProviderProps>;
     readonly PrefsProvider: typeof PrefsProvider;
-    readonly AppStateProvider: typeof AppStateProvider;
     readonly Documents: typeof Documents;
     readonly NOOP_VFS: IVirtualFileSystem;
-    readonly CachedVfs: typeof CachedVfs;
     readonly Explorer: import("react").FC<IExplorerProps>;
     readonly DocTabs: import("react").FC<DocTabsProps>;
     readonly DocSplitLayout: import("react").FC<DocSplitLayoutProps>;
@@ -14707,10 +12209,8 @@ export declare const shellApi: {
         children: React$1.ReactNode;
         onClick?: (e: React$1.MouseEvent<HTMLDivElement>) => void;
     }>;
-    readonly AnchoredPopup: import("react").FC<AnchoredPopupProps>;
-    readonly AccountProvider: import("react").FC<IAccountProviderProps>;
+    readonly AccountProvider: import("react").FC<{}>;
     readonly SettingsProvider: import("react").FC<{}>;
-    readonly CheckoutFlow: import("react").FC<CheckoutFlowProps>;
     readonly BxPlus: IconComponent;
     readonly BxEditAlt: IconComponent;
     readonly BxTrash: IconComponent;
@@ -14730,7 +12230,6 @@ export declare const shellApi: {
     readonly BxChevronRight: IconComponent;
     readonly BxFolderOpen: IconComponent;
     readonly AppLayout: import("react").FC<AppLayoutProps>;
-    readonly DesktopView: import("react").FC<DesktopViewProps>;
     readonly getAppVersionOverride: typeof getAppVersionOverride;
     readonly applyAppVersionOverride: typeof applyAppVersionOverride;
     readonly versionedEntryUrl: typeof versionedEntryUrl;
@@ -14788,7 +12287,7 @@ export type ShellApiShape = typeof shellApi;
  * @returns The frozen `shellApi` object.
  */
 export declare function getShellApi(): ShellApiShape;
-export { AppManifestEntry$1 as AppManifestEntry, ConnectResult as AuthUser, Document$1 as Document, Explorer as DocExplorer, ExplorerChild as DocEntryChild, ExplorerConfig as DocExplorerConfig, ExplorerEntry as DocEntry, ExplorerStatus as DocEntryStatus, IConfirmDialogProps as ConfirmDialogProps, IExplorerProps as DocExplorerProps, PipelineControlConnection as IControlConnection, PipelineInputConnection as IInputConnection, PromoRedemption$1 as PromoRedemption, PromoValidation$1 as PromoValidation, ShellConnectionEventMap as ShellEventMap, TASK_STATE as ITaskState, TASK_STATUS as ITaskStatus, TASK_STATUS_FLOW as IFlowData, };
-export {};
+export { AppManifestEntry$1 as AppManifestEntry, ConnectResult as AuthUser, Document$1 as Document, Explorer as DocExplorer, ExplorerChild as DocEntryChild, ExplorerConfig as DocExplorerConfig, ExplorerEntry as DocEntry, ExplorerStatus as DocEntryStatus, IConfirmDialogProps as ConfirmDialogProps, IExplorerProps as DocExplorerProps, PipelineControlConnection as IControlConnection, PipelineInputConnection as IInputConnection, PromoRedemption$1 as PromoRedemption, PromoValidation$1 as PromoValidation, ShellConnectionEventMap as ShellEventMap, TASK_STATE as ITaskState, TASK_STATUS as ITaskStatus, TASK_STATUS_FLOW as IFlowData };
+
 // ===== END FROZEN BUNDLE =====
 export type ShellApiV7 = ShellApiShape;

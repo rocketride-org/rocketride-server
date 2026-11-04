@@ -606,6 +606,20 @@ export interface ShellConfig {
 	 * live traffic off the serving host (e.g. CDN-served UI, direct API).
 	 */
 	serverUri?: string;
+	/**
+	 * HOST-owned sidebar extras — the platform's announcements ticker +
+	 * Documentation row. The shell frames render ONLY what the host
+	 * provides here (and withhold it entirely in deep-app/session-locked
+	 * tabs); the sidebar components themselves carry no platform content.
+	 * `render` produces the expanded block (`padded` for standalone
+	 * placements like the workbench panel foot); `onOpenDocs` drives the
+	 * collapsed rail's Documentation icon.
+	 */
+	sidebarExtras?: {
+		render: (opts?: { padded?: boolean }) => React.ReactNode;
+		onOpenDocs?: () => void;
+	};
+
 	/** All RR_* runtime config — passed through to remote apps via useShellApiConfig(). */
 	apiConfig: ShellApiConfig;
 	/** Branding shown on the loading screen before any app is mounted. */

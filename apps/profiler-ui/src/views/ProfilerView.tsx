@@ -663,17 +663,19 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ channel, engine }) => {
 	// Apply panel actions. The subscription is stable per channel; the handler
 	// ref always sees the latest closures (start/stop/fetch bind live state).
 	const actionRef = useRef<(action: ProfilerAction) => void>(() => {});
-	actionRef.current = (action) => {
-		switch (action.op) {
-			case 'setTarget': setTarget(action.target || null); break;
-			case 'start': void handleStart(action.session); break;
-			case 'stop': void handleStop(); break;
-			case 'viewReport':
-				if (!report) void fetchReport();
-				setShowReportModal(true);
-				break;
-		}
-	};
+	useEffect(() => {
+		actionRef.current = (action) => {
+			switch (action.op) {
+				case 'setTarget': setTarget(action.target || null); break;
+				case 'start': void handleStart(action.session); break;
+				case 'stop': void handleStop(); break;
+				case 'viewReport':
+					if (!report) void fetchReport();
+					setShowReportModal(true);
+					break;
+			}
+		};
+	});
 	useEffect(() => channel.subscribeActions((action) => actionRef.current(action)), [channel]);
 
 	// =========================================================================

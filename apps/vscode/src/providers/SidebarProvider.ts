@@ -31,14 +31,14 @@ import * as vscode from 'vscode';
 import * as crypto from 'crypto';
 import { ConfigManager } from '../config';
 import { ConnectionManager } from '../connection/connection';
-import { GenericEvent } from '../shared/types';
+import { GenericEvent, PIPE_BUILDER_APP_ID } from '../shared/types';
 import { isDeployRunBody } from 'shared/tools/pipelines/runKind';
 import { getLogger } from '../shared/util/output';
 import { getPipelineProvider } from '../extension';
 import { DevToolStore } from './DevToolStore';
 import type { BusHost } from './toolhost/busHost';
 // Deep import on purpose — ext-host-safe .ts leaf (see busHost.ts).
-import { SHELL_PARTITION } from 'shell/src/workspace/workspaceStore';
+import { appPartition } from 'shell/src/workspace/workspaceStore';
 // Deep imports on purpose — ext-host-safe .ts leaves (see busHost.ts).
 import { registerOpHandlers } from 'shell/src/ops/busOps';
 import type { PipelineHostOpMap } from 'shared/ops/pipelineOps';
@@ -61,11 +61,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 	private configManager = ConfigManager.getInstance();
 	private connectionManager = ConnectionManager.getInstance();
 
-	// ── Sidebar mode (persisted per workspace) ───────────────────────────────
 	// NO App Builder state here: MY APPS discovery runs in the WEBVIEW's
 	// AppDev controller (shared tools/appdev) over the generic workspace-FS
 	// service — the extension host no longer knows what an .rrapp binding is.
-	private sidebarMode: string = 'apps';
 
 	private logger = getLogger();
 
@@ -95,13 +93,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 	 *   tool peer traffic rides its retained/signal lanes).
 	 */
 	constructor(private readonly extensionUri: vscode.Uri, private readonly context?: vscode.ExtensionContext, private readonly devTools?: DevToolStore, private readonly busHost?: BusHost) {
-		// Restore the last mode (previously session-only — it died on reload)
-		// and the persisted strip order.
-		// DELIBERATE per-host default: 'apps' in VS Code, 'agent' on web. A
-		// persisted mode whose tool is disabled falls back in SidebarChrome.
-		const savedMode = this.busHost?.prefs.prefsFor(SHELL_PARTITION)[SIDEBAR_MODE_KEY];
-		this.sidebarMode = (typeof savedMode === 'string' ? savedMode : undefined) ?? 'apps';
-		this.toolRows = new ToolRows(this.connectionManager, this.devTools, this.context, this.busHost?.rootBus);
+		this.toolRows = new ToolRows(this.connectionManager, this.devTools, this.context);
 		this.pipelineFiles = new PipelineFiles(this.connectionManager, this.configManager);
 		// The workspace-FS capability (declared in shared/ops/fsOps) is served
 		// HERE too: this provider owns the service and the watch lifecycle.
@@ -242,8 +234,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 	 * @param mode - The mode to select (e.g. `tool:<appId>`).
 	 */
 	public setModeExternal(mode: string): void {
-		this.sidebarMode = mode;
-		this.busHost?.prefs.setPref(SHELL_PARTITION, SIDEBAR_MODE_KEY, mode);
+		// Same partition the webview reads/writes the mode from — the two
+		// sides must share one persisted value.
+		this.busHost?.prefs.setPref(appPartition(PIPE_BUILDER_APP_ID), SIDEBAR_MODE_KEY, mode);
 		// Reveal the RocketRide sidebar (keeping keyboard focus where it is)
 		// so the tool's sidebar body is actually on screen, then switch its
 		// strip to the tool's tab. A SIGNAL, not retained — a focus event,
@@ -266,13 +259,20 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 		this.busHost?.retained.publish('devtools:activeDoc', { appId, docKey });
 	}
 
+	/** Monotonic build id — only the latest buildToolRows result publishes
+	 *  (overlapping builds finish out of order: icon fetches time-box at 5s). */
+	private toolRowsGen = 0;
+
 	/** Publishes fresh strip rows (pin/unpin, account change). The PICKER
 	 *  list no longer rides this — every panel asks the server itself via
 	 *  the brokered client.app.list op. */
 	private pushToolsUpdate(): void {
+		const gen = ++this.toolRowsGen;
 		void this.toolRows.buildToolRows()
 			.catch((): ToolRowDTO[] => this.toolRows.cachedRows())
-			.then((tools) => this.publishToolRows(tools));
+			.then((tools) => {
+				if (gen === this.toolRowsGen) this.publishToolRows(tools);
+			});
 	}
 
 	// =========================================================================

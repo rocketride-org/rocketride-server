@@ -345,6 +345,7 @@ export class EngineInstaller {
 
 			// Clear existing engine contents (preserve lockfile and PID files).
 			// FATAL on a locked survivor — never extract over a dirty tree.
+			fs.rmSync(this.versionJsonPath(), { force: true });
 			await this.clearEngineDir();
 
 			// Extract into engine/

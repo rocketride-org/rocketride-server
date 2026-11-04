@@ -220,9 +220,11 @@ const SqlSidebar: React.FC<SqlSidebarProps> = ({ bridge = localSidebarBridge, ho
 	const openConnection = useCallback((conn: SavedSqlConnection) => {
 		if (!isConnected) { setOpenError('Not connected to a server.'); return; }
 		setOpenError('');
-		setOpeningId(conn.id);
+		// An already-active connection raises no focus change, so nothing
+		// would clear the opening state — skip it and just re-focus.
+		if (endpointKeyForConnection(conn) !== activeKey) setOpeningId(conn.id);
 		bridge.openConnection(conn);
-	}, [bridge, isConnected]);
+	}, [bridge, isConnected, activeKey]);
 
 	// "+ New Connection" as a stock SidebarMenu entry, mirroring the app-builder
 	// sidebar's "+ New app" nav above its MY APPS list. No persistent selection
@@ -265,9 +267,17 @@ const SqlSidebar: React.FC<SqlSidebarProps> = ({ bridge = localSidebarBridge, ho
 							title={conn.mode === 'pipeline' ? `${conn.name} — pipeline: ${conn.pipelineName}` : `${conn.name} — direct (${conn.provider})`}
 							style={styles.row(isActive, isHovered)}
 							onClick={() => { if (!isOpening && !isConfirming) openConnection(conn); }}
-							onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && !isOpening && !isConfirming) { e.preventDefault(); openConnection(conn); } }}
+							// Only the ROW itself opens — the nested action buttons'
+							// Enter/Space bubbles here and must keep its own meaning.
+							onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ') && !isOpening && !isConfirming) { e.preventDefault(); openConnection(conn); } }}
 							onMouseEnter={() => setHoveredId(conn.id)}
 							onMouseLeave={() => setHoveredId(null)}
+							// Focus mirrors hover so keyboard users reach the revealed
+							// actions; blur only clears when focus leaves the row.
+							onFocus={() => setHoveredId(conn.id)}
+							onBlur={(e) => {
+								if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setHoveredId((prev) => (prev === conn.id ? null : prev));
+							}}
 						>
 							<span style={styles.rowIcon(isActive)}><DatabaseIcon /></span>
 							{isConfirming ? (
@@ -302,7 +312,7 @@ const SqlSidebar: React.FC<SqlSidebarProps> = ({ bridge = localSidebarBridge, ho
 							) : (
 								<>
 									<span style={styles.rowLabel}>{isOpening ? `${conn.name}…` : conn.name}</span>
-									{/* Hover actions: modify / delete. */}
+									{/* Hover/focus actions: modify / delete. */}
 									{isHovered && !isOpening && (
 										<>
 											<button

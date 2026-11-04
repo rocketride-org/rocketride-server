@@ -95,12 +95,22 @@ const PipelineWebview: React.FC = () => {
 			setPendingOAuthTokens(undefined);
 			if (payload.envKeys) envKeysApplyRef.current?.(payload.envKeys);
 		};
+		let offRetry: (() => void) | undefined;
+		const retryLoad = (): void => {
+			void cm.request('host.pipeline.load', { doc } as never).then((payload) => applyLoad(payload as Record<string, any>), () => {});
+		};
 		void cm.request('host.pipeline.load', { doc } as never).then(
 			(payload) => applyLoad(payload as Record<string, any>),
 			() => {
-				const offRetry = cm.on('shell:connected', () => {
-					offRetry();
-					void cm.request('host.pipeline.load', { doc } as never).then((payload) => applyLoad(payload as Record<string, any>), () => {});
+				// Already connected: no shell:connected will arrive — retry now.
+				if (cm.isConnected()) {
+					retryLoad();
+					return;
+				}
+				offRetry = cm.on('shell:connected', () => {
+					offRetry?.();
+					offRetry = undefined;
+					retryLoad();
 				});
 			}
 		);
@@ -150,7 +160,10 @@ const PipelineWebview: React.FC = () => {
 				if (typeof v === 'boolean') setCloudConnectionConfigured(v);
 			}),
 		];
-		return () => offs.forEach((off) => off());
+		return () => {
+			offRetry?.();
+			offs.forEach((off) => off());
+		};
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, []);
 

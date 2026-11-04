@@ -72,6 +72,9 @@ export interface WebHostOptions {
 	onReloadPreview: () => void;
 	/** Open the linked preview in a new browser tab (the debug verb). */
 	onOpenDebugTab: () => void;
+	/** Toggle session inheritance for the preview (the Inherit Auth
+	 *  checkbox) — the provider owns the session answer. */
+	onSetInheritAuth: (inherit: boolean) => void;
 }
 
 // =============================================================================
@@ -85,7 +88,7 @@ export interface WebHostOptions {
  * @returns The host adapter AppBuilderScreen mounts.
  */
 export function createWebAppBuilderHost(o: WebHostOptions): IAppBuilderHost {
-	const { client, appId, folder, hasReviewLadder, previewUrl, session, onReloadPreview, onOpenDebugTab, prefs } = o;
+	const { client, appId, folder, hasReviewLadder, previewUrl, session, onReloadPreview, onOpenDebugTab, onSetInheritAuth, prefs } = o;
 
 	return {
 		// The SDK half — the brokered client.* ops + realm-local shell:event
@@ -107,6 +110,9 @@ export function createWebAppBuilderHost(o: WebHostOptions): IAppBuilderHost {
 		subscribeWatch: session ? (listener) => session.subscribeWatch(listener) : undefined,
 		reloadPreview: onReloadPreview,
 		getPreviewUrl: () => previewUrl,
+		// Inherit Auth (parity with the VS Code panel): presence of this
+		// member is what makes the shared DesignView render the checkbox.
+		setInheritAuth: onSetInheritAuth,
 		// Debug = the LINKED preview in a first-class browser tab: the
 		// provider adopts the tab as the injection target (same-origin
 		// handle), so DevTools debugs the real linked app with sourcemapped

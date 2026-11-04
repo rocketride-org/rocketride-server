@@ -18,6 +18,7 @@
 import React, { useState } from 'react';
 import { BaseEdge, EdgeLabelRenderer, getBezierPath, useReactFlow, type EdgeProps } from '@xyflow/react';
 import { Trash2 } from 'lucide-react';
+import { useFlowPreferences } from '../../context/FlowPreferencesContext';
 
 // =============================================================================
 // Styles
@@ -53,6 +54,7 @@ export default function FlowEdge({ id, sourceX, sourceY, targetX, targetY, sourc
 	/** Whether the mouse is currently hovering over this edge. */
 	const [hovered, setHovered] = useState(false);
 	const { setEdges } = useReactFlow();
+	const { isLocked } = useFlowPreferences();
 
 	// ReactFlow can render an edge for a frame before its connected nodes have been
 	// measured — at which point sourceX/Y and targetX/Y are NaN, and getBezierPath
@@ -91,8 +93,9 @@ export default function FlowEdge({ id, sourceX, sourceY, targetX, targetY, sourc
 		<g onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
 			<BaseEdge path={edgePath} markerEnd={markerEnd} style={edgeStyle} />
 
-			{/* Delete button at the midpoint — visible on hover or selection */}
-			{(selected || hovered) && (
+			{/* Delete button at the midpoint — visible on hover or selection,
+			    hidden while the canvas is locked (the lock guard rejects the change) */}
+			{!isLocked && (selected || hovered) && (
 				<EdgeLabelRenderer>
 					<div
 						style={{

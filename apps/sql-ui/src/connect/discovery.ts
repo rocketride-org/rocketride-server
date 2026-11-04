@@ -32,6 +32,7 @@
 // =============================================================================
 
 import type { RocketRideClient } from 'rocketride';
+import { isDirectEndpointKey } from './resolver';
 import type { SqlEndpoint } from './types';
 
 // =============================================================================
@@ -47,6 +48,7 @@ export const DATABASE_PROVIDERS: ReadonlySet<string> = new Set([
 	'db_mysql',
 	'db_postgres',
 	'db_clickhouse',
+	'rocketride_sql',
 ]);
 
 // =============================================================================
@@ -93,6 +95,9 @@ export async function discoverSqlEndpoints(client: RocketRideClient): Promise<Sq
 	// rows for the same pipeline; the token resolver returns the live one.
 	const seen = new Set<string>();
 	const candidates = rows.filter((task) => {
+		// Direct-mode temp pipelines (sqlconn-<id>) are not user pipelines —
+		// surfacing them would let a pipeline binding alias a direct endpoint.
+		if (isDirectEndpointKey(task.projectId)) return false;
 		// TASK_STATE >= 4 (STOPPING/COMPLETED/CANCELLED) is not attachable;
 		// `completed` alone misses the stopping window.
 		if (task.completed || task.state >= 4) return false;

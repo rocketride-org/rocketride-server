@@ -118,6 +118,56 @@ def load_manifest_entries() -> List[Dict[str, Any]]:
 
 
 # =============================================================================
+# THE BUNDLE — the local built tree, and its digest
+# =============================================================================
+
+
+def _local_bundle_root(app_id: str) -> str:
+    """Where the app build emits an app's bundle: ``<engine_dir>/static/apps/<app_id>/``."""
+    return os.path.join(os.path.dirname(sys.executable), 'static', 'apps', app_id)
+
+
+def bundle_digest(app_id: str) -> Optional[str]:
+    """sha256 of an app's built bundle in the local static tree, or None when there is none.
+
+    Covers each file's path relative to the bundle root and its bytes, walked
+    in sorted order, so the same build gives the same digest on every pod and
+    a changed, added, removed or renamed file changes it. Seeded rows record
+    it as ``metadata.build.bundleSha256``; ``bundle_changed`` compares against it.
+
+    None means "no digest": no directory, an empty one (the copy would find no
+    files and fail the seed), or a file or directory that can't be read. Callers
+    then seed without a digest rather than fail, which is how rows looked before
+    the field.
+    """
+    root = _local_bundle_root(app_id)
+    if not os.path.isdir(root):
+        return None
+    digest = hashlib.sha256()
+    found = False
+
+    def unreadable_dir(exc: OSError) -> None:
+        # os.walk skips a directory it can't list unless told otherwise, which
+        # would digest only the readable part of the bundle.
+        raise exc
+
+    try:
+        for dirpath, dirs, files in os.walk(root, onerror=unreadable_dir):
+            dirs.sort()
+            for filename in sorted(files):
+                abs_path = os.path.join(dirpath, filename)
+                rel = os.path.relpath(abs_path, root).replace(os.sep, '/')
+                with open(abs_path, 'rb') as handle:
+                    content = hashlib.sha256(handle.read()).digest()
+                digest.update(rel.encode('utf-8') + b'\0' + content)
+                found = True
+    except OSError as exc:
+        debug(f'[seed_apps] {app_id}: bundle digest unavailable: {exc}')
+        return None
+    return digest.hexdigest() if found else None
+
+
+# =============================================================================
 # THE PRIMITIVE — mint one seed version + copy its bundle
 # =============================================================================
 
@@ -142,43 +192,6 @@ def seed_artifact_of(entry: Dict[str, Any]) -> Dict[str, Any]:
         'name': str(entry.get('name') or app_id),
         'appVersion': str(entry.get('version') or SEED_VERSION),
     }
-
-
-def bundle_sha256(app_id: str) -> Optional[str]:
-    """Deterministic content hash of an app's locally built bundle tree.
-
-    Hashes ``<engine_dir>/static/apps/<app_id>/`` — the same tree
-    ``copy_bundle_to_store`` mirrors into the store — as sorted relative
-    paths + file bytes, so identical rebuilds hash identically regardless of
-    walk order or timestamps. Stamped into ``metadata.build.bundleSha256`` at
-    seed time; later runs recompute it to decide whether the app changed.
-    Returns None when no local tree exists (app not built) — nothing to
-    compare, and nothing servable to reseed from.
-
-    Args:
-        app_id: The app identifier (serving directory name).
-
-    Returns:
-        Hex sha256 of the bundle tree, or None when the tree is absent.
-    """
-    local_root = os.path.join(os.path.dirname(sys.executable), 'static', 'apps', app_id)
-    if not os.path.isdir(local_root):
-        return None
-    digest = hashlib.sha256()
-    for dirpath, dirs, files in os.walk(local_root):
-        # Sorted traversal: os.walk order is filesystem-dependent.
-        dirs.sort()
-        for filename in sorted(files):
-            abs_path = os.path.join(dirpath, filename)
-            rel = os.path.relpath(abs_path, local_root).replace(os.sep, '/')
-            # NUL-delimit path and content so boundaries cannot alias
-            # (e.g. 'a' + 'bc' vs 'ab' + 'c').
-            digest.update(rel.encode('utf-8'))
-            digest.update(b'\0')
-            with open(abs_path, 'rb') as handle:
-                digest.update(handle.read())
-            digest.update(b'\0')
-    return digest.hexdigest()
 
 
 def _manifest_for_compare(manifest: Any) -> Dict[str, Any]:
@@ -212,7 +225,7 @@ def seed_is_current(entry: Dict[str, Any], latest_row: Dict[str, Any]) -> bool:
     Returns:
         True when nothing changed (skip), False when a reseed is due.
     """
-    local = bundle_sha256(str(entry['id']))
+    local = bundle_digest(str(entry['id']))
     if local is None:
         return True
     metadata = latest_row.get('metadata') if isinstance(latest_row.get('metadata'), dict) else {}
@@ -243,7 +256,7 @@ async def copy_bundle_to_store(app_id: str, artifact_path: str) -> int:
     from ai.account.deployment_backend import artifact_content_dir
     from ai.account.store import Store
 
-    local_root = os.path.join(os.path.dirname(sys.executable), 'static', 'apps', app_id)
+    local_root = _local_bundle_root(app_id)
     if not os.path.isdir(local_root):
         debug(f'[seed_apps] no local bundle at {local_root} — store copy skipped for {app_id} (rebuild the app)')
         return 0
@@ -296,10 +309,14 @@ async def seed_app(account: Any, org_id: str, entry: Dict[str, Any], actor: Dict
     # from version numbers everywhere, so recording apps.json's build-time
     # static path would only seed a dead field into every new row.
     manifest = {k: v for k, v in entry.items() if k != 'entry'}
-    # Hash the local tree BEFORE the copy so the stamp records exactly the
-    # bytes this version was seeded from — seed_is_current compares later
-    # rebuilds against it to decide whether a reseed is due.
-    bundle_sha = bundle_sha256(app_id)
+    # Digest the local tree BEFORE the copy so the stamp records exactly the
+    # bytes this version was seeded from — ``seed_is_current`` and
+    # ``bundle_changed`` both compare later rebuilds against it to decide
+    # whether a reseed is due.
+    build: Dict[str, Any] = {'status': 'ok', 'seeded': True, 'endedAt': time.time()}
+    digest = bundle_digest(app_id)
+    if digest:
+        build['bundleSha256'] = digest
     registered = await account.deployments_publish(
         org_id,
         app_id,
@@ -309,15 +326,7 @@ async def seed_app(account: Any, org_id: str, entry: Dict[str, Any], actor: Dict
         # build.status 'ok': the seed's dist/ is populated by the copy below
         # from an already-built static tree, so seeded versions pass the SAME
         # built gate server builds do (no special-casing anywhere downstream).
-        metadata={
-            'manifest': manifest,
-            'build': {
-                'status': 'ok',
-                'seeded': True,
-                **({'bundleSha256': bundle_sha} if bundle_sha else {}),
-                'endedAt': time.time(),
-            },
-        },
+        metadata={'manifest': manifest, 'build': build},
         state='ready',
     )
     try:
@@ -367,6 +376,48 @@ def _build_ok(entry: Dict[str, Any]) -> bool:
     metadata = entry.get('metadata') if isinstance(entry.get('metadata'), dict) else {}
     build = metadata.get('build') if isinstance(metadata.get('build'), dict) else {}
     return str(build.get('status') or '') == 'ok'
+
+
+# =============================================================================
+# CHANGED-BUILD POLICY — for orchestrators that re-seed only what moved
+# =============================================================================
+
+
+async def bundle_changed(account: Any, org_id: str, entry: Dict[str, Any]) -> bool:
+    """Whether this pod's built bundle differs from the one the app was last seeded with.
+
+    The policy behind an orchestrator's changed-only re-seed: force an app
+    only when its build changed, so an unchanged app does not gain a version
+    on every deploy. Compares the local bundle digest with ``bundleSha256``
+    on the newest SEED row; user deploys of the same id are not seeds and
+    are ignored. A seed row without a digest counts as changed: either it
+    predates the field (one re-seed records a digest), or its build failed
+    and was stamped without one, so the next deploy retries the seed.
+
+    Returns False when there is no local bundle (nothing to seed from), no
+    rail rows (the plain seed handles a fresh app), no seed rows (a user
+    deployed the id first, and it is left alone), or when the public audience
+    serves a direct deploy rather than a seed: a release must not replace what
+    someone deployed on purpose. A manual ``--reseed`` still does.
+    """
+    app_id = str(entry['id'])
+    local = bundle_digest(app_id)
+    if local is None:
+        return False
+    rows = await account.deployments_versions(org_id, app_id)
+    # Rows are newest-first, so the first seed row is the latest seed.
+    seeds = [row for row in rows or [] if row.get('comment') == SEED_COMMENT]
+    if not seeds:
+        return False
+    public = await account.publish_get(org_id, 'app', app_id, PUBLIC_AUDIENCE)
+    if public is not None:
+        bound = int(public.get('version', 0))
+        live = next((row for row in rows if int(row.get('version', 0)) == bound), None)
+        if live is not None and live.get('comment') != SEED_COMMENT:
+            return False
+    metadata = seeds[0].get('metadata') if isinstance(seeds[0].get('metadata'), dict) else {}
+    build = metadata.get('build') if isinstance(metadata.get('build'), dict) else {}
+    return build.get('bundleSha256') != local
 
 
 # =============================================================================
@@ -468,16 +519,13 @@ async def seed_manifest_app(
                         continue
                     try:
                         if await copy_bundle_to_store(app_id, str(row.get('artifactPath') or '')) > 0:
-                            # The retried copy serves the CURRENT local tree, so
-                            # the heal stamp carries its hash — the change
-                            # baseline.
-                            healed_sha = bundle_sha256(app_id)
-                            stamp = {
-                                'status': 'ok',
-                                'seeded': True,
-                                **({'bundleSha256': healed_sha} if healed_sha else {}),
-                                'endedAt': time.time(),
-                            }
+                            # The retried copy serves the CURRENT local tree,
+                            # so the heal stamp carries its digest — the
+                            # change baseline.
+                            stamp = {'status': 'ok', 'seeded': True, 'endedAt': time.time()}
+                            digest = bundle_digest(app_id)
+                            if digest:
+                                stamp['bundleSha256'] = digest
                             await account.deployments_set_build(org_id, app_id, int(row.get('version', 0)), stamp)
                             row.setdefault('metadata', {})['build'] = stamp
                             target = row

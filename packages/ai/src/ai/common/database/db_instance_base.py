@@ -176,8 +176,20 @@ def _format_table(table_info: dict) -> dict:
     return result
 
 
+# What get_data and the question lanes report when _executeSQLQuery returns None
+_QUERY_EXECUTION_FAILED = 'Query execution failed'
+
+
 class MissingLlmError(ValueError):
     """A natural-language question reached a node with no llm connected."""
+
+
+class _QuestionFailed(RuntimeError):
+    """A question failed with a message this module wrote for the caller, safe to put on the lanes."""
+
+
+# What the caller gets for a failure whose text the node did not write; the cause goes to the log only
+_QUESTION_FAILED = 'Failed to answer the question'
 
 
 class DatabaseInstanceBase(IInstanceBase, ABC):
@@ -204,6 +216,33 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         Surfaced to SDK callers via the ``dialect`` tool function so applications
         can branch on the underlying engine (dialect-specific SQL, type coercion, etc.).
         """
+
+    def _sessionsAreTransactions(self) -> bool:
+        """Return whether a ``begin`` session is a database transaction on this node.
+
+        db_clickhouse overrides this to False: its ``commit`` and ``rollback`` are
+        no-ops and it has no savepoints, so the session tools must not promise rollback.
+        """
+        return True
+
+    def _unknownSession(self, session_id: Any) -> ValueError:
+        """Return the error for a ``session_id`` the registry does not hold."""
+        kind = 'transaction session' if self._sessionsAreTransactions() else 'session'
+        return ValueError(f'unknown or expired {kind}: {session_id}')
+
+    def _sessionRecoveryPolicy(self) -> str:
+        """Return the ``execute`` description's advice for a session after a failed statement."""
+        if not self._sessionsAreTransactions():
+            return (
+                f'A failed statement inside a session_id leaves the session open. A session on '
+                f'{self._db_display_name()} opens no transaction, so it undoes nothing: every statement is '
+                f'executed when it is sent, rollback discards nothing, and savepoints do not exist.'
+            )
+        return (
+            'A failed statement inside a session_id rolls nothing back and leaves the session open: '
+            'recover with rollback, or rollback to savepoint <name>, before sending more work on that '
+            'session. On PostgreSQL the transaction stays aborted until you do, and commit is refused.'
+        )
 
     # ------------------------------------------------------------------
     # Reflection lock
@@ -296,7 +335,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         sql_query = sql_result['sql']
         result = self._executeSQLQuery(sql_query)
         if result is None:
-            return {'valid': False, 'error': 'Query execution failed', 'sql': sql_query, 'rows': []}
+            return {'valid': False, 'error': _QUERY_EXECUTION_FAILED, 'sql': sql_query, 'rows': []}
 
         rows = [self._sanitize_row(row) for row in result]
         return {'valid': True, 'rows': rows, 'sql': sql_query, 'row_limit': limit}
@@ -393,9 +432,9 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         elif is_valid and sql_query:
             return {'error': 'Generated query contains unsafe SQL', 'sql': sql_query, 'valid': False}
         elif result.get('error'):
-            # EXPLAIN rejected the query on every attempt -- surface the real
-            # database error instead of the rejected SQL, so callers can tell
-            # this apart from a genuinely off-topic question.
+            # EXPLAIN rejected the query on every attempt (or the LLM reported an
+            # error) -- surface the error instead of the rejected SQL, so callers
+            # can tell this apart from a genuinely off-topic question.
             return {'error': result['error'], 'valid': False}
         else:
             return {'answer': sql_query, 'valid': False}
@@ -406,7 +445,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             'required': ['sql'],
             'properties': {
                 'sql': {'type': 'string', 'description': 'Raw SQL statement to execute.'},
-                'session_id': {'type': 'string', 'description': 'Optional transaction session id from begin.'},
+                'session_id': {'type': 'string', 'description': 'Optional session id from begin.'},
                 'params': {'type': 'array', 'description': 'Optional positional bind values for $1..$n.'},
                 'row_mode': {
                     'type': 'string',
@@ -424,10 +463,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         },
         description=lambda self: (
             f'Execute a raw SQL statement against this {self._db_display_name()} database. '
-            f'Bypasses LLM translation and SQL safety checks. '
-            f'A failed statement inside a session_id rolls nothing back and leaves the session open: '
-            f'recover with rollback, or rollback to savepoint <name>, before sending more work on that '
-            f'session. On PostgreSQL the transaction stays aborted until you do, and commit is refused.'
+            f'Bypasses LLM translation and SQL safety checks. {self._sessionRecoveryPolicy()}'
         ),
     )
     def execute(self, args):
@@ -451,7 +487,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             try:
                 result = self.IGlobal.tx_registry.execute(session_id, sql.strip(), params, row_mode)
             except KeyError:
-                raise ValueError(f'unknown or expired transaction session: {session_id}')
+                raise self._unknownSession(session_id)
             except Exception as e:
                 # The statement itself failed. `tx_registry` has no IGlobal and
                 # is shared with other callers, so the formatting the sessionless
@@ -522,10 +558,13 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         output_schema={'type': 'object', 'properties': {'session_id': {'type': 'string'}}},
         description=lambda self: (
             f'Begin a transaction on this {self._db_display_name()} database; returns a session_id.'
+            if self._sessionsAreTransactions()
+            else f'Reserve a connection on this {self._db_display_name()} database; returns a session_id. '
+            f'It opens no transaction: statements sent with the session_id are executed when they are sent.'
         ),
     )
     def begin(self, args):
-        """Begin a transaction and return a session_id."""
+        """Open a session and return its session_id; a transaction unless ``_sessionsAreTransactions`` is False."""
         if not self.IGlobal.allow_execute:
             raise ValueError('execute tool is disabled for this node (set allow_execute=true)')
         return {'session_id': self.IGlobal.tx_registry.begin()}
@@ -537,10 +576,14 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             'properties': {'session_id': {'type': 'string'}},
         },
         output_schema={'type': 'object', 'properties': {'ok': {'type': 'boolean'}}},
-        description=lambda self: 'Commit an open transaction session.',
+        description=lambda self: (
+            'Commit an open transaction session.'
+            if self._sessionsAreTransactions()
+            else 'Close a session. Its statements were already executed when they were sent.'
+        ),
     )
     def commit(self, args):
-        """Commit an open transaction session."""
+        """Commit and close a session; where sessions are not transactions it only closes it."""
         return self._finishTx(args, commit=True)
 
     @tool_function(
@@ -550,10 +593,14 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             'properties': {'session_id': {'type': 'string'}},
         },
         output_schema={'type': 'object', 'properties': {'ok': {'type': 'boolean'}}},
-        description=lambda self: 'Roll back an open transaction session.',
+        description=lambda self: (
+            'Roll back an open transaction session.'
+            if self._sessionsAreTransactions()
+            else 'Close a session. This undoes nothing: its statements were already executed when they were sent.'
+        ),
     )
     def rollback(self, args):
-        """Roll back an open transaction session."""
+        """Roll back and close a session; where sessions are not transactions it only closes it."""
         return self._finishTx(args, commit=False)
 
     def _finishTx(self, args, *, commit: bool):
@@ -565,7 +612,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         try:
             (self.IGlobal.tx_registry.commit if commit else self.IGlobal.tx_registry.rollback)(args['session_id'])
         except KeyError:
-            raise ValueError(f'unknown or expired transaction session: {args["session_id"]}')
+            raise self._unknownSession(args['session_id'])
         return {'ok': True}
 
     @tool_function(
@@ -777,7 +824,16 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         LLM and another attempt is made, up to ``IGlobal.max_validation_attempts``
         times.  Returns the last LLM response if EXPLAIN eventually accepts it;
         if every attempt is rejected, the result is forced to ``isValid: False``
-        with the last EXPLAIN error carried in ``error``.
+        with the last EXPLAIN error carried in ``error``. An ``error`` the LLM
+        puts in its own reply becomes ``_QUESTION_FAILED`` (its text goes to the
+        log), so ``error`` in the result is always text the node wrote.
+
+        Args:
+            question_text: The natural-language question.
+            limit: The row limit the generated query must apply.
+
+        Returns:
+            The LLM's reply as a dict with ``isValid`` and ``query``, plus ``error`` when the question failed.
         """
         previous_sql: str | None = None
         last_error: str | None = None
@@ -785,6 +841,10 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
 
         for attempt in range(self.IGlobal.max_validation_attempts):
             result = self._buildSQLQueryOnce(question_text, limit=limit, previous_sql=previous_sql, error=last_error)
+            # The prompt asks for no error key: whatever the LLM wrote there is its text, not ours
+            if result.get('error'):
+                warning(f'The LLM reported an error for the question: {result["error"]}')
+                result['error'] = _QUESTION_FAILED
 
             is_valid = parse_bool(result.get('isValid', False))
             sql_query = result.get('query', '')
@@ -940,7 +1000,10 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
                 column_names = result.keys()
                 return [dict(zip(column_names, row)) for row in rows]
 
-        except SQLAlchemyError as e:
+        except Exception as e:
+            # Not only SQLAlchemyError: the clickhouse+native:// connector raises its own DatabaseException
+            if not _isDbFailure(e):
+                raise
             error(f'Error executing SQL query: {e}')
             return None
 
@@ -1034,33 +1097,43 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             sql_query = query_json.get('query')
             is_valid_query = parse_bool(query_json.get('isValid', False))
 
-            # The EXPLAIN repair loop gave up: `query` still holds the rejected
-            # SQL, not an answer. Emit the error instead of printing it as prose.
+            # The EXPLAIN repair loop gave up (`query` still holds the rejected SQL,
+            # not an answer) or the LLM reported an error. Report it, never print it as prose.
             if query_json.get('error'):
-                self._emitError(query_json['error'], lanes)
-                return
+                raise _QuestionFailed(query_json['error'])
             # The LLM claimed valid SQL but it fails the safety gate: same rule
             # -- surface the rejection, never emit the unsafe SQL as prose/data.
             if is_valid_query and sql_query and not is_sql_safe(sql_query):
-                self._emitError('Generated query contains unsafe SQL', lanes)
-                return
+                raise _QuestionFailed('Generated query contains unsafe SQL')
+            # Neither SQL to run nor a prose answer: report it instead of emitting the text 'None'
+            if not sql_query:
+                raise _QuestionFailed('The LLM returned neither a query nor an answer')
 
             executed = is_valid_query and bool(sql_query)
             # When the LLM decides it isn't a DB question, `sql_query` holds its prose answer.
             result = self._executeSQLQuery(sql_query) if executed else sql_query
+            # The database rejected the statement at run time (the cause is in the log)
+            if executed and result is None:
+                raise _QuestionFailed(_QUERY_EXECUTION_FAILED)
 
-            self._emit(result, lanes, executed=executed)
-
-        except MissingLlmError as e:
-            # The caller needs this cause, not only the log: on the text/answers
-            # lanes when one is wired, otherwise through the engine's error path
-            # (a table-only pipeline has no lane that carries an error message).
-            error(f'Error handling question: {e}')
-            if 'text' not in lanes and 'answers' not in lanes:
-                raise
-            self._emitError(str(e), lanes)
         except Exception as e:
+            # The caller needs to know the question failed, not only the log: on the
+            # text/answers lanes when one is wired, otherwise through the engine's
+            # error path (a table-only pipeline has no lane that carries an error),
+            # which hands the exception's text to the client too. Only messages
+            # written here reach the caller either way; any other exception text can
+            # carry the LLM's reply or a provider's internals, so it stays in the log.
             error(f'Error handling question: {e}')
+            written_here = isinstance(e, (_QuestionFailed, MissingLlmError))
+            if 'text' not in lanes and 'answers' not in lanes:
+                if written_here:
+                    raise
+                raise _QuestionFailed(_QUESTION_FAILED) from None
+            self._emitError(str(e) if written_here else _QUESTION_FAILED, lanes)
+            return
+
+        # Outside the try: a lane write runs the downstream nodes, so their failure fails the question with their own error
+        self._emit(result, lanes, executed=executed)
 
     def _emitError(self, message: str, lanes) -> None:
         """Emit a validation/safety error to the wired lanes, never a rejected query as prose.

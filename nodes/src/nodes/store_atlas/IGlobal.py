@@ -33,6 +33,8 @@ from rocketlib import warning
 
 class IGlobal(StoreGlobalBase):
     serverName: str = 'atlas'
+    # The connection string carries the user name and password.
+    credential_fields = ('host',)
 
     def _open_store(self, logical_type: str, conn_config: Dict[str, Any], bag: Dict[str, Any]):
         """Return the driver's Store, resolved lazily via the package hook so config mode never loads the driver."""

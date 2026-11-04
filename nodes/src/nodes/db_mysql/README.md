@@ -82,13 +82,18 @@ ORM drivers such as Drizzle require. It returns `{rows, affected_rows}`. A
 failed statement raises `SQL execution failed:` followed by the database's own
 primary message, identically with and without a `session_id`. What is removed
 is the tail: SQLAlchemy's `[SQL: ...]` / `[parameters: ...]` echo. The primary
-sentence itself is passed through as MySQL wrote it, so a syntax error quotes
-the fragment it stopped on (the driver interpolates bound values client-side,
-so that fragment can contain one) and a constraint error names the value that
-collided. That is deliberate: reaching this tool at all requires **Allow
-direct query execution**, and a caller who has it can read the same data with
-a `SELECT`. The full text stays in the server log. `begin` takes no arguments
-and returns `{session_id}`; `commit` and `rollback` require that ID and return
+sentence itself is passed through as MySQL wrote it: a `SIGNAL`'s text comes
+back whole, a constraint error names the value that collided, and a syntax
+error (1064) quotes the rest of the statement from where the parser stopped,
+up to 80 characters (`near '...' at line N`), so a value bound after that point
+can appear in it (the driver interpolates bound values client-side; see
+#2732). That is deliberate: reaching this tool at all requires **Allow direct
+query execution**, and a caller who has it can read the same data with a
+`SELECT`. The full text is written to the server log. For ClickHouse, use the
+`db_clickhouse` node: pointed at ClickHouse's MySQL interface, this node
+returns ClickHouse's error text as is, which can repeat the statement and its
+bound values. `begin` takes no arguments and returns `{session_id}`; `commit`
+and `rollback` require that ID and return
 `{ok: true}`. These four write-capable operations fail when **Allow direct
 query execution** is off; unknown or expired session IDs also fail. Invalid
 tool input raises an error.
