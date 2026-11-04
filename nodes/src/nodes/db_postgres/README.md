@@ -42,7 +42,7 @@ first insert.
 
 An agent (e.g. `agent_deepagent`) with this node connected as a tool. The
 agent calls `get_schema` to learn the shape of the data, then `get_data` to
-answer questions; generated queries run in a read-only transaction, so they cannot change data.
+answer questions; generated queries must be shaped like a `SELECT` and run in a read-only transaction, so they cannot change data.
 
 ## Connections
 
@@ -143,11 +143,11 @@ PostgreSQL server it queries.
 
 Generated SQL passes three gates:
 
-1. **Shape check**: only statements beginning with `SELECT` (optionally prefixed by `EXPLAIN`) are allowed, and a `SELECT` with `INTO` or a row lock (`FOR UPDATE`, `FOR SHARE`) is rejected. Literals and comments are masked first, under PostgreSQL and under MySQL quoting rules, so text inside them can neither hide a clause nor trip a check. Every statement in a multi-statement input is checked, and `WITH` (CTE) is deliberately excluded because PostgreSQL accepts CTE-into-mutation (e.g. `WITH x AS (...) DELETE ...`).
+1. **Shape check**: only statements beginning with `SELECT` (optionally prefixed by `EXPLAIN`) are allowed, and a `SELECT` with `INTO` or a row lock (`FOR UPDATE`, `FOR SHARE`) is rejected. Literals and comments are masked first, under PostgreSQL and under MySQL quoting rules, so text inside them can neither hide a clause nor trip a check. Multi-statement input is rejected, and `WITH` (CTE) is deliberately excluded because PostgreSQL accepts CTE-into-mutation (e.g. `WITH x AS (...) DELETE ...`).
 2. **`EXPLAIN` validation**: the query is validated against the live database. If `EXPLAIN` rejects it, the rejected SQL and the database error are fed back to the LLM for a corrected query, up to `max_attempts` times (default 5).
-3. **Read-only transaction**: the `EXPLAIN` and the query run in a `READ ONLY` transaction with `statement_timeout` set to 60 seconds. PostgreSQL refuses any write (`SELECT ... INTO`, `nextval`, `setval`, `FOR UPDATE`, a function that modifies data) and cancels a query that runs longer.
+3. **Read-only transaction**: the `EXPLAIN` and the query run in a `READ ONLY` transaction with `statement_timeout` set to 60 seconds. PostgreSQL refuses any write (`SELECT ... INTO`, `nextval`, `setval`, `FOR UPDATE`, a function that modifies data) and cancels a query that runs longer. The transaction covers one statement: psycopg2 sends a multi-statement input as one string, and a later statement in it could end the transaction (`COMMIT`) or lift the time limit (`set_config()`), so the shape check's refusal of multi-statement input is what stops such an input.
 
-The shape check is a first pass, not the guarantee: a `SELECT` can call a function whose side effects its text does not show. The read-only transaction stops writes, but not reads of server files (`pg_read_file`, `lo_import`), signals to other sessions (`pg_terminate_backend`) or connections out of the database (`dblink`). The role the node connects as controls those: grant it `SELECT` on the tables it should answer from and nothing more, not superuser and not membership of `pg_read_server_files`, `pg_signal_backend` or `pg_execute_server_program`.
+Apart from multi-statement input, the shape check is a first pass, not the guarantee: a `SELECT` can call a function whose side effects its text does not show. The read-only transaction stops writes, but not reads of server files (`pg_read_file`, `lo_import`), signals to other sessions (`pg_terminate_backend`) or connections out of the database (`dblink`). The role the node connects as controls those: grant it `SELECT` on the tables it should answer from and nothing more, not superuser and not membership of `pg_read_server_files`, `pg_signal_backend` or `pg_execute_server_program`.
 
 Insert operations never go through SQL generation; they use the `answers` lane.
 

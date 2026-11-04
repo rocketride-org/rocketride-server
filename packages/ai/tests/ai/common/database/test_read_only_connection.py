@@ -28,9 +28,10 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import create_engine, text
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import OperationalError, ProgrammingError
 
 from ai.common.database.db_global_base import DatabaseGlobalBase
+from ai.common.database.sql_safety import is_sql_safe
 from ai.common.database.db_instance_base import DatabaseInstanceBase
 
 
@@ -114,6 +115,14 @@ def test_sqlite_reads_and_refuses_writes(sqlite_global):
     assert _count(sqlite_global.engine) == 2
 
 
+def test_sqlite_refuses_a_chain(sqlite_global):
+    """sqlite3 runs one statement per call, so a ;-chain cannot switch query_only off and then write."""
+    with pytest.raises(ProgrammingError, match='one statement'):
+        with sqlite_global.read_only_connection() as conn:
+            conn.exec_driver_sql('PRAGMA query_only = OFF; DELETE FROM t')
+    assert _count(sqlite_global.engine) == 2
+
+
 def test_sqlite_connection_is_writable_again_after_the_block(sqlite_global):
     """The pooled connection goes back read-write, also after a refused write."""
     with pytest.raises(OperationalError):
@@ -125,7 +134,7 @@ def test_sqlite_connection_is_writable_again_after_the_block(sqlite_global):
 
 
 def test_generated_query_paths_use_the_read_only_connection(sqlite_global):
-    """``_executeSQLQuery`` and the EXPLAIN check cannot write, whatever the SQL says."""
+    """``_executeSQLQuery`` and the EXPLAIN check cannot write, whatever the statement says."""
     inst = _Instance.__new__(_Instance)
     inst.IGlobal = sqlite_global
 
@@ -231,6 +240,8 @@ _LIVE = {
             'CREATE TABLE {t}_new (id int)',
             'CREATE TABLE {t}_copy AS SELECT * FROM {t}',
             'SELECT * FROM {t} FOR UPDATE',
+            # pymysql connects without multi-statements, so a chain cannot switch the session back to read-write first
+            'SET SESSION TRANSACTION READ WRITE; INSERT INTO {t} VALUES (9)',
         ],
         'extra': [],
         'drop': ['DROP TABLE IF EXISTS {t}', 'DROP TABLE IF EXISTS {t}_new', 'DROP TABLE IF EXISTS {t}_copy'],
@@ -247,6 +258,7 @@ _LIVE = {
             'SELECT 1 SETTINGS readonly = 0',
             'SELECT 1 SETTINGS max_execution_time = 0',
             "SELECT * FROM url('http://127.0.0.1:8123/?query=SELECT+1', CSV)",
+            'SELECT 1; INSERT INTO {t} VALUES (9)',
         ],
         'extra': [],
         'drop': ['DROP TABLE IF EXISTS {t}', 'DROP TABLE IF EXISTS {t}_new'],
@@ -282,12 +294,41 @@ def live(request):
 
 
 def test_live_server_refuses_every_write(live):
-    """Each write, lock and DDL statement is refused by the server inside the block."""
+    """Each write, lock and DDL statement is refused by the server inside the block, and the table stays empty."""
     glb, table, case = live
     for statement in case['refused']:
         with pytest.raises(Exception):  # noqa: B017 - each driver raises its own class
             with glb.read_only_connection() as conn:
                 conn.execute(text(statement.format(t=table))).fetchall()
+    with glb.engine.connect() as conn:
+        assert conn.exec_driver_sql(f'SELECT count(*) FROM {table}').scalar() == 0
+
+
+def test_live_postgres_chain_needs_the_shape_check(live):
+    """On PostgreSQL a COMMIT in a ;-chain leaves the read-only transaction, so is_sql_safe's chain rule must stop it."""
+    glb, table, _case = live
+    if glb.engine.dialect.name != 'postgresql':
+        pytest.skip('this driver refuses a ;-chain: see the refused statements')
+    chain = f'COMMIT; INSERT INTO {table} VALUES (9)'
+    assert not is_sql_safe(chain)
+    with glb.read_only_connection() as conn:
+        conn.execute(text(chain))
+    with glb.engine.connect() as conn:
+        assert conn.exec_driver_sql(f'SELECT count(*) FROM {table}').scalar() == 1
+
+
+def test_live_postgres_chain_of_reads_lifts_the_time_limit(live):
+    """On PostgreSQL a later SELECT of a ;-chain can switch the time limit off, so is_sql_safe refuses any chain."""
+    glb, _table, _case = live
+    if glb.engine.dialect.name != 'postgresql':
+        pytest.skip('this driver refuses a ;-chain: see the refused statements')
+    sleep = glb.READ_QUERY_TIMEOUT + 2
+    chain = f"SELECT 1; SELECT set_config('statement_timeout', '0', false); SELECT pg_sleep({sleep})"
+    assert not is_sql_safe(chain)
+    start = time.monotonic()
+    with glb.read_only_connection() as conn:
+        conn.execute(text(chain))
+    assert time.monotonic() - start >= sleep
 
 
 def test_live_server_stops_a_long_query(live):

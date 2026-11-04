@@ -29,9 +29,8 @@ from ai.common.database.sql_safety import is_sql_safe
         'SELECT * FROM users JOIN accounts ON users.id = accounts.user_id',
         'EXPLAIN SELECT 1',
         'explain select 1',
-        'SELECT 1; SELECT 2',
-        'SELECT 1;\nSELECT 2;\n',
         'SELECT 1;',
+        'SELECT 1;\n',
     ],
 )
 def test_allows_select_variants(sql):
@@ -106,6 +105,30 @@ def test_rejects_non_read_only(sql):
 )
 def test_rejects_chain_with_any_unsafe_statement(sql):
     """If any statement in a ;-chain is unsafe, the whole input is rejected."""
+    assert is_sql_safe(sql) is False
+
+
+@pytest.mark.parametrize(
+    'sql',
+    [
+        'COMMIT; INSERT INTO t VALUES (1)',
+        'ROLLBACK; INSERT INTO t VALUES (1)',
+        'END; DELETE FROM t',
+        'SELECT 1; COMMIT; INSERT INTO t VALUES (1)',
+        'SET TRANSACTION READ WRITE; INSERT INTO t VALUES (1)',
+        'SET default_transaction_read_only = off; COMMIT; DELETE FROM t',
+        'SET statement_timeout = 0; SELECT pg_sleep(100)',
+        "SELECT 1; SELECT set_config('statement_timeout', '0', false); SELECT pg_sleep(100)",
+    ],
+)
+def test_rejects_a_chain_that_would_get_around_a_postgres_read_only_transaction(sql):
+    """On PostgreSQL a ;-chain can end the read-only transaction or lift its time limit, so this check must stop it."""
+    assert is_sql_safe(sql) is False
+
+
+@pytest.mark.parametrize('sql', ['SELECT 1; SELECT 2', 'SELECT 1;\nSELECT 2;\n', 'EXPLAIN SELECT 1; SELECT 2'])
+def test_rejects_more_than_one_statement_even_reads(sql):
+    """A generated query is one statement; a chain of reads is refused too."""
     assert is_sql_safe(sql) is False
 
 

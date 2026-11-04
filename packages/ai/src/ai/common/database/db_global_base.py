@@ -660,11 +660,15 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
     def read_only_connection(self) -> Iterator[Connection]:
         """Yield a connection on which the database refuses writes and stops a query after ``READ_QUERY_TIMEOUT``.
 
-        This is the guarantee that a generated query cannot change the database; ``is_sql_safe`` is only a
-        first pass over its shape.
+        This is the database's own guarantee that a generated statement cannot change it; ``is_sql_safe`` is a
+        first pass over its shape. On PostgreSQL it covers one statement only, see below.
 
         - PostgreSQL: a READ ONLY transaction (``postgresql_readonly``, set before the transaction begins)
-          with ``SET LOCAL statement_timeout``.
+          with ``SET LOCAL statement_timeout``. psycopg2 sends a ``;``-chain as one string: a ``COMMIT`` or
+          ``ROLLBACK`` in it ends the transaction, so the statements after it can write, and a ``SET`` or
+          ``set_config()`` in it lifts the time limit for the statements after it. ``is_sql_safe`` rejects
+          any chain; on PostgreSQL that rule is part of the guarantee. MySQL and MariaDB (pymysql connects
+          without multi-statements), ClickHouse and SQLite refuse a ``;``-chain outright.
         - MySQL and MariaDB: a read-only session (``SET SESSION TRANSACTION READ ONLY``, which also refuses
           DDL) with ``max_execution_time`` (``max_statement_time`` on MariaDB). ``SELECT ... INTO OUTFILE``
           is not a table change and still runs here: ``is_sql_safe`` refuses it, and a role without the FILE

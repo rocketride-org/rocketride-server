@@ -34,7 +34,10 @@ sessions; on MySQL ``LOAD_FILE`` reads files. The guarantee is one layer
 down: ``DatabaseGlobalBase.read_only_connection`` runs the query in a
 transaction the database itself keeps read-only, with a time limit. For file
 reads and other sessions the control is a database role without those
-privileges.
+privileges. One exception: on PostgreSQL psycopg2 sends a ``;``-chain as
+one string, and a later statement of it can end that transaction (``COMMIT``)
+or lift the time limit (``set_config()``), so there this check's refusal of
+more than one statement is part of the guarantee. Keep it.
 
 Literals and comments are masked before any check, so a keyword inside a
 string cannot trip a check and a comment cannot hide a clause from one. How
@@ -218,7 +221,7 @@ def _mask_mysql(sql: str) -> str | None:
 
 
 def _is_read_shaped(masked: str | None) -> bool:
-    """Return True if every statement of the masked text is a SELECT that does not write or lock.
+    """Return True if the masked text holds at most one statement, a SELECT that does not write or lock.
 
     Args:
         masked: The statement text with literals and comments blanked, or None if masking refused it.
@@ -229,19 +232,23 @@ def _is_read_shaped(masked: str | None) -> bool:
     if masked is None:
         return False
     # A ';' inside a literal or a comment is blanked, so this splits real statements only
-    for statement in (part.strip() for part in masked.split(';')):
-        if statement and (not _ALLOWED_STATEMENT.match(statement) or _WRITING_CLAUSE.search(statement)):
-            return False
-    return True
+    statements = [part.strip() for part in masked.split(';') if part.strip()]
+    if len(statements) > 1:
+        return False
+    return all(
+        _ALLOWED_STATEMENT.match(statement) and not _WRITING_CLAUSE.search(statement) for statement in statements
+    )
 
 
 def is_sql_safe(sql: str) -> bool:
-    """Return False unless every statement is shaped like a read: ``SELECT``, optionally behind ``EXPLAIN``.
+    """Return False unless the SQL is one statement shaped like a read: ``SELECT``, optionally behind ``EXPLAIN``.
 
     A whitelist: anything else (SET, COPY, PREPARE / EXECUTE, DO, HANDLER, WITH, ...) is rejected, and so
-    is a SELECT with ``INTO`` or a row lock (``FOR UPDATE``, ``FOR SHARE``, ``LOCK IN SHARE MODE``). Every
-    statement of a ``;``-chain must pass. The text is read under PostgreSQL and under MySQL rules (see the
-    module docstring) and must pass both.
+    is a SELECT with ``INTO`` or a row lock (``FOR UPDATE``, ``FOR SHARE``, ``LOCK IN SHARE MODE``). So is
+    a ``;``-chain of more than one statement, reads included: on PostgreSQL a later statement could end
+    the read-only transaction or lift its time limit, and a generated query is one statement. A trailing
+    ``;`` is fine. The text is read under PostgreSQL and under MySQL rules (see the module docstring) and
+    must pass both.
 
     Not a read-only guarantee: see the module docstring. Empty or whitespace-only input passes, as there is
     no statement to reject; a caller that must forbid empty SQL guards that itself.

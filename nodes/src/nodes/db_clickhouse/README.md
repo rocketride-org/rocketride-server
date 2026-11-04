@@ -172,8 +172,8 @@ server from the environment where the pipeline runs.
 ### Generated-query safety
 
 For LLM-generated SQL, the node only accepts `SELECT`, optionally preceded by
-`EXPLAIN`. It masks literals and comments, checks every semicolon-separated
-statement, and rejects CTEs plus a `SELECT` with `INTO` or a row lock. It validates each safe
+`EXPLAIN`. It masks literals and comments, and rejects multi-statement input
+and CTEs plus a `SELECT` with `INTO` or a row lock. It validates each safe
 candidate with `EXPLAIN` and feeds database errors to the LLM for the next
 attempt.
 
