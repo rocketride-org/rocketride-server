@@ -197,6 +197,58 @@ def test_search_web_requires_query():
         inst.search_web({'query': '   '})
 
 
+def test_search_web_rejects_non_boolean_scrape_markdown():
+    inst, _ = _make_instance()
+    with pytest.raises(ValueError, match='scrape_markdown must be a boolean'):
+        inst.search_web({'query': 'rocketride', 'scrape_markdown': 'false'})
+
+
+def test_search_web_falls_back_to_metadata_for_scraped_documents():
+    inst, app = _make_instance()
+    app.search.return_value = SimpleNamespace(
+        web=[
+            SimpleNamespace(
+                url=None,
+                title=None,
+                description=None,
+                markdown='# Doc 1',
+                metadata=SimpleNamespace(
+                    url='https://example.com/doc1',
+                    title='Doc 1 Title',
+                    description='Doc 1 Desc',
+                ),
+            ),
+            SimpleNamespace(
+                markdown='# Doc 2',
+                metadata={
+                    'url': 'https://example.com/doc2',
+                    'title': 'Doc 2 Title',
+                    'description': 'Doc 2 Desc',
+                },
+            ),
+        ]
+    )
+
+    res = inst.search_web({'query': 'rocketride', 'scrape_markdown': True})
+    assert res == {
+        'success': True,
+        'results': [
+            {
+                'url': 'https://example.com/doc1',
+                'title': 'Doc 1 Title',
+                'description': 'Doc 1 Desc',
+                'markdown': '# Doc 1',
+            },
+            {
+                'url': 'https://example.com/doc2',
+                'title': 'Doc 2 Title',
+                'description': 'Doc 2 Desc',
+                'markdown': '# Doc 2',
+            },
+        ],
+    }
+
+
 def test_iglobal_clamps_max_results(monkeypatch):
     glb = global_mod.IGlobal()
     glb.IEndpoint = SimpleNamespace(endpoint=SimpleNamespace(openMode=2))

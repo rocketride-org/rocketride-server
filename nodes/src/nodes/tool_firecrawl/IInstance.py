@@ -176,7 +176,9 @@ class IInstance(IInstanceBase):
                 limit = default_max
         limit = max(1, min(20, limit))
 
-        scrape_markdown = bool(args.get('scrape_markdown', False))
+        scrape_markdown = args.get('scrape_markdown', False)
+        if not isinstance(scrape_markdown, bool):
+            raise ValueError('scrape_markdown must be a boolean')
         search_kwargs: dict = {'limit': limit, 'integration': '_rocketride'}
         if scrape_markdown:
             search_kwargs['scrape_options'] = {'formats': ['markdown']}
@@ -193,17 +195,35 @@ class IInstance(IInstanceBase):
         results = []
         for item in raw_items or []:
             if isinstance(item, dict):
+                metadata = item.get('metadata')
+                if isinstance(metadata, dict):
+                    metadata_url = metadata.get('url')
+                    metadata_title = metadata.get('title')
+                    metadata_description = metadata.get('description')
+                else:
+                    metadata_url = getattr(metadata, 'url', None)
+                    metadata_title = getattr(metadata, 'title', None)
+                    metadata_description = getattr(metadata, 'description', None)
                 entry = {
-                    'url': item.get('url', '') or '',
-                    'title': item.get('title', '') or '',
-                    'description': item.get('description', '') or '',
+                    'url': item.get('url', '') or metadata_url or '',
+                    'title': item.get('title', '') or metadata_title or '',
+                    'description': item.get('description', '') or metadata_description or '',
                 }
                 markdown = item.get('markdown')
             else:
+                metadata = getattr(item, 'metadata', None)
+                if isinstance(metadata, dict):
+                    metadata_url = metadata.get('url')
+                    metadata_title = metadata.get('title')
+                    metadata_description = metadata.get('description')
+                else:
+                    metadata_url = getattr(metadata, 'url', None)
+                    metadata_title = getattr(metadata, 'title', None)
+                    metadata_description = getattr(metadata, 'description', None)
                 entry = {
-                    'url': getattr(item, 'url', '') or '',
-                    'title': getattr(item, 'title', '') or '',
-                    'description': getattr(item, 'description', '') or '',
+                    'url': getattr(item, 'url', '') or metadata_url or '',
+                    'title': getattr(item, 'title', '') or metadata_title or '',
+                    'description': getattr(item, 'description', '') or metadata_description or '',
                 }
                 markdown = getattr(item, 'markdown', None)
 
