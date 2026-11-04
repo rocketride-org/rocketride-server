@@ -73,7 +73,10 @@ function engine(h: ReturnType<typeof createRealmClientHarness>, files: Record<st
 			case 'rrext_store': {
 				const sub = subcommand(message);
 				if (sub === 'fs_stat') return { body: { exists: String(args.path) in files } };
-				if (sub === 'fs_get_json') return { body: { value: files[String(args.path)] } };
+				if (sub === 'fs_get_json') {
+					if (!(String(args.path) in files)) throw new Error(`File not found: ${String(args.path)}`);
+					return { body: { value: files[String(args.path)] } };
+				}
 				if (sub === 'fs_put_json') { puts.push({ path: String(args.path), value: args.value }); return { body: {} }; }
 				return { body: {} };
 			}
@@ -251,7 +254,7 @@ describe('case 5 — history prefs over the real client: a missing file is first
 	const PATH = historyPrefsPath('graph');
 	const OWNER = 'user-a|org-1|team-1';
 
-	it('fsStat exists:false is the only first-run signal: a later write creates the file', async () => {
+	it('a missing stat confirmed by a not-found read is a first run: a later write creates the file', async () => {
 		const h = createRealmClientHarness();
 		const { puts } = engine(h);
 		const clock = manualClock();

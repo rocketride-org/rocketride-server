@@ -42,16 +42,22 @@
 //     only once `load()` settled. A change made before or during the load is
 //     QUEUED and applied over the loaded file (it wins over the stored value),
 //     then written once the load is ready.
-//   NEVER CLOBBER. `fsStat` tells a missing file (first run: start
-//     empty, writes allowed) from one that exists. The engine answers
-//     `{exists: false}` for a missing file AND for a missing parent folder
-//     (packages/ai/src/ai/account/file_store.py FileStore.stat: an absent
-//     prefix lists nothing, and get_file_info's StorageNotFoundError is
-//     caught), so a first run is always a clean `ready`. Only a failed request
-//     fails a load; it is retried (PREFS_LOAD_ATTEMPTS in all) before the
-//     session falls back to memory. A file that exists but cannot be read, or
+//   NEVER CLOBBER. `fsStat` is not trusted to say "missing": the engine
+//     answers `{exists: false}` for a missing file AND for a missing parent
+//     folder AND for ANY storage error (file_store.py FileStore.stat catches
+//     StorageError, not only StorageNotFoundError, so a throttled or failing
+//     backend looks like an absent file). So a "missing" answer is CONFIRMED by
+//     a read: only a read that fails as a proven not-found (`/file not found/i`,
+//     the rule develop's saved-connections store uses; the SDK carries no
+//     structured code for it) is a first run (start empty, writes allowed). A
+//     read that succeeds means the file is there and is used. Any other failure,
+//     of the stat or the read, fails the load; it is retried
+//     (PREFS_LOAD_ATTEMPTS in all) before the session falls back to memory, with
+//     no writer installed. A file that exists but cannot be read, or
 //     holds an unknown or newer format, is never written: the session keeps
-//     its history in memory and the failure is reported.
+//     its history in memory and the failure is reported. A realm with no client
+//     yet fails the request as `unavailable` (nothing sent) and counts as a
+//     failed request.
 //   ONE BAG PER OWNER. The owner is the identity fingerprint (user,
 //     organization, development team). The file keeps one bag per owner and
 //     an accessor reads and writes only its own; every other entry is written
@@ -208,6 +214,19 @@ class FileFormatError extends Error {
 }
 
 /**
+ * Whether a failed read is a PROVEN not-found: the engine's file store raises
+ * `StorageError('File not found: …')` (packages/ai/src/ai/account/file_store.py)
+ * and the SDK exposes no structured code for it, so the message is the proof
+ * (the same rule develop's saved-connections store uses).
+ *
+ * @param error - What the read threw.
+ * @returns True for a file-not-found failure.
+ */
+function isNotFound(error: unknown): boolean {
+	return error instanceof Error && /file not found/i.test(error.message);
+}
+
+/**
  * Another owner's entry, kept exactly as it was read (it is written back as is).
  */
 interface IKeptEntry {
@@ -353,9 +372,21 @@ export function createFsPrefs(opts: IFsPrefsOptions): IFsPrefs {
 	const readOnce = async (): Promise<ILoadedFile | 'stale'> => {
 		const stat = await fs.fsStat(path);
 		if (!stillOwner()) return 'stale';
-		if (isPlainObject(stat) && stat.exists === false) return { mine: {}, others: {}, extra: {} };
-		if (!isPlainObject(stat) || stat.exists !== true) throw new Error('fsStat gave no answer about the history file.');
-		const raw = await fs.fsReadJson<unknown>(path);
+		if (!isPlainObject(stat) || (stat.exists !== true && stat.exists !== false)) throw new Error('fsStat gave no answer about the history file.');
+		// `exists: false` is NOT proof of a missing file: the engine's stat turns
+		// ANY storage error (a throttled or failing backend) into it. So a "missing"
+		// answer is confirmed by reading, and only a read that fails as a proven
+		// not-found is a first run; any other failure leaves the file unreadable
+		// (no writer, bounded retry). A read that succeeds after a "missing" stat
+		// means the stat lied, and the file is used as read.
+		let raw: unknown;
+		try {
+			raw = await fs.fsReadJson<unknown>(path);
+		} catch (error) {
+			if (!stillOwner()) return 'stale';
+			if (stat.exists === false && isNotFound(error)) return { mine: {}, others: {}, extra: {} };
+			throw error;
+		}
 		if (!stillOwner()) return 'stale';
 		return readFile(raw, owner);
 	};
