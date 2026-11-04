@@ -383,6 +383,22 @@ def _build_ok(entry: Dict[str, Any]) -> bool:
 # =============================================================================
 
 
+def public_serves_user_deploy(rows: List[Dict[str, Any]], public: Optional[Dict[str, Any]]) -> bool:
+    """Whether the public audience is bound to a direct (non-seed) deploy.
+
+    The guard every automatic re-seed honors: when someone deployed the id on
+    purpose and the public rung serves that deploy, a release must not
+    repoint it. ``rows`` are the app's rail rows; ``public`` is the public
+    publish binding (None when unbound). An unbound rung, or a binding to a
+    version not among ``rows``, is not a user deploy.
+    """
+    if public is None:
+        return False
+    bound = int(public.get('version', 0))
+    live = next((row for row in rows or [] if int(row.get('version', 0)) == bound), None)
+    return live is not None and live.get('comment') != SEED_COMMENT
+
+
 async def bundle_changed(account: Any, org_id: str, entry: Dict[str, Any]) -> bool:
     """Whether this pod's built bundle differs from the one the app was last seeded with.
 
@@ -412,11 +428,8 @@ async def bundle_changed(account: Any, org_id: str, entry: Dict[str, Any]) -> bo
     if not seeds:
         return False
     public = await account.publish_get(org_id, 'app', app_id, PUBLIC_AUDIENCE)
-    if public is not None:
-        bound = int(public.get('version', 0))
-        live = next((row for row in rows if int(row.get('version', 0)) == bound), None)
-        if live is not None and live.get('comment') != SEED_COMMENT:
-            return False
+    if public_serves_user_deploy(rows, public):
+        return False
     metadata = seeds[0].get('metadata') if isinstance(seeds[0].get('metadata'), dict) else {}
     build = metadata.get('build') if isinstance(metadata.get('build'), dict) else {}
     return build.get('bundleSha256') != local

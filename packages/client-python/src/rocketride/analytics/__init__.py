@@ -35,7 +35,7 @@ Nothing else lives here.
 
 from __future__ import annotations
 
-from typing import Callable, Optional
+from typing import Callable, Optional, Protocol
 
 # Per-call capture options a sink may honor (transport/timestamp/uuid — see the
 # TypeScript mirror's SendOptions). Plain dict: Python sinks are server-side
@@ -43,7 +43,17 @@ from typing import Callable, Optional
 SendOptions = dict
 
 ReportSink = Callable[[str, Optional[dict], Optional[SendOptions]], None]
-Reporter = Callable[[str, Optional[dict], Optional[SendOptions]], None]
+
+
+class Reporter(Protocol):
+    """A bound reporter: ``report(event, props=None, options=None)``.
+
+    A Protocol rather than a Callable alias so ``report('x')`` type-checks:
+    ``props`` and ``options`` are optional.
+    """
+
+    def __call__(self, event: str, props: Optional[dict] = None, options: Optional[SendOptions] = None) -> None: ...
+
 
 __all__ = ['ReportSink', 'Reporter', 'SendOptions', 'create_reporter']
 

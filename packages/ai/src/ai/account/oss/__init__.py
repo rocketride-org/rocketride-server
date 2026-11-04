@@ -225,16 +225,19 @@ class Account(AccountBase):
           the newest seed's recorded bundleSha256 — version strings lie when
           an upgrade ships a rebuilt bundle without a bump, and the digest is
           the truth. A seed row predating the digest field reads as changed
-          (one re-seed records it).
+          (one re-seed records it). Neither trigger fires while the public
+          rung serves a user's direct deploy: a release never repoints that.
         - rail rows but NO seed rows (a user deployed the id first) ->
           force: bind the public rung to a fresh SEED version, never to a
           user row
         """
         from ai.account.seed_apps import (
+            PUBLIC_AUDIENCE,
             SEED_COMMENT,
             SYSTEM_ACTOR,
             bundle_digest,
             load_manifest_entries,
+            public_serves_user_deploy,
             seed_manifest_app,
         )
 
@@ -262,16 +265,21 @@ class Account(AccountBase):
                         metadata = seeds[0].get('metadata') if isinstance(seeds[0].get('metadata'), dict) else {}
                         stored = ((metadata or {}).get('manifest') or {}).get('version')
                         shipped = entry.get('version')
-                        force = bool(shipped) and str(stored or '') != str(shipped)
-                        if not force:
-                            # The digest trigger: an upgrade that rebuilt the
-                            # bundle without bumping the manifest version must
-                            # still march. No local bundle = nothing to compare
-                            # (never force); a seed row without a digest reads
-                            # as changed, so one re-seed records it.
-                            build = metadata.get('build') if isinstance(metadata.get('build'), dict) else {}
-                            local = bundle_digest(str(app_id))
-                            force = local is not None and build.get('bundleSha256') != local
+                        version_moved = bool(shipped) and str(stored or '') != str(shipped)
+                        # The digest trigger: an upgrade that rebuilt the
+                        # bundle without bumping the manifest version must
+                        # still march. No local bundle = nothing to compare
+                        # (never force); a seed row without a digest reads
+                        # as changed, so one re-seed records it.
+                        build = metadata.get('build') if isinstance(metadata.get('build'), dict) else {}
+                        local = bundle_digest(str(app_id))
+                        digest_changed = local is not None and build.get('bundleSha256') != local
+                        if version_moved or digest_changed:
+                            # Neither trigger may repoint a public rung that
+                            # serves someone's deliberate deploy (the same
+                            # guard bundle_changed honors).
+                            public = await self.publish_get('local', 'app', str(app_id), PUBLIC_AUDIENCE)
+                            force = not public_serves_user_deploy(rows, public)
                 # Step 2: run the shared seeder with that policy.
                 if await seed_manifest_app(self, 'local', entry, SYSTEM_ACTOR, force=force):
                     seeded += 1

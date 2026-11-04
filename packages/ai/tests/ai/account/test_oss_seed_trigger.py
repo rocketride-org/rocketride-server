@@ -30,7 +30,7 @@ replaced with a recorder, so only the force policy is under test.
 """
 
 import asyncio
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 
 from ai.account import seed_apps
@@ -54,14 +54,25 @@ def _seed_row(version: int, manifest_version: str = '1.0.0', digest: Any = 'sha-
     }
 
 
-def _run_trigger(monkeypatch, rows: List[Dict], local_digest: Any, entry: Dict = ENTRY) -> List[bool]:
-    """Run _seed_builtin_apps against fakes; return the force flags it chose."""
+def _run_trigger(
+    monkeypatch, rows: List[Dict], local_digest: Any, entry: Dict = ENTRY, public_version: Optional[int] = None
+) -> List[bool]:
+    """Run _seed_builtin_apps against fakes; return the force flags it chose.
+
+    ``public_version`` is the version the public rung is bound to (None =
+    bound to the newest row, or unbound when there are no rows).
+    """
     account = Account.__new__(Account)
 
     async def versions(org_id: str, app_id: str) -> List[Dict]:
         return list(rows)
 
+    async def publish_get(org_id: str, kind: str, app_id: str, audience: Dict) -> Optional[Dict]:
+        bound = public_version if public_version is not None else (rows[0]['version'] if rows else None)
+        return None if bound is None else {'version': bound}
+
     account.deployments_versions = versions  # type: ignore[method-assign]
+    account.publish_get = publish_get  # type: ignore[method-assign]
     monkeypatch.setattr(seed_apps, 'load_manifest_entries', lambda: [entry])
     monkeypatch.setattr(seed_apps, 'bundle_digest', lambda app_id: local_digest)
     forces: List[bool] = []
@@ -110,3 +121,25 @@ def test_newest_seed_row_wins_over_older_ones(monkeypatch):
     # Newest-first ordering: the current seed is compared, not a stale one.
     rows = [_seed_row(2, digest='sha-current'), _seed_row(1, digest='sha-old')]
     assert _run_trigger(monkeypatch, rows, 'sha-current') == [False]
+
+
+def _user_row(version: int) -> Dict:
+    """A rail row someone deployed directly (not a seed)."""
+    return {'version': version, 'comment': 'my deploy', 'state': 'ready', 'metadata': {}}
+
+
+def test_version_move_leaves_a_public_user_deploy_alone(monkeypatch):
+    # Public serves the user's v2: a manifest bump must not repoint it.
+    rows = [_user_row(2), _seed_row(1, manifest_version='0.9.0')]
+    assert _run_trigger(monkeypatch, rows, 'sha-current', public_version=2) == [False]
+
+
+def test_digest_change_leaves_a_public_user_deploy_alone(monkeypatch):
+    rows = [_user_row(2), _seed_row(1)]
+    assert _run_trigger(monkeypatch, rows, 'sha-rebuilt', public_version=2) == [False]
+
+
+def test_triggers_still_force_when_public_serves_the_seed(monkeypatch):
+    # A user row exists but public still serves the seed: the march proceeds.
+    rows = [_user_row(2), _seed_row(1)]
+    assert _run_trigger(monkeypatch, rows, 'sha-rebuilt', public_version=1) == [True]
