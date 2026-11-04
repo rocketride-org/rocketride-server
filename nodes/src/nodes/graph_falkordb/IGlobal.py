@@ -38,6 +38,7 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
+import redis
 from redis.exceptions import RedisError
 
 from rocketlib import OPEN_MODE, debug, warning
@@ -129,7 +130,7 @@ class IGlobal(GraphGlobalBase):
     def _close_driver(self) -> None:
         if self.client is not None:
             try:
-                self.client.close()
+                _close_client(self.client)
             finally:
                 self.client = None
 
@@ -176,7 +177,7 @@ class IGlobal(GraphGlobalBase):
         finally:
             if client is not None:
                 try:
-                    client.close()
+                    _close_client(client)
                 except Exception:
                     pass
 
@@ -462,11 +463,11 @@ class IGlobal(GraphGlobalBase):
         # Do NOT strip the password — whitespace is valid in passwords.
         password = str(config.get('password') or '')
         if not password:
-            return FalkorDB.from_url(url)
+            return _client_from_url(url)
 
         # A filled-in password field is the one that counts, so drop whatever the
         # URL embeds: redis-py would otherwise prefer the URL and ignore the field.
-        return FalkorDB.from_url(_url_without_password(url), password=password)
+        return _client_from_url(_url_without_password(url), password=password)
 
     @staticmethod
     def _client_kwargs(config: Dict[str, Any]) -> Dict[str, Any]:
@@ -591,6 +592,48 @@ def _header_names(header) -> List[str]:
         else:
             names.append(str(entry))
     return names
+
+
+def _client_from_url(url: str, **kwargs: Any) -> FalkorDB:
+    """Open a client from a URL without ``FalkorDB.from_url``'s temporary client.
+
+    ``FalkorDB.from_url`` builds a throwaway ``redis.Redis`` that owns the
+    connection pool, then gives the same pool to the client it returns. The
+    throwaway is garbage collected soon after (a reference cycle can keep it for
+    a while), and its ``__del__`` disconnects the pool, which is now the live
+    client's: a reply being read at that moment dies with
+    ``'NoneType' object has no attribute 'readline'``. The collector runs most
+    readily while a large reply is being parsed, because parsing allocates a lot.
+    Here the owner is kept, on the client, until ``_close_client`` closes it.
+
+    Args:
+        url (str): The connection URL (``falkor://``, ``redis://`` and the TLS forms).
+        **kwargs (Any): Passed to ``redis.Redis.from_url`` (for example ``password``).
+
+    Returns:
+        FalkorDB: The client; close it with ``_close_client``.
+    """
+    if url.startswith('falkor://'):
+        url = 'redis://' + url[len('falkor://') :]
+    elif url.startswith('falkors://'):
+        url = 'rediss://' + url[len('falkors://') :]
+    owner = redis.Redis.from_url(url, decode_responses=True, **kwargs)
+    client = FalkorDB(connection_pool=owner.connection_pool)
+    client._rr_pool_owner = owner
+    return client
+
+
+def _close_client(client: FalkorDB) -> None:
+    """Close a client and the pool its URL-built owner holds (best effort, as the client's own close is)."""
+    try:
+        client.close()
+    finally:
+        owner = getattr(client, '_rr_pool_owner', None)
+        if owner is not None:
+            try:
+                owner.close()
+            except RedisError:
+                pass
 
 
 def _wrote(result) -> bool:

@@ -18,6 +18,7 @@ Skips when the server is unreachable unless RR_REQUIRE_DB_TESTS is set.
 
 from __future__ import annotations
 
+import gc
 import os
 import sys
 import time
@@ -216,6 +217,29 @@ class TestReadQueryRefusals:
             assert str(err.value).startswith('Refused: LOAD CSV is not allowed on the read-only path')
         finally:
             glb.endGlobal()
+
+
+class TestUrlClientPool:
+    def test_a_large_reply_survives_garbage_collection_on_a_url_client(self, falkor_env, falkor_graph):
+        """FalkorDB.from_url's throwaway client used to disconnect the live pool when it was collected.
+
+        A host name that resolves to ::1 first (``localhost``) leaves the throwaway in a reference cycle, so it is
+        collected later, most readily while a large reply is being parsed: "'NoneType' object has no attribute
+        'readline'". The node opens URL clients itself (_client_from_url) and keeps the pool's owner.
+        """
+        url = URL.replace('127.0.0.1', 'localhost')
+        thresholds = gc.get_threshold()
+        for _ in range(6):
+            glb, inst = start_node(
+                falkor_env, 'graph_falkordb', {'mode': 'url', 'url': url, 'graph': GRAPH, 'max_rows': 9500}
+            )
+            try:
+                gc.set_threshold(1, 1, 1)  # collect as often as the interpreter allows, mid-parse included
+                out = inst.read_query({'cypher': 'UNWIND range(1, 9000) AS i RETURN i', 'limit': 9500})
+                assert len(out['rows']) == 9000 and out['truncated'] is False
+            finally:
+                gc.set_threshold(*thresholds)
+                glb.endGlobal()
 
 
 class TestServerLimits:
