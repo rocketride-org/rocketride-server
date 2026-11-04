@@ -589,7 +589,7 @@ variables never connects to a database.
 
 | Variable | Database | Suites |
 | --- | --- | --- |
-| `RR_TEST_PG_DSN` | PG16 + pgvector 0.8.0 | `test_rocketride_db_live.py`, `test_rocketride_vector_tools_live.py`, `test_vector_store_writes_live.py` |
+| `RR_TEST_PG_DSN` | PG16 + pgvector 0.8.0 | `test_rocketride_db_live.py`, `test_rocketride_vector_tools_live.py`, `test_vector_store_writes_live.py`, `test_vector_store_listing_live.py`, `test_pgvector_search_live.py` |
 | `RR_TEST_AGE_DSN` | PG16 + Apache AGE 1.5.0 or 1.6.0 | `test_rocketride_graph_live.py` |
 
 `RR_REQUIRE_DB_TESTS=1` turns a missing or unreachable database into a failure.
