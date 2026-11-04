@@ -54,9 +54,9 @@
 //   SDK request     "Request timed out after <n>ms"                 -> timeout
 //
 // Everything else is `raised`, message verbatim. A `code` is copied only when
-// the thrown value carries one (the SDK's DAPException, in a realm that has
-// the client); it is never parsed out of text (R10). Over the VS Code bridge
-// the controller's own `client.tool` failures arrive without one.
+// the thrown value carries one (the SDK's DAPException; the realm client
+// rebuilds it across the shell bus, errorWire.ts); it is never parsed out of
+// text (R10).
 // =============================================================================
 
 import { ExplorerToolError, readErrorCode, readErrorMessage } from '../errors';

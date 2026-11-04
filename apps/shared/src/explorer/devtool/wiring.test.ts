@@ -141,7 +141,7 @@ describe('T3 — every op round-trips JSON-safe; failures come back as equal Exp
 		const attached = attachController<WireOps>({
 			channel: shellProtocol.createToolChannel(h.sidebarPeer),
 			createToolOpServer: shellProtocol.createToolOpServer,
-			handlers: { 'w.read': () => toReply(() => { throw new Error("Op 'client.tool' timed out after 66000ms (bridged)"); }, { tool: 'get_data' }) },
+			handlers: { 'w.read': () => toReply(() => { throw new Error("Op 'client.request' timed out after 66000ms (bridged)"); }, { tool: 'get_data' }) },
 		});
 		const caller = createFrameCaller<WireOps>({ ...frameOf(h) });
 		await settle();
@@ -194,7 +194,7 @@ describe('R3 applied uniformly — whatever a handler does, the frame gets a Rep
 	});
 
 	it('a foreign failure escaping a handler becomes Reply data (a lane timeout text is kind timeout)', async () => {
-		const { caller, done } = await rig(async () => { throw new Error("Op 'client.tool' timed out after 66000ms"); });
+		const { caller, done } = await rig(async () => { throw new Error("Op 'client.request' timed out after 66000ms"); });
 		await assert.rejects(caller.callReply('w.write', { key: 'k', text: 'x' }, { timeoutMs: 5_000 }), (error: unknown) => {
 			assert.ok(error instanceof ExplorerToolError);
 			assert.equal(error.kind, 'timeout');
@@ -213,27 +213,6 @@ describe('R3 applied uniformly — whatever a handler does, the frame gets a Rep
 			return true;
 		});
 		done();
-	});
-});
-
-describe('events and ops share one registry (accepted platform semantics)', () => {
-	it('an event named like an op is NOT a protocol the lanes use: the collision check names it, and the guard refuses one with no deadline', async () => {
-		const h = createDevToolHarness('tool.test', { json: true });
-		const runs: string[] = [];
-		const refused: string[] = [];
-		const attached = attachController<WireOps>({
-			channel: shellProtocol.createToolChannel(h.sidebarPeer),
-			createToolOpServer: shellProtocol.createToolOpServer,
-			onRefused: (error) => refused.push(error.reason),
-			handlers: { 'w.write': (params) => { runs.push(params.text); return { affected: 1 }; } },
-		});
-		const frameChannel = shellProtocol.createToolChannel(h.newFramePeer());
-		await settle();
-		frameChannel.sendEvent('w.write', { key: 'k', text: 'bare' });
-		await settle();
-		assert.deepEqual(runs, [], 'an event without deadlineAt runs nothing');
-		assert.ok(refused.length >= 1 && refused.every((reason) => reason === 'missing'));
-		attached.dispose();
 	});
 });
 

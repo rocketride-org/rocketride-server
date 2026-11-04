@@ -27,7 +27,8 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import type { IToolOpServer, ToolChannel, ToolOpMap, ToolOpSpec } from 'shell';
-import { assertNoOpEventCollisions, attachController } from './controller';
+import { assertNoOpEventCollisions, attachController, MAX_OP_BUDGET_MS } from './controller';
+import { frameOpTimeoutMs, toolCallBudgetMs } from './timeouts';
 import type { RequiredControllerHandlers } from './controller';
 import type { IDeadline } from './deadline';
 import type { Reply } from './reply';
@@ -201,39 +202,120 @@ describe('attachController — readiness (CE-9)', () => {
 	});
 });
 
-describe('platform behavior (documented, so a shell fix shows up here) — events and held calls', () => {
-	it('a plain EVENT named like an op runs its handler, with no reply; with no deadlineAt the guard refuses it and nothing runs', async () => {
+describe('events never run a handler (DA-R1-01)', () => {
+	it('R1-A: one op-named EVENT (even with a live deadlineAt) runs nothing, however many times the platform delivers it', async () => {
+		const h = createDevToolHarness('tool.da', { json: true });
+		const writes: number[] = [];
+		const refused: string[] = [];
+		const attached = attachController<TestOps>({
+			channel: shellProtocol.createToolChannel(h.sidebarPeer),
+			createToolOpServer: shellProtocol.createToolOpServer,
+			handlers: { 't.echo': ({ x }) => { writes.push(x); return x; } },
+			onRefused: (error) => refused.push(error.reason),
+		});
+		const frame = shellProtocol.createToolChannel(h.newFramePeer());
+		await settle();
+		frame.sendEvent('t.echo', { x: 1, deadlineAt: Date.now() + 60_000 });
+		await settle();
+		assert.deepEqual(writes, []);
+		assert.ok(refused.length >= 1 && refused.every((reason) => reason === 'event'), 'refused as an event, every delivery');
+		attached.dispose();
+	});
+
+	it('R1-B: one far-future event is not re-run by any later controller mount (the retained last-payload slot replays it)', async () => {
+		const h = createDevToolHarness('tool.db', { json: true });
+		const writes: number[] = [];
+		const frame = shellProtocol.createToolChannel(h.newFramePeer());
+		await settle();
+		frame.sendEvent('t.echo', { x: 7, deadlineAt: Number.MAX_SAFE_INTEGER });
+		await settle();
+		for (let mount = 0; mount < 3; mount += 1) {
+			const channel = shellProtocol.createToolChannel(h.sidebarPeer);
+			const attached = attachController<TestOps>({ channel, createToolOpServer: shellProtocol.createToolOpServer, handlers: { 't.echo': ({ x }) => { writes.push(x); return x; } } });
+			await settle();
+			attached.dispose();
+		}
+		assert.deepEqual(writes, []);
+	});
+
+	it('R1-F: a CALL still runs, once, after refused events (only correlated calls reach a handler)', async () => {
+		const h = createDevToolHarness('tool.df', { json: true });
+		const runs: number[] = [];
+		const attached = attachController<TestOps>({
+			channel: shellProtocol.createToolChannel(h.sidebarPeer),
+			createToolOpServer: shellProtocol.createToolOpServer,
+			handlers: { 't.echo': ({ x }) => { runs.push(x); return x; } },
+		});
+		const frameChannel = shellProtocol.createToolChannel(h.newFramePeer());
+		const call = shellProtocol.createToolOpClient<TestOps>(frameChannel);
+		await settle();
+		frameChannel.sendEvent('t.echo', { x: 1, deadlineAt: Date.now() + 60_000 });
+		await settle();
+		assert.deepEqual(await call('t.echo', { x: 2, deadlineAt: Date.now() + 60_000 }, { timeoutMs: 2_000 }), { ok: true, value: 2 });
+		assert.deepEqual(runs, [2]);
+		attached.dispose();
+	});
+
+	it('an event with no payload, or none usable, is refused by the deadline guard', async () => {
 		const h = createDevToolHarness();
+		const refused: string[] = [];
+		const attached = attachController<TestOps>({
+			channel: shellProtocol.createToolChannel(h.sidebarPeer),
+			createToolOpServer: shellProtocol.createToolOpServer,
+			handlers: { 't.echo': ({ x }) => x },
+			onRefused: (error) => refused.push(error.reason),
+		});
+		const frame = shellProtocol.createToolChannel(h.newFramePeer());
+		await settle();
+		frame.sendEvent('t.echo', undefined);
+		frame.sendEvent('t.echo', 5);
+		await settle();
+		assert.ok(refused.length >= 2 && refused.every((reason) => reason === 'missing'));
+		attached.dispose();
+	});
+
+	it('a deadline further ahead than the op\'s largest budget is refused (a replayed payload cannot live indefinitely)', async () => {
+		const h = createDevToolHarness();
+		const clock = manualNow(1_000);
 		const ran: number[] = [];
 		const refused: string[] = [];
 		const attached = attachController<TestOps>({
 			channel: shellProtocol.createToolChannel(h.sidebarPeer),
 			createToolOpServer: shellProtocol.createToolOpServer,
 			handlers: { 't.echo': ({ x }) => { ran.push(x); return x; } },
+			maxBudgetMs: { 't.echo': 10_000 },
+			now: clock.now,
 			onRefused: (error) => refused.push(error.reason),
 		});
-		const frame = shellProtocol.createToolChannel(h.newFramePeer());
+		const call = shellProtocol.createToolOpClient<TestOps>(shellProtocol.createToolChannel(h.newFramePeer()));
 		await settle();
-		// An event whose payload carries a live deadline runs the handler: the channel's registry answers events too (toolChannel.ts).
-		frame.sendEvent('t.echo', { x: 7, deadlineAt: Date.now() + 60_000 });
-		await settle();
-		// It can run MORE THAN ONCE: a frame's event reaches the sidebar peer as a signal and again through the retained last-payload slot (busPeer.ts).
-		assert.ok(ran.length >= 1 && ran.every((x) => x === 7), 'accepted platform semantics: never name an event like an op, and make mutating handlers check their own authority');
-		const ranBefore = ran.length;
-		// An event without a deadline is a protocol error: refused, not run.
-		frame.sendEvent('t.echo', { x: 8 });
-		frame.sendEvent('t.echo', undefined);
-		await settle();
-		assert.equal(ran.length, ranBefore, 'nothing ran for an event without a deadline');
-		assert.ok(refused.length >= 2 && refused.every((reason) => reason === 'missing'));
+		await assert.rejects(call('t.echo', { x: 1, deadlineAt: 1_000 + 10_001 }, { timeoutMs: 1_000 }), /further ahead/);
+		assert.deepEqual(await call('t.echo', { x: 2, deadlineAt: 1_000 + 10_000 }, { timeoutMs: 1_000 }), { ok: true, value: 2 });
+		assert.deepEqual(ran, [2]);
+		assert.deepEqual(refused, ['horizon']);
 		attached.dispose();
+	});
+
+	it('the default horizon admits the largest legal frame budget (an unbounded tool call) and nothing beyond', () => {
+		assert.ok(MAX_OP_BUDGET_MS >= frameOpTimeoutMs(toolCallBudgetMs(null)));
+		assert.ok(MAX_OP_BUDGET_MS < 2 * 24 * 60 * 60 * 1000);
+	});
+
+	it('attach throws when a lane names an event like a served op, and does nothing else', () => {
+		const h = createDevToolHarness();
+		const channel = shellProtocol.createToolChannel(h.sidebarPeer);
+		assert.throws(() => attachController<TestOps>({ channel, createToolOpServer: shellProtocol.createToolOpServer, handlers: { 't.echo': ({ x }) => x }, events: ['refresh', 't.echo'] }), /t\.echo/);
+		const ok = attachController<TestOps>({ channel, createToolOpServer: shellProtocol.createToolOpServer, handlers: { 't.echo': ({ x }) => x }, events: ['refresh'] });
+		ok.dispose();
 	});
 
 	it('assertNoOpEventCollisions names every event that shares an op\'s name', () => {
 		assert.deepEqual(assertNoOpEventCollisions(['t.echo', 't.other'], ['refresh', 't.other', `${RESERVED_STATE_PREFIX}summon`]), ['t.other']);
 		assert.deepEqual(assertNoOpEventCollisions(['t.echo'], ['refresh']), []);
 	});
+});
 
+describe('platform behavior (documented, so a shell fix shows up here) — held calls', () => {
 	it('a call the sidebar peer HELD for an unmounted controller is dropped when the host builds the channel before the controller serves (toolChannel.ts: no registry, no answer)', async () => {
 		const h = createDevToolHarness();
 		const frame = shellProtocol.createToolChannel(h.newFramePeer());

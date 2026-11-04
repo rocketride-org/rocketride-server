@@ -74,8 +74,9 @@
 // =============================================================================
 
 import type { IToolOpServer, ToolChannel, ToolOpMap, ToolOpParams, ToolOpResult, ToolOpSpec } from 'shell';
-import { guardDeadline } from './deadline';
-import type { DeadlineError, IDeadline } from './deadline';
+import { DeadlineError, guardDeadline } from './deadline';
+import type { IDeadline } from './deadline';
+import { frameOpTimeoutMs, toolCallBudgetMs } from './timeouts';
 import { CONTROLLER_STATE_TOPIC, mountNonce } from './realm';
 import type { IControllerState } from './realm';
 import { asReply, toReplyError } from './reply';
@@ -142,7 +143,21 @@ export interface IAttachControllerOptions<O extends ToolOpMap> {
 	onFirstOp?: (op: string) => void;
 	/** Told about every call the guard refused (it did not run). */
 	onRefused?: (error: DeadlineError) => void;
+	/**
+	 * The furthest ahead a call's `deadlineAt` may be, per op, in ms: the op's
+	 * largest legal budget (default for an op not listed: {@link MAX_OP_BUDGET_MS}).
+	 */
+	maxBudgetMs?: Partial<Record<keyof O & string, number>>;
+	/**
+	 * Every channel EVENT name the lane sends or listens for. Checked against
+	 * the served ops at attach: a name in both throws (the channel would run an
+	 * op's handler for that event).
+	 */
+	events?: readonly string[];
 }
+
+/** The largest budget any op's frame may have: an unbounded tool call (24 h) plus the margins. */
+export const MAX_OP_BUDGET_MS = frameOpTimeoutMs(toolCallBudgetMs(null));
 
 /** A mounted controller. */
 export interface IAttachedController {
@@ -194,6 +209,12 @@ function answering(handler: (params: unknown) => unknown): (params: unknown) => 
 export function attachController<O extends ToolOpMap & DevToolOps<O>>(opts: IAttachControllerOptions<O>): IAttachedController {
 	const { channel } = opts;
 
+	const served = Object.keys(opts.handlers) as Array<keyof O & string>;
+	const collisions = assertNoOpEventCollisions(served, opts.events ?? []);
+	if (collisions.length > 0) {
+		throw new RangeError(`Event names that are also served ops: ${collisions.join(', ')}. The channel would run the op's handler for such an event; rename the event.`);
+	}
+
 	// A mount that was never cleaned up must not keep a second op server: the
 	// registry holds one handler per op, and the new server replaces it.
 	live.get(channel)?.dispose();
@@ -206,11 +227,29 @@ export function attachController<O extends ToolOpMap & DevToolOps<O>>(opts: IAtt
 		first = false;
 		opts.onFirstOp?.(op);
 	};
-	for (const op of Object.keys(opts.handlers) as Array<keyof O & string>) {
+	// The channel runs `onEvent` listeners synchronously BEFORE it runs the op's
+	// handler for a plain event of the same name, with the same payload object
+	// (toolChannel.ts). So a listener per served op can mark every event payload,
+	// and a handler invocation whose params ARE such a payload is refused: only
+	// a correlated call (which the channel never shows to onEvent) runs.
+	const eventPayloads = new WeakSet<object>();
+	const offs: Array<() => void> = [];
+	for (const op of served) {
 		const handler = opts.handlers[op] as ((params: unknown) => unknown) | undefined;
 		if (handler === undefined) continue;
-		const served = guardDeadline(op, answering(handler), { now: opts.now, onAccepted, onRefused: opts.onRefused });
-		server.serve(op, served as unknown as Parameters<IToolOpServer<O>['serve']>[1]);
+		offs.push(channel.onEvent(op, (payload) => {
+			if (payload !== null && typeof payload === 'object') eventPayloads.add(payload);
+		}));
+		const guarded = guardDeadline(op, answering(handler), { now: opts.now, onAccepted, onRefused: opts.onRefused, maxAheadMs: opts.maxBudgetMs?.[op] ?? MAX_OP_BUDGET_MS });
+		const callsOnly = async (params: unknown): Promise<Reply<unknown>> => {
+			if (params !== null && typeof params === 'object' && eventPayloads.has(params)) {
+				const refusal = new DeadlineError(op, 'event');
+				opts.onRefused?.(refusal);
+				throw refusal;
+			}
+			return guarded(params);
+		};
+		server.serve(op, callsOnly as unknown as Parameters<IToolOpServer<O>['serve']>[1]);
 	}
 
 	let disposed = false;
@@ -219,6 +258,7 @@ export function attachController<O extends ToolOpMap & DevToolOps<O>>(opts: IAtt
 		dispose() {
 			if (disposed) return;
 			disposed = true;
+			for (const off of offs.splice(0)) off();
 			server.dispose();
 			if (live.get(channel) !== attachment) return;
 			live.delete(channel);
