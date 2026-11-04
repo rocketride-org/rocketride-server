@@ -188,14 +188,18 @@ def test_path_pages_count_paths_not_documents(store_env):
     assert store.getPaths(offset=2, limit=2) == {'/c': 'z'}
     assert store.getPaths(offset=4, limit=2) == {}
 
-    # The objdir tool lists every document (`entries`, equal paths not collapsed) and pages by them, so a page
-    # of 2 holds the two documents under /aa and its `paths` map one key; #2668's page of two paths is the
-    # driver's getPaths above.
+    # #2668 at the tool: a page counts distinct paths (each mapped to its lowest object id); `entries` lists
+    # every document under the page's paths.
     tool = _tools(store)
     objdir = tool.objdir({'limit': 2})
-    assert objdir['success'] is True and objdir['paths'] == {'/aa': 'x1'}
-    assert [(entry['path'], entry['objectId']) for entry in objdir['entries']] == [('/aa', 'x1'), ('/aa', 'x2')]
-    assert tool.objdir({'offset': 2, 'limit': 2})['paths'] == {'/aa': 'x3', '/b': 'y'}
+    assert objdir['success'] is True and objdir['paths'] == {'/aa': 'x1', '/b': 'y'}
+    assert [(entry['path'], entry['objectId']) for entry in objdir['entries']] == [
+        ('/aa', 'x1'),
+        ('/aa', 'x2'),
+        ('/aa', 'x3'),
+        ('/b', 'y'),
+    ]
+    assert tool.objdir({'offset': 2, 'limit': 2})['paths'] == {'/c': 'z'}
 
     # The parent filter narrows the distinct paths the same way.
     assert store.getPaths(parent='/aa') == {'/aa': 'x1'}

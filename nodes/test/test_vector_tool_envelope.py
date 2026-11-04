@@ -37,10 +37,11 @@ from .test_vector_hooks import MemoryStore, corpus
 
 #: sha256 of today's six agent descriptors (search, upsert, delete, objdir, get, stats) as
 #: ``_build_tool_descriptors`` builds them, JSON with sorted keys and no spaces. Regenerated
-#: for the develop merge of b76848a6f: the six are byte-identical to what develop builds
-#: (#2631 gave objdir and get their descriptors; #2587/#2704 gave upsert its chunk numbering,
-#: delete its ``object_ids`` answer and stats its ``document_count``).
-LEGACY_AGENT_CATALOG_SHA256 = '549b4904a65411925e55b7718c2f819a59ce5d8f981725619b438d75d78ca9d9'
+#: for the develop merge of b76848a6f: the six are byte-identical to what develop builds except
+#: where develop's text is false on this branch: objdir's ``parent`` (Qdrant matches the exact path,
+#: not as a text match) and stats' ``document_count`` (null where the store cannot count, not
+#: "does not list documents": every driver lists).
+LEGACY_AGENT_CATALOG_SHA256 = '5d8017a3425e90a584801102e7a54d690f3b0edc352fcf53c640a3ef31707260'
 
 LEGACY_TOOLS = ('delete', 'get', 'objdir', 'search', 'stats', 'upsert')
 #: #2704's three, listed for agents too: the document listing and the trash.

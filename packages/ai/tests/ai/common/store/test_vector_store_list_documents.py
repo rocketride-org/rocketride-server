@@ -149,11 +149,22 @@ def test_an_offset_past_zero_is_refused_naming_the_cursor(offset):
         ({'parent': 5}, 'parent must be a string'),
         ({'deleted': 'yes'}, 'deleted must be'),
         ({'deleted': 1}, 'deleted must be'),
+        ({'limit': 0}, 'limit must be 1 or more'),
+        ({'limit': -3}, 'limit must be 1 or more'),
         ({'limit': True}, 'limit must be an integer'),
         ({'limit': 2.5}, 'limit must be an integer'),
         ({'limit': 'many'}, 'limit must be an integer'),
     ],
-    ids=['parent-type', 'deleted-string', 'deleted-int', 'limit-bool', 'limit-float', 'limit-text'],
+    ids=[
+        'parent-type',
+        'deleted-string',
+        'deleted-int',
+        'limit-zero',
+        'limit-negative',
+        'limit-bool',
+        'limit-float',
+        'limit-text',
+    ],
 )
 def test_bad_arguments_fail_without_reading_the_store(args, message):
     store = _store()
@@ -165,14 +176,18 @@ def test_bad_arguments_fail_without_reading_the_store(args, message):
     store.listDocumentPage.assert_not_called()
 
 
-def test_a_limit_below_one_or_above_the_cap_is_clamped_and_said_so():
+def test_defaults_and_cap():
+    """#2704's page size: 100 by default, at most 1,000 (an app that needs another sends its own limit)."""
     store = _store()
     tools = Tools(store)
 
-    below = tools.list_documents({'limit': 0})
-    assert store.listDocumentPage.call_args.kwargs['limit'] == 1 and 'limit_clamped' in below['warnings']
+    assert tools.list_documents({})['offset'] == 0
+    assert store.listDocumentPage.call_args.kwargs['limit'] == 100
+
     above = tools.list_documents({'limit': 5000})
-    assert store.listDocumentPage.call_args.kwargs['limit'] == 500 and 'limit_clamped' in above['warnings']
+    assert store.listDocumentPage.call_args.kwargs['limit'] == 1000 and 'limit_clamped' in above['warnings']
+    tools.list_documents({'limit': '7'})
+    assert store.listDocumentPage.call_args.kwargs['limit'] == 7
 
 
 def test_payloads_are_normalized_like_the_other_tools():
