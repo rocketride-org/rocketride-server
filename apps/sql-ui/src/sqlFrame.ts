@@ -58,7 +58,7 @@
 import type { DevToolProps, ToolChannel, ToolControllerFn, ToolOpMap, TypedToolChannel } from 'shell';
 import { createFrameCaller } from 'shared/explorer/devtool/frame';
 import type { IFrameCaller } from 'shared/explorer/devtool/frame';
-import { createFrameIdentityGuard } from 'shared/explorer/devtool/frameIdentity';
+import { IDENTITY_STATE_TOPIC, createFrameIdentityGuard } from 'shared/explorer/devtool/frameIdentity';
 import type { FrameResetReason } from 'shared/explorer/devtool/frameIdentity';
 import { CONTROLLER_STATE_TOPIC } from 'shared/explorer/devtool/realm';
 import { createControllerSummon } from 'shared/explorer/devtool/summon';
@@ -435,8 +435,17 @@ export interface SqlFrameMount {
  */
 export function attachSqlFrame(opts: SqlFrameOptions): SqlFrameMount {
 	const { protocol, channel } = opts;
+	// The identity the controller vouches for NOW (its retained `identity` topic).
+	// The caller's fence holds a call until one is known and refuses an answer
+	// that crosses an account change, so nothing cached for A is read as B's.
+	let identityNow: string | null = null;
+	const offIdentityNow = channel.onState(IDENTITY_STATE_TOPIC, (snapshot) => {
+		const fingerprint = (snapshot as { fingerprint?: unknown } | null | undefined)?.fingerprint;
+		identityNow = typeof fingerprint === 'string' && fingerprint !== '' ? fingerprint : null;
+	});
 	const caller = plainSpoken(createFrameCaller<SqlOps>({
 		channel,
+		identityNow: () => identityNow,
 		createToolOpClient: protocol.createToolOpClient,
 		...(opts.now ? { now: opts.now } : {}),
 	}));
@@ -468,6 +477,7 @@ export function attachSqlFrame(opts: SqlFrameOptions): SqlFrameMount {
 			disposed = true;
 			summon.dispose();
 			guard.dispose();
+			offIdentityNow();
 			caller.dispose();
 			detachHost();
 		},
