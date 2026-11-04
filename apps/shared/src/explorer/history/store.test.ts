@@ -131,18 +131,22 @@ describe('createHistoryStore — what the app chooses', () => {
 		}
 	});
 
-	it('drops stored entries that lack its text field, so another app\'s history in the same file is not read as its own', async () => {
+	it('does not READ entries that lack its text field as its own, but writes them back unchanged (another app\'s history in the same key is not erased)', async () => {
 		const store = createHistoryStore<'cypher'>({ historyKey: 'graph.history', recordingKey: 'graph.historyRecording', textField: 'cypher', persistDelayMs: BATCH_MS });
-		const prefs = fakePrefs({ 'graph.history': { conn: [{ id: 's1', sql: 'SELECT 1', at: 1, ms: 1, outcome: 'rows', kind: 'read' }, 7, null, { id: 'c1', cypher: 'RETURN 1', at: 2 }], onlySql: [{ id: 's2', sql: 'SELECT 2' }] } });
+		const sqlEntry = { id: 's1', sql: 'SELECT 1', at: 1, ms: 1, outcome: 'rows', kind: 'read' };
+		const prefs = fakePrefs({ 'graph.history': { conn: [sqlEntry, 7, null, { id: 'c1', cypher: 'RETURN 1', at: 2 }], onlySql: [{ id: 's2', sql: 'SELECT 2' }] } });
 		const detach = store.attachPrefs(prefs.api);
 		try {
+			assert.deepEqual(store.getHistory('conn').map((e) => e.id), ['c1'], 'only its own entries are read');
+			assert.deepEqual(store.getHistory('onlySql'), []);
 			// A mutation makes the store write back what it hydrated.
 			store.togglePin('conn', 'c1');
 			await settle();
-			const written = prefs.values['graph.history'] as Record<string, { id: string; pinned?: boolean }[]>;
-			assert.deepEqual(written.conn?.map((e) => e.id), ['c1']);
-			assert.equal(written.conn?.[0]?.pinned, true);
-			assert.equal('onlySql' in written, false);
+			const written = prefs.values['graph.history'] as Record<string, unknown[]>;
+			assert.deepEqual(written.conn.map((e) => (e as { id?: string } | null)?.id ?? e).sort(), ['c1', 's1', 7, null].map((e) => e ?? null).sort());
+			assert.deepEqual(written.conn.find((e) => (e as { id?: string } | null)?.id === 's1'), sqlEntry);
+			assert.equal((written.conn.find((e) => (e as { id?: string } | null)?.id === 'c1') as { pinned?: boolean }).pinned, true);
+			assert.deepEqual(written.onlySql, [{ id: 's2', sql: 'SELECT 2' }]);
 		} finally {
 			detach();
 		}
@@ -370,5 +374,63 @@ describe('trimHistory — the text field is a parameter', () => {
 		const kept = trimBag(bag, 330);
 		assert.deepEqual(kept.a?.map((e) => e.id), ['a2']);
 		assert.equal(bag.a.length, 2);
+	});
+});
+
+// =============================================================================
+// UNREADABLE STORED CONTENT IS ANOTHER CLIENT'S DATA (D6-VX-4)
+// =============================================================================
+
+describe('createHistoryStore — what it cannot read is written back unchanged', () => {
+	const foreignConnection = { v: 2, entries: [{ id: 'x', q: 'kept by a newer client' }] };
+	const oddEntry = { id: 'odd', note: 'no text field', at: 2 };
+	const stored = {
+		'v.history': {
+			'k1|other': foreignConnection,
+			'k1|mine': [{ id: 'old', v: 'where is the water', at: 1, ms: 1, outcome: 'rows', kind: 'read' }, oddEntry],
+			'k1|junk-only': ['nope', 7],
+		},
+		'v.historyRecording': { 'k1|mine': false, 'k1|other': 'maybe' },
+	};
+
+	it('a run recorded after hydrate rewrites the key with the unreadable connection, entry and switch carried verbatim', async () => {
+		const prefs = fakePrefs(stored);
+		const store = createHistoryStore<'v'>({ historyKey: 'v.history', recordingKey: 'v.historyRecording', textField: 'v', persistDelayMs: 0 });
+		const detach = store.attachPrefs(prefs.api, 'owner-1');
+		store.setRecording('k1|mine', true);
+		store.runs.emitRun('k1|mine', run('v', 'new', 'a new run', 3));
+		store.flush();
+		const history = prefs.values['v.history'] as Record<string, unknown[]>;
+		assert.deepEqual(history['k1|other'], foreignConnection, 'a connection in another shape is untouched');
+		assert.deepEqual(history['k1|mine'].map((e) => (e as { id: string }).id).sort(), ['new', 'odd', 'old']);
+		assert.deepEqual(history['k1|mine'].find((e) => (e as { id: string }).id === 'odd'), oddEntry, 'the unreadable entry is byte-for-byte');
+		assert.deepEqual(history['k1|junk-only'], ['nope', 7], 'a list of only unreadable entries is kept');
+		assert.deepEqual((prefs.values['v.historyRecording'] as Record<string, unknown>)['k1|other'], 'maybe', 'a non-boolean switch is kept');
+		detach();
+	});
+
+	it('a history or recording value that is not an object at all is never written over', () => {
+		const prefs = fakePrefs({ 'v.history': 'a string from elsewhere', 'v.historyRecording': ['x'] });
+		const store = createHistoryStore<'v'>({ historyKey: 'v.history', recordingKey: 'v.historyRecording', textField: 'v', persistDelayMs: 0 });
+		const detach = store.attachPrefs(prefs.api, 'owner-1');
+		store.runs.emitRun('c', run('v', 'n1', 'text', 1));
+		store.flush();
+		assert.equal(prefs.values['v.history'], 'a string from elsewhere');
+		assert.deepEqual(prefs.values['v.historyRecording'], ['x']);
+		assert.equal(store.getHistory('c').length, 1, 'the session still has its entry in memory');
+		detach();
+	});
+
+	it('another owner\'s unreadable content is never written into the next owner\'s file', () => {
+		const a = fakePrefs(stored);
+		const b = fakePrefs({});
+		const store = createHistoryStore<'v'>({ historyKey: 'v.history', recordingKey: 'v.historyRecording', textField: 'v', persistDelayMs: 0 });
+		const detachA = store.attachPrefs(a.api, 'owner-A');
+		detachA();
+		const detachB = store.attachPrefs(b.api, 'owner-B');
+		store.runs.emitRun('c', run('v', 'b1', 'b text', 1));
+		store.flush();
+		assert.deepEqual(Object.keys(b.values['v.history'] as object), ['c']);
+		detachB();
 	});
 });
