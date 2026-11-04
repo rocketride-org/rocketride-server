@@ -21,6 +21,8 @@
 # SOFTWARE.
 # =============================================================================
 
+from typing import Any, Dict, List, Optional
+
 from rocketlib import IInstanceBase, Entry, warning
 from ai.common.schema import Question, Answer
 from .IGlobal import IGlobal
@@ -34,13 +36,11 @@ class IInstance(IInstanceBase):
         super().__init__()
         self.source_documents = []
         self.retrieval_ran = False
-        self.question_text = ''
 
     def open(self, entry: Entry):
         """Reset per-object state."""
         self.source_documents = []
         self.retrieval_ran = False
-        self.question_text = ''
 
     def writeQuestions(self, question: Question):
         """Run input guardrails on the question before forwarding.
@@ -65,9 +65,6 @@ class IInstance(IInstanceBase):
             text_parts.extend(question.context)
 
         full_text = ' '.join(text_parts)
-        # Kept for the output pass: a figure the answer quotes back from the question
-        # is a reference, not a claim the model invented.
-        self.question_text = full_text
 
         if not full_text.strip():
             # Nothing to check, forward as-is
@@ -134,15 +131,19 @@ class IInstance(IInstanceBase):
         context = {
             'source_documents': self.source_documents,
             'retrieval_ran': self.retrieval_ran,
-            'question_text': self.question_text,
         }
 
         # Run output guardrails
         result = engine.evaluate(text, mode='output', context=context)
 
         if result['action'] == 'block':
+            replacement = self._replacement_for(answer, result['violations'])
+            verb = 'replaced' if replacement else 'blocked'
             for violation in result['violations']:
-                warning(f'Guardrails output blocked: {violation["rule"]} \u2014 {violation["details"]}')
+                warning(f'Guardrails output {verb}: {violation["rule"]} \u2014 {violation["details"]}')
+            if replacement:
+                self._forward_answer(replacement)
+                return
             self.preventDefault()
             return
 
@@ -152,6 +153,24 @@ class IInstance(IInstanceBase):
 
         # Forward the answer downstream
         self._forward_answer(answer)
+
+    def _replacement_for(self, answer: Answer, violations: List[Dict[str, Any]]) -> Optional[Answer]:
+        """Return the answer to deliver in place of a blocked one, or None for nothing.
+
+        Blocking is otherwise silent, so the user of a chat gets no reply at all. A
+        violation can name a reply to stand in, and that reply is used only when
+        every violation names the same one: a refusal can stand in for an ungrounded
+        figure, not for leaked PII. A JSON answer is still dropped, since a consumer
+        parsing it would fail on a sentence.
+        """
+        replies = {violation.get('replacement') for violation in violations}
+        if len(replies) != 1 or None in replies or getattr(answer, 'expectJson', False):
+            return None
+        reply = Answer()
+        reply.setAnswer(replies.pop())
+        # The model still ran, so its usage stays on the turn.
+        reply.tokens = getattr(answer, 'tokens', None)
+        return reply
 
     def _forward_answer(self, answer: Answer):
         """Forward an answer downstream exactly once. See `_forward_question`
@@ -193,4 +212,3 @@ class IInstance(IInstanceBase):
         """Reset state on close."""
         self.source_documents = []
         self.retrieval_ran = False
-        self.question_text = ''

@@ -8,7 +8,8 @@
 Each node was tested on its own and each looked right, while the pair still got
 ordinary turns wrong: the prompt node told the model to refuse, or guardrails
 dropped what the model produced. These run a turn through the real prompt node,
-stand a model answer in its place, and put that answer through the real engine.
+stand a model answer in its place, and put that answer through the real guardrails
+node, asserting on what the user is actually delivered.
 
 Loaded with the engine dependencies stubbed, so no server, model or key is needed.
 """
@@ -20,27 +21,42 @@ import types
 
 import pytest
 
-_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-_ENGINE_PATH = os.path.join(_ROOT, 'src', 'nodes', 'guardrails', 'guardrails_engine.py')
-
-sys.path.insert(0, os.path.join(_ROOT, 'test', 'prompt'))
+_HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(os.path.dirname(_HERE), 'prompt'))
 from test_grounding_instruction import _load_iinstance  # noqa: E402
 
+# Loaded by path: several nodes have a test_all.py, so the bare name is ambiguous.
+_spec = importlib.util.spec_from_file_location('guardrails_test_all', os.path.join(_HERE, 'test_all.py'))
+_guardrails_tests = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_guardrails_tests)
 
-def _engine(**overrides):
-    saved = sys.modules.get('rocketlib')
-    stub = types.ModuleType('rocketlib')
-    stub.warning = lambda *a, **kw: None
-    sys.modules['rocketlib'] = stub
-    spec = importlib.util.spec_from_file_location('guardrails_engine_e2e', _ENGINE_PATH)
-    mod = importlib.util.module_from_spec(spec)
-    try:
-        spec.loader.exec_module(mod)
-    finally:
-        sys.modules.pop('rocketlib', None) if saved is None else sys.modules.__setitem__('rocketlib', saved)
-    settings = {'policy_mode': 'block', 'require_grounding': True}
-    settings.update(overrides)
-    return mod.GuardrailsEngine(settings)
+# A miss under Strict must never deliver one of these, and must always deliver something.
+QUESTION = 'Was Apple net income $94.7B in FY2024?'
+
+AFFIRMATIONS = (
+    'Yes. Apple net income was $94.7B.',
+    'Correct, it was $94.7B.',
+    'Yes, it was $94.7B. There is no doubt.',
+    'Nothing else to add, it was $94.7B.',
+    'Apple net income was $94.7B. Further detail is not available.',
+    'The $94.7B you mentioned is correct, no doubt about it.',
+    "Apple's net income was about ninety-four billion dollars.",
+)
+
+REFUSALS_QUOTING_THE_FIGURE = (
+    'I cannot confirm whether it was $94.7B.',
+    'The figure of $94.7 billion is not in the documents.',
+    "I didn't find the $94.7B figure in the documents.",
+    'I do not have the figure. You asked about $94.7B, but no document covers it.',
+    'Regarding $94.7B, I could not find it in the documents.',
+)
+
+REPLIES_WITHOUT_A_FIGURE = (
+    'Hello! Happy to help. What would you like to look at?',
+    'I do not have the information to answer that.',
+    "I'm sorry, I couldn't find that in the knowledge base.",
+    'Could you clarify which fiscal year you mean?',
+)
 
 
 @pytest.fixture
@@ -54,6 +70,20 @@ def prompt_node():
     return inst
 
 
+@pytest.fixture(scope='module')
+def guardrails():
+    IInstance, EngineClass, FakeQuestion, FakeQuestionText, FakeAnswer = (
+        _guardrails_tests.TestIInstanceLifecycle._load_iinstance_class()
+    )
+    return types.SimpleNamespace(
+        IInstance=IInstance,
+        Engine=EngineClass,
+        Question=FakeQuestion,
+        QuestionText=FakeQuestionText,
+        Answer=FakeAnswer,
+    )
+
+
 def _turn(node, question, documents):
     """One retrieval turn, returning the instruction the model would be given."""
     node.writeQuestions(types.SimpleNamespace(questions=[types.SimpleNamespace(text=question)]))
@@ -63,106 +93,90 @@ def _turn(node, question, documents):
     return next((i.instructions for i in emitted.instructions if i.subtitle == 'Grounding'), None)
 
 
-def _verdict(answer, question, **overrides):
-    return _engine(**overrides).evaluate(
-        answer,
-        mode='output',
-        context={'source_documents': [], 'retrieval_ran': True, 'question_text': question},
-    )['action']
+def _delivered(g, answer, question=QUESTION, retrieved=True, **overrides):
+    """What the user receives when *answer* passes a Strict guardrails node."""
+    inst = g.IInstance()
+    settings = {'policy_mode': 'block', 'require_grounding': True}
+    settings.update(overrides)
+    inst.IGlobal = types.SimpleNamespace(engine=g.Engine(settings), config={})
+    delivered = []
+    inst.instance = types.SimpleNamespace(
+        writeAnswers=delivered.append,
+        writeQuestions=lambda q: None,
+        writeDocuments=lambda d: None,
+    )
+    inst.preventDefault = lambda: None
+    inst.open(None)
+    inst.writeQuestions(g.Question(questions=[g.QuestionText(question)]))
+    if retrieved:
+        inst.writeDocuments([])
+    inst.writeAnswers(g.Answer(answer))
+    return [a.getText() for a in delivered]
 
 
-def test_a_greeting_survives_a_retrieval_miss(prompt_node):
+def test_a_greeting_survives_a_retrieval_miss(prompt_node, guardrails):
     """A store matches nothing on plenty of turns, and the turn is still answerable.
 
     The instruction must not order a refusal outright, and the answer the model
-    gives must reach the user.
+    gives must reach the user unchanged.
     """
     question = 'Hello, thanks for your help'
     instruction = _turn(prompt_node, question, [])
+    reply = 'Hello! Happy to help. What would you like to look at?'
 
     assert 'needs that material' in instruction, 'the refusal has to be conditional on the question'
-    assert _verdict('Hello! Happy to help. What would you like to look at?', question) != 'block'
+    assert _delivered(guardrails, reply, question) == [reply]
 
 
-def test_an_answer_that_hands_back_the_question_figure_is_still_blocked(prompt_node):
-    """Repeating a figure as fact asserts it as much as inventing one.
+def test_a_miss_never_delivers_an_ungrounded_figure_and_never_silence(prompt_node, guardrails):
+    """The property both halves exist for, held across every shape of answer.
 
-    Nothing was retrieved, so there is no support for it either way.
+    Whether the model affirms the question's figure, invents one, or declines while
+    quoting it, the user gets exactly one reply and that reply states no figure.
     """
-    question = 'Was Apple net income $94.7B?'
-    _turn(prompt_node, question, [])
+    _turn(prompt_node, QUESTION, [])
 
-    for answer in (
-        'Yes. Apple net income was $94.7B.',
-        'Correct, it was $94.7B.',
-        'Apple net income was $94.7B.',
-        # An affirmation can carry a negation that has nothing to do with the figure,
-        # so the refusal test cannot be "is the word no anywhere in this".
-        'Yes, it was $94.7B. There is no doubt.',
-        'Correct. That is not in dispute: $94.7B.',
-        'Indeed, $94.7B is the figure.',
-        # A negation binds to its own clause. These state the figure in one clause
-        # while negating something else in another, which is not a refusal.
-        'Nothing else to add, it was $94.7B.',
-        'I cannot confirm this, but the document mentions $94.7B.',
-        # A stated shortfall elsewhere in the answer is not the figure being declined.
-        'Apple net income was $94.7B. Further detail is not available.',
-        "Apple net income was $94.7B. I don't have the breakdown.",
-    ):
-        assert _verdict(answer, question) == 'block', answer
+    for answer in AFFIRMATIONS + REFUSALS_QUOTING_THE_FIGURE + REPLIES_WITHOUT_A_FIGURE:
+        delivered = _delivered(guardrails, answer)
+        assert len(delivered) == 1, answer
+        assert not guardrails.Engine.FIGURE_PATTERN.search(delivered[0]), answer
 
 
-def test_a_refusal_is_kept_however_it_negates_the_figure(prompt_node):
-    """The mirror of the affirmation case, so tightening one does not break the other."""
-    question = 'Was Apple net income $94.7B?'
-    _turn(prompt_node, question, [])
+def test_an_affirmed_figure_reaches_the_user_as_a_refusal(prompt_node, guardrails):
+    """Repeating a figure as fact asserts it as much as inventing one."""
+    _turn(prompt_node, QUESTION, [])
 
-    for answer in (
-        'I cannot confirm whether it was $94.7B.',
-        'The figure of $94.7 billion is not in the documents.',
-        'There is no record of $94.7B in the sources.',
-        'I was unable to verify $94.7B.',
-        'That $94.7B figure does not appear anywhere in the material.',
-        'Unfortunately, I could not find $94.7B.',
-        # Contractions are how models usually decline.
-        "I didn't find the $94.7B figure in the documents.",
-        "The $94.7B figure isn't in the retrieved documents.",
-        "The documents don't mention $94.7B.",
-    ):
-        assert _verdict(answer, question) != 'block', answer
+    for answer in AFFIRMATIONS:
+        assert _delivered(guardrails, answer) == [guardrails.Engine.UNGROUNDED_REPLY], answer
 
 
-def test_a_refusal_naming_the_same_amount_another_way_is_kept(prompt_node):
-    """$1,200 and $1200 are one amount, so quoting it back is not a new claim."""
-    for answer, question in (
-        ('I could not find the $1200 figure in the documents.', 'Was the fee $1,200?'),
-        ('There is no mention of 12.0% in the sources.', 'Did revenue grow 12%?'),
-        # The grouping comma is part of the figure, not a clause break.
-        ('The $1,200 fee is not in the documents.', 'Was the fee $1,200?'),
-    ):
-        assert _verdict(answer, question) != 'block', answer
+def test_a_refusal_quoting_the_figure_still_reaches_the_user_as_a_refusal(guardrails):
+    """The case every phrase rule kept dropping: the user is told no, not nothing."""
+    for answer in REFUSALS_QUOTING_THE_FIGURE:
+        assert _delivered(guardrails, answer) == [guardrails.Engine.UNGROUNDED_REPLY], answer
 
 
-def test_an_invented_figure_after_a_miss_is_still_blocked(prompt_node):
-    """The case the feature exists for, held in place while the others were loosened."""
+def test_a_reply_without_a_figure_is_delivered_as_written(guardrails):
+    """Nothing to ground, so the model's own wording reaches the user."""
+    for answer in REPLIES_WITHOUT_A_FIGURE:
+        assert _delivered(guardrails, answer) == [answer], answer
+
+
+def test_an_invented_figure_after_a_miss_is_replaced(prompt_node, guardrails):
+    """The case the feature exists for: the reported finance chatbot."""
     question = 'What is the refund policy?'
     _turn(prompt_node, question, [])
 
-    assert _verdict('Refunds are processed within $250 of the original charge.', question) == 'block'
+    delivered = _delivered(guardrails, 'Refunds are processed within $250 of the original charge.', question)
+
+    assert delivered == [guardrails.Engine.UNGROUNDED_REPLY]
 
 
-def test_a_pipeline_that_never_retrieves_is_untouched(prompt_node):
+def test_a_pipeline_that_never_retrieves_is_untouched(prompt_node, guardrails):
     """No documents lane means no grounding rule and no grounding verdict."""
     prompt_node.writeText('branch a output')
     prompt_node.closing()
     emitted = prompt_node.emitted[-1]
 
     assert [i.subtitle for i in emitted.instructions] == ['User Instruction']
-    assert (
-        _engine().evaluate(
-            'Revenue was $94.7B.',
-            mode='output',
-            context={'source_documents': [], 'retrieval_ran': False, 'question_text': 'anything'},
-        )['action']
-        != 'block'
-    )
+    assert _delivered(guardrails, 'Revenue was $94.7B.', retrieved=False) == ['Revenue was $94.7B.']
