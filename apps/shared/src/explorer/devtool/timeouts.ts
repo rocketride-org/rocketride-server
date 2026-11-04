@@ -100,8 +100,13 @@ export const GET_TASK_PIPELINE_TIMEOUT_MS = 30_000;
 /** Application deadline of `addMonitor` / `removeMonitor` (a registration; failing it only costs live updates). */
 export const MONITOR_TIMEOUT_MS = 15_000;
 
-/** Application deadline of `use` (starting a pipeline can start an engine: the longest generic call). */
-export const USE_DEADLINE_MS = 120_000;
+/**
+ * Application deadline of `use` (starting a pipeline can start an engine: the
+ * longest generic call). Deliberately BELOW the bus's 120 s default request
+ * timeout: `use` sends no SDK timeout, so through a proxy the bus timer would tie
+ * with ours and whichever fired first would pick the message.
+ */
+export const USE_DEADLINE_MS = 100_000;
 
 /** Application deadline of `terminate`. */
 export const TERMINATE_DEADLINE_MS = 30_000;

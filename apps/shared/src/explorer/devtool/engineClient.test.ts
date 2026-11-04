@@ -39,6 +39,7 @@ import {
 	PROXY_BUS_SLACK_MS,
 	SDK_TIMEOUT_SLACK_MS,
 	UNBOUNDED_TOOL_TIMEOUT_MS,
+	USE_DEADLINE_MS,
 	frameOpTimeoutMs,
 	toolCallBudgetMs,
 	toolSdkTimeoutMs,
@@ -276,5 +277,11 @@ describe('createExplorerAdmin — generic SDK calls with a deadline, no retries'
 		}
 		await new Promise((resolve) => setTimeout(resolve, 60));
 		assert.deepEqual(calls.map((c) => c.method), ['use', 'terminate'], 'one call each, no automatic retry');
+	});
+});
+
+describe('USE_DEADLINE_MS (DA-R2-06)', () => {
+	it('is below the 120 s bus default, so the application deadline\'s message wins through a proxy', () => {
+		assert.ok(USE_DEADLINE_MS < 120_000);
 	});
 });
