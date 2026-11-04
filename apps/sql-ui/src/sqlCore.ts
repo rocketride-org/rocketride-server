@@ -381,7 +381,9 @@ export function createSqlCore(opts: SqlCoreOptions): SqlCore {
 		run();
 		return () => { done = true; off(); };
 	};
-	/** The owner whose failed load has been tried once more (Q1: one retry, from `listReady`). */
+	/** The owner whose list read has been started (by the readiness gate). */
+	let loadedFor: string | null = null;
+	/** The owner whose failed load has been tried once more (one retry, from `listReady`). */
 	let retriedFor: string | null = null;
 	// This realm owns the list for the core's lifetime: a replica snapshot
 	// (a frame in the same realm) never overwrites it.
@@ -392,6 +394,8 @@ export function createSqlCore(opts: SqlCoreOptions): SqlCore {
 		const owner = snapshot.known ? snapshot.fingerprint : null;
 		if (owner === listOwner) return;
 		listOwner = owner;
+		loadedFor = null;
+		retriedFor = null;
 		// The list is per user: a new identity (or none) must not see the last one's.
 		resetSavedConnections({ force: true });
 		offLoadWhenActive?.();
@@ -401,7 +405,9 @@ export function createSqlCore(opts: SqlCoreOptions): SqlCore {
 		// dev-tool controller's mount is its activation (the hosts mount only a
 		// selected or summoned sidebar).
 		offLoadWhenActive = whenAllowed(() => {
-			if (!disposed && listOwner === owner) void loadSavedConnections(listFs);
+			if (disposed || listOwner !== owner) return;
+			loadedFor = owner;
+			void loadSavedConnections(listFs);
 		});
 	};
 	followIdentity(identity.get());
@@ -437,16 +443,27 @@ export function createSqlCore(opts: SqlCoreOptions): SqlCore {
 	 */
 	const listReady = async (tool: string): Promise<void> => {
 		requireIdentity(tool);
-		// A load that failed leaves the list `idle` and nothing else would try
-		// again until the identity changes: one retry, from here, per owner.
-		if (getSavedConnectionsStatus() === 'idle' && listOwner !== null && retriedFor !== listOwner && discovery.allowed()) {
-			retriedFor = listOwner;
-			void loadSavedConnections(listFs);
-		}
-		if (getSavedConnectionsStatus() !== 'ready') {
+		/** The list is `idle`, its first read was tried and failed, and nothing is reading it. */
+		const failed = (): boolean => getSavedConnectionsStatus() === 'idle' && listOwner !== null && loadedFor === listOwner && discovery.allowed();
+		/**
+		 * A load that failed leaves the list `idle` and nothing else would try
+		 * again until the identity changes: one retry, from here, per owner.
+		 */
+		const retry = (): void => {
+			if (failed() && retriedFor !== listOwner) {
+				retriedFor = listOwner;
+				void loadSavedConnections(listFs);
+			}
+		};
+		retry();
+		if (getSavedConnectionsStatus() !== 'ready' && !(failed() && retriedFor === listOwner)) {
 			await new Promise<void>((resolve) => {
 				const timer = setTimeout(done, LIST_WAIT_MS);
-				const off = subscribeSavedConnections(() => { if (getSavedConnectionsStatus() === 'ready') done(); });
+				const off = subscribeSavedConnections(() => {
+					retry();
+					// Ready, or the retry too has failed: no point waiting out the bound.
+					if (getSavedConnectionsStatus() === 'ready' || (failed() && retriedFor === listOwner)) done();
+				});
 				function done(): void {
 					clearTimeout(timer);
 					off();
@@ -620,14 +637,40 @@ export function createSqlCore(opts: SqlCoreOptions): SqlCore {
 		whenAllowed,
 		endpoints,
 		async resolve(connId) {
-			const record = await recordOf(connId, 'resolve');
-			const found = await locate(record, 'resolve');
-			const endpoint = endpointForConnection(record);
-			if (record.mode === 'direct') holders.set(endpoint.key, (holders.get(endpoint.key) ?? 0) + 1);
-			// A pipeline connection is shown by its running pipeline's current
-			// name, not the one frozen into the record when it was saved; the
-			// key and everything else stay the record's.
-			return record.mode === 'pipeline' ? { ...endpoint, pipelineName: found.pipelineName } : endpoint;
+			// Claim the holder BEFORE the first wait, when the record is already
+			// known: a remount's cleanup release lands while this resolve is still
+			// waiting, and must see this holder (else it stops the pipeline).
+			const early = getSavedConnection(connId);
+			let claimed: string | null = null;
+			const claim = (record: SavedSqlConnection): void => {
+				const key = record.mode === 'direct' ? endpointKeyForConnection(record) : null;
+				if (key === claimed) return;
+				unclaim();
+				if (key !== null) holders.set(key, (holders.get(key) ?? 0) + 1);
+				claimed = key;
+			};
+			const unclaim = (): void => {
+				if (claimed === null) return;
+				const left = (holders.get(claimed) ?? 1) - 1;
+				if (left > 0) holders.set(claimed, left);
+				else holders.delete(claimed);
+				claimed = null;
+			};
+			if (early !== undefined && identity.get().known) claim(early);
+			try {
+				const record = await recordOf(connId, 'resolve');
+				claim(record);
+				const found = await locate(record, 'resolve');
+				const endpoint = endpointForConnection(record);
+				// A pipeline connection is shown by its running pipeline's current
+				// name, not the one frozen into the record when it was saved; the
+				// key and everything else stay the record's.
+				return record.mode === 'pipeline' ? { ...endpoint, pipelineName: found.pipelineName } : endpoint;
+			} catch (error) {
+				// Nothing opened: this resolution holds nothing.
+				unclaim();
+				throw error;
+			}
 		},
 		keyOf: async (connId) => endpointKeyForConnection(await recordOf(connId, 'history')),
 		sessionFor,
