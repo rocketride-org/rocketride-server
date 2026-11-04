@@ -37,7 +37,7 @@ import { parsePipelineContent } from '../utils/parse';
 import type { ParsedPipelineFile, ServiceClassInfo } from '../utils/parse';
 // Leaf import: these modules also compile in the VS Code EXTENSION HOST
 // program, which must not resolve the shell's React barrel.
-import type { WorkspaceFs } from 'shell/src/workspace/workspaceFs';
+import type { WorkspaceFs } from 'shell';
 import type { ProjectEntry } from './types';
 
 /** The globs that are pipeline files. */
@@ -124,8 +124,14 @@ export function startPipelineDiscovery(fs: WorkspaceFs, options: IPipelineDiscov
 		return entries;
 	};
 
+	let scanInFlight = false;
+
 	const rescan = (reparse: boolean): void => {
+		// A full scan builds entries with the current catalog when it lands,
+		// so a catalog-only refresh must not supersede (and cancel) it.
+		if (!reparse && scanInFlight) return;
 		const mine = ++seq;
+		if (reparse) scanInFlight = true;
 		void (async () => {
 			if (reparse) {
 				const [roots, found] = await Promise.all([
@@ -149,6 +155,8 @@ export function startPipelineDiscovery(fs: WorkspaceFs, options: IPipelineDiscov
 			onEntries(buildEntries());
 		})().catch(() => {
 			// A failed scan keeps the previous entries; the next event retries.
+		}).finally(() => {
+			if (reparse && mine === seq) scanInFlight = false;
 		});
 	};
 

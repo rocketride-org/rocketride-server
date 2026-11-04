@@ -33,8 +33,17 @@ import { createOpBus, typedBusOps, BusNoHandlerError } from './busOps';
 import type { ShellOpMap, ShellOpSpec } from './busOps';
 import { attachRealmToRoot, createBusRouter, createLocalEndpointPair } from './busBridge';
 
-/** Flushes queued microtasks + macrotask hops used by the local endpoints. */
-const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 10));
+/**
+ * Drains pending bus delivery. The local endpoints deliver on setTimeout(0)
+ * chains — a fixed delay races those chains when the event loop is starved
+ * (parallel builder tasks). Each zero-delay hop here yields one FULL loop
+ * turn, so ten hops flush any delivery chain regardless of load.
+ */
+const settle = async (): Promise<void> => {
+	for (let i = 0; i < 10; i++) {
+		await new Promise((resolve) => setTimeout(resolve, 0));
+	}
+};
 
 // =============================================================================
 // IN-REALM

@@ -143,118 +143,10 @@
 					"default": "latest",
 					"description": "Engine version for local deployment target"
 				},
-				"rocketride.defaultPipelinePath": {
-					"type": "string",
-					"default": "${workspaceFolder}/pipelines",
-					"description": "Default directory path for creating new pipeline files (relative to workspace root)",
-					"examples": [
-						"pipelines",
-						"src/pipelines",
-						"workflows"
-					]
-				},
-				"rocketride.welcomeDismissed": {
-					"type": "boolean",
-					"default": false,
-					"description": "Set to true to skip the welcome/setup page on startup. Reset to false to show it again."
-				},
-				"rocketride.pipelineRestartBehavior": {
-					"type": "string",
-					"enum": [
-						"auto",
-						"manual",
-						"prompt"
-					],
-					"default": "prompt",
-					"description": "Behavior when a .pipe file changes while the pipeline is running.",
-					"enumDescriptions": [
-						"Automatically restart when .pipe changes",
-						"Do not automatically restart",
-						"Prompt to restart when .pipe changes"
-					]
-				},
-				"rocketride.pipelineTTL": {
-					"type": "integer",
-					"enum": [
-						900,
-						1800,
-						3600,
-						14400,
-						28800,
-						0
-					],
-					"enumDescriptions": [
-						"15 minutes",
-						"30 minutes",
-						"1 hour",
-						"4 hours",
-						"8 hours",
-						"Run forever or until you stop it"
-					],
-					"default": 900,
-					"minimum": 0,
-					"description": "Default idle timeout before a running pipeline is shut down."
-				},
-				"rocketride.pipelineTraceLevel": {
-					"type": "string",
-					"enum": [
-						"none",
-						"metadata",
-						"summary",
-						"full"
-					],
-					"default": "full",
-					"description": "Controls tracing verbosity for pipeline execution."
-				},
-				"rocketride.taskArguments": {
-					"type": "string",
-					"default": "",
-					"description": "Additional command-line arguments passed to each pipeline task."
-				},
-				"rocketride.pipelineDebugOutput": {
-					"type": "boolean",
-					"default": false,
-					"description": "Enable full debug output for pipeline tasks (--trace=debugOut)."
-				},
 				"rocketride.debug.busTrace": {
 					"type": "boolean",
 					"default": false,
 					"description": "Log every shell-bus message crossing a webview bridge to the RocketRide output channel (diagnostics only — very chatty)."
-				},
-				"rocketride.integrations.autoAgentIntegration": {
-					"type": "boolean",
-					"default": true,
-					"description": "Automatically detect and install RocketRide documentation for coding agents (Copilot, Claude Code, Cursor, Windsurf) on startup"
-				},
-				"rocketride.integrations.copilot": {
-					"type": "boolean",
-					"default": false,
-					"description": "Enable RocketRide integration with GitHub Copilot"
-				},
-				"rocketride.integrations.claudeCode": {
-					"type": "boolean",
-					"default": false,
-					"description": "Enable RocketRide integration with Claude Code"
-				},
-				"rocketride.integrations.cursor": {
-					"type": "boolean",
-					"default": false,
-					"description": "Enable RocketRide integration with Cursor"
-				},
-				"rocketride.integrations.windsurf": {
-					"type": "boolean",
-					"default": false,
-					"description": "Enable RocketRide integration with Windsurf"
-				},
-				"rocketride.integrations.claudeMd": {
-					"type": "boolean",
-					"default": false,
-					"description": "Install RocketRide instructions to CLAUDE.md at the repo root (generic agent support)"
-				},
-				"rocketride.integrations.agentsMd": {
-					"type": "boolean",
-					"default": false,
-					"description": "Install RocketRide instructions to AGENTS.md at the repo root (generic agent support)"
 				},
 				"rocketride.connectionMode": {
 					"type": "string",
@@ -288,37 +180,6 @@
 					"type": "string",
 					"default": "latest",
 					"deprecationMessage": "Migrated to rocketride.deployment.local.engineVersion"
-				},
-				"rocketride.development.teamId": {
-					"type": "string",
-					"default": "",
-					"deprecationMessage": "Retired: the development team is assigned by your server profile"
-				},
-				"rocketride.deployment.teamId": {
-					"type": "string",
-					"default": "",
-					"deprecationMessage": "Retired: deployments are team-scoped on the server; no client-side team setting"
-				},
-				"rocketride.developmentTeamId": {
-					"type": "string",
-					"default": "",
-					"deprecationMessage": "Retired: the development team is assigned by your server profile"
-				},
-				"rocketride.deployTargetTeamId": {
-					"type": "string",
-					"default": "",
-					"deprecationMessage": "Retired: deployments are team-scoped on the server; no client-side team setting"
-				},
-				"rocketride.appdev.shellUrl": {
-					"type": "string",
-					"default": "",
-					"description": "App Builder: override the preview shell base URL (empty = the Development Mode engine). For monorepo developers running the shell dev server.",
-					"format": "uri"
-				},
-				"rocketride.appdev.autoWatch": {
-					"type": "boolean",
-					"default": true,
-					"description": "App Builder: start the app watch/rebuild session automatically when an App Builder screen opens."
 				}
 			}
 		},

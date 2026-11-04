@@ -1115,6 +1115,7 @@ def manifest_snapshot(entry: Dict[str, Any], artifact: Dict[str, Any]) -> Dict[s
     manifest = metadata.get('manifest') if isinstance(metadata.get('manifest'), dict) else {}
     return {
         'name': str(manifest.get('name') or artifact.get('name') or artifact.get('appId') or ''),
+        'publisher': str(manifest.get('publisher') or ''),
         'description': str(manifest.get('description') or ''),
         'iconPath': str(manifest.get('icon') or ''),
         'readmePath': str(manifest.get('readme') or ''),
@@ -1382,6 +1383,10 @@ async def resolve_app_pins(org_id: str, user_id: Optional[str], team_ids: List[s
         if not isinstance(artifact, dict) or artifact.get('kind') != 'app':
             continue
         snapshot = row.get('snapshot') or {}
+        # The DB edition's fixed snapshot columns drop `publisher`, so fall
+        # back to the artifact's stored appManifest (metadata.manifest).
+        artifact_meta = artifact.get('metadata') if isinstance(artifact.get('metadata'), dict) else {}
+        artifact_manifest = artifact_meta.get('manifest') if isinstance(artifact_meta.get('manifest'), dict) else {}
         rung = 'personal' if audience_type == 'user' else audience_type
         mode = snapshot.get('mode') or 'free'
         # Internal-pin serving status. A public (store) entry gets its real
@@ -1402,6 +1407,7 @@ async def resolve_app_pins(org_id: str, user_id: Optional[str], team_ids: List[s
             'id': app_id,
             'moduleId': artifact.get('moduleId') or app_id.replace('.', '_'),
             'name': snapshot.get('name') or artifact.get('name') or app_id,
+            'publisher': str(snapshot.get('publisher') or artifact_manifest.get('publisher') or ''),
             'description': snapshot.get('description') or '',
             'icon': _icon_url_of(app_id, version, snapshot.get('iconPath')),
             'readme': snapshot.get('readmePath') or '',

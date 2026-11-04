@@ -44,7 +44,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { ChatView, useChatMessages, useShellConnection, commonStyles } from 'shell';
+import { ChatView, useChatMessages, useShellConnection, useWorkspace, commonStyles } from 'shell';
 import type { DevToolProps } from 'shell';
 import type { TextResult } from 'shell';
 import { AgentSession } from '../../modules/agent/agent';
@@ -179,17 +179,29 @@ export const AgentConversationTool: React.FC<DevToolProps> = ({ docKey }) => {
 	const sessionId = docKey ?? '';
 	const { isConnected } = useShellConnection();
 
+	// Session storage is namespaced by the HOSTING APP — a workspace fact,
+	// not a sidebar fact. Stamp it from this document too, so a restored
+	// conversation loads even when the controller (which also stamps it)
+	// has not mounted yet. configureSessions is idempotent for one app id.
+	const { activeAppId } = useWorkspace();
+	useEffect(() => {
+		AgentSession.configure(activeAppId);
+	}, [activeAppId]);
+
 	// step: load the session once per mount (reopen = re-read from disk)
 	const [session, setSession] = useState<AgentSession | null>(null);
+	const [loadError, setLoadError] = useState<string | null>(null);
 	useEffect(() => {
 		if (!sessionId) return;
 		let disposed = false;
+		setLoadError(null);
 		AgentSession.getSession(sessionId)
 			.then((loaded) => {
 				if (!disposed) setSession(loaded);
 			})
 			.catch((err) => {
 				console.log('[AgentConversation] session load failed', err);
+				if (!disposed) setLoadError(err instanceof Error ? err.message : String(err));
 			});
 		return () => {
 			disposed = true;
@@ -197,7 +209,12 @@ export const AgentConversationTool: React.FC<DevToolProps> = ({ docKey }) => {
 	}, [sessionId]);
 
 	if (!sessionId) return <div style={styles.root}><div style={styles.loading}>No session selected.</div></div>;
-	return session ? <AgentConversation session={session} isConnected={isConnected} /> : <div style={styles.root}><div style={styles.loading}>Loading session…</div></div>;
+	if (session) return <AgentConversation session={session} isConnected={isConnected} />;
+	// A failed load must say so — an eternal "Loading…" over a rejected read
+	// hides real faults (and would silently overwrite history if sends were
+	// allowed against an empty session).
+	if (loadError) return <div style={styles.root}><div style={styles.loading}>Could not load this session: {loadError}</div></div>;
+	return <div style={styles.root}><div style={styles.loading}>Loading session…</div></div>;
 };
 
 /**
@@ -205,12 +222,13 @@ export const AgentConversationTool: React.FC<DevToolProps> = ({ docKey }) => {
  *
  * @param props.heading - Short card heading (the task family).
  * @param props.prompt - The full prompt sent verbatim on click.
+ * @param props.disabled - Blocks activation (mirrors the composer's connection gate).
  * @param props.onPick - Receives the prompt when the card is activated.
  */
-const ExampleCard: React.FC<{ heading: string; prompt: string; onPick: (prompt: string) => void }> = ({ heading, prompt, onPick }) => {
+const ExampleCard: React.FC<{ heading: string; prompt: string; disabled?: boolean; onPick: (prompt: string) => void }> = ({ heading, prompt, disabled = false, onPick }) => {
 	const [hovered, setHovered] = useState(false);
 	return (
-		<div style={{ ...styles.exampleCard, ...(hovered ? { background: CARD_HOVER_BG } : {}) }} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)} {...buttonize(() => onPick(prompt))}>
+		<div style={{ ...styles.exampleCard, ...(hovered && !disabled ? { background: CARD_HOVER_BG } : {}), ...(disabled ? { opacity: 0.5, cursor: 'default' } : {}) }} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)} {...buttonize(() => onPick(prompt), !disabled)}>
 			<div style={styles.exampleHeading}>{heading}</div>
 			<div style={styles.exampleText}>{prompt}</div>
 		</div>
@@ -262,7 +280,7 @@ const AgentConversation: React.FC<{ session: AgentSession; isConnected: boolean 
 			</div>
 			<div style={styles.exampleGrid}>
 				{EXAMPLE_PROMPTS.map((example) => (
-					<ExampleCard key={example.heading} heading={example.heading} prompt={example.prompt} onPick={handleSend} />
+					<ExampleCard key={example.heading} heading={example.heading} prompt={example.prompt} disabled={!isConnected} onPick={handleSend} />
 				))}
 			</div>
 		</div>

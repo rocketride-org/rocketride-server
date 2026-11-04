@@ -169,7 +169,7 @@ const ToolStorePanel: React.FC<{
 	installedIds: Set<string>;
 	onShowTool: (id: string) => void;
 	onRefresh?: () => void;
-	builtins?: { id: string; name: string; description?: string; enabled: boolean }[];
+	builtins?: { id: string; name: string; description?: string; icon?: string; enabled: boolean }[];
 	onToggleBuiltin?: (id: string, enabled: boolean) => void;
 }> = ({ installedIds, onShowTool, onRefresh, builtins, onToggleBuiltin }) => {
 	const [hovered, setHovered] = useState<string | null>(null);
@@ -180,7 +180,7 @@ const ToolStorePanel: React.FC<{
 		let alive = true;
 		const refresh = (): void => {
 			if (!cm.isConnected()) return; // stay on Loading until a connection answers
-			void fetchDevToolCatalog(cm).then(
+			void fetchDevToolCatalog(cm.getClient()).then(
 				(entries) => {
 					if (!alive) return;
 					const base = (cm.getHttpUrl() || '').replace(/\/$/, '');
@@ -208,6 +208,7 @@ const ToolStorePanel: React.FC<{
 					<div style={panelStyles.sectionList}>
 						{builtins.map((b) => (
 							<div key={b.id} style={S.storeRow}>
+								{b.icon ? <img src={b.icon} alt="" style={{ ...S.storeRowIcon, ...(b.enabled ? {} : { opacity: 0.5 }) }} /> : <div style={S.storeRowIcon} />}
 								<div style={{ flex: 1, minWidth: 0 }}>
 									<div style={{ fontWeight: 600, ...commonStyles.textEllipsis, ...(b.enabled ? {} : { color: 'var(--rr-text-secondary)' }) }}>{b.name}</div>
 									{b.description && (

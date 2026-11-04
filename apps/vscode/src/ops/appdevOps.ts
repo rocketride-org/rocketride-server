@@ -31,6 +31,9 @@ interface IAppDevOpsDeps {
 	connectionManager: ConnectionManager;
 	/** Fire-and-forget op to every attached realm (BusHost.broadcastEmitOp). */
 	broadcast: (op: string, params: unknown) => void;
+	/** Closes the UNBOUND (untitled) App Builder panel, if one is open —
+	 *  the wizard's Cancel, and the retire step after a scaffold succeeds. */
+	closeWizard: () => void;
 }
 
 /**
@@ -38,7 +41,7 @@ interface IAppDevOpsDeps {
  * context.subscriptions).
  */
 export function registerVscodeAppDevOps(bus: IOpBus, deps: IAppDevOpsDeps): void {
-	const { context, connectionManager, broadcast } = deps;
+	const { context, connectionManager, broadcast, closeWizard } = deps;
 
 	/**
 	 * Resolves the developer id from the connected server's account info.
@@ -77,7 +80,10 @@ export function registerVscodeAppDevOps(bus: IOpBus, deps: IAppDevOpsDeps): void
 				appName: p.displayName,
 				frame: p.frame,
 			});
+			// The real builder is open — retire the untitled document.
+			closeWizard();
 		},
+		'host.appdev.closeWizard': async () => closeWizard(),
 	};
 	registerOpHandlers<AppDevOpMap>(bus, impls);
 

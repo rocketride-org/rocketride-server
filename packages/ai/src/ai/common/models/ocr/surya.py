@@ -29,7 +29,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from ai.web.metrics import metrics
 from ai.common.utils.cuda_utils import model_gpu_gb
 from ..base import BaseLoader, get_model_server_address, ModelClient
-from .utils import preprocess_image_transparency
+from .utils import preprocess_image_transparency, raise_on_error, with_error_field
 
 logger = logging.getLogger('rocketlib.models.surya')
 
@@ -185,12 +185,12 @@ class SuryaLoader(BaseLoader):
         recognition_predictor = models['recognition_predictor']
         images = preprocessed['images']
 
-        results = []
+        def read(batch):
+            results = []
 
-        try:
             # New API: recognition_predictor accepts det_predictor parameter
             # and handles both detection and recognition in one call
-            predictions = recognition_predictor(images, det_predictor=detection_predictor)
+            predictions = recognition_predictor(batch, det_predictor=detection_predictor)
 
             # Format results - Surya returns line-level results
             for prediction in predictions:
@@ -216,12 +216,24 @@ class SuryaLoader(BaseLoader):
                         'boxes': boxes,
                     }
                 )
+            return results
 
+        try:
+            return read(images)
         except Exception as e:
-            logger.error(f'Surya inference failed: {e}')
-            for _ in images:
-                results.append({'text': '', 'boxes': [], 'error': str(e)})
+            if len(images) == 1:
+                logger.error(f'Surya inference failed: {e}')
+                return [{'text': '', 'boxes': [], 'error': str(e)}]
+            # a model-server batch mixes tasks: read each image alone so one failure stays with its image
+            logger.warning(f'Surya inference of {len(images)} images failed ({e}); reading each alone')
 
+        results = []
+        for image in images:
+            try:
+                results += read([image])
+            except Exception as e:
+                logger.error(f'Surya inference failed: {e}')
+                results.append({'text': '', 'boxes': [], 'error': str(e)})
         return results
 
     @staticmethod
@@ -326,7 +338,7 @@ class Surya:
 
         # Postprocess phase — extract text and layout results
         t0 = time.perf_counter()
-        results = SuryaLoader.postprocess(self._model, raw_output, len(images), self.output_fields)
+        results = SuryaLoader.postprocess(self._model, raw_output, len(images), with_error_field(self.output_fields))
         t_post = (time.perf_counter() - t0) * 1000
 
         # Report all perf counters — same keys as model server response
@@ -350,7 +362,7 @@ class Surya:
             result = self._client.send_command(
                 'rrext_ms_inference',
                 {
-                    'output_fields': self.output_fields,
+                    'output_fields': with_error_field(self.output_fields),
                     'data': image_bytes,
                 },
             )
@@ -360,6 +372,7 @@ class Surya:
 
     def _format_result(self, result: Dict) -> Dict:
         """Format result to consistent output."""
+        raise_on_error('Surya', result)
         return {
             'text': result.get('$text') or result.get('text', ''),
             'boxes': result.get('$boxes') or result.get('boxes', []),

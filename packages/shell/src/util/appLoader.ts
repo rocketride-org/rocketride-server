@@ -35,7 +35,7 @@ import type { AppManifestEntry, AppDescriptor, AppConfiguration } from '../compo
 // modules reference each other strictly through function calls at runtime,
 // so the import cycle carries no module-evaluation (TDZ) risk.
 import { getAppVersionOverrides, versionedEntryUrl } from './versionOverride';
-import { devBootConfig } from './devGate';
+import { devBootConfig, tabSession } from './devGate';
 
 /**
  * Shape of an app entry from the server (rrext_public_probe or ConnectResult).
@@ -83,6 +83,11 @@ export interface ServerAppEntry {
 // resetRemote() can tear down and re-register a container without callers
 // having to thread the entry URL through.
 const registeredEntries = new Map<string, string>();
+// Server-provided apps by APP id -> their MF container name, for loadAppModule().
+// Added to, never rebuilt, like registeredEntries: registerAndMapApps receives one
+// batch per call (the probe catalog at boot, then only the apps a sign-in adds),
+// so a rebuild would drop the probe's apps, the home app among them.
+const serverAppModules = new Map<string, string>();
 
 // MF containers whose remote has successfully LOADED this document. A loaded
 // container is committed to its version (identity is the name — repointing a
@@ -90,14 +95,38 @@ const registeredEntries = new Map<string, string>();
 // consults this to decide repoint-in-place vs full reload.
 const loadedModules = new Set<string>();
 
-// MF containers with a descriptor load currently IN FLIGHT. A container is
-// committed to its entry from the moment its load STARTS, not when it
-// resolves: forced re-registration drops the runtime's cached promise but
-// does NOT cancel the running operation, so replacing the entry mid-load
+// MF containers with a load currently IN FLIGHT, counted per container. A
+// container is committed to its entry from the moment its load STARTS, not
+// when it resolves: forced re-registration drops the runtime's cached promise
+// but does NOT cancel the running operation, so replacing the entry mid-load
 // races two initializations of one container name. The dev takeover treats
-// pending like loaded. A Set suffices — loadDescriptor dedups concurrent
-// loads per app, so at most one load per container is in flight.
-const pendingModules = new Set<string>();
+// pending like loaded. Counted, not a Set: loadDescriptor dedups concurrent
+// descriptor loads per app, but loadAppModule (the home remote's telemetry
+// entry on the waitlist screen) can load the same container at the same time,
+// and the load that finishes first must not clear the mark of the other.
+const pendingModules = new Map<string, number>();
+
+/** Count one more load of an MF container as in flight. */
+function markPending(moduleId: string): void {
+	pendingModules.set(moduleId, (pendingModules.get(moduleId) ?? 0) + 1);
+}
+
+/** Release one in-flight load of an MF container; its mark goes when the last one settles. */
+function releasePending(moduleId: string): void {
+	const left = (pendingModules.get(moduleId) ?? 0) - 1;
+	if (left > 0) pendingModules.set(moduleId, left);
+	else pendingModules.delete(moduleId);
+}
+
+/**
+ * Whether an MF container has a load in flight in this document (the
+ * descriptor, or another module it exposes).
+ *
+ * @param moduleId - The MF container name.
+ */
+export function isRemotePending(moduleId: string): boolean {
+	return (pendingModules.get(moduleId) ?? 0) > 0;
+}
 
 /**
  * Whether an MF container's remote has successfully loaded this document.
@@ -171,6 +200,11 @@ export interface LocalAppMeta {
 	configuration?: AppManifestEntry['configuration'];
 	/** Manifest categories. */
 	categories?: string[];
+	/** The app's auth requirement from ITS manifest (absent = true, the
+	 *  platform default). The dev entry must gate exactly like the deployed
+	 *  app would — hardcoding this false once let auth-required apps render
+	 *  signed out in dev tabs, hiding the gate the user would ship. */
+	authenticated?: boolean;
 }
 
 // Synthetic manifest entries for local apps the server has never heard of:
@@ -216,6 +250,34 @@ export function isDevRemote(moduleId: string): boolean {
  */
 export function setLocalAppsListener(fn: (() => void) | null): void {
 	localAppsListener = fn;
+}
+
+// Change feed for everyone else (useSubscriptions): a version counter and a
+// subscriber set, bumped wherever the single Shell listener is notified.
+let localAppsVersion = 0;
+const localAppsSubscribers = new Set<() => void>();
+
+/** Monotonic version of the local-apps registry (bumps on every change). */
+export function getLocalAppsVersion(): number {
+	return localAppsVersion;
+}
+
+/**
+ * Subscribes to local-app registry changes (useSyncExternalStore-shaped).
+ *
+ * @param cb - Change callback.
+ * @returns Unsubscribe.
+ */
+export function subscribeLocalApps(cb: () => void): () => void {
+	localAppsSubscribers.add(cb);
+	return () => { localAppsSubscribers.delete(cb); };
+}
+
+/** Notify every local-apps consumer (the Shell listener and subscribers). */
+function notifyLocalApps(): void {
+	localAppsVersion++;
+	localAppsListener?.();
+	for (const cb of [...localAppsSubscribers]) cb();
 }
 
 /**
@@ -271,7 +333,9 @@ export function getLocalAppEntries(): AppManifestEntry[] {
 		moduleId: meta.moduleId,
 		name: meta.name,
 		description: meta.description || 'Local development app',
-		authenticated: false,
+		// The app's own manifest decides (default true) — dev must gate
+		// exactly like production will.
+		authenticated: meta.authenticated !== false,
 		public: false,
 		// step: dev means "I'm working on it, show me everything" — the
 		// settings registry and desktop surfaces gate on onDesktop, and
@@ -317,7 +381,7 @@ export function registerLocalApp(id: string, load: () => Promise<AppDescriptor>,
 			moduleId: meta.moduleId || id.replace(/[^a-zA-Z0-9_$]/g, '_'),
 			name: meta.name || id,
 		});
-		localAppsListener?.();
+		notifyLocalApps();
 	}
 	// Release any descriptor loads holding for this app's dev registration:
 	// a local registration satisfies the embedded preview's wait exactly like
@@ -342,7 +406,7 @@ export function unregisterLocalApp(id: string): void {
 	const hadOverride = localOverrides.delete(id);
 	const meta = localAppMetas.get(id);
 	if (meta) devRemoteModules.delete(meta.moduleId);
-	if (localAppMetas.delete(id)) localAppsListener?.();
+	if (localAppMetas.delete(id)) notifyLocalApps();
 	if (hadOverride) {
 		console.log(`[appLoader] Local override removed for "${id}"`);
 	}
@@ -383,7 +447,7 @@ export function registerDevRemote(appId: string, moduleId: string, name: string,
 	// hold orders the registration before the first load on both flavors
 	// (framed push, top-level self-registration) — this covers a
 	// lock/injection mismatch and the late-registration-after-fallback case.
-	if (registeredEntries.has(moduleId) && !devRemoteModules.has(moduleId) && (loadedModules.has(moduleId) || pendingModules.has(moduleId))) {
+	if (registeredEntries.has(moduleId) && !devRemoteModules.has(moduleId) && (loadedModules.has(moduleId) || isRemotePending(moduleId))) {
 		let reboot = false;
 		try {
 			// One-shot per session: after the reboot the dev-preview hold
@@ -485,19 +549,18 @@ export function fallbackSkippedRemote(appId: string): boolean {
  */
 export function isDevPreviewPage(): boolean {
 	try {
-		if (new URLSearchParams(window.location.search).get('rrdev') === '1') return true;
-		return sessionStorage.getItem('rr:dev') === '1';
+		return tabSession().dev;
 	} catch {
 		return false;
 	}
 }
 
 /**
- * The app id this page is session-locked to (`?appid=` / `?appId=`), or ''.
- * The value identifies WHICH app's first load the dev-preview hold applies
- * to. The URL wins; the sessionStorage copy ('rr:devAppId', persisted by the
- * flavor picker beside 'rr:dev') covers the OAuth redirect, which strips the
- * query string on its way back to the bare origin.
+ * The app id this page is session-locked to, or ''. The value identifies
+ * WHICH app's first load the dev-preview hold applies to. Authored preview
+ * pages state their identity in the page itself (devBootConfig); everyone
+ * else carries it in the tab session (URL-first, with the per-tab persisted
+ * copy covering the OAuth redirect's stripped query string).
  */
 export function previewLockedAppId(): string {
 	try {
@@ -505,10 +568,7 @@ export function previewLockedAppId(): string {
 		// no URL, no sessionStorage, no OAuth round-trip concerns.
 		const injected = devBootConfig()?.appId;
 		if (injected) return injected;
-		const params = new URLSearchParams(window.location.search);
-		const fromUrl = params.get('appId') || params.get('appid');
-		if (fromUrl) return fromUrl;
-		return sessionStorage.getItem('rr:devAppId') || '';
+		return tabSession().appId;
 	} catch {
 		return '';
 	}
@@ -579,6 +639,35 @@ function dumpShareScope(): void {
 		});
 	} catch (err) {
 		console.warn(`[appLoader] share scope dump failed: ${err instanceof Error ? err.message : String(err)}`);
+	}
+}
+
+/**
+ * Load a module an app's container exposes besides its AppDescriptor (the home
+ * remote's `telemetry` entry, used on the shell's own screens where no app
+ * renders). Resolves null when the app is unknown or its container does not
+ * expose that module; never throws. Keeps the same pending/loaded bookkeeping
+ * as load() (counted, so overlapping loads of one container each hold the
+ * mark until they finish): a container loaded here is committed to its
+ * version too, so a later version override falls back to a reload instead of
+ * repointing it.
+ *
+ * @param appId - The app id (not the container name).
+ * @param modulePath - The exposed module path without the leading `./`.
+ * @returns The module namespace, or null.
+ */
+export async function loadAppModule<T = unknown>(appId: string, modulePath: string): Promise<T | null> {
+	const moduleId = serverAppModules.get(appId) ?? localAppMetas.get(appId)?.moduleId;
+	if (!moduleId) return null;
+	markPending(moduleId);
+	try {
+		const mod = (await loadRemote(`${moduleId}/${modulePath}`)) as T;
+		loadedModules.add(moduleId);
+		return mod;
+	} catch {
+		return null; // an older build of the app without that entry, or the container failed to load
+	} finally {
+		releasePending(moduleId);
 	}
 }
 
@@ -674,6 +763,16 @@ export function resolveServerEntry(a: ServerAppEntry): string | null {
 	return typeof a.registryVersion === 'number' ? versionedEntryUrl(a.id, a.registryVersion) : null;
 }
 
+/**
+ * Register the server's app manifest with Module Federation and map it to the
+ * shell's manifest entries. Entries without a load URL are dropped; dev-owned
+ * containers and a dev preview's session-locked app are not re-registered.
+ * Each entry's `load()` fetches its descriptor lazily (a local override, when
+ * one is registered, wins) and marks the container pending for the whole load.
+ *
+ * @param serverApps - The apps listed in the server's manifest.
+ * @returns One manifest entry per app that resolved to a load URL.
+ */
 export function registerAndMapApps(serverApps: ServerAppEntry[]): AppManifestEntry[] {
 	const overrides = getAppVersionOverrides();
 	/** The entry's effective version override (chip + resolution agree). */
@@ -720,6 +819,7 @@ export function registerAndMapApps(serverApps: ServerAppEntry[]): AppManifestEnt
 
 	// Record the registered URLs so resetRemote() can rebuild a container.
 	for (const { app, url } of registrable) registeredEntries.set(app.moduleId, url);
+	for (const { app } of resolved) serverAppModules.set(app.id, app.moduleId);
 
 	// Map server entries to runtime AppManifestEntry objects with lazy loaders
 	return resolved.map(({ app: a }) => ({
@@ -744,15 +844,23 @@ export function registerAndMapApps(serverApps: ServerAppEntry[]): AppManifestEnt
 			if (local) return local();
 			// Pending marks the container committed for the WHOLE load — the
 			// dev takeover must not force-register it mid-flight.
-			pendingModules.add(a.moduleId);
-			return (loadRemote(`${a.moduleId}/AppDescriptor`) as Promise<{ default: AppDescriptor }>)
+			markPending(a.moduleId);
+			let loading: Promise<{ default: AppDescriptor }>;
+			try {
+				loading = loadRemote(`${a.moduleId}/AppDescriptor`) as Promise<{ default: AppDescriptor }>;
+			} catch (err) {
+				// a loader that throws before it returns a promise must not leave the mark behind
+				releasePending(a.moduleId);
+				throw err;
+			}
+			return loading
 				.then((m) => {
 					// A resolved remote commits this container to its version
 					// for the document's lifetime (see isRemoteLoaded).
 					loadedModules.add(a.moduleId);
 					return m.default;
 				})
-				.finally(() => pendingModules.delete(a.moduleId));
+				.finally(() => releasePending(a.moduleId));
 		},
 	}));
 }

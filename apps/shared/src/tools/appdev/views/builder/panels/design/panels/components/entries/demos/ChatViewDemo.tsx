@@ -31,7 +31,7 @@
  * beat so the typing indicator shows.
  */
 
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ChatView } from 'shell';
 import type { ChatMessage } from 'shell';
 import type { IGalleryDemoProps } from '../../galleryTypes';
@@ -48,14 +48,20 @@ const ChatViewDemo: React.FC<IGalleryDemoProps> = ({ knobs }) => {
 	const [isTyping, setIsTyping] = useState(false);
 	// Monotonic id source continuing after the seed messages
 	const nextId = useRef(SEED_MESSAGES.length + 1);
+	// Pending canned-reply timer, cleared on unmount
+	const replyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+	useEffect(() => () => clearTimeout(replyTimer.current), []);
 
 	/** Appends the user message, then a canned bot reply after a beat. */
 	const handleSend = (text: string): void => {
 		const stamp = new Date().toTimeString().slice(0, 5);
-		setMessages((prev) => [...prev, { id: nextId.current++, text, sender: 'user', timestamp: stamp }]);
+		const userId = nextId.current++;
+		setMessages((prev) => [...prev, { id: userId, text, sender: 'user', timestamp: stamp }]);
 		setIsTyping(true);
-		setTimeout(() => {
-			setMessages((prev) => [...prev, { id: nextId.current++, text: 'This is a canned gallery reply - no pipeline behind it.', sender: 'bot', timestamp: stamp }]);
+		replyTimer.current = setTimeout(() => {
+			const botId = nextId.current++;
+			setMessages((prev) => [...prev, { id: botId, text: 'This is a canned gallery reply - no pipeline behind it.', sender: 'bot', timestamp: stamp }]);
 			setIsTyping(false);
 		}, 900);
 	};

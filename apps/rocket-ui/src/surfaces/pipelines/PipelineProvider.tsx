@@ -21,77 +21,36 @@
 // SOFTWARE.
 
 // =============================================================================
-// PROJECT PAGE — pipeline editor view
+// PROJECT PAGE — this host's DOCUMENT SEAM around the shared pipeline editor
 // =============================================================================
 //
-// Owns the full lifecycle for a project document view:
-//   - Documents library integration (useDocuments for save/dirty)
-//   - Save logic (dirty state, save dialog, Ctrl+S via tab:save event)
-//   - Pipeline run/stop/restart (via RocketRide client)
-//   - Server event handling: status updates for the canvas, plus the raw
-//     stamped live-event feed + run-log bindings (client.log) that power the
-//     Development/Deploy section players
+// The editor itself (canvas, sections, deploy page, record drawers, DVR,
+// monitors, event folding) is the shared PipelineEditor
+// (shared/tools/pipelines); what lives here is exactly what the cloud host
+// owns and no other host does:
 //
-// Directly mounts <ProjectView> as a React child — no iframe, no postMessage.
+//   - the Documents-store document: save / save-as (SaveFileDialog over the
+//     project VFS), dirty-run choreography, tab re-pointing after save-as;
+//   - run settings resolution (the pipeline-builder settings) and the
+//     client.use/terminate/restart verbs;
+//   - the subscription prompt (shell:subscribe toward the shell's
+//     CheckoutFlow) and the paywall gate;
+//   - publish (client.deploy.add of the saved snapshot) and export.
 // =============================================================================
 
-import React, { useEffect, useCallback, useMemo, useRef, useState, CSSProperties } from 'react';
+import React, { useCallback, useMemo, useRef, useState, CSSProperties, useEffect } from 'react';
 import { commonStyles } from 'shell';
-import { getClient, useShellConnection, useWorkspace, useSubscriptions, ConnectionManager, ConfirmDialog, SaveFileDialog, createMirroredPrefsStore } from 'shell';
-import { PIPELINE_PARTITION } from 'shared/tools/pipelines/types';
+import { getClient, useShellConnection, useWorkspace, useSubscriptions, ConnectionManager, ConfirmDialog, SaveFileDialog } from 'shell';
 import { getDocs } from '../../docs';
 import type { PipelineConfig } from 'shell';
 // Project module is imported via subpath (not the 'shared' barrel) so the
 // canvas bundles into THIS app, not the shell's eager shared chunk.
-import { ProjectView, parseServerEvent, isDevLiveEvent } from 'shared/tools/pipelines';
-import { registerServiceIcons } from 'shared/tools/pipelines/panels/design/canvas';
-import { foldProjectDeployRuns } from 'shared/tools/pipelines/sidebar/taskFold';
-import type { DeploySnapshot, TeamDeployment } from 'shared/panels/deploy';
-import type { DeployArtifact } from 'shell';
-import { useDeployments } from '../deployments/useDeployments';
-import { PrefsProvider } from 'shell';
-import type { TaskEventMessage, TaskEventSession, TaskStatus, TaskTimeline, TraceLevel, ViewState } from 'shared/tools/pipelines';
+import { PipelineEditor } from 'shared/tools/pipelines/PipelineEditor';
+import type { IPipelineEditorHost } from 'shared/tools/pipelines/PipelineEditor';
+import type { TraceLevel, ViewState } from 'shared/tools/pipelines';
 import { displayName as projectDisplayName } from '../workspace/projectStore';
 import { createProjectVfs } from '../workspace/projectVfs';
 import { downloadJson } from '../../utils/downloadFile';
-import DeploymentProvider from '../deployments/DeploymentProvider';
-
-// =============================================================================
-// CONSTANTS
-// =============================================================================
-
-/**
- * Host-side live-event feed cap. The feed only ever grows within a session;
- * past this length it is trimmed to the newest LIVE_EVENTS_KEEP in one cut
- * (a rare, chunky trim — the sections detect the shrink and re-feed their
- * buffers, deduped on seq, so nothing inside their own DVR caps is lost).
- */
-const LIVE_EVENTS_MAX = 20000;
-
-/** Post-trim feed length (see {@link LIVE_EVENTS_MAX}). */
-const LIVE_EVENTS_KEEP = 10000;
-
-// =============================================================================
-// HELPERS
-// =============================================================================
-
-/**
- * Derives an HTTP URL from the WebSocket connection URI.
- *
- * @returns The HTTP base URL for the RocketRide server.
- */
-function getHttpUrl(): string {
-	const wsUri = getClient()?.getConnectionInfo().uri;
-	if (!wsUri) return '';
-	try {
-		const url = new URL(wsUri);
-		const proto = url.protocol === 'wss:' ? 'https:' : 'http:';
-		const port = url.port || (url.protocol === 'wss:' ? '443' : '80');
-		return `${proto}//${url.hostname}:${port}`;
-	} catch {
-		return '';
-	}
-}
 
 // =============================================================================
 // STYLES
@@ -127,7 +86,7 @@ interface ProjectPageProps {
 	 * Per-editor saved view state (active tab, viewport, flow mode). Typed
 	 * `unknown` because it is an untyped persisted blob from the Documents
 	 * store; it was originally written from a ProjectView `ViewState`, so it
-	 * is narrowed back to that shape where it is handed to ProjectView.
+	 * is narrowed back to that shape where it is handed to the editor.
 	 */
 	initialViewState?: unknown;
 	/** Called when the pipeline editor modifies the content. */
@@ -141,11 +100,7 @@ interface ProjectPageProps {
 // =============================================================================
 
 /**
- * Pipeline editor view.
- *
- * Receives parsed pipeline data from RocketApp and delegates rendering to
- * the shared ProjectView component.  Handles save logic, pipeline actions
- * (run/stop/restart), and server event parsing.
+ * Pipeline editor view — the cloud host's seam around the shared editor.
  *
  * @param props - Project page configuration.
  */
@@ -164,20 +119,19 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 	const settingTaskArguments = String(settings['rocketride.pipeBuilder.taskArguments'] ?? '').trim();
 	// Full task debug output; adds --trace=debugOut to the task args when enabled
 	const settingDebugOutput = settings['rocketride.pipeBuilder.pipelineDebugOutput'] === true;
+	// Workspace-relative directory preselected when saving an untitled pipeline;
+	// SaveFileDialog renders it even before it exists and mkdirs it on confirm
+	const settingDefaultDir = String(settings['rocketride.pipeBuilder.defaultPipelinePath'] ?? '').replace(/^\/+|\/+$/g, '') || 'pipelines';
 
 	// Rocket Builder is a paywalled app. Running requires an active sub —
 	// gate the run controls (lock icon) and the run action on this. Reactive:
 	// updates live when the subscription status changes.
 	const { getStatus } = useSubscriptions();
-	// Memoized so its reference is stable across renders (getStatus only changes
-	// when identity.apps changes) — keeps it from ever contributing render churn
-	// to the canvas/context subtree.
 	const isSubscribed = useMemo(() => {
 		const s = getStatus('rocketride.pipeBuilder');
 		return s === 'subscribed' || s === 'trialing';
 	}, [getStatus]);
-	const [servicesJson, setServicesJson] = useState<Record<string, any>>({});
-	const [envKeys, setEnvKeys] = useState<string[]>([]);
+
 	const [saveDialogOpen, setSaveDialogOpen] = useState(false);
 	const [pendingRun, setPendingRun] = useState<{ action: string; source?: string } | null>(null);
 	// Ref preserves the run intent across save-as for new files (state is
@@ -185,113 +139,12 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 	const deferredRunRef = useRef<{ action: string; source?: string } | null>(null);
 	const [pipelineError, setPipelineError] = useState<string | null>(null);
 
-	// --- Server event state ---------------------------------------------------
-	const [statusMap, setStatusMap] = useState<Record<string, TaskStatus>>({});
-	// Raw stamped live events (header eventTime + seq) for this project — the
-	// sections' DVR buffers and folds feed from this append-only array.
-	const [liveLogEvents, setLiveLogEvents] = useState<TaskEventMessage[]>([]);
-
-	// Derived values
 	const projectId = pipeline?.project_id ?? '';
 	const filename = uri;
 
 	// Project-store VFS for the stock SaveFileDialog — the dialog loads its own
 	// folder tree and drives its own overwrite confirm through this adapter.
 	const projectVfs = useMemo(() => createProjectVfs(client), [client]);
-
-	// --- Services from the shell's cached catalog -----------------------------
-
-	useEffect(() => {
-		if (!isConnected) return;
-		// Seed from the shell's summary cache (first access triggers its lazy
-		// fetch) and follow refreshes — the shell fetches the catalog once per
-		// connection, so opening more canvases issues no services traffic.
-		const manager = ConnectionManager.getInstance();
-		const cached = manager.getCachedServices();
-		if (!cached.servicesError && Object.keys(cached.services).length > 0) {
-			// The summary carries the deduplicated icon table — (re)build the
-			// icon registry with the same lifecycle as the services list
-			// itself. The shell types service entries loosely (Record<string,
-			// unknown>); the registry reads only the `icon` id off each entry,
-			// so the hand-off narrows to that shape.
-			registerServiceIcons({ services: cached.services as Record<string, { icon?: string }>, icons: cached.icons ?? {} });
-			setServicesJson(cached.services);
-		}
-		return manager.on('shell:servicesUpdated', ({ services, icons, servicesError }) => {
-			// A failed refresh keeps the last good catalog on the canvas.
-			if (servicesError) return;
-			registerServiceIcons({ services: services as Record<string, { icon?: string }>, icons: icons ?? {} });
-			setServicesJson(services);
-		});
-	}, [isConnected]);
-
-	// --- Environment variable keys (for ${...} autocomplete in config fields) -
-	// Mirrors the VS Code host: fetch the saved variable names and feed them to
-	// ProjectView, which drives the env-var suggestions in the config widgets.
-	// Without this, the web autocomplete list is always empty.
-
-	useEffect(() => {
-		if (!client || !isConnected) {
-			setEnvKeys([]);
-			return;
-		}
-		const load = () => {
-			(client as any).account
-				?.getEnvironmentKeys?.()
-				.then((keys: string[]) => setEnvKeys(keys ?? []))
-				.catch(() => setEnvKeys([]));
-		};
-		load();
-		// Let other views (e.g. the Variables panel) trigger a refresh after the
-		// user adds or removes a variable, without reconnecting.
-		window.addEventListener('rocketride:envKeysChanged', load);
-		return () => window.removeEventListener('rocketride:envKeysChanged', load);
-	}, [client, isConnected]);
-
-	// --- Server event subscription --------------------------------------------
-
-	useEffect(() => {
-		const pid = pipeline?.project_id;
-		if (!pid) return;
-
-		// Subscribe to raw server events: statusMap keeps feeding the canvas
-		// (per-node badges + page error counts); the raw stamped envelope is
-		// accumulated into liveLogEvents for the ProjectView sections.
-		const unsub = ConnectionManager.getInstance().on('shell:event', ({ event }) => {
-			// Host firehose parse is DEV-scoped: deploy events ride this
-			// connection whenever a team-scoped subscription is open and must
-			// not paint the dev canvas.
-			const parsed = parseServerEvent(event, pid, 'dev');
-			if (parsed.statusUpdate) {
-				setStatusMap((prev) => ({ ...prev, [parsed.statusUpdate!.source]: parsed.statusUpdate!.status }));
-			}
-
-			// Accumulate this project's STAMPED task events for the DEV
-			// sections. Membership (stamps present + project match + not a
-			// deploy run) is the shared classification — deploy events ride
-			// this connection whenever a team-scoped subscription is open and
-			// must never enter the dev feed.
-			// Wire-boundary reinterpret: the generic DAP envelope narrows to
-			// the task-event shape only after the membership check below.
-			const msg = event as unknown as TaskEventMessage;
-			if (!isDevLiveEvent(msg, pid)) return;
-			setLiveLogEvents((prev) => {
-				const next = [...prev, msg];
-				// Rare chunky trim; sections re-feed (seq-deduped) on shrink.
-				return next.length > LIVE_EVENTS_MAX ? next.slice(next.length - LIVE_EVENTS_KEEP) : next;
-			});
-		});
-		return unsub;
-	}, [pipeline?.project_id]);
-
-	// --- Clear stale data on reconnect ----------------------------------------
-
-	useEffect(() => {
-		if (isConnected) {
-			setStatusMap({});
-			setLiveLogEvents([]);
-		}
-	}, [isConnected]);
 
 	// --- Viewport restore on view activation ----------------------------------
 
@@ -310,16 +163,15 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 	 * @param saveFilename - The file path to save to.
 	 * @param project      - The pipeline configuration to save.
 	 * @param opts         - When `rethrow` is set, a save failure re-throws
-	 *   after surfacing the error. The save-and-publish path relies on this:
-	 *   DeployPanel awaits the save before publishing, so a swallowed failure
-	 *   would let a failed local save still publish the in-memory pipeline and
-	 *   report success. Re-throwing rejects the awaited promise and aborts the
-	 *   publish. The plain save path leaves it unset (fire-and-forget callers
-	 *   must not see an unhandled rejection).
+	 *   after surfacing the error (the save-and-publish path awaits the save,
+	 *   so a swallowed failure would publish an unsaved pipeline).
 	 */
 	const performSave = useCallback(
 		async (saveFilename: string, project: PipelineConfig, opts?: { rethrow?: boolean }) => {
-			if (!client || !isConnected) return;
+			if (!client || !isConnected) {
+				if (opts?.rethrow) throw new Error('Not connected');
+				return;
+			}
 			try {
 				await projectVfs.write(saveFilename, project);
 				// Mark clean in Documents model
@@ -330,8 +182,6 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 				// Surface the failure — a silent catch leaves the user believing
 				// the document was saved.
 				setPipelineError(`Save failed: ${err instanceof Error ? err.message : String(err)}`);
-				// The publish path must abort when the save fails: re-throw so
-				// the awaiting caller's promise rejects instead of resolving.
 				if (opts?.rethrow) throw err;
 			}
 		},
@@ -342,8 +192,7 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 
 	/**
 	 * Opens the subscription checkout (plan picker) for Rocket Builder.
-	 * Uses the app entry from account info when present, else a minimal entry —
-	 * the checkout only needs the app id (to fetch prices) plus name/description.
+	 * Uses the app entry from account info when present, else a minimal entry.
 	 */
 	const promptSubscribe = useCallback(() => {
 		const info: any = getClient()?.getAccountInfo();
@@ -353,9 +202,6 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 
 	/**
 	 * Executes a pipeline action (run, stop, restart) via the RocketRide client.
-	 *
-	 * @param action  - The action to perform ('run', 'stop', 'restart').
-	 * @param source  - The source component ID to act on.
 	 */
 	const executePipelineAction = useCallback(
 		(action: string, source?: string) => {
@@ -364,23 +210,18 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 			if (!source || !pid) return;
 
 			// Subscription gate (defense-in-depth; the primary gate is in
-			// handlePipelineAction). Running/restarting a paywalled pipeline requires
-			// an active subscription — prompt checkout instead of executing.
+			// runAction below).
 			if ((action === 'run' || action === 'restart') && !isSubscribed) {
 				promptSubscribe();
 				return;
 			}
 
 			if (action === 'run') {
-				// Trace level, TTL, task arguments, and debug output all come from the
-				// effective pipeline-builder settings (each already carries its manifest
-				// default). ttl:0 = no timeout; omitting ttl lets the engine apply its
-				// own default.
+				// Trace level, TTL, task arguments, and debug output all come from
+				// the effective pipeline-builder settings. ttl:0 = no timeout;
+				// omitting ttl lets the engine apply its own default.
 				const traceLevel = settingTraceLevel;
 				const ttl = Number.isFinite(settingTtl) ? settingTtl : undefined;
-				// Task args mirror the VSCode host: the raw string is passed as a single
-				// entry (the engine shell-splits it), with --trace=debugOut appended when
-				// debug output is on and the user hasn't set an explicit --trace.
 				const taskArgs: string[] = [];
 				if (settingTaskArguments) taskArgs.push(settingTaskArguments);
 				if (settingDebugOutput && !settingTaskArguments.includes('--trace=')) taskArgs.push('--trace=debugOut');
@@ -404,9 +245,6 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 					.getTaskToken({ projectId: pid, source })
 					// No token = no running task to restart; the server rejects a
 					// tokenless restart outright, so skip it exactly as stop does.
-					// The SDK types restart's pipeline as a loose record (no typed
-					// pipeline shape on that verb yet); PipelineConfig carries no
-					// index signature, so the hand-off needs the cast.
 					.then((token: string | undefined) => (token ? client.restart({ token, projectId: pid, source, pipeline: pipeline as unknown as Record<string, unknown> }) : undefined))
 					.catch((err: unknown) => setPipelineError(err instanceof Error ? err.message : String(err)));
 			}
@@ -414,9 +252,7 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 		[client, isConnected, pipeline, filename, isSubscribed, promptSubscribe, settingTraceLevel, settingTtl, settingTaskArguments, settingDebugOutput]
 	);
 
-	/**
-	 * Initiates save — opens the save dialog for new documents, or saves directly.
-	 */
+	/** Initiates save — the save dialog for new documents, else direct. */
 	const handleSave = useCallback(() => {
 		if (!pipeline) return;
 		if (isNew) {
@@ -426,33 +262,26 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 		performSave(filename, pipeline);
 	}, [isNew, filename, pipeline, performSave]);
 
-	/**
-	 * Exports the current pipeline as a downloaded .pipe file (SaaS-only).
-	 */
+	/** Exports the current pipeline as a downloaded .pipe file (SaaS-only). */
 	const handleExport = useCallback(() => {
 		if (!pipeline) return;
 		const name = filename.split('/').pop() ?? 'pipeline.pipe';
 		downloadJson(name, pipeline);
 	}, [filename, pipeline]);
 
-	/**
-	 * Handles save-dialog confirmation with a new file path.
-	 *
-	 * @param fileRelPath - The chosen file path from the dialog.
-	 */
+	/** Handles save-dialog confirmation with a new file path. */
 	const handleSaveDialogConfirm = useCallback(
 		async (fileRelPath: string) => {
 			if (!pipeline || !client || !isConnected) return;
 			setSaveDialogOpen(false);
 
-			// Save to the new path
 			try {
 				await projectVfs.write(fileRelPath, pipeline);
 			} catch (err) {
 				console.error('[PipelineProvider] Save-as failed:', err);
-				// Surface the failure — a silent catch leaves the user believing
-				// the document was saved.
 				setPipelineError(`Save failed: ${err instanceof Error ? err.message : String(err)}`);
+				// Drop the run intent — a later unrelated save-as must not run it.
+				deferredRunRef.current = null;
 				return;
 			}
 
@@ -479,16 +308,11 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 		[pipeline, client, isConnected, uri, projectId, executePipelineAction, projectVfs]
 	);
 
-	/**
-	 * Handles pipeline action with dirty-save prompt if needed.
-	 *
-	 * @param action  - The action to perform.
-	 * @param source  - The source component ID.
-	 */
-	const handlePipelineAction = useCallback(
-		(action: string, source?: string) => {
-			// Not subscribed → prompt checkout (plan picker) instead of running. Gate
-			// here, before the dirty-save detour, so the lock always prompts checkout.
+	/** Pipeline action with the dirty-save prompt choreography. */
+	const runAction = useCallback(
+		(action: 'run' | 'stop' | 'restart', source?: string) => {
+			// Not subscribed → prompt checkout instead of running. Gate here,
+			// before the dirty-save detour, so the lock always prompts checkout.
 			if ((action === 'run' || action === 'restart') && !isSubscribed) {
 				promptSubscribe();
 				return;
@@ -498,8 +322,7 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 				return;
 			}
 			if (isDirty) {
-				// exactOptionalPropertyTypes: omit `source` entirely when absent
-				// rather than storing an explicit undefined.
+				// exactOptionalPropertyTypes: omit `source` entirely when absent.
 				setPendingRun(source !== undefined ? { action, source } : { action });
 				return;
 			}
@@ -508,17 +331,15 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 		[isDirty, executePipelineAction, isSubscribed, promptSubscribe]
 	);
 
-	/**
-	 * Saves the pipeline then runs the pending action.
-	 */
+	/** Saves the pipeline then runs the pending action. */
 	const handleSaveAndRun = useCallback(() => {
 		if (!pendingRun || !pipeline) {
 			setPendingRun(null);
 			return;
 		}
 		if (isNew) {
-			// Stash the run intent in a ref so handleSaveDialogConfirm can
-			// trigger it after save-as. Clear state to dismiss the ConfirmDialog.
+			// Stash the run intent so handleSaveDialogConfirm can trigger it
+			// after save-as. Clear state to dismiss the ConfirmDialog.
 			deferredRunRef.current = pendingRun;
 			setPendingRun(null);
 			setSaveDialogOpen(true);
@@ -527,429 +348,74 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 		const run = pendingRun;
 		setPendingRun(null);
 		if (!client || !isConnected) return;
-		projectVfs.write(filename, pipeline)
-			.then(() => {
-				getDocs()?.saveDocument(uri);
-				executePipelineAction(run.action, run.source);
-			})
-			.catch((err) => setPipelineError(err instanceof Error ? err.message : String(err)));
-	}, [pendingRun, isNew, filename, pipeline, client, isConnected, uri, executePipelineAction, projectVfs]);
+		performSave(filename, pipeline, { rethrow: true })
+			.then(() => executePipelineAction(run.action, run.source))
+			// performSave already surfaced the error; abort the run.
+			.catch(() => undefined);
+	}, [pendingRun, isNew, filename, pipeline, client, isConnected, executePipelineAction, performSave]);
 
-	// --- ProjectView callbacks ------------------------------------------------
+	// --- Publish (client.deploy.add of the saved snapshot) --------------------
 
-	/**
-	 * Called when the ProjectView editor modifies the pipeline content.
-	 *
-	 * @param updatedProject - The modified PipelineConfig.
-	 */
-	const handleContentChanged = useCallback(
-		(updatedProject: any) => {
-			onContentChanged(updatedProject);
-		},
-		[onContentChanged]
-	);
-
-	/**
-	 * Validates a pipeline via the RocketRide client.
-	 *
-	 * @param pipelineToValidate - The pipeline to validate.
-	 * @returns Validation result with errors and warnings.
-	 */
-	const handleValidate = useCallback(async (pipelineToValidate: any): Promise<any> => {
-		const c = getClient();
-		if (!c) return { errors: [], warnings: [] };
-		try {
-			return await c.validate({ pipeline: pipelineToValidate });
-		} catch {
-			return { errors: [], warnings: [] };
-		}
-	}, []);
-
-	/**
-	 * Fetches the FULL definition (config schema) for one service provider.
-	 * The bulk services payload is summary-only, so the canvas requests
-	 * definitions on demand and caches them. Throws while disconnected so the
-	 * canvas treats the request as retryable rather than caching a miss.
-	 *
-	 * @param provider - The service provider key (e.g. "db_mysql").
-	 * @returns The full service definition, or undefined when the server has none.
-	 */
-	const handleGetNodeSchema = useCallback(async (provider: string): Promise<Record<string, unknown> | undefined> => {
-		const c = getClient();
-		if (!c) throw new Error('Not connected to server');
-		return (await c.getService(provider)) as Record<string, unknown> | undefined;
-	}, []);
-
-	/**
-	 * Handles opening a link in a webview (currently a no-op in the new model).
-	 *
-	 * @param url         - The URL to open.
-	 * @param displayName - Optional display name for the tab.
-	 */
-	const handleOpenLink = useCallback((url: string, displayName?: string) => {
-		const docs = getDocs();
-		if (!docs) return;
-		const label = displayName || 'Webview';
-		docs.openStaticDocument(`webview:${url}`, label);
-	}, []);
-
-	/**
-	 * Handles view state changes (canvas scroll, zoom, etc.).
-	 *
-	 * @param viewState - The updated viewport state.
-	 */
-	const handleViewStateChange = useCallback(
-		(viewState: ViewState) => {
-			// Persist view state (tab, viewport) back to the editor instance. The
-			// spread re-types the interface as a plain record (interfaces have no
-			// implicit index signature) without any casting.
-			onViewStateChangeProp?.({ ...viewState });
-		},
-		[onViewStateChangeProp]
-	);
-
-	// --- Run-log bindings (replay + activity timeline) ------------------------
-
-	/**
-	 * Stream-bound DVR session factory for the ProjectView sections — wraps
-	 * `client.log.openEventStream` with this project's id merged into the
-	 * stream ref. The section owns the returned session's lifetime.
-	 *
-	 * @param stream - Section-supplied source + runKind.
-	 * @returns A DVR session over that stream (inert stub before connect).
-	 */
-	const openEventStream = useCallback(
-		(stream: { source: string; runKind: 'dev' | 'deploy' }): TaskEventSession => {
-			const c = getClient();
-			if (!c || !projectId) {
-				// Inert stand-in until the connection exists: satisfies the session
-				// surface with no-ops; the section re-creates it after connect.
-				return {
-					seek: async () => {},
-					getStatus: async () => null,
-					play: async () => {},
-					getTrace: async () => ({ events: [] }),
-					pause: () => {},
-					ingestLive: () => {},
-					closeEventStream: () => {},
-				};
-			}
-			// This view only hosts DEV sections now (deploy monitoring lives on
-			// the per-team deployment tab); the scope IS the kind — an unscoped
-			// stream ref addresses the caller's own dev continuum.
-			return (c as any).log.openEventStream({ projectId, source: stream.source });
-		},
-		[projectId]
-	);
-
-	/**
-	 * Stream-bound chapters fetch for the activity timeline — wraps
-	 * `client.log.chapters` the same way.
-	 *
-	 * @param stream - Section-supplied source + runKind.
-	 * @returns Chapters, activity spans, and stream timeline metadata.
-	 */
-	const fetchTimeline = useCallback(
-		async (stream: { source: string; runKind: 'dev' | 'deploy' }): Promise<TaskTimeline> => {
-			const c = getClient();
-			if (!c || !projectId) return { chapters: [], segments: [], horizonSeq: 0, completed: true };
-			// Dev continuum: unscoped ref (see openEventStream above).
-			return (c as any).log.chapters({ projectId, source: stream.source });
-		},
-		[projectId]
-	);
-
-	// --- Monitor registration -------------------------------------------------
-
-	useEffect(() => {
-		const pid = pipeline?.project_id;
-		const c = getClient();
-		if (!pid || !c || !isConnected) return;
-
-		// Register for the HOST's own needs (status map + canvas). The DVR
-		// sessions register their own monitors (all classes) — the wire
-		// carries the union and this feed receives it.
-		const monitorKey = { projectId: pid, source: '*' };
-		const monitorTypes = ['summary', 'flow'];
-		c.addMonitor(monitorKey, monitorTypes).catch((err: unknown) => console.error('[PipelineProvider] addMonitor failed:', err));
-
-		return () => {
-			c.removeMonitor(monitorKey, monitorTypes).catch((err: unknown) => console.error('[PipelineProvider] removeMonitor failed:', err));
-		};
-	}, [pipeline?.project_id, isConnected]);
-
-	// --- Deploy lifecycle capabilities (the DEPLOY page) ----------------------
-	// ProjectView composes the DeployPanel itself (capability-fed,
-	// like SourcePanel); this host supplies the closures + live rows.
-
-	const { deployments, teams: deployTeams, teamName, refresh: refreshDeployments } = useDeployments();
-
-	// LIVE where-live FACTS for this project (team, pointer, state, schedule
-	// records) from the shared deployments poll — raw only: ProjectView
-	// resolves source names against the pipeline it holds; the panel's
-	// registry snapshot is fetched separately.
-	// Live deploy-run state per team (the where-live running badges), folded
-	// from the connection's task events: the catch-up snapshot seeds it and
-	// begin/end flip it — no polling. The '*' task subscription that feeds
-	// it is registered below (refcounted with the sidebar's).
-	const [deployRunsByTeam, setDeployRunsByTeam] = useState<Record<string, Record<string, boolean>>>({});
-	const deployRunsRef = useRef(deployRunsByTeam);
-	useEffect(() => {
-		deployRunsRef.current = deployRunsByTeam;
-	}, [deployRunsByTeam]);
-
-	useEffect(() => {
-		const pid = pipeline?.project_id;
-		const c = getClient();
-		if (!pid || !c || !isConnected) {
-			deployRunsRef.current = {};
-			setDeployRunsByTeam({});
-			return;
-		}
-		c.addMonitor({ token: '*' }, ['task']).catch((err: unknown) => console.error('[PipelineProvider] task monitor failed:', err));
-		const unsub = ConnectionManager.getInstance().on('shell:event', ({ event }: { event: any }) => {
-			if (event?.event !== 'apaevt_task' || !event.body) return;
-			const folded = foldProjectDeployRuns(event.body, deployRunsRef.current, pid);
-			if (folded) {
-				deployRunsRef.current = folded;
-				setDeployRunsByTeam(folded);
-			}
-		});
-		return () => {
-			unsub();
-			c.removeMonitor({ token: '*' }, ['task']).catch(() => {});
-		};
-	}, [pipeline?.project_id, isConnected]);
-
-	const teamDeployments = useMemo<TeamDeployment[]>(
-		() =>
-			deployments
-				.filter((dep) => dep.projectId === projectId && dep.state !== 'removed')
-				.map((dep) => {
-					const schedules = (dep.schedules ?? {}) as Record<string, { cron?: string; paused?: boolean; ttl?: number; lastRunAt?: number }>;
-					return {
-						teamId: dep.teamId as string,
-						teamName: teamName(dep.teamId as string),
-						version: dep.version ?? 0,
-						// A record without a state stamp is a live pointer —
-						// 'enabled' is the only default inside the vocabulary.
-						state: (dep.state ?? 'enabled') as TeamDeployment['state'],
-						deployedAt: dep.deployedAt ?? dep.updatedAt ?? 0,
-						schedules: Object.fromEntries(Object.entries(schedules).map(([sourceId, sched]) => [sourceId, { cron: sched.cron ?? '', paused: sched.paused === true, ...(sched.ttl ? { ttl: sched.ttl } : {}), ...(sched.lastRunAt ? { lastRunAt: sched.lastRunAt } : {}) }])),
-						...(deployRunsByTeam[dep.teamId as string] ? { runningSources: deployRunsByTeam[dep.teamId as string] } : {}),
-					};
-				}),
-		[deployments, projectId, teamName, deployRunsByTeam]
-	);
-
-	/** Registry snapshot fetch — the PANEL owns calling and refreshing this. */
-	const fetchDeployLifecycle = useCallback(async (): Promise<DeploySnapshot> => {
-		// Nothing fetchable — the panel renders its empty states.
-		if (!client || !isConnected || !projectId) return { versions: [] };
-		const versions = await client.deploy.versions(projectId);
-		return {
-			versions: ((versions.rows ?? []) as DeployArtifact[]).map((v) => ({
-				version: v.version ?? 0,
-				sha256: v.sha256 ?? '',
-				publishedAt: v.publishedAt ?? 0,
-				publishedBy: v.publishedBy?.display || v.publishedBy?.userId || '',
-				...(v.comment ? { comment: v.comment } : {}),
-			})),
-		};
-	}, [client, isConnected, projectId]);
-
-	/** Publish the SAVED pipeline (the panel re-fetches its snapshot after). */
-	const handleDeployPublish = useCallback(
+	const handlePublish = useCallback(
 		async (comment: string, deployTo?: string): Promise<void> => {
 			if (!client || !pipeline) throw new Error('Not connected');
 			// Snapshot carries a display name: the registry's pipelineName is
 			// what every deploy surface renders (names live in filenames here).
 			const documentName = projectDisplayName(filename);
-			// The spread builds publish()'s required-name shape statically —
-			// a truthiness check alone would not narrow the property type.
 			const snapshot = { ...pipeline, name: pipeline.name || documentName };
 			await client.deploy.add({
 				pipeline: snapshot,
 				...(comment ? { comment } : {}),
 				...(deployTo ? { deployTo } : {}),
 			});
-			refreshDeployments();
 		},
-		[client, pipeline, filename, refreshDeployments]
+		[client, pipeline, filename]
 	);
 
-	/** Own 'user~{uid}' rows are addressed as '@me' on the wire — the server
-	    never accepts raw owner keys, and only the caller's own space is
-	    addressable at all. */
-	const wireOwnTeam = useCallback(
-		(teamId: string): string => {
-			const uid = client?.getAccountInfo?.()?.userId ?? '';
-			return uid && teamId === `user~${uid}` ? '@me' : teamId;
-		},
-		[client]
-	);
+	// --- The host seam ---------------------------------------------------------
 
-	/** Point a team at a version (promotion and rollback alike). */
-	const handleDeployVersion = useCallback(
-		async (version: number, teamId: string): Promise<void> => {
-			if (!client) throw new Error('Not connected');
-			await client.deploy.deploy(projectId, version, wireOwnTeam(teamId));
-			refreshDeployments();
-		},
-		[client, projectId, refreshDeployments, wireOwnTeam]
-	);
-
-	/** Toggle one team deployment's kill switch (where-live state dot). */
-	const handleDeploySetDisabled = useCallback(
-		async (teamId: string, disabled: boolean): Promise<void> => {
-			if (!client) throw new Error('Not connected');
-			if (disabled) await client.deploy.disable(projectId, wireOwnTeam(teamId));
-			else await client.deploy.enable(projectId, wireOwnTeam(teamId));
-			refreshDeployments();
-		},
-		[client, projectId, refreshDeployments, wireOwnTeam]
-	);
-
-	/** Soft-remove one team's deployment (where-live header verb). */
-	const handleDeployRemove = useCallback(
-		async (teamId: string): Promise<void> => {
-			if (!client) throw new Error('Not connected');
-			await client.deploy.remove(projectId, wireOwnTeam(teamId));
-			refreshDeployments();
-		},
-		[client, projectId, refreshDeployments, wireOwnTeam]
-	);
-
-	/** Set/clear one source's schedule from the where-live pill editor. */
-	const handleDeploySetSchedule = useCallback(
-		async (teamId: string, sourceId: string, cron: string | null, ttl: number | null): Promise<void> => {
-			if (!client) throw new Error('Not connected');
-			await client.deploy.setSchedule(projectId, sourceId, cron, wireOwnTeam(teamId), { ...(ttl !== null ? { ttl } : {}) });
-			refreshDeployments();
-		},
-		[client, projectId, refreshDeployments, wireOwnTeam]
-	);
-
-	/** Pause/resume one source's schedule (the editor's footer verb). */
-	const handleDeploySetSchedulePaused = useCallback(
-		async (teamId: string, sourceId: string, paused: boolean): Promise<void> => {
-			if (!client) throw new Error('Not connected');
-			if (paused) await client.deploy.pauseSchedule(projectId, sourceId, wireOwnTeam(teamId));
-			else await client.deploy.resumeSchedule(projectId, sourceId, wireOwnTeam(teamId));
-			refreshDeployments();
-		},
-		[client, projectId, refreshDeployments, wireOwnTeam]
-	);
-
-	/** Fetch one immutable artifact (the version cards' record drawer). */
-	const handleDeployFetchArtifact = useCallback(
-		async (version: number) => {
-			if (!client) throw new Error('Not connected');
-			return client.deploy.artifact(projectId, version);
-		},
-		[client, projectId]
-	);
-
-	/** Cron preview via the server's single evaluator (schedule editor). */
-	const handleDeployPreviewSchedule = useCallback(
-		async (cron: string, count: number) => {
-			if (!client) throw new Error('Not connected');
-			return client.deploy.preview(cron, count);
-		},
-		[client]
-	);
-
-	// Where-live row / version-badge click → the deployment record drawer.
-	// This page OWNS its record panel (the grid-view pattern: the surface
-	// that opens a record renders it) — keyed team id, or null when closed.
-	const [openDeployment, setOpenDeployment] = useState<{ teamId: string; sourceId?: string } | null>(null);
-	/** Opens a deployment record drawer: the TEAM record (no sourceId) or
-	    one source's record. */
-	const handleOpenDeployment = useCallback((teamId: string, sourceId?: string) => {
-		setOpenDeployment({ teamId, ...(sourceId ? { sourceId } : {}) });
+	const handleOpenLink = useCallback((url: string, displayName?: string) => {
+		const docs = getDocs();
+		if (!docs) return;
+		docs.openStaticDocument(`webview:${url}`, displayName || 'Webview');
 	}, []);
+
+	const documentTitle = useMemo(() => {
+		const docState = getDocs()?.getState();
+		return (docState ? Object.values(docState.editors).find((editor) => editor.documentUri === uri)?.label : undefined) || projectDisplayName(filename);
+	}, [uri, filename]);
+
+	const editorHost = useMemo<IPipelineEditorHost>(
+		() => ({
+			documentTitle,
+			isDirty,
+			isNew,
+			isReadonly,
+			...(initialViewState ? { initialViewState: initialViewState as ViewState } : {}),
+			onViewStateChange: (viewState: ViewState) => onViewStateChangeProp?.({ ...viewState }),
+			onContentChanged,
+			save: handleSave,
+			// The publish flow awaits the save; a failed save MUST abort it.
+			saveDocument: () => performSave(filename, pipeline, { rethrow: true }),
+			publish: handlePublish,
+			runAction,
+			isSubscribed,
+			promptSubscribe,
+			openLink: handleOpenLink,
+			exportDocument: handleExport,
+		}),
+		[documentTitle, isDirty, isNew, isReadonly, initialViewState, onViewStateChangeProp, onContentChanged, handleSave, performSave, filename, pipeline, handlePublish, runAction, isSubscribed, promptSubscribe, handleOpenLink, handleExport]
+	);
 
 	// --- Render --------------------------------------------------------------
 
-	// The pipeline editor's PREFERENCES — the editor is a built-in tool, so
-	// they live in the TOOL's partition, not in whatever app happens to be
-	// active (which is where they used to land, via useWorkspace).
-	// Per-document state does not come through here; it rides the editor's
-	// view state, which Documents already persists per editor into appState.
-	const pipelinePrefs = useMemo(() => createMirroredPrefsStore(ConnectionManager.getInstance(), PIPELINE_PARTITION), []);
-	useEffect(() => pipelinePrefs.dispose, [pipelinePrefs]);
-	// The shell mounts its own PrefsProvider, but this app bundles shared by
-	// SUBPATH (its own module instances), so the shell's context object never
-	// reaches these components — the provider must be mounted from the SAME
-	// bundled instance, here. It also wraps the deployment drawer below.
-	const prefsApi = useMemo(
-		() => ({
-			getPref: (key: string) => pipelinePrefs.store.get(key),
-			setPref: (key: string, value: unknown) => pipelinePrefs.store.set(key, value),
-		}),
-		[pipelinePrefs]
-	);
-
 	return (
 		<div style={styles.container}>
-			<PrefsProvider value={prefsApi}>
-				<ProjectView
-					project={pipeline}
-					documentTitle={(() => {
-						const docState = getDocs()?.getState();
-						return (docState ? Object.values(docState.editors).find((editor) => editor.documentUri === uri)?.label : undefined) || projectDisplayName(filename);
-					})()}
-					{...(isReadonly
-						? {}
-						: {
-								deploy: {
-									fetchLifecycle: fetchDeployLifecycle,
-									publish: handleDeployPublish,
-									deployVersion: handleDeployVersion,
-									teamDeployments,
-									teams: deployTeams,
-									openDeployment: handleOpenDeployment,
-									setDisabled: handleDeploySetDisabled,
-									remove: handleDeployRemove,
-									setSchedule: handleDeploySetSchedule,
-									setSchedulePaused: handleDeploySetSchedulePaused,
-									previewSchedule: handleDeployPreviewSchedule,
-									fetchArtifact: handleDeployFetchArtifact,
-									saveDocument: () => performSave(filename, pipeline, { rethrow: true }),
-								},
-							})}
-					servicesJson={servicesJson}
-					isConnected={isConnected}
-					isSubscribed={isSubscribed}
-					statusMap={statusMap}
-					serverHost={getHttpUrl()}
-					isDirty={isDirty}
-					isNew={isNew}
-					isReadonly={isReadonly}
-					{...(initialViewState ? { initialViewState: initialViewState as ViewState } : {})}
-					prefs={pipelinePrefs.store}
-					liveLogEvents={liveLogEvents}
-					openEventStream={isConnected ? openEventStream : undefined}
-					fetchTimeline={fetchTimeline}
-					onContentChanged={handleContentChanged}
-					onValidate={handleValidate}
-					getNodeSchema={handleGetNodeSchema}
-					onPipelineAction={handlePipelineAction}
-					onViewStateChange={handleViewStateChange}
-					onOpenLink={handleOpenLink}
-					onSave={handleSave}
-					onExport={handleExport}
-					envKeys={envKeys}
-				/>
-				{/* Deployment record drawer — keyed by identity so switching teams
-				    remounts fresh state (React key identity rule). Inside the
-				    PrefsProvider so the drawer's width persistence reaches the
-				    workspace prefs. */}
-				{openDeployment && <DeploymentProvider key={`${openDeployment.teamId}:${openDeployment.sourceId ?? ''}:${projectId}`} teamId={openDeployment.teamId} {...(openDeployment.sourceId ? { sourceId: openDeployment.sourceId } : {})} projectId={projectId} onClose={() => setOpenDeployment(null)} onOpenSource={(sourceId: string) => setOpenDeployment({ teamId: openDeployment.teamId, sourceId })} />}
-			</PrefsProvider>
+			<PipelineEditor project={pipeline} host={editorHost} />
 			{/* Preselect the document's own folder/name (an untitled doc has no
-			    folder, so it opens at root with its "Untitled-N" placeholder). */}
-			{saveDialogOpen && <SaveFileDialog title="Save Pipeline As" vfs={projectVfs} fileTypes={[{ label: 'RocketRide Pipeline', extension: '.pipe' }]} defaultDir={filename.includes('/') ? filename.slice(0, filename.lastIndexOf('/')) : ''} initialName={projectDisplayName(filename)} onConfirm={handleSaveDialogConfirm} onCancel={() => setSaveDialogOpen(false)} />}
+			    folder, so it opens at the workspace's default pipeline directory
+			    with its "Untitled-N" placeholder). */}
+			{saveDialogOpen && <SaveFileDialog title="Save Pipeline As" vfs={projectVfs} fileTypes={[{ label: 'RocketRide Pipeline', extension: '.pipe' }]} defaultDir={filename.includes('/') ? filename.slice(0, filename.lastIndexOf('/')) : settingDefaultDir} initialName={projectDisplayName(filename)} onConfirm={handleSaveDialogConfirm} onCancel={() => { deferredRunRef.current = null; setSaveDialogOpen(false); }} />}
 			{pendingRun && <ConfirmDialog title="Unsaved Changes" message="The pipeline has unsaved changes. Save before running?" confirmLabel="Save & Run" cancelLabel="Cancel" onConfirm={handleSaveAndRun} onCancel={() => setPendingRun(null)} />}
 			{pipelineError && <ConfirmDialog title="Pipeline Error" message={pipelineError} confirmLabel="OK" onConfirm={() => setPipelineError(null)} onCancel={() => setPipelineError(null)} />}
 		</div>

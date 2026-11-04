@@ -65,6 +65,14 @@ const SERVER_CLIENTS_DIR = path.join(DIST_ROOT, 'server', 'static', 'clients', '
 // Source directories and files that affect the shell build output.
 const SRC_DIR = path.join(APP_ROOT, 'src');
 const PKG_JSON = path.join(APP_ROOT, 'package.json');
+const RSBUILD_CONFIG = path.join(APP_ROOT, 'rsbuild.config.mts');
+// The shell bundles the SDK from source as the 'rocketride' MF share every
+// remote consumes (import: false), so SDK edits must rebuild the host — a
+// remote built against new SDK exports would otherwise run on a stale host.
+const SDK_ROOT = path.join(APP_ROOT, '..', 'client-typescript');
+const SDK_SRC_DIR = path.join(SDK_ROOT, 'src');
+const SDK_PKG_JSON = path.join(SDK_ROOT, 'package.json');
+const CLIENT_COMMON_SRC_DIR = path.join(APP_ROOT, '..', 'client-common', 'typescript', 'src');
 const BUILD_HASH_KEY = 'shell.buildHash';
 
 // =============================================================================
@@ -121,7 +129,11 @@ function makeBundleAction() {
 	return {
 		run: async (ctx, task) => {
 			// Fingerprint inputs before building so concurrent edits are detected on the next run.
-			const { changed, hash } = await hasBuildInputChanged(BUILD_HASH_KEY, [SRC_DIR], [PKG_JSON]);
+			const { changed, hash } = await hasBuildInputChanged(
+				BUILD_HASH_KEY,
+				[SRC_DIR, SDK_SRC_DIR, CLIENT_COMMON_SRC_DIR],
+				[PKG_JSON, RSBUILD_CONFIG, SDK_PKG_JSON]
+			);
 			// The cache skip must also verify the CANONICAL artifact: on a
 			// fresh clone the invoking root's .rocketride/shell/shell.tgz is
 			// the pre-install stub (marked by the shell.tgz.stub file the

@@ -47,17 +47,27 @@
  * the blob URL, so a worker chunk that lazy-loads NESTED chunks under an
  * 'auto' publicPath would mis-resolve them. The Monaco workers are
  * single-chunk, so the path never runs today.
+ *
+ * Built lazily (first getWorker call) so merely importing this module never
+ * touches the global Worker — Node/jsdom imports of the barrel stay safe.
  */
-class CrossOriginWorker extends Worker {
-	constructor(scriptURL: string | URL, options?: WorkerOptions) {
-		const resolved = new URL(String(scriptURL), self.location.href);
-		if (resolved.origin === self.location.origin) {
-			super(scriptURL, options);
-		} else {
-			const trampoline = new Blob([`importScripts(${JSON.stringify(resolved.href)});`], { type: 'application/javascript' });
-			super(URL.createObjectURL(trampoline), options);
-		}
+let crossOriginWorkerClass: typeof Worker | null = null;
+
+function getCrossOriginWorkerClass(): typeof Worker {
+	if (!crossOriginWorkerClass) {
+		crossOriginWorkerClass = class CrossOriginWorker extends Worker {
+			constructor(scriptURL: string | URL, options?: WorkerOptions) {
+				const resolved = new URL(String(scriptURL), self.location.href);
+				if (resolved.origin === self.location.origin) {
+					super(scriptURL, options);
+				} else {
+					const trampoline = new Blob([`importScripts(${JSON.stringify(resolved.href)});`], { type: 'application/javascript' });
+					super(URL.createObjectURL(trampoline), options);
+				}
+			}
+		};
 	}
+	return crossOriginWorkerClass;
 }
 
 /**
@@ -81,7 +91,7 @@ export function ensureMonacoEnvironment(): void {
 			// invisible outside this call.
 			const scope = self as { Worker: typeof Worker };
 			const RealWorker = scope.Worker;
-			scope.Worker = CrossOriginWorker;
+			scope.Worker = getCrossOriginWorkerClass();
 			try {
 				// step: route the language label to its dedicated worker; every
 				// other language runs on the base editor worker.

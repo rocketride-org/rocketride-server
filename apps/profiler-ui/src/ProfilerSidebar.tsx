@@ -39,10 +39,8 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { ConnectionManager, SidebarCollapsedGate, createToolOpServer, useShellEvent } from 'shell';
+import { SidebarCollapsedGate, useShellEvent } from 'shell';
 import type { DevToolProps } from 'shell';
-import { callProfilerOp } from './ops';
-import type { ProfilerOps } from './ops';
 import { localSidebarChannel, createPeerSidebarChannel } from './profilerBridge';
 import type { ProfilerControlsState, ProfilerSidebarChannel } from './profilerBridge';
 
@@ -204,6 +202,7 @@ const ProfilerSidebar: React.FC<IProfilerSidebarProps> = ({ channel = localSideb
 					<span style={styles.fieldLabel}>Target</span>
 					<select
 						style={styles.select}
+						aria-label="Profiling target"
 						value={state.target}
 						onChange={(e) => channel.sendAction({ op: 'setTarget', target: e.target.value })}
 						disabled={active}
@@ -220,6 +219,7 @@ const ProfilerSidebar: React.FC<IProfilerSidebarProps> = ({ channel = localSideb
 					<span style={styles.fieldLabel}>Session name</span>
 					<input
 						type="text"
+						aria-label="Session name"
 						placeholder="Optional"
 						value={sessionName}
 						onChange={(e) => setSessionName(e.target.value)}
@@ -276,8 +276,8 @@ const ProfilerSidebar: React.FC<IProfilerSidebarProps> = ({ channel = localSideb
  * channel to the frame panel, and the frame's state arrives back the same
  * way (seeded by a `hello`, since the frame may already be running).
  */
-export const ProfilerDevToolSidebar: React.FC<DevToolProps> = ({ peer, documents }) => {
-	const sidebarChannel = useMemo(() => createPeerSidebarChannel(peer), [peer]);
+export const ProfilerDevToolSidebar: React.FC<DevToolProps> = ({ channel, documents }) => {
+	const sidebarChannel = useMemo(() => createPeerSidebarChannel(channel), [channel]);
 
 	// SINGLE-PANE UX: the profiler is one surface, so activating its sidebar
 	// tab opens (or reveals) the pane — the tool's choice, made here.
@@ -292,19 +292,8 @@ export const ProfilerDevToolSidebar: React.FC<DevToolProps> = ({ peer, documents
 		if (appId === 'rocketride.profiler') documents?.open('', 'Profiler');
 	});
 
-	// The CONTROLLER realm: serve the frames' raw-command op on this mount's
-	// engine connection (frames hold none).
-	useEffect(() => {
-		const ops = createToolOpServer<ProfilerOps>(peer);
-		// Served over the SHELL BUS — named client.* ops, no client object.
-		const cm = ConnectionManager.getInstance();
-		ops.serve('profiler.call', async ({ command, args }) => {
-			if (!cm.isConnected()) throw new Error('Not connected to a server.');
-			return callProfilerOp((op, params) => cm.request(op, params), command, args);
-		});
-		return () => ops.dispose();
-	}, [peer]);
-
+	// No controller duties remain: the frame holds its own realm client, so
+	// no `profiler.*` ops are served here.
 	return <ProfilerSidebar channel={sidebarChannel} gated={false} />;
 };
 

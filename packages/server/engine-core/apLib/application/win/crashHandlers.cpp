@@ -47,8 +47,8 @@ unhandledExceptionFilter(::PEXCEPTION_POINTERS pExceptionInfo) noexcept {
     LOG(Always, errorStr);
 
     // Create a minidump of the crash (or the program state, if no exception
-    // info is available)
-    plat::createMinidump(pExceptionInfo);
+    // info is available), if run with --dumps
+    if (dev::dumpsEnabled()) plat::createMinidump(pExceptionInfo);
 
     // Report the error and exit
     dev::fatality(_location, APERR(Ec::Fatality, errorStr));
@@ -70,8 +70,8 @@ void abortHandler(int signal) noexcept {
     std::cerr << "FATAL ERROR: " << errorStr << std::endl;
     LOG(Always, errorStr);
 
-    // Create a minidump of the program state
-    plat::createMinidump(signal);
+    // Create a minidump of the program state, if run with --dumps
+    if (dev::dumpsEnabled()) plat::createMinidump(signal);
 
     // Report the error and exit
     dev::fatality(_location, APERR(Ec::Fatality, errorStr));

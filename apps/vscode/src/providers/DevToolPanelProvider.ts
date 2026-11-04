@@ -184,13 +184,14 @@ export class DevToolPanelProvider {
 		// connect + mount pipeline itself. The host's only remaining job here
 		// is cosmetic: name panels that were created while disconnected once
 		// the catalog knows the tool.
-		const statusListener = this.connectionManager.on('shell:statusChange', () => {
+		const statusHandler = (): void => {
 			for (const entry of this.panels.values()) {
 				const row = this.findApp(entry.appId);
 				if (row?.name && !entry.docKey) entry.panel.title = row.name;
 			}
-		});
-		this.disposables.push(statusListener as any);
+		};
+		this.connectionManager.on('shell:statusChange', statusHandler);
+		this.disposables.push({ dispose: () => this.connectionManager.off('shell:statusChange', statusHandler) });
 
 		// Follow the editor's ACTIVE tab globally — switching to a text file
 		// or another tool must clear the tool sidebars' selection, and no
@@ -404,7 +405,7 @@ export class DevToolPanelProvider {
 		let row = connected ? this.findApp(appId) : undefined;
 		if (connected && (!row || row.registryVersion === undefined) && this.busHost) {
 			try {
-				row = (await fetchDevToolCatalog(this.busHost.rootBus)).find((a) => a.id === appId);
+				row = (await fetchDevToolCatalog(this.busHost.connectionManager.getClient())).find((a) => a.id === appId);
 			} catch (err) {
 				getLogger().error(`[devtool] catalog resolve failed for ${appId}: ${err}`);
 			}

@@ -13,10 +13,10 @@
 // (`offset`/`limit`/`search`/`category`/`shell`) and is passed through to
 // the wire verbatim, so callers page instead of a library hoarding one list.
 //
-// The transport is the brokered `client.app.list` op (`rrext_app list`) —
-// it resolves locally in a framework root and over the bridge in a webview
-// realm, so every surface makes the SAME call. Deliberately `rrext_app
-// list`, not `rrext_public_catalog`: the picker needs the caller's @me and
+// The transport is the client's `rrext_app list` call — through the realm
+// client in a webview realm, the real client at a root, so every surface
+// makes the SAME call. Deliberately `rrext_app list`, not
+// `rrext_public_catalog`: the picker needs the caller's @me and
 // @team rows, which the public store verb filters off by design. And never
 // the ACCOUNT list (the user's desktop — a tool not yet gotten can never
 // appear) nor the MF REGISTRATION list (bundle wiring). Both were used as
@@ -26,10 +26,10 @@
 // Type-only deep import — the ext host compiles this leaf too.
 import type { AppManifestEntry } from 'shell/src/components/workspace/types';
 
-/** The minimal bus surface the fetch needs — `IOpBus.request` and the
- *  ConnectionManager's `request` both satisfy it, root and realm alike. */
-export interface IOpRequester {
-	request(op: string, params: unknown): Promise<unknown>;
+/** The minimal client surface the fetch needs — a realm client and the ext
+ *  host's real client both satisfy it structurally. */
+export interface ICatalogClient {
+	call<T>(command: string, args?: Record<string, unknown>): Promise<T>;
 }
 
 /** Catalog query parameters — the same shape home-ui's useStoreApps sends. */
@@ -64,13 +64,14 @@ export function isDevToolEntry(entry: { categories?: unknown[] }): boolean {
  * One page of the app catalog — the caller's reachable @me/@team/@public
  * rows, manifest-shaped.
  *
- * @param bus - Anything with `request` (a ConnectionManager — realm or
- *              root — or an ext host's root IOpBus).
+ * @param client - The realm's client, or null while disconnected (rejects
+ *                 with the standard not-connected error).
  * @param query - Pagination/filter parameters, passed through verbatim.
  * @returns The page as returned by the wire.
  */
-export async function fetchAppCatalog(bus: IOpRequester, query?: CatalogQuery): Promise<CatalogPage> {
-	const body = (await bus.request('client.app.list', { ...(query ?? {}) })) as CatalogPage | undefined;
+export async function fetchAppCatalog(client: ICatalogClient | null | undefined, query?: CatalogQuery): Promise<CatalogPage> {
+	if (!client) throw new Error('Not connected to server');
+	const body = await client.call<CatalogPage | undefined>('rrext_app', { subcommand: 'list', ...(query ?? {}) });
 	return { apps: body?.apps ?? [], total: body?.total, offset: body?.offset, limit: body?.limit };
 }
 
@@ -79,10 +80,10 @@ export async function fetchAppCatalog(bus: IOpRequester, query?: CatalogQuery): 
  * name-sorted. A convenience over {@link fetchAppCatalog} for the picker
  * surfaces; the category filters client-side (see {@link CatalogQuery}).
  *
- * @param bus - See {@link fetchAppCatalog}.
+ * @param client - See {@link fetchAppCatalog}.
  * @returns Dev-tool entries, sorted by display name.
  */
-export async function fetchDevToolCatalog(bus: IOpRequester): Promise<AppManifestEntry[]> {
-	const page = await fetchAppCatalog(bus);
+export async function fetchDevToolCatalog(client: ICatalogClient | null | undefined): Promise<AppManifestEntry[]> {
+	const page = await fetchAppCatalog(client);
 	return page.apps.filter(isDevToolEntry).sort((a, b) => (a.name ?? a.id).localeCompare(b.name ?? b.id));
 }

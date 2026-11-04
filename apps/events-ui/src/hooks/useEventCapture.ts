@@ -61,7 +61,7 @@ export interface IUseEventCaptureResult {
 	config: MonitorConfig;
 	/** Latest coalesced snapshot (grid rows + metrics). */
 	snapshot: CaptureSnapshot;
-	/** Whether a shell client is available to subscribe through. */
+	/** Whether the shell WebSocket is authenticated and connected. */
 	connected: boolean;
 	/** Toggle monitoring on/off (subscribe / unsubscribe). */
 	toggleActive: () => void;
@@ -207,22 +207,24 @@ export function useEventCapture(): IUseEventCaptureResult {
 	});
 
 	// Subscribe on start, unsubscribe on stop; a failed subscribe resets active.
-	// Over the SHELL BUS: the broker owns the engine-side registration (and,
-	// in multi-realm hosts, the cross-realm refcounts).
+	// Through the realm client, which forwards monitors to the root broker
+	// (the engine-side registration and, in multi-realm hosts, the
+	// cross-realm refcounts live there).
 	useEffect(() => {
 		if (!isConnected) return;
 		if (!config.active) return;
 
-		const cm = ConnectionManager.getInstance();
+		const client = ConnectionManager.getInstance().getClient();
+		if (!client) return;
 		// The monitor is keyed on the token; the types select the categories.
 		const key = { token: config.token };
-		cm.request('client.addMonitor', { key, types: config.types }).catch((err) => {
+		client.addMonitor(key, config.types).catch((err) => {
 			console.error('[events-ui] addMonitor failed', err);
 			setConfig((c) => ({ ...c, active: false }));
 		});
 
 		return () => {
-			cm.request('client.removeMonitor', { key, types: config.types }).catch((err) => {
+			client.removeMonitor(key, config.types).catch((err) => {
 				console.error('[events-ui] removeMonitor failed', err);
 			});
 		};

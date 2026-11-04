@@ -4,16 +4,14 @@
 // =============================================================================
 
 // =============================================================================
-// CLIENT OVERRIDES — the ops THIS host answers differently
+// HOST ENV OPS — the slot-resolved env family (`host.env.*`)
 // =============================================================================
 //
-// The brokered `client.*` table (shell clientOps.ts) is one shared, generic
-// implementation registered at every framework root. A multi-connection host
-// answers a few ops with HOST POLICY instead — these register FIRST, and the
-// shared table skips them (specific-before-shared):
-//
-//   - env family: the `connection` dimension resolves dev → the primary
-//     manager, deploy → the DeployManager (ext-host-only state).
+// The Environment page's env reads/writes carry a `connection` dimension:
+// dev resolves to the primary manager, deploy to the DeployManager — state
+// that lives ONLY in the extension-host process, which is why these are
+// `host.*` ops rather than calls on a realm client (a realm client always
+// rides the primary connection's socket).
 //
 // (The monitor pair is also overridden, but by BusHost itself — cross-realm
 // refcounting is broker state, not host policy.)
@@ -22,7 +20,7 @@
 // Deep imports on purpose — ext-host-safe .ts leaves (see busHost.ts).
 import { registerOpHandlers } from 'shell/src/ops/busOps';
 import type { IOpBus, OpImplTable } from 'shell/src/ops/busOps';
-import type { ClientOpMap } from 'shell/src/ops/clientOps';
+import type { HostOpMap } from 'shared/ops/hostOps';
 import type { ConnectionManager } from '../connection/connection';
 import { DeployManager } from '../connection/deploy-manager';
 
@@ -38,13 +36,12 @@ function slotClient(connectionManager: ConnectionManager, connection?: 'dev' | '
 }
 
 /**
- * Registers this host's `client.*` overrides. Call BEFORE the shared
- * registerClientOps so the hasHandler guard yields to these.
+ * Registers this host's slot-resolved `host.env.*` implementations.
  */
 export function registerVscodeClientOverrides(bus: IOpBus, connectionManager: ConnectionManager): void {
-	const impls: OpImplTable<ClientOpMap> = {
-		'client.account.getEnv': async (p) => slotClient(connectionManager, p.connection).account.getEnv(p.scope, p.scopeId),
-		'client.account.setEnv': async (p) => {
+	const impls: OpImplTable<HostOpMap> = {
+		'host.env.get': async (p) => slotClient(connectionManager, p.connection).account.getEnv(p.scope, p.scopeId),
+		'host.env.set': async (p) => {
 			const result = await slotClient(connectionManager, p.connection).account.setEnv(p.scope, p.env, p.scopeId);
 			// Env-gate consumers (ProjectProvider) watch the slot's manager.
 			const manager = p.connection === 'deploy' ? DeployManager.getDeployInstance() : connectionManager;
@@ -53,5 +50,5 @@ export function registerVscodeClientOverrides(bus: IOpBus, connectionManager: Co
 			return result;
 		},
 	};
-	registerOpHandlers<ClientOpMap>(bus, impls);
+	registerOpHandlers<HostOpMap>(bus, impls);
 }

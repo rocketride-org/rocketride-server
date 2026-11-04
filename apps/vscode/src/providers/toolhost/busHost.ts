@@ -36,6 +36,9 @@ import { createBusRouter } from 'shell/src/ops/busBridge';
 import { createRetainedRegistry } from 'shell/src/ops/retained';
 import type { IRetainedRegistry } from 'shell/src/ops/retained';
 import type { ClientOpMap } from 'shell/src/ops/clientOps';
+import { CLIENT_EVENT_OP } from 'shell/src/ops/clientOps';
+import { encodeMessageData } from 'shell/src/connection/binaryWire';
+import type { DAPMessage } from 'rocketride';
 import type { IBusEndpoint, IBusRouter, SummonLookup } from 'shell/src/ops/busBridge';
 import type { ConnectionManager } from '../../connection/connection';
 import { isCloudConnected } from '../../connection/connection';
@@ -159,6 +162,29 @@ export class BusHost {
 	 * and account only crosses when it actually changed.
 	 */
 	public startMirrors(): void {
+		// Engine EVENTS, pushed to every realm so a realm's own client
+		// dispatches them — what makes a monitor subscription (and a
+		// DataPipe's SSE callback) work outside this process. Fire-and-forget
+		// by nature: nothing requested an event, so there is no caller to
+		// answer and no single realm to answer.
+		//
+		// NOT retained, unlike the state topics below: an event is an EDGE,
+		// and replaying a stale one to a late realm would report work that
+		// already finished as if it were happening now. A realm that needs
+		// current state reads the retained topics; a realm that needs the
+		// stream subscribes and gets it from the moment it asked.
+		//
+		// `apaext_account` and `apaext_org_changed` never reach here — the CM
+		// handles both and returns early. Neither is a loss: the account
+		// rides the retained `shell:account` topic (more reliable, since it
+		// replays) and an org change reconnects the root, which the status
+		// topic carries.
+		const pushEvent = (message: DAPMessage): void => {
+			this.broadcastEmitOp(CLIENT_EVENT_OP, { message: encodeMessageData(message) });
+		};
+		this.connectionManager.on('shell:event', pushEvent);
+		this.disposables.push({ dispose: () => this.connectionManager.off('shell:event', pushEvent) });
+
 		const pushStatus = (): void => this.retained.publish('shell:status', this.statusTopic());
 		for (const event of ['shell:statusChange', 'shell:connected', 'shell:disconnected'] as const) {
 			this.connectionManager.on(event, pushStatus);
