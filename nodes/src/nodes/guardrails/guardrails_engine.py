@@ -363,9 +363,9 @@ class GuardrailsEngine:
     # Output guardrails
     # -------------------------------------------------------------------------
 
-    # Delivered in place of an answer that states a figure after a retrieval miss.
-    # Nothing retrieved can support a figure, so declining is the only grounded
-    # answer, and a refusal that happened to quote one loses nothing by this.
+    # Delivered in place of an answer that needs a source after a retrieval miss.
+    # Nothing retrieved can support it, so declining is the only grounded answer, and
+    # a refusal that happened to quote a figure loses nothing by this.
     UNGROUNDED_REPLY = "I couldn't find anything in the available documents to answer that."
 
     _NUMBER_WORDS = (
