@@ -41,6 +41,7 @@ from .types.account import (
     AccountProfile,
     ApiKeyRecord,
     CreateKeyResult,
+    DeleteOrgPrecheck,
     MemberRecord,
     OrgDetail,
     TeamDetail,
@@ -131,6 +132,63 @@ class AccountApi:
             name: The new organization name.
         """
         await self._client.call('rrext_account_org', subcommand='update', orgId=org_id, name=name)
+
+    async def create_org(self, name: str) -> None:
+        """
+        Create a new organization (workspace); the caller becomes its admin.
+
+        On success the server switches the caller's default org to the new one
+        and pushes ``apaext_org_changed`` — clients rescope through their
+        normal org-switch path.
+
+        Args:
+            name: The new organization's name (non-empty; normal org-name rules).
+        """
+        await self._client.call('rrext_account_org', subcommand='create', name=name)
+
+    async def leave_org(self, org_id: str) -> None:
+        """
+        Remove the current user from an organization.
+
+        The server refuses — with a user-presentable message — to let the
+        organization's last admin leave. Leaving the user's ACTIVE
+        organization switches them to another membership and pushes a
+        refreshed identity (``apaext_org_changed``) to all of the user's
+        connections; leaving a non-active organization pushes nothing, so
+        callers that show memberships should re-read the profile afterwards.
+
+        Args:
+            org_id: Organisation UUID to leave.
+        """
+        await self._client.call('rrext_account_org', subcommand='leave', orgId=org_id)
+
+    async def delete_org_precheck(self, org_id: str) -> DeleteOrgPrecheck:
+        """
+        Dry-run of :meth:`delete_org`: what WOULD deletion involve. Lets the
+        confirm dialog name the member count and the billing blocker before
+        anything is destroyed.
+
+        Args:
+            org_id: Organisation UUID.
+
+        Returns:
+            The org's member count and whether a subscription is active.
+        """
+        return await self._client.call('rrext_account_org', subcommand='delete', orgId=org_id, confirm=False)
+
+    async def delete_org(self, org_id: str) -> None:
+        """
+        Permanently delete an organization and ALL of its data (pipelines,
+        deployments, apps, environment variables, API keys) for every member.
+        Admin-gated; the server rejects on the caller's last workspace or an
+        active subscription. Deleting the CURRENT org re-points the default
+        and pushes ``apaext_org_changed`` (other members are re-pointed on
+        their next touch).
+
+        Args:
+            org_id: Organisation UUID to delete.
+        """
+        await self._client.call('rrext_account_org', subcommand='delete', orgId=org_id, confirm=True)
 
     # =========================================================================
     # API KEYS

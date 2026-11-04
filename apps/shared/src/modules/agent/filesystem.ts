@@ -402,6 +402,7 @@ export class FilesystemTools extends AgentToolkit {
 		const oldPath = normalizePath(rawOld);
 		const newPath = normalizePath(rawNew);
 		this.guardDirty(oldPath, 'rename');
+		this.guardDirty(newPath, 'rename');
 		await this.vfs.rename(oldPath, newPath);
 		return `Renamed ${oldPath} to ${newPath}.`;
 	}

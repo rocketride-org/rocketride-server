@@ -7,10 +7,11 @@
 	"appManifest": {
 		"id": "rocketride.test",
 		"projectId": "31909e81-237c-4057-89ea-5474fa5b5a08",
-		"publisher": "Aparavi Software AG",
+		"publisher": "RocketRide",
 		"name": "Test UI",
 		"description": "Stress-test and chaos-test dashboard for the RocketRide backend",
 		"icon": "./src/icon.svg",
+		"readme": "./README.md",
 		"categories": [
 			"tools"
 		],

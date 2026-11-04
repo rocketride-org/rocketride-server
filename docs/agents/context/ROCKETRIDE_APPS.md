@@ -219,19 +219,24 @@ Two rules before anything else:
   	displayName: 'Reports',
   	statusFooter: true,
   });
-  // created.appId = 'local.reports', created.folder = 'apps/reports'
+  // created.appId = '<your developer id>.reports', created.folder = 'apps/reports-ui'
   ```
 
-  The scaffold defaults the id to `local.<slug>` (pass `developerId` once
-  your org's id is registered) and is scaffolding only — nothing deploys
-  until the normal lifecycle (`verifyApp` → `addApp` → `publishApp`)
-  runs.
+  The scaffold namespaces the id with the connected org's developer id
+  (falling back to `local.<slug>` when the org has not registered one;
+  pass `developerId` to override) and is scaffolding only — nothing
+  deploys until the normal lifecycle (`verifyApp` → `addApp` →
+  `publishApp`) runs.
 
-The New App wizard collects an app-name slug, a display name, a template
-(**Blank** or **Dashboard**), and three frame options that each toggle a
-chrome region of the generated app: **sidebar** (two-column layout with a
-navigation sidebar), **status footer** (`AppLayout showStatus`), and
-**doc tabs** (a document tab strip: Documents + DocSplitLayout + DocTabs).
+The New App wizard is the App Builder's empty state: "New app" opens an
+**Untitled** builder document whose body is the wizard (the same pattern as
+the pipeline editor's empty-canvas wizard), and creating the app binds that
+document to the new app's builder. It collects an app-name slug, a display
+name, a template (**Blank** or **Dashboard**), and three frame options that
+each toggle a chrome region of the generated app: **sidebar** (two-column
+layout with a navigation sidebar), **status footer** (`AppLayout
+showStatus`), and **doc tabs** (a document tab strip: Documents +
+DocSplitLayout + DocTabs).
 
 The wizard assembles the app id from your organization's developer id plus
 the slug, validates it, and writes the app folder under `./apps` in your
@@ -261,8 +266,8 @@ sharing one `node_modules`.
 
 ### Watch
 
-Opening an App Builder panel starts the watch for that app (gated by the
-`rocketride.appdev.autoWatch` setting):
+Opening an App Builder panel starts the watch for that app (always — there
+is no opt-out setting):
 
 1. **Install** — one `pnpm install` at the workspace root, shared and
    single-flight across all apps. Editing your app's `package.json`
@@ -361,7 +366,7 @@ by hand.
 | Field | Type | Default | Meaning |
 |---|---|---|---|
 | `id` | `string` | required | Stable unique identity, `<developerId>.<name>` (e.g. `acme.brandy`). The prefix must be your org's claimed namespace to deploy or publish. Renaming the id makes it a different app. |
-| `projectId` | `string` | auto | Working-copy GUID the App Builder manages — tells one checkout apart from another; rides deploys only as provenance. Leave it alone. |
+| `projectId` | `string` | auto | Working-copy GUID stamped when the app is created (New App wizard, `rocketride app create`, `createApp`/`create_app`) or first opened in the App Builder — tells one checkout apart from another. Deploys forward it as provenance and never write it. Leave it alone. |
 | `publisher` | `string` | — | Publisher display name in the app store. |
 | `name` | `string` | required | Display name (app switcher, store tile). |
 | `description` | `string` | — | Short description for the store listing. |
@@ -422,6 +427,52 @@ Rules and behavior:
 const { settings } = useWorkspace();
 const maxResults = settings['acme.brandy.maxResults'] as number;
 ```
+
+- The shell owns the control: declare the setting and read the value. Do
+  not build a toggle or input for it in your own UI, and do not store it
+  in `usePrefs()` — prefs never appear on the Settings page.
+- The shell owns the NAVIGATION too: never add a "Settings" entry to your
+  app's sidebar, rail, or menus — the platform's sidebar footer already
+  opens the Settings overlay for every app, and a second route confuses
+  users ("which settings is this?"). If a view genuinely needs a shortcut
+  (e.g. next to the feature a setting controls), open the shell's overlay
+  instead of rendering anything:
+
+```typescript
+import { ConnectionManager } from 'shell';
+ConnectionManager.getInstance().emit('shell:openOverlay', { id: 'settings' });
+```
+- A fixed set of choices is a `string` with `enum` (rendered as a picker);
+  `enumDescriptions` label each choice in order:
+
+```json
+"acme.brandy.timeFormat": {
+  "type": "string",
+  "enum": ["12h", "24h"],
+  "enumDescriptions": ["12-hour clock with AM/PM", "24-hour clock"],
+  "default": "12h",
+  "description": "How times are displayed."
+}
+```
+
+Adding a setting, end to end:
+
+1. Declare it under `appManifest.contributes.configuration` in your app's
+   `package.json`, key prefixed with the app id.
+2. Reload the preview. The manifest is read without loading your bundle,
+   so a manifest edit is picked up on the next preview reload — the
+   setting then appears in the shell's Settings overlay under your
+   configuration `title`.
+3. Read the effective value with `useWorkspace().settings['<full key>']`
+   (defaults already merged). Components re-render when the user saves a
+   change — react to the value, never cache it.
+
+Persistence needs an identity: a signed-in user's changes are stored as
+overrides in `.workspace/settings.json`; a signed-out session keeps them
+in memory only (the Settings page banners this) and they are gone on
+reload. The scaffold defaults new apps to `authenticated: true` so
+settings persist from day one — opt into `authenticated: false` only for
+an app meant to run signed out, accepting session-only settings.
 
 ### Packaging extra directories (`include`)
 
@@ -603,6 +654,7 @@ import { useShellConnection, useWorkspace, usePrefs, AppLayout, Button } from 's
 | `useClient()` | `RocketRideClient \| null`, re-rendering on connect/disconnect. |
 | `useConnectionStatus()` | `ConnectionStatus` — the full state machine (state, retry attempt, progress message). |
 | `useShellApiConfig()` | `ShellApiConfig` — runtime config the host booted with. |
+| `useShellApiKey()` | `{ apiKey, loading, error }` — the connection's API key, fetched asynchronously. The only way to reach it: `client.getApiKey()` throws outside the root realm. Engine work needs no key — the client already carries the session. |
 | `getClient()` | Non-React access to the client singleton. |
 | `useAuthUser()` | `ConnectResult \| null` — current identity (the `AuthUser` type). |
 | `useLogout()` | Sign-out trigger. |
@@ -610,8 +662,19 @@ import { useShellConnection, useWorkspace, usePrefs, AppLayout, Button } from 's
 
 ```typescript
 const { client, isConnected } = useShellConnection();
-if (!client || !isConnected) return <div>Connecting...</div>;
+
+// `client` is a REAL client in every realm, including a VS Code webview —
+// its calls ride the shell bus to the host's socket. It is null only before
+// the realm has heard from the host.
+if (!client) return <Spinner />;        // UNKNOWN — not "disconnected"
+if (!isConnected) return <Offline />;   // known to be down
 ```
+
+**Never render absence as a negative.** `client === null` means *not known
+yet*, so `if (!client || !isConnected) return <div>Connecting…</div>` is a
+bug, not a shortcut: in a realm that is perfectly healthy it renders
+"Connecting…" forever while the status bar says connected. Distinguish the
+two states, and give the unknown one a neutral or loading treatment.
 
 The client instance is always the shell's — never construct a
 `RocketRideClient` in an app.
@@ -763,7 +826,7 @@ from `'shell'`). The full set:
 | `shell:appsUpdated` | `{ apps }` | App catalog changed — complete replacement set. |
 | `shell:login` | `{ user: ConnectResult }` | Authentication succeeded. |
 | `shell:logout` | `{}` | User signed out. |
-| `shell:loginRequest` | `{ appId?, register? }` | UI requests sign-in. |
+| `shell:loginRequest` | `{ appId?, register?, auto?, signupProperties?: SignupProperties }` | UI requests sign-in; `auto` is set only by the shell's auth gate. |
 | `shell:logoutRequest` | `{}` | UI requests sign-out. |
 | `shell:switchApp` | `{ appId }` | Switch the active app. |
 | `shell:subscribe` | `{ app, plan?, promo? }` | Open subscription checkout; `plan` skips the picker. |
@@ -774,12 +837,31 @@ from `'shell'`). The full set:
 | `shell:themeChange` | `{ tokens }` | Theme changed; `tokens` is the full `--rr-*` map. |
 | `shell:viewActivated` | `{ viewId }` | A view/tab became active — lazy panels init here. |
 | `shell:manifestRefresh` | `{ source }` | Server-side app manifest changed (publish, expiry). |
+| `shell:telemetry` | `{ event, props, ts, id }` | A telemetry fact the shell observed (`auth:complete`) for the active app to forward; `auth:start` and other held facts come from `cm.drainTelemetry()`. |
 | `app:statusChanged` | `{ appId, version?, status, notes? }` | Store review status changed. |
 | `store:changed` | `{ prefix, paths }` | Files changed under a watched store prefix. |
 
 The event map is the platform's shared vocabulary — it carries platform
 events only. For your app's internal communication, use ordinary React
 state or your own emitter; do not overload the shell bus.
+
+Optional `signupProperties` is consent-gated PKCE credential context for sign-up requests.
+The native auth telemetry facts contain no signup attribution; the encoded credential alone
+uses the snake_case `signup_properties` key. See the public Shell API signup attribution guide.
+
+**Telemetry facts.** The shell has no analytics SDK: it raises `auth:start`
+and `auth:complete` (with `is_new`, `waitlisted` and `duration_ms`, the OAuth
+round trip from the redirect, null when unknown) as `shell:telemetry` for the
+active app to forward to its own analytics. `auth:start` is always held (the
+OAuth redirect follows at once), and so is a fact raised while no app listens
+(32 facts, 30 minutes, in the tab's sessionStorage), until the app calls
+`cm.drainTelemetry?.()` (optional: older shells lack it): drain once at
+analytics init, then subscribe, and forward each fact once by its `id` with
+`ts` as its time. On the waitlist
+screen, where no app renders, the shell loads the home app's exposed
+`./telemetry` module and calls its no-argument default export once per page
+load; it starts the home analytics and must not render. Only the home app
+exposes it.
 
 ### Debug log
 
@@ -797,6 +879,19 @@ const unsub = cm.onAny((event, payload) => console.log(event, payload));
 ---
 
 ## State & Persistence
+
+Four places hold per-app state. Pick by who changes the value and what it is:
+
+| You want… | Use | Where the user sees it |
+|---|---|---|
+| A value the **user** chooses (time format, API key, result limit) | A **setting**: declare it in the manifest under `contributes.configuration`, read it with `useWorkspace().settings` — see [Declaring settings](#declaring-settings-contributesconfiguration) | The shell's **Settings page**, under your app's group. Your app renders no control for it. |
+| UI state your **app** remembers (selected tab, collapsed section, zoom) | **Prefs**: `usePrefs()` — [below](#prefs--small-ui-preferences) | Nowhere; it just comes back on reload. |
+| Anything else your app wants persisted (open documents, layout, drafts) | **App state**: `updateAppState()` — [below](#app-state--your-opaque-blob) | Nowhere; opaque to the shell. |
+| Data | The server: pipelines, the file store (`client.fs*`) | — |
+
+The common mistake is storing a user choice in prefs and drawing a toggle
+for it in the client area: it works, but it never shows up on the Settings
+page. If a human should be able to find and change it, it is a setting.
 
 The shell persists your app's state per user in `.workspace/` on the server:
 
@@ -857,6 +952,11 @@ updatePrefs({ activeView: 'details' });
 
 Prefs persist per user and per app, riding the workspace exactly like theme
 or sidebar state — never browser `localStorage`.
+
+Prefs are **not** user settings: nothing you put here appears on the
+shell's Settings page. A value the user should be able to find and change
+is declared in the manifest instead — see
+[Declaring settings](#declaring-settings-contributesconfiguration).
 
 ### App state — your opaque blob
 
@@ -1803,17 +1903,19 @@ Mechanics worth knowing:
 Everything the Deploy tab does is scriptable — the UI and the SDKs call the
 same verbs (TypeScript camelCase / Python snake_case):
 
-| Action | TypeScript verb |
-|---|---|
-| List versions | `client.listDeployments(appId)` |
-| Deploy a source zip | `client.deploy.add({ kind: 'app', data, metadata })` |
-| Publish to a rung | `client.publishApp(appId, version, target)` |
-| Remove a binding | `client.removeAppPublish(appId, target)` |
-| Disable a binding | `client.disableAppPublish(appId, target)` |
-| Where live | `client.whereApp(appId)` |
-| Submit / withdraw review | `client.submitApp(...)` / `client.withdrawApp(...)` |
-| Review thread reply | `client.replyApp(appId, message)` |
-| Build log | `client.buildLog(appId, version)` |
+| Action | TypeScript verb | CLI |
+|---|---|---|
+| Live preview (dev loop) | `rocketride/app-dev` (`DevSession`, `devPreviewUrl`) | `rocketride app dev [app] --open` |
+| List versions | `client.listDeployments(appId)` | `rocketride app versions [app]` |
+| Deploy the app's source | `client.deploy.addApp(appFolder, { comment })` | `rocketride app deploy [app]` |
+| Wait for the server build | `client.waitForAppBuild(appId, version)` | (built into `app publish` / `app deploy --publish`) |
+| Publish to a rung | `client.publishApp(appId, version, target)` | `rocketride app publish [app] [version] --to <target>` |
+| Remove a binding | `client.removeAppPublish(appId, target)` | `rocketride app unpublish [app] --from <target>` |
+| Disable a binding | `client.disableAppPublish(appId, target)` | `rocketride app disable [app] --from <target>` |
+| Where live | `client.whereApp(appId)` | `rocketride app where [app]` |
+| Submit / withdraw review | `client.submitApp(...)` / `client.withdrawApp(...)` | `rocketride app submit|withdraw [app] [version]` |
+| Review thread reply | `client.replyApp(appId, message)` | `rocketride app reply [app] -m <text>` |
+| Build log | `client.buildLog(appId, version)` | `rocketride app log [app] [version]` |
 
 The Python client mirrors every verb (`publish_app`, `submit_app`,
 `where_app`, ...). See `ROCKETRIDE_typescript_API.md` and

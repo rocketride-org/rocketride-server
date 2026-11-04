@@ -182,8 +182,19 @@ export async function loadSavedConnections(client: SavedConnectionsFs): Promise<
 	try {
 		const raw = (await client.fsReadJson(STORE_PATH)) as SavedSqlConnection[] | null | undefined;
 		if (Array.isArray(raw)) list = raw;
-	} catch {
-		// No file yet (or unreadable) — start empty; the first save writes it.
+	} catch (err) {
+		// Only a PROVEN-missing file is first run (the store raises
+		// StorageError('File not found: …')). Any other failure — transport
+		// drop, malformed JSON — must NOT install the writer: the next commit
+		// would persist an empty-based list and wipe the stored connections.
+		const absent = err instanceof Error && /file not found/i.test(err.message);
+		if (!absent) {
+			if (seq !== loadSeq) return;
+			console.log('[sql-ui] failed to load connections', err);
+			status = 'idle';
+			notify();
+			return;
+		}
 	}
 	if (seq !== loadSeq) return;
 	connections = list;

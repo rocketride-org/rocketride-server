@@ -30,7 +30,7 @@ import type { ConnectionManager } from 'shell';
 import { identityFingerprint, identityFromConnectResult } from '../connect/identity';
 import { createIdentityTracker } from './identity';
 import type { IIdentityBus, IIdentityTracker } from './identity';
-import { account, assertJsonSafe, createFakeClientRealm, createFakeSocketlessRealm, settle } from './testing';
+import { account, assertJsonSafe, createFakeClientRealm, createFakeMirroredRealm, settle } from './testing';
 
 const fp = (value: unknown): string | null => identityFingerprint(identityFromConnectResult(value));
 
@@ -53,12 +53,12 @@ describe('the ConnectionManager satisfies the structural identity bus', () => {
 	});
 });
 
-describe('socketless realm (VS Code webview): the root account topic is the authority', () => {
+describe('mirrored realm (VS Code webview): once the root account topic has spoken it is the authority', () => {
 	const A = account('user-a', 'org-1');
 	const B = account('user-b', 'org-2');
 
 	it('starts unknown and becomes known once the root account is read', async () => {
-		const realm = createFakeSocketlessRealm();
+		const realm = createFakeMirroredRealm();
 		realm.root.connect(A);
 		await settle();
 		const tracker = createIdentityTracker({ cm: realm.cm });
@@ -73,7 +73,7 @@ describe('socketless realm (VS Code webview): the root account topic is the auth
 	});
 
 	it('T7: account A -> disconnect -> reconnect -> account B after shell:connected ends with B, never A after the drop', async () => {
-		const realm = createFakeSocketlessRealm();
+		const realm = createFakeMirroredRealm();
 		realm.root.connect(A);
 		await settle();
 		const tracker = createIdentityTracker({ cm: realm.cm });
@@ -97,7 +97,7 @@ describe('socketless realm (VS Code webview): the root account topic is the auth
 	});
 
 	it('does not get stuck when the root kept the same account and so never re-published it', async () => {
-		const realm = createFakeSocketlessRealm();
+		const realm = createFakeMirroredRealm();
 		realm.root.connect(A);
 		await settle();
 		const tracker = createIdentityTracker({ cm: realm.cm });
@@ -114,7 +114,7 @@ describe('socketless realm (VS Code webview): the root account topic is the auth
 	});
 
 	it('fails closed on a sign-out the realm mirror swallows (a null account while still connected)', async () => {
-		const realm = createFakeSocketlessRealm();
+		const realm = createFakeMirroredRealm();
 		realm.root.connect(A);
 		await settle();
 		const tracker = createIdentityTracker({ cm: realm.cm });
@@ -128,7 +128,7 @@ describe('socketless realm (VS Code webview): the root account topic is the auth
 	});
 
 	it('never derives an identity from a snapshot without a user', async () => {
-		const realm = createFakeSocketlessRealm();
+		const realm = createFakeMirroredRealm();
 		realm.root.connect({ organization: { id: 'org-1' } });
 		await settle();
 		const tracker = createIdentityTracker({ cm: realm.cm });
@@ -138,7 +138,7 @@ describe('socketless realm (VS Code webview): the root account topic is the auth
 	});
 
 	it('a topic push newer than an in-flight root read wins (the late read is ignored)', async () => {
-		const realm = createFakeSocketlessRealm();
+		const realm = createFakeMirroredRealm();
 		realm.root.connect(A);
 		await settle();
 		const releases: Array<(value: unknown) => void> = [];
@@ -156,7 +156,7 @@ describe('socketless realm (VS Code webview): the root account topic is the auth
 	});
 
 	it('mounted while disconnected: unknown until the root connects', async () => {
-		const realm = createFakeSocketlessRealm();
+		const realm = createFakeMirroredRealm();
 		const tracker = createIdentityTracker({ cm: realm.cm });
 		await settle();
 		assert.equal(tracker.get().known, false);
@@ -166,10 +166,9 @@ describe('socketless realm (VS Code webview): the root account topic is the auth
 		tracker.dispose();
 	});
 
-	it('a bus without read/subscribe falls back to strict events: after a reconnect it waits for a fresh account', async () => {
-		const realm = createFakeSocketlessRealm();
-		realm.root.connect(A);
-		await settle();
+	it('a bus without read/subscribe has only the client: it follows the client account, and fails closed while the client is not authenticated', async () => {
+		const realm = createFakeClientRealm();
+		realm.login(A);
 		const bare: IIdentityBus = {
 			on: (event, handler) => realm.cm.on(event, handler),
 			isConnected: () => realm.cm.isConnected(),
@@ -177,103 +176,155 @@ describe('socketless realm (VS Code webview): the root account topic is the auth
 			getClient: () => realm.cm.getClient(),
 		};
 		const tracker = createIdentityTracker({ cm: bare });
-		assert.equal(tracker.get().fingerprint, fp(A), 'the mount-time snapshot is all a bare bus has');
-		realm.root.dropStatusOnly();
-		await settle();
+		assert.equal(tracker.get().fingerprint, fp(A), 'the mount-time snapshot, with no topic to wait for');
+		assert.equal(tracker.settled(), true);
+		realm.drop();
+		assert.equal(tracker.get().known, false);
+		realm.reconnect(B);
+		assert.equal(tracker.get().fingerprint, fp(B), 'the handshake account of the new connection');
+		realm.anonymousConnect(A);
+		realm.drop();
+		realm.anonymousConnect(A);
+		assert.equal(tracker.get().known, false, 'an unauthenticated client is never trusted');
+		tracker.dispose();
+	});
+
+	it('REGRESSION (stale-account flash): shell:status connected lands BEFORE shell:account, and the realm client still holds the previous account; the tracker never reports it for the new connection', async () => {
+		const realm = createFakeMirroredRealm();
 		realm.root.connect(A);
 		await settle();
-		assert.equal(tracker.get().known, false, 'no stale re-derivation from the mirror');
-		realm.root.accountChanged(B);
+		const tracker = createIdentityTracker({ cm: realm.cm });
+		await settle();
+		assert.equal(tracker.get().fingerprint, fp(A));
+		const seen = record(tracker);
+
+		realm.root.disconnect();
+		await settle();
+		// The mirrored realm's manager ignored the root's null account: its client still answers A, now marked unauthenticated.
+		assert.equal(fp((realm.cm.getClient() as { getAccountInfo(): unknown }).getAccountInfo()), fp(A), 'the fake client really does hold the previous account');
+
+		// Sign-in as B: the root publishes status first, then the account.
+		realm.registry.publish('shell:status', { connected: true, status: { state: 'connected' } });
+		await settle();
+		assert.equal(realm.cm.isConnected(), true);
+		assert.equal((realm.cm.getClient() as { isAuthenticated(): boolean }).isAuthenticated(), true, 'the client already says authenticated');
+		assert.equal(fp((realm.cm.getClient() as { getAccountInfo(): unknown }).getAccountInfo()), fp(A), 'and still holds A');
+		assert.equal(tracker.get().known, false, 'connected with no account yet: unknown, never A');
+
+		realm.registry.publish('shell:account', B);
 		await settle();
 		assert.equal(tracker.get().fingerprint, fp(B));
+		assert.deepEqual(seen, [fp(A), null, fp(B)], 'A, the drop, then B: never A again');
 		tracker.dispose();
 	});
 });
 
-describe('client realm (rocket-ui): the SDK client account is the authority', () => {
+describe('client realm (rocket-ui, no account topic at the root): the SDK client account answers, after the root topic says nothing', () => {
 	const A1 = account('user-a', 'org-1');
 	const A2 = account('user-a', 'org-2');
 	const B = account('user-b', 'org-1');
 
-	it('login makes the identity known', () => {
+	it('login makes the identity known', async () => {
 		const realm = createFakeClientRealm();
 		const tracker = createIdentityTracker({ cm: realm.cm });
 		assert.equal(tracker.get().known, false);
 		realm.login(A1);
+		await settle();
 		assert.equal(tracker.get().fingerprint, fp(A1));
 		tracker.dispose();
 	});
 
-	it('a drop makes it unknown; a background reconnect (no shell:login) brings it back from the handshake', () => {
+	it('a drop makes it unknown; a background reconnect (no shell:login) brings it back from the handshake', async () => {
 		const realm = createFakeClientRealm();
 		realm.login(A1);
+		await settle();
 		const tracker = createIdentityTracker({ cm: realm.cm });
+		await settle();
 		const seen = record(tracker);
 		realm.drop();
+		await settle();
 		assert.equal(tracker.get().known, false);
 		realm.reconnect(A1);
+		await settle();
 		assert.equal(tracker.get().fingerprint, fp(A1));
 		assert.deepEqual(seen, [fp(A1), null, fp(A1)]);
 		assert.equal(realm.events.filter((e) => e === 'shell:login').length, 1, 'the reconnect emitted no login');
 		tracker.dispose();
 	});
 
-	it('follows an account update through the SDK client account', () => {
+	it('follows an account update through the SDK client account', async () => {
 		const realm = createFakeClientRealm();
 		realm.login(A1);
+		await settle();
 		const tracker = createIdentityTracker({ cm: realm.cm });
 		realm.accountUpdate(A2);
+		await settle();
 		assert.equal(tracker.get().fingerprint, fp(A2));
 		realm.drop();
+		await settle();
 		realm.reconnect(A2);
+		await settle();
 		assert.equal(fp(realm.cm.getAccountInfo()), fp(A1), 'the fake manager keeps its own copy');
 		assert.equal(tracker.get().fingerprint, fp(A2));
 		tracker.dispose();
 	});
 
-	it('logout: unknown, reconnects do not resurrect it, the next login does', () => {
+	it('logout: unknown, reconnects do not resurrect it, the next login does', async () => {
 		const realm = createFakeClientRealm();
 		realm.login(A1);
+		await settle();
 		const tracker = createIdentityTracker({ cm: realm.cm });
 		realm.logout();
+		await settle();
 		assert.equal(tracker.get().known, false);
 		realm.reconnect(undefined);
+		await settle();
 		assert.equal(tracker.get().known, false);
 		realm.login(B);
+		await settle();
 		assert.equal(tracker.get().fingerprint, fp(B));
 		tracker.dispose();
 	});
 
-	it('orgChanged: unknown until a truthy account arrives, even across a reconnect', () => {
+	it('orgChanged: unknown until a truthy account arrives, even across a reconnect', async () => {
 		const realm = createFakeClientRealm();
 		realm.login(A1);
+		await settle();
 		const tracker = createIdentityTracker({ cm: realm.cm });
 		realm.orgChanged('org-2');
+		await settle();
 		assert.equal(tracker.get().known, false);
 		realm.drop();
+		await settle();
 		realm.reconnect(A1);
+		await settle();
 		assert.equal(tracker.get().known, false, 'the old organization is not trusted again');
 		realm.accountUpdate(A2);
+		await settle();
 		assert.equal(tracker.get().fingerprint, fp(A2));
 		tracker.dispose();
 	});
 
-	it('fails closed on a connection whose client is not authenticated (an anonymous attach), whatever account it reports', () => {
+	it('fails closed on a connection whose client is not authenticated (an anonymous attach), whatever account it reports', async () => {
 		const realm = createFakeClientRealm();
 		realm.anonymousConnect(A1);
+		await settle();
 		assert.equal(realm.cm.isConnected(), true);
 		const tracker = createIdentityTracker({ cm: realm.cm });
 		assert.equal(tracker.get().known, false);
 		realm.login(B);
+		await settle();
 		assert.equal(tracker.get().fingerprint, fp(B), 'an authenticated login is trusted');
 		tracker.dispose();
 	});
 
-	it('an account update without a usable user makes the identity unknown', () => {
+	it('an account update without a usable user makes the identity unknown', async () => {
 		const realm = createFakeClientRealm();
 		realm.login(A1);
+		await settle();
 		const tracker = createIdentityTracker({ cm: realm.cm });
 		realm.accountUpdate({});
+		await settle();
 		assert.equal(tracker.get().known, false);
 		tracker.dispose();
 	});
@@ -281,7 +332,7 @@ describe('client realm (rocket-ui): the SDK client account is the authority', ()
 
 describe('tracker lifecycle', () => {
 	it('notifies only on change, and dispose removes every listener and subscription', async () => {
-		const realm = createFakeSocketlessRealm();
+		const realm = createFakeMirroredRealm();
 		realm.root.connect(account('user-a'));
 		await settle();
 		const listenersBefore = realm.cm.listenerCount();
@@ -306,11 +357,11 @@ describe('tracker lifecycle', () => {
 });
 
 describe('tracker settling (the first answer it can vouch for, or not)', () => {
-	it('a client realm settles at once; a socketless realm when its root read answers', async () => {
+	it('a tracker that has nothing to read (not connected) settles at once; a connected one when its root read answers', async () => {
 		const client = createFakeClientRealm();
 		const t1 = createIdentityTracker({ cm: client.cm });
 		assert.equal(t1.settled(), true);
-		const realm = createFakeSocketlessRealm();
+		const realm = createFakeMirroredRealm();
 		realm.root.connect(account('user-a'));
 		await settle();
 		const t2 = createIdentityTracker({ cm: realm.cm });

@@ -147,6 +147,13 @@ export interface IEndpointStoreOptions {
 	session?: Omit<IToolSessionOptions, 'tools'>;
 	/** The one-per-endpoint probe (default: the `dialect` tool). */
 	probe?: (session: IToolSession) => Promise<IProbeResult>;
+	/**
+	 * While this returns true, a refresh lists endpoints (discovery reads only)
+	 * but sends NO probe: a probe is a tool call, and a tool call that reaches a
+	 * task keeps it alive. An endpoint left unprobed stays `probing` and is
+	 * probed by the first refresh made after this returns false. Default: never held.
+	 */
+	holdProbes?: () => boolean;
 	/** Maximum concurrent probes and pipeline fallbacks (default 4). */
 	concurrency?: number;
 	/** Task events are coalesced into one refresh after this quiet period (default 300 ms). */
@@ -588,7 +595,9 @@ export function createEndpointStore(options: IEndpointStoreOptions): IEndpointSt
 				if (epochAfterReset(startedEpoch)) return;
 				const toProbe = merge(found, opts.reprobe === true, opts.background === true);
 				setState({ ...state, status: 'ready', error: null, refreshedAt: clock.now() });
-				const probes = mapWithConcurrency(toProbe, concurrency, (endpoint) => runProbe(client, endpoint));
+				const probes = options.holdProbes?.() === true
+					? Promise.resolve([])
+					: mapWithConcurrency(toProbe, concurrency, (endpoint) => runProbe(client, endpoint));
 				// A re-discovery done to rebind a restarted endpoint must not wait on
 				// the probes it started; everything else resolves with final states.
 				if (opts.awaitProbes === false) void probes;

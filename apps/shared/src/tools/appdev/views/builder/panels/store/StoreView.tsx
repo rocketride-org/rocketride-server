@@ -321,17 +321,28 @@ export const StoreView: React.FC<IStoreViewProps> = ({ host, app, readOnly, onNa
 	const [confirmDiscard, setConfirmDiscard] = useState(false);
 
 	/** Initial load: listing draft + pre-flight results. Seeds BOTH the
-	 *  draft and the dirty baseline from the saved manifest. */
+	 *  draft and the dirty baseline from the saved manifest.
+	 *
+	 *  The two halves fail INDEPENDENTLY — a preflight error must not
+	 *  destroy a perfectly good listing load (and vice versa). And a failed
+	 *  load still seeds the fallback draft WITH the error on screen: a null
+	 *  draft turns every control into a silent no-op, which reads as
+	 *  "mysteriously locked to Free" instead of as the failure it is. */
 	const refresh = useCallback(async (): Promise<void> => {
-		try {
-			const [d, c] = await Promise.all([host.loadListing?.() ?? Promise.resolve(null), host.runPreflight?.() ?? Promise.resolve([])]);
-			// Seed an empty draft from the app facts when no record exists yet
-			const loaded = d ?? { appId: app.id, mode: 'free' as const, name: app.name, description: app.description ?? '', plans: [] };
-			setDraft(loaded);
-			setSaved(loaded);
-			setChecks(c);
-		} catch (e) {
-			console.log('[appdev] store refresh failed:', e);
+		const [dRes, cRes] = await Promise.allSettled([
+			host.loadListing?.() ?? Promise.resolve(null),
+			host.runPreflight?.() ?? Promise.resolve([]),
+		]);
+		const d = dRes.status === 'fulfilled' ? dRes.value : null;
+		// Seed an empty draft from the app facts when no record exists yet
+		const loaded = d ?? { appId: app.id, mode: 'free' as const, name: app.name, description: app.description ?? '', plans: [] };
+		setDraft(loaded);
+		setSaved(loaded);
+		if (cRes.status === 'fulfilled') setChecks(cRes.value);
+		const failure = dRes.status === 'rejected' ? dRes.reason : cRes.status === 'rejected' ? cRes.reason : null;
+		if (failure) {
+			console.log('[appdev] store refresh failed:', failure);
+			setError(`Could not load the ${dRes.status === 'rejected' ? 'store listing' : 'store requirements'}: ${failure instanceof Error ? failure.message : String(failure)}`);
 		}
 	}, [host, app.id, app.name, app.description]);
 

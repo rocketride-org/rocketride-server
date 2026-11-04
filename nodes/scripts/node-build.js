@@ -95,6 +95,7 @@ function makeNodeModule({ name, srcDir, description, extraSteps = [] }) {
 				action: () => ({
 					description: `Build node ${name}`,
 					steps: [
+						'server:setup-tools',
 						'vcpkg:submodule-build',
 						'java:setup-jdk',
 						'server:build-core',

@@ -548,26 +548,12 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
     ///------------------------------------------------------------
     auto getPythonCallerLocation =
         []() -> std::optional<std::tuple<std::string_view, int, std::string_view>> {
-        // The names are interned for the life of the process, and the views handed out
-        // below point into that pool. ap::Location holds string_views and Error keeps a
-        // Location by value, so a location built over a caller-local std::string outlives
-        // its own storage the moment that scope ends - every later read of it, such as the
-        // completionError property, then lands in freed memory. A pipeline's distinct
-        // file/function names are bounded by its Python sources, so the pool stays small;
-        // it is never pruned, which is what makes the views permanently safe. unordered_set
-        // is node-based, so inserting never moves an element another view already points at.
-        //
-        // The pool and its lock are leaked on purpose rather than left as ordinary
-        // function-local statics. Those are destroyed in reverse order of construction, and
-        // engine::config::monitor() (config/global.hpp) is constructed first - so the pool
-        // would be gone while the monitor still holds Errors viewing into it, putting the
-        // same dangling read back at shutdown. Leaking is what makes "life of the process"
-        // exact; the memory is reclaimed by the OS when the process ends.
-        static auto &internLock = *new std::mutex();
-        static auto &internPool = *new std::unordered_set<std::string>();
+        // The names are interned for the life of the process (the engine's
+        // shared, leaked pool; see internLocationText in python/init.cpp),
+        // because ap::Location holds string_views and Error keeps a Location
+        // by value.
         const auto intern = [](std::string value) -> std::string_view {
-            const std::lock_guard<std::mutex> guard(internLock);
-            return *internPool.insert(std::move(value)).first;
+            return internLocationText(std::move(value));
         };
 
         try {

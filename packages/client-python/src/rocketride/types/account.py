@@ -185,6 +185,20 @@ class OrgDetail(TypedDict):
     teamCount: int
 
 
+class DeleteOrgPrecheck(TypedDict):
+    """
+    Dry-run answer for an organization delete: what WOULD deletion involve.
+
+    Attributes:
+        members: Total number of members (active and pending) in the org.
+        subscriptionActive: True when an active/trialing/past-due app
+            subscription blocks the delete — cancel it first.
+    """
+
+    members: int
+    subscriptionActive: bool
+
+
 # =============================================================================
 # MEMBERS
 # =============================================================================

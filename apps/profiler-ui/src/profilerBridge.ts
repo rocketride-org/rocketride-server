@@ -34,13 +34,14 @@
 // Two transports behind one pair of channel faces:
 //  - LOCAL: both mounts share one document (the full app) — an in-memory
 //    emitter that replays the last state to a late subscriber.
-//  - PEER: the mounts are isolated documents (VS Code webviews) — the same
-//    messages ride the DevToolProps peer channel. Direction discipline per
-//    the peer contract: the panel posts ONLY user actions; the frame PUSHES
-//    a full state snapshot on every change, and the host retains the last
-//    push so a reloaded sidebar renders without asking.
+//  - CHANNEL: the mounts are isolated documents (VS Code webviews) — the
+//    same payloads ride the tool channel as events. Direction discipline per
+//    the channel contract: the panel sends ONLY user actions; the frame
+//    PUSHES a full state snapshot on every change, and the host retains the
+//    last frame push so a reloaded sidebar renders without asking.
 
-import type { DevToolProps } from 'shell';
+import { typedToolChannel } from 'shell';
+import type { ToolChannel, ToolEventMap as ToolEventMapBase, ToolStateMap as ToolStateMapBase } from 'shell';
 
 // =============================================================================
 // STATE + ACTIONS
@@ -131,55 +132,55 @@ export const localSidebarChannel: ProfilerSidebarChannel = {
 };
 
 // =============================================================================
-// PEER TRANSPORT — isolated mounts (VS Code webviews)
+// CHANNEL TRANSPORT — isolated mounts (VS Code webviews)
 // =============================================================================
 
-/** The peer wire protocol between the two mounts (app-internal). */
-type ProfilerPeerMessage =
-	| { t: 'state'; state: ProfilerControlsState }
-	| { t: 'action'; action: ProfilerAction };
+/** The profiler's channel events (either direction, app-internal). */
+interface ProfilerEventMap extends ToolEventMapBase {
+	/** The frame's full controls snapshot — pushed on every change; the host
+	 *  retains the last frame push for a reloaded sidebar. */
+	controlsState: ProfilerControlsState;
+	/** One user control event from the panel (may summon a closed frame —
+	 *  exactly right for a clicked control). */
+	controlsAction: ProfilerAction;
+}
 
 /**
- * Builds the frame's channel face over the host-relayed peer. The frame
- * publishes on every state change (including right after mount), so the
- * host's retained last message keeps a reloaded sidebar current.
+ * Builds the frame's channel face over the tool channel. The frame publishes
+ * on every state change (including right after mount), so the host's
+ * retained last frame push keeps a reloaded sidebar current.
  *
- * @param peer - The host-relayed channel from DevToolProps.
+ * @param channel - The mount's channel from DevToolProps.
  * @returns The frame face.
  */
-export function createPeerFrameChannel(peer: DevToolProps['peer']): ProfilerFrameChannel {
+export function createPeerFrameChannel(channel: ToolChannel): ProfilerFrameChannel {
+	const typed = typedToolChannel<ToolStateMapBase, ProfilerEventMap>(channel);
 	return {
 		publishState(state) {
-			peer.post({ t: 'state', state } satisfies ProfilerPeerMessage);
+			typed.sendEvent('controlsState', state);
 		},
 		subscribeActions(cb) {
-			return peer.subscribe((message) => {
-				const msg = message as ProfilerPeerMessage;
-				if (msg && msg.t === 'action') cb(msg.action);
-			});
+			return typed.onEvent('controlsAction', cb);
 		},
 	};
 }
 
 /**
- * Builds the sidebar's channel face over the host-relayed peer. Posts
- * nothing on mount — only user actions (a post to a closed frame summons
- * it, which is exactly right for a clicked control and exactly wrong for a
- * handshake).
+ * Builds the sidebar's channel face over the tool channel. Sends nothing on
+ * mount — only user actions (an event to a closed frame summons it, which
+ * is exactly right for a clicked control and exactly wrong for a handshake).
  *
- * @param peer - The host-relayed channel from DevToolProps.
+ * @param channel - The mount's channel from DevToolProps.
  * @returns The sidebar face.
  */
-export function createPeerSidebarChannel(peer: DevToolProps['peer']): ProfilerSidebarChannel {
+export function createPeerSidebarChannel(channel: ToolChannel): ProfilerSidebarChannel {
+	const typed = typedToolChannel<ToolStateMapBase, ProfilerEventMap>(channel);
 	return {
 		sendAction(action) {
-			peer.post({ t: 'action', action } satisfies ProfilerPeerMessage);
+			typed.sendEvent('controlsAction', action);
 		},
 		subscribeState(cb) {
-			return peer.subscribe((message) => {
-				const msg = message as ProfilerPeerMessage;
-				if (msg && msg.t === 'state') cb(msg.state);
-			});
+			return typed.onEvent('controlsState', cb);
 		},
 	};
 }

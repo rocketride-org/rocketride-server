@@ -279,10 +279,20 @@ const ScmProvider: React.FC = () => {
 					return (
 						<div
 							key={path}
+							role="button"
+							tabIndex={0}
 							style={{ ...S.row, ...(hovered ? { background: HOVER_BG } : {}) }}
 							onMouseEnter={() => setHoveredRow(path)}
 							onMouseLeave={() => setHoveredRow(null)}
+							onFocus={() => setHoveredRow(path)}
+							onBlur={() => setHoveredRow(null)}
 							onClick={() => handleOpenDiff(path)}
+							onKeyDown={(e) => {
+								if (e.key === 'Enter' || e.key === ' ') {
+									e.preventDefault();
+									handleOpenDiff(path);
+								}
+							}}
 							title={`${path} — click for diff`}
 						>
 							<span style={{ ...S.rowName, color: SCM_COLORS[kind] }}>{leaf}</span>

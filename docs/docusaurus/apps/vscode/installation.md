@@ -46,29 +46,17 @@ its OAuth code against the same effective server.
 
 > Credentials are not a settings key. Enter your API key with the **Settings** page command `rocketride.page.settings.setupCredentials` (update or clear it via `rocketride.page.settings.updateApiKey` / `rocketride.page.settings.clearApiKey`). It is held in VS Code SecretStorage, not in `settings.json`.
 
-### Pipeline
-
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `rocketride.defaultPipelinePath` | - | Default directory for new pipeline files |
-| `rocketride.pipelineRestartBehavior` | - | Restart behavior: `auto`, `manual`, or `prompt` |
-| `rocketride.taskArguments` | - | Additional command-line arguments passed to each pipeline task |
-| `rocketride.pipelineDebugOutput` | `false` | Enable full debug output for pipeline tasks (`--trace=debugOut`) |
-
 ### Local Engine
 
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `rocketride.development.local.engineVersion` | `latest` | Engine version: `latest`, `prerelease`, or a specific tag |
 
-### Integrations
+### Everything else
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `rocketride.integrations.autoAgentIntegration` | `true` | Automatically detect and install RocketRide documentation for coding agents (Copilot, Claude Code, Cursor, Windsurf) on startup |
-| `rocketride.integrations.copilot` | - | Enable GitHub Copilot integration for pipeline development |
-| `rocketride.integrations.claudeCode` | - | Enable Claude Code integration |
-| `rocketride.integrations.cursor` | - | Enable Cursor IDE integration |
-| `rocketride.integrations.windsurf` | - | Enable Windsurf integration |
-| `rocketride.integrations.claudeMd` | - | Install RocketRide instructions to CLAUDE.md at the repo root |
-| `rocketride.integrations.agentsMd` | - | Install RocketRide instructions to AGENTS.md at the repo root |
+Pipeline defaults (TTL, trace level, restart behavior, task arguments, debug
+output, default paths) and the agent integrations (Copilot, Claude Code,
+Cursor, Windsurf, CLAUDE.md, AGENTS.md) are **workspace settings**, edited in
+the RocketRide Settings page (*RocketRide: Settings* → Rocket Builder /
+Integrations). They are stored on the connected server and follow you between
+VS Code and the cloud workbench — they are not VS Code configuration keys.

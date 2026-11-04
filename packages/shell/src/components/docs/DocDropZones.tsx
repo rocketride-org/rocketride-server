@@ -255,25 +255,13 @@ const DocDropZones: React.FC<DocDropZonesProps> = ({ docs, groupId, children }) 
 		e.stopPropagation();
 		setRegion(null);
 
-		// Resolve the payload — transfer data first, drag session as fallback
-		let editorId: string | undefined;
-		let sourceGroupId: string | undefined;
-		try {
-			const data = JSON.parse(e.dataTransfer.getData(EDITOR_DND_MIME));
-			editorId = data.editorId;
-			sourceGroupId = data.sourceGroupId;
-		} catch { /* ignore malformed data */ }
-		if (!editorId) {
-			const session = getEditorDrag(docs);
-			if (!session) return;
-			editorId = session.editorId;
-			sourceGroupId = session.sourceGroupId;
-		}
-
-		// A tab dragged from a DIFFERENT Documents instance (another app's
-		// layout in the same window) must not act here — the editor id means
-		// nothing in this model, and an edge drop would manufacture an empty
-		// split before moveEditor no-ops
+		// The per-instance drag session is the only proof the drag belongs to
+		// THIS Documents model — editor ids ('editor-N') collide across
+		// instances, so a transfer-payload id from another app's layout could
+		// name an unrelated editor here. No session for this docs = not ours.
+		const session = getEditorDrag(docs);
+		if (!session) return;
+		const { editorId, sourceGroupId } = session;
 		if (!docs.getState().editors[editorId]) return;
 
 		// Re-derive the region at the drop point and re-validate the gesture
@@ -288,10 +276,9 @@ const DocDropZones: React.FC<DocDropZonesProps> = ({ docs, groupId, children }) 
 		}
 
 		// Edge-splitting a group's only tab out of itself recreates the same
-		// layout after the source collapses. isUsefulDrop suppresses this via
-		// the drag SESSION — re-check with the RESOLVED source group, because
-		// a drag that never called beginEditorDrag (no session) still carries
-		// transfer data and would otherwise manufacture an empty split.
+		// layout after the source collapses. isUsefulDrop suppresses this
+		// during hover — re-check at the drop point, where the pointer may
+		// have moved since the last dragover.
 		if (sourceGroupId === groupId && (docs.getState().groups[groupId]?.editorIds.length ?? 0) <= 1) return;
 
 		// Edge drop — split this group, then move the editor into the new pane

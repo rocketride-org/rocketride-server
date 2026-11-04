@@ -26,7 +26,7 @@ import { registerOpHandlers } from 'shell/src/ops/busOps';
 import type { IOpBus, OpImplTable } from 'shell/src/ops/busOps';
 import { WorkspaceStore, SHELL_PARTITION } from 'shell/src/workspace/workspaceStore';
 import type { Partition } from 'shell/src/workspace/workspaceStore';
-import { prefsTopic } from 'shell/src/components/workspace/prefsStore';
+import { prefsTopic, settingsTopic } from 'shell/src/components/workspace/prefsStore';
 import type { HostOpMap } from 'shared/ops/hostOps';
 import type { IRetainedRegistry } from 'shell/src/ops/retained';
 import type { ConnectionManager } from '../../connection/connection';
@@ -52,11 +52,19 @@ export function startPrefsMirror(deps: IPrefsMirrorDeps): { store: WorkspaceStor
 
 	// `defaultAppId` names the active partition, which only matters to a
 	// shell with an app surface — the extension host has none, and never
-	// mutates that partition. (global.json's `activeAppId` is written but
-	// read by nobody, so the two hosts cannot fight over it.)
-	const store = new WorkspaceStore({ defaultAppId: 'vscode' });
+	// mutates that partition. `headless` keeps the placeholder purely
+	// in-memory: no read probe at load, no file ever materialized —
+	// `.workspace/` holds one `<appId>.workspace.json` per REAL app only.
+	// (global.json's `activeAppId` is written but read by nobody, so the
+	// two hosts cannot fight over it.)
+	const store = new WorkspaceStore({ defaultAppId: 'vscode', headless: true });
 
-	const publish = (partition: Partition): void => retained.publish(prefsTopic(partition), store.prefsFor(partition));
+	// One change signal republishes BOTH of a partition's topics — the store
+	// notifies on pref AND settings changes through the same seam.
+	const publish = (partition: Partition): void => {
+		retained.publish(prefsTopic(partition), store.prefsFor(partition));
+		retained.publish(settingsTopic(partition), store.settingsFor(partition));
+	};
 	const offPrefs = store.onPrefsChanged(publish);
 
 	const syncConnection = (): void => store.setConnection(connectionManager.getClient() ?? null, connectionManager.isConnected());
@@ -71,6 +79,13 @@ export function startPrefsMirror(deps: IPrefsMirrorDeps): { store: WorkspaceStor
 		// Always publishes, even for an empty bag — the realm's `ready` hangs
 		// otherwise, and an app with no saved prefs is the common case.
 		'shell.prefs.attach': async (p) => {
+			await store.ensurePartition(p.partition);
+			publish(p.partition);
+		},
+		'shell.updateSetting': async (p) => {
+			store.updateSetting(p.partition, p.key, p.value);
+		},
+		'shell.settings.attach': async (p) => {
 			await store.ensurePartition(p.partition);
 			publish(p.partition);
 		},
@@ -90,3 +105,4 @@ export function startPrefsMirror(deps: IPrefsMirrorDeps): { store: WorkspaceStor
 		},
 	};
 }
+

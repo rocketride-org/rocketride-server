@@ -172,3 +172,13 @@ describe('truncateLists — the default shrink', () => {
 	});
 });
 
+describe('guardRetainedState — it is a whole ToolChannel', () => {
+	it('forwards the op lane: a controller can serve ops on the guarded channel and a frame can call them', async () => {
+		const h = createDevToolHarness();
+		const guarded = guardRetainedState(shellProtocol.createToolChannel(h.sidebarPeer));
+		guarded.serveOp('g.echo', (params) => params);
+		const frame = shellProtocol.createToolChannel(h.newFramePeer());
+		await settle();
+		assert.deepEqual(await frame.call('g.echo', { x: 1 }, { timeoutMs: 2_000 }), { x: 1 });
+	});
+});

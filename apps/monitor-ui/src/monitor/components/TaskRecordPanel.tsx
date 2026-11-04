@@ -7,7 +7,7 @@
 // TASK RECORD PANEL — DetailPanel slide-out for one pipeline task
 // =============================================================================
 
-import React, { useRef } from 'react';
+import React, { useEffect, useRef } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { DetailPanel } from 'shell';
 import { Section, LabelValue } from 'shell';
@@ -217,11 +217,13 @@ export const TaskRecordPanel: React.FC<ITaskRecordPanelProps> = ({ taskId, tasks
 	// rows so every parent re-render (each 3s poll) refreshes the open panel.
 	const lastKnownRef = useRef<DashboardTask | null>(null);
 	const live = taskId != null ? tasks.find((task) => task.id === taskId) : undefined;
-	if (live != null) {
+	useEffect(() => {
 		// Cache the latest resolved snapshot (a plain memo write; the ref is
 		// only read by this component's own render).
-		lastKnownRef.current = live;
-	}
+		if (live != null) {
+			lastKnownRef.current = live;
+		}
+	}, [live]);
 
 	// Step 2: fall back to the last-known snapshot when the row is absent from
 	// the current rows — the id guard ensures a stale cache from a previously

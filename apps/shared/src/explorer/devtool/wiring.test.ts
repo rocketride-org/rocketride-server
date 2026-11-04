@@ -33,13 +33,12 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import type { IToolOpServer, ToolOpMap, ToolOpSpec } from 'shell';
+import type { IToolOpServer, ToolChannel, ToolOpMap, ToolOpSpec } from 'shell';
 import { ExplorerToolError } from '../errors';
 import { attachController } from './controller';
 import type { IDeadline } from './deadline';
 import { createFrameCaller } from './frame';
-import { channelFor, CONTROLLER_STATE_TOPIC } from './realm';
-import type { DevToolPeer } from './realm';
+import { CONTROLLER_STATE_TOPIC } from './realm';
 import { toReply } from './reply';
 import type { Reply } from './reply';
 import { assertJsonSafe, createDevToolHarness, manualNow, settle, shellProtocol } from './testing';
@@ -50,15 +49,22 @@ interface WireOps extends ToolOpMap {
 	'w.delete': ToolOpSpec<IDeadline & { key: string }, Reply<null>>;
 }
 
-/** The frame-side primitives, real. */
-const frameProto = { createToolController: shellProtocol.createToolController, createToolChannel: shellProtocol.createToolChannel };
+/**
+ * The frame-side primitives over a new frame mount: ONE host channel, as the host builds it.
+ *
+ * @param h - The harness.
+ * @returns Options for createFrameCaller.
+ */
+function frameOf(h: ReturnType<typeof createDevToolHarness>) {
+	return { channel: shellProtocol.createToolChannel(h.newFramePeer()), createToolOpClient: shellProtocol.createToolOpClient };
+}
 
 /** Counts op servers over the real factory. */
 function countingServers() {
 	const counts = { created: 0, disposed: 0 };
-	const factory = (peer: DevToolPeer): IToolOpServer<WireOps> => {
+	const factory = (channel: ToolChannel): IToolOpServer<WireOps> => {
 		counts.created += 1;
-		const server = shellProtocol.createToolOpServer<WireOps>(peer);
+		const server = shellProtocol.createToolOpServer<WireOps>(channel);
 		return { serve: (op, handler) => server.serve(op, handler), dispose: () => { counts.disposed += 1; server.dispose(); } };
 	};
 	return { counts, factory };
@@ -71,15 +77,14 @@ describe('T3 — every op round-trips JSON-safe; failures come back as equal Exp
 		const handled: unknown[] = [];
 		const failure = new ExplorerToolError({ kind: 'raised', tool: 'execute', code: 'TASK_STOPPED', message: 'Task stopped\nIt was restarted' });
 		const attached = attachController<WireOps>({
-			peer: h.sidebarPeer,
-			createToolChannel: shellProtocol.createToolChannel,
+			channel: shellProtocol.createToolChannel(h.sidebarPeer),
 			createToolOpServer: shellProtocol.createToolOpServer,
 			handlers: {
 				'w.read': (params) => toReply(() => { handled.push(params); return { columns: ['id', 'name'], rows: [[1, 'a'], [2, null]] }; }),
 				'w.write': (params) => toReply(() => { handled.push(params); throw failure; }),
 			},
 		});
-		const caller = createFrameCaller<WireOps>({ peer: h.newFramePeer(), createToolController: shellProtocol.createToolController, createToolChannel: shellProtocol.createToolChannel });
+		const caller = createFrameCaller<WireOps>({ ...frameOf(h) });
 		await settle();
 
 		const value = await caller.callReply('w.read', { key: 'k1|dev|user|u1|t|p|tools=tools_1|db_1', text: 'select 1' }, { timeoutMs: 5_000 });
@@ -111,8 +116,7 @@ describe('T3 — every op round-trips JSON-safe; failures come back as equal Exp
 		const deleted: string[] = [];
 		let viaToReply = false;
 		const attached = attachController<WireOps>({
-			peer: h.sidebarPeer,
-			createToolChannel: shellProtocol.createToolChannel,
+			channel: shellProtocol.createToolChannel(h.sidebarPeer),
 			createToolOpServer: shellProtocol.createToolOpServer,
 			handlers: {
 				'w.delete': (params) => {
@@ -121,7 +125,7 @@ describe('T3 — every op round-trips JSON-safe; failures come back as equal Exp
 				},
 			},
 		});
-		const caller = createFrameCaller<WireOps>({ peer: h.newFramePeer(), ...frameProto });
+		const caller = createFrameCaller<WireOps>({ ...frameOf(h) });
 		await settle();
 		assert.equal(await caller.callReply('w.delete', { key: 'a' }, { timeoutMs: 5_000 }), null);
 		viaToReply = true;
@@ -135,12 +139,11 @@ describe('T3 — every op round-trips JSON-safe; failures come back as equal Exp
 	it('a bus timeout inside the controller comes back to the frame as kind timeout', async () => {
 		const h = createDevToolHarness('tool.test', { json: true });
 		const attached = attachController<WireOps>({
-			peer: h.sidebarPeer,
-			createToolChannel: shellProtocol.createToolChannel,
+			channel: shellProtocol.createToolChannel(h.sidebarPeer),
 			createToolOpServer: shellProtocol.createToolOpServer,
-			handlers: { 'w.read': () => toReply(() => { throw new Error("Op 'client.tool' timed out after 66000ms (bridged)"); }, { tool: 'get_data' }) },
+			handlers: { 'w.read': () => toReply(() => { throw new Error("Op 'client.request' timed out after 66000ms (bridged)"); }, { tool: 'get_data' }) },
 		});
-		const caller = createFrameCaller<WireOps>({ peer: h.newFramePeer(), createToolController: shellProtocol.createToolController, createToolChannel: shellProtocol.createToolChannel });
+		const caller = createFrameCaller<WireOps>({ ...frameOf(h) });
 		await settle();
 		await assert.rejects(caller.callReply('w.read', { key: 'k', text: 'x' }, { timeoutMs: 5_000 }), (error: unknown) => {
 			assert.ok(error instanceof ExplorerToolError);
@@ -163,12 +166,11 @@ describe('R3 applied uniformly — whatever a handler does, the frame gets a Rep
 	async function rig(handler: (params: IDeadline & { key: string; text: string }) => unknown) {
 		const h = createDevToolHarness('tool.test', { json: true });
 		const attached = attachController<WireOps>({
-			peer: h.sidebarPeer,
-			createToolChannel: shellProtocol.createToolChannel,
+			channel: shellProtocol.createToolChannel(h.sidebarPeer),
 			createToolOpServer: shellProtocol.createToolOpServer,
 			handlers: { 'w.write': handler as never },
 		});
-		const caller = createFrameCaller<WireOps>({ peer: h.newFramePeer(), ...frameProto });
+		const caller = createFrameCaller<WireOps>({ ...frameOf(h) });
 		await settle();
 		return { h, caller, done: () => { caller.dispose(); attached.dispose(); } };
 	}
@@ -192,7 +194,7 @@ describe('R3 applied uniformly — whatever a handler does, the frame gets a Rep
 	});
 
 	it('a foreign failure escaping a handler becomes Reply data (a lane timeout text is kind timeout)', async () => {
-		const { caller, done } = await rig(async () => { throw new Error("Op 'client.tool' timed out after 66000ms"); });
+		const { caller, done } = await rig(async () => { throw new Error("Op 'client.request' timed out after 66000ms"); });
 		await assert.rejects(caller.callReply('w.write', { key: 'k', text: 'x' }, { timeoutMs: 5_000 }), (error: unknown) => {
 			assert.ok(error instanceof ExplorerToolError);
 			assert.equal(error.kind, 'timeout');
@@ -214,115 +216,74 @@ describe('R3 applied uniformly — whatever a handler does, the frame gets a Rep
 	});
 });
 
-describe('quirk 7 — an event named like an op never reaches the op server', () => {
-	it('whatever its payload (a fresh deadlineAt included): no run, no refusal; the channel still hears it', async () => {
+describe('T5 — mount -> dispose -> mount leaves one live op server; replays execute nothing', () => {
+	it('ops are answered and channel events delivered (the host channel, rocket-ui and VS Code alike)', async () => {
 		const h = createDevToolHarness('tool.test', { json: true });
+		const hostChannel = shellProtocol.createToolChannel(h.sidebarPeer);
+		const servers = countingServers();
 		const runs: string[] = [];
-		const refused: string[] = [];
-		const heard: unknown[] = [];
-		const attached = attachController<WireOps>({
-			peer: h.sidebarPeer,
-			createToolChannel: shellProtocol.createToolChannel,
-			createToolOpServer: shellProtocol.createToolOpServer,
-			onRefused: (error) => refused.push(error.reason),
-			handlers: { 'w.write': (params) => { runs.push(params.text); return { affected: 1 }; } },
+		const mount = () => attachController<WireOps>({
+			channel: hostChannel,
+			createToolOpServer: servers.factory,
+			handlers: {
+				'w.read': (params) => toReply(() => { runs.push(`read:${params.text}`); return { columns: [], rows: [] }; }),
+				'w.write': (params) => toReply(() => { runs.push(`write:${params.text}`); return { affected: 1 }; }),
+			},
 		});
-		attached.channel.onEvent('w.write', (payload) => heard.push(payload));
+
+		// StrictMode: mount, cleanup, mount.
+		const first = mount();
+		first.dispose();
+		const second = mount();
+		assert.equal(servers.counts.created - servers.counts.disposed, 1, 'exactly one live op server');
+
+		const actives: unknown[] = [];
+		second.channel.onEvent('active', (payload) => actives.push(payload));
+
 		const frameChannel = shellProtocol.createToolChannel(h.newFramePeer());
+		const caller = createFrameCaller<WireOps>({ channel: frameChannel, createToolOpClient: shellProtocol.createToolOpClient });
 		await settle();
-		frameChannel.sendEvent('w.write', { key: 'k', text: 'event', deadlineAt: Date.now() + 60_000 });
-		frameChannel.sendEvent('w.write', { key: 'k', text: 'bare' });
+
+		// Ops are answered, once each.
+		await caller.callReply('w.write', { key: 'k', text: 'one' }, { timeoutMs: 5_000 });
+		assert.deepEqual(runs, ['write:one']);
+
+		// A channel event reaches the controller's channel (it can arrive twice: the live signal and the retained last-payload slot).
+		frameChannel.sendEvent('active', 'workbench:k');
 		await settle();
-		assert.deepEqual(runs, []);
-		assert.deepEqual(refused, []);
-		assert.equal(heard.length, 2, 'the controller channel still receives events');
-		attached.dispose();
+		assert.ok(actives.length >= 1 && actives.every((payload) => payload === 'workbench:k'));
+
+		// Remount: the retained last frame payload replays into the channel and executes nothing.
+		second.dispose();
+		const third = mount();
+		await settle();
+		assert.equal(servers.counts.created - servers.counts.disposed, 1);
+		assert.deepEqual(runs, ['write:one']);
+
+		// And the remounted controller still answers.
+		await caller.callReply('w.read', { key: 'k', text: 'two' }, { timeoutMs: 5_000 });
+		assert.deepEqual(runs, ['write:one', 'read:two']);
+		assert.deepEqual(h.violations, []);
+
+		caller.dispose();
+		third.dispose();
 	});
 });
 
-describe('T5 — mount -> dispose -> mount leaves one live op server; replays execute nothing', () => {
-	for (const withHostChannel of [true, false]) {
-		it(`ops are answered and channel events delivered (${withHostChannel ? 'host channel, rocket-ui style' : 'no host channel'})`, async () => {
-			const h = createDevToolHarness('tool.test', { json: true });
-			const hostChannel = withHostChannel ? shellProtocol.createToolChannel(h.sidebarPeer) : undefined;
-			const servers = countingServers();
-			const runs: string[] = [];
-			const mount = () => attachController<WireOps>({
-				peer: h.sidebarPeer,
-				...(hostChannel ? { channel: hostChannel } : {}),
-				createToolChannel: shellProtocol.createToolChannel,
-				createToolOpServer: servers.factory,
-				handlers: {
-					'w.read': (params) => toReply(() => { runs.push(`read:${params.text}`); return { columns: [], rows: [] }; }),
-					'w.write': (params) => toReply(() => { runs.push(`write:${params.text}`); return { affected: 1 }; }),
-				},
-			});
-
-			// StrictMode: mount, cleanup, mount.
-			const first = mount();
-			first.dispose();
-			const second = mount();
-			assert.equal(servers.counts.created - servers.counts.disposed, 1, 'exactly one live op server');
-
-			const actives: unknown[] = [];
-			second.channel.onEvent('active', (payload) => actives.push(payload));
-
-			const framePeer = h.newFramePeer();
-			const frameChannel = shellProtocol.createToolChannel(framePeer);
-			const caller = createFrameCaller<WireOps>({ peer: framePeer, channel: frameChannel, createToolController: shellProtocol.createToolController, createToolChannel: shellProtocol.createToolChannel });
-			await settle();
-
-			// Ops are answered, once each.
-			await caller.callReply('w.write', { key: 'k', text: 'one' }, { timeoutMs: 5_000 });
-			assert.deepEqual(runs, ['write:one']);
-
-			// Channel events reach the controller's channel exactly once (the op server is the live
-			// subscriber; the channel hears frame events on the retained last-payload lane).
-			frameChannel.sendEvent('active', 'workbench:k');
-			await settle();
-			assert.deepEqual(actives, ['workbench:k']);
-
-			// An event named like an op (a protocol bug) is delivered twice to the op server (live +
-			// retained slot) and executes nothing: it carries no deadline.
-			frameChannel.sendEvent('w.write', { key: 'k', text: 'event' });
-			await settle();
-			assert.deepEqual(runs, ['write:one']);
-
-			// Remount: the retained last frame payload replays into the new op server and executes nothing.
-			second.dispose();
-			const third = mount();
-			await settle();
-			assert.equal(servers.counts.created - servers.counts.disposed, 1);
-			assert.deepEqual(runs, ['write:one']);
-			assert.deepEqual(actives, ['workbench:k'], 'no second delivery of the last event to the controller channel');
-
-			// And the remounted controller still answers.
-			await caller.callReply('w.read', { key: 'k', text: 'two' }, { timeoutMs: 5_000 });
-			assert.deepEqual(runs, ['write:one', 'read:two']);
-			assert.deepEqual(h.violations, []);
-
-			caller.dispose();
-			third.dispose();
-		});
-	}
-});
-
-describe('T13 — a call held while no controller is subscribed and delivered after its deadline is not executed', () => {
-	it('the frame has already rejected; the remounted controller refuses it (control: an on-time held call runs)', async () => {
+describe('T13 — a call to a controller that has gone away is dropped, never run later', () => {
+	it('the channel stays subscribed with no handlers, so the call is dropped; the frame gives up and a later mount runs nothing', async () => {
 		const h = createDevToolHarness('tool.test', { json: true });
 		const clock = manualNow(1_000_000);
 		const runs: string[] = [];
+		const hostChannel = shellProtocol.createToolChannel(h.sidebarPeer);
 		const mount = () => attachController<WireOps>({
-			peer: h.sidebarPeer,
-			createToolChannel: shellProtocol.createToolChannel,
+			channel: hostChannel,
 			createToolOpServer: shellProtocol.createToolOpServer,
 			now: clock.now,
 			handlers: { 'w.write': (params) => toReply(() => { runs.push(params.text); return { affected: 1 }; }) },
 		});
-		const caller = createFrameCaller<WireOps>({ peer: h.newFramePeer(), createToolController: shellProtocol.createToolController, createToolChannel: shellProtocol.createToolChannel, now: clock.now });
+		const caller = createFrameCaller<WireOps>({ ...frameOf(h), now: clock.now });
 
-		// The controller is ready, the frame calls, and the controller unmounts (a VS Code
-		// disconnect) while the call is still on the bus: the REAL busPeer holds it.
 		const first = mount();
 		await settle();
 		const late = caller.callReply('w.write', { key: 'k', text: 'late' }, { timeoutMs: 40 });
@@ -330,53 +291,31 @@ describe('T13 — a call held while no controller is subscribed and delivered af
 		await assert.rejects(late, (error: unknown) => error instanceof ExplorerToolError && error.kind === 'timeout');
 		assert.equal(caller.pending(), 0, 'the frame gave up');
 
-		// Minutes pass, then the controller remounts and receives the held call.
 		clock.advance(5 * 60_000);
+		const again = mount();
+		await settle();
+		assert.deepEqual(runs, [], 'the dropped write never ran');
+		again.dispose();
+		caller.dispose();
+	});
+
+	it('a call that reaches a live controller after its deadline is refused without running (R2)', async () => {
+		const h = createDevToolHarness('tool.test', { json: true });
+		const clock = manualNow(1_000_000);
+		const runs: string[] = [];
 		const refused: string[] = [];
-		const again = attachController<WireOps>({
-			peer: h.sidebarPeer,
-			createToolChannel: shellProtocol.createToolChannel,
+		const attached = attachController<WireOps>({
+			channel: shellProtocol.createToolChannel(h.sidebarPeer),
 			createToolOpServer: shellProtocol.createToolOpServer,
 			now: clock.now,
 			onRefused: (error) => refused.push(`${error.op}:${error.reason}`),
 			handlers: { 'w.write': (params) => toReply(() => { runs.push(params.text); return { affected: 1 }; }) },
 		});
+		const call = shellProtocol.createToolOpClient<WireOps>(shellProtocol.createToolChannel(h.newFramePeer()));
 		await settle();
-		assert.deepEqual(runs, [], 'the expired write never ran');
-		assert.deepEqual(refused, ['w.write:expired'], 'the held call DID reach the controller, which refused it');
-		again.dispose();
-
-		// Control: the same race, with the remount inside the deadline: the held call runs.
-		const second = mount();
-		await settle();
-		const onTime = caller.callReply('w.write', { key: 'k', text: 'on-time' }, { timeoutMs: 5_000 });
-		second.dispose();
-		await settle();
-		const third = mount();
-		assert.deepEqual(await onTime, { affected: 1 });
-		assert.deepEqual(runs, ['on-time']);
-		third.dispose();
-		caller.dispose();
-	});
-});
-
-describe('held calls on the very FIRST mount without a host channel', () => {
-	it('an on-time call held before the controller ever mounted is served, not swallowed by the new channel', async () => {
-		const h = createDevToolHarness('tool.test', { json: true });
-		const caller = createFrameCaller<WireOps>({ peer: h.newFramePeer(), ...frameProto });
-		await settle();
-		const held = caller.callReply('w.write', { key: 'k', text: 'held' }, { timeoutMs: 1_000 });
-		await settle();
-		const runs: string[] = [];
-		const attached = attachController<WireOps>({
-			peer: h.sidebarPeer,
-			createToolChannel: shellProtocol.createToolChannel,
-			createToolOpServer: shellProtocol.createToolOpServer,
-			handlers: { 'w.write': (params) => { runs.push(params.text); return { affected: 1 }; } },
-		});
-		assert.deepEqual(await held, { affected: 1 });
-		assert.deepEqual(runs, ['held']);
-		caller.dispose();
+		await assert.rejects(call('w.write', { key: 'k', text: 'old', deadlineAt: clock.now() - 1 }, { timeoutMs: 1_000 }), /deadline/);
+		assert.deepEqual(runs, []);
+		assert.deepEqual(refused, ['w.write:expired']);
 		attached.dispose();
 	});
 });
@@ -386,26 +325,24 @@ describe('readiness — a call made in the render -> effect window (CE-9)', () =
 	 * The handler log and a mount over the harness.
 	 *
 	 * @param h - The harness.
-	 * @param channel - The host channel, when the host built one.
+	 * @param channel - The host channel.
 	 * @returns The runs and the mount function.
 	 */
-	function lane(h: ReturnType<typeof createDevToolHarness>, channel?: ReturnType<typeof shellProtocol.createToolChannel>) {
+	function lane(h: ReturnType<typeof createDevToolHarness>, channel: ReturnType<typeof shellProtocol.createToolChannel>) {
 		const runs: string[] = [];
 		const mount = () => attachController<WireOps>({
-			peer: h.sidebarPeer,
-			...(channel ? { channel } : {}),
-			createToolChannel: shellProtocol.createToolChannel,
+			channel,
 			createToolOpServer: shellProtocol.createToolOpServer,
 			handlers: { 'w.write': (params) => { runs.push(params.text); return { affected: 1 }; } },
 		});
 		return { runs, mount };
 	}
 
-	it('the host channel subscribes at render (DevToolSidebarMount.tsx), before the controller effect: the call still succeeds', async () => {
+	it('the host channel subscribes at render (DevToolSidebarMount.tsx), before the controller effect: a call made then is held until readiness and succeeds', async () => {
 		const h = createDevToolHarness();
 		const hostChannel = shellProtocol.createToolChannel(h.sidebarPeer);
 		const { runs, mount } = lane(h, hostChannel);
-		const caller = createFrameCaller<WireOps>({ peer: h.newFramePeer(), ...frameProto });
+		const caller = createFrameCaller<WireOps>({ ...frameOf(h) });
 		await settle();
 		const call = caller.callReply('w.write', { key: 'k', text: 'reload' }, { timeoutMs: 2_000 });
 		await settle();
@@ -417,27 +354,12 @@ describe('readiness — a call made in the render -> effect window (CE-9)', () =
 		attached.dispose();
 	});
 
-	it('the same when the lane built its channel (channelFor) before attachController', async () => {
-		const h = createDevToolHarness();
-		channelFor(h.sidebarPeer, shellProtocol.createToolChannel);
-		const { runs, mount } = lane(h);
-		const caller = createFrameCaller<WireOps>({ peer: h.newFramePeer(), ...frameProto });
-		await settle();
-		const call = caller.callReply('w.write', { key: 'k', text: 'early' }, { timeoutMs: 2_000 });
-		await settle();
-		const attached = mount();
-		assert.deepEqual(await call, { affected: 1 });
-		assert.deepEqual(runs, ['early']);
-		caller.dispose();
-		attached.dispose();
-	});
-
 	it('a stale ready left by a dead controller is still bounded by the deadline', async () => {
 		const h = createDevToolHarness();
 		const hostChannel = shellProtocol.createToolChannel(h.sidebarPeer);
 		// A controller whose realm died without its dispose running: its last word was "ready".
 		hostChannel.publishState(CONTROLLER_STATE_TOPIC, { ready: 'dead-controller' });
-		const caller = createFrameCaller<WireOps>({ peer: h.newFramePeer(), ...frameProto });
+		const caller = createFrameCaller<WireOps>({ ...frameOf(h) });
 		await settle();
 		assert.equal(caller.controllerReady(), true);
 		await assert.rejects(caller.callReply('w.write', { key: 'k', text: 'lost' }, { timeoutMs: 80 }), (error: unknown) => error instanceof ExplorerToolError && error.kind === 'timeout');

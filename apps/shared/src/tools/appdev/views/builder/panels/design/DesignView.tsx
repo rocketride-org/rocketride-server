@@ -950,7 +950,9 @@ export const DesignView: React.FC<IDesignViewProps> = ({ host, previewPane }) =>
 							title="Zoom: scale the preview manually with the slider (100% = actual size) and pan with the hand tool."
 							onClick={selectZoom}
 						>Zoom</button>
-						<label
+						<div
+							role="group"
+							aria-label="Preview zoom"
 							style={fitMode ? { ...styles.zoomControl, ...styles.ctlDisabled } : styles.zoomControl}
 							title={fitMode
 								? 'Zoom is driven by Fit. Select Zoom to scale manually.'
@@ -964,6 +966,7 @@ export const DesignView: React.FC<IDesignViewProps> = ({ host, previewPane }) =>
 							>-</button>
 							<input
 								type="range"
+								aria-label="Preview zoom percent"
 								min={25}
 								max={200}
 								step={5}
@@ -980,7 +983,7 @@ export const DesignView: React.FC<IDesignViewProps> = ({ host, previewPane }) =>
 								onClick={() => setPreviewZoom((z) => Math.min(2, Math.round((z + 0.05) * 100) / 100))}
 							>+</button>
 							<span style={styles.zoomValue}>{Math.round(effectiveZoom * 100)}%</span>
-						</label>
+						</div>
 						{host.reloadPreview && (
 							<button
 								style={styles.layoutBtn}

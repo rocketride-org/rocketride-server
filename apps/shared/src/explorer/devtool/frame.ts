@@ -27,11 +27,10 @@
 // Frames hold no client (R1): every engine-facing step is an op on the
 // controller. This is the frame's runtime for those ops:
 //
-//   - ONE controller function and ONE channel per frame peer. Both
-//     `createToolController` and `createToolChannel` subscribe the peer at
-//     construction and can never be disposed (toolOps.ts, toolChannel.ts); on
-//     a frame peer each subscription also announces a HELLO. They are cached
-//     per peer, so a StrictMode double mount adds nothing.
+//   - The host's channel (DevToolProps.channel) is the frame's only transport.
+//     A frame never builds a channel (one subscribes its peer for good and can
+//     never be disposed): the typed op client is a thin closure over it, so a
+//     StrictMode double mount adds nothing.
 //   - Every call names an explicit `timeoutMs` (timeouts.ts) and is stamped
 //     with `deadlineAt` (deadline.ts), which the controller enforces.
 //   - The moment `host:connection` turns false, every pending call is
@@ -60,6 +59,14 @@
 //     succeed. A stale nonce left by a dead controller is bounded the same
 //     way, by the deadline. `waitForController: false` sends at once (a
 //     controller that publishes no readiness).
+//   - IDENTITY FENCE (optional, `identityNow`). A call is bound to the first
+//     known identity fingerprint: the one at the moment it is issued, or, when
+//     none is known yet (a cold start), none at all (unknown -> A is not a
+//     change). If the frame is under another identity, or none, when the answer
+//     arrives, the answer is discarded and the call rejects as kind `stale`
+//     (callers ignore it), so account A's answer never reaches a frame that has
+//     adopted B. The identity is read when the call is issued and when its
+//     answer arrives, not in between.
 //   - `dispose` (the effect cleanup) stops following host:connection and
 //     rejects what is still pending as `stale`, which callers ignore.
 // =============================================================================
@@ -67,8 +74,7 @@
 import type { ToolChannel, ToolControllerFn, ToolOpMap, ToolOpParams, ToolOpResult } from 'shell';
 import { ExplorerToolError, readErrorMessage } from '../errors';
 import { isDeadlineExpiredText, stampDeadline } from './deadline';
-import { channelFor, CONTROLLER_STATE_TOPIC } from './realm';
-import type { DevToolPeer } from './realm';
+import { CONTROLLER_STATE_TOPIC } from './realm';
 import { fromReply, isLaneTimeoutText } from './reply';
 import type { Reply, ReplyValue } from './reply';
 import { assertTimeoutMs } from './timeouts';
@@ -87,18 +93,21 @@ export interface IFrameCallOptions {
 
 /** What {@link createFrameCaller} needs. */
 export interface IFrameCallerOptions {
-	/** The frame mount's peer (DevToolProps.peer). */
-	peer: DevToolPeer;
-	/** The host's channel for this mount (DevToolProps.channel), when it gave one. */
-	channel?: ToolChannel;
-	/** The shell's `createToolController` (injected: no value import from 'shell'). */
-	createToolController: <O extends ToolOpMap>(peer: DevToolPeer) => ToolControllerFn<O>;
-	/** The shell's `createToolChannel`. */
-	createToolChannel: (peer: DevToolPeer) => ToolChannel;
+	/** The host's channel for this mount (DevToolProps.channel). */
+	channel: ToolChannel;
+	/** The shell's `createToolOpClient` (injected: no value import from 'shell'). */
+	createToolOpClient: <O extends ToolOpMap>(channel: ToolChannel) => ToolControllerFn<O>;
 	/** The clock deadlines are stamped from (default `Date.now`). */
 	now?: () => number;
 	/** Hold calls until the controller publishes readiness (default true; see the header). */
 	waitForController?: boolean;
+	/**
+	 * The identity fingerprint the frame is under now (frameIdentity.ts guard
+	 * `first()`/current, or the tracker's). A call is bound to it when issued,
+	 * and its answer, success or failure, is discarded as kind `stale` if the
+	 * identity changed before it arrived.
+	 */
+	identityNow?: () => string | null;
 }
 
 /** A frame's way to call its controller. */
@@ -126,25 +135,6 @@ export interface IFrameCaller<O extends ToolOpMap> {
 	dispose(): void;
 }
 
-/** The controller function built for each frame peer. */
-const controllers = new WeakMap<DevToolPeer, ToolControllerFn<ToolOpMap>>();
-
-/**
- * The one controller function for a frame peer.
- *
- * @param peer - The frame's peer.
- * @param create - The shell's `createToolController`.
- * @returns The function (untyped; the caller types it).
- */
-function controllerFor(peer: DevToolPeer, create: IFrameCallerOptions['createToolController']): ToolControllerFn<ToolOpMap> {
-	let fn = controllers.get(peer);
-	if (fn === undefined) {
-		fn = create<ToolOpMap>(peer);
-		controllers.set(peer, fn);
-	}
-	return fn;
-}
-
 /**
  * Build a frame's caller.
  *
@@ -153,8 +143,8 @@ function controllerFor(peer: DevToolPeer, create: IFrameCallerOptions['createToo
  */
 export function createFrameCaller<O extends ToolOpMap>(opts: IFrameCallerOptions): IFrameCaller<O> {
 	const now = opts.now ?? Date.now;
-	const send = controllerFor(opts.peer, opts.createToolController) as unknown as (op: string, params: unknown, options: { timeoutMs: number }) => Promise<unknown>;
-	const channel = opts.channel ?? channelFor(opts.peer, opts.createToolChannel);
+	const { channel } = opts;
+	const send = opts.createToolOpClient<ToolOpMap>(channel) as unknown as (op: string, params: unknown, options: { timeoutMs: number }) => Promise<unknown>;
 
 	const waitForController = opts.waitForController ?? true;
 
@@ -244,6 +234,20 @@ export function createFrameCaller<O extends ToolOpMap>(opts: IFrameCallerOptions
 		if (connected === false) {
 			return Promise.reject(new ExplorerToolError({ kind: 'unavailable', tool: op, message: `Not connected to a server, so '${op}' was not sent.` }));
 		}
+		// Bound to the FIRST KNOWN identity: a call issued while none is known
+		// (a cold start, before the identity topic delivers) binds to the first
+		// one seen when its answer arrives, so unknown -> A is not a change;
+		// only A -> B, or A -> null (a sign-out), is.
+		const issuedUnder = opts.identityNow?.() ?? null;
+		const changedSince = (): boolean => {
+			if (opts.identityNow === undefined || issuedUnder === null) return false;
+			return (opts.identityNow() ?? null) !== issuedUnder;
+		};
+		const staleIdentity = (): ExplorerToolError => new ExplorerToolError({
+			kind: 'stale',
+			tool: op,
+			message: `'${op}' was answered after the identity changed; the answer was discarded.`,
+		});
 		const args = stampDeadline(params as object | undefined, timeoutMs, now);
 		const { deadlineAt } = args;
 		return new Promise<unknown>((resolve, reject) => {
@@ -267,8 +271,8 @@ export function createFrameCaller<O extends ToolOpMap>(opts: IFrameCallerOptions
 				}
 				entry.sent = true;
 				send(op, args, { timeoutMs: left }).then(
-					(value) => { if (settle(entry)) resolve(value); },
-					(error: unknown) => { if (settle(entry)) reject(mapFailure(op, error)); },
+					(value) => { if (settle(entry)) { if (changedSince()) reject(staleIdentity()); else resolve(value); } },
+					(error: unknown) => { if (settle(entry)) reject(changedSince() ? staleIdentity() : mapFailure(op, error)); },
 				);
 			};
 			if (!waitForController || ready !== null) {
