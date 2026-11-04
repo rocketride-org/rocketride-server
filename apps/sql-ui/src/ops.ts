@@ -171,5 +171,8 @@ export interface SqlEventMap extends ToolEventMap {
 	active: string | null;
 }
 
+/** The names of {@link SqlEventMap}'s events (the controller refuses an event that names a served op). */
+export const SQL_EVENT_NAMES: readonly string[] = ['openError', 'active'];
+
 // Re-exported so op consumers get arg types without reaching into connect/.
 export type { SavedSqlConnection };

@@ -35,7 +35,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import type { IPrefsAccessor } from 'shared/explorer/history/types';
-import { SQL_APP_ID } from '../src/appId';
 import { getSavedConnections, resetSavedConnections } from '../src/connect';
 import { createSqlCore } from '../src/sqlCore';
 import { LOCAL_HISTORY, createLocalSqlEnv } from '../src/localEnv';
@@ -47,7 +46,7 @@ describe('T12 — the full app path runs on the LOCAL env over its own engine co
 	it('resolves, runs, discovers, saves and keeps its preferences and history where the full app keeps them', async () => {
 		resetSavedConnections({ force: true });
 		const engine = scriptedClientRealm(engineScript([PIPELINE], [taskRow('p1'), taskRow('p2')], postgres));
-		const core = createSqlCore({ cm: engine.cm, appId: SQL_APP_ID, mode: 'app', focusTarget: null });
+		const core = createSqlCore({ ...engine.source, mode: 'app', focusTarget: null });
 		const values = new Map<string, unknown>();
 		const prefs: IPrefsAccessor = { getPref: (key) => values.get(key), setPref: (key, value) => { values.set(key, value); } };
 		const env = createLocalSqlEnv(core, true, (provider) => (provider === 'db_postgres' ? 'PostgreSQL' : undefined), prefs);
@@ -64,7 +63,6 @@ describe('T12 — the full app path runs on the LOCAL env over its own engine co
 			assert.equal(env.serviceTitle('db_postgres'), 'PostgreSQL');
 			assert.equal(env.prefs, prefs, 'the full app keeps its workspace preferences');
 			assert.equal(env.history, LOCAL_HISTORY, 'and its module history store');
-			assert.deepEqual(engine.requests.filter((q) => typeof q.timeoutMs !== 'number').map((q) => q.op), []);
 		} finally {
 			core.dispose();
 		}

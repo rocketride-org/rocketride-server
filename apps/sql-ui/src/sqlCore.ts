@@ -29,15 +29,19 @@
 // (R1); they reach it through ops (sqlBridge.ts). It is built on the shared
 // Explorer library:
 //
-//   client      the library's IExplorerClient over the shell bus
-//               (shared/explorer/devtool/busClient), every request with an
-//               explicit timeout;
+//   client      the library's IExplorerClient over the realm's own
+//               RocketRideClient (shared/explorer/devtool/engineClient: a
+//               getter, never a captured client), every request bounded by
+//               an explicit deadline;
 //   identity    the dev-tool identity tracker: it fails closed, and NOTHING is
 //               discovered while it cannot vouch for anyone;
-//   activation  the full app opens it at once; a dev-tool controller's
-//               mount opens it, since both hosts build a tool's sidebar only
-//               when it is selected or a frame summons it (#2625 9bd5d931f;
-//               shared/explorer/devtool/activation.ts);
+//   readiness   discovery and the saved-list read wait for the identity to be
+//               known AND the realm's engine to be ready (devtool/readiness.ts,
+//               devtool/watch.ts). There is no activation gate: a dev-tool
+//               controller's mount is its activation, since both hosts build
+//               a tool's sidebar only when it is selected or a frame summons
+//               it. Endpoint probes (tool calls) are held until a person is
+//               present (`discovery.markUserPresent`);
 //   endpoints   SQL Explorer's endpoint store (connect/endpoints.ts): owner-
 //               aware discovery, one probe per endpoint, the task-token vault,
 //               the sessions (tokens come ONLY from that vault);
@@ -68,12 +72,11 @@
 import { ExplorerToolError } from 'shared/explorer/errors';
 import type { IEndpointStore, IStoreClock } from 'shared/explorer/connect/store';
 import type { IExplorerClient, IExplorerEndpoint } from 'shared/explorer/types';
-import { busRequest, getBusExplorerClient } from 'shared/explorer/devtool/busClient';
-import type { IExplorerBus } from 'shared/explorer/devtool/busClient';
+import { createExplorerAdmin, createExplorerClient, createPrefsFs } from 'shared/explorer/devtool/engineClient';
+import type { IPrefsFs, IRealmClient, RealmClientGetter } from 'shared/explorer/devtool/engineClient';
+import type { IEngineReadiness } from 'shared/explorer/devtool/readiness';
 import { createIdentityTracker } from 'shared/explorer/devtool/identity';
 import type { IIdentityBus, IIdentitySnapshot, IIdentityTracker } from 'shared/explorer/devtool/identity';
-import { createActivationGate } from 'shared/explorer/devtool/activation';
-import type { IActivationBus, IActivationGate } from 'shared/explorer/devtool/activation';
 import { createDevToolDiscovery } from 'shared/explorer/devtool/watch';
 import type { IDevToolDiscovery, IDiscoveryBus, IFocusTarget } from 'shared/explorer/devtool/watch';
 import { isPlainObject } from 'shared/explorer/checks';
@@ -88,6 +91,7 @@ import {
 	endpointKeyForConnection,
 	getSavedConnection,
 	getSavedConnectionsStatus,
+	isDirectEndpointKey,
 	loadSavedConnections,
 	ownSavedConnections,
 	resetSavedConnections,
@@ -96,7 +100,7 @@ import {
 	toDialect,
 	upsertSavedConnection,
 } from './connect';
-import type { SavedConnectionsFs, SavedSqlConnection, SqlDialect, SqlEndpoint, SqlSession } from './connect';
+import type { DirectConnection, SavedConnectionsFs, SavedSqlConnection, SqlDialect, SqlEndpoint, SqlSession } from './connect';
 import {
 	DISCOVERY_WAIT_MS,
 	ENV_KEYS_TIMEOUT_MS,
@@ -112,8 +116,8 @@ import {
 // TYPES
 // =============================================================================
 
-/** What the core needs from a realm's ConnectionManager (structural). */
-export type SqlCoreBus = IExplorerBus & IIdentityBus & IActivationBus & IDiscoveryBus;
+/** What the core needs from a realm's ConnectionManager (structural): identity events and the server event stream. */
+export type SqlCoreBus = IIdentityBus & IDiscoveryBus;
 
 /** What a session's caller may ask besides the session itself. */
 export interface SessionContext {
@@ -127,17 +131,18 @@ export interface SessionContext {
 
 /** What {@link createSqlCore} needs. */
 export interface SqlCoreOptions {
-	/** The realm's ConnectionManager. */
+	/** The realm's ConnectionManager (identity events and the server event stream). */
 	cm: SqlCoreBus;
-	/** This tool's app id (the activation gate listens for it). */
-	appId: string;
+	/** The realm's client right now, or null (`useEngineSource().getClient`): read again on every call. */
+	getClient: RealmClientGetter<IRealmClient>;
+	/** The realm's engine readiness (`useEngineSource().readiness`). */
+	engine: IEngineReadiness;
 	/**
-	 * `app`: the full app, which owns the window and discovers at once;
-	 * `devtool`: a dev-tool controller, which waits to be activated (R7).
+	 * `app`: the full app, where a person is present from the start (probes
+	 * are not held); `devtool`: a controller, whose probes wait until a
+	 * person is present (an op arrives, or the sidebar is used).
 	 */
 	mode: 'app' | 'devtool';
-	/** The sidebar's `activeDocKey` at mount (devtool). */
-	activeDocKey?: string | null;
 	/** Where focus comes from (default: the window; null: none). */
 	focusTarget?: IFocusTarget | null;
 	/** The endpoint store's clock (tests). */
@@ -146,14 +151,21 @@ export interface SqlCoreOptions {
 
 /** The engine core. */
 export interface SqlCore {
-	/** The bus client (one per realm). */
+	/** The realm's engine client (one adapter per core). */
 	readonly client: IExplorerClient;
+	/** The user-store calls over the same getter (saved connections, history files, saved queries). */
+	readonly fs: IPrefsFs;
 	/** The identity tracker. */
 	readonly identity: IIdentityTracker;
-	/** The activation gate. */
-	readonly activation: IActivationGate;
 	/** The discovery gate and watch. */
 	readonly discovery: IDevToolDiscovery;
+	/**
+	 * Run `fn` once the identity is known AND the realm's engine is ready (at
+	 * once when it already is): the moment a controller may read its files.
+	 *
+	 * @returns Cancel (idempotent).
+	 */
+	whenAllowed(fn: () => void): () => void;
 	/** SQL Explorer's endpoint store (owner of every task token). */
 	readonly endpoints: IEndpointStore;
 	/**
@@ -321,29 +333,56 @@ function unavailable(tool: string, message: string): ExplorerToolError {
  * @returns The core; dispose it with its owner.
  */
 export function createSqlCore(opts: SqlCoreOptions): SqlCore {
-	const { cm, appId } = opts;
-	const client = getBusExplorerClient(cm);
+	const { cm, getClient } = opts;
+	const client = createExplorerClient(getClient);
+	const fs = createPrefsFs(getClient, FS_TIMEOUT_MS);
+	// Write-like admin calls (`use`, `terminate`) are sent once, never retried:
+	// a deadline that expires leaves the request running ("not cancelled, may
+	// still complete"), so a retry could start a second pipeline.
+	const admin = createExplorerAdmin(getClient, {
+		use: USE_TIMEOUT_MS,
+		getTaskToken: RELEASE_STEP_TIMEOUT_MS,
+		terminate: RELEASE_STEP_TIMEOUT_MS,
+		getService: SERVICE_TIMEOUT_MS,
+		validate: VALIDATE_TIMEOUT_MS,
+		getEnvironmentKeys: ENV_KEYS_TIMEOUT_MS,
+	});
 	const identity = createIdentityTracker({ cm });
-	const activation = createActivationGate({ appId, cm, activeDocKey: opts.activeDocKey ?? null });
-	if (opts.mode === 'app') activation.open('user');
 	const discovery = createDevToolDiscovery({
 		cm,
 		client,
 		identity,
-		activation,
+		engine: opts.engine,
+		present: opts.mode === 'app',
 		...(opts.focusTarget !== undefined ? { focusTarget: opts.focusTarget } : {}),
 	});
-	const endpoints = createSqlEndpoints(opts.clock ? { clock: opts.clock } : {});
+	const endpoints = createSqlEndpoints({ holdProbes: () => discovery.holdProbes(), ...(opts.clock ? { clock: opts.clock } : {}) });
 	const detachStore = endpoints.attach(client, identity.get().identity, discovery.watch);
 	let disposed = false;
 
 	// ── The saved-connection list, per identity ──────────────────────────────
 
-	const fs: SavedConnectionsFs = {
-		fsMkdir: (path) => busRequest(cm, 'client.fsMkdir', { path }, FS_TIMEOUT_MS),
-		fsReadJson: (path) => busRequest(cm, 'client.fsReadJson', { path }, FS_TIMEOUT_MS),
-		fsWriteJson: (path, value) => busRequest(cm, 'client.fsWriteJson', { path, value }, FS_TIMEOUT_MS),
+	const listFs: SavedConnectionsFs = fs;
+	/**
+	 * Run `fn` once the discovery gate allows it (the identity is known AND the
+	 * realm's engine is ready), at once when it already does.
+	 *
+	 * @param fn - What to run.
+	 * @returns Cancel (idempotent).
+	 */
+	const whenAllowed = (fn: () => void): (() => void) => {
+		let done = false;
+		const run = (): void => {
+			if (done || !discovery.allowed()) return;
+			done = true;
+			fn();
+		};
+		const off = discovery.subscribe(run);
+		run();
+		return () => { done = true; off(); };
 	};
+	/** The owner whose failed load has been tried once more (Q1: one retry, from `listReady`). */
+	let retriedFor: string | null = null;
 	// This realm owns the list for the core's lifetime: a replica snapshot
 	// (a frame in the same realm) never overwrites it.
 	const releaseList = ownSavedConnections();
@@ -358,11 +397,11 @@ export function createSqlCore(opts: SqlCoreOptions): SqlCore {
 		offLoadWhenActive?.();
 		offLoadWhenActive = null;
 		if (owner === null) return;
-		// Read only once the tool is activated (R7). A dev-tool controller's
-		// mount is its activation (the hosts mount only a selected or summoned
-		// sidebar); the full app opens its gate at once.
-		offLoadWhenActive = activation.subscribe(() => {
-			if (!disposed && listOwner === owner) void loadSavedConnections(fs);
+		// Read only once the identity is known and the engine is ready. A
+		// dev-tool controller's mount is its activation (the hosts mount only a
+		// selected or summoned sidebar).
+		offLoadWhenActive = whenAllowed(() => {
+			if (!disposed && listOwner === owner) void loadSavedConnections(listFs);
 		});
 	};
 	followIdentity(identity.get());
@@ -398,6 +437,12 @@ export function createSqlCore(opts: SqlCoreOptions): SqlCore {
 	 */
 	const listReady = async (tool: string): Promise<void> => {
 		requireIdentity(tool);
+		// A load that failed leaves the list `idle` and nothing else would try
+		// again until the identity changes: one retry, from here, per owner.
+		if (getSavedConnectionsStatus() === 'idle' && listOwner !== null && retriedFor !== listOwner && discovery.allowed()) {
+			retriedFor = listOwner;
+			void loadSavedConnections(listFs);
+		}
 		if (getSavedConnectionsStatus() !== 'ready') {
 			await new Promise<void>((resolve) => {
 				const timer = setTimeout(done, LIST_WAIT_MS);
@@ -442,12 +487,55 @@ export function createSqlCore(opts: SqlCoreOptions): SqlCore {
 			.sort((a, b) => ownRank(a) - ownRank(b) || STATE_RANK[a.state] - STATE_RANK[b.state])[0];
 	};
 
+	/** Open holders per direct endpoint key (a resolve +1, a keyed release -1). */
+	const holders = new Map<string, number>();
+	/** Starts in flight per direct project: concurrent resolutions share one `use`. */
+	const starting = new Map<string, Promise<void>>();
+
+	/**
+	 * Start (or reattach to) a direct connection's temporary pipeline, once
+	 * for every resolution that asks while the start is in flight. `use` is
+	 * sent once and never retried: an expired deadline leaves it running.
+	 *
+	 * @param record - The direct connection.
+	 */
+	const startDirect = (record: DirectConnection): Promise<void> => {
+		const projectId = directProjectId(record);
+		let pending = starting.get(projectId);
+		if (pending === undefined) {
+			pending = (async () => {
+				try {
+					await admin.use(directUseOptions(record) as Parameters<typeof admin.use>[0]);
+				} finally {
+					starting.delete(projectId);
+				}
+			})();
+			starting.set(projectId, pending);
+		}
+		return pending;
+	};
+
+	/**
+	 * Stop a direct connection's pipeline, best effort (the 15-minute idle TTL
+	 * reaps whatever a failure leaves behind). Each step is sent once.
+	 *
+	 * @param record - The direct connection.
+	 */
+	const terminateDirect = async (record: DirectConnection): Promise<void> => {
+		try {
+			const token = await admin.getTaskToken({ projectId: directProjectId(record), source: TOOLS_SOURCE_ID });
+			if (typeof token === 'string' && token !== '') await admin.terminate(token);
+		} catch {
+			// Best effort.
+		}
+	};
+
 	/** Run a discovery now (only while it is allowed), bounded. */
 	const rediscover = async (tool: string): Promise<void> => {
 		requireIdentity(tool);
-		// A call is an explicit request: it opens the gate (the controller already
-		// did so for the op itself).
-		activation.open('op');
+		// A call is an explicit request: a person is present (the controller
+		// already said so for the op itself).
+		discovery.markUserPresent('op');
 		await bounded(endpoints.refresh(client), DISCOVERY_WAIT_MS);
 	};
 
@@ -466,7 +554,7 @@ export function createSqlCore(opts: SqlCoreOptions): SqlCore {
 		if (!running(found)) {
 			if (record.mode === 'direct') {
 				requireIdentity(tool);
-				await busRequest(cm, 'client.use', directUseOptions(record), USE_TIMEOUT_MS);
+				await startDirect(record);
 			}
 			await rediscover(tool);
 			found = match(legacyKey);
@@ -526,14 +614,16 @@ export function createSqlCore(opts: SqlCoreOptions): SqlCore {
 
 	return {
 		client,
+		fs,
 		identity,
-		activation,
 		discovery,
+		whenAllowed,
 		endpoints,
 		async resolve(connId) {
 			const record = await recordOf(connId, 'resolve');
 			const found = await locate(record, 'resolve');
 			const endpoint = endpointForConnection(record);
+			if (record.mode === 'direct') holders.set(endpoint.key, (holders.get(endpoint.key) ?? 0) + 1);
 			// A pipeline connection is shown by its running pipeline's current
 			// name, not the one frozen into the record when it was saved; the
 			// key and everything else stay the record's.
@@ -550,22 +640,34 @@ export function createSqlCore(opts: SqlCoreOptions): SqlCore {
 			// Released by the key the caller opened: after an edit the project's
 			// pipeline is the edited connection's, and must not be stopped.
 			if (key !== undefined && key !== endpointKeyForConnection(record)) return;
-			const projectId = directProjectId(record);
-			try {
-				const token = await busRequest(cm, 'client.getTaskToken', { projectId, source: TOOLS_SOURCE_ID }, RELEASE_STEP_TIMEOUT_MS);
-				if (typeof token === 'string' && token !== '') await busRequest(cm, 'client.terminate', { token }, RELEASE_STEP_TIMEOUT_MS);
-			} catch {
-				// Best effort: the 15-minute idle TTL reaps whatever this leaves behind.
+			const endpointKey = endpointKeyForConnection(record);
+			// One holder per open resolution. A keyed release (a frame closing) only
+			// gives its own up: the pipeline stops with the LAST holder, so a
+			// frame that re-resolved the same connection (or a second frame on it)
+			// is not cut off by the first one's late release. An unkeyed release
+			// (the full app's last document, a delete) stops whatever the
+			// connection runs now.
+			if (key !== undefined) {
+				const remaining = (holders.get(endpointKey) ?? 1) - 1;
+				if (remaining > 0) {
+					holders.set(endpointKey, remaining);
+					return;
+				}
 			}
+			holders.delete(endpointKey);
+			await terminateDirect(record);
 		},
 		async pickable() {
 			await rediscover('discover');
 			return endpoints.getState().endpoints
-				.filter((endpoint) => endpoint.legacyKey !== null && endpoint.state !== 'stopped')
+				// A direct connection's temporary pipeline is this app's own plumbing,
+				// not a user pipeline: offering it would let a pipeline connection
+				// alias a direct endpoint.
+				.filter((endpoint) => endpoint.legacyKey !== null && endpoint.state !== 'stopped' && !isDirectEndpointKey(endpoint.projectId))
 				.map(pickerEntry);
 		},
-		getService: (provider) => busRequest(cm, 'client.getService', { service: provider }, SERVICE_TIMEOUT_MS),
-		validate: (pipeline) => busRequest(cm, 'client.validate', { pipeline }, VALIDATE_TIMEOUT_MS),
+		getService: (provider) => admin.getService(provider),
+		validate: (pipeline) => admin.validate({ pipeline }),
 		async saveConnection(connection, stillAllowed = sameAccount('saveConnection')) {
 			const record = checkSavedConnection(connection);
 			await listReady('saveConnection');
@@ -586,7 +688,7 @@ export function createSqlCore(opts: SqlCoreOptions): SqlCore {
 			return getSavedConnection(connId) ?? null;
 		},
 		async envKeys() {
-			const keys = await busRequest(cm, 'client.getEnvironmentKeys', {}, ENV_KEYS_TIMEOUT_MS);
+			const keys = await admin.getEnvironmentKeys();
 			return Array.isArray(keys) ? keys.filter((key): key is string => typeof key === 'string') : [];
 		},
 		dispose() {
@@ -597,7 +699,6 @@ export function createSqlCore(opts: SqlCoreOptions): SqlCore {
 			releaseList();
 			detachStore();
 			discovery.dispose();
-			activation.dispose();
 			identity.dispose();
 		},
 	};

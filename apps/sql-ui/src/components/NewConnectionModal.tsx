@@ -35,6 +35,7 @@
 // Save validates the single component server-side before persisting.
 // =============================================================================
 
+import { keptPipelineBinding } from '../connect/keptBinding';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { Banner, Button, ContentHeader, Modal } from 'shell';
@@ -286,14 +287,21 @@ const NewConnectionModal: React.FC<NewConnectionModalProps> = ({ editing, onClos
 		if (!endpoint) {
 			// The saved node is not discoverable (its pipeline is stopped):
 			// keep the existing binding and apply the new name.
-			if (editing?.mode === 'pipeline' && selectedKey === `${editing.projectId}:${editing.source}:${editing.nodeId}`) {
-				const kept: SavedSqlConnection = { ...editing, name: name.trim() || editing.name };
-				commit(kept);
-				onSaved?.(kept);
-				onClose();
+			const kept = keptPipelineBinding(editing, selectedKey, name);
+			if (kept === null) {
+				setError('Select a database node.');
 				return;
 			}
-			setError('Select a database node.');
+			setSaving(true);
+			try {
+				await env.saveConnection(kept);
+				onSaved?.(kept);
+				onClose();
+			} catch (err) {
+				setError(err instanceof Error ? err.message : String(err));
+			} finally {
+				setSaving(false);
+			}
 			return;
 		}
 		const record: SavedSqlConnection = {

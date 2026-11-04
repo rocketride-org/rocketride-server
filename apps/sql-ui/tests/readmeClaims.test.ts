@@ -59,7 +59,7 @@ describe('README claims', () => {
 
 	it('says the picker offers your own development runs only, as the code filters', () => {
 		assert.match(prose, /finds the database nodes in the pipelines you are running yourself \(your own development runs\)/);
-		assert.match(core, /\.filter\(\(endpoint\) => endpoint\.legacyKey !== null && endpoint\.state !== 'stopped'\)/);
+		assert.match(core, /\.filter\(\(endpoint\) => endpoint\.legacyKey !== null && endpoint\.state !== 'stopped' && !isDirectEndpointKey\(endpoint\.projectId\)\)/);
 	});
 
 	it('says a restored document asks the host for the sidebar, says it is starting, and asks you only after a few seconds', () => {

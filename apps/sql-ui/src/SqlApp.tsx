@@ -47,14 +47,13 @@ import { resetSavedConnections, isDirectEndpointKey } from './connect';
 import { directReleasesOnClose } from './directReleases';
 import { createLocalSidebarBridge, createLocalSqlEnv } from './localEnv';
 import type { SqlSidebarBridge } from './sidebarBridge';
+import { useEngineSource } from 'shared/explorer/react';
 import { createSqlCore } from './sqlCore';
 import type { SqlCore } from './sqlCore';
-import { SQL_APP_ID } from './appId';
 import { sqlIdentityScope } from './identityScope';
 import { SqlEnvProvider, useSqlEnv } from './sqlEnv';
 import type { SqlEndpoint } from './connect';
 import ConnectionView from './views/ConnectionView';
-import ConnectionOverlays from './components/ConnectionOverlays';
 import ConnectionEditorBody from './components/ConnectionEditorBody';
 import QueryView from './views/QueryView';
 import TableDataView from './views/TableDataView';
@@ -153,12 +152,15 @@ const SqlApp: React.FC<ShellAppProps> = (_props) => {
 	// The full app's engine core (sqlCore.ts): the shared endpoint store, its
 	// sessions, the identity it discovers for, and the saved-connection list,
 	// which it reads from the user's store for each signed-in identity.
+	// The engine source is stable per mount: a reconnect or a new client never
+	// rebuilds the core, which reads the client through the getter on each call.
+	const { getClient, readiness } = useEngineSource();
 	const [core, setCore] = useState<SqlCore | null>(null);
 	useEffect(() => {
-		const created = createSqlCore({ cm: ConnectionManager.getInstance(), appId: SQL_APP_ID, mode: 'app' });
+		const created = createSqlCore({ cm: ConnectionManager.getInstance(), getClient, engine: readiness, mode: 'app' });
 		setCore(created);
 		return () => created.dispose();
-	}, []);
+	}, [getClient, readiness]);
 
 	// A different user, organization or team closes the previous account's
 	// tabs and schema; an identity nobody can vouch for (signed out, dropped)
@@ -212,10 +214,6 @@ const SqlApp: React.FC<ShellAppProps> = (_props) => {
 		<SqlEnvProvider value={env}>
 			<AppLayout sidebar={sidebar} showStatus>
 				<SqlAppReady docs={getDocs()!} bridge={localBridge} />
-				{/* Sidebar-requested dialogs render HERE, outside the sidebar
-				    subtree — the compact drawer is a transformed ancestor that
-				    would trap a fixed-position overlay. */}
-				<ConnectionOverlays />
 			</AppLayout>
 		</SqlEnvProvider>
 	);

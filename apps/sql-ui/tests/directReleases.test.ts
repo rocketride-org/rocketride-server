@@ -34,11 +34,10 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { SQL_APP_ID } from '../src/appId';
 import { createSqlCore } from '../src/sqlCore';
 import type { SavedSqlConnection } from '../src/connect';
 import { directReleasesOnClose } from '../src/directReleases';
-import { USER, engineScript, scriptedClientRealm } from './realm';
+import { USER, engineScript, scriptedClientRealm, until } from './realm';
 import { taskRow } from './support';
 import type { IFakeTaskRow } from './support';
 
@@ -78,9 +77,10 @@ describe('T12 — the full app stops a direct pipeline when the last document of
 		};
 		engine.script['client.getTaskToken'] = () => rows[0]?.token ?? '';
 		engine.script['client.terminate'] = () => ({});
-		const core = createSqlCore({ cm: engine.cm, appId: SQL_APP_ID, mode: 'app', focusTarget: null });
+		const core = createSqlCore({ ...engine.source, mode: 'app', focusTarget: null });
 		engine.realm.login(USER);
 		try {
+			await until(() => core.identity.get().known, 'the signed-in identity');
 			const opened = await core.resolve('c-direct');
 			await core.saveConnection({ ...DIRECT, provider: 'db_postgres' });
 			await core.resolve('c-direct');

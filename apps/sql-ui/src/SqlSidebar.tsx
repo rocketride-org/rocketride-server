@@ -39,12 +39,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { ConnectionManager, useShellConnection } from 'shell';
+import { useEngineSource } from 'shared/explorer/react';
 import { SidebarMenu, BxPlus, BxCheck, BxEditAlt, BxTrash } from 'shell';
 import type { DevToolProps, ViewMenu } from 'shell';
 import { useSavedConnections, useSavedConnectionsStatus, endpointKeyForConnection } from './connect';
 import type { SavedSqlConnection } from './connect';
 import type { SqlSidebarBridge } from './sidebarBridge';
-import { SQL_TOOL_PROTOCOL } from './sqlBridge';
+import { SQL_CONTROLLER_PROTOCOL } from './sqlBridge';
 import { attachSqlController } from './sqlController';
 import type { SqlControllerMount } from './sqlController';
 import { DatabaseIcon } from './icons';
@@ -368,38 +369,40 @@ const SqlSidebar: React.FC<SqlSidebarProps> = ({ bridge, hostActiveDoc }) => {
  * mutation, publishes it as retained channel state) and follows the host's
  * activeDocKey to highlight the fronted connection.
  */
-export const SqlDevToolSidebar: React.FC<DevToolProps> = ({ peer, channel, documents, activeDocKey }) => {
+export const SqlDevToolSidebar: React.FC<DevToolProps> = ({ channel, documents, activeDocKey }) => {
+	// The realm's engine source: a stable getter over its client and a stable
+	// readiness store. The controller is built once per channel; neither a new
+	// client nor a reconnect rebuilds it.
+	const { getClient, readiness } = useEngineSource();
 	// The controller (sqlController.ts): its engine core, exactly one op
 	// server (created after the channel), the retained state it publishes, and
 	// the sidebar's bridge. Built in an EFFECT and disposed with it (R6): under
 	// StrictMode that is mount -> dispose -> mount, which leaves one live op
 	// server. It posts nothing and opens no document at mount (R7).
 	const [mount, setMount] = useState<SqlControllerMount | null>(null);
-	const activeDocKeyRef = useRef(activeDocKey);
-	activeDocKeyRef.current = activeDocKey;
 	// The host's documents API, read at call time: a host that hands a new
 	// object on a re-render must not remount the controller (its op server).
 	const documentsRef = useRef(documents);
 	documentsRef.current = documents;
 	useEffect(() => {
 		const attached = attachSqlController({
-			peer,
-			...(channel ? { channel } : {}),
+			channel,
 			documents: {
 				open: (key, title) => documentsRef.current?.open(key, title),
 				close: (key) => documentsRef.current?.close(key),
 			},
-			activeDocKey: activeDocKeyRef.current ?? null,
 			cm: ConnectionManager.getInstance(),
-			protocol: SQL_TOOL_PROTOCOL,
+			getClient,
+			engine: readiness,
+			protocol: SQL_CONTROLLER_PROTOCOL,
 		});
 		setMount(attached);
 		return () => {
 			attached.dispose();
 			setMount((current) => (current === attached ? null : current));
 		};
-	}, [peer, channel]);
-	// A non-null activeDocKey is an activation (R7).
+	}, [channel, getClient, readiness]);
+	// A non-null activeDocKey means a person fronted a document: probes may start.
 	useEffect(() => { mount?.noteActiveDocKey(activeDocKey); }, [mount, activeDocKey]);
 
 	if (!mount) return null;

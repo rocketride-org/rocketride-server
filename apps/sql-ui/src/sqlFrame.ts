@@ -55,17 +55,16 @@
 // the shell's real ones to the React mount, tests the real modules.
 // =============================================================================
 
-import type { DevToolProps, IToolOpServer, ToolChannel, ToolControllerFn, ToolOpMap, TypedToolChannel } from 'shell';
+import type { DevToolProps, ToolChannel, ToolControllerFn, ToolOpMap, TypedToolChannel } from 'shell';
 import { createFrameCaller } from 'shared/explorer/devtool/frame';
 import type { IFrameCaller } from 'shared/explorer/devtool/frame';
 import { createFrameIdentityGuard } from 'shared/explorer/devtool/frameIdentity';
 import type { FrameResetReason } from 'shared/explorer/devtool/frameIdentity';
-import { channelFor, CONTROLLER_STATE_TOPIC } from 'shared/explorer/devtool/realm';
+import { CONTROLLER_STATE_TOPIC } from 'shared/explorer/devtool/realm';
 import { createControllerSummon } from 'shared/explorer/devtool/summon';
 import type { IControllerSummon, SummonState } from 'shared/explorer/devtool/summon';
 import type { SignInState } from 'shared/explorer/devtool/frameIdentity';
 import { ExplorerToolError } from 'shared/explorer/errors';
-import type { DevToolPeer } from 'shared/explorer/devtool/realm';
 import { applyReplicaConnections, isDirectEndpointKey } from './connect';
 import type { SavedConnectionsStatus, SqlEndpoint } from './connect';
 import { parseConnectionEditorDocKey } from './docs';
@@ -77,14 +76,10 @@ import type { SqlEventMap, SqlOps, SqlStateMap } from './ops';
 // PROTOCOL FACTORIES (injected)
 // =============================================================================
 
-/** The shell's tool-protocol factories (sqlBridge.ts SQL_TOOL_PROTOCOL; the real modules in tests). */
-export interface SqlToolProtocol {
-	/** Build a channel over a peer. */
-	createToolChannel: (peer: DevToolPeer) => ToolChannel;
-	/** Build a frame's controller function over a peer. */
-	createToolController: <O extends ToolOpMap>(peer: DevToolPeer) => ToolControllerFn<O>;
-	/** Build the controller's op server over a peer. */
-	createToolOpServer: <O extends ToolOpMap>(peer: DevToolPeer) => IToolOpServer<O>;
+/** The shell's frame-side op client factory (sqlBridge.ts SQL_FRAME_PROTOCOL; the real module in tests). */
+export interface SqlFrameProtocol {
+	/** Build a frame's op caller over the host's channel. */
+	createToolOpClient: <O extends ToolOpMap>(channel: ToolChannel) => ToolControllerFn<O>;
 }
 
 /**
@@ -398,16 +393,14 @@ export function followVouched(channel: ToolChannel, onChange: (vouched: boolean)
 
 /** What {@link attachSqlFrame} needs (DevToolProps plus the injected factories). */
 export interface SqlFrameOptions {
-	/** The frame's peer. */
-	peer: DevToolPeer;
-	/** The host's channel for this mount, when it gave one. */
-	channel?: ToolChannel;
+	/** The host's channel for this mount (`DevToolProps.channel`). */
+	channel: ToolChannel;
 	/** The frame's docKey. */
 	docKey?: string | null;
 	/** The host's documents API (closing this document on an identity change). */
 	documents?: DevToolProps['documents'];
 	/** The protocol factories. */
-	protocol: SqlToolProtocol;
+	protocol: SqlFrameProtocol;
 	/**
 	 * Clear what the mount holds for the connection (its history view) —
 	 * identity change, sign-out, a dropped connection. The realm's schema
@@ -441,13 +434,10 @@ export interface SqlFrameMount {
  * @returns The mount; dispose it in the effect's cleanup.
  */
 export function attachSqlFrame(opts: SqlFrameOptions): SqlFrameMount {
-	const { peer, protocol } = opts;
-	const channel = opts.channel ?? channelFor(peer, protocol.createToolChannel);
+	const { protocol, channel } = opts;
 	const caller = plainSpoken(createFrameCaller<SqlOps>({
-		peer,
 		channel,
-		createToolController: protocol.createToolController,
-		createToolChannel: protocol.createToolChannel,
+		createToolOpClient: protocol.createToolOpClient,
 		...(opts.now ? { now: opts.now } : {}),
 	}));
 	const detachHost = attachSqlDocumentHost(channel);
