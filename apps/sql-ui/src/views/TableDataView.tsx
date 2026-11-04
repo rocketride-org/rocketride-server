@@ -752,7 +752,7 @@ export const TableDataView: React.FC<TableDataViewProps> = ({ endpoint, table, e
 		try {
 			let result;
 			try {
-				result = await env.getSession(endpoint).applyBatch(ask.statements, { atomic });
+				result = await env.getSession(endpoint).applyBatch(ask.statements, { atomic, confirmed: true });
 			} catch (error) {
 				if (isTransactionsUnavailable(error)) {
 					noteNoTransactions(endpoint.key, snapshot.refreshedAt);

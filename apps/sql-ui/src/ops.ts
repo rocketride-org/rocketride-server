@@ -88,7 +88,7 @@ export interface SqlOps extends ToolOpMap {
 	// ── Session tools (SqlSession, one op per method) ───────────────────────
 	/** Execute one statement on a connection. The controller classifies it
 	 *  again: transaction control is refused, and only a read may be retried. */
-	'sql.execute': ToolOpSpec<IDeadline & { connId: string; sql: string; params?: JsonValue[]; idempotent?: boolean }, Reply<SqlExecuteResult>>;
+	'sql.execute': ToolOpSpec<IDeadline & { connId: string; sql: string; params?: JsonValue[]; idempotent?: boolean; confirmed?: boolean }, Reply<SqlExecuteResult>>;
 	/** Read the connection's (task-start) schema reflection. */
 	'sql.getSchema': ToolOpSpec<IDeadline & { connId: string; table?: string }, Reply<SqlSchemaResponse>>;
 	/** Ask the node to re-reflect the database (falls back to the task-start
@@ -105,7 +105,7 @@ export interface SqlOps extends ToolOpMap {
 	 * twice. A failure once statements are sent is data in the result. It
 	 * writes, so it is refused for a frame of another account (`owner`).
 	 */
-	'sql.applyBatch': ToolOpSpec<IDeadline & IOwnedCall & { connId: string; statements: Array<{ sql: string; params?: JsonValue[]; expect?: number }>; atomic: boolean }, Reply<SqlApplyResult>>;
+	'sql.applyBatch': ToolOpSpec<IDeadline & IOwnedCall & { connId: string; statements: Array<{ sql: string; params?: JsonValue[]; expect?: number }>; atomic: boolean; confirmed?: boolean }, Reply<SqlApplyResult>>;
 	// ── Connection editor support ────────────────────────────────────────────
 	/** Fetch one service definition (the direct path's config schema). */
 	'sql.getService': ToolOpSpec<IDeadline & { provider: string }, Reply<JsonValue>>;
@@ -121,14 +121,16 @@ export interface SqlOps extends ToolOpMap {
 	'sql.connection': ToolOpSpec<IDeadline & { connId: string }, Reply<SavedSqlConnection | null>>;
 	// ── Saved-connection mutations (the controller owns the list) ───────────
 	/** Insert or replace a saved connection (the editor document's save). */
-	'sql.saveConnection': ToolOpSpec<IDeadline & IOwnedCall & { connection: SavedSqlConnection }, Reply<null>>;
+	'sql.saveConnection': ToolOpSpec<IDeadline & IOwnedCall & { connection: SavedSqlConnection; safetyTicket?: string }, Reply<null>>;
 	/**
 	 * Set one saved connection's safety level, and nothing else. Only the id
 	 * and the level cross: the owner changes the record it holds, so the
 	 * stored config (a direct connection's password included) is never sent
 	 * back or rebuilt for it.
 	 */
-	'sql.setConnectionSafety': ToolOpSpec<IDeadline & IOwnedCall & { connId: string; safety: SafetyLevel }, Reply<null>>;
+	'sql.setConnectionSafety': ToolOpSpec<IDeadline & IOwnedCall & { connId: string; safety: SafetyLevel; ticket?: string }, Reply<null>>;
+	/** A one-time ticket for LOWERING a connection's level, which the document asks for only after its downgrade dialog. */
+	'sql.requestSafetyDowngrade': ToolOpSpec<IDeadline & IOwnedCall & { connId: string; safety: SafetyLevel }, Reply<{ ticket: string }>>;
 	/** Delete a saved connection (a direct one's temp pipeline is stopped first, best effort). */
 	'sql.deleteConnection': ToolOpSpec<IDeadline & IOwnedCall & { connId: string }, Reply<null>>;
 	// ── History (the controller owns it; frames read and edit through these) ──

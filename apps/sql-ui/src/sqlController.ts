@@ -131,6 +131,7 @@ import { createSavedQueriesFile } from './history/savedQueriesFile';
 import type { SavedQueriesFile } from './history/savedQueriesFile';
 import type { SqlSidebarBridge } from './sidebarBridge';
 import { gateStatement } from './sql/gate';
+import { CONFIRMATION_REQUIRED_CODE, confirmationRefusal } from './sql/safety';
 import { createSqlCore } from './sqlCore';
 import type { SqlCore, SqlCoreBus } from './sqlCore';
 import { sqlChannel } from './sqlFrame';
@@ -530,13 +531,16 @@ export function attachSqlController(opts: SqlControllerOptions): SqlControllerMo
 			await core.release(connId, key, holder);
 		},
 		'sql.discoverEndpoints': () => core.pickable(),
-		'sql.execute': ({ connId, sql, params, idempotent }) => {
+		'sql.execute': ({ connId, sql, params, idempotent, confirmed }) => {
 			checkExecuteInput({ sql, params, idempotent });
 			return core.withSession(connId, async (session, ctx) => {
 				// Classified with the node's own dialect (asked for when no probe has
 				// it); with none, the gate fails closed: sent once, never repeated.
 				const gate = gateStatement(sql, await ctx.dialect(), idempotent === true);
 				if (gate.refusal !== null) throw new ExplorerToolError({ kind: 'invalid', tool: 'execute', message: gate.refusal });
+				// The connection's safety level, enforced here whatever the document showed.
+				const unconfirmed = confirmationRefusal([sql], await ctx.dialect(), ctx.safety, confirmed === true);
+				if (unconfirmed !== null) throw new ExplorerToolError({ kind: 'invalid', tool: 'execute', code: CONFIRMATION_REQUIRED_CODE, message: unconfirmed });
 				return session.execute(sql, { ...(params && params.length > 0 ? { params } : {}), idempotent: gate.idempotent });
 			}, 'execute');
 		},
@@ -546,14 +550,14 @@ export function attachSqlController(opts: SqlControllerOptions): SqlControllerMo
 		},
 		'sql.refreshSchema': ({ connId }) => core.withSession(connId, (session) => session.refreshSchema(), 'refresh_schema'),
 		'sql.dialect': ({ connId }) => core.withSession(connId, (session) => session.dialect(), 'dialect'),
-		'sql.applyBatch': ({ connId, statements, atomic, owner }) => {
+		'sql.applyBatch': ({ connId, statements, atomic, owner, confirmed }) => {
 			requireOwner(owner, 'apply');
 			checkApplyInput({ statements, atomic });
 			// The core gates the list with the node's dialect and keeps the
 			// session id: the frame gets the outcome only. Never repeated (T10).
 			// The account is checked again once the connection is resolved,
 			// right before anything is sent.
-			return core.applyBatch(connId, statements, atomic, () => requireOwner(owner, 'apply'));
+			return core.applyBatch(connId, statements, atomic, () => requireOwner(owner, 'apply'), confirmed === true);
 		},
 		'sql.getService': async ({ provider }) => {
 			if (typeof provider !== 'string' || provider === '') throw invalidInput('get_service', 'The provider must be a name.');
@@ -565,15 +569,23 @@ export function attachSqlController(opts: SqlControllerOptions): SqlControllerMo
 		},
 		'sql.envKeys': () => core.envKeys(),
 		'sql.connection': ({ connId }) => core.connection(connId),
-		'sql.saveConnection': async ({ connection, owner }) => {
+		'sql.saveConnection': async ({ connection, owner, safetyTicket }) => {
 			requireOwner(owner, 'saveConnection');
+			if (safetyTicket !== undefined && typeof safetyTicket !== 'string') throw invalidInput('saveConnection', 'The ticket must be text.');
 			// Checked again where the list changes: the account may change while
 			// the list is still being read.
-			await core.saveConnection(connection, () => requireOwner(owner, 'saveConnection'));
+			await core.saveConnection(connection, () => requireOwner(owner, 'saveConnection'), safetyTicket);
 		},
-		'sql.setConnectionSafety': async ({ connId, safety, owner }) => {
+		'sql.setConnectionSafety': async ({ connId, safety, owner, ticket }) => {
 			requireOwner(owner, 'setConnectionSafety');
-			await core.setConnectionSafety(connId, safety, () => requireOwner(owner, 'setConnectionSafety'));
+			if (ticket !== undefined && typeof ticket !== 'string') throw invalidInput('setConnectionSafety', 'The ticket must be text.');
+			// A lower level needs the ticket the document gets after its dialog
+			// (the core checks it); raising needs none.
+			await core.setConnectionSafety(connId, safety, () => requireOwner(owner, 'setConnectionSafety'), ticket);
+		},
+		'sql.requestSafetyDowngrade': async ({ connId, safety, owner }) => {
+			requireOwner(owner, 'requestSafetyDowngrade');
+			return { ticket: await core.issueSafetyTicket(connId, safety, () => requireOwner(owner, 'requestSafetyDowngrade')) };
 		},
 		'sql.deleteConnection': async ({ connId, owner }) => {
 			requireOwner(owner, 'deleteConnection');

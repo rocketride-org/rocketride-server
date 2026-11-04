@@ -384,7 +384,7 @@ const NewConnectionModal: React.FC<NewConnectionModalProps> = ({ editing, onClos
 		try {
 			// Committed where the list is owned: the full app's core, or the
 			// dev tool's controller (an op). A failure keeps the editor open.
-			await env.saveConnection(record);
+			await env.saveConnection(record, { confirmedLowering: safetyChoice.asks });
 			onSaved?.(record);
 			onClose();
 		} catch (err) {
@@ -392,7 +392,7 @@ const NewConnectionModal: React.FC<NewConnectionModalProps> = ({ editing, onClos
 		} finally {
 			setSaving(false);
 		}
-	}, [endpoints, selectedKey, name, safety, editing, env, onClose, onSaved]);
+	}, [endpoints, selectedKey, name, safety, safetyChoice.asks, editing, env, onClose, onSaved]);
 
 	/** Validates the configured component server-side, then persists. */
 	const saveDirect = useCallback(async (formData: IFormData) => {
@@ -425,7 +425,7 @@ const NewConnectionModal: React.FC<NewConnectionModalProps> = ({ editing, onClos
 				config: formData,
 				safety,
 			};
-			await env.saveConnection(record);
+			await env.saveConnection(record, { confirmedLowering: safetyChoice.asks });
 			onSaved?.(record);
 			onClose();
 		} catch (err) {
@@ -433,7 +433,7 @@ const NewConnectionModal: React.FC<NewConnectionModalProps> = ({ editing, onClos
 		} finally {
 			setSaving(false);
 		}
-	}, [provider, env, name, safety, editing, onClose, onSaved, providerTitle]);
+	}, [provider, env, name, safety, safetyChoice.asks, editing, onClose, onSaved, providerTitle]);
 
 	/**
 	 * Run a save, asking first when it would lower the stored level (the same

@@ -118,7 +118,7 @@ describe('the editor and an in-place change, over the dev-tool rig', () => {
 			const choice = editorSafetyChoice(safetyLevelOf(saved('c-direct')), 'off');
 			assert.deepEqual(choice, { level: 'off', asks: true });
 			// Confirmed: saved as picked.
-			await r.env.saveConnection({ ...OFF, safety: choice.level });
+			await r.env.saveConnection({ ...OFF, safety: choice.level }, { confirmedLowering: choice.asks });
 			await until(() => saved('c-direct')?.safety === 'off', 'the confirmed save');
 		} finally {
 			r.dispose();

@@ -656,8 +656,16 @@ there, with these differences:
 - **Documents hold no engine connection of their own.** Every statement,
   schema read, history write and saved-connection change is a request the
   document sends to the sidebar, which runs it on the tool's one connection
-  and checks it again itself (who is signed in, what the connection's safety
-  setting allows). This is the design every Explorer shares. It differs from
+  and checks it again itself: who is signed in, and the connection's safety
+  level. A statement or an Apply that asks at that level (see [Confirmations and safety levels](#confirmations-and-safety-levels)) is
+  refused unless the request says the document's own confirmation ran, and a
+  lower level is accepted only with a one-time ticket the sidebar issues after
+  the document's downgrade dialog; a plain request cannot lower it. This
+  guards against requests that skip the confirmation. It is a check on
+  statement text, not a database security boundary: a document that says it
+  confirmed is trusted as the user's own, and the node's `allow_execute`
+  setting is the hard gate. The full app applies the same checks in its own
+  core. This is the design every Explorer shares. It differs from
   the first dev-tool version of SQL Explorer, where each document ran its
   statements on its own connection and the sidebar only started and stopped
   the temporary pipelines of direct connections.

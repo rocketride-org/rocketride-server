@@ -103,7 +103,8 @@ import {
 } from './connect';
 import { transactionsUnavailable } from './connect/session';
 import type { DirectConnection, SavedConnectionsFs, SavedSqlConnection, SqlApplyResult, SqlApplyStatement, SqlDialect, SqlEndpoint, SqlSession } from './connect';
-import { isSafetyLevel } from './connect/savedConnections';
+import { isSafetyLevel, safetyLevelOf } from './connect/savedConnections';
+import { CONFIRMATION_REQUIRED_CODE, confirmationRefusal, isSafetyDowngrade } from './sql/safety';
 import type { SafetyLevel } from './connect/savedConnections';
 import { gateApplyStatements } from './sql/gate';
 import type { ConnectionStatusSource } from './connectionStatus';
@@ -120,6 +121,9 @@ import {
 	VALIDATE_TIMEOUT_MS,
 } from './sqlTimeouts';
 
+/** How long a ticket for lowering a safety level stays valid. */
+const SAFETY_TICKET_TTL_MS = 5 * 60_000;
+
 // =============================================================================
 // TYPES
 // =============================================================================
@@ -135,6 +139,8 @@ export interface SessionContext {
 	 * none answers, or the answer is not a dialect the app models.
 	 */
 	dialect(): Promise<SqlDialect>;
+	/** The connection's safety level as the list holds it now. */
+	readonly safety: SafetyLevel;
 }
 
 /** What {@link createSqlCore} needs. */
@@ -218,7 +224,7 @@ export interface SqlCore {
 	 * @returns What ran (a failure once statements are sent is data).
 	 * @throws ExplorerToolError `invalid` (the list was refused), `unavailable`, `transactions-unavailable`, or `begin`'s refusal: nothing was applied.
 	 */
-	applyBatch(connId: string, statements: SqlApplyStatement[], atomic: boolean, stillAllowed?: () => void): Promise<SqlApplyResult>;
+	applyBatch(connId: string, statements: SqlApplyStatement[], atomic: boolean, stillAllowed?: () => void, confirmed?: boolean): Promise<SqlApplyResult>;
 	/**
 	 * Stop a direct connection's temp pipeline, best effort (a no-op for a
 	 * pipeline connection).
@@ -254,7 +260,7 @@ export interface SqlCore {
 	 * @param stillAllowed - Throws when the change is no longer allowed; run after every wait, right before the list changes (default: the account signed in at the call is still signed in).
 	 * @throws ExplorerToolError `invalid` (not a usable record) or `unavailable` (not signed in, list unreadable).
 	 */
-	saveConnection(connection: SavedSqlConnection, stillAllowed?: () => void): Promise<void>;
+	saveConnection(connection: SavedSqlConnection, stillAllowed?: () => void, safetyTicket?: string): Promise<void>;
 	/**
 	 * Set one saved connection's safety level on the record the list holds,
 	 * keeping the rest of it (the config, secrets included) as stored. A level
@@ -265,7 +271,21 @@ export interface SqlCore {
 	 * @param stillAllowed - As for {@link SqlCore.saveConnection}.
 	 * @throws ExplorerToolError `invalid` (an unknown level or connection) or `unavailable`.
 	 */
-	setConnectionSafety(connId: string, safety: SafetyLevel, stillAllowed?: () => void): Promise<void>;
+	setConnectionSafety(connId: string, safety: SafetyLevel, stillAllowed?: () => void, ticket?: string): Promise<void>;
+	/**
+	 * A one-time ticket for LOWERING a connection's safety level to `safety`.
+	 * The document asks for it only after its downgrade dialog; a lower level
+	 * (through {@link SqlCore.setConnectionSafety} or a saved record) is accepted
+	 * only with a ticket issued for that connection and no lower a level, once,
+	 * within a few minutes.
+	 *
+	 * @param connId - The connection id.
+	 * @param safety - The lower level.
+	 * @param stillAllowed - As for {@link SqlCore.saveConnection}.
+	 * @returns The ticket.
+	 * @throws ExplorerToolError `invalid` (an unknown connection or level, or not a downgrade).
+	 */
+	issueSafetyTicket(connId: string, safety: SafetyLevel, stillAllowed?: () => void): Promise<string>;
 	/**
 	 * Delete a saved connection; a direct one's temp pipeline is stopped first, best effort.
 	 *
@@ -813,20 +833,51 @@ export function createSqlCore(opts: SqlCoreOptions): SqlCore {
 				return 'unknown';
 			}
 		};
-		return fn(session, { dialect });
+		return fn(session, { dialect, safety: safetyLevelOf(record) });
 	};
 
-	const applyBatch = (connId: string, statements: SqlApplyStatement[], atomic: boolean, stillAllowed: () => void = () => undefined): Promise<SqlApplyResult> => withSession(connId, async (session, ctx) => {
+	const applyBatch = (connId: string, statements: SqlApplyStatement[], atomic: boolean, stillAllowed: () => void = () => undefined, confirmed?: boolean): Promise<SqlApplyResult> => withSession(connId, async (session, ctx) => {
 		const dialect = await ctx.dialect();
 		stillAllowed();
+		// The connection's level, enforced here whatever the document showed.
+		const unconfirmed = confirmationRefusal(statements.map((statement) => statement.sql), dialect, ctx.safety, confirmed);
+		if (unconfirmed !== null) throw new ExplorerToolError({ kind: 'invalid', tool: 'apply', code: CONFIRMATION_REQUIRED_CODE, message: unconfirmed });
 		const refusal = gateApplyStatements(statements.map((statement) => statement.sql), dialect, atomic);
 		if (refusal !== null) throw new ExplorerToolError({ kind: 'invalid', tool: 'apply', message: refusal });
 		// A ClickHouse `begin` reserves a connection but opens no transaction
 		// (the node's `_sessionsAreTransactions`): an atomic apply there sends
 		// nothing, and the caller asks the user before sending `atomic: false`.
 		if (atomic && dialect === 'clickhouse') throw transactionsUnavailable('apply', 'ClickHouse has no transactions, so nothing was applied.');
-		return session.applyBatch(statements, { atomic });
+		return session.applyBatch(statements, { atomic, ...(confirmed === true ? { confirmed } : {}) });
 	}, 'apply');
+	// ── Tickets for lowering a connection's safety level ─────────────────────
+
+	/** Outstanding tickets: what each was issued for, by its token. */
+	const tickets = new Map<string, { connId: string; to: SafetyLevel; account: string | null; expires: number }>();
+
+	/**
+	 * Spend a ticket for lowering a connection's level to `to`: it must be one
+	 * issued for this connection, to this level or a higher one, to the account
+	 * signed in now, and not expired or used.
+	 *
+	 * @param ticket - The token, if any.
+	 * @param connId - The connection.
+	 * @param to - The level being set.
+	 * @param tool - What is being done (named in the refusal).
+	 * @throws ExplorerToolError `invalid` when there is no usable ticket.
+	 */
+	const spendTicket = (ticket: string | undefined, connId: string, to: SafetyLevel, tool: string): void => {
+		const held = ticket === undefined ? undefined : tickets.get(ticket);
+		const now = Date.now();
+		const account = identity.get().known ? identity.get().fingerprint : null;
+		const usable = held !== undefined && held.connId === connId && held.expires > now && held.account === account
+			&& (held.to === to || isSafetyDowngrade(to, held.to));
+		if (!usable) {
+			throw new ExplorerToolError({ kind: 'invalid', tool, code: 'safety-downgrade-unconfirmed', message: 'Lowering the safety level needs the confirmation of the connection\'s own dialog, and none came with it, so nothing was changed.' });
+		}
+		tickets.delete(ticket as string);
+	};
+
 	const statusSource = (): ConnectionStatusSource => {
 		const state = endpoints.getState();
 		return { discovered: state.refreshedAt > 0 ? state.endpoints : null, openErrors };
@@ -839,11 +890,16 @@ export function createSqlCore(opts: SqlCoreOptions): SqlCore {
 		}
 		return {
 			endpoint,
-			execute: (sql, options) => withSession(connId, (session) => session.execute(sql, options), 'execute'),
+			execute: (sql, options) => withSession(connId, async (session, ctx) => {
+				// The full app's session is the authority too: the same check the controller makes.
+				const unconfirmed = confirmationRefusal([sql], await ctx.dialect(), ctx.safety, options?.confirmed);
+				if (unconfirmed !== null) throw new ExplorerToolError({ kind: 'invalid', tool: 'execute', code: CONFIRMATION_REQUIRED_CODE, message: unconfirmed });
+				return session.execute(sql, options);
+			}, 'execute'),
 			getSchema: (table) => withSession(connId, (session) => session.getSchema(table), 'get_schema'),
 			refreshSchema: () => withSession(connId, (session) => session.refreshSchema(), 'refresh_schema'),
 			dialect: () => withSession(connId, (session) => session.dialect(), 'dialect'),
-			applyBatch: (statements, options) => applyBatch(connId, statements, options.atomic),
+			applyBatch: (statements, options) => applyBatch(connId, statements, options.atomic, undefined, options.confirmed),
 			getSql: (question) => withSession(connId, (session) => session.getSql(question), 'get_sql'),
 		};
 	};
@@ -962,20 +1018,47 @@ export function createSqlCore(opts: SqlCoreOptions): SqlCore {
 		},
 		getService: (provider) => admin.getService(provider),
 		validate: (pipeline) => admin.validate({ pipeline }),
-		async saveConnection(connection, stillAllowed = sameAccount('saveConnection')) {
+		async saveConnection(connection, stillAllowed = sameAccount('saveConnection'), safetyTicket) {
 			const record = checkSavedConnection(connection);
 			await listReady('saveConnection');
 			stillAllowed();
+			// A record may not lower the level the list holds without the confirmation
+			// a lower level needs (the editor is not a way around it); a new
+			// connection starts at any level.
+			const stored = getSavedConnection(record.id);
+			if (stored !== undefined && isSafetyDowngrade(safetyLevelOf(stored), safetyLevelOf(record))) {
+				spendTicket(safetyTicket, record.id, safetyLevelOf(record), 'saveConnection');
+			}
 			upsertSavedConnection(record);
 		},
-		async setConnectionSafety(connId, safety, stillAllowed = sameAccount('setConnectionSafety')) {
+		async issueSafetyTicket(connId, safety, stillAllowed = sameAccount('requestSafetyDowngrade')) {
+			const invalid = (message: string): ExplorerToolError => new ExplorerToolError({ kind: 'invalid', tool: 'requestSafetyDowngrade', message });
+			if (!isSafetyLevel(safety)) throw invalid("The safety level must be 'off', 'risky' or 'every'.");
+			await listReady('requestSafetyDowngrade');
+			stillAllowed();
+			const record = getSavedConnection(connId);
+			if (!record) throw invalid(`There is no saved connection '${connId}'.`);
+			if (!isSafetyDowngrade(safetyLevelOf(record), safety)) throw invalid('That is not a lower level, so it needs no confirmation.');
+			const now = Date.now();
+			for (const [token, held] of tickets) if (held.expires <= now) tickets.delete(token);
+			while (tickets.size >= 16) tickets.delete(tickets.keys().next().value as string);
+			const bytes = new Uint8Array(16);
+			globalThis.crypto.getRandomValues(bytes);
+			const token = [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+			tickets.set(token, { connId, to: safety, account: identity.get().known ? identity.get().fingerprint : null, expires: now + SAFETY_TICKET_TTL_MS });
+			return token;
+		},
+		async setConnectionSafety(connId, safety, stillAllowed = sameAccount('setConnectionSafety'), ticket) {
 			const invalid = (message: string): ExplorerToolError => new ExplorerToolError({ kind: 'invalid', tool: 'setConnectionSafety', message });
 			if (!isSafetyLevel(safety)) throw invalid("The safety level was not saved: it must be 'off', 'risky' or 'every'.");
 			await listReady('setConnectionSafety');
 			stillAllowed();
 			const record = getSavedConnection(connId);
 			if (!record) throw invalid(`There is no saved connection '${connId}'.`);
-			if (record.safety === safety) return;
+			if (safetyLevelOf(record) === safety && record.safety === safety) return;
+			// A lower level needs the ticket the document gets after its dialog; a
+			// plain operation cannot lower it. Raising needs none.
+			if (isSafetyDowngrade(safetyLevelOf(record), safety)) spendTicket(ticket, connId, safety, 'setConnectionSafety');
 			upsertSavedConnection({ ...record, safety });
 		},
 		async deleteConnection(connId, stillAllowed = sameAccount('deleteConnection')) {

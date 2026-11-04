@@ -56,6 +56,7 @@ import type { JsonValue } from 'shared/explorer/devtool/reply';
 import type { IDataGridPersistence } from 'shell';
 import type { SqlOps } from './ops';
 import type { SqlApplyResult, SqlApplyStatement, SqlEndpoint, SqlExecuteResult, SqlSchemaResponse, SqlSession, SavedSqlConnection, SqlDialect, SqlGetSqlResult } from './connect';
+import { safetyLevelOf } from './connect/savedConnections';
 import type { SafetyLevel } from './connect/savedConnections';
 import { SQL_OP_TIMEOUT_MS, applyBatchTimeoutMs } from './sqlTimeouts';
 import type { IPrefsAccessor } from 'shared/explorer/history/types';
@@ -91,13 +92,18 @@ export interface SqlEnv {
 	/** Environment-variable names for the config form's autocomplete.
 	 *  Never rejects — failures come back as an empty list. */
 	getEnvironmentKeys(): Promise<string[]>;
-	/** Insert or replace a saved connection (it is committed where the list is owned). */
-	saveConnection(conn: SavedSqlConnection): Promise<void>;
+	/**
+	 * Insert or replace a saved connection (it is committed where the list is owned).
+	 * A record that lowers the connection's safety level is saved only when
+	 * `confirmedLowering` says the user confirmed the lower level in the dialog
+	 * (the owner issues a one-time ticket for it; a plain save is refused).
+	 */
+	saveConnection(conn: SavedSqlConnection, opts?: { confirmedLowering?: boolean }): Promise<void>;
 	/**
 	 * Set one saved connection's safety level where the list is owned, sending
 	 * only the id and the level (the stored config is kept, never resent).
 	 */
-	setConnectionSafety(connId: string, safety: SafetyLevel): Promise<void>;
+	setConnectionSafety(connId: string, safety: SafetyLevel, opts?: { confirmedLowering?: boolean }): Promise<void>;
 	/** Delete a saved connection (a direct one's temp pipeline is stopped first, best effort). */
 	deleteConnection(conn: SavedSqlConnection): Promise<void>;
 	/**
@@ -216,16 +222,38 @@ async function underTicket<T>(ticket: IGenerationTicket | undefined, tool: strin
  * @param owner - The identity fingerprint the frame belongs to (sent with an apply, which writes).
  * @returns The proxy session.
  */
+/**
+ * Ask the controller for the one-time ticket a LOWER safety level needs. Called
+ * only once the user has confirmed the lower level in the document's dialog.
+ *
+ * @param caller - The frame's caller.
+ * @param owner - The frame's account fingerprint.
+ * @param connId - The connection.
+ * @param level - The lower level.
+ * @returns The ticket.
+ */
+async function lowerTicket(caller: IFrameCaller<SqlOps>, owner: () => string | null, connId: string, level: SafetyLevel): Promise<string | undefined> {
+	try {
+		const issued = await caller.callReply('sql.requestSafetyDowngrade', { connId, safety: level, owner: owner() }, { timeoutMs: SQL_OP_TIMEOUT_MS['sql.requestSafetyDowngrade'] });
+		return issued.ticket;
+	} catch (error) {
+		// Not a lower level any more (it changed while the dialog was open): the save needs no ticket.
+		if (error instanceof ExplorerToolError && error.kind === 'invalid') return undefined;
+		throw error;
+	}
+}
+
 function remoteSession(caller: IFrameCaller<SqlOps>, endpoint: SqlEndpoint, owner: () => string | null): SqlSession {
 	const connId = connIdOf(endpoint);
 	return {
 		endpoint,
-		execute: (sql: string, opts?: { params?: unknown[]; idempotent?: boolean; generation?: IGenerationTicket }): Promise<SqlExecuteResult> =>
+		execute: (sql: string, opts?: { params?: unknown[]; idempotent?: boolean; generation?: IGenerationTicket; confirmed?: boolean }): Promise<SqlExecuteResult> =>
 			underTicket(opts?.generation, 'execute', () => caller.callReply('sql.execute', {
 				connId,
 				sql,
 				...(opts?.params ? { params: opts.params as JsonValue[] } : {}),
 				...(opts?.idempotent !== undefined ? { idempotent: opts.idempotent } : {}),
+				...(opts?.confirmed === true ? { confirmed: true } : {}),
 			}, { timeoutMs: SQL_OP_TIMEOUT_MS['sql.execute'] })),
 		getSchema: (table?: string): Promise<SqlSchemaResponse> =>
 			caller.callReply('sql.getSchema', { connId, ...(table ? { table } : {}) }, { timeoutMs: SQL_OP_TIMEOUT_MS['sql.getSchema'] }),
@@ -233,7 +261,7 @@ function remoteSession(caller: IFrameCaller<SqlOps>, endpoint: SqlEndpoint, owne
 		dialect: (): Promise<SqlDialect> => caller.callReply('sql.dialect', { connId }, { timeoutMs: SQL_OP_TIMEOUT_MS['sql.dialect'] }),
 		// The whole apply runs in the controller: the frame sends the list and
 		// gets the outcome, never a session id.
-		applyBatch: (statements: SqlApplyStatement[], opts: { atomic: boolean }): Promise<SqlApplyResult> => caller.callReply('sql.applyBatch', {
+		applyBatch: (statements: SqlApplyStatement[], opts: { atomic: boolean; confirmed?: boolean }): Promise<SqlApplyResult> => caller.callReply('sql.applyBatch', {
 			connId,
 			owner: owner(),
 			statements: statements.map((statement) => ({
@@ -242,6 +270,7 @@ function remoteSession(caller: IFrameCaller<SqlOps>, endpoint: SqlEndpoint, owne
 				...(statement.expect !== undefined ? { expect: statement.expect } : {}),
 			})),
 			atomic: opts.atomic,
+			...(opts.confirmed === true ? { confirmed: true } : {}),
 		}, { timeoutMs: applyBatchTimeoutMs(statements.length, opts.atomic) }),
 		getSql: (question: string): Promise<SqlGetSqlResult> => caller.callReply('sql.getSql', { connId, question }, { timeoutMs: SQL_OP_TIMEOUT_MS['sql.getSql'] }),
 	};
@@ -277,11 +306,13 @@ export function createRemoteSqlEnv(caller: IFrameCaller<SqlOps>, ready: boolean,
 		getService: (provider) => caller.callReply('sql.getService', { provider }, { timeoutMs: SQL_OP_TIMEOUT_MS['sql.getService'] }),
 		validate: (pipeline) => caller.callReply('sql.validate', { pipeline: pipeline as { [key: string]: JsonValue } }, { timeoutMs: SQL_OP_TIMEOUT_MS['sql.validate'] }),
 		getEnvironmentKeys: () => caller.callReply('sql.envKeys', {}, { timeoutMs: SQL_OP_TIMEOUT_MS['sql.envKeys'] }).catch(() => []),
-		saveConnection: async (conn) => {
-			await caller.callReply('sql.saveConnection', { connection: conn, owner: owner() }, { timeoutMs: SQL_OP_TIMEOUT_MS['sql.saveConnection'] });
+		saveConnection: async (conn, opts) => {
+			const ticket = opts?.confirmedLowering === true ? await lowerTicket(caller, owner, conn.id, safetyLevelOf(conn)) : undefined;
+			await caller.callReply('sql.saveConnection', { connection: conn, owner: owner(), ...(ticket !== undefined ? { safetyTicket: ticket } : {}) }, { timeoutMs: SQL_OP_TIMEOUT_MS['sql.saveConnection'] });
 		},
-		setConnectionSafety: async (connId, safety) => {
-			await caller.callReply('sql.setConnectionSafety', { connId, safety, owner: owner() }, { timeoutMs: SQL_OP_TIMEOUT_MS['sql.setConnectionSafety'] });
+		setConnectionSafety: async (connId, safety, opts) => {
+			const ticket = opts?.confirmedLowering === true ? await lowerTicket(caller, owner, connId, safety) : undefined;
+			await caller.callReply('sql.setConnectionSafety', { connId, safety, owner: owner(), ...(ticket !== undefined ? { ticket } : {}) }, { timeoutMs: SQL_OP_TIMEOUT_MS['sql.setConnectionSafety'] });
 		},
 		deleteConnection: async (conn) => {
 			await caller.callReply('sql.deleteConnection', { connId: conn.id, owner: owner() }, { timeoutMs: SQL_OP_TIMEOUT_MS['sql.deleteConnection'] });

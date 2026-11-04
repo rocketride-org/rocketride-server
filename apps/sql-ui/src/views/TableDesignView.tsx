@@ -773,7 +773,7 @@ export const TableDesignView: React.FC<TableDesignViewProps> = ({ endpoint, tabl
 				// Every statement that ran goes into History, as the grid's Apply
 				// records its own: same helper, same outcomes. A thrown apply
 				// records nothing, as there.
-				const result = await env.getSession(endpoint).applyBatch(sentStatements, { atomic });
+				const result = await env.getSession(endpoint).applyBatch(sentStatements, { atomic, confirmed: true });
 				for (const entry of applyHistoryEntries(sentStatements, result, { dialect: snapshot.dialect, at: startedAt, ms: Date.now() - startedAt, wording: atomic ? 'transaction' : 'each' })) env.history.record(endpoint, entry);
 				transactional = result.transactional;
 				if (result.failure !== null) {

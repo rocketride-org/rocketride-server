@@ -232,6 +232,9 @@ describe('T3 — every op round-trips JSON-safe; failures come back as equal Exp
 			await r.env.saveConnection({ ...PIPELINE, id: 'c-new', name: 'New' });
 			await r.env.setConnectionSafety('c-new', 'every');
 			assert.equal(getSavedConnections().find((c) => c.id === 'c-new')?.safety, 'every');
+			// Lowering it again, once the dialog confirmed: the owner issues the one-time ticket.
+			await r.env.setConnectionSafety('c-new', 'risky', { confirmedLowering: true });
+			assert.equal(getSavedConnections().find((c) => c.id === 'c-new')?.safety, 'risky');
 			await r.env.deleteConnection({ ...PIPELINE, id: 'c-new', name: 'New' });
 			// The direct document's release carries the key it opened, and the
 			// controller sees it.

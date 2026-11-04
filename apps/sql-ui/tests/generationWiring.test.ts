@@ -54,7 +54,7 @@ function read(...parts: string[]): string {
 describe('generation tickets reach the session', () => {
 	it('the query runner passes the batch ticket with every statement', () => {
 		const source = read('views', 'QueryView.tsx');
-		assert.match(source, /execute: \(run, send, ticket\) => env\.getSession\(endpoint\)\.execute\(send\.sql, \{ idempotent: run\.kind === 'read', generation: ticket \}\)/);
+		assert.match(source, /execute: \(run, send, ticket\) => env\.getSession\(endpoint\)\.execute\(send\.sql, \{ idempotent: run\.kind === 'read', generation: ticket, confirmed: true \}\)/);
 	});
 
 	it('the plan drawer takes a ticket per EXPLAIN and expires it when the drawer closes or the statement changes', () => {

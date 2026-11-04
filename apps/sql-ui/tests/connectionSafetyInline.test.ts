@@ -87,7 +87,8 @@ describe('setting the level as a dev tool (sql.setConnectionSafety)', () => {
 		const r = await rig({ saved: [PIPELINE, WITH_SECRET] });
 		try {
 			await until(() => getSavedConnections().length === 2, 'the list');
-			await r.env.setConnectionSafety('c-direct', 'off');
+			// A lower level: the dialog confirmed, so the controller issues the one-time ticket.
+			await r.env.setConnectionSafety('c-direct', 'off', { confirmedLowering: true });
 			const calls = r.h.wire.filter((entry) => JSON.stringify(entry.value).includes('sql.setConnectionSafety'));
 			assert.ok(calls.length > 0, 'the call crossed the wire');
 			for (const entry of calls) assert.ok(!JSON.stringify(entry.value).includes(SECRET), 'no secret in the call or its reply');
@@ -188,8 +189,8 @@ describe('the Query page offers the level in place', () => {
 
 	it('asks before a lower level, and only a confirmed choice is saved, with the connection id only', () => {
 		assert.match(view, /if \(isSafetyDowngrade\(safety, level\)\) \{\s*setConfirmSafety\(level\);\s*return;\s*\}/);
-		assert.match(view, /<SafetyDowngradeDialog[\s\S]*?onConfirm=\{\(\) => \{[\s\S]*?commitSafety\(level\);/);
-		assert.match(view, /env\.setConnectionSafety\(connId, next\)/);
+		assert.match(view, /<SafetyDowngradeDialog[\s\S]*?onConfirm=\{\(\) => \{[\s\S]*?commitSafety\(level, true\);/);
+		assert.match(view, /env\.setConnectionSafety\(connId, next, \{ confirmedLowering \}\)/);
 		assert.equal((view.match(/env\.setConnectionSafety\(/g) ?? []).length, 1, 'one place saves the level');
 		assert.doesNotMatch(view, /saveConnection\(/, 'the page never rebuilds or resends the record');
 	});
@@ -227,7 +228,7 @@ describe('the Query page offers the level in place', () => {
 	});
 
 	it('the remote env sends the id, the level and the owner, nothing else', () => {
-		assert.match(read('src', 'sqlEnv.ts'), /caller\.callReply\('sql\.setConnectionSafety', \{ connId, safety, owner: owner\(\) \}/);
+		assert.match(read('src', 'sqlEnv.ts'), /caller\.callReply\('sql\.setConnectionSafety', \{ connId, safety, owner: owner\(\), \.\.\.\(ticket !== undefined \? \{ ticket \} : \{\}\) \}/);
 	});
 
 	it('the README says where the level can be changed, and that lowering it asks', () => {

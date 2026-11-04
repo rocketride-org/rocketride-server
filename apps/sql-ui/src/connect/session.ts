@@ -253,7 +253,7 @@ class SqlToolSession implements SqlSession {
 	}
 
 	/** @inheritdoc */
-	async execute(sql: string, opts?: { params?: unknown[]; idempotent?: boolean; generation?: IGenerationTicket }): Promise<SqlExecuteResult> {
+	async execute(sql: string, opts?: { params?: unknown[]; idempotent?: boolean; generation?: IGenerationTicket; confirmed?: boolean }): Promise<SqlExecuteResult> {
 		// Omit `params` entirely when there is nothing to bind: the node's
 		// placeholder rewriting is skipped for an empty list, so an unbound
 		// statement keeps travelling exactly as it did before.
@@ -283,7 +283,7 @@ class SqlToolSession implements SqlSession {
 	 * @param opts.atomic - Run them inside one transaction (refused when the node has no `begin`).
 	 * @returns What ran.
 	 */
-	async applyBatch(statements: SqlApplyStatement[], opts: { atomic: boolean }): Promise<SqlApplyResult> {
+	async applyBatch(statements: SqlApplyStatement[], opts: { atomic: boolean; confirmed?: boolean }): Promise<SqlApplyResult> {
 		if (!opts.atomic) return this.applyEach(statements);
 		let sessionId: string;
 		try {

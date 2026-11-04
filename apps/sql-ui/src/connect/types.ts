@@ -270,7 +270,7 @@ export interface SqlSession {
 	 *                          controller's one retry cannot see it.
 	 * @returns Rows and affected-row count.
 	 */
-	execute(sql: string, opts?: { params?: unknown[]; idempotent?: boolean; generation?: IGenerationTicket }): Promise<SqlExecuteResult>;
+	execute(sql: string, opts?: { params?: unknown[]; idempotent?: boolean; generation?: IGenerationTicket; confirmed?: boolean }): Promise<SqlExecuteResult>;
 	/**
 	 * Apply app-written statements in order: staged row edits, or a designer
 	 * plan. Nothing is ever sent twice.
@@ -301,7 +301,7 @@ export interface SqlSession {
 	 *         refused, the connection is not running, `begin` was refused,
 	 *         or there are no transactions (`transactions-unavailable`).
 	 */
-	applyBatch(statements: SqlApplyStatement[], opts: { atomic: boolean }): Promise<SqlApplyResult>;
+	applyBatch(statements: SqlApplyStatement[], opts: { atomic: boolean; confirmed?: boolean }): Promise<SqlApplyResult>;
 	/**
 	 * Reflect the schema of the attached database (or a single table).
 	 *

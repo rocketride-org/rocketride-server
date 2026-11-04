@@ -33,6 +33,8 @@
 import { createMessageGridPersistence } from 'shell';
 import type { IDataGridPersistence } from 'shell';
 import { createCopyingGridPersistence } from 'shared/explorer/devtool/gridPersistence';
+import { ExplorerToolError } from 'shared/explorer/errors';
+import { safetyLevelOf } from './connect/savedConnections';
 import { connectionEditorUri, connectionUri, getDocs } from './docs';
 import type { IPrefsAccessor } from 'shared/explorer/history/types';
 import { APP_PRIVACY_NOTICE } from './history/api';
@@ -106,6 +108,19 @@ interface LocalPersistence {
 const LOCAL_PERSISTENCE = new WeakMap<SqlCore, LocalPersistence>();
 
 /**
+ * A ticket that could not be issued because the level is no longer a lower one
+ * needs none (the save is not a downgrade); anything else is a real failure.
+ *
+ * @param error - What issuing rejected with.
+ * @returns No ticket.
+ * @throws The error, when it is not that refusal.
+ */
+function notLower(error: unknown): undefined {
+	if (error instanceof ExplorerToolError && error.kind === 'invalid') return undefined;
+	throw error;
+}
+
+/**
  * The core-backed environment (the full app).
  *
  * @param core - The realm's engine core.
@@ -137,8 +152,14 @@ export function createLocalSqlEnv(core: SqlCore, isConnected: boolean, serviceTi
 				return [];
 			}
 		},
-		saveConnection: (conn) => core.saveConnection(conn),
-		setConnectionSafety: (connId, safety) => core.setConnectionSafety(connId, safety),
+		saveConnection: async (conn, opts) => {
+			const ticket = opts?.confirmedLowering === true ? await core.issueSafetyTicket(conn.id, safetyLevelOf(conn)).catch(notLower) : undefined;
+			await core.saveConnection(conn, undefined, ticket);
+		},
+		setConnectionSafety: async (connId, safety, opts) => {
+			const ticket = opts?.confirmedLowering === true ? await core.issueSafetyTicket(connId, safety).catch(notLower) : undefined;
+			await core.setConnectionSafety(connId, safety, undefined, ticket);
+		},
 		deleteConnection: (conn) => core.deleteConnection(conn.id),
 		getConnection: (connId) => core.connection(connId),
 		serviceTitle,

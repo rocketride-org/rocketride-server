@@ -221,6 +221,29 @@ export function isSafetyDowngrade(from: SafetyLevel, to: SafetyLevel): boolean {
 	return SAFETY_RANK[to] < SAFETY_RANK[from];
 }
 
+/** The code of the refusal a statement gets when it asks and no confirmation came with it. */
+export const CONFIRMATION_REQUIRED_CODE = 'confirmation-required';
+
+/**
+ * The refusal for statements that ask at a connection's level and arrive
+ * without the confirmation of the document's own flow, or null to go ahead.
+ * The authority layer (the controller, the full app's core) calls it with the
+ * same classifier the document used, so a call that skips the document is
+ * stopped. It is a check on statement text, not a database security boundary.
+ *
+ * @param statements - What would be sent.
+ * @param dialect - The node's dialect ('unknown' reads every way).
+ * @param level - The connection's level.
+ * @param confirmed - Whether the call says the document's confirmation ran.
+ * @returns The sentence, or null.
+ */
+export function confirmationRefusal(statements: readonly string[], dialect: SqlDialect, level: SafetyLevel, confirmed: boolean | undefined): string | null {
+	if (confirmed === true || level === 'off') return null;
+	return statements.some((sql) => needsConfirmation(sql, dialect, level) !== null)
+		? 'This statement asks for confirmation at this connection\'s safety level, and none came with it, so nothing was sent.'
+		: null;
+}
+
 /**
  * The level the connection editor shows and saves, and whether saving it asks.
  *

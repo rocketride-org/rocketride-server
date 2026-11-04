@@ -105,7 +105,7 @@ describe('the bar, Review SQL, the confirmation, then one applyBatch', () => {
 	it('Review SQL and the bar\'s Apply both go through the confirmation, and only its confirm sends', () => {
 		assert.match(VIEW, /<ReviewSqlDialog[\s\S]*?wording=\{review\.mode\.wording\}[\s\S]*?onApply=\{\(\) => \{ void askApply\(\); \}\}/);
 		assert.match(VIEW, /<ApplyConfirmDialog[\s\S]*?onConfirm=\{\(\) => \{ void runApply\(applyAsk, applyAsk\.mode\.atomic\); \}\}/);
-		assert.match(VIEW, /\.applyBatch\(ask\.statements, \{ atomic \}\)/);
+		assert.match(VIEW, /\.applyBatch\(ask\.statements, \{ atomic, confirmed: true \}\)/);
 		assert.equal((VIEW.match(/\.applyBatch\(/g) ?? []).length, 1, 'one place sends');
 	});
 

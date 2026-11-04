@@ -435,11 +435,11 @@ export const QueryView: React.FC<QueryViewProps> = ({ endpoint, label, initialSq
 	 *
 	 * @param next - The level.
 	 */
-	const commitSafety = useCallback((next: SafetyLevel): void => {
+	const commitSafety = useCallback((next: SafetyLevel, confirmedLowering = false): void => {
 		const connId = endpoint.connId;
 		if (!connId) return;
 		setPendingSafety(next);
-		env.setConnectionSafety(connId, next).then(
+		env.setConnectionSafety(connId, next, { confirmedLowering }).then(
 			() => {
 				announce(`Safety level for this connection: ${SAFETY_CHOICES[next]}`);
 				if (safetySyncTimerRef.current !== null) clearTimeout(safetySyncTimerRef.current);
@@ -626,7 +626,9 @@ export const QueryView: React.FC<QueryViewProps> = ({ endpoint, label, initialSq
 		// The batch's ticket goes down too (port of 740b69c6d), so a read the
 		// user stopped waiting for (or whose tab closed) is not sent again by the
 		// full app's retry, and a frame drops its late answer.
-		execute: (run, send, ticket) => env.getSession(endpoint).execute(send.sql, { idempotent: run.kind === 'read', generation: ticket }),
+		// `confirmed`: this runner already asked (or the user chose not to be asked) before sending; the
+		// controller refuses a statement that asks at the level and arrives without it.
+		execute: (run, send, ticket) => env.getSession(endpoint).execute(send.sql, { idempotent: run.kind === 'read', generation: ticket, confirmed: true }),
 		// Captures the result's columns before any grid has seen its rows.
 		settle: (run, response) => settleStatement(run, response),
 		describeFailure: (message) => describeFailure(message),
@@ -1360,7 +1362,9 @@ export const QueryView: React.FC<QueryViewProps> = ({ endpoint, label, initialSq
 						const level = confirmSafety;
 						setConfirmSafety(null);
 						focusSafetyButton();
-						commitSafety(level);
+						// The user confirmed the lower level in this dialog: the owner issues
+						// the ticket a lower level needs (a plain operation cannot lower it).
+						commitSafety(level, true);
 					}}
 					onCancel={() => {
 						setConfirmSafety(null);

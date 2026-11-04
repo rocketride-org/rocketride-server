@@ -184,7 +184,7 @@ describe('C-1: TableDesignView asks again before it applies without a transactio
 describe('TableDesignView applies through applyBatch', () => {
 	it('sends the plan in one call, atomic by the dialect, and no longer runs statements one execute at a time', () => {
 		assert.match(VIEW, /const sentStatements = statements\.map\(\(sql\) => \(\{ sql \}\)\);/);
-		assert.match(VIEW, /\.applyBatch\(sentStatements, \{ atomic \}\)/);
+		assert.match(VIEW, /\.applyBatch\(sentStatements, \{ atomic, confirmed: true \}\)/);
 		assert.match(VIEW, /const mode = designApplyMode\(snapshot\.dialect, knownNoTransactions\(endpoint\.key, snapshot\.refreshedAt\)\)/);
 		assert.doesNotMatch(VIEW, /for \(const sql of statements\)/);
 		assert.doesNotMatch(VIEW, /prev\.slice\(done\)/);
@@ -225,7 +225,7 @@ describe('DA-R2 M5: the designer\'s Apply records its statements in History', ()
 	it('records each entry of the reply with the grid\'s helper and the promise its confirmation made', () => {
 		assert.match(VIEW, /import \{ applyHistoryEntries \} from '\.\.\/sql\/applyHistory';/);
 		assert.match(VIEW, /const sentStatements = statements\.map\(\(sql\) => \(\{ sql \}\)\);/);
-		assert.match(VIEW, /const result = await env\.getSession\(endpoint\)\.applyBatch\(sentStatements, \{ atomic \}\);\s*for \(const entry of applyHistoryEntries\(sentStatements, result, \{ dialect: snapshot\.dialect, at: startedAt, ms: Date\.now\(\) - startedAt, wording: atomic \? 'transaction' : 'each' \}\)\) env\.history\.record\(endpoint, entry\);/);
+		assert.match(VIEW, /const result = await env\.getSession\(endpoint\)\.applyBatch\(sentStatements, \{ atomic, confirmed: true \}\);\s*for \(const entry of applyHistoryEntries\(sentStatements, result, \{ dialect: snapshot\.dialect, at: startedAt, ms: Date\.now\(\) - startedAt, wording: atomic \? 'transaction' : 'each' \}\)\) env\.history\.record\(endpoint, entry\);/);
 	});
 
 	it('a designer plan\'s entries are schema changes, with the grid\'s outcomes', async () => {
