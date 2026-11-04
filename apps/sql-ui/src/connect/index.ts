@@ -51,7 +51,7 @@ export type { EndpointStatus, EndpointState } from './endpointStore';
 export {
 	loadSavedConnections, resetSavedConnections, useSavedConnections, useSavedConnectionsStatus,
 	upsertSavedConnection, newConnectionId, deleteSavedConnection, getSavedConnection,
-	applySavedConnections, subscribeSavedConnections, getSavedConnections, getSavedConnectionsStatus,
+	applySavedConnections, subscribeSavedConnections, getSavedConnections, getSavedConnectionsStatus, getSavedConnectionsLoadProblem,
 	ownSavedConnections, applyReplicaConnections, getSavedConnectionsPartial, useSavedConnectionsPartial,
 } from './savedConnections';
 export type { SavedSqlConnection, PipelineBoundConnection, DirectConnection, SavedConnectionsStatus, SavedConnectionsFs, ReplicaPartial } from './savedConnections';

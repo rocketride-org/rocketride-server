@@ -78,10 +78,10 @@ export interface SqlOps extends ToolOpMap {
 	// ── Connection lifecycle ─────────────────────────────────────────────────
 	/** Resolve a saved connection to its running endpoint (direct mode starts
 	 *  or reattaches its temp pipeline — the controller owns it). */
-	'sql.resolveEndpoint': ToolOpSpec<IDeadline & { connId: string }, Reply<SqlEndpoint>>;
+	'sql.resolveEndpoint': ToolOpSpec<IDeadline & { connId: string; holder?: string }, Reply<SqlEndpoint>>;
 	/** Stop a direct connection's temp pipeline, best effort (no-op for a
 	 *  pipeline connection). Fire-and-forget callers may ignore the result. */
-	'sql.releaseEndpoint': ToolOpSpec<IDeadline & { connId: string; key?: string }, Reply<null>>;
+	'sql.releaseEndpoint': ToolOpSpec<IDeadline & { connId: string; key?: string; holder?: string }, Reply<null>>;
 	/** The New Connection picker's list: discovered endpoints a pipeline
 	 *  connection can be saved for (the caller's own development runs). */
 	'sql.discoverEndpoints': ToolOpSpec<IDeadline, Reply<SqlEndpoint[]>>;

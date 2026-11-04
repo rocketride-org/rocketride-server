@@ -361,11 +361,14 @@ export function plainFrameError(error: unknown): unknown {
  * @param caller - The library's caller.
  * @returns The same caller, failures reworded.
  */
-function plainSpoken<O extends ToolOpMap>(caller: IFrameCaller<O>): IFrameCaller<O> {
+function plainSpoken<O extends ToolOpMap>(caller: IFrameCaller<O>, holder?: string): IFrameCaller<O> {
 	const reword = (error: unknown): never => { throw plainFrameError(error); };
+	// Opening and closing a direct connection name this frame as the holder, so
+	// a frame that resolves again is still one holder (never a second).
+	const named = <P>(op: string, params: P): P => (holder !== undefined && (op === 'sql.resolveEndpoint' || op === 'sql.releaseEndpoint') ? { ...params, holder } : params);
 	return {
-		call: (op, params, opts) => caller.call(op, params, opts).catch(reword),
-		callReply: (op, params, opts) => caller.callReply(op, params, opts).catch(reword),
+		call: (op, params, opts) => caller.call(op, named(op, params), opts).catch(reword),
+		callReply: (op, params, opts) => caller.callReply(op, named(op, params), opts).catch(reword),
 		pending: () => caller.pending(),
 		connected: () => caller.connected(),
 		controllerReady: () => caller.controllerReady(),
@@ -443,12 +446,13 @@ export function attachSqlFrame(opts: SqlFrameOptions): SqlFrameMount {
 		const fingerprint = (snapshot as { fingerprint?: unknown } | null | undefined)?.fingerprint;
 		identityNow = typeof fingerprint === 'string' && fingerprint !== '' ? fingerprint : null;
 	});
+	const holderId = `frame-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
 	const caller = plainSpoken(createFrameCaller<SqlOps>({
 		channel,
 		identityNow: () => identityNow,
 		createToolOpClient: protocol.createToolOpClient,
 		...(opts.now ? { now: opts.now } : {}),
-	}));
+	}), holderId);
 	const detachHost = attachSqlDocumentHost(channel);
 	const guard = createFrameIdentityGuard({
 		channel,

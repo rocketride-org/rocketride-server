@@ -210,6 +210,18 @@ let partial: ReplicaPartial | null = null;
 let persist: ((list: SavedSqlConnection[]) => void) | null = null;
 const listeners = new Set<() => void>();
 
+/** Why the stored list could not be used (null: nothing is wrong). */
+let loadProblem: string | null = null;
+
+/**
+ * Why the last load left the list unusable, for the UI and the core to say.
+ *
+ * @returns A sentence, or null.
+ */
+export function getSavedConnectionsLoadProblem(): string | null {
+	return loadProblem;
+}
+
 /** Monotonic load counter — an outdated in-flight load never wins. */
 let loadSeq = 0;
 
@@ -245,14 +257,26 @@ function commit(next: SavedSqlConnection[]): void {
  */
 export async function loadSavedConnections(client: SavedConnectionsFs): Promise<void> {
 	const seq = ++loadSeq;
+	loadProblem = null;
 	status = 'loading';
 	notify();
 	// Ensure the app-data folder exists (idempotent; failure surfaces on write).
 	try { await client.fsMkdir(STORE_DIR); } catch { /* already exists */ }
 	let list: SavedSqlConnection[] = [];
 	try {
-		const raw = (await client.fsReadJson(STORE_PATH)) as SavedSqlConnection[] | null | undefined;
-		if (Array.isArray(raw)) list = raw;
+		const raw: unknown = await client.fsReadJson(STORE_PATH);
+		if (!Array.isArray(raw)) {
+			// The file parsed, but it is not a list of connections (another
+			// version's format, a hand edit): treat it like an unreadable file.
+			// No writer is installed, so the next save cannot replace it.
+			if (seq !== loadSeq) return;
+			loadProblem = 'Your saved connections file is not a list of connections (another version\'s format, or edited by hand), so it was left as it is and nothing will be saved to it.';
+			console.log('[sql-ui] saved connections file has an unrecognized format; left untouched');
+			status = 'idle';
+			notify();
+			return;
+		}
+		list = raw as SavedSqlConnection[];
 	} catch (err) {
 		// Only a PROVEN-missing file is first run (the store raises
 		// StorageError('File not found: …')). Any other failure — transport
@@ -303,6 +327,7 @@ export async function loadSavedConnections(client: SavedConnectionsFs): Promise<
 export function resetSavedConnections(opts: { force?: boolean } = {}): void {
 	if (listeners.size > 0 && opts.force !== true) return;
 	loadSeq++;
+	loadProblem = null;
 	status = 'idle';
 	connections = [];
 	partial = null;

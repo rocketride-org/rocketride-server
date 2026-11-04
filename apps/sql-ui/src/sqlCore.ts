@@ -90,6 +90,7 @@ import {
 	endpointForConnection,
 	endpointKeyForConnection,
 	getSavedConnection,
+	getSavedConnectionsLoadProblem,
 	getSavedConnectionsStatus,
 	isDirectEndpointKey,
 	loadSavedConnections,
@@ -179,10 +180,12 @@ export interface SqlCore {
 	 * Resolve a saved connection to its running endpoint (direct mode starts
 	 * or reattaches its temp pipeline).
 	 *
+	 * @param connId - The connection.
+	 * @param holder - Who is opening it (a frame): one holder however often it resolves again. Omitted: a holder of its own.
 	 * @returns The token-free description, carrying `connId`.
 	 * @throws ExplorerToolError `invalid` (no such connection) or `unavailable` (not signed in, not running).
 	 */
-	resolve(connId: string): Promise<SqlEndpoint>;
+	resolve(connId: string, holder?: string): Promise<SqlEndpoint>;
 	/**
 	 * The endpoint key a saved connection's history and schema are kept under
 	 * (`endpointKeyForConnection(record)`), once the list is read; no engine call.
@@ -226,7 +229,7 @@ export interface SqlCore {
 	 *   pipeline was replaced by the one the edit started, under the same
 	 *   project id: nothing is stopped (the idle TTL reaps any orphan).
 	 */
-	release(connId: string, key?: string): Promise<void>;
+	release(connId: string, key?: string, holder?: string): Promise<void>;
 	/** The New Connection picker's list: discovered endpoints a pipeline connection can be saved for. */
 	pickable(): Promise<SqlEndpoint[]>;
 	/** One service definition (the direct path's config schema). */
@@ -588,7 +591,7 @@ export function createSqlCore(opts: SqlCoreOptions): SqlCore {
 				}
 			});
 		}
-		if (getSavedConnectionsStatus() !== 'ready') throw unavailable(tool, 'Your saved connections could not be read from the server yet. Try again.');
+		if (getSavedConnectionsStatus() !== 'ready') throw unavailable(tool, getSavedConnectionsLoadProblem() ?? 'Your saved connections could not be read from the server yet. Try again.');
 	};
 
 	/**
@@ -621,8 +624,33 @@ export function createSqlCore(opts: SqlCoreOptions): SqlCore {
 			.sort((a, b) => ownRank(a) - ownRank(b) || STATE_RANK[a.state] - STATE_RANK[b.state])[0];
 	};
 
-	/** Open holders per direct endpoint key (a resolve +1, a keyed release -1). */
-	const holders = new Map<string, number>();
+	/**
+	 * Open holders per direct endpoint key, each with the sequence number of
+	 * its latest resolve. A named holder (a frame) is one entry however often
+	 * it resolves again; an anonymous resolve (the full app) is an entry of its
+	 * own, which an anonymous keyed release takes back oldest first.
+	 */
+	const holders = new Map<string, Map<string, number>>();
+	/** Counts resolves and releases, so a release can tell a resolve that came after it. */
+	let holderSeq = 0;
+	/** Per direct project: what runs one at a time (a teardown, a start, a look at what is running). */
+	const locks = new Map<string, Promise<unknown>>();
+
+	/**
+	 * Run `fn` after everything queued before it for this direct project: a
+	 * close that is tearing the pipeline down and a new open never overlap.
+	 *
+	 * @param projectId - The temporary pipeline's project id.
+	 * @param fn - What to run.
+	 * @returns What `fn` answers.
+	 */
+	const underLock = <T,>(projectId: string, fn: () => Promise<T>): Promise<T> => {
+		const run = (locks.get(projectId) ?? Promise.resolve()).then(fn, fn);
+		const tail = run.then(() => undefined, () => undefined);
+		locks.set(projectId, tail);
+		void tail.then(() => { if (locks.get(projectId) === tail) locks.delete(projectId); });
+		return run;
+	};
 	/** Starts in flight per direct project: concurrent resolutions share one `use`. */
 	const starting = new Map<string, Promise<void>>();
 
@@ -682,6 +710,9 @@ export function createSqlCore(opts: SqlCoreOptions): SqlCore {
 		try {
 			const projectId = directProjectId(record);
 			const token = await admin.getTaskToken({ projectId, source: TOOLS_SOURCE_ID });
+			// A document that opened while the token was being looked up holds the
+			// pipeline now: it is never terminated under a holder.
+			if ((holders.get(endpointKeyForConnection(record))?.size ?? 0) > 0) return;
 			if (typeof token === 'string' && token !== '') {
 				// The engine tears a task down asynchronously: its token can still
 				// resolve for a moment after `terminate` answers. Remember it, so a
@@ -712,7 +743,13 @@ export function createSqlCore(opts: SqlCoreOptions): SqlCore {
 	 * @param tool - What is being done.
 	 * @returns The endpoint.
 	 */
-	const locate = async (record: SavedSqlConnection, tool: string): Promise<IExplorerEndpoint> => {
+	const locate = (record: SavedSqlConnection, tool: string): Promise<IExplorerEndpoint> => (
+		// A direct connection's pipeline is started and stopped by this core, one
+		// step at a time: a start waits for a teardown in progress.
+		record.mode === 'direct' ? underLock(directProjectId(record), () => locateNow(record, tool)) : locateNow(record, tool)
+	);
+
+	const locateNow = async (record: SavedSqlConnection, tool: string): Promise<IExplorerEndpoint> => {
 		const legacyKey = endpointKeyForConnection(record);
 		let found = match(legacyKey);
 		if (record.mode === 'direct') {
@@ -818,25 +855,36 @@ export function createSqlCore(opts: SqlCoreOptions): SqlCore {
 		discovery,
 		whenAllowed,
 		endpoints,
-		async resolve(connId) {
+		async resolve(connId, holder) {
 			const askedBy = identity.get().known ? identity.get().fingerprint : null;
 			// Claim the holder BEFORE the first wait, when the record is already
 			// known: a remount's cleanup release lands while this resolve is still
 			// waiting, and must see this holder (else it stops the pipeline).
 			const early = getSavedConnection(connId);
+			const holderId = holder ?? `anon-${holderSeq + 1}`;
 			let claimed: string | null = null;
+			let added = false;
 			const claim = (record: SavedSqlConnection): void => {
 				const key = record.mode === 'direct' ? endpointKeyForConnection(record) : null;
 				if (key === claimed) return;
 				unclaim();
-				if (key !== null) holders.set(key, (holders.get(key) ?? 0) + 1);
+				if (key !== null) {
+					const mine = holders.get(key) ?? new Map<string, number>();
+					added = !mine.has(holderId);
+					mine.set(holderId, ++holderSeq);
+					holders.set(key, mine);
+				}
 				claimed = key;
 			};
 			const unclaim = (): void => {
 				if (claimed === null) return;
-				const left = (holders.get(claimed) ?? 1) - 1;
-				if (left > 0) holders.set(claimed, left);
-				else holders.delete(claimed);
+				const mine = holders.get(claimed);
+				// Only a holder this resolution added is taken back (a frame that
+				// already held it, and failed to resolve again, still holds it).
+				if (mine !== undefined && added) {
+					mine.delete(holderId);
+					if (mine.size === 0) holders.delete(claimed);
+				}
 				claimed = null;
 			};
 			if (early !== undefined && identity.get().known) claim(early);
@@ -864,7 +912,7 @@ export function createSqlCore(opts: SqlCoreOptions): SqlCore {
 		sessionFor,
 		withSession: (connId, fn, tool) => withSession(connId, fn, tool),
 		applyBatch,
-		async release(connId, key) {
+		async release(connId, key, holder) {
 			// Read before the first await: a delete that follows a release in the
 			// same turn must not hide the record from it.
 			const record = getSavedConnection(connId);
@@ -873,21 +921,35 @@ export function createSqlCore(opts: SqlCoreOptions): SqlCore {
 			// pipeline is the edited connection's, and must not be stopped.
 			if (key !== undefined && key !== endpointKeyForConnection(record)) return;
 			const endpointKey = endpointKeyForConnection(record);
-			// One holder per open resolution. A keyed release (a frame closing) only
-			// gives its own up: the pipeline stops with the LAST holder, so a
-			// frame that re-resolved the same connection (or a second frame on it)
-			// is not cut off by the first one's late release. An unkeyed release
-			// (the full app's last document, a delete) stops whatever the
-			// connection runs now.
-			if (key !== undefined) {
-				const remaining = (holders.get(endpointKey) ?? 1) - 1;
-				if (remaining > 0) {
-					holders.set(endpointKey, remaining);
+			const at = ++holderSeq;
+			// The decision and the teardown run after anything queued before them
+			// for this connection, and re-read the holders: a resolve that arrived
+			// after this release (another frame, or this one again) keeps the
+			// pipeline, and a pipeline with a holder is never terminated.
+			await underLock(directProjectId(record), async () => {
+				const mine = holders.get(endpointKey);
+				if (key !== undefined) {
+					// A keyed release gives up its own holder, unless the same frame
+					// resolved again after releasing. One holder per frame, so the
+					// last real close stops the pipeline.
+					if (mine !== undefined) {
+						if (holder !== undefined) {
+							if ((mine.get(holder) ?? 0) <= at) mine.delete(holder);
+						} else {
+							const oldest = [...mine.keys()].find((id) => id.startsWith('anon-'));
+							if (oldest !== undefined) mine.delete(oldest);
+						}
+						if (mine.size === 0) holders.delete(endpointKey);
+					}
+					if ((holders.get(endpointKey)?.size ?? 0) > 0) return;
+				} else if (mine !== undefined && [...mine.values()].some((seq) => seq > at)) {
+					// An unkeyed release (the full app's last document, a delete) stops
+					// what the connection runs now, but not for a resolve that came after it.
 					return;
 				}
-			}
-			holders.delete(endpointKey);
-			await terminateDirect(record);
+				holders.delete(endpointKey);
+				await terminateDirect(record);
+			});
 		},
 		async pickable() {
 			await rediscover('discover');
