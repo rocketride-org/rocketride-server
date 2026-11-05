@@ -23,22 +23,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 # ---------------------------------------------------------------------------
-# Mock heavy dependencies BEFORE importing the atlas module
-# ---------------------------------------------------------------------------
-
-for mod_name in (
-    'pymongo',
-    'pymongo.collection',
-    'pymongo.database',
-    'pymongo.errors',
-    'pymongo.operations',
-):
-    sys.modules.setdefault(mod_name, MagicMock())
-
-sys.modules.setdefault('numpy', MagicMock())
-
-
-# ---------------------------------------------------------------------------
 # Lightweight DocFilter stand-in
 # ---------------------------------------------------------------------------
 
@@ -66,12 +50,33 @@ class DocFilter:
 # Load atlas.py directly by file path (bypasses atlas/__init__.py)
 # ---------------------------------------------------------------------------
 
+# Stub pymongo and numpy only for the duration of exec_module so mocks never
+# leak into sys.modules for subsequent test files in the same pytest session.
 # Do NOT stub pydantic: atlas.py imports ai.common.store -> rocketlib, and
 # rocketlib.types needs the real pydantic (BaseModel, ConfigDict, Field).
-_atlas_path = Path(__file__).parent.parent.parent / 'src' / 'nodes' / 'store_atlas' / 'atlas.py'
-_spec = importlib.util.spec_from_file_location('_atlas_direct', _atlas_path)
-atlas_mod = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(atlas_mod)
+_STUB_NAMES = (
+    'pymongo',
+    'pymongo.collection',
+    'pymongo.database',
+    'pymongo.errors',
+    'pymongo.operations',
+    'numpy',
+)
+_saved_modules = {_name: sys.modules.get(_name) for _name in _STUB_NAMES}
+try:
+    for _name in _STUB_NAMES:
+        sys.modules.setdefault(_name, MagicMock())
+
+    _atlas_path = Path(__file__).parent.parent.parent / 'src' / 'nodes' / 'store_atlas' / 'atlas.py'
+    _spec = importlib.util.spec_from_file_location('_atlas_direct', _atlas_path)
+    atlas_mod = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(atlas_mod)
+finally:
+    for _name, _mod in _saved_modules.items():
+        if _mod is None:
+            sys.modules.pop(_name, None)
+        else:
+            sys.modules[_name] = _mod
 
 Store = atlas_mod.Store
 
@@ -208,11 +213,17 @@ class TestEmptyListGuards:
 
 
 def test_trash_round_trip_filters_paths_before_paging(store):
+    """Verify soft-deleted paths are filtered out before skip/limit paging."""
+
     class Cursor(list):
+        """List-backed MongoDB cursor stand-in supporting skip and limit."""
+
         def skip(self, offset):
+            """Return cursor slice starting at offset."""
             return Cursor(self[offset:])
 
         def limit(self, limit):
+            """Return cursor slice capped at limit."""
             return Cursor(self[:limit])
 
     rows = [
@@ -221,7 +232,10 @@ def test_trash_round_trip_filters_paths_before_paging(store):
     ]
 
     def find(query):
+        """Filter in-memory rows using MongoDB-like meta field queries."""
+
         def matches(row):
+            """Return True when row metadata matches all query predicates."""
             for field, value in query.items():
                 actual = row['meta'][field.removeprefix('meta.')]
                 if isinstance(value, dict):
@@ -234,6 +248,7 @@ def test_trash_round_trip_filters_paths_before_paging(store):
         return Cursor(row for row in rows if matches(row))
 
     def update_many(query, update):
+        """Apply $set updates to matching in-memory rows."""
         for row in rows:
             if row['meta']['objectId'] in query['meta.objectId']['$in']:
                 row['meta']['isDeleted'] = update['$set']['meta.isDeleted']
@@ -247,3 +262,11 @@ def test_trash_round_trip_filters_paths_before_paging(store):
     store.markActive(['a'])
     assert store.getPaths(parent='/A') == {'/a': 'a'}
     assert store.getPaths() == {'/a': 'a', '/b': 'b'}
+
+
+def test_module_import_does_not_leak_numpy_or_pymongo_mocks():
+    """Importing this test module must not leave MagicMock stubs in sys.modules."""
+    for mod_name in _STUB_NAMES:
+        assert not isinstance(sys.modules.get(mod_name), MagicMock), (
+            f'{mod_name} still holds a MagicMock in sys.modules after module import'
+        )
