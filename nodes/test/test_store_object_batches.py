@@ -14,7 +14,7 @@ object of every batch, so only the last flush survived.
 Each driver is loaded from source with its client library stubbed. The stub
 keeps what a backend would store: an insert adds chunks, a delete removes the
 chunks of its objects, so the tests check what a write order leaves stored. The
-real round trip on pgvector is in ``test_vector_store_writes_full.py``.
+real round trip on pgvector is in ``test_vector_store_writes_live.py``.
 """
 
 from __future__ import annotations
