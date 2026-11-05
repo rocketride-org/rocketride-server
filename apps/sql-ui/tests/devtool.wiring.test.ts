@@ -862,6 +862,9 @@ describe('T10 — write gates hold in the controller even when a frame calls the
 		} });
 		try {
 			await r.env.resolveEndpoint(PIPELINE);
+			// The first probe (held back until a person is present, then asynchronous) has failed:
+			// wait for it rather than assume it has already run.
+			await until(() => Object.values(r.mount.core.endpoints.getState().probes).length > 0, 'the first probe to answer');
 			const probe = Object.values(r.mount.core.endpoints.getState().probes)[0];
 			assert.equal(probe?.ok, false, 'the store has no dialect');
 			await assert.rejects(r.frame.caller.callReply('sql.execute', { connId: 'c-pipe', sql: 'SELECT 1--1; DELETE FROM orders', idempotent: true }, { timeoutMs: SQL_OP_TIMEOUT_MS['sql.execute'] }), /Task was stopped/);
@@ -1093,7 +1096,18 @@ describe('T11 — no bulk result is retained state; each topic stays within 64 K
 			await until(() => getSavedConnections().length === saved.length, 'the list');
 			for (const conn of saved) r.history.watch(endpointForConnection(conn));
 			const count = (): number => r.frameCalls.filter((call) => call.op === 'sql.history').length;
-			await new Promise((resolve) => setTimeout(resolve, 300));
+			// Wait for the real condition: no read pending and the count no longer growing, for a few
+			// looks in a row (a fixed sleep is too short on a slow runner).
+			const started = Date.now();
+			let last = -1;
+			let stable = 0;
+			while (stable < 3) {
+				await new Promise((resolve) => setTimeout(resolve, 100));
+				const now = count();
+				stable = now === last && r.frame.caller.pending() === 0 ? stable + 1 : 0;
+				last = now;
+				if (Date.now() - started > 30_000) throw new Error(`the reads did not settle (${now} so far)`);
+			}
 			const a = count();
 			await new Promise((resolve) => setTimeout(resolve, 300));
 			assert.equal(count(), a, 'the reads settled');
@@ -1247,6 +1261,9 @@ describe('T13 — deadlines: an expired call never runs, on every path a call ca
 		// A caller that does not wait (no lane does) puts its call in the hold, which summons the controller.
 		const eager = createFrameCaller<SqlOps>({ channel: shellProtocol.createToolChannel(h.newFramePeer()), createToolOpClient: shellProtocol.createToolOpClient, waitForController: false });
 		const held = eager.callReply('sql.envKeys', {}, { timeoutMs: 300 });
+		// Observed from the start: on a slow runner the call may time out before the mount below is
+		// attached, and an unobserved rejection is not the outcome under test.
+		const heldOutcome = held.then(() => null, (error: unknown) => error);
 		await settle();
 		assert.equal(heldCalls(), 1);
 		assert.ok(h.emitted.some((entry) => entry.op === 'host.mountToolSidebar'), 'the held call summoned the controller');
@@ -1255,7 +1272,8 @@ describe('T13 — deadlines: an expired call never runs, on every path a call ca
 		const refused: unknown[] = [];
 		const mount = attachSqlController({ channel: shellProtocol.createToolChannel(h.sidebarPeer), ...engine.source, protocol: shellProtocol, focusTarget: null, onRefused: (error) => refused.push(error) });
 		try {
-			await assert.rejects(held, (error: unknown) => error instanceof ExplorerToolError && error.kind === 'timeout');
+			const outcome = await heldOutcome;
+			assert.ok(outcome instanceof ExplorerToolError && outcome.kind === 'timeout', 'the held call timed out');
 			assert.equal(engine.ops().includes('client.getEnvironmentKeys'), false, 'the held call never ran');
 			assert.deepEqual(refused, [], 'and never reached the controller: the host channel took it');
 		} finally {
