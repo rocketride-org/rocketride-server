@@ -45,17 +45,21 @@ import IconLight from 'shared/assets/rocketride/rocketride-light.svg';
  */
 const ROCKETRIDE_APP: AppDescriptor = {
 	id: 'rocketride.pipeBuilder',
-	name: 'Pipeline Builder',
+	name: 'Rocket Builder',
 	branding: {
-		appName: 'Pipeline Builder',
+		appName: 'Rocket Builder',
 		iconDark: React.createElement(IconDark, { style: { width: '100%', height: '100%' } }),
 		iconLight: React.createElement(IconLight, { style: { width: '100%', height: '100%' } }),
-		welcomeTitle: 'Pipeline Builder',
+		welcomeTitle: 'Rocket Builder',
 		welcomeSubtitle: 'Open a project from the Explorer or create a new one to get started.',
 	},
 	// Two-column app: RocketApp's root AppLayout declares the pipelines
 	// Explorer sidebar and the status bar.
 	app: RocketApp,
+	// Open with the sidebar panel closed (the rail stays reachable). Honored
+	// only until the person expands/collapses it themselves — their choice is
+	// remembered per app and wins on later visits.
+	sidebar: 'collapsed',
 };
 
 export default ROCKETRIDE_APP;

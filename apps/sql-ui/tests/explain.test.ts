@@ -34,7 +34,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import type { IPlanNode } from '../src/sql/explain';
+import type { PlanNode } from '../src/sql/explain';
 import { buildExplain, countPlanNodes, formatRawPlan, parseExplain, planNotes } from '../src/sql/explain';
 
 // =============================================================================
@@ -126,7 +126,7 @@ const CLICKHOUSE_ROWS = [
  * @param label - The label to match exactly.
  * @returns The first matching node, or null.
  */
-function findNode(node: IPlanNode, label: string): IPlanNode | null {
+function findNode(node: PlanNode, label: string): PlanNode | null {
 	if (node.label === label) return node;
 	for (const child of node.children) {
 		const hit = findNode(child, label);
@@ -393,7 +393,7 @@ describe('planNotes', () => {
 	 * @param fields - The fields as key/value text pairs.
 	 * @returns The node.
 	 */
-	function node(label: string, fields: Record<string, string> = {}): IPlanNode {
+	function node(label: string, fields: Record<string, string> = {}): PlanNode {
 		return {
 			label,
 			fields: Object.entries(fields).map(([key, value]) => ({ key, value, numeric: /^-?\d+(\.\d+)?$/.test(value) })),

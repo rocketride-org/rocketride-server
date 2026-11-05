@@ -11,11 +11,11 @@ that indexed video.
 
 ## What it does
 
-The node receives `video` data, collects the stream, submits the resulting
-temporary file for analysis, and writes the returned text to `text` when that
-lane has a listener. Pick it when a pipeline needs a hosted analysis response
-for a complete video, rather than local playback, transcription, or speech
-generation. There is no agent-tool interface.
+The node receives `video` data, streams it to a temporary file as it arrives,
+submits the completed file for analysis, and writes the returned text to
+`text` when that lane has a listener. Pick it when a pipeline needs a hosted
+analysis response for a complete video, rather than local playback,
+transcription, or speech generation. There is no agent-tool interface.
 
 ## Lanes
 
@@ -47,12 +47,13 @@ instances.
 
 ### Submission lifecycle and failures
 
-Every stream is buffered in memory, written to a temporary file when it ends,
-and analyzed through a new index named `rocketride-<random>`. The node polls
-the indexing task every five seconds, fails if that task reports `failed`, and
-raises `TwelveLabs task timed out` after 15 minutes. It attempts to delete both
-the temporary index and the local temporary file even when processing fails;
-an empty service response is emitted as `No data from TwelveLabs`.
+Every stream is written to a temporary file as its chunks arrive (not buffered
+in memory first), then analyzed through a new index named
+`rocketride-<random>` once the stream ends. The node polls the indexing task
+every five seconds, fails if that task reports `failed`, and raises
+`TwelveLabs task timed out` after 15 minutes. It attempts to delete both the
+temporary index and the local temporary file even when processing fails; an
+empty service response is emitted as `No data from TwelveLabs`.
 
 ### Input file suffix
 

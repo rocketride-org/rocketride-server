@@ -619,13 +619,15 @@ class Store(DocumentStoreBase):
         if checkCollection and not self.createCollection(chunks):
             return
 
-        object_ids_to_delete: Dict[str, bool] = {}
+        # The objects this batch starts over
+        object_ids_to_delete = self.objectIdsToReplace(chunks)
         ids: List[str] = []
         embeddings: List[List[float]] = []
         metadatas: List[Dict] = []
         documents: List[str] = []
 
         def flush():
+            """Delete the replaced objects on the first call, then upsert the queued chunks."""
             nonlocal ids, embeddings, metadatas, documents
             # Defense in depth: never index against a missing collection. Surface a clear,
             # actionable error instead of a cryptic "'NoneType' object has no attribute
@@ -640,7 +642,7 @@ class Store(DocumentStoreBase):
                     filter_condition = {'$or': [{'objectId': object_id} for object_id in object_ids_to_delete]}
                     self.collectionObj.delete(where=filter_condition)
                 else:
-                    filter_condition = {'objectId': list(object_ids_to_delete.keys())[0]}
+                    filter_condition = {'objectId': object_ids_to_delete[0]}
                     self.collectionObj.delete(where=filter_condition)
                 object_ids_to_delete.clear()
 
@@ -650,10 +652,6 @@ class Store(DocumentStoreBase):
                 embeddings.clear()
                 metadatas.clear()
                 documents.clear()
-
-        for chunk in chunks:
-            if chunk.metadata.chunkId == 0:
-                object_ids_to_delete[chunk.metadata.objectId] = True
 
         sum_size = 0
         cur_size = 0

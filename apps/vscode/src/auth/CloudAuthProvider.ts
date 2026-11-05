@@ -95,6 +95,10 @@ export class CloudAuthProvider implements vscode.UriHandler, vscode.Disposable {
 	/** The cloud server the in-flight sign-in exchanges its code against —
 	 * captured at signIn() because the callback arrives later. */
 	private pendingCloudUrl: string | null = null;
+	/** The Zitadel client id the pending sign-in authorized with — the
+	    server-side exchange must name the SAME client (Zitadel binds codes
+	    to their minting client; any other id fails with invalid_client). */
+	private pendingClientId: string | null = null;
 	/** Set when the LAST sign-in attempt came back waitlisted (auth fine,
 	 * access not yet granted, no token minted). In-memory only — the
 	 * waitlist is a server fact and must never persist into staleness; the
@@ -177,6 +181,7 @@ export class CloudAuthProvider implements vscode.UriHandler, vscode.Disposable {
 		const { verifier, challenge } = generatePkce();
 		this.pendingVerifier = verifier;
 		this.pendingCloudUrl = cloudUrl;
+		this.pendingClientId = clientId;
 
 		const authUrl = buildAuthUrl(zitadelUrl, clientId, REDIRECT_URI, challenge);
 		await vscode.env.openExternal(vscode.Uri.parse(authUrl));
@@ -285,12 +290,14 @@ export class CloudAuthProvider implements vscode.UriHandler, vscode.Disposable {
 			// custom server), never a value baked into the extension.
 			const cloudUrl = this.pendingCloudUrl;
 			this.pendingCloudUrl = null;
+			const clientId = this.pendingClientId ?? undefined;
+			this.pendingClientId = null;
 			if (!cloudUrl) {
 				vscode.window.showErrorMessage('RocketRide Cloud sign-in failed: no cloud server was captured for this sign-in.');
 				return;
 			}
 			const tempClient = new RocketRideClient({ persist: false });
-			const result = await tempClient.connect({ code, verifier, redirectUri: REDIRECT_URI }, { uri: cloudUrl });
+			const result = await tempClient.connect({ code, verifier, redirectUri: REDIRECT_URI, clientId }, { uri: cloudUrl });
 
 			const token = (result as any)?.userToken || '';
 			const displayName = (result as any)?.displayName || '';
