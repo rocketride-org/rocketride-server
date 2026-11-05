@@ -41,6 +41,11 @@ async function loadPackageJson() {
 	return { version: VERSION, repo: REPO };
 }
 
+// How long a request may stay silent (no response, no body data) before it is aborted
+// as ETIMEDOUT, so a host that accepts the connection but never answers is retried
+// and, in downloadFileFrom, left for the next URL.
+const REQUEST_IDLE_TIMEOUT_MS = 60_000;
+
 // Connection failures before any response that are worth another try: the host
 // did not answer, reset the connection, or name resolution failed for a moment.
 const RETRYABLE_NETWORK_CODES = new Set([
@@ -180,7 +185,19 @@ async function _download(url, destPath, task) {
 	const makeRequest = (currentUrl) => {
 		return new Promise((resolve, reject) => {
 			const protocol = currentUrl.startsWith('https') ? https : require('http');
-			const req = protocol.get(currentUrl, { headers: { 'User-Agent': 'rocketride-build' } }, resolve);
+			const req = protocol.get(
+				currentUrl,
+				{ headers: { 'User-Agent': 'rocketride-build' }, timeout: REQUEST_IDLE_TIMEOUT_MS },
+				resolve
+			);
+			// A socket timeout does not abort the request by itself.
+			req.on('timeout', () => {
+				const err = new Error(
+					`No data from ${new URL(currentUrl).host} for ${REQUEST_IDLE_TIMEOUT_MS / 1000}s`
+				);
+				err.code = 'ETIMEDOUT';
+				req.destroy(err);
+			});
 			req.on('error', reject);
 		});
 	};
