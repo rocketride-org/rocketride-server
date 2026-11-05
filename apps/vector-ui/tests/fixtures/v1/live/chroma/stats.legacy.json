@@ -22,5 +22,6 @@
   "counts_as_of": "<scrubbed>",
   "caveats": [
     "documents_by_first_chunk"
-  ]
+  ],
+  "document_count": 7
 }

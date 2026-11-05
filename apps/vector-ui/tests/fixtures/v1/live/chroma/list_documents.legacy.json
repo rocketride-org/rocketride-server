@@ -56,6 +56,25 @@
   "counts_exact": true,
   "distinct": true,
   "sorted": false,
+  "documents": [
+    {
+      "object_id": "91ae15d4-3f6e-589f-bb81-72301f2ca1b6",
+      "parent": "C:/demo/field/kestrel_field_guide.md",
+      "chunk_count": 5
+    },
+    {
+      "object_id": "dcfda41e-afa5-5f8d-b1c7-860cc0e03189",
+      "parent": "C:/demo/greenhouse/orchid_notes.txt",
+      "chunk_count": 4
+    },
+    {
+      "object_id": "012cc655-30be-5e9c-a91c-9359f91650b6",
+      "parent": "C:/demo/ops/memo_q3.txt",
+      "chunk_count": 4
+    }
+  ],
+  "offset": 0,
+  "has_more": true,
   "caveats": [
     "documents_unsorted"
   ]
