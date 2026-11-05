@@ -628,7 +628,7 @@ class _RequirementsMode(_CollectMode):
     """--list-requirements: the requirements.txt of every node a selected dynamic test will load.
 
     The builder installs them before the suites start in parallel
-    (server:warm-test-deps), so no suite installs packages while the others run.
+    (warmup:test-deps), so no suite installs packages while the others run.
     Only the dynamic tests count: they run the node, and the providers its test
     chain names, in a pipeline on the test server, which installs their
     requirements. A node's hand-written tests mock its SDK. A test that will be

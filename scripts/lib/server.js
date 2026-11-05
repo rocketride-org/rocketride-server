@@ -538,8 +538,8 @@ async function stopServer(serverObj, timeout = 5000) {
  *
  * depends() logs `Installed: <requirements file>` after each install. During a
  * test run an install makes every satisfied verdict stale, and the suites'
- * engines then queue on install.lock. server:warm-test-deps
- * (packages/server/scripts/tasks.js) installs before the suites start what its
+ * engines then queue on install.lock. warmup:test-deps (scripts/test-warmup.js)
+ * installs before the suites start what its
  * rules find: the startup globs and the nodes the selected node tests load. A
  * file named here is one those rules missed. On GitHub Actions the report is a
  * warning annotation. Reports only; the run's result does not change.
@@ -561,7 +561,7 @@ function reportInstallsDuringRun(logFile) {
 	if (files.size === 0) return;
 	const title = 'Packages installed during the test run';
 	const detail =
-		'server:warm-test-deps (packages/server/scripts/tasks.js) did not install these ' +
+		'warmup:test-deps (scripts/test-warmup.js) did not install these ' +
 		'requirement files before the suites started; widen its rules to cover them:';
 	const lines = [...files].map((file) => `  ${file}`);
 	if (process.env.GITHUB_ACTIONS === 'true') {

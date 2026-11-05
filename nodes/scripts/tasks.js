@@ -178,7 +178,7 @@ function makeStopTestServerAction() {
 // tests; options.warmup === 'plan' only lists them), 'list-skipped' (report the
 // selected tests that will be skipped), 'list-requirements' (the requirements
 // files of the nodes the selected dynamic tests will load, left in
-// ctx.nodeTestRequirements for server:warm-test-deps). Only 'run' needs the test server.
+// ctx.nodeTestRequirements for warmup:test-deps). Only 'run' needs the test server.
 function makeRunPytestAction(options = {}) {
 	const mode = options.mode || 'run';
 	return {
@@ -399,7 +399,7 @@ function makeTestAction(options = {}) {
 	}
 
 	// The collect-only modes above report the environment as it is; test runs complete it.
-	steps.push('server:warm-test-deps');
+	steps.push('warmup:test-deps');
 	steps.push({ name: 'nodes:install-test-deps', action: makeInstallTestDepsAction() });
 
 	// Download the selected heavy tests' models before the server starts, so the

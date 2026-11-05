@@ -58,6 +58,7 @@ const path = require('path');
 const { parallel, execCommand } = require('./lib');
 const { PROJECT_ROOT } = require('./lib/paths');
 const registry = require('./lib/registry');
+const warmupModule = require('./test-warmup');
 
 // Platform repo = the shell source lives in-tree. Standalone app repos
 // vendor the compiled shell instead.
@@ -271,4 +272,7 @@ const builderModule = {
 	],
 };
 
-module.exports = IS_PLATFORM_REPO ? [uiModule, builderModule] : [uiModule, clientVendorModule, builderModule];
+// The test warm-up drives the engine, nodes and ai suites, which only the platform repo has.
+module.exports = IS_PLATFORM_REPO
+	? [uiModule, warmupModule, builderModule]
+	: [uiModule, clientVendorModule, builderModule];

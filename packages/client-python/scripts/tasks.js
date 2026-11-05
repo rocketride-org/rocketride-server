@@ -375,7 +375,7 @@ module.exports = {
 					// the dist and depends() resolves against the complete constraint
 					// set. Before the bracket, so a slow first install does not hold
 					// the test server open.
-					'server:warm-test-deps',
+					'warmup:test-deps',
 					'client-python:setup-test-deps',
 					bracket({
 						name: 'py-test-server',

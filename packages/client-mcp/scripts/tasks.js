@@ -284,7 +284,7 @@ module.exports = {
 						['ai:build', 'nodes:build', 'client-mcp:build', 'client-python:build'],
 						'Build dependencies'
 					),
-					'server:warm-test-deps',
+					'warmup:test-deps',
 					bracket({
 						name: 'mcp-test-server',
 						setup: makeStartTestServerAction(options),
