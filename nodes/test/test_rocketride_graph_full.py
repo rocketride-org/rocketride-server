@@ -129,7 +129,7 @@ RULES_VERSION = SERVER_AGE_VERSION if SERVER_AGE_VERSION in ('1.5.0', '1.6.0') e
 def _by_version(expected: dict):
     """The recorded result for the AGE version under test; skip when none is recorded."""
     if SERVER_AGE_VERSION not in expected:
-        pytest.skip(f'no recorded AGE behaviour for version {SERVER_AGE_VERSION}')
+        pytest.skip(f'NOT RUN: no recorded AGE behaviour for version {SERVER_AGE_VERSION}')
     return expected[SERVER_AGE_VERSION]
 
 
@@ -844,7 +844,7 @@ class TestAgeDataGaps:
     def test_bulk_upsert_in_one_call_with_params(self, rr_env, age_graph):
         """1.6.0 rules: UNWIND + MERGE + SET stores every row in one call."""
         if RULES_VERSION != '1.6.0':
-            pytest.skip('one-call bulk upsert is rejected on the AGE 1.5.0 rules')
+            pytest.skip('NOT RUN: one-call bulk upsert is rejected on the AGE 1.5.0 rules')
         rows = [{'id': i, 'x': f'v{i}'} for i in range(1, 6)]
         glb = _begin(rr_env, {'allow_execute': True})
         inst = rr_env.iinstance_cls()
