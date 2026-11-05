@@ -248,7 +248,7 @@ class TestServerLimits:
         try:
             cap = glb.server_result_cap
             if cap is None:
-                pytest.skip('server does not allow GRAPH.CONFIG GET RESULTSET_SIZE')
+                pytest.skip('NOT RUN: server does not allow GRAPH.CONFIG GET RESULTSET_SIZE')
             assert glb.read_query_cap == min(25000, cap - 1)
             over = inst.read_query({'cypher': f'UNWIND range(1, {cap + 5000}) AS i RETURN i', 'limit': 25000})
             assert over['row_limit'] == cap - 1 and len(over['rows']) == cap - 1
@@ -263,7 +263,7 @@ class TestServerLimits:
         try:
             cap = glb.server_result_cap
             if cap is None:
-                pytest.skip('server does not allow GRAPH.CONFIG GET RESULTSET_SIZE')
+                pytest.skip('NOT RUN: server does not allow GRAPH.CONFIG GET RESULTSET_SIZE')
             assert glb.execute_graph_cap == min(glb.max_execute_rows, cap - 1)
             over = inst.execute({'query': f'UNWIND range(1, {cap + 5000}) AS i RETURN i', 'shape': 'graph'})
             assert over['row_limit'] == cap - 1 and len(over['rows']) == cap - 1
@@ -279,7 +279,7 @@ class TestServerLimits:
         try:
             cap = glb.server_result_cap
             if cap is None:
-                pytest.skip('server does not allow GRAPH.CONFIG GET RESULTSET_SIZE')
+                pytest.skip('NOT RUN: server does not allow GRAPH.CONFIG GET RESULTSET_SIZE')
             over = f'UNWIND range(1, {cap + 5000}) AS i RETURN i'
             out = inst.query({'cypher': over})
             assert 'error' not in out, out
@@ -298,7 +298,7 @@ class TestServerLimits:
         try:
             cap = glb.server_result_cap
             if cap is None:
-                pytest.skip('server does not allow GRAPH.CONFIG GET RESULTSET_SIZE')
+                pytest.skip('NOT RUN: server does not allow GRAPH.CONFIG GET RESULTSET_SIZE')
             # The default shape reads RESULTSET_SIZE on every call (#2617): a reply that reaches it is over the cap.
             with pytest.raises(
                 ValueError,
