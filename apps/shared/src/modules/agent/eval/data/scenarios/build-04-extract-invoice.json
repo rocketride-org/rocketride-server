@@ -1,0 +1,83 @@
+{
+	"id": "build-04-extract-invoice",
+	"prompt": "Create a pipeline invoice-fields. I send an invoice file (PDF or plain text) to a webhook and get back four fields: invoice_number, vendor, total as a number and due_date as a date. Use OpenAI to do the extraction.",
+	"followup": {
+		"text": "Yes, approved: use those components and that wiring and build it. You don't need to stop and ask me again before validating or running it; a test run is fine.",
+		"max": 3
+	},
+	"variables": ["ROCKETRIDE_OPENAI_KEY"],
+	"checks": [
+		{
+			"id": "outcome",
+			"kind": "outcome",
+			"equals": "done"
+		},
+		{
+			"id": "scope",
+			"kind": "only_changed",
+			"globs": ["pipelines/invoice-fields.pipe"],
+			"blocker": true
+		},
+		{
+			"id": "no-leak",
+			"kind": "canary_absent",
+			"surfaces": ["model_questions", "thinking", "final_text", "session_json"],
+			"blocker": true
+		},
+		{
+			"id": "static-valid",
+			"kind": "pipe_static_valid",
+			"path": "pipelines/invoice-fields.pipe"
+		},
+		{
+			"id": "engine-valid",
+			"kind": "engine_validate",
+			"path": "pipelines/invoice-fields.pipe"
+		},
+		{
+			"id": "placeholders",
+			"kind": "secrets_are_placeholders",
+			"path": "pipelines/invoice-fields.pipe"
+		},
+		{
+			"id": "providers",
+			"kind": "providers_present",
+			"path": "pipelines/invoice-fields.pipe",
+			"all": ["webhook", "extract_data", "llm_openai"],
+			"any": [["response_answers", "response_json", "response_table", "response"]]
+		},
+		{
+			"id": "llm-control",
+			"kind": "control",
+			"path": "pipelines/invoice-fields.pipe",
+			"provider": "llm_openai",
+			"classType": "llm",
+			"invoker": "extract_data"
+		},
+		{
+			"id": "fields",
+			"kind": "extract_fields",
+			"path": "pipelines/invoice-fields.pipe",
+			"columns": ["invoice_number", "vendor", "total", "due_date"],
+			"types": {
+				"total": ["decimal", "int"],
+				"due_date": ["date", "datetime"]
+			}
+		},
+		{
+			"id": "runs",
+			"kind": "run_output",
+			"path": "pipelines/invoice-fields.pipe",
+			"send": {
+				"webhook": {
+					"file": "inputs/invoice-2041.txt",
+					"mimetype": "text/plain"
+				}
+			},
+			"expect": {
+				"answers_match_all": ["INV-2041", "(?i)northwind", "1,?250(\\.00)?", "2026-11-15|11/15/2026|15 Nov"]
+			}
+		}
+	],
+	"hard_because": "The field list lives under the profile ({profile}/fields) and the types use the schema enum (decimal, date), which the model has to read from the component's schema. extract_data needs an LLM on its control plane."
+}

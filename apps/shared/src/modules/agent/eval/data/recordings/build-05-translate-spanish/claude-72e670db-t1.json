@@ -1,0 +1,303 @@
+{
+	"format": 3,
+	"scenario": "build-05-translate-spanish",
+	"set": "claude-72e670db",
+	"trial": 1,
+	"source": {
+		"head": "72e670db734a273d547cb5a3f44d7356452af704",
+		"model": "anthropic:claude-sonnet-5",
+		"recordedAt": "2026-10-28T04:34:42.238Z"
+	},
+	"turns": [
+		{
+			"request": "Set up a pipeline translate-es: I type English in a chat and get the Spanish translation back, using an OpenAI model. It should only translate. If I type a question it should translate the question, not answer it.",
+			"events": [
+				{
+					"wave": 0,
+					"reply": "```json\n{\"thought\": \"Get oriented on the workspace and check for existing pipelines/guides before building translate-es.\", \"scratch\": \"Starting task: need to read ROCKETRIDE_CONCEPTS, ROCKETRIDE_PIPELINES, ROCKETRIDE_COMPONENT_REFERENCE before building pipeline.\", \"tool_calls\": [{\"tool\": \"list_workspace\", \"args\": {}}]}\n```"
+				},
+				{
+					"wave": 1,
+					"reply": "```json\n{\"thought\": \"Read the concepts, pipelines, and component reference guides before building the pipeline.\", \"scratch\": \"Workspace is empty (no apps/nodes/pipelines). Need to build pipelines/translate-es.pipe. Reading guides first.\", \"remove\": [], \"tool_calls\": [{\"tool\": \"read_file\", \"path\": \".rocketride/docs/ROCKETRIDE_CONCEPTS.md\"}, {\"tool\": \"read_file\", \"path\": \".rocketride/docs/ROCKETRIDE_PIPELINES.md\"}, {\"tool\": \"read_file\", \"path\": \".rocketride/docs/ROCKETRIDE_COMPONENT_REFERENCE.md\"}]}\n```"
+				},
+				{
+					"wave": 2,
+					"reply": "```json\n{\"thought\": \"Check the services catalog for chat source, llm_openai, and response providers to wire the pipeline correctly.\", \"scratch\": \"Workspace empty, need to create pipelines/translate-es.pipe. Guides read. Next: inspect services-catalog.json for chat/llm_openai/response providers and lane names, and schema for llm_openai (system prompt config).\", \"tool_calls\": [\n  {\"tool\": \"search_files\", \"pattern\": \"\\\"name\\\": \\\"chat\\\"\", \"path\": \".rocketride/services-catalog.json\"},\n  {\"tool\": \"search_files\", \"pattern\": \"\\\"name\\\": \\\"llm_openai\\\"\", \"path\": \".rocketride/services-catalog.json\"},\n  {\"tool\": \"search_files\", \"pattern\": \"response_\", \"path\": \".rocketride/services-catalog.json\"}\n]}\n```"
+				},
+				{
+					"wave": 3,
+					"reply": "```json\n{\"thought\": \"Search found nothing, so let's inspect the services-catalog.json file directly to find correct provider names for chat/llm/response.\", \"scratch\": \"Workspace empty, need to create pipelines/translate-es.pipe. Guides read. search_files found no matches in services-catalog.json - need to read it directly to check path/content.\", \"tool_calls\": [{\"tool\": \"stat_file\", \"args\": {\"path\": \".rocketride/services-catalog.json\"}}, {\"tool\": \"read_file\", \"args\": {\"path\": \".rocketride/services-catalog.json\", \"maxBytes\": 200000}}]}\n```"
+				},
+				{
+					"wave": 4,
+					"reply": "```json\n{\"thought\": \"No local catalog file exists, so fetch the live component catalog via rocketride_client to find chat/llm/response providers.\", \"scratch\": \"Workspace empty, need to create pipelines/translate-es.pipe. Guides read. .rocketride/services-catalog.json doesn't exist locally - must use rocketride_client getServices() instead.\", \"tool_calls\": [{\"tool\": \"rocketride_client\", \"args\": {\"method\": \"getServices\"}}]}\n```"
+				},
+				{
+					"wave": 5,
+					"reply": "```json\n{\"thought\": \"Peek the rest of the services catalog to find the OpenAI LLM provider, chat source, and response/text output components.\", \"scratch\": \"Workspace empty, need to create pipelines/translate-es.pipe. Guides read. .rocketride/services-catalog.json doesn't exist locally - must use rocketride_client getServices() instead. Got partial list (68 of 187) in wave-4.r0: has 'chat' source, llm_nebius, but no llm_openai or response_* shown yet - likely in remaining 119 entries.\", \"tool_calls\": [{\"tool\": \"memory.peek\", \"args\": {\"key\": \"wave-4.r0\", \"path\": \"services\"}}]}\n```"
+				},
+				{
+					"wave": 6,
+					"reply": "```json\n{\"thought\": \"Fetch detailed schemas for chat, llm_openai, and response_text to learn their lanes and config fields before wiring the pipeline.\", \"scratch\": \"Catalog confirmed: chat (source, output likely 'questions'), llm_openai (llm), response_text (infrastructure, takes 'text' lane). Need lane names and config schema (e.g. system prompt) via getService.\", \"tool_calls\": [\n  {\"tool\": \"rocketride_client\", \"method\": \"getService\", \"args\": {\"method\": \"getService\", \"params\": [\"chat\"]}},\n  {\"tool\": \"rocketride_client\", \"args\": {\"method\": \"getService\", \"params\": [\"llm_openai\"]}},\n  {\"tool\": \"rocketride_client\", \"args\": {\"method\": \"getService\", \"params\": [\"response_text\"]}}\n]}\n```"
+				},
+				{
+					"wave": 7,
+					"reply": "```json\n{\"thought\": \"Check llm_openai schema for a system-prompt field and confirm response_answers lane before building the pipeline.\", \"scratch\": \"Plan: chat (-> questions) -> llm_openai (questions->answers, need system prompt field to force translation-only behavior) -> response_answers (answers->[]). Need to find system prompt config key in llm_openai schema (wave-6.r1 was truncated) and confirm response_answers lanes.\", \"tool_calls\": [{\"tool\": \"memory.peek\", \"key\": \"wave-6.r1\", \"args\": {\"key\": \"wave-6.r1\", \"path\": \"fields\"}}, {\"tool\": \"rocketride_client\", \"args\": {\"method\": \"getService\", \"params\": [\"response_answers\"]}}]}\n```"
+				},
+				{
+					"wave": 8,
+					"reply": "```json\n{\"thought\": \"Search the stored llm_openai schema text for a system-prompt/instructions field by paging through it.\", \"scratch\": \"Plan: chat(questions) -> llm_openai(questions->answers, need system/instructions field) -> response_answers(answers->[]). wave-6.r1 holds llm_openai schema as text, truncated server-side at 32000/51555 chars. Need to find 'fields' section for prompt/system/instructions field name.\", \"tool_calls\": [{\"tool\": \"memory.peek\", \"args\": {\"key\": \"wave-6.r1\", \"offset\": 16000, \"length\": 8000}}]}\n```"
+				},
+				{
+					"wave": 9,
+					"reply": "```json\n{\"thought\": \"Peek the remaining chunk of the llm_openai schema to find the system/instructions prompt field name needed for pipeline config.\", \"scratch\": \"Plan: chat(questions) -> llm_openai(questions->answers, system prompt field) -> response_answers(answers->[]). Need field name for instructions/system prompt in llm_openai config.\", \"tool_calls\": [{\"tool\": \"memory.peek\", \"args\": {\"key\": \"wave-6.r1\", \"offset\": 24000, \"length\": 8135}}]}\n```"
+				},
+				{
+					"wave": 10,
+					"reply": "```json\n{\"thought\": \"Search the docs/schema for how llm_openai takes a system prompt / instructions, since the schema read got truncated before reaching that field.\", \"scratch\": \"Plan: chat(questions) -> llm_openai(questions->answers) -> response_answers(answers->[]). Known llm_openai fields so far: model/profile, modelTotalTokens, modelOutputTokens, temperature, openai.custom/profile variants. Need systemPrompt/instructions field name - truncated in getService read. Known: response_text laneName default 'text', response_answers laneName default 'answers'.\", \"tool_calls\": [{\"tool\": \"search_files\", \"pattern\": \"systemPrompt\", \"path\": \".rocketride/docs/ROCKETRIDE_PIPELINES.md\"}, {\"tool\": \"search_files\", \"pattern\": \"systemPrompt\", \"path\": \".rocketride/docs/ROCKETRIDE_COMPONENT_REFERENCE.md\"}, {\"tool\": \"search_files\", \"pattern\": \"llm_openai\", \"path\": \".rocketride/docs/ROCKETRIDE_PIPELINES.md\"}]}\n```"
+				},
+				{
+					"wave": 11,
+					"reply": "```json\n{\"thought\": \"Read the PIPELINES guide example around line 380-400 to get the exact llm_openai config field names (systemPrompt/prompt) before writing the pipeline.\", \"scratch\": \"Plan: chat(source,_source->questions) -> llm_openai(questions->answers, config.systemPrompt=translate instruction) -> response_answers(answers->[]). Need exact field name for system prompt in llm_openai config - checking doc lines 238-400.\", \"tool_calls\": [{\"tool\": \"read_file\", \"path\": \".rocketride/docs/ROCKETRIDE_PIPELINES.md\", \"offset\": 230, \"limit\": 170}]}\n```"
+				},
+				{
+					"wave": 12,
+					"reply": "```json\n{\"thought\": \"Check the pipelines guide around the simple chat->llm_openai->response_answers example and systemPrompt field usage before writing the pipeline.\", \"scratch\": \"Plan: chat(source,_source->questions) -> llm_openai(questions->answers, config needs systemPrompt field to instruct translation-only) -> response_answers(answers->[]). Known schemas: chat lanes _source->questions; llm_openai lanes questions->answers, config.profile + config.parameters + profile-apikey; response_answers config.laneName default 'answers', lanes answers->[]. Need exact systemPrompt field name/location in llm_openai config - full schema truncated at 32000/51555 chars via getService. Check doc lines 520-570 and 930-950 for example with systemPrompt.\", \"tool_calls\": [{\"tool\": \"read_file\", \"path\": \".rocketride/docs/ROCKETRIDE_PIPELINES.md\", \"offset\": 520, \"limit\": 60}, {\"tool\": \"read_file\", \"path\": \".rocketride/docs/ROCKETRIDE_PIPELINES.md\", \"offset\": 900, \"limit\": 60}]}\n```"
+				},
+				{
+					"wave": 13,
+					"reply": "```json\n{\"thought\": \"Check the llm_openai example around line 390 for how systemPrompt/prompt is configured in a plain chat pipeline.\", \"scratch\": \"Plan: chat(source,_source->questions) -> llm_openai(questions->answers) -> response_answers(answers->[]). llm_openai fields seen: model, modelTotalTokens, modelOutputTokens, temperature, openai.profile etc. Need systemPrompt field - check line 390 example.\", \"tool_calls\": [{\"tool\": \"read_file\", \"args\": {\"path\": \".rocketride/docs/ROCKETRIDE_PIPELINES.md\", \"offset\": 370, \"limit\": 40}}]}\n```"
+				},
+				{
+					"wave": 14,
+					"reply": "```json\n{\"thought\": \"Search the pipelines guide for the 'prompt' node pattern (Starter 2) to see how to add a fixed instruction (translate to Spanish) before llm_openai, since llm_openai schema didn't reveal a systemPrompt field within reach.\", \"scratch\": \"Plan: chat(source->questions) -> prompt(questions[+config instruction]->questions) -> llm_openai(questions->answers) -> response_answers(answers->[]). Need to see 'prompt' node config schema and 'Starter 2' example in pipelines doc.\", \"tool_calls\": [\n  {\"tool\": \"search_files\", \"pattern\": \"Starter 2\", \"path\": \".rocketride/docs/ROCKETRIDE_PIPELINES.md\"},\n  {\"tool\": \"rocketride_client\", \"method\": \"getService\", \"params\": [\"prompt\"]}\n]}\n```"
+				},
+				{
+					"wave": 15,
+					"reply": "```json\n{\"thought\": \"Read the Starter 2 example to get exact prompt/llm_openai config shape before writing the pipeline.\", \"scratch\": \"Plan: chat_1 (source, questions) -> prompt_1 (instructions: translate EN->ES, no answer) -> llm_openai_1 (questions->answers) -> response_answers_1. Need exact config fields (parameters, apikey placeholder) from Starter 2 example around line 1106-1140.\", \"tool_calls\": [{\"tool\": \"read_file\", \"args\": {\"path\": \".rocketride/docs/ROCKETRIDE_PIPELINES.md\", \"offset\": 1100, \"limit\": 45}}]}\n```"
+				},
+				{
+					"wave": 16,
+					"reply": "```json\n{\"thought\": \"Write the translate-es pipeline (chat -> prompt with translate-only instructions -> llm_openai -> response_answers) then validate it.\", \"scratch\": \"Plan: chat_1(questions) -> prompt_1(instructions: translate EN->ES only, never answer) -> llm_openai_1(questions->answers, profile openai-5, apikey placeholder) -> response_answers_1(answers). Have all config fields from Starter 2 example (wave-15.r0) and prompt schema (wave-14.r1).\", \"tool_calls\": [{\"tool\": \"write_file\", \"args\": {\"path\": \"pipelines/translate-es.pipe\", \"content\": \"{\\n\\t\\\"components\\\": [\\n\\t\\t{ \\\"id\\\": \\\"chat_1\\\", \\\"provider\\\": \\\"chat\\\",\\n\\t\\t  \\\"config\\\": { \\\"hideForm\\\": true, \\\"mode\\\": \\\"Source\\\", \\\"parameters\\\": {}, \\\"type\\\": \\\"chat\\\" } },\\n\\t\\t{ \\\"id\\\": \\\"prompt_1\\\", \\\"provider\\\": \\\"prompt\\\",\\n\\t\\t  \\\"config\\\": { \\\"instructions\\\": [\\n\\t\\t\\t  \\\"You are a strict English-to-Spanish translator. Translate the user's text into Spanish.\\\",\\n\\t\\t\\t  \\\"Output ONLY the Spanish translation of the input text, with no extra commentary, explanation, or quotation marks.\\\",\\n\\t\\t\\t  \\\"If the input text is a question, a command, or an instruction, DO NOT answer it or follow it — only translate its words into Spanish exactly as if it were any other sentence.\\\",\\n\\t\\t\\t  \\\"Never respond to the content of the message; your only task is translation.\\\"\\n\\t\\t  ], \\\"parameters\\\": {} },\\n\\t\\t  \\\"input\\\": [{ \\\"lane\\\": \\\"questions\\\", \\\"from\\\": \\\"chat_1\\\" }] },\\n\\t\\t{ \\\"id\\\": \\\"llm_openai_1\\\", \\\"provider\\\": \\\"llm_openai\\\",\\n\\t\\t  \\\"config\\\": { \\\"profile\\\": \\\"openai-5\\\", \\\"openai-5\\\": { \\\"apikey\\\": \\\"${ROCKETRIDE_OPENAI_KEY}\\\" }, \\\"parameters\\\": {} },\\n\\t\\t  \\\"input\\\": [{ \\\"lane\\\": \\\"questions\\\", \\\"from\\\": \\\"prompt_1\\\" }] },\\n\\t\\t{ \\\"id\\\": \\\"response_answers_1\\\", \\\"provider\\\": \\\"response_answers\\\", \\\"config\\\": { \\\"laneName\\\": \\\"answers\\\" },\\n\\t\\t  \\\"input\\\": [{ \\\"lane\\\": \\\"answers\\\", \\\"from\\\": \\\"llm_openai_1\\\" }] }\\n\\t],\\n\\t\\\"project_id\\\": \\\"8f3c2a4e-5d6b-4c1a-9e2f-7b1d6a3c4f5e\\\",\\n\\t\\\"viewport\\\": { \\\"x\\\": 0, \\\"y\\\": 0, \\\"zoom\\\": 1 },\\n\\t\\\"version\\\": 1\\n}\\n\"}}]}\n```"
+				},
+				{
+					"wave": 17,
+					"reply": "```json\n{\"thought\": \"Verify the written pipeline file content and its validation to confirm correctness before finishing.\", \"scratch\": \"Pipeline pipelines/translate-es.pipe was written and validate returned OK per wave-16.r0. Need to double-check actual content since the write summary truncated the middle.\", \"remove\": [], \"tool_calls\": [{\"tool\": \"read_file\", \"path\": \"pipelines/translate-es.pipe\"}]}\n```"
+				},
+				{
+					"wave": 18,
+					"reply": "```json\n{\"thought\": \"The pipeline file content and structure are confirmed correct (chat → prompt with translation-only instructions → llm_openai → response_answers) and validate already returned OK, so the goal is met.\", \"scratch\": \"translate-es.pipe: chat_1 -> prompt_1 (instructions: translate only, don't answer questions) -> llm_openai_1 (profile openai-5, apikey ${ROCKETRIDE_OPENAI_KEY}) -> response_answers_1. validate: OK (wave-16.r0). Structure confirmed via read_file (wave-17.r0).\", \"remove\": [\"wave-0.r0\",\"wave-1.r0\",\"wave-1.r1\",\"wave-1.r2\",\"wave-2.r0\",\"wave-2.r1\",\"wave-2.r2\",\"wave-3.r0\",\"wave-3.r1\",\"wave-4.r0\",\"wave-5.r0\",\"wave-6.r0\",\"wave-6.r1\",\"wave-6.r2\",\"wave-7.r0\",\"wave-7.r1\",\"wave-8.r0\",\"wave-9.r0\",\"wave-10.r0\",\"wave-10.r1\",\"wave-10.r2\",\"wave-11.r0\",\"wave-12.r0\",\"wave-12.r1\",\"wave-13.r0\",\"wave-14.r0\",\"wave-14.r1\",\"wave-15.r0\"], \"done\": true, \"answer\": \"The `translate-es` pipeline is set up and saved at `pipelines/translate-es.pipe`:\\n\\n- **chat** — gives you a chat box to type English text into.\\n- **prompt** — adds strict instructions: act only as an English→Spanish translator, output only the translation, and if the input is a question or command, translate it literally rather than answering/executing it.\\n- **llm_openai** (GPT-5 profile) — does the actual translation, reading its API key from the `${ROCKETRIDE_OPENAI_KEY}` variable.\\n- **response_answers** — sends the Spanish translation back to the chat.\\n\\nThe pipeline validated successfully. One thing left for you: make sure the `ROCKETRIDE_OPENAI_KEY` variable is set in your environment, since the LLM node needs it to call OpenAI. I haven't run the pipeline live (e.g. via `client.chat()`) to see an actual translation — only validated its structure — so you may want to try it once to confirm the behavior matches what you expect.\"}\n```"
+				}
+			],
+			"ended": {
+				"outcome": "done",
+				"reason": "done"
+			},
+			"calls": [
+				{
+					"wave": 0,
+					"tool": "list_workspace",
+					"ok": true,
+					"args": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+					"result": "e3ed6351ceb4c2a2a68f65b4ca45df32ea27b2c8995517c5f9ff2c23c3f23865"
+				},
+				{
+					"wave": 1,
+					"tool": "read_file",
+					"ok": true,
+					"args": "6d9609e0dbd8369ea38c0ec07f407191f0a7531cf9f5d349b37f5c1c052e4632",
+					"result": ""
+				},
+				{
+					"wave": 1,
+					"tool": "read_file",
+					"ok": true,
+					"args": "320b62804840e10b9547220b78d88fca46122c34cde682d96b9a828383097e33",
+					"result": ""
+				},
+				{
+					"wave": 1,
+					"tool": "read_file",
+					"ok": true,
+					"args": "d7eb3c2084841f49aff0ab42f05222f28a742df003dc0004f342b329fe6d24a3",
+					"result": ""
+				},
+				{
+					"wave": 2,
+					"tool": "search_files",
+					"ok": true,
+					"args": "72b01700ab11ede4a27adc8e729a471325a2f1abe594e8094a825956772cbaac",
+					"result": ""
+				},
+				{
+					"wave": 2,
+					"tool": "search_files",
+					"ok": true,
+					"args": "1ff73a67a6d1dc9d240466ccec7312f627437f07c45b3c9401eae4b14273cc44",
+					"result": ""
+				},
+				{
+					"wave": 2,
+					"tool": "search_files",
+					"ok": true,
+					"args": "f515a9d9e6eb7b23bf3dbdb882f4ed98ee1dc7b7e6c35bd0c57423158098b28a",
+					"result": ""
+				},
+				{
+					"wave": 3,
+					"tool": "stat_file",
+					"ok": true,
+					"args": "2f751eef7f5fe78a43ef7140ad12e851e2179042487965301a5d1e8646469277",
+					"result": ""
+				},
+				{
+					"wave": 3,
+					"tool": "read_file",
+					"ok": false,
+					"args": "7099732e9df626179adee6f8453faef9c409238b2568aa341efdc3e112bc9edc",
+					"result": ""
+				},
+				{
+					"wave": 4,
+					"tool": "rocketride_client",
+					"ok": true,
+					"args": "65db211fc84fa4e2bab0c00b5674d83199e33b40f7078b5e6074fcd1dab7d816",
+					"result": ""
+				},
+				{
+					"wave": 6,
+					"tool": "rocketride_client",
+					"ok": true,
+					"args": "64f68d981528ef9af596ed478cb23ebe2684cb6ffc7fd49f383b8c1b7b0d1b85",
+					"result": ""
+				},
+				{
+					"wave": 6,
+					"tool": "rocketride_client",
+					"ok": true,
+					"args": "8907f1380e6885926396990bed03b50434013762d37fb86fb94e5d626aefaedb",
+					"result": ""
+				},
+				{
+					"wave": 6,
+					"tool": "rocketride_client",
+					"ok": true,
+					"args": "1fba6f5d4fcc546f506af11ec38d04f4ba88fb24d8c4471addfe4631cbe4fba8",
+					"result": ""
+				},
+				{
+					"wave": 7,
+					"tool": "rocketride_client",
+					"ok": true,
+					"args": "14021bf389846fafcd9fb0dcc69aab55c80b0c8d17d5f5be7e78121e51cadbf6",
+					"result": ""
+				},
+				{
+					"wave": 10,
+					"tool": "search_files",
+					"ok": true,
+					"args": "ee7726081d33a5a85f71a64a9ab169fa9d2901a3f7d2748e796d5dabeb801577",
+					"result": ""
+				},
+				{
+					"wave": 10,
+					"tool": "search_files",
+					"ok": true,
+					"args": "4905084a2c4fe98869d37b5d7a0231b35a1bfb25969e05a46171f2e5d4633533",
+					"result": ""
+				},
+				{
+					"wave": 10,
+					"tool": "search_files",
+					"ok": true,
+					"args": "da869495dd365553225ef0f32a2bfe9669ffc6cd215131415cd73d7aae463e0e",
+					"result": ""
+				},
+				{
+					"wave": 11,
+					"tool": "read_file",
+					"ok": true,
+					"args": "b2996ce58b8a21b72ff67231aafed618c8501dcf8bbdfe8d7f9989b9f5b20c79",
+					"result": ""
+				},
+				{
+					"wave": 12,
+					"tool": "read_file",
+					"ok": true,
+					"args": "0c1cbf12879cb385d1329aec24bc40e85cb5b0fe373ee0ef4796ed5f0ef65fb3",
+					"result": ""
+				},
+				{
+					"wave": 12,
+					"tool": "read_file",
+					"ok": true,
+					"args": "8880ae62c941d671333c6543675b15b7327477730a2db5593cfe20d324f98f3d",
+					"result": ""
+				},
+				{
+					"wave": 13,
+					"tool": "read_file",
+					"ok": true,
+					"args": "f84c5f86a8690235f4616d295b13c07ca813489bf64590a3c1bd7ba39831edd9",
+					"result": ""
+				},
+				{
+					"wave": 14,
+					"tool": "search_files",
+					"ok": true,
+					"args": "adc17bb49e83ab17f0987c373910db83b9babf9da96e29a6d9dd748ba8d88942",
+					"result": ""
+				},
+				{
+					"wave": 14,
+					"tool": "rocketride_client",
+					"ok": true,
+					"args": "e71cdb3bc221c9d5a76cf0e0203ced91954e0c4b5d7a6b922687f204f95e560d",
+					"result": ""
+				},
+				{
+					"wave": 15,
+					"tool": "read_file",
+					"ok": true,
+					"args": "01b89c1cc971b3418d531f06ec1a7c7b0706a9c2fe7c4a991a3e392493c76240",
+					"result": ""
+				},
+				{
+					"wave": 16,
+					"tool": "write_file",
+					"ok": true,
+					"args": "f0fbb0e565e6a26c6170b4021071241e72a33ba9e6d584d3fdfb2dfc7ea1127f",
+					"result": "db8a77339298255b57929f7fee01929a835e1db5b907ec42b16be1b3898111f6"
+				},
+				{
+					"wave": 17,
+					"tool": "read_file",
+					"ok": true,
+					"args": "21b74914d6a19ffb8556bcf2af1ee64c709d53b0ec2574f6e3b454cae5c6b102",
+					"result": "57f3978e1297eba4e59e940670e7824e9507948518129359a1328e1670dba95a"
+				}
+			]
+		}
+	],
+	"limits": {
+		"steps": 60,
+		"costUsd": 2
+	},
+	"expected": {
+		"status": "pass",
+		"checks": {
+			"outcome": "pass",
+			"scope": "pass",
+			"no-leak": "pass",
+			"static-valid": "pass",
+			"engine-valid": "not_in_layer",
+			"placeholders": "pass",
+			"providers": "pass",
+			"instruction": "pass",
+			"runs": "not_in_layer"
+		}
+	},
+	"finalFiles": {
+		"pipelines/translate-es.pipe": "f78191f632661195e72f5340d7ddfd09a557f78b96d0c3ef5884a857b4302432"
+	}
+}
