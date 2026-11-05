@@ -1,9 +1,9 @@
 # rocketride_sql
 
 A RocketRide database node for asking natural-language questions of, and writing
-structured pipeline data to, the relational database provisioned for the signed-in
-RocketRide tenant. Pick it instead of a connection-configured PostgreSQL node when
-the data belongs in that managed tenant database.
+structured pipeline data to, a managed RocketRide database: your organization's,
+your team's or your own (see Database). Pick it instead of a connection-configured
+PostgreSQL node when the data belongs in that managed database.
 
 ## What it does
 
@@ -95,10 +95,10 @@ abandoned instead.
 
 ## Configuration
 
-There is one built-in profile and no connection panel. RocketRide provisions a
-per-tenant database for its managed database nodes, and this node resolves it
-from the signed-in RocketRide identity instead of a host, user, password, or
-database name you enter. Configure the table and the context supplied to the
+There is one built-in profile and no connection panel. The node uses the managed
+database chosen under Database (Organization by default); the RocketRide server
+authorizes it for the run and delivers its connection at task start, instead of
+a host, user, password, or database name you enter. Configure the table and the context supplied to the
 LLM; leave direct execution disabled unless a trusted caller needs it.
 
 ### Table name and database description
@@ -189,16 +189,15 @@ for.
 
 ## Limitations
 
-This node is marked noremote and depends on a signed-in RocketRide identity to
-resolve the per-tenant DSN. It cannot start where that cloud identity is not
-available; DSN resolution is deliberately not replaced by host or credential
-fields. On a server without a RocketRide cloud database (for example, a local
-or self-hosted engine with no database broker) the task fails at start with a
-message that says so; use a connection-configured node such as db_postgres
-there. On RocketRide Cloud, missing broker configuration is a server
+This node is marked noremote. The RocketRide server resolves the connection to
+the node's chosen database at task start, through its cloud database broker; DSN resolution is deliberately not replaced by host or
+credential fields. On a server without a RocketRide cloud database (for
+example, a local or self-hosted engine with no database broker) the task fails
+at start with a message that says so; use a connection-configured node such as
+db_postgres there. On RocketRide Cloud, missing broker configuration is a server
 configuration error: contact the server operator to restore it and retry.
-LLM-generated queries are limited to the safe SQL path, while raw SQL
-is unavailable until direct execution is explicitly enabled.
+LLM-generated queries are limited to the safe SQL path, while raw SQL is
+unavailable until direct execution is explicitly enabled.
 
 ## Notes
 

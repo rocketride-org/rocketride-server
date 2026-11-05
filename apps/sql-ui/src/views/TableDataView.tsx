@@ -24,7 +24,8 @@
 // SQL-UI — TABLE DATA VIEW (server-paged data browser for one table)
 // =============================================================================
 
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createGeneration } from 'shared/explorer/generation';
 import type { CSSProperties } from 'react';
 import type { GridCellComponent } from 'shell';
 import { Banner, Card, ContentHeader, DataGrid, EmptyState, monoEl, mutedEl } from 'shell';
@@ -125,6 +126,13 @@ export const TableDataView: React.FC<TableDataViewProps> = ({ endpoint, table })
 	const seqRef = useRef(0);
 	const newestRef = useRef<Promise<IDataGridPage<Record<string, unknown>>> | null>(null);
 
+	// The same rule, carried down to the session (port of 740b69c6d): each page
+	// request takes a ticket, which the next request (or closing the view)
+	// expires. The session then sends nothing more for a superseded request,
+	// its one retry after a restart included, and its late answer is dropped.
+	const [generation] = useState(createGeneration);
+	useEffect(() => () => generation.invalidate(), [generation]);
+
 	// The table's reflected schema drives columns, search targets, and the
 	// default sort (primary key).
 	const tableDef = snapshot.schema?.tables?.[table] ?? null;
@@ -159,6 +167,7 @@ export const TableDataView: React.FC<TableDataViewProps> = ({ endpoint, table })
 		// different question, so the previous answer's failure stops being
 		// shown the moment this one starts rather than the moment it lands.
 		setLoadError(null);
+		const ticket = generation.next();
 
 		const run = (async (): Promise<IDataGridPage<Record<string, unknown>>> => {
 			if (!env.ready || !tableDef) return { rows: [], total: 0 };
@@ -167,12 +176,13 @@ export const TableDataView: React.FC<TableDataViewProps> = ({ endpoint, table })
 
 			// Page rows + total over the same WHERE (drives the pager). The two
 			// statements are independent, so one round trip instead of two.
-			// Both statements are SELECTs: safe to re-run, so they opt in to the
-			// session's one retry with a re-resolved token (the task may have
-			// restarted since this view last paged).
+			// Both statements are SELECTs, so they opt in to the session's one
+			// retry, which follows only a TASK_STOPPED refusal raised before the
+			// statement reaches the node (the task may be restarting since this
+			// view last paged).
 			const [pageResult, countResult] = await Promise.all([
-				session.execute(select, { params, idempotent: true }),
-				session.execute(count, { params, idempotent: true }),
+				session.execute(select, { params, idempotent: true, generation: ticket }),
+				session.execute(count, { params, idempotent: true, generation: ticket }),
 			]);
 			const total = Number((countResult.rows[0] as { total?: unknown } | undefined)?.total ?? pageResult.rows.length);
 			return { rows: pageResult.rows, total };
@@ -196,7 +206,7 @@ export const TableDataView: React.FC<TableDataViewProps> = ({ endpoint, table })
 		);
 		newestRef.current = chain;
 		return chain;
-	}, [env, endpoint, table, tableDef, dialect]);
+	}, [env, endpoint, table, tableDef, dialect, generation]);
 
 	/**
 	 * Surface a page-load failure (the grid itself only shows a transient
@@ -265,6 +275,7 @@ export const TableDataView: React.FC<TableDataViewProps> = ({ endpoint, table })
 						remoteSort
 						onLoadError={handleLoadError}
 						tableId={`sql-data-${endpoint.provider}`}
+						persistence={env.gridPersistence}
 						height="100%"
 						emptyTitle="No rows"
 						emptyDescription="The table is empty (or nothing matches the current search/filters)."

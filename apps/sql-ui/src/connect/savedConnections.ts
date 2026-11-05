@@ -52,9 +52,19 @@
 // =============================================================================
 
 import { useSyncExternalStore } from 'react';
-// The client type comes from the rocketride module itself (an MF shared
-// singleton beside 'shell') — the full SDK surface, no barrel indirection.
-import type { RocketRideClient } from 'rocketride';
+
+/**
+ * The three user-store calls the list needs. The engine core (sqlCore.ts)
+ * supplies them over the shell bus, each with an explicit timeout.
+ */
+export interface SavedConnectionsFs {
+	/** Create a folder (an existing one is not an error worth reporting). */
+	fsMkdir(path: string): Promise<unknown>;
+	/** Read a JSON file. */
+	fsReadJson(path: string): Promise<unknown>;
+	/** Write a JSON file. */
+	fsWriteJson(path: string, value: unknown): Promise<unknown>;
+}
 
 // =============================================================================
 // TYPES
@@ -113,9 +123,33 @@ export type SavedConnectionsStatus = 'idle' | 'loading' | 'ready';
 
 let status: SavedConnectionsStatus = 'idle';
 let connections: SavedSqlConnection[] = [];
+/**
+ * A replica's note that the controller published only part of the list (its
+ * first `kept` of `total` records; see ops.ts ConnectionsState). Always null
+ * in the realm that owns the list.
+ */
+export interface ReplicaPartial {
+	/** Records in the replica. */
+	kept: number;
+	/** Records in the controller's list. */
+	total: number;
+}
+let partial: ReplicaPartial | null = null;
 /** Writes the list back to the server store (installed by load). */
 let persist: ((list: SavedSqlConnection[]) => void) | null = null;
 const listeners = new Set<() => void>();
+
+/** Why the stored list could not be used (null: nothing is wrong). */
+let loadProblem: string | null = null;
+
+/**
+ * Why the last load left the list unusable, for the UI and the core to say.
+ *
+ * @returns A sentence, or null.
+ */
+export function getSavedConnectionsLoadProblem(): string | null {
+	return loadProblem;
+}
 
 /** Monotonic load counter — an outdated in-flight load never wins. */
 let loadSeq = 0;
@@ -148,18 +182,30 @@ function commit(next: SavedSqlConnection[]): void {
  * controller as retained channel state (applySavedConnections). Reconnects
  * re-load against the new server; a missing file is first run.
  *
- * @param client - The shell's RocketRide client.
+ * @param client - The user-store calls (the engine core's, over the bus).
  */
-export async function loadSavedConnections(client: RocketRideClient): Promise<void> {
+export async function loadSavedConnections(client: SavedConnectionsFs): Promise<void> {
 	const seq = ++loadSeq;
+	loadProblem = null;
 	status = 'loading';
 	notify();
 	// Ensure the app-data folder exists (idempotent; failure surfaces on write).
 	try { await client.fsMkdir(STORE_DIR); } catch { /* already exists */ }
 	let list: SavedSqlConnection[] = [];
 	try {
-		const raw = (await client.fsReadJson(STORE_PATH)) as SavedSqlConnection[] | null | undefined;
-		if (Array.isArray(raw)) list = raw;
+		const raw: unknown = await client.fsReadJson(STORE_PATH);
+		if (!Array.isArray(raw)) {
+			// The file parsed, but it is not a list of connections (another
+			// version's format, a hand edit): treat it like an unreadable file.
+			// No writer is installed, so the next save cannot replace it.
+			if (seq !== loadSeq) return;
+			loadProblem = 'Your saved connections file is not a list of connections (another version\'s format, or edited by hand), so it was left as it is and nothing will be saved to it.';
+			console.log('[sql-ui] saved connections file has an unrecognized format; left untouched');
+			status = 'idle';
+			notify();
+			return;
+		}
+		list = raw as SavedSqlConnection[];
 	} catch (err) {
 		// Only a PROVEN-missing file is first run (the store raises
 		// StorageError('File not found: …')). Any other failure — transport
@@ -201,15 +247,90 @@ export async function loadSavedConnections(client: RocketRideClient): Promise<vo
  * children have already unsubscribed by the time its cleanup runs, so in an
  * isolated document (VS Code webview) the listener set is empty here and
  * the reset proceeds exactly as before.
+ *
+ * `force` resets whoever still renders it: a change of signed-in identity
+ * (the list is the previous user's) or the owner's unmount.
+ *
+ * @param opts - `force`: reset even while the list is on screen.
  */
-export function resetSavedConnections(): void {
-	if (listeners.size > 0) return;
+export function resetSavedConnections(opts: { force?: boolean } = {}): void {
+	if (listeners.size > 0 && opts.force !== true) return;
 	loadSeq++;
+	loadProblem = null;
 	status = 'idle';
 	connections = [];
+	partial = null;
 	persist = null;
 	pendingUpserts.length = 0;
 	notify();
+}
+
+/** Owners alive in this realm (engine cores that load and write the list). */
+let owners = 0;
+
+/**
+ * Mark this realm as an OWNER of the list for as long as the returned release
+ * is not called (the engine core does, for its lifetime). While a realm owns
+ * the list, a replica snapshot never overwrites it: in one realm (rocket-ui)
+ * the frames and the controller share this module, and a snapshot the
+ * controller could not publish (over the retained-state cap) or one that is
+ * still loading must not wipe the owner's list or cancel its load.
+ *
+ * @returns Release the claim (idempotent).
+ */
+export function ownSavedConnections(): () => void {
+	owners++;
+	let released = false;
+	return () => {
+		if (released) return;
+		released = true;
+		owners--;
+	};
+}
+
+/**
+ * A published partial note, if it is one.
+ *
+ * @param value - What the snapshot carried.
+ * @returns The note, or null (the list is whole).
+ */
+function readPartial(value: unknown): ReplicaPartial | null {
+	if (value === null || typeof value !== 'object') return null;
+	const { kept, total } = value as { kept?: unknown; total?: unknown };
+	return typeof kept === 'number' && typeof total === 'number' && kept < total ? { kept, total } : null;
+}
+
+/**
+ * Applies a snapshot the controller published (`{ status, list, partial }`)
+ * in a realm that does NOT own the list: a ready list becomes the read-only
+ * replica (with its partial note), anything else shows as loading. A no-op
+ * where an owner is alive.
+ *
+ * @param snapshot - The controller's snapshot.
+ * @param snapshot.status - The list's status in the controller.
+ * @param snapshot.list - The list (empty unless ready).
+ * @param snapshot.partial - Null, or how much of the list it holds.
+ */
+export function applyReplicaConnections(snapshot: { status: SavedConnectionsStatus; list: SavedSqlConnection[]; partial?: ReplicaPartial | null } | undefined): void {
+	if (owners > 0) return;
+	if (snapshot?.status === 'ready' && Array.isArray(snapshot.list)) {
+		const next = readPartial(snapshot.partial);
+		const changed = JSON.stringify(next) !== JSON.stringify(partial);
+		partial = next;
+		applySavedConnections(snapshot.list);
+		if (changed) notify();
+	} else {
+		resetSavedConnections({ force: true });
+	}
+}
+
+/**
+ * The replica's partial note (non-React consumers).
+ *
+ * @returns Null when the list is whole (always, where the list is owned).
+ */
+export function getSavedConnectionsPartial(): ReplicaPartial | null {
+	return partial;
 }
 
 /**
@@ -340,5 +461,17 @@ export function useSavedConnectionsStatus(): SavedConnectionsStatus {
 	return useSyncExternalStore(
 		(cb) => { listeners.add(cb); return () => listeners.delete(cb); },
 		() => status,
+	);
+}
+
+/**
+ * Subscribes to the replica's partial note (see {@link getSavedConnectionsPartial}).
+ *
+ * @returns Null when the list is whole.
+ */
+export function useSavedConnectionsPartial(): ReplicaPartial | null {
+	return useSyncExternalStore(
+		(cb) => { listeners.add(cb); return () => listeners.delete(cb); },
+		() => partial,
 	);
 }

@@ -38,85 +38,37 @@
 
 import type { SqlDialect } from '../connect';
 import type { StatementKind } from './classify';
-import { CTE_WRITE_WORDS } from './classify';
-import { codeOnly, keywordSites, stripSqlComments } from './split';
+import { CTE_WRITE_WORDS, selectsInto } from './classify';
+import { codeOnly, codeWithOperands, keywordSites, stripSqlComments } from './split';
+import {
+	formatBatchOutcome,
+	formatElapsed,
+	formatPriorStatements,
+	formatRunLabel as formatSharedRunLabel,
+	hasStatementInFlight,
+} from 'shared/explorer/runner/format';
+import type { IStatementRunBase, RunOutcome } from 'shared/explorer/runner/types';
+
+// The outcome wording is shared with the other Explorers (shared/explorer/runner/format):
+// SQL's defaults are the autocommit words, so what users read is unchanged.
+// (Port of 4c584a214.)
+export { formatBatchOutcome, formatElapsed, formatPriorStatements, hasStatementInFlight };
+export type { RunOutcome };
 
 // =============================================================================
 // TYPES
 // =============================================================================
 
-/**
- * How one statement of a batch ended.
- *
- * - `pending` — queued, not started.
- * - `running` — sent, no answer yet.
- * - `rows` — returned a result set.
- * - `affected` — reported an affected-row count.
- * - `error` — the node or the database rejected it.
- * - `abandoned` — the user stopped waiting; it MAY still be running remotely.
- * - `skipped` — an earlier statement failed, so this one was never sent.
- */
-export type RunOutcome = 'pending' | 'running' | 'rows' | 'affected' | 'error' | 'abandoned' | 'skipped';
-
 /** One statement of a batch, with whatever is known about it so far. */
-export interface StatementRun {
-	/** Zero-based position in the batch. */
-	index: number;
+export interface StatementRun extends IStatementRunBase {
 	/** The statement as sent (before the row limit is appended). */
 	sql: string;
 	/** Statement kind, by pattern. */
 	kind: StatementKind;
-	/** Leading keyword, for the strip label. */
-	verb: string;
-	/** Start offset in the editor buffer, when the statement came from one. */
-	start?: number;
-	/** End offset in the editor buffer, when the statement came from one. */
-	end?: number;
-	/**
-	 * One-based first line in the editor buffer. ABSENT for a statement that
-	 * did not come from the editor — a history rerun has no position, and
-	 * inventing line 1 would decorate and name unrelated text.
-	 */
-	startLine?: number;
-	/** One-based last line in the editor buffer; absent with {@link startLine}. */
-	endLine?: number;
-	/** Current outcome. */
-	outcome: RunOutcome;
 	/** Returned rows, when the outcome is `rows`. */
 	rows?: Record<string, unknown>[];
-	/** Affected-row count, when the outcome is `affected`. */
-	affected?: number;
-	/** Round-trip milliseconds, once an answer (or an abandonment) landed. */
-	ms?: number;
-	/** Verbatim failure text, when the outcome is `error`. */
-	error?: string;
-	/** Row limit appended to this statement, or null when none was. */
-	limitApplied?: number | null;
 	/** How the row limit came about — decides which meta wording applies. */
 	limitState?: LimitState;
-}
-
-// =============================================================================
-// WHAT IS AT THE DATABASE
-// =============================================================================
-
-/**
- * Whether one of these statements is AT THE DATABASE right now.
- *
- * NOT the same question as "is the batch running". The batch is running from
- * the moment Run is pressed, which includes the time a pattern-check dialog
- * sits open with nothing yet sent; only a run whose outcome is `running` has
- * been handed to `session.execute` and is waiting on an answer.
- *
- * The "Stop waiting" affordance keys on THIS, because what it says when it is
- * used — that the database may still be running the statement and cannot be
- * told to stop — is only true of a request that was actually made.
- *
- * @param runs - The batch's statements, in order.
- * @returns True when one of them has been sent and has not answered yet.
- */
-export function hasStatementInFlight(runs: StatementRun[]): boolean {
-	return runs.some((run) => run.outcome === 'running');
 }
 
 // =============================================================================
@@ -136,97 +88,6 @@ export function leadingVerb(sql: string, dialect: SqlDialect = 'unknown'): strin
 }
 
 /**
- * Format a round-trip duration.
- *
- * @param ms - Milliseconds measured in the browser.
- * @returns e.g. `round trip 0.031 s`.
- */
-export function formatElapsed(ms: number): string {
-	return `round trip ${(ms / 1000).toFixed(3)} s`;
-}
-
-/** The words a batch position can be described with. */
-type OutcomeGroup = 'ran' | 'committed' | 'failed' | 'not run' | 'abandoned';
-
-/**
- * Which word describes a finished statement.
- *
- * A read `ran`; anything else `committed`. The distinction matters because
- * "committed" is the app's way of saying the change is already durable and
- * cannot be undone from here — saying it about a SELECT dilutes the one word
- * that has to carry that weight. Anything not clearly read-only is called
- * committed, which is the safe direction.
- *
- * @param run - The statement.
- * @returns The group, or null for a statement that has not resolved.
- */
-function groupOf(run: StatementRun): OutcomeGroup | null {
-	if (run.outcome === 'rows' || run.outcome === 'affected') return run.kind === 'read' ? 'ran' : 'committed';
-	if (run.outcome === 'error') return 'failed';
-	if (run.outcome === 'abandoned') return 'abandoned';
-	if (run.outcome === 'skipped' || run.outcome === 'pending') return 'not run';
-	return null;
-}
-
-/**
- * Summarise a finished batch in one line, e.g.
- * `1 ran · 2 committed · 3 failed · 4–5 not run`.
- *
- * Positions are one-based and consecutive positions in the same group collapse
- * into a range. A statement still running contributes nothing, so the line is
- * only complete once the batch is.
- *
- * @param runs - The batch's statements, in order.
- * @returns The summary line ('' when there is nothing to say).
- */
-export function formatBatchOutcome(runs: StatementRun[]): string {
-	const parts: string[] = [];
-	let groupStart = -1;
-	let groupName: OutcomeGroup | null = null;
-
-	/**
-	 * Close the open range and push its phrase.
-	 *
-	 * @param endIndex - One-based position of the range's last statement.
-	 */
-	const flush = (endIndex: number): void => {
-		if (groupName === null || groupStart < 0) return;
-		const span = groupStart === endIndex ? `${groupStart}` : `${groupStart}–${endIndex}`;
-		parts.push(`${span} ${groupName}`);
-	};
-
-	for (let i = 0; i < runs.length; i++) {
-		const group = groupOf(runs[i]);
-		if (group === groupName) continue;
-		flush(i);
-		groupName = group;
-		groupStart = group === null ? -1 : i + 1;
-	}
-	flush(runs.length);
-	return parts.join(' · ');
-}
-
-/**
- * What the failure banner says about the statements BEFORE the one that
- * failed — the sentence that has to stop a reader assuming a failed batch
- * rolled back.
- *
- * @param runs - The batch, in order.
- * @param failedIndex - Zero-based index of the statement that failed.
- * @returns The sentence, or '' when nothing ran before the failure.
- */
-export function formatPriorStatements(runs: StatementRun[], failedIndex: number): string {
-	const prior = runs.slice(0, Math.max(0, failedIndex));
-	if (prior.length === 0) return '';
-	const span = prior.length === 1 ? 'Statement 1' : `Statements 1\u2013${prior.length}`;
-	// One write or DDL before the failure is enough: something is durable.
-	const changed = prior.some((run) => run.kind !== 'read');
-	return changed
-		? `${span} already committed (each statement runs in its own autocommit transaction).`
-		: `${span} already ran.`;
-}
-
-/**
  * The status strip's label for one statement, e.g.
  * `2 UPDATE · 3 affected · round trip 0.012 s`.
  *
@@ -237,24 +98,7 @@ export function formatPriorStatements(runs: StatementRun[], failedIndex: number)
  * @returns The label.
  */
 export function formatRunLabel(run: StatementRun): string {
-	const head = `${run.index + 1} ${run.verb}`;
-	const elapsed = run.ms === undefined ? '' : ` · ${formatElapsed(run.ms)}`;
-	switch (run.outcome) {
-		case 'rows':
-			return `${head} · ${(run.rows?.length ?? 0).toLocaleString()} rows${elapsed}`;
-		case 'affected':
-			return `${head} · ${(run.affected ?? 0).toLocaleString()} affected${elapsed}`;
-		case 'error':
-			return `${head} · error${elapsed}`;
-		case 'abandoned':
-			return `${head} · abandoned${elapsed}`;
-		case 'running':
-			return `${head} · running…`;
-		case 'skipped':
-			return `${head} · not run`;
-		default:
-			return `${head} · queued`;
-	}
+	return formatSharedRunLabel({ ...run, rowCount: run.rows?.length ?? run.rowCount });
 }
 
 // =============================================================================
@@ -375,6 +219,79 @@ function hashCommentPrecedesClause(sql: string, lockingAt: number, dialect: SqlD
 const FETCH_LIMIT_HEAD = /^fetch\s+(?:first|next)(?![\w$])/i;
 
 /**
+ * ClickHouse's `LIMIT n BY expr`, also spelled `LIMIT m, n BY` and `LIMIT n
+ * OFFSET m BY`: it caps the rows PER GROUP of `expr`, not the result, so it
+ * is not the statement's row limit. ClickHouse accepts an ordinary `LIMIT`
+ * after it, which is where the header's goes. `n` and `m` are constants or
+ * query parameters (`{n:UInt32}`), so each is one token here; matched on
+ * masked text sliced at a `limit` site, like {@link FETCH_LIMIT_HEAD}.
+ */
+const LIMIT_BY_HEAD = /^limit\s+[^\s,()]+(?:\s*,\s*[^\s,()]+)?(?:\s+offset\s+[^\s,()]+)?\s+by(?![\w$])/i;
+
+/**
+ * Whether the dialect may be one that has `LIMIT n BY`: ClickHouse, or a
+ * connection whose dialect could not be probed. On PostgreSQL and MySQL the
+ * clause does not parse at all, and the statement is left as it was.
+ *
+ * @param dialect - The engine dialect.
+ * @returns True when a `LIMIT ... BY` may be a per-group limit.
+ */
+function mayLimitByGroup(dialect: SqlDialect): boolean {
+	return dialect === 'clickhouse' || dialect === 'unknown';
+}
+
+/**
+ * ClickHouse's trailing `SETTINGS name = value, ...` and `FORMAT Name`
+ * clauses, matched on masked text sliced at a depth-0 `settings`/`format`
+ * site. ClickHouse orders them after every LIMIT (`... LIMIT n SETTINGS ...
+ * FORMAT ...`, or FORMAT first) and rejects a LIMIT that follows either.
+ * `FORMAT` must also be the statement's last clause apart from a trailing
+ * SETTINGS, so a column or alias named `format` or `settings` (`SELECT format
+ * FROM t`, `WHERE settings = 1`) never matches.
+ * Only a `;` and comments may follow the format name: `--` and block comments
+ * are masked, but ClickHouse can read `#` as a line comment, which the
+ * scanner masks on MySQL alone, so an unmasked `# ...` is allowed there too.
+ */
+const SETTINGS_CLAUSE_HEAD = /^settings\s+[a-z_][\w]*\s*=/i;
+const FORMAT_CLAUSE = /^format\s+[a-z_][\w]*(?:\s+settings\s+[a-z_][\w]*\s*=[\s\S]*?)?\s*;?\s*(?:#[^\n]*\s*)*$/i;
+
+/**
+ * Masked text before a `settings`/`format` site that still expects an
+ * operand: a comma, an opening parenthesis, a dot, an operator, or a keyword
+ * such as BY, FROM or JOIN. There the word is a column, table or alias name
+ * (`ORDER BY format DESC`, `ORDER BY a, format ASC`, `FROM format f`), never
+ * the trailing clause, which only follows a complete query. `*` is left out
+ * because `SELECT * FORMAT CSV` is a complete ClickHouse query. The word
+ * boundary is the identifier class written out, not `\b`, for the reason
+ * `keywordSites` gives, and without a lookbehind (Safari 13).
+ */
+const EXPECTS_OPERAND = /(?:[,(.=<>+\-/%|&^~!]|(?:^|[^A-Za-z0-9_$\u0080-\uffff])(?:by|from|join|select|distinct|where|prewhere|having|on|using|and|or|not|in|is|like|ilike|between|as|case|when|then|else))\s*$/i;
+
+/**
+ * Where a trailing ClickHouse `SETTINGS` or `FORMAT` clause starts (the first
+ * of them when both are present), or -1. Only on a dialect that may be
+ * ClickHouse (see {@link mayLimitByGroup}); neither clause parses on
+ * PostgreSQL or MySQL.
+ *
+ * @param sql - The statement.
+ * @param dialect - The engine dialect.
+ * @returns The clause's start index, or -1.
+ */
+function trailingClickHouseClauseAt(sql: string, dialect: SqlDialect): number {
+	if (!mayLimitByGroup(dialect)) return -1;
+	const masked = codeOnly(sql, dialect);
+	// A literal or a quoted name right before the site is a complete operand,
+	// which the plain mask would blank away (`kind = 'click' SETTINGS ...`).
+	const operands = codeWithOperands(sql, dialect);
+	for (const site of keywordSites(sql, ['settings', 'format'], dialect)) {
+		if (site.depth !== 0 || EXPECTS_OPERAND.test(operands.slice(0, site.index))) continue;
+		const rest = masked.slice(site.index);
+		if (site.keyword === 'settings' ? SETTINGS_CLAUSE_HEAD.test(rest) : FORMAT_CLAUSE.test(rest)) return site.index;
+	}
+	return -1;
+}
+
+/**
  * Where the statement's own outermost row-limit clause starts — `LIMIT` or
  * the SQL standard's `FETCH { FIRST | NEXT } ... ONLY` — or -1 when it has
  * none. Either spelling shares `LIMIT`'s grammar slot, so a statement bounded
@@ -424,7 +341,13 @@ function inStatementLimitAt(sql: string, dialect: SqlDialect): number {
 	const masked = codeOnly(sql, dialect);
 	for (const site of keywordSites(sql, ['limit', 'fetch'], dialect)) {
 		if (site.depth !== 0) continue;
-		if (site.keyword === 'limit' || FETCH_LIMIT_HEAD.test(masked.slice(site.index))) return site.index;
+		if (site.keyword === 'limit') {
+			// A per-group `LIMIT n BY` bounds each group, not the result: look on
+			// for a real one (ClickHouse allows one after it).
+			if (mayLimitByGroup(dialect) && LIMIT_BY_HEAD.test(masked.slice(site.index))) continue;
+			return site.index;
+		}
+		if (FETCH_LIMIT_HEAD.test(masked.slice(site.index))) return site.index;
 	}
 	return -1;
 }
@@ -433,7 +356,8 @@ function inStatementLimitAt(sql: string, dialect: SqlDialect): number {
  * How a result's row limit came about.
  *
  * - `applied` — the app added the header's limit: appended at the end, or
- *   inserted before a trailing locking clause.
+ *   inserted before a trailing locking clause or, on ClickHouse and an
+ *   unprobed dialect, before a trailing `SETTINGS` or `FORMAT` clause.
  * - `in-statement` — the statement carried its own LIMIT, so the app added
  *   none and the row count is the STATEMENT's bound, not the table's size.
  * - `none` — no limit is in play at all.
@@ -445,12 +369,16 @@ export type LimitState = 'applied' | 'in-statement' | 'none';
  *
  * The limit is APPENDED at the end, except on a statement whose last clause is
  * a lock, where it is INSERTED before that clause — the one placement both
- * MySQL and PostgreSQL accept.
+ * MySQL and PostgreSQL accept — and, on ClickHouse or a dialect that could not
+ * be probed, on a statement that ends in `SETTINGS` or `FORMAT`, where it is
+ * inserted before the first of them.
  *
  * A statement that already carries its own LIMIT is left alone: the user's
  * limit governs, and the meta line reports that none was applied by the app.
  * Nothing is added to writes, DDL, SHOW, EXPLAIN or DESCRIBE, where the clause
- * is either invalid or silently changes what the statement does.
+ * is either invalid or silently changes what the statement does — nor to a
+ * `SELECT ... INTO` on any dialect ({@link selectsInto}), which writes its rows
+ * into a table, a file or variables, so a limit would truncate what it writes.
  *
  * @param sql - The statement.
  * @param limit - The header selection ('200', '1000' or 'All').
@@ -468,6 +396,14 @@ export function applyRowLimit(sql: string, limit: string, dialect: SqlDialect = 
 	const returnsRows = RETURNS_ROWS.test(bare)
 		|| stripped.startsWith('(')
 		|| (/^with\b/i.test(bare) && keywordSites(bare, CTE_WRITE_WORDS, dialect).length === 0);
+	// A SELECT ... INTO returns no rows: it fills a new table (PostgreSQL), a
+	// file or variables (MySQL), or a file (ClickHouse). An appended LIMIT would
+	// silently truncate the copy, or follow MySQL's trailing INTO where it does
+	// not parse. It goes out as typed, its own LIMIT included, and since no
+	// rows come back no limit is reported either. Checked before the statement's
+	// own limit for that reason, with the classification's own test, so the run
+	// is a `write` there too.
+	if (returnsRows && selectsInto(sql, dialect)) return { sql, limit: null, state: 'none' };
 	// Checked BEFORE the header selection, so `All` on a statement that limits
 	// itself still reports the statement's limit instead of claiming none. Two
 	// spellings count: `LIMIT n` and the SQL standard's `FETCH { FIRST | NEXT }
@@ -522,6 +458,14 @@ export function applyRowLimit(sql: string, limit: string, dialect: SqlDialect = 
 		// the line would revive it. Such a statement goes out untouched.
 		if (hashCommentPrecedesClause(sql, lockingAt, dialect)) return { sql, limit: null, state: 'none' };
 		return { sql: `${sql.slice(0, lockingAt).trimEnd()}\nLIMIT ${value}\n${sql.slice(lockingAt)}`, limit: value, state: 'applied' };
+	}
+	// ClickHouse's SETTINGS and FORMAT clauses come after every LIMIT, so the
+	// header's limit goes in front of the first of them, the same way it goes in
+	// front of a locking clause. A LIMIT appended after either does not parse.
+	const trailingAt = trailingClickHouseClauseAt(sql, dialect);
+	if (trailingAt >= 0) {
+		if (hashCommentPrecedesClause(sql, trailingAt, dialect)) return { sql, limit: null, state: 'none' };
+		return { sql: `${sql.slice(0, trailingAt).trimEnd()}\nLIMIT ${value}\n${sql.slice(trailingAt)}`, limit: value, state: 'applied' };
 	}
 	// The clause is joined with a NEWLINE, not a space: the checks above run on
 	// comment-stripped text but the statement is sent RAW, so appending after a

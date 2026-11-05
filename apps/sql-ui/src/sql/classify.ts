@@ -28,8 +28,10 @@
 // about being guesses:
 //
 //   `classifyStatement` — what kind of statement this is. The runner uses it
-//   to decide whether a failed call may be retried with a fresh token
-//   (`idempotent`), so the rule is conservative: anything that is not clearly
+//   to decide whether a call may take the session's one retry (`idempotent`),
+//   which follows only a `TASK_STOPPED` refusal the engine raises before the
+//   statement reaches the node (a dev tool's controller classifies again);
+//   the rule is conservative all the same: anything that is not clearly
 //   read-only is not a read. `EXPLAIN ANALYZE` really executes its inner
 //   statement, so it is classified by that statement, not as a read — and
 //   `patternCheck` peels the same prefix for the same reason.
@@ -61,7 +63,8 @@ import type { KeywordSite } from './split';
  * What a statement does, by text pattern.
  *
  * - `read` — returns rows and changes nothing (SELECT, SHOW, EXPLAIN, DESCRIBE).
- * - `write` — changes rows (INSERT, UPDATE, DELETE, REPLACE, MERGE, TRUNCATE).
+ * - `write` — changes rows (INSERT, UPDATE, DELETE, REPLACE, MERGE, TRUNCATE),
+ *   or sends a SELECT's rows into a table, a file or variables (`SELECT ... INTO`).
  * - `ddl` — changes the schema (CREATE, ALTER, DROP, RENAME).
  * - `tx` — transaction control, which has no effect through this app's
  *   per-call autocommit execution path.
@@ -98,6 +101,26 @@ const TX_LEADERS = /^(begin|start\s+transaction|commit|rollback|savepoint|releas
 const TX_SET = /^set\s+(?:session\s+|global\s+|local\s+)?(?:autocommit|transaction)\b/i;
 
 /**
+ * PostgreSQL's other transaction spellings that no other dialect uses:
+ * `ABORT` (ROLLBACK) and `PREPARE TRANSACTION` (two-phase commit;
+ * `COMMIT PREPARED` / `ROLLBACK PREPARED` already lead with COMMIT/ROLLBACK).
+ */
+const TX_POSTGRES = /^(?:abort|prepare\s+transaction)\b/i;
+
+/**
+ * PostgreSQL's `END [WORK | TRANSACTION]` (COMMIT). Only under 'postgres': in
+ * MySQL, and in a body split without its dollar quotes, a lone END closes a
+ * compound statement.
+ */
+const TX_POSTGRES_END = /^end(?:\s+(?:work|transaction))?$/i;
+
+/**
+ * MySQL's: XA (distributed) transactions, and autocommit set through a
+ * system-variable reference (`SET @@autocommit`, `SET @@session.autocommit`).
+ */
+const TX_MYSQL = /^(?:xa\s+(?:start|begin|end|prepare|commit|rollback|recover)\b|set\s+@@(?:(?:session|global|local)\.)?autocommit\b)/i;
+
+/**
  * The `EXPLAIN` prefix: the keyword, an optional parenthesised option list, and
  * any bare option words before the statement being explained.
  */
@@ -111,6 +134,35 @@ const EXPLAIN_PREFIX = /^explain\s*(?:\([^)]*\)\s*)?(?:(?:analyz[se]|verbose|ext
  * unbounded under a meta line that says otherwise.
  */
 export const CTE_WRITE_WORDS = ['insert', 'update', 'delete', 'merge', 'replace'];
+
+/**
+ * Whether a statement that leads like a read sends its rows somewhere else
+ * instead of back to the caller: an `INTO` in its CODE.
+ *
+ * PostgreSQL's `SELECT ... INTO [TEMP | UNLOGGED] [TABLE] name` creates and
+ * fills a table; MySQL's `INTO OUTFILE` and `INTO DUMPFILE` write a file on
+ * the server and `INTO @var` sets variables, before `FROM` or at the end;
+ * ClickHouse's `INTO OUTFILE` writes a file. None of them returns rows, so
+ * none is a read, and a row limit appended to one would silently truncate
+ * what it writes (or, after MySQL's trailing INTO, be a syntax error naming
+ * a clause the user never typed).
+ *
+ * Read on MASKED text, so `into` in a literal, a comment or a quoted
+ * identifier is not one, and at ANY depth: no read-only SELECT carries an
+ * INTO anywhere, and the one way a data-modifying CTE does (`INSERT INTO`) is
+ * a write already. Only ever asked about a statement led by SELECT, a
+ * parenthesised set expression or a WITH chain.
+ *
+ * Exported for the same reason as {@link CTE_WRITE_WORDS}: the row-limit rule
+ * in `batch.ts` must give the same answer as the classification.
+ *
+ * @param sql - The statement.
+ * @param dialect - The engine dialect.
+ * @returns True when the statement carries an INTO in code.
+ */
+export function selectsInto(sql: string, dialect: SqlDialect = 'unknown'): boolean {
+	return keywordSites(sql, ['into'], dialect).length > 0;
+}
 
 /**
  * Keywords that can lead a statement, whether it is the one a `WITH` chain
@@ -239,10 +291,14 @@ export function classifyStatement(sql: string, dialect: SqlDialect = 'unknown'):
 
 	if (TX_SET.test(head)) return 'tx';
 	if (TX_LEADERS.test(head)) return 'tx';
-	if (READ_LEADERS.test(head)) return 'read';
+	if ((dialect === 'postgres' || dialect === 'unknown') && TX_POSTGRES.test(head)) return 'tx';
+	if (dialect === 'postgres' && TX_POSTGRES_END.test(head)) return 'tx';
+	if ((dialect === 'mysql' || dialect === 'unknown') && TX_MYSQL.test(head)) return 'tx';
+	// A SELECT ... INTO fills a table, a file or variables: a write.
+	if (READ_LEADERS.test(head)) return /^select\b/i.test(head) && selectsInto(head, dialect) ? 'write' : 'read';
 	if (WRITE_LEADERS.test(head)) return 'write';
 	if (DDL_LEADERS.test(head)) return 'ddl';
-	if (/^with\b/i.test(head)) return keywordSites(head, CTE_WRITE_WORDS, dialect).length > 0 ? 'write' : 'read';
+	if (/^with\b/i.test(head)) return keywordSites(head, CTE_WRITE_WORDS, dialect).length > 0 || selectsInto(head, dialect) ? 'write' : 'read';
 	return 'other';
 }
 

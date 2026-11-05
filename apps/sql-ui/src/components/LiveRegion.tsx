@@ -21,93 +21,87 @@
 // SOFTWARE.
 
 // =============================================================================
-// SQL-UI — LIVE REGION (one polite announcer for the whole app)
+// SQL-UI — LIVE REGION (one polite announcer per realm)
+// =============================================================================
+//
+// The component itself is shared (shared/explorer/a11y/LiveRegion); this binds
+// it to SQL Explorer's own announcer, which is one per realm (a module).
+//
+// ONE REGION PER REALM. In-shell, every dev-tool frame (and the full app, when
+// it is open too) lives in one realm and shares the announcer: a region in
+// each mount would speak every sentence once per open document. Every mount
+// renders `<LiveRegion />`; only the first alive one renders the region, and
+// the claim passes on when it unmounts. The region goes to `document.body`
+// through a portal: the host hides background tabs with `display: none`, which
+// would silence a region inside one.
 // =============================================================================
 
-import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import type { CSSProperties } from 'react';
-import { getAnnouncement, subscribeAnnouncements } from '../a11y/announce';
+import React, { useEffect, useState, useSyncExternalStore } from 'react';
+import { createPortal } from 'react-dom';
+import { createLiveRegion } from 'shared/explorer/a11y/LiveRegion';
+import { sqlAnnouncer } from '../a11y/announce';
 
-// =============================================================================
-// TIMING
-// =============================================================================
+/** The region itself, bound to SQL Explorer's announcer. */
+const Region = createLiveRegion(sqlAnnouncer);
+
+/** Which mount renders the realm's one region. */
+export interface RegionClaims {
+	/**
+	 * Ask to render the region (idempotent per id).
+	 *
+	 * @returns Give the claim up (idempotent).
+	 */
+	claim(id: symbol): () => void;
+	/** The mount that renders it: the first alive claim, or null. */
+	holder(): symbol | null;
+	/** Told whenever the holder may have changed. */
+	subscribe(listener: () => void): () => void;
+}
 
 /**
- * How long the region stays empty before the new sentence is put back.
+ * Create a set of claims (one per realm; tests make their own).
  *
- * The clear and the restore must land in DIFFERENT tasks: a removal and an
- * insertion inside one commit can be coalesced into "no change" by the time
- * assistive technology reads the accessibility tree, which is exactly how a
- * repeated sentence goes unspoken.
+ * @returns The claims.
  */
-const RESTORE_DELAY_MS = 50;
+export function createRegionClaims(): RegionClaims {
+	const claims: symbol[] = [];
+	const listeners = new Set<() => void>();
+	const notify = (): void => listeners.forEach((listener) => listener());
+	return {
+		claim(id) {
+			if (!claims.includes(id)) {
+				claims.push(id);
+				notify();
+			}
+			return () => {
+				const at = claims.indexOf(id);
+				if (at < 0) return;
+				claims.splice(at, 1);
+				notify();
+			};
+		},
+		holder: () => claims[0] ?? null,
+		subscribe(listener) {
+			listeners.add(listener);
+			return () => { listeners.delete(listener); };
+		},
+	};
+}
 
-// =============================================================================
-// STYLES
-// =============================================================================
+/** This realm's claims. */
+const realmClaims = createRegionClaims();
 
 /**
- * Visually hidden but readable: clipped to a 1px box rather than
- * `display: none` or `visibility: hidden`, both of which remove the element
- * from the accessibility tree and would silence it.
- */
-const hidden: CSSProperties = {
-	position: 'absolute',
-	width: 1,
-	height: 1,
-	margin: -1,
-	padding: 0,
-	border: 0,
-	overflow: 'hidden',
-	clip: 'rect(0 0 0 0)',
-	clipPath: 'inset(50%)',
-	whiteSpace: 'nowrap',
-};
-
-// =============================================================================
-// COMPONENT
-// =============================================================================
-
-/**
- * The app's single polite live region. Mounted once by `SqlApp`; every
- * `announce()` call anywhere in the app lands here.
- *
- * Every announcement — including a REPEAT of the sentence already showing —
- * empties the region and puts the text back a task later. Replacing the node
- * in one commit (by keying it on the revision) is not enough: the removal and
- * the insertion can be coalesced before the accessibility tree is read, and a
- * repeated sentence then goes unspoken. A newer announcement cancels a
- * restore still pending for the previous one, so only the latest is voiced.
- *
- * @returns The live region element.
+ * The realm's single polite live region: mount it in every root (the full
+ * app, each dev-tool frame); every `announce()` lands in the one region the
+ * first alive root renders.
  */
 export const LiveRegion: React.FC = () => {
-	const announcement = useSyncExternalStore(subscribeAnnouncements, getAnnouncement, getAnnouncement);
-	const [spoken, setSpoken] = useState('');
-	const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-	useEffect(() => {
-		// Empty first, in this commit; the text returns in a later task.
-		setSpoken('');
-		if (announcement.text === '') return undefined;
-		timerRef.current = setTimeout(() => {
-			timerRef.current = null;
-			setSpoken(announcement.text);
-		}, RESTORE_DELAY_MS);
-		// Runs before the next announcement's setup, which is how a pending
-		// restore is cancelled.
-		return () => {
-			if (timerRef.current === null) return;
-			clearTimeout(timerRef.current);
-			timerRef.current = null;
-		};
-	}, [announcement.revision, announcement.text]);
-
-	return (
-		<div style={hidden} aria-live="polite" aria-atomic="true" role="status">
-			<span>{spoken}</span>
-		</div>
-	);
+	const [id] = useState(() => Symbol('sql-live-region'));
+	useEffect(() => realmClaims.claim(id), [id]);
+	const holder = useSyncExternalStore(realmClaims.subscribe, realmClaims.holder, realmClaims.holder);
+	if (holder !== id || typeof document === 'undefined') return null;
+	return createPortal(<Region />, document.body);
 };
 
 export default LiveRegion;

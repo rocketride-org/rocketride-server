@@ -36,15 +36,18 @@
 // host-mounted devToolSidebar (see sqlBridge.ts).
 // =============================================================================
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { useShellConnection } from 'shell';
+import { ConnectionManager, useShellConnection } from 'shell';
+import { useEngineSource } from 'shared/explorer/react';
 import { SidebarMenu, BxPlus, BxCheck, BxEditAlt, BxTrash } from 'shell';
 import type { DevToolProps, ViewMenu } from 'shell';
-import { useSavedConnections, useSavedConnectionsStatus, loadSavedConnections, deleteSavedConnection, endpointKeyForConnection, releaseDirectEndpoint } from './connect';
+import { useSavedConnections, useSavedConnectionsStatus, endpointKeyForConnection } from './connect';
 import type { SavedSqlConnection } from './connect';
-import { localSidebarBridge, createSidebarToolBridge } from './sqlBridge';
-import type { SqlSidebarBridge } from './sqlBridge';
+import type { SqlSidebarBridge } from './sidebarBridge';
+import { SQL_CONTROLLER_PROTOCOL } from './sqlBridge';
+import { attachSqlController } from './sqlController';
+import type { SqlControllerMount } from './sqlController';
 import { DatabaseIcon } from './icons';
 
 // =============================================================================
@@ -150,8 +153,8 @@ const styles = {
 
 /** Props for {@link SqlSidebar}. */
 export interface SqlSidebarProps {
-	/** The frame bridge (in-document calls by default; peer in a tool mount). */
-	bridge?: SqlSidebarBridge;
+	/** The frame bridge (in-document calls in the full app; the channel in a tool mount). */
+	bridge: SqlSidebarBridge;
 	/**
 	 * Host-tracked selection (DevToolProps.activeDocKey): the fronted SQL
 	 * document's key — a saved connection id highlights that row and shows
@@ -171,8 +174,8 @@ export interface SqlSidebarProps {
  * Two mounts, one sidebar: AppLayout's `sidebar` slot in the full app (local
  * bridge), and the host's sidebar panel as a devToolSidebar (peer bridge).
  */
-const SqlSidebar: React.FC<SqlSidebarProps> = ({ bridge = localSidebarBridge, hostActiveDoc }) => {
-	const { client, isConnected } = useShellConnection();
+const SqlSidebar: React.FC<SqlSidebarProps> = ({ bridge, hostActiveDoc }) => {
+	const { isConnected } = useShellConnection();
 	const connections = useSavedConnections();
 	const connectionsStatus = useSavedConnectionsStatus();
 
@@ -291,9 +294,9 @@ const SqlSidebar: React.FC<SqlSidebarProps> = ({ bridge = localSidebarBridge, ho
 										onClick={(e) => {
 											e.stopPropagation();
 											// Best-effort stop of a direct connection's temp
-											// pipeline; the idle TTL reaps it otherwise.
-											if (conn.mode === 'direct' && isConnected && client) void releaseDirectEndpoint(client, endpointKeyForConnection(conn));
-											deleteSavedConnection(conn.id);
+											// pipeline (the idle TTL reaps it otherwise), then
+											// the record goes.
+											bridge.deleteConnection(conn);
 											setConfirmDeleteId(null);
 										}}
 									>
@@ -367,20 +370,43 @@ const SqlSidebar: React.FC<SqlSidebarProps> = ({ bridge = localSidebarBridge, ho
  * activeDocKey to highlight the fronted connection.
  */
 export const SqlDevToolSidebar: React.FC<DevToolProps> = ({ channel, documents, activeDocKey }) => {
-	const { client, isConnected } = useShellConnection();
-	// Controller bridge: commits incoming saves, publishes the list as
-	// retained channel state, and carries the sidebar's actions.
-	const bridge = useMemo(() => createSidebarToolBridge({ channel, ...(documents ? { documents } : {}) }), [channel, documents]);
-
-	// This is the OWNER realm: load the list from the server store with the
-	// persistence writer installed. Every mutation — inline delete here,
-	// editor saves arriving over the channel — commits in this realm, and
-	// each commit republishes the state topic to every document.
+	// The realm's engine source: a stable getter over its client and a stable
+	// readiness store. The controller is built once per channel; neither a new
+	// client nor a reconnect rebuilds it.
+	const { getClient, readiness } = useEngineSource();
+	// The controller (sqlController.ts): its engine core, exactly one op
+	// server (created after the channel), the retained state it publishes, and
+	// the sidebar's bridge. Built in an EFFECT and disposed with it (R6): under
+	// StrictMode that is mount -> dispose -> mount, which leaves one live op
+	// server. It posts nothing and opens no document at mount (R7).
+	const [mount, setMount] = useState<SqlControllerMount | null>(null);
+	// The host's documents API, read at call time: a host that hands a new
+	// object on a re-render must not remount the controller (its op server).
+	const documentsRef = useRef(documents);
+	documentsRef.current = documents;
 	useEffect(() => {
-		if (isConnected && client) void loadSavedConnections(client);
-	}, [isConnected, client]);
+		const attached = attachSqlController({
+			channel,
+			documents: {
+				open: (key, title) => documentsRef.current?.open(key, title),
+				close: (key) => documentsRef.current?.close(key),
+			},
+			cm: ConnectionManager.getInstance(),
+			getClient,
+			engine: readiness,
+			protocol: SQL_CONTROLLER_PROTOCOL,
+		});
+		setMount(attached);
+		return () => {
+			attached.dispose();
+			setMount((current) => (current === attached ? null : current));
+		};
+	}, [channel, getClient, readiness]);
+	// A non-null activeDocKey means a person fronted a document: probes may start.
+	useEffect(() => { mount?.noteActiveDocKey(activeDocKey); }, [mount, activeDocKey]);
 
-	return <SqlSidebar bridge={bridge} {...(activeDocKey !== undefined ? { hostActiveDoc: activeDocKey } : {})} />;
+	if (!mount) return null;
+	return <SqlSidebar bridge={mount.bridge} {...(activeDocKey !== undefined ? { hostActiveDoc: activeDocKey } : {})} />;
 };
 
 export default SqlSidebar;

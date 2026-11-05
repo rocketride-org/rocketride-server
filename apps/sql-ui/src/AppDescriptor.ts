@@ -31,8 +31,10 @@
 import 'react/jsx-dev-runtime';
 
 import type { AppDescriptor } from 'shell';
-import SqlApp, { SqlDevTool } from './SqlApp';
+import SqlApp from './SqlApp';
+import SqlDevTool from './SqlDevTool';
 import { SqlDevToolSidebar } from './SqlSidebar';
+import { SQL_APP_ID } from './appId';
 
 /**
  * SQL Explorer app descriptor. The client area hosts the connection landing
@@ -41,7 +43,7 @@ import { SqlDevToolSidebar } from './SqlSidebar';
  * schema tree.
  */
 const SQL_APP: AppDescriptor = {
-	id: 'rocketride.sql',
+	id: SQL_APP_ID,
 	name: 'SQL Explorer',
 	branding: {
 		appName: 'SQL Explorer',

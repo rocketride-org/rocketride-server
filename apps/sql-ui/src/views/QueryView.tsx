@@ -48,27 +48,29 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { usePrefs } from 'shell';
 import type { GridCellComponent, GridColumnDefinition } from 'shell';
 import { Banner, Button, Card, CardDataGrid, ConfirmDialog, ContentHeader, EmptyState, StatusBadge, ToggleGroup, commonStyles, monoEl, mutedEl } from 'shell';
-import type { SqlEndpoint, SqlDialect } from '../connect';
+import type { SqlEndpoint, SqlExecuteResult, SqlDialect } from '../connect';
 import { useSchema } from '../schema/schemaStore';
 import { useSqlEnv } from '../sqlEnv';
 import SqlEditor from '../components/SqlEditor';
 import type { DecorationRange, EditorCursorState, SqlEditorHandle } from '../components/SqlEditor';
 import StatementStrip from '../components/StatementStrip';
 import CellInspector from '../components/CellInspector';
+import { FailureBanner } from 'shared/explorer/components/FailureBanner';
+import { PatternConfirmDialog } from 'shared/explorer/components/PatternConfirmDialog';
+import { lineRange, clock } from 'shared/explorer/runner/format';
+import { useStatementRunner } from 'shared/explorer/runner/useStatementRunner';
 import HistoryPanel from '../components/HistoryPanel';
 import ExplainPanel from '../components/ExplainPanel';
 import { announce } from '../a11y/announce';
 import { splitStatements, splitStatementsIn, statementAtOffset } from '../sql/split';
+import { liveBufferText, selectRunTargets } from '../sql/targets';
 import { classifyStatement, patternCheck } from '../sql/classify';
-import type { PatternFinding } from '../sql/classify';
-import { applyRowLimit, formatBatchOutcome, formatElapsed, formatPriorStatements, hasStatementInFlight, leadingVerb } from '../sql/batch';
-import type { StatementRun, RunOutcome } from '../sql/batch';
+import { applyRowLimit, formatBatchOutcome, formatElapsed, formatPriorStatements, leadingVerb } from '../sql/batch';
+import type { StatementRun } from '../sql/batch';
 import {
 	ALLOW_EXECUTE_OFF_TEXT,
-	DATABASE_SAID_LABEL,
 	GENERIC_ERROR_TEXT,
 	TRANSACTION_REFUSAL_TEXT,
 	describeFailure,
@@ -78,7 +80,6 @@ import type { FailureNotice } from '../sql/failure';
 import { inferColumnTypes } from '../sql/resultTypes';
 import { buildCompletionModel } from '../sql/completion';
 import { buildExplain } from '../sql/explain';
-import { emitRun } from '../history/runEvents';
 import type { HistoryEntry } from '../history/types';
 import { DatabaseIcon } from '../icons';
 
@@ -118,34 +119,11 @@ interface RunTarget {
 	endLine?: number;
 }
 
-/** A pending pattern-check confirmation, and the resolver waiting on it. */
-interface PatternPrompt {
-	/** The statement the check fired on. */
-	run: StatementRun;
-	/** What the check saw. */
-	finding: PatternFinding;
-}
-
-/** A failed statement, and where in the batch it was. */
-interface FailureState {
-	/** What the failure means and what to show. */
-	notice: FailureNotice;
-	/** Zero-based index of the statement that failed. */
-	index: number;
-	/** Line range of the failing statement; '' when it has no editor position. */
-	lines: string;
-	/** What is true of everything before the failure ('' when it failed first). */
-	prior: string;
-}
-
 /** Row-limit options offered by the header toggle. */
 const LIMIT_OPTIONS = ['200', '1000', 'All'] as const;
 
 /** Prefs key holding the per-connection pattern-check switch. */
 const PATTERN_CHECK_PREF = 'sql.patternChecks';
-
-/** How long a run must last before "Stop waiting" is offered. */
-const STOP_WAITING_AFTER_MS = 1000;
 
 // =============================================================================
 // STYLES
@@ -199,61 +177,11 @@ const styles = {
 		fontSize: 11,
 		color: 'var(--rr-text-secondary)',
 	} as CSSProperties,
-
-	// Verbatim driver text inside the error banner.
-	verbatim: {
-		margin: '6px 0 0',
-		padding: 8,
-		maxHeight: 180,
-		overflow: 'auto',
-		fontFamily: 'var(--rr-font-mono, monospace)',
-		fontSize: 11,
-		whiteSpace: 'pre-wrap',
-		background: 'color-mix(in srgb, var(--rr-text-primary) 6%, transparent)',
-		borderRadius: 4,
-	} as CSSProperties,
-
-	// Statement excerpt inside the confirmation dialog.
-	excerpt: {
-		margin: '8px 0',
-		padding: 8,
-		maxHeight: 120,
-		overflow: 'auto',
-		fontFamily: 'var(--rr-font-mono, monospace)',
-		fontSize: 11,
-		whiteSpace: 'pre-wrap',
-		background: 'color-mix(in srgb, var(--rr-text-primary) 6%, transparent)',
-		borderRadius: 4,
-	} as CSSProperties,
 };
 
 // =============================================================================
 // HELPERS
 // =============================================================================
-
-/**
- * Describe a line range the way the pre-run line and the strip do.
- *
- * @param from - First line (one-based), or undefined for a statement with no
- *               position in the editor (a rerun from the history drawer).
- * @param to - Last line (one-based).
- * @returns e.g. `line 4` or `lines 4–6`; '' when there is no position.
- */
-function lineRange(from?: number, to?: number): string {
-	if (from === undefined || to === undefined) return '';
-	return from === to ? `line ${from}` : `lines ${from}–${to}`;
-}
-
-/**
- * Clock time for the meta and history lines.
- *
- * @param at - Unix ms.
- * @returns `HH:MM`.
- */
-function clock(at: number): string {
-	const date = new Date(at);
-	return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
-}
 
 /**
  * Why Explain cannot run on a statement, or null when it can.
@@ -301,13 +229,15 @@ function toHistoryEntry(run: StatementRun): HistoryEntry {
 		at: Date.now() - (run.ms ?? 0),
 		ms: run.ms ?? 0,
 		outcome,
-		rows: run.outcome === 'rows' ? run.rows?.length ?? 0 : undefined,
-		affected: run.outcome === 'affected' ? run.affected ?? 0 : undefined,
-		error: run.error,
 		kind: run.kind,
+		// Absent fields are left out rather than set to undefined: the entry may
+		// cross to a dev tool's controller as JSON.
+		...(run.outcome === 'rows' ? { rows: run.rows?.length ?? 0 } : {}),
+		...(run.outcome === 'affected' ? { affected: run.affected ?? 0 } : {}),
+		...(run.error !== undefined ? { error: run.error } : {}),
 		// Only a limit the APP appended is reported; a statement's own LIMIT is
 		// already visible in the stored text.
-		limit: run.limitState === 'applied' ? run.limitApplied ?? undefined : undefined,
+		...(run.limitState === 'applied' && typeof run.limitApplied === 'number' ? { limit: run.limitApplied } : {}),
 	};
 }
 
@@ -330,25 +260,18 @@ function toHistoryEntry(run: StatementRun): HistoryEntry {
 export const QueryView: React.FC<QueryViewProps> = ({ endpoint, label, initialSql, origin }) => {
 	const env = useSqlEnv();
 	const snapshot = useSchema(endpoint.key);
-	const prefs = usePrefs();
+	// The pattern-check switch: workspace preferences in the full app, this
+	// session only in a dev-tool frame (SqlEnv prefs; never usePrefs here).
+	const prefs = env.prefs;
 
 	// ── Editor + run state ───────────────────────────────────────────────────
 	const [sql, setSql] = useState(initialSql ?? '');
 	const [limit, setLimit] = useState<string>('1000');
-	const [running, setRunning] = useState(false);
-	const [runs, setRuns] = useState<StatementRun[]>([]);
-	const [selectedRun, setSelectedRun] = useState<number | null>(null);
-	const [activeIndex, setActiveIndex] = useState(0);
 	const [cursor, setCursor] = useState<EditorCursorState>({ offset: 0, selectionText: '', selectionStart: 0, selectionEnd: 0 });
 	const [lastRun, setLastRun] = useState<{ index: number; at: number; start?: number; end?: number } | null>(null);
 
 	// ── Notices ──────────────────────────────────────────────────────────────
-	const [failure, setFailure] = useState<FailureState | null>(null);
-	const [showVerbatim, setShowVerbatim] = useState(false);
-	const [abandonNotice, setAbandonNotice] = useState<string | null>(null);
-	const [txRefused, setTxRefused] = useState(false);
 	const [allowExecuteOff, setAllowExecuteOff] = useState(false);
-	const [canStop, setCanStop] = useState(false);
 	const [untouchedGenerated, setUntouchedGenerated] = useState(origin === 'generated');
 
 	// ── Drawers + dialogs ────────────────────────────────────────────────────
@@ -357,7 +280,6 @@ export const QueryView: React.FC<QueryViewProps> = ({ endpoint, label, initialSq
 	const [explainSql, setExplainSql] = useState('');
 	const [pendingLoad, setPendingLoad] = useState<string | null>(null);
 	const [inspected, setInspected] = useState<{ row: Record<string, unknown>; number: number } | null>(null);
-	const [patternPrompt, setPatternPrompt] = useState<PatternPrompt | null>(null);
 	const [patternChecksOn, setPatternChecksOn] = useState<boolean>(() => {
 		const bag = prefs.getPref(PATTERN_CHECK_PREF) as Record<string, boolean> | undefined;
 		return bag?.[endpoint.key] !== false;
@@ -365,34 +287,18 @@ export const QueryView: React.FC<QueryViewProps> = ({ endpoint, label, initialSq
 
 	// ── Refs ─────────────────────────────────────────────────────────────────
 	const editorRef = useRef<SqlEditorHandle>(null);
-	// Monotonic run id. Every await re-checks it: a response whose sequence has
-	// moved on belongs to a run the user abandoned and is DROPPED, never landed.
-	const runSeqRef = useRef(0);
-	const runningRef = useRef(false);
-	const runStartedRef = useRef(0);
-	const runsRef = useRef<StatementRun[]>([]);
-	const activeIndexRef = useRef(0);
-	const mountedRef = useRef(true);
-	const patternResolverRef = useRef<((answer: 'run' | 'always' | 'cancel') => void) | null>(null);
 	const patternChecksOnRef = useRef(patternChecksOn);
 	// The buffer text as of the last run or the last load: anything else in the
 	// editor is unsaved work that must not be replaced without asking.
 	const committedTextRef = useRef(initialSql ?? '');
+	// The editor text an editor run is cut from. runFromEditor offers it,
+	// onStart takes it (the runner calls onStart synchronously, and only when
+	// the batch really starts), and onFinished marks it as run. The `sql` state
+	// can lag the editor by a render after a fast Ctrl+Enter, so it is never
+	// that text.
+	const editorRunTextRef = useRef<string | null>(null);
+	const startedRunTextRef = useRef<string | null>(null);
 
-	// Set on EVERY setup, not only by `useRef(true)`: under StrictMode React
-	// runs setup, cleanup and setup again on the same instance, and a flag the
-	// cleanup cleared would otherwise stay false for the life of that
-	// instance — silently dropping every later statement from history.
-	useEffect(() => {
-		mountedRef.current = true;
-		return () => {
-			mountedRef.current = false;
-			// A dialog open at unmount would otherwise leave the run loop
-			// awaiting a promise nobody can settle.
-			patternResolverRef.current?.('cancel');
-			patternResolverRef.current = null;
-		};
-	}, []);
 	useEffect(() => { patternChecksOnRef.current = patternChecksOn; }, [patternChecksOn]);
 
 	const dialect = snapshot.dialect;
@@ -407,8 +313,9 @@ export const QueryView: React.FC<QueryViewProps> = ({ endpoint, label, initialSq
 	// ── Preferences ──────────────────────────────────────────────────────────
 
 	/**
-	 * Turn the pattern check on or off for THIS connection, in the workspace
-	 * prefs (server-side, per user) and in local state.
+	 * Turn the pattern check on or off for THIS connection, in the mount's
+	 * preferences (the full app's workspace preferences, server-side and per
+	 * user; a dev-tool frame's session) and in local state.
 	 *
 	 * @param on - Whether the check should run.
 	 */
@@ -424,6 +331,104 @@ export const QueryView: React.FC<QueryViewProps> = ({ endpoint, label, initialSq
 		setPatternChecksOn(on);
 		announce(on ? 'Pattern checks on for this connection' : 'Pattern checks off for this connection');
 	}, [prefs, endpoint.key]);
+
+	// ── The runner ───────────────────────────────────────────────────────────
+	//
+	// The batch's rules (one statement per call, the first failure ends it, a
+	// late answer after Stop waiting is dropped, a pattern check asks first) are
+	// shared with the other Explorers (shared/explorer/runner); everything SQL
+	// decides is handed in here. The runner lives in the document: in a dev-tool
+	// frame its session is the REMOTE one (every statement an op on the
+	// controller), in the full app the engine core's.
+	const {
+		runs,
+		running,
+		inFlight,
+		canStop,
+		selectedRun,
+		setSelectedRun,
+		activeIndex,
+		failure,
+		abandonNotice,
+		refusal: txRefusal,
+		patternPrompt,
+		answerPattern,
+		runTargets: runStatements,
+		stopWaiting,
+	} = useStatementRunner<StatementRun, { sql: string }, SqlExecuteResult, FailureNotice>({
+		canRun: () => env.ready,
+		initRun: (target, index): StatementRun => ({
+			index,
+			sql: target.text,
+			kind: classifyStatement(target.text, dialect),
+			verb: leadingVerb(target.text, dialect),
+			start: target.start,
+			end: target.end,
+			startLine: target.startLine,
+			endLine: target.endLine,
+			outcome: 'pending',
+		}),
+		textOf: (run) => run.sql,
+		// Transaction control cannot work through per-call autocommit, so it is
+		// refused before anything is sent rather than run and misunderstood. No
+		// announce(): the Banner is already a polite live region (Banner.tsx:75-76),
+		// and mirroring it would read the refusal twice.
+		refuse: (list) => (list.some((run) => run.kind === 'tx') ? TRANSACTION_REFUSAL_TEXT : null),
+		patternChecksOn: () => patternChecksOnRef.current,
+		patternCheck: (run) => patternCheck(run.sql, dialect),
+		disablePatternChecks: () => setPatternChecks(false),
+		prepare: (run) => {
+			const prepared = applyRowLimit(run.sql, limit, dialect);
+			return { send: { sql: prepared.sql }, patch: { limitApplied: prepared.limit, limitState: prepared.state } };
+		},
+		// `idempotent` gates the session's one retry after a restart: a read may be
+		// sent twice harmlessly, a write may NOT (the controller checks again).
+		// The batch's ticket goes down too (port of 740b69c6d), so a read the
+		// user stopped waiting for (or whose tab closed) is not sent again by the
+		// full app's retry, and a frame drops its late answer.
+		execute: (run, send, ticket) => env.getSession(endpoint).execute(send.sql, { idempotent: run.kind === 'read', generation: ticket }),
+		settle: (run, response) => {
+			const rows = response.rows ?? [];
+			const affected = response.affected_rows ?? 0;
+			const outcome: StatementRun['outcome'] = rows.length > 0 || run.kind === 'read' ? 'rows' : 'affected';
+			return { outcome, rows, rowCount: rows.length, affected };
+		},
+		describeFailure: (message) => describeFailure(message),
+		// Says "ran" or "committed" per the kinds that preceded the failure — the
+		// sentence that stops a reader assuming the batch rolled back.
+		formatPrior: (list, failedIndex) => formatPriorStatements(list, failedIndex),
+		// The runner records only while this document is mounted.
+		record: (run) => env.history.record(endpoint, toHistoryEntry(run)),
+		onFailure: (notice) => { if (notice.allowExecuteOff) setAllowExecuteOff(true); },
+		onStart: () => {
+			startedRunTextRef.current = editorRunTextRef.current;
+			setUntouchedGenerated(false);
+			setInspected(null);
+		},
+		onFinished: (info, opts) => {
+			if (info.shown) setLastRun({ index: info.shown.index, at: Date.now(), start: info.shown.start, end: info.shown.end });
+			// Only an editor run makes the buffer "already run". A rerun from the
+			// history drawer must not mark untouched editor text as run, or the
+			// next Load-into-editor would silently discard it. What is marked is the
+			// live text the run was cut from, not the (possibly lagging) `sql` state.
+			if (opts.fromEditor && startedRunTextRef.current !== null) committedTextRef.current = startedRunTextRef.current;
+			// A statement that actually ran is the only proof the node's execute
+			// gate is open again, so a successful run retires the warning.
+			if (info.resolved) setAllowExecuteOff(false);
+		},
+		// Only outcomes that have NO live region of their own are announced. A
+		// failure is not one: the error Banner is an assertive alert already
+		// (Banner.tsx:75-76), so announcing it here would read it twice.
+		summarize: ({ runs: finished, shown, failedAt }) => {
+			if (finished.length > 1) return `${finished.length} statements: ${formatBatchOutcome(finished)}`;
+			if (failedAt < 0 && shown?.outcome === 'rows') return `Statement returned ${(shown.rows?.length ?? 0).toLocaleString()} rows`;
+			if (failedAt < 0 && shown?.outcome === 'affected') return `Statement affected ${(shown.affected ?? 0).toLocaleString()} rows`;
+			return null;
+		},
+		announce,
+		// The warning Banner carries the notice; it is a live region already.
+		onStopped: () => editorRef.current?.focus(),
+	});
 
 	// ── Editor wiring ────────────────────────────────────────────────────────
 
@@ -445,26 +450,22 @@ export const QueryView: React.FC<QueryViewProps> = ({ endpoint, label, initialSq
 	 * The statements the Run button would send right now: the selection when
 	 * there is one, otherwise the statement holding the caret.
 	 *
-	 * Reads the live editor handle rather than the debounced preview state, so
-	 * a keypress that lands between a caret move and its settle still sends
-	 * what the user is looking at.
+	 * Reads the live editor handle for the TEXT as well as the caret and the
+	 * selection. The `sql` state can lag the editor by a render when the run
+	 * action fires right after the last keystrokes; pairing that stale copy with
+	 * the live caret selected a truncated statement. The state copy is only the
+	 * fallback when there is no editor to ask.
 	 *
 	 * @returns The statements to run (possibly empty).
 	 */
 	const currentTarget = useCallback((): RunTarget[] => {
-		const selection = editorRef.current?.getSelection();
-		if (selection && selection.text.trim()) {
-			// A selection is NOT necessarily one statement — `SELECT …; DELETE …`
-			// can be dragged in one gesture. Sending it whole would classify it
-			// by its first keyword alone, so the pattern check would never see
-			// the DELETE, a trailing ROLLBACK would never be refused, and the
-			// whole thing would be marked read-only and become eligible for the
-			// session's retry. Split it exactly like the buffer.
-			return splitStatementsIn(sql, selection.start, selection.end, dialect);
-		}
-		const offset = editorRef.current?.getCursorOffset() ?? cursor.offset;
-		const statement = statementAtOffset(sql, offset, dialect);
-		return statement ? [statement] : [];
+		const editor = editorRef.current;
+		return selectRunTargets(
+			liveBufferText(editor, sql),
+			editor?.getSelection() ?? null,
+			editor?.getCursorOffset() ?? cursor.offset,
+			dialect,
+		);
 	}, [sql, dialect, cursor.offset]);
 
 	// The pre-run line and the editor decoration, always saying the same thing.
@@ -508,253 +509,41 @@ export const QueryView: React.FC<QueryViewProps> = ({ endpoint, label, initialSq
 		editorRef.current?.setDecorations(preview.decorations);
 	}, [preview]);
 
-	// Whether a statement is at the database, which is NOT the same as the
-	// batch running: `running` is already true while a pattern-check dialog
-	// waits for an answer and nothing has been sent.
-	const inFlight = useMemo(() => hasStatementInFlight(runs), [runs]);
-
-	// "Stop waiting" only appears once a statement IN FLIGHT has been slow.
-	// Keying this on `running` offered it while a confirmation was open, and
-	// clicking it then announced that the database might still be running a
-	// statement that had never been sent.
-	//
-	// The timer measures an uninterrupted STRETCH of statements, not each one:
-	// the publish that resolves statement i and the publish that dispatches
-	// i + 1 happen in the same microtask continuation, and React 18 batches
-	// them into one render (the app mounts with `createRoot`,
-	// packages/shell/src/bootstrap.tsx:94), so `inFlight` never observes false
-	// in between and the effect does not re-run. What does reset it is a
-	// confirmation dialog: nothing is at the database while one is open, so
-	// the next statement starts the second again. Both are correct for what
-	// the button says.
-	useEffect(() => {
-		if (!inFlight) {
-			setCanStop(false);
-			return undefined;
-		}
-		const timer = setTimeout(() => setCanStop(true), STOP_WAITING_AFTER_MS);
-		return () => clearTimeout(timer);
-	}, [inFlight]);
-
-	// ── Pattern-check confirmation ───────────────────────────────────────────
-
 	/**
-	 * Open the confirmation dialog and wait for the answer.
-	 *
-	 * @param run - The statement being confirmed.
-	 * @param finding - What the pattern check saw.
-	 * @returns The user's choice.
-	 */
-	const askPatternConfirm = useCallback((run: StatementRun, finding: PatternFinding): Promise<'run' | 'always' | 'cancel'> => {
-		return new Promise((resolve) => {
-			patternResolverRef.current = resolve;
-			setPatternPrompt({ run, finding });
-		});
-	}, []);
-
-	/**
-	 * Answer the open confirmation dialog.
-	 *
-	 * @param answer - The user's choice.
-	 */
-	const answerPattern = useCallback((answer: 'run' | 'always' | 'cancel'): void => {
-		setPatternPrompt(null);
-		const resolve = patternResolverRef.current;
-		patternResolverRef.current = null;
-		resolve?.(answer);
-	}, []);
-
-	// ── Running ──────────────────────────────────────────────────────────────
-
-	/**
-	 * Publish a finished statement to the history subscribers, but only while
-	 * this document is still mounted — a closed tab must not write.
-	 *
-	 * @param run - The finished statement.
-	 */
-	const record = useCallback((run: StatementRun): void => {
-		if (!mountedRef.current) return;
-		emitRun(endpoint.key, toHistoryEntry(run));
-	}, [endpoint.key]);
-
-	/**
-	 * Commit a run list to state and to the ref the abandon path reads.
-	 *
-	 * @param next - The new run list.
-	 */
-	const publishRuns = useCallback((next: StatementRun[]): void => {
-		runsRef.current = next;
-		setRuns(next);
-	}, []);
-
-	/**
-	 * Run a list of statements in order, stopping at the first error.
+	 * Run a list of statements in order, stopping at the first error (the shared
+	 * runner; SQL's targets carry their text under `sql`).
 	 *
 	 * @param targets - The statements to send, in order.
+	 * @param opts - `fromEditor` marks the buffer as run.
 	 */
-	const runTargets = useCallback(async (targets: RunTarget[], opts?: { fromEditor?: boolean }): Promise<void> => {
-		if (!env.ready || runningRef.current || targets.length === 0) return;
-
-		// Transaction control cannot work through per-call autocommit, so it is
-		// refused before anything is sent rather than run and misunderstood.
-		if (targets.some((target) => classifyStatement(target.sql, dialect) === 'tx')) {
-			// No announce(): the Banner below is already a polite live region
-			// (Banner.tsx:75-76), and mirroring it would read the refusal twice.
-			setTxRefused(true);
-			return;
-		}
-
-		const seq = runSeqRef.current + 1;
-		runSeqRef.current = seq;
-		runningRef.current = true;
-		setRunning(true);
-		setTxRefused(false);
-		setFailure(null);
-		setShowVerbatim(false);
-		setAbandonNotice(null);
-		setUntouchedGenerated(false);
-		setSelectedRun(null);
-		setInspected(null);
-
-		const list: StatementRun[] = targets.map((target, index) => ({
-			index,
-			sql: target.sql,
-			kind: classifyStatement(target.sql, dialect),
-			verb: leadingVerb(target.sql, dialect),
-			start: target.start,
-			end: target.end,
-			startLine: target.startLine,
-			endLine: target.endLine,
-			outcome: 'pending' as RunOutcome,
-		}));
-		publishRuns(list);
-
-		const session = env.getSession(endpoint);
-		const results = [...list];
-		let failedAt = -1;
-
-		for (let i = 0; i < results.length; i++) {
-			if (runSeqRef.current !== seq) return;
-
-			// One confirmation per matching statement, asked before it is sent.
-			if (patternChecksOnRef.current) {
-				const finding = patternCheck(results[i].sql, dialect);
-				if (finding) {
-					const answer = await askPatternConfirm(results[i], finding);
-					if (runSeqRef.current !== seq) return;
-					if (answer === 'cancel') {
-						for (let j = i; j < results.length; j++) results[j] = { ...results[j], outcome: 'skipped' };
-						publishRuns([...results]);
-						break;
-					}
-					if (answer === 'always') setPatternChecks(false);
-				}
-			}
-
-			const prepared = applyRowLimit(results[i].sql, limit, dialect);
-			results[i] = { ...results[i], outcome: 'running', limitApplied: prepared.limit, limitState: prepared.state };
-			publishRuns([...results]);
-			setActiveIndex(i);
-			activeIndexRef.current = i;
-			const started = performance.now();
-			runStartedRef.current = started;
-
-			try {
-				// `idempotent` gates the session's one retry with a fresh token:
-				// a read may be sent twice harmlessly, a write may NOT.
-				const response = await session.execute(prepared.sql, { idempotent: results[i].kind === 'read' });
-				if (runSeqRef.current !== seq) return;
-				const rows = response.rows ?? [];
-				const affected = response.affected_rows ?? 0;
-				const outcome: RunOutcome = rows.length > 0 || results[i].kind === 'read' ? 'rows' : 'affected';
-				results[i] = { ...results[i], outcome, rows, affected, ms: performance.now() - started };
-				publishRuns([...results]);
-				record(results[i]);
-			} catch (error) {
-				if (runSeqRef.current !== seq) return;
-				const message = error instanceof Error ? error.message : String(error);
-				const notice = describeFailure(message);
-				results[i] = { ...results[i], outcome: 'error', error: message, ms: performance.now() - started };
-				for (let j = i + 1; j < results.length; j++) results[j] = { ...results[j], outcome: 'skipped' };
-				publishRuns([...results]);
-				failedAt = i;
-				setFailure({
-					notice,
-					index: i,
-					lines: lineRange(results[i].startLine, results[i].endLine),
-					// Says "ran" or "committed" per the kinds that preceded the
-					// failure — the sentence that stops a reader assuming the
-					// batch rolled back.
-					prior: formatPriorStatements(results, i),
-				});
-				if (notice.allowExecuteOff) setAllowExecuteOff(true);
-				record(results[i]);
-				break;
-			}
-		}
-
-		if (runSeqRef.current !== seq) return;
-		runningRef.current = false;
-		setRunning(false);
-
-		// Show the last statement that returned rows; failing that, the last
-		// one that resolved at all.
-		const withRows = [...results].reverse().find((run) => run.outcome === 'rows');
-		const resolved = [...results].reverse().find((run) => run.outcome === 'rows' || run.outcome === 'affected');
-		const shown = withRows ?? resolved ?? null;
-		setSelectedRun(shown ? shown.index : null);
-		if (shown) setLastRun({ index: shown.index, at: Date.now(), start: shown.start, end: shown.end });
-		// Only an editor run makes the buffer "already run". A rerun from the
-		// history drawer must not mark untouched editor text as run, or the
-		// next Load-into-editor would silently discard it.
-		if (opts?.fromEditor) committedTextRef.current = sql;
-		// A statement that actually ran is the only proof the node's execute
-		// gate is open again, so a successful run retires the warning.
-		if (resolved) setAllowExecuteOff(false);
-
-		// Only outcomes that have NO live region of their own are announced. A
-		// failure is not one: the error Banner is an assertive alert already
-		// (Banner.tsx:75-76), so announcing it here would read it twice. The
-		// batch summary and the row counts live in the strip and the meta line,
-		// which are ordinary text.
-		if (results.length > 1) announce(`${results.length} statements: ${formatBatchOutcome(results)}`);
-		else if (failedAt < 0 && shown?.outcome === 'rows') announce(`Statement returned ${(shown.rows?.length ?? 0).toLocaleString()} rows`);
-		else if (failedAt < 0 && shown?.outcome === 'affected') announce(`Statement affected ${(shown.affected ?? 0).toLocaleString()} rows`);
-	}, [env, dialect, endpoint, limit, sql, askPatternConfirm, publishRuns, record, setPatternChecks]);
-
-	/** Run the selection, or the statement at the caret. */
-	const runOne = useCallback((): void => { void runTargets(currentTarget(), { fromEditor: true }); }, [runTargets, currentTarget]);
-
-	/** Run every statement in the buffer, in order. */
-	const runAll = useCallback((): void => { void runTargets(splitStatements(sql, dialect), { fromEditor: true }); }, [runTargets, sql, dialect]);
+	const runTargets = useCallback((targets: RunTarget[], opts?: { fromEditor?: boolean }): Promise<void> => {
+		return runStatements(targets.map(({ sql: text, ...position }) => ({ text, ...position })), opts);
+	}, [runStatements]);
 
 	/**
-	 * Stop waiting for the statement in flight.
+	 * Run statements cut from the editor's text, and offer that text to be marked
+	 * as run once the batch ends (see editorRunTextRef).
 	 *
-	 * There is NO server-side cancel: this bumps the run sequence so the late
-	 * answer is discarded, and says plainly that the database may still be
-	 * running the statement.
+	 * @param text - The live editor text the targets were cut from.
+	 * @param targets - The statements to send.
 	 */
-	const stopWaiting = useCallback((): void => {
-		if (!runningRef.current) return;
-		runSeqRef.current += 1;
-		runningRef.current = false;
-		const ms = performance.now() - runStartedRef.current;
-		setRunning(false);
-		const next = runsRef.current.map((run) => {
-			if (run.outcome === 'running') return { ...run, outcome: 'abandoned' as RunOutcome, ms };
-			if (run.outcome === 'pending') return { ...run, outcome: 'skipped' as RunOutcome };
-			return run;
-		});
-		publishRuns(next);
-		const abandoned = next.find((run) => run.outcome === 'abandoned');
-		if (abandoned) record(abandoned);
-		setAbandonNotice(
-			`Stopped waiting after ${(ms / 1000).toFixed(1)} s. The statement may still be running on the database; this tool cannot cancel it.`,
-		);
-		// The warning Banner carries this; it is a live region already.
-		editorRef.current?.focus();
-	}, [publishRuns, record]);
+	const runFromEditor = useCallback((text: string, targets: RunTarget[]): void => {
+		editorRunTextRef.current = text;
+		void runTargets(targets, { fromEditor: true });
+		editorRunTextRef.current = null;
+	}, [runTargets]);
+
+	/** Run the selection, or the statement at the caret. */
+	const runOne = useCallback((): void => {
+		const text = liveBufferText(editorRef.current, sql);
+		runFromEditor(text, currentTarget());
+	}, [runFromEditor, currentTarget, sql]);
+
+	/** Run every statement in the buffer, in order. */
+	const runAll = useCallback((): void => {
+		const text = liveBufferText(editorRef.current, sql);
+		runFromEditor(text, splitStatements(text, dialect));
+	}, [runFromEditor, sql, dialect]);
 
 	// ── Explain, history, and loading a statement back in ────────────────────
 
@@ -1020,34 +809,18 @@ export const QueryView: React.FC<QueryViewProps> = ({ endpoint, label, initialSq
 				</div>
 
 				{/* Transaction control was refused before anything was sent. */}
-				{txRefused && <Banner variant="warning">{TRANSACTION_REFUSAL_TEXT}</Banner>}
+				{txRefusal && <Banner variant="warning">{txRefusal}</Banner>}
 
 				{/* The user stopped waiting; the statement may still be running. */}
 				{abandonNotice && <Banner variant="warning">{abandonNotice}</Banner>}
 
 				{/* Execution failure. */}
 				{failure && (
-					<Banner variant="error">
-						<div>{failure.notice.generic ? GENERIC_ERROR_TEXT : failure.notice.headline}</div>
-						<div>
-							{`Statement ${failure.index + 1}${failure.lines ? ` (${failure.lines})` : ''}.`}
-							{failure.prior && ` ${failure.prior}`}
-						</div>
-						{failure.notice.maxExecuteRows !== null && <div>{maxRowsText(failure.notice.maxExecuteRows)}</div>}
-						{!failure.notice.generic && failure.notice.verbatim && (
-							<>
-								<Button
-									variant="ghost"
-									small
-									ariaExpanded={showVerbatim}
-									onClick={() => setShowVerbatim((open) => !open)}
-								>
-									{showVerbatim ? `Hide “${DATABASE_SAID_LABEL}”` : DATABASE_SAID_LABEL}
-								</Button>
-								{showVerbatim && <pre style={styles.verbatim}>{failure.notice.verbatim}</pre>}
-							</>
-						)}
-					</Banner>
+					<FailureBanner
+						failure={failure}
+						genericText={GENERIC_ERROR_TEXT}
+						extra={failure.notice.maxExecuteRows !== null ? <div>{maxRowsText(failure.notice.maxExecuteRows)}</div> : undefined}
+					/>
 				)}
 
 				{/* Per-statement outcomes of the last batch. */}
@@ -1074,6 +847,7 @@ export const QueryView: React.FC<QueryViewProps> = ({ endpoint, label, initialSq
 								columns={columns}
 								data={rows}
 								tableId="sql-query-results"
+								persistence={env.gridPersistence}
 								paginate={false}
 								height="100%"
 								emptyTitle="No rows"
@@ -1141,21 +915,11 @@ export const QueryView: React.FC<QueryViewProps> = ({ endpoint, label, initialSq
 
 			{/* Pattern check — a TEXT check, and it says so. */}
 			{patternPrompt && (
-				<ConfirmDialog
-					title="Run this statement?"
-					destructive
-					message={
-						<>
-							<div>{`Pattern check: ${patternPrompt.finding.kind} detected. This is a text check, not a database safeguard.`}</div>
-							<pre style={styles.excerpt}>{patternPrompt.run.sql.split('\n').slice(0, 3).join('\n')}</pre>
-							<div>It runs immediately and commits on its own.</div>
-						</>
-					}
-					confirmLabel="Run statement"
-					secondaryLabel="Run and stop asking on this connection"
-					onConfirm={() => answerPattern('run')}
-					onSecondary={() => answerPattern('always')}
-					onCancel={() => answerPattern('cancel')}
+				<PatternConfirmDialog
+					kind={patternPrompt.finding.kind}
+					excerpt={patternPrompt.run.sql.split('\n').slice(0, 3).join('\n')}
+					consequence="It runs immediately and commits on its own."
+					onAnswer={answerPattern}
 				/>
 			)}
 		</div>
