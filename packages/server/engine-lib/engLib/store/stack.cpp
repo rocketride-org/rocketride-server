@@ -516,6 +516,32 @@ Error IServiceEndpoint::buildConnections() noexcept {
     lifecycleOrder = _mv(regions->head);
     controlLifecycleOrders = _mv(regions->control);
 
+    // Warn when a chat pipeline has no response node reachable downstream from
+    // the chat source. Webhook and dropper ingestion pipelines legitimately end
+    // at a store, so only chat sources are checked.
+    if (config.pipeline.hasSource() &&
+        config.pipeline.source().lookup<iText>("provider") == "chat"_itv) {
+        bool hasResponseNode = false;
+        for (int node : lifecycleOrder) {
+            if (node < 0 || _cast<size_t>(node) >= pipeStack.size()) continue;
+            const auto &entry = pipeStack[node];
+            auto serviceInfo =
+                IServices::getServiceDefinition(entry.logicalType);
+            if (entry.logicalType == "response"_itv ||
+                entry.logicalType.startsWith("response_"_itv) ||
+                (serviceInfo && (*serviceInfo)->prefix == "response"_itv)) {
+                hasResponseNode = true;
+                break;
+            }
+        }
+        if (!hasResponseNode) {
+            MONERR(warning, Ec::Warning,
+                   "This chat pipeline has no Return Answers node, so "
+                   "responses won't reach the chat. Add a Return Answers node "
+                   "after the LLM.");
+        }
+    }
+
     // And done
     return {};
 }

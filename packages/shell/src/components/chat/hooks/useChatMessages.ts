@@ -6,44 +6,12 @@
 import { useState, useCallback, useRef } from 'react';
 import { Question, QuestionType, type PIPELINE_RESULT } from 'rocketride';
 import type { ChatMessage, TextResult, UseChatMessagesOptions } from '../types';
+import { extractTextFromResult } from '../utils/pipelineUtils';
 
 // Module-level monotonic counter — guarantees unique IDs even when multiple
 // messages are created within the same millisecond (e.g. batched SSE updates).
 let _nextId = 1;
 const nextId = () => _nextId++;
-
-// =============================================================================
-// extractTextFromResult
-// =============================================================================
-
-/**
- * Extracts displayable text responses from a RocketRide pipeline result.
- * Handles the dynamic field system where result_types maps field names to types.
- */
-function extractTextFromResult(result: PIPELINE_RESULT): TextResult[] {
-	const out: TextResult[] = [];
-
-	if (!result.result_types) {
-		out.push({ text: '### No answers found\nAre you sure your pipeline returns them?', key: '' });
-		return out;
-	}
-
-	for (const [field, type] of Object.entries(result.result_types)) {
-		if (type !== 'text' && type !== 'answers') continue;
-		const data = result[field];
-
-		if (Array.isArray(data)) {
-			data.filter((v) => typeof v === 'string' && v.trim()).forEach((v) => out.push({ text: v, key: field }));
-		} else if (typeof data === 'string' && data.trim()) {
-			out.push({ text: data, key: field });
-		} else if (data !== null && typeof data === 'object' && typeof (data as Record<string, unknown>).answer === 'string') {
-			const text = ((data as Record<string, unknown>).answer as string).trim();
-			if (text) out.push({ text, key: field });
-		}
-	}
-
-	return out;
-}
 
 // =============================================================================
 // useChatMessages
