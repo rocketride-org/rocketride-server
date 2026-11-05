@@ -428,6 +428,7 @@ module.exports = {
 						['ai:build', 'nodes:build', 'client-python:build', 'client-typescript:build'],
 						'Build dependencies'
 					),
+					'server:warm-test-deps',
 					bracket({
 						name: 'ts-test-server',
 						setup: makeStartTestServerAction(options),

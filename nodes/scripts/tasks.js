@@ -176,7 +176,9 @@ function makeStopTestServerAction() {
 
 // Modes: 'run' (the tests), 'warmup' (download the models of the selected heavy
 // tests; options.warmup === 'plan' only lists them), 'list-skipped' (report the
-// selected tests that will be skipped). Only 'run' needs the test server.
+// selected tests that will be skipped), 'list-requirements' (the requirements
+// files of the nodes the selected dynamic tests will load, left in
+// ctx.nodeTestRequirements for server:warm-test-deps). Only 'run' needs the test server.
 function makeRunPytestAction(options = {}) {
 	const mode = options.mode || 'run';
 	return {
@@ -237,6 +239,8 @@ function makeRunPytestAction(options = {}) {
 				extraArgs.push(`--warmup-models=${options.warmup === 'plan' ? 'plan' : 'download'}`);
 			} else if (mode === 'list-skipped') {
 				extraArgs.push(`--list-skipped=${options.listSkipped}`);
+			} else if (mode === 'list-requirements') {
+				extraArgs.push('--list-requirements');
 			} else {
 				// Parallel execution via pytest-xdist. Defaults to min(cpus, 8) when the
 				// flag is not set: empirically, cloud-LLM rate limits + node-subprocess
@@ -270,6 +274,11 @@ function makeRunPytestAction(options = {}) {
 				await collectPytestReport(ctx, (reportArg) => pytest([reportArg]));
 				return;
 			}
+			if (mode === 'list-requirements') {
+				ctx.nodeTestRequirements = await listTestRequirements(pytest);
+				task.output = `${ctx.nodeTestRequirements.length} node requirements files for the selected tests`;
+				return;
+			}
 			await pytest();
 
 			if (mode !== 'run') return;
@@ -283,6 +292,30 @@ function makeRunPytestAction(options = {}) {
 			});
 		},
 	};
+}
+
+/**
+ * Run the --list-requirements collection and return the files it reports.
+ *
+ * The report starts with a heading line; every other line is the absolute path
+ * of a node requirements file. No report file means no selected test loads a node.
+ *
+ * @param {(extra: string[]) => Promise<void>} pytest - Runs the collection with extra arguments
+ * @returns {Promise<string[]>} Absolute paths of the requirements files
+ */
+async function listTestRequirements(pytest) {
+	const report = path.join(os.tmpdir(), `rr-node-test-requirements-${process.pid}.txt`);
+	fs.rmSync(report, { force: true });
+	try {
+		await pytest([`--rocketride-report=${report}`]);
+		if (!fs.existsSync(report)) return [];
+		return fs
+			.readFileSync(report, 'utf8')
+			.split(/\r?\n/)
+			.filter((line) => line.endsWith('.txt') && fs.existsSync(line));
+	} finally {
+		fs.rmSync(report, { force: true });
+	}
 }
 
 function makeDocsGenerateAction() {
@@ -366,6 +399,7 @@ function makeTestAction(options = {}) {
 	}
 
 	// The collect-only modes above report the environment as it is; test runs complete it.
+	steps.push('server:warm-test-deps');
 	steps.push({ name: 'nodes:install-test-deps', action: makeInstallTestDepsAction() });
 
 	// Download the selected heavy tests' models before the server starts, so the
@@ -491,6 +525,10 @@ module.exports = {
 		{ name: 'nodes:start-server', action: makeStartTestServerAction },
 		{ name: 'nodes:stop-server', action: makeStopTestServerAction },
 		{ name: 'nodes:run-contracts', action: makeRunContractTestsAction },
+		{
+			name: 'nodes:list-test-requirements',
+			action: (options) => makeRunPytestAction({ ...options, mode: 'list-requirements' }),
+		},
 		{ name: 'nodes:docs-generate', action: makeDocsGenerateAction },
 		{ name: 'nodes:credentials-generate', action: makeCredentialsGenerateAction },
 		{ name: 'nodes:credentials-check', action: makeCredentialsCheckAction },

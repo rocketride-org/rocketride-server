@@ -21,7 +21,7 @@ const fs = require('fs');
 const net = require('net');
 const { spawn } = require('child_process');
 const { exists } = require('./fs');
-const { DIST_ROOT } = require('./paths');
+const { DIST_ROOT, PROJECT_ROOT } = require('./paths');
 
 const SERVER_DIR = path.join(DIST_ROOT, 'server');
 const READY_MESSAGE = 'Application startup complete.';
@@ -482,6 +482,7 @@ async function stopServer(serverObj, timeout = 5000) {
 			);
 		}
 		await logWritten();
+		reportInstallsDuringRun(diagnostics?.logFile);
 		return;
 	}
 
@@ -529,6 +530,46 @@ async function stopServer(serverObj, timeout = 5000) {
 	});
 
 	await logWritten();
+	reportInstallsDuringRun(diagnostics?.logFile);
+}
+
+/**
+ * Name the requirement files that installed packages while a test server ran.
+ *
+ * depends() logs `Installed: <requirements file>` after each install. During a
+ * test run an install makes every satisfied verdict stale, and the suites'
+ * engines then queue on install.lock. server:warm-test-deps
+ * (packages/server/scripts/tasks.js) installs before the suites start what its
+ * rules find: the startup globs and the nodes the selected node tests load. A
+ * file named here is one those rules missed. On GitHub Actions the report is a
+ * warning annotation. Reports only; the run's result does not change.
+ *
+ * @param {string|null|undefined} logFile - The server's log file, if it was written
+ */
+function reportInstallsDuringRun(logFile) {
+	if (!logFile) return;
+	let text;
+	try {
+		text = fs.readFileSync(logFile, 'utf8');
+	} catch {
+		return;
+	}
+	const files = new Set();
+	for (const match of text.matchAll(/\bInstalled: (.+?\.txt)\s*$/gm)) {
+		files.add(path.relative(PROJECT_ROOT, match[1].trim()));
+	}
+	if (files.size === 0) return;
+	const title = 'Packages installed during the test run';
+	const detail =
+		'server:warm-test-deps (packages/server/scripts/tasks.js) did not install these ' +
+		'requirement files before the suites started; widen its rules to cover them:';
+	const lines = [...files].map((file) => `  ${file}`);
+	if (process.env.GITHUB_ACTIONS === 'true') {
+		// A workflow command is one line; %0A is its newline.
+		console.log(`::warning title=${title}::${[detail, ...lines].join('%0A')}`);
+	} else {
+		console.warn(`[server] ${title}. ${detail}\n${lines.join('\n')}`);
+	}
 }
 
 /**

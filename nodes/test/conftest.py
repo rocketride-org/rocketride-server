@@ -191,15 +191,19 @@ def pytest_configure(config):
             raise pytest.UsageError(str(exc)) from exc
     config.stash[_SNAPSHOT] = snapshot
 
-    warmup_mode = config.getoption('warmup_models', None)
-    list_mode = config.getoption('list_skipped', None)
-    if warmup_mode and list_mode:
-        raise pytest.UsageError('--warmup-models and --list-skipped cannot be combined')
-    if warmup_mode or list_mode:
+    modes = {
+        '--warmup-models': (config.getoption('warmup_models', None), _WarmupMode),
+        '--list-skipped': (config.getoption('list_skipped', None), _SkipReportMode),
+        '--list-requirements': (config.getoption('list_requirements', None), _RequirementsMode),
+    }
+    chosen = [(flag, mode_class) for flag, (value, mode_class) in modes.items() if value]
+    if len(chosen) > 1:
+        raise pytest.UsageError(f'{" and ".join(flag for flag, _ in chosen)} cannot be combined')
+    if chosen:
+        flag, mode_class = chosen[0]
         if _worker_count(config) > 1:
-            raise pytest.UsageError('--warmup-models / --list-skipped run in a single process; drop -n')
-        mode = _WarmupMode(config) if warmup_mode else _SkipReportMode(config)
-        config.pluginmanager.register(mode, 'rocketride-collect-mode')
+            raise pytest.UsageError(f'{flag} runs in a single process; drop -n')
+        config.pluginmanager.register(mode_class(config), 'rocketride-collect-mode')
 
 
 # =============================================================================
@@ -209,6 +213,7 @@ def pytest_configure(config):
 from ai.common.utils.hardware import HardwareSnapshot  # noqa: E402
 
 from .framework import discover_testable_nodes, gate, warmup, NodeTestConfig, NodeTestRunner  # noqa: E402
+from .framework.discovery import _parse_service_json  # noqa: E402
 
 
 @pytest.fixture(scope='session')
@@ -307,10 +312,16 @@ def pytest_addoption(parser):
         help='List the selected tests that will be skipped, grouped by reason, instead of running them.',
     )
     group.addoption(
+        '--list-requirements',
+        action='store_true',
+        default=None,
+        help='List the requirements files of the nodes the selected tests will load, instead of running them.',
+    )
+    group.addoption(
         '--rocketride-report',
         metavar='PATH',
         default=None,
-        help='Also write the --warmup-models / --list-skipped report to PATH (the builder prints it at the end).',
+        help='Also write the --warmup-models / --list-skipped / --list-requirements report to PATH.',
     )
 
 
@@ -455,7 +466,7 @@ def pytest_runtest_setup(item):
 
 
 # =============================================================================
-# Collect-only modes: --warmup-models, --list-skipped
+# Collect-only modes: --warmup-models, --list-skipped, --list-requirements
 # =============================================================================
 
 
@@ -597,3 +608,55 @@ class _WarmupMode(_CollectMode):
         self.lines.append(summary)
         if not_ready:
             self.lines.append(f'{not_ready} model(s) not ready; their tests will fail when they load them.')
+
+
+# One folder per node package: nodes/src/nodes/<node>/
+_NODES_SRC = Path(__file__).resolve().parent.parent / 'src' / 'nodes'
+
+
+def _provider_dirs() -> Dict[str, Path]:
+    """Node folder of each provider: the ``protocol`` of its service*.json, without ``://``."""
+    dirs: Dict[str, Path] = {}
+    for service_file in sorted(_NODES_SRC.glob('*/service*.json')):
+        protocol = (_parse_service_json(str(service_file)) or {}).get('protocol')
+        if isinstance(protocol, str):
+            dirs.setdefault(protocol.replace('://', ''), service_file.parent)
+    return dirs
+
+
+class _RequirementsMode(_CollectMode):
+    """--list-requirements: the requirements.txt of every node a selected dynamic test will load.
+
+    The builder installs them before the suites start in parallel
+    (server:warm-test-deps), so no suite installs packages while the others run.
+    Only the dynamic tests count: they run the node, and the providers its test
+    chain names, in a pipeline on the test server, which installs their
+    requirements. A node's hand-written tests mock its SDK. A test that will be
+    skipped loads no node and adds nothing.
+    """
+
+    title = 'requirements of the selected tests'
+
+    def handle(self, items) -> None:
+        """Gather the node folders of the runnable dynamic items: the node and its test chain."""
+        providers = None
+        folders = set()
+        for item in items:
+            if item.get_closest_marker('hardware_unmet') or _static_skip_reason(item) is not None:
+                continue
+            callspec = getattr(item, 'callspec', None)
+            pair = (
+                (callspec.params.get('node_test_config') or callspec.params.get('node_fulltest_config'))
+                if callspec
+                else None
+            )
+            if not pair:
+                continue
+            node_config = pair[0]
+            folders.add(Path(node_config.service_file).parent)
+            if node_config.chain:
+                providers = _provider_dirs() if providers is None else providers
+                folders.update(providers[name] for name in node_config.chain if name in providers)
+        self.lines = sorted(
+            str(folder / 'requirements.txt') for folder in folders if (folder / 'requirements.txt').is_file()
+        )

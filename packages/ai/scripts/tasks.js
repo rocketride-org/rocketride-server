@@ -150,7 +150,7 @@ module.exports = {
 			name: 'ai:test',
 			action: () => ({
 				description: 'Testing ai',
-				steps: ['ai:build', 'ai:run-pytest'],
+				steps: ['ai:build', 'server:warm-test-deps', 'ai:run-pytest'],
 			}),
 		},
 		{
