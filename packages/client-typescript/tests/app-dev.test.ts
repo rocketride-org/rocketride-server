@@ -50,7 +50,9 @@ beforeEach(() => {
 
 afterEach(() => {
 	jest.restoreAllMocks();
-	fs.rmSync(ws, { recursive: true, force: true });
+	// Windows refuses to remove a folder a just-stopped dev server still holds
+	// until that process is fully gone, which takes longer on a busy machine
+	fs.rmSync(ws, { recursive: true, force: true, maxRetries: 10 });
 });
 
 /** A connectClient stand-in for executeAppDev (validated once, then dropped). */
