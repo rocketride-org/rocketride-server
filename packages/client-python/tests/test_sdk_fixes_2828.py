@@ -185,6 +185,9 @@ class TestSendFilesMissingFileAndSyncProgress:
         async_client.pipe = AsyncMock(return_value=make_stub_pipe())
         await async_client.send_files([str(sample_file)], token='tok_1')
 
+        expected_objinfo = {'name': 'sample.txt', 'size': 11}
+        sync_client.pipe.assert_awaited_once_with('tok_1', expected_objinfo, 'text/plain')
+        async_client.pipe.assert_awaited_once_with('tok_1', expected_objinfo, 'text/plain')
         assert sync_actions == ['open', 'write', 'close', 'complete']
         assert async_actions == ['open', 'write', 'close', 'complete']
 
