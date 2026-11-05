@@ -109,7 +109,14 @@ async function vscodeRig(files: Record<string, unknown>) {
 	const frame = attachSqlFrame({ channel: shellProtocol.createToolChannel(h.newFramePeer()), docKey: 'c-pipe', documents: { open: () => undefined, close: () => undefined }, protocol: shellProtocol });
 	await settle();
 	const record = (id: string, sql: string, owner: string | null) => frame.caller.callReply('sql.historyRecord', { connId: 'c-pipe', entry: entry(id, sql, 70), owner }, { timeoutMs: SQL_OP_TIMEOUT_MS['sql.historyRecord'] });
-	return { h, engine, controller, frame, record, dispose() { frame.dispose(); controller.dispose(); } };
+	/** Frames opened later (after another account signed in) are that account's: they bind to the first identity they see. */
+	const extra: Array<ReturnType<typeof attachSqlFrame>> = [];
+	const newFrame = () => {
+		const later = attachSqlFrame({ channel: shellProtocol.createToolChannel(h.newFramePeer()), docKey: 'c-pipe', documents: { open: () => undefined, close: () => undefined }, protocol: shellProtocol });
+		extra.push(later);
+		return later;
+	};
+	return { h, engine, controller, frame, record, newFrame, dispose() { for (const later of extra) later.dispose(); frame.dispose(); controller.dispose(); } };
 }
 
 describe('dev tool: A\'s history read is still in flight when B signs in', () => {
@@ -156,7 +163,11 @@ describe('dev tool: A\'s history write is in flight when B signs in and records'
 			await until(() => r.controller.core.identity.get().fingerprint === FP_B, 'B');
 			held.release();
 			await until(() => r.controller.history.getHistory(KEY).some((e) => e.id === 'b1'), 'B\'s history');
-			await r.record('b-run', 'SELECT 7 FROM b_run', FP_B);
+			// B's run comes from a frame that belongs to B: the first frame is A's, and the
+			// identity fence refuses (as `stale`) what it asks once the account has changed.
+			const frameB = r.newFrame();
+			await until(() => frameB.owner() === FP_B, 'a frame that belongs to B');
+			await frameB.caller.callReply('sql.historyRecord', { connId: 'c-pipe', entry: entry('b-run', 'SELECT 7 FROM b_run', 71), owner: FP_B }, { timeoutMs: SQL_OP_TIMEOUT_MS['sql.historyRecord'] });
 			await new Promise<void>((resolve) => { setTimeout(resolve, 1_500); });
 			assert.equal(bagHas(files, FP_B, 'a-run'), false, 'A\'s run is not in B\'s bag');
 			assert.equal(bagHas(files, FP_A, 'b-run'), false, 'B\'s run is not in A\'s bag');
