@@ -611,6 +611,88 @@ exist:
 If you choose another `--dist` mode with several workers while heavy tests are
 selected, the run stops before any test starts.
 
+### Live database tests
+
+Some suites drive a node's real driver against a real database server and stub
+the engine surface themselves, so they need no test server, only their
+databases. They cannot run in the mocked pass: `nodes/test/mocks` replaces
+`psycopg2`, `pgvector`, `qdrant_client`, `chromadb`, `falkordb` and other
+database clients for the whole engine. They are therefore **registered**, and
+`nodes:test` leaves every registered suite out of its mocked pass by absolute
+path and runs them in a separate pass without mocks.
+
+A registration is one file per domain in `nodes/scripts/db-lanes/` (loaded in
+file-name order; the shape is documented in `nodes/scripts/tasks.js`):
+
+```js
+module.exports = {
+	name: 'my-domain',
+	suites: ['test_my_domain_full.py'],
+	// optional: put suites (yours or another domain's) through a pooler
+	poolerSuites: ['test_my_domain_full.py'],
+	poolerEnv: 'RR_TEST_MY_POOLER_DSN', // unset: the pooler leg is left out
+	poolerMode: 'in-suite', // or 'second-pass' (then also secondPassEnv(poolerDsn, env))
+};
+```
+
+The servers a domain needs for CI are started by one script per domain in
+`nodes/test/db-services/` (run in sorted order by the "Start DB live-lane
+services" step of `.github/workflows/_build.yaml`, after the Postgres step).
+A script prints only `NAME=value` lines on stdout, which the step exports to the
+test environment once the script succeeded; the protocol and helpers (a pinned
+PgBouncer, readiness waits) are in `nodes/test/db-services/_common.sh`. Pin
+images by digest. A domain adds its suites and its servers by adding its two
+files, so domains never edit the same lines. Domain-specific notes (which
+suites, which servers, how to regenerate fixtures) live in the header comment of
+the domain's registration file or in the app's own docs.
+
+Registering changes behavior only for the suites registered. With no
+registration `nodes:test` is what it was: no live pass, the mocked pass leaves
+`*_full.py` out by glob and `nodes:test-full` collects everything. The suites
+that exist on develop (`DEVELOP_DB_SUITES` in `tasks.js`) keep that behavior
+until a domain lists one in its `suites`: they stay out of `nodes:test`
+(`test_pgvector_search.py`, which is not named `*_full`, stays in its mocked
+pass). Listing one moves it to the unmocked live pass and, with
+`RR_REQUIRE_DB_TESTS` set as on the Linux CI leg, makes it required: a change
+to CI for every PR, so the domain's PR says so.
+
+The live pass runs in one process in a fixed order that does not depend on
+which domains exist: the registered `DEVELOP_DB_SUITES` in that list's order,
+then each domain's other suites (domains by file name, suites as listed). The
+suites share the test databases and each is written to create and remove its own
+tables, graphs or collections, so order should not matter; the runner does not
+enforce that.
+
+`nodes/test/test_db_lane_guard.py` checks the registry: every registration is
+well-formed, every suite file exists and is registered exactly once, and every
+`nodes/test/test_*.py` that reads a live-database variable from the environment (`RR_REQUIRE_DB_TESTS`
+or an `RR_TEST_*_DSN`/`_URI`/`_URL`) is registered or listed in `DEVELOP_DB_SUITES`, so a new live suite cannot
+be collected by the mocked pass by mistake. Name new suites `test_*_full.py`.
+
+```bash
+./builder nodes:test-db                        # only the live database pass; the databases are required
+RR_REQUIRE_DB_TESTS=0 ./builder nodes:test-db  # the same, skipping suites whose server is unreachable
+RR_REQUIRE_DB_TESTS=1 ./builder nodes:test     # as CI runs it
+```
+
+When the databases are optional (`nodes:test` without `RR_REQUIRE_DB_TESTS`),
+each suite skips when its server is unreachable. When they are required
+(`nodes:test-db` by default, or `RR_REQUIRE_DB_TESTS` set, which the Linux CI
+leg does once its database containers are healthy), an unreachable server fails
+the suite, a suite in which no test passed fails the run, and so does any test
+that skips for a reason that does not start with `NOT RUN:`. That prefix marks a
+deliberate skip for something the CI servers do not offer, such as a Neo4j
+Enterprise role or a pooled case while its pooler variable is unset.
+
+Pooler legs reproduce how the cloud reaches tenant databases (a
+transaction-mode pooler). A domain's `poolerEnv` names the variable that holds
+the pooler's DSN. With it set, a `second-pass` domain's `poolerSuites` run a
+second time with `secondPassEnv` applied (the report is
+`junit-<name>-pooler.xml` unless the registration names one); an `in-suite`
+domain's suites parametrise their cases over the pooler themselves, and each
+must pass a case whose test id carries `pooler`. Without the variable a required
+run still passes but leaves the leg out and says so in the task output.
+
 ### Mock support
 
 Integration tests set the `ROCKETRIDE_MOCK` environment variable, which enables mock implementations for external services (LLM providers, vector stores, etc.). This allows tests to run in CI without real API keys. Mock modules are located in `nodes/test/mocks/`.

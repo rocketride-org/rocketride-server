@@ -36,9 +36,11 @@ inherits the rest. See ``nodes/src/nodes/graph_falkordb/IInstance.py``.
 from __future__ import annotations
 
 import json
+import math
+import re
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from rocketlib import IInstanceBase, error, tool_function, warning
 from rocketlib.types import IInvokeLLM
@@ -47,10 +49,49 @@ from ai.common.schema import Answer, Question, QuestionType
 from ai.common.table import Table
 from ai.common.utils import normalize_tool_input, parse_bool, require_str
 
-from .cypher_safety import is_cypher_safe
-from .graph_global_base import DEFAULT_MAX_EXECUTE_ROWS, GraphGlobalBase
+from .cypher_safety import check_read_query_statement, is_cypher_safe
+from .graph_errors import GraphToolError, driver_detail
+from .graph_global_base import DEFAULT_MAX_EXECUTE_ROWS, DEFAULT_READ_QUERY_LIMIT, GraphGlobalBase
+from .normalize import DEFAULT_ELEMENT_LIMIT, DEFAULT_VALUE_LIMIT, GraphBudgetExceeded, GraphNormalizer
+from .schema import empty_block
 
 DEFAULT_ROW_LIMIT = 250
+
+MAX_CYPHER_LENGTH = 100_000
+MAX_PARAM_DEPTH = 32
+MAX_PARAM_VALUES = 10_000
+INT64_MIN, INT64_MAX = -(2**63), 2**63 - 1
+_PARAM_NAME = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
+_READ_QUERY_FIELDS = frozenset({'cypher', 'params', 'limit'})
+_EXECUTE_SHAPES = ('legacy', 'graph')
+
+# Shared by read_query and execute(shape='graph').
+GRAPH_RESULT_SCHEMA = {
+    'type': 'object',
+    'properties': {
+        'columns': {'type': 'array', 'items': {'type': 'string'}, 'description': 'Column names, in order; may repeat.'},
+        'rows': {
+            'type': 'array',
+            'items': {'type': 'array'},
+            'description': 'Positional rows. Nodes, relationships, paths, temporals, points, large numbers and '
+            'bytes are tagged objects with an "@kind" key; user map keys starting with "@" carry one extra "@".',
+        },
+        'row_limit': {'type': 'integer', 'description': 'The row limit actually applied.'},
+        'truncated': {'type': 'boolean'},
+        'truncated_by': {'type': ['string', 'null'], 'enum': [None, 'rows', 'elements', 'values']},
+        'element_limit': {'type': 'integer'},
+        'elements': {'type': 'integer', 'description': 'Graph elements (nodes + relationships) in this response.'},
+        'value_limit': {'type': 'integer'},
+        'values': {'type': 'integer', 'description': 'JSON values (scalars, containers, tags) in this response.'},
+    },
+}
+
+# The schema v2 block get_schema and refresh_schema return under 'schema'.
+SCHEMA_V2_PROPERTY = {
+    'type': 'object',
+    'description': 'Schema v2: labels and relationship types with all observed property types, '
+    'endpoints, counts, sampled/truncated flags, refreshed_at, and stale/error after a failed refresh.',
+}
 
 
 class GraphInstanceBase(IInstanceBase, ABC):
@@ -163,7 +204,7 @@ class GraphInstanceBase(IInstanceBase, ABC):
                     'items': {'type': 'object'},
                     'description': 'Relationship types with their start and end labels.',
                 },
-                'error': {'type': 'string'},
+                'schema': SCHEMA_V2_PROPERTY,
             },
         },
         description=lambda self: (
@@ -173,14 +214,47 @@ class GraphInstanceBase(IInstanceBase, ABC):
         ),
     )
     def get_schema(self, args):
-        """Return the reflected graph schema."""
+        """Return the reflected graph schema (legacy keys plus the v2 ``schema`` block)."""
         schema = self.IGlobal.graph_schema or {}
         nodes = schema.get('nodes', {})
         return {
             'labels': list(nodes.keys()),
             'nodes': {label: [{'property': p, 'type': t} for p, t in props] for label, props in nodes.items()},
             'relationships': schema.get('relationships', []),
+            'schema': self._schema_block(),
         }
+
+    def _schema_block(self) -> Dict[str, Any]:
+        block = self.IGlobal.schema_snapshot
+        if block is None:
+            block = empty_block(source='startup', error='The schema has not been reflected yet')
+        return block
+
+    @tool_function(
+        input_schema={'type': 'object', 'properties': {}},
+        output_schema={
+            'type': 'object',
+            'properties': {
+                'labels': {'type': 'array', 'items': {'type': 'string'}},
+                'nodes': {'type': 'object'},
+                'relationships': {'type': 'array', 'items': {'type': 'object'}},
+                'schema': SCHEMA_V2_PROPERTY,
+            },
+        },
+        description=lambda self: (
+            f'Re-read the {self._db_display_name()} graph schema now (bounded and sampled) and return it like '
+            f'get_schema. If the refresh fails, the previous schema is kept and marked stale with the error.'
+        ),
+    )
+    def refresh_schema(self, args):
+        """Reflect the schema again, publish it all-or-nothing, and return it."""
+        args = normalize_tool_input(args, tool_name='refresh_schema')
+        if args:
+            raise GraphToolError(
+                f'Invalid refresh_schema input: unexpected field(s) {", ".join(map(repr, sorted(args)))}'
+            )
+        self.IGlobal.refresh_schema_snapshot(source='refresh')
+        return self.get_schema({})
 
     @tool_function(
         input_schema={
@@ -231,13 +305,26 @@ class GraphInstanceBase(IInstanceBase, ABC):
         output_schema={
             'type': 'object',
             'properties': {
-                'rows': {'type': 'array', 'items': {'type': 'object'}},
-                'affected_rows': {'type': 'integer'},
+                # columns, row_limit, truncated, ... come with shape "graph" only.
+                **GRAPH_RESULT_SCHEMA['properties'],
+                'rows': {
+                    'type': 'array',
+                    'items': {'type': ['object', 'array']},
+                    'description': 'Shape "legacy" (the default): one object per row, keyed by column name. '
+                    'Shape "graph": positional rows as read_query returns them, with the other read_query '
+                    'fields (columns, row_limit, truncated, ...).',
+                },
+                'affected_rows': {
+                    'type': 'integer',
+                    'description': 'Both shapes. The summed write counters on Neo4j and FalkorDB; the number of '
+                    'result rows on Apache AGE, which reports no write counters.',
+                },
                 'truncated': {
                     'type': 'boolean',
                     'description': (
-                        'Present and true when a write returned more rows than the row cap on an engine '
-                        'that cannot roll back: the write is saved and only the first rows are returned.'
+                        'Shape "graph": the result was cut, see truncated_by. Shape "legacy": present and true when '
+                        'a write returned more rows than the row cap on an engine that cannot roll back: the write '
+                        'is saved and only the first rows are returned.'
                     ),
                 },
             },
@@ -255,11 +342,13 @@ class GraphInstanceBase(IInstanceBase, ABC):
             args (dict): ``query`` (str) — the raw statement; ``sql`` is accepted
                 in its place, which is the key ``client.database.query`` sends.
                 ``params`` (dict, optional) — values for ``$name`` placeholders.
+                ``shape`` (str, optional) — ``'legacy'`` (the default) or
+                ``'graph'`` for the read_query envelope.
 
         Returns:
-            dict: ``{'rows': [...], 'affected_rows': int}``, plus
-            ``'truncated': True`` when the driver reports a saved write whose
-            result passed the row cap.
+            dict: ``{'rows': [...], 'affected_rows': int}``, plus ``'truncated': True`` when
+            the driver reports a saved write whose result passed the row cap; with shape
+            ``'graph'``, the read_query envelope plus ``affected_rows``.
 
         Raises:
             ValueError: execute is disabled, the statement is missing,
@@ -274,6 +363,11 @@ class GraphInstanceBase(IInstanceBase, ABC):
 
         key = 'sql' if 'query' not in args and 'sql' in args else 'query'
         query = require_str(args, key, tool_name='execute')
+        shape = args.get('shape', 'legacy')
+        if shape is None:
+            shape = 'legacy'
+        if shape not in _EXECUTE_SHAPES:
+            raise ValueError(f'execute: "shape" must be one of {", ".join(_EXECUTE_SHAPES)} (got {shape!r})')
         params = self._execute_params(args.get('params'))
         # client.database.query also forwards these SQL-node options; refuse
         # them rather than run outside the transaction or in another row shape.
@@ -281,6 +375,26 @@ class GraphInstanceBase(IInstanceBase, ABC):
             raise ValueError('execute: graph nodes have no transactions, so "session_id" is not supported')
         if (args.get('row_mode') or 'object') != 'object':
             raise ValueError('execute: graph nodes return row objects, so "row_mode" must be \'object\'')
+
+        if shape == 'graph':
+            # Never retried: a write may already have happened.
+            row_limit = self.IGlobal.execute_graph_cap
+
+            def consume(columns, rows):
+                return self._graph_envelope(columns, rows, row_limit)
+
+            try:
+                if params:
+                    envelope, affected = self.IGlobal._raw_query_rows(query, row_limit + 1, consume, params=params)
+                else:
+                    envelope, affected = self.IGlobal._raw_query_rows(query, row_limit + 1, consume)
+            except GraphToolError:
+                raise
+            except NotImplementedError as e:
+                raise GraphToolError('execute with shape "graph" is not available on this node', str(e)) from e
+            except Exception as e:
+                raise self._graph_error(e) from e
+            return {**envelope, 'affected_rows': int(affected or 0)}
 
         if params:
             result = self.IGlobal._run_query_raw(query, params=params)
@@ -295,16 +409,235 @@ class GraphInstanceBase(IInstanceBase, ABC):
         return out
 
     @tool_function(
+        input_schema={
+            'type': 'object',
+            'required': ['cypher'],
+            'additionalProperties': False,
+            'properties': {
+                'cypher': {
+                    'type': 'string',
+                    'description': 'One read-only Cypher statement. Put values in params as $name; never splice them '
+                    'into the text.',
+                },
+                'params': {
+                    'type': 'object',
+                    'description': 'Values for $name placeholders (null, boolean, number, string, list, map). '
+                    'Graph ids are strings: elementId(n) = $id on Neo4j, id(n) = toInteger($id) elsewhere.',
+                },
+                'limit': {
+                    'type': 'integer',
+                    'minimum': 1,
+                    'description': f'Maximum rows to return (default {DEFAULT_READ_QUERY_LIMIT}; capped by the node).',
+                },
+            },
+        },
+        output_schema=GRAPH_RESULT_SCHEMA,
+        description=lambda self: (
+            f'Run a read-only {self._query_language()} statement you wrote against the {self._db_display_name()} '
+            f'graph and return positional rows with nodes, relationships and paths in one documented shape. '
+            f'Read-only whatever the node allows elsewhere; writes are refused.'
+        ),
+    )
+    def read_query(self, args):
+        """Run caller-written Cypher read-only and return the graph result envelope."""
+        cypher, params, limit = self._read_query_args(args)
+        # read_query's statement rule, the same for every engine, ahead of the
+        # driver's own read boundary.
+        check_read_query_statement(cypher)
+        row_limit = min(limit, self.IGlobal.read_query_cap)
+
+        def consume(columns, rows):
+            return self._graph_envelope(columns, rows, row_limit)
+
+        try:
+            return self.IGlobal._read_query_rows(cypher, params, row_limit + 1, consume)
+        except GraphToolError:
+            raise
+        except NotImplementedError as e:
+            raise GraphToolError('read_query is not available on this node', str(e)) from e
+        except Exception as e:
+            raise self._graph_error(e) from e
+
+    # ------------------------------------------------------------------
+    # read_query helpers (also used by execute shape='graph')
+    # ------------------------------------------------------------------
+
+    def _read_query_args(self, args) -> Tuple[str, Optional[Dict[str, Any]], int]:
+        """Validate read_query input at runtime: the transport does not enforce schemas."""
+        if args is not None and not isinstance(args, (dict, str)) and not hasattr(args, 'model_dump'):
+            raise GraphToolError(f'Invalid read_query input: expected an object, got {type(args).__name__}')
+        args = normalize_tool_input(args, tool_name='read_query')
+        unknown = sorted(set(args) - _READ_QUERY_FIELDS)
+        if unknown:
+            raise GraphToolError(f'Invalid read_query input: unknown field(s) {", ".join(map(repr, unknown))}')
+
+        cypher = args.get('cypher')
+        if not isinstance(cypher, str) or not cypher.strip():
+            raise GraphToolError('Invalid read_query input: "cypher" must be a non-empty string')
+        if len(cypher) > MAX_CYPHER_LENGTH:
+            raise GraphToolError(
+                f'Invalid read_query input: "cypher" is {len(cypher):,} characters (limit {MAX_CYPHER_LENGTH:,})'
+            )
+
+        params = args.get('params')
+        if params is not None:
+            if not isinstance(params, dict):
+                raise GraphToolError(
+                    f'Invalid read_query input: "params" must be an object, got {type(params).__name__}'
+                )
+            for name in params:
+                if not isinstance(name, str) or not _PARAM_NAME.fullmatch(name):
+                    raise GraphToolError(
+                        f'Invalid read_query input: parameter name {name!r} must match [A-Za-z_][A-Za-z0-9_]*'
+                    )
+            self._check_param_value(params, 'params', 0, [0])
+            params = params or None
+
+        limit = args.get('limit')
+        if limit is None:
+            limit = DEFAULT_READ_QUERY_LIMIT
+        elif isinstance(limit, bool) or not isinstance(limit, int):
+            raise GraphToolError(f'Invalid read_query input: "limit" must be an integer >= 1 (got {limit!r})')
+        elif limit < 1:
+            raise GraphToolError(f'Invalid read_query input: "limit" must be an integer >= 1 (got {limit})')
+        return cypher, params, limit
+
+    @classmethod
+    def _check_param_value(cls, value: Any, where: str, depth: int, count: List[int]) -> None:
+        count[0] += 1
+        if count[0] > MAX_PARAM_VALUES:
+            raise GraphToolError(f'Invalid read_query input: params hold more than {MAX_PARAM_VALUES:,} values')
+        if depth > MAX_PARAM_DEPTH:
+            raise GraphToolError(f'Invalid read_query input: {where} is nested more than {MAX_PARAM_DEPTH} levels')
+        if value is None or isinstance(value, (bool, str)):
+            return
+        if isinstance(value, int):
+            if not INT64_MIN <= value <= INT64_MAX:
+                raise GraphToolError(f'Invalid read_query input: {where} is outside the 64-bit integer range')
+            return
+        if isinstance(value, float):
+            if not math.isfinite(value):
+                raise GraphToolError(f'Invalid read_query input: {where} is not a finite number')
+            return
+        if isinstance(value, list):
+            for i, item in enumerate(value):
+                cls._check_param_value(item, f'{where}[{i}]', depth + 1, count)
+            return
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if not isinstance(key, str):
+                    raise GraphToolError(f'Invalid read_query input: {where} has a non-string key')
+                if '`' in key:
+                    raise GraphToolError(f'Invalid read_query input: map key {key!r} in {where} contains a back-quote')
+                cls._check_param_value(item, f'{where}.{key}', depth + 1, count)
+            return
+        raise GraphToolError(f'Invalid read_query input: {where} has unsupported type {type(value).__name__}')
+
+    def _graph_envelope(self, columns: List[str], rows: Iterable[Sequence[Any]], row_limit: int) -> Dict[str, Any]:
+        """Normalize positional driver rows into the read_query envelope, enforcing budgets.
+
+        ``rows`` should yield at most ``row_limit + 1`` rows: one extra row
+        tells a full page apart from a truncated one. A row that would push the
+        response past its element or value budget is dropped whole (the
+        response stays consistent) and truncation is reported; if the very
+        first row alone is over a budget, the query is refused instead.
+        """
+        normalizer = GraphNormalizer(
+            self.IGlobal._graph_adapter(), element_limit=DEFAULT_ELEMENT_LIMIT, value_limit=DEFAULT_VALUE_LIMIT
+        )
+        out: List[List[Any]] = []
+        truncated_by: Optional[str] = None
+        for raw in rows:
+            if len(out) >= row_limit:
+                truncated_by = 'rows'
+                break
+            mark = normalizer.checkpoint()
+            try:
+                out.append(normalizer.row(list(raw)))
+            except GraphBudgetExceeded as e:
+                normalizer.rollback(mark)
+                if not out:
+                    what = 'graph elements' if e.kind == 'elements' else 'values'
+                    raise GraphToolError(
+                        f'Refused: the first row holds more than {e.limit:,} {what}',
+                        'Narrow the query, for example with LIMIT before collect() or a smaller variable-length range.',
+                    ) from None
+                truncated_by = e.kind
+                break
+            except ValueError as e:
+                raise GraphToolError('Query result cannot be represented', str(e)) from e
+        return {
+            'columns': [str(c) for c in columns],
+            'rows': out,
+            'row_limit': row_limit,
+            'truncated': truncated_by is not None,
+            'truncated_by': truncated_by,
+            'element_limit': normalizer.element_limit,
+            'elements': normalizer.elements,
+            'value_limit': normalizer.value_limit,
+            'values': normalizer.values,
+        }
+
+    def _graph_error(self, exc: BaseException) -> GraphToolError:
+        """Shared formatter: driver exception -> "<headline>\n<detail>"."""
+        described = None
+        try:
+            described = self.IGlobal._describe_error(exc)
+        except Exception:
+            described = None
+        if described:
+            headline, detail = described
+            return GraphToolError(headline, detail)
+        return GraphToolError('Query failed', driver_detail(exc))
+
+    @tool_function(
         input_schema={'type': 'object', 'properties': {}},
         output_schema={
             'type': 'object',
-            'properties': {'dialect': {'type': 'string', 'description': 'Graph engine identifier.'}},
+            'properties': {
+                'dialect': {'type': 'string', 'description': 'Graph engine identifier.'},
+                'engine': {'type': 'object', 'description': '{name, version, edition}'},
+                'database': {'type': ['string', 'null']},
+                'graph': {'type': ['string', 'null']},
+                'allow_execute': {'type': 'boolean'},
+                'capabilities': {'type': 'object'},
+                'limits': {'type': 'object'},
+                'read_boundary': {'type': 'string'},
+                'read_boundary_verified': {'type': 'boolean'},
+            },
         },
-        description='Return the graph engine dialect (e.g. neo4j, falkordb).',
+        description='Return the graph engine dialect, version, database/graph, capabilities and limits.',
     )
     def dialect(self, args):
-        """Return the graph engine dialect."""
-        return {'dialect': self._db_dialect()}
+        """Return the engine identity, capabilities and limits (no credentials or hosts)."""
+        identity = self.IGlobal._engine_identity()
+        glb = self.IGlobal
+        max_rows = glb.read_query_cap
+        return {
+            'dialect': self._db_dialect(),
+            'engine': identity.get('engine') or {'name': self._db_display_name(), 'version': None, 'edition': None},
+            'database': identity.get('database'),
+            'graph': identity.get('graph'),
+            'allow_execute': bool(getattr(glb, 'allow_execute', False)),
+            'capabilities': {
+                'read_query': True,
+                'refresh_schema': True,
+                'execute_shape_graph': True,
+                'params': True,
+                'shortest_path': bool(identity.get('shortest_path', True)),
+            },
+            'limits': {
+                # What read_query returns when the caller sends no limit.
+                'default_rows': min(DEFAULT_READ_QUERY_LIMIT, max_rows),
+                'max_rows': max_rows,
+                'max_elements': DEFAULT_ELEMENT_LIMIT,
+                'max_values': DEFAULT_VALUE_LIMIT,
+                'statement_timeout_ms': glb.statement_timeout_ms,
+                'server_result_cap': identity.get('server_result_cap'),
+            },
+            'read_boundary': identity.get('read_boundary', 'read_only_tx'),
+            'read_boundary_verified': bool(identity.get('read_boundary_verified', False)),
+        }
 
     # ------------------------------------------------------------------
     # Sanitization helpers
@@ -329,6 +662,12 @@ class GraphInstanceBase(IInstanceBase, ABC):
                     'count toward the query length limit.'
                 ),
             }
+        properties['shape'] = {
+            'type': 'string',
+            'enum': list(_EXECUTE_SHAPES),
+            'description': 'Result shape: "legacy" (default, rows as objects) or "graph" (the read_query '
+            'envelope plus affected_rows).',
+        }
         return {'type': 'object', 'required': ['query'], 'properties': properties}
 
     def _execute_params(self, raw: Any) -> Optional[Dict[str, Any]]:
@@ -459,6 +798,10 @@ class GraphInstanceBase(IInstanceBase, ABC):
 
         question.addContext(self._describe_schema(self.IGlobal.graph_schema))
         question.expectJson = True
+
+        engine_rules = self.IGlobal._prompt_rules()
+        if engine_rules:
+            question.addInstruction('Target engine', '\n'.join(engine_rules))
 
         question.addInstruction(
             f'{language} Query Generation Guidelines',

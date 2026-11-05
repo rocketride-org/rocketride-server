@@ -43,8 +43,9 @@ the live pin (PG16 + AGE 1.5.0); see the layer README.
 from __future__ import annotations
 
 import enum
+import re
 from dataclasses import dataclass
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, Optional, Tuple
 
 from .analysis import CypherFacts
 from .errors import AgeUnsupportedFeature
@@ -69,6 +70,33 @@ class Capability:
     detail: str = ''
     # EMULATE hook: CypherFacts -> rewritten Cypher text.
     rewrite: Optional[Callable[[CypherFacts], str]] = None
+    # What the user wrote, for the "Not supported on Apache AGE <v>: <construct>" headline.
+    construct: str = ''
+
+
+# Cells first verified against AGE 1.5.0 only. AGE_1_6_0 inherits them, but nobody has run them on 1.6.0 (or on an
+# unlisted version that falls back to these rules), so a rejection there says so instead of claiming the new version.
+VERIFIED_ON_1_5_0_ONLY = frozenset(
+    {
+        'temporal_functions',
+        'element_id',
+        'list_comprehension',
+        'pattern_comprehension',
+        'all_shortest_paths',
+        # syntax_hint() features (a parse that failed):
+        'exists_subquery',
+        'shortest_path',
+        'regex_match',
+        'exists_function',
+    }
+)
+
+
+def _with_verification(feature: str, detail: str, age_version: str) -> str:
+    """Add the verification note to a detail that was verified on AGE 1.5.0 only, when the engine is another version."""
+    if feature in VERIFIED_ON_1_5_0_ONLY and age_version != '1.5.0':
+        return f'{detail}. Verified on AGE 1.5.0; not confirmed on {age_version}.'
+    return detail
 
 
 def _uses_function(name: str) -> Callable[[CypherFacts], bool]:
@@ -91,6 +119,16 @@ def _rewrite_empty_in(facts: CypherFacts) -> str:
     return text
 
 
+def _uses_any_function(names) -> Callable[[CypherFacts], bool]:
+    names = frozenset(names)
+    return lambda facts: bool(names & facts.function_names)
+
+
+# Temporal constructors AGE 1.5.0 lacks ('function ag_catalog.age_<name> does
+# not exist', verified live). datetime() keeps its own, older cell.
+_TEMPORAL_FUNCTIONS = ('date', 'time', 'localtime', 'localdatetime', 'duration')
+
+
 # ---------------------------------------------------------------------------
 # AGE 1.5.0 — what the RocketRide cloud runs
 # ---------------------------------------------------------------------------
@@ -107,6 +145,7 @@ AGE_1_5_0: Dict[str, Capability] = {
                 'Apache AGE has no datetime() (function ag_catalog.age_datetime does not exist); '
                 'store timestamps as ISO-8601 strings or epoch numbers instead'
             ),
+            construct='datetime()',
         ),
         Capability(
             feature='return_star',
@@ -116,6 +155,7 @@ AGE_1_5_0: Dict[str, Capability] = {
                 "AGE requires an explicit result-column list and 'RETURN *' needs full scope "
                 'analysis to synthesize one; list the columns explicitly (e.g. RETURN a, b)'
             ),
+            construct='RETURN *',
         ),
         Capability(
             feature='order_by_alias',
@@ -125,6 +165,7 @@ AGE_1_5_0: Dict[str, Capability] = {
                 "Apache AGE cannot ORDER BY a projection alias ('could not find rte for <name>'); "
                 'order by the expression itself (e.g. ORDER BY r.since, not ORDER BY since)'
             ),
+            construct='ORDER BY <alias>',
         ),
         # --- verified 2026-07-28 against the exact pin container (PG 16.14 +
         # AGE 1.5.0): all four are syntax-level rejections ('syntax error at or
@@ -138,6 +179,7 @@ AGE_1_5_0: Dict[str, Capability] = {
                 "Apache AGE does not parse MERGE ... ON CREATE/ON MATCH SET (syntax error at 'ON'); "
                 'use plain MERGE, then a separate SET clause (MERGE (n) ... SET n.prop = ...)'
             ),
+            construct='MERGE ... ON CREATE/ON MATCH SET',
         ),
         Capability(
             feature='where_label_check',
@@ -148,6 +190,7 @@ AGE_1_5_0: Dict[str, Capability] = {
                 "'WHERE (n:Label)' both fail (syntax error at ':'); put the label in the "
                 'pattern instead (MATCH (n:Label))'
             ),
+            construct='WHERE n:Label',
         ),
         Capability(
             feature='multi_label',
@@ -158,6 +201,7 @@ AGE_1_5_0: Dict[str, Capability] = {
                 "CREATE and MATCH (syntax error at ':'); model the second label as a property "
                 'or an edge to a category node'
             ),
+            construct='multiple labels on one node',
         ),
         # --- verified 2026-10-02 / 2026-10-05 / 2026-10-06 against the
         # datacore image (PG 16.15 + AGE 1.5.0): both shapes report success
@@ -180,6 +224,7 @@ AGE_1_5_0: Dict[str, Capability] = {
                 'Properties inside the MERGE pattern are stored, but MERGE matches on them, so '
                 'with other values it creates a second node or edge'
             ),
+            construct='SET/REMOVE/DELETE after MERGE',
         ),
         Capability(
             feature='empty_list_in',
@@ -200,6 +245,57 @@ AGE_1_5_0: Dict[str, Capability] = {
                 'Apache AGE has no shortestPath() (syntax error); use a bounded variable-length '
                 'match (e.g. (a)-[*..3]-(b)) and rank by path length in the query'
             ),
+            construct='shortestPath()',
+        ),
+        # --- verified 2026-10-04 against PG 16.3 + AGE 1.5.0: the translator
+        # accepts these but AGE fails at run time with a raw error. ---
+        Capability(
+            feature='temporal_functions',
+            status=CellStatus.REJECT,
+            detect=_uses_any_function(_TEMPORAL_FUNCTIONS),
+            detail=(
+                'AGE 1.5.0 has no date(), time(), localtime(), localdatetime() or duration() '
+                '(function ag_catalog.age_<name> does not exist); store temporal values as ISO-8601 '
+                'strings or epoch numbers and compare those (timestamp() returns epoch milliseconds)'
+            ),
+            construct='date()/time()/localtime()/localdatetime()/duration()',
+        ),
+        Capability(
+            feature='element_id',
+            status=CellStatus.REJECT,
+            detect=_uses_function('elementid'),
+            detail='AGE 1.5.0 has no elementId(); use id(n), and look nodes up with WHERE id(n) = toInteger($id)',
+            construct='elementId()',
+        ),
+        Capability(
+            feature='list_comprehension',
+            status=CellStatus.REJECT,
+            detect=lambda facts: facts.has_list_comprehension,
+            detail=(
+                'AGE 1.5.0 does not parse list comprehensions ([x IN list WHERE ... | ...]); '
+                'use UNWIND list AS x ... WITH collect(...) instead'
+            ),
+            construct='list comprehension',
+        ),
+        Capability(
+            feature='pattern_comprehension',
+            status=CellStatus.REJECT,
+            detect=lambda facts: facts.has_pattern_comprehension,
+            detail=(
+                'AGE 1.5.0 does not parse pattern comprehensions ([(a)-->(b) | ...]); '
+                'use OPTIONAL MATCH ... WITH a, collect(...) instead'
+            ),
+            construct='pattern comprehension',
+        ),
+        Capability(
+            feature='all_shortest_paths',
+            status=CellStatus.REJECT,
+            detect=_uses_function('allshortestpaths'),
+            detail=(
+                'AGE 1.5.0 has no allShortestPaths(); use a bounded variable-length match '
+                '(e.g. MATCH p = (a)-[*1..3]-(b)) and keep the shortest length(p)'
+            ),
+            construct='allShortestPaths()',
         ),
     )
 }
@@ -254,7 +350,13 @@ def apply_capabilities(facts: CypherFacts, age_version: str = DEFAULT_AGE_VERSIO
         if not cap.detect(facts):
             continue
         if cap.status is CellStatus.REJECT:
-            raise AgeUnsupportedFeature(cap.feature, cap.detail)
+            construct = cap.construct
+            if cap.feature == 'temporal_functions':
+                used = sorted(set(_TEMPORAL_FUNCTIONS) & facts.function_names)
+                construct = ', '.join(f'{name}()' for name in used) or construct
+            raise AgeUnsupportedFeature(
+                cap.feature, _with_verification(cap.feature, cap.detail, age_version), construct, age_version
+            )
         if cap.status is CellStatus.EMULATE and cap.rewrite is not None:
             # Re-analyze the rewritten text so later stages see consistent
             # facts, but keep the caller-visible column names of the query
@@ -273,3 +375,52 @@ def apply_capabilities(facts: CypherFacts, age_version: str = DEFAULT_AGE_VERSIO
                 rewritten.return_columns = facts.return_columns
             facts = rewritten
     return facts
+
+
+# ---------------------------------------------------------------------------
+# Hints for constructs the openCypher grammar cannot even parse
+# ---------------------------------------------------------------------------
+
+# Applied only after a parse has FAILED, to replace the bare syntax error with
+# guidance; the statement is rejected either way. Matched on the text with
+# string literals and comments blanked out.
+_SYNTAX_HINTS: Tuple[Tuple[str, str, str, str], ...] = (
+    (
+        r'\bEXISTS\s*\{',
+        'exists_subquery',
+        'EXISTS { ... } subquery',
+        'AGE 1.5.0 has no EXISTS subqueries; use OPTIONAL MATCH and test the result with IS NULL / IS NOT NULL',
+    ),
+    (
+        r'\b(?:all)?shortestPath\s*\(',
+        'shortest_path',
+        'shortestPath()',
+        'AGE 1.5.0 has no shortest-path functions; use a bounded variable-length match '
+        '(e.g. MATCH p = (a)-[*1..3]-(b)) and keep the shortest length(p)',
+    ),
+    (
+        r'=~',
+        'regex_match',
+        'regular-expression match (=~)',
+        'this translator does not accept =~ yet; use STARTS WITH, ENDS WITH or CONTAINS',
+    ),
+    (
+        r'\bexists\s*\(',
+        'exists_function',
+        'exists()',
+        'this translator does not accept exists() yet; use n.prop IS NOT NULL, or a MATCH on the pattern',
+    ),
+)
+
+_BLANK_LITERALS = re.compile(r"""'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|`[^`]*`|//[^\r\n]*|/\*.*?\*/""", re.DOTALL)
+
+
+def syntax_hint(query: str, age_version: str = DEFAULT_AGE_VERSION) -> Optional[AgeUnsupportedFeature]:
+    """Return a precise unsupported-feature error for a query that failed to parse, if one applies."""
+    code = _BLANK_LITERALS.sub(' ', query)
+    for pattern, feature, construct, detail in _SYNTAX_HINTS:
+        if re.search(pattern, code, re.IGNORECASE):
+            return AgeUnsupportedFeature(
+                feature, _with_verification(feature, detail, age_version), construct, age_version
+            )
+    return None

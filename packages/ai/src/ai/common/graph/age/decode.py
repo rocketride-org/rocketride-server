@@ -101,6 +101,27 @@ def _to_plain(value: Any) -> Any:
     return value
 
 
+def parse_agtype(text: Any) -> Any:
+    """Parse one agtype column value WITHOUT flattening graph entities.
+
+    Returns the vendored parser's ``Vertex``/``Edge``/``Path`` objects, ``int``
+    (exact, any size), ``float`` (incl. NaN/Infinity) and ``Decimal`` for
+    ``::numeric`` — the input for the shared graph normalizer, which needs the
+    entity types and exact numbers that :func:`decode_agtype` flattens away.
+    SQL NULL (``None``) passes through.
+    """
+    if text is None:
+        return None
+    if not isinstance(text, str):
+        raise AgeTranslationError(f'agtype value must be text, got {type(text).__name__}')
+    try:
+        return _parse_agtype_strict(text)
+    except AgeTranslationError:
+        raise
+    except Exception as e:
+        raise AgeTranslationError(f'Failed to decode agtype value: {e}') from e
+
+
 def decode_agtype(text: Any) -> Any:
     """Decode one agtype column value into a plain Python value.
 

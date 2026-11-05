@@ -1,0 +1,4 @@
+# Local results of the manual lanes, and the browser lanes' Playwright install.
+out/
+browser/node_modules/
+browser/package-lock.json

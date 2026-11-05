@@ -1,0 +1,91 @@
+{
+  "components": [
+    {
+      "id": "tools_1",
+      "provider": "tools",
+      "name": "Tools",
+      "config": {
+        "hideForm": true,
+        "mode": "Source",
+        "parameters": {},
+        "type": "tools",
+        "name": "Tools"
+      },
+      "ui": {
+        "position": {
+          "x": 100,
+          "y": 120
+        },
+        "measured": {
+          "width": 150,
+          "height": 87
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "graph_falkordb_1",
+      "provider": "graph_falkordb",
+      "name": "FalkorDB",
+      "config": {
+        "profile": "default",
+        "default": {
+          "host": "localhost",
+          "port": 6379,
+          "graph": "agent",
+          "allow_writes": false,
+          "allow_execute": false
+        },
+        "name": "FalkorDB"
+      },
+      "ui": {
+        "position": {
+          "x": 260,
+          "y": 280
+        },
+        "measured": {
+          "width": 150,
+          "height": 123
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "control": [
+        {
+          "classType": "tool",
+          "from": "tools_1"
+        }
+      ]
+    },
+    {
+      "id": "annotation_1",
+      "provider": "annotation",
+      "name": "Read this first",
+      "config": {
+        "content": "**FalkorDB**\n\nGraph Explorer opens this pipeline's graph node as a connection. Start the pipeline, then open Graph Explorer and choose the connection.\n\n**Nothing here can write.** `allow_execute` is off, so Graph Explorer browses read-only and has no write console for this node. Turn it on only for a node you trust people to change data through.\n\nTo ask questions in words, add an LLM node and connect it to this graph node. Browsing with Cypher needs no model.\n\nChange `host`, `port` and `graph` to your instance. Browsing uses `GRAPH.RO_QUERY`, which the server itself restricts to reads. Put the password in the node's form (stored encrypted; this template holds none).",
+        "bgColor": "var(--rr-annotation-bg-default)",
+        "fgColor": "var(--rr-text-primary)"
+      },
+      "ui": {
+        "position": {
+          "x": 480,
+          "y": 100
+        },
+        "measured": {
+          "width": 340,
+          "height": 300
+        },
+        "nodeType": "annotation"
+      }
+    }
+  ],
+  "version": 1,
+  "docRevision": 1,
+  "isLocked": false,
+  "snapToGrid": true,
+  "snapGridSize": [
+    10,
+    10
+  ]
+}

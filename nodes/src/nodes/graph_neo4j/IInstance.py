@@ -65,6 +65,7 @@ class IInstance(GraphInstanceBase):
                 'nodes': {'type': 'object', 'description': 'Map of node label to its properties and types.'},
                 'relationships': {'type': 'array', 'items': {'type': 'object'}},
                 'database': {'type': 'string', 'description': 'The Neo4J database the schema was read from.'},
+                'schema': {'type': 'object', 'description': 'Schema v2 block (whole graph, not label-filtered).'},
                 'error': {'type': 'string'},
             },
         },
@@ -99,6 +100,7 @@ class IInstance(GraphInstanceBase):
             'labels': list(nodes.keys()),
             'nodes': {label: [{'property': p, 'type': t} for p, t in props] for label, props in nodes.items()},
             'relationships': rels,
+            'schema': self._schema_block(),
         }
 
     @tool_function(

@@ -33,6 +33,9 @@ and LLM query loop from the base class.
 from __future__ import annotations
 
 import re
+import time
+
+from itertools import islice
 from typing import Any, Dict, List, Optional, Tuple
 
 import neo4j
@@ -41,6 +44,20 @@ from neo4j.exceptions import Neo4jError, ServiceUnavailable
 from rocketlib import error, warning
 
 from ai.common.graph import GraphGlobalBase, is_cypher_safe, strip_cypher_literals
+from ai.common.graph.adapters import neo4j_adapter
+from ai.common.graph.cypher_safety import NEO4J_READ_PROCEDURES, check_read_only_cypher
+from ai.common.graph.schema import SCHEMA_LABEL_LIMIT, SCHEMA_REL_TYPE_LIMIT, SCHEMA_SAMPLE_SIZE
+
+# Privileges a browsing identity may hold and still be read-only. Anything
+# else GRANTED (writes, schema/name management, administration, boosted
+# execution, or a privilege this list does not know) means the role is not a
+# verified read-only boundary. Procedures and functions run with the caller's
+# own privileges unless boosted, so 'execute' cannot write for a reader. 'load'
+# (granted to PUBLIC by default) lets LOAD CSV read external files; it never
+# writes the graph, and read_query refuses LOAD CSV regardless.
+READ_ONLY_PRIVILEGES = frozenset(
+    {'access', 'traverse', 'read', 'match', 'show_index', 'show_constraint', 'execute', 'execute_function', 'load'}
+)
 
 DEFAULT_URI = 'neo4j://localhost:7687'
 DEFAULT_DATABASE = 'neo4j'
@@ -65,6 +82,9 @@ class IGlobal(GraphGlobalBase):
 
     uri: str = ''
     database: str = DEFAULT_DATABASE
+    server_version: Optional[str] = None
+    server_edition: Optional[str] = None
+    role_verified_read_only: bool = False
 
     # ------------------------------------------------------------------
     # Driver hooks
@@ -85,6 +105,29 @@ class IGlobal(GraphGlobalBase):
         except (ServiceUnavailable, Neo4jError) as e:
             error(f'Neo4J connection failed: {e}')
             raise
+        self._read_server_identity()
+
+    def _read_server_identity(self) -> None:
+        """Server version/edition, and whether this identity's role is verifiably read-only."""
+        self.server_version, self.server_edition, self.role_verified_read_only = None, None, False
+        try:
+            with self.driver.session(database=self.database, default_access_mode=neo4j.READ_ACCESS) as session:
+                rec = session.run(
+                    neo4j.Query(
+                        'CALL dbms.components() YIELD name, versions, edition RETURN versions, edition', timeout=10
+                    )
+                ).single()
+                if rec is not None:
+                    versions = rec['versions'] or []
+                    self.server_version = str(versions[0]) if versions else None
+                    self.server_edition = str(rec['edition'] or '').lower() or None
+                if self.server_edition == 'enterprise':
+                    rows = session.run(
+                        neo4j.Query('SHOW USER PRIVILEGES YIELD access, action RETURN access, action', timeout=10)
+                    ).data()
+                    self.role_verified_read_only = role_is_read_only(rows)
+        except Exception as e:  # identity is descriptive; never fail the node over it
+            warning(f'Neo4J: could not read server identity or privileges: {e}')
 
     def _close_driver(self) -> None:
         if self.driver is not None:
@@ -184,6 +227,149 @@ class IGlobal(GraphGlobalBase):
         )
         return {'rows': rows, 'affected_rows': affected}
 
+    # ------------------------------------------------------------------
+    # read_query / execute(shape='graph')
+    # ------------------------------------------------------------------
+
+    @property
+    def statement_timeout_ms(self) -> int:
+        return int(self.QUERY_TIMEOUT * 1000)
+
+    def _graph_adapter(self):
+        return neo4j_adapter()
+
+    def _read_query_rows(self, cypher, params, fetch_limit, consume):
+        """Read-only Cypher for read_query.
+
+        Layers, outermost first: a token-level check that refuses writes,
+        administration, USE and any CALL outside the read-only procedure
+        allowlist; a READ-mode managed transaction; a server-side transaction
+        deadline. None of these is the security boundary on Neo4j: that is a
+        read-only database role (see the node README). READ mode is routing,
+        not access control, by the driver's own documentation, even though a
+        single instance does refuse writes in it.
+        """
+        check_read_only_cypher(cypher, allowed_procedures=NEO4J_READ_PROCEDURES)
+
+        def work(tx):
+            result = tx.run(cypher, params or {})
+            columns = list(result.keys())
+            # Stream: stop pulling records once the caller has enough.
+            return consume(columns, (record.values() for record in islice(result, fetch_limit)))
+
+        with self.driver.session(
+            database=self.database,
+            default_access_mode=neo4j.READ_ACCESS,
+            fetch_size=max(1, min(fetch_limit, 1000)),
+        ) as session:
+            return session.execute_read(neo4j.unit_of_work(timeout=self.QUERY_TIMEOUT)(work))
+
+    def _raw_query_rows(self, cypher, fetch_limit, consume, params=None):
+        """execute(shape='graph'): run as written in one write transaction (never retried).
+
+        ``params`` binds ``$name`` values as Bolt parameters, as in ``_run_query_raw``.
+        """
+        with self.driver.session(database=self.database) as session:
+            result = session.run(neo4j.Query(cypher, timeout=self.QUERY_TIMEOUT), params or {})
+            envelope = consume(list(result.keys()), (record.values() for record in islice(result, fetch_limit)))
+            counters = result.consume().counters
+            affected = (
+                counters.nodes_created
+                + counters.nodes_deleted
+                + counters.relationships_created
+                + counters.relationships_deleted
+                + counters.properties_set
+                + counters.labels_added
+                + counters.labels_removed
+            )
+            return envelope, affected
+
+    # ------------------------------------------------------------------
+    # Schema v2, identity, prompt rules
+    # ------------------------------------------------------------------
+
+    def _reflect_schema_v2(self, builder, deadline):
+        """Labels and relationship types with counts (count store) and sampled properties/endpoints.
+
+        Everything runs in ONE read transaction whose server-side timeout is
+        the remaining refresh budget, so the whole refresh is bounded by the
+        server, not just each statement. Label and type names come from the
+        procedures' raw values (never back-quoted display strings) and are
+        quoted as identifiers when sampled.
+        """
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError('schema refresh budget exhausted')
+
+        def work(tx):
+            labels = [r['label'] for r in tx.run('CALL db.labels() YIELD label RETURN label ORDER BY label')]
+            if len(labels) > SCHEMA_LABEL_LIMIT:
+                builder.truncated = True
+                labels = labels[:SCHEMA_LABEL_LIMIT]
+            for label in labels:
+                q = _quote(label)
+                builder.label(label, count=tx.run(f'MATCH (n:{q}) RETURN count(n) AS c').single()['c'])
+                for rec in tx.run(f'MATCH (n:{q}) WITH n LIMIT {SCHEMA_SAMPLE_SIZE} RETURN properties(n) AS p'):
+                    builder.sample_label_properties(label, rec['p'])
+            rels = [
+                r['relationshipType']
+                for r in tx.run(
+                    'CALL db.relationshipTypes() YIELD relationshipType RETURN relationshipType ORDER BY relationshipType'
+                )
+            ]
+            if len(rels) > SCHEMA_REL_TYPE_LIMIT:
+                builder.truncated = True
+                rels = rels[:SCHEMA_REL_TYPE_LIMIT]
+            for rel in rels:
+                q = _quote(rel)
+                builder.rel_type(rel, count=tx.run(f'MATCH ()-[r:{q}]->() RETURN count(r) AS c').single()['c'])
+                for rec in tx.run(
+                    f'MATCH (a)-[r:{q}]->(b) WITH a, r, b LIMIT {SCHEMA_SAMPLE_SIZE} '
+                    'RETURN labels(a) AS s, labels(b) AS e, properties(r) AS p'
+                ):
+                    for start in rec['s'] or ['']:
+                        for end in rec['e'] or ['']:
+                            builder.endpoint(rel, start, end, observed=True)
+                    builder.sample_rel_properties(rel, rec['p'])
+
+        with self.driver.session(database=self.database, default_access_mode=neo4j.READ_ACCESS) as session:
+            session.execute_read(neo4j.unit_of_work(timeout=remaining)(work))
+
+    def _engine_identity(self):
+        verified = bool(self.role_verified_read_only)
+        return {
+            'engine': {'name': 'Neo4j', 'version': self.server_version, 'edition': self.server_edition},
+            'database': self.database,
+            'graph': None,
+            'read_boundary': 'database_role' if verified else 'read_session',
+            'read_boundary_verified': verified,
+            'shortest_path': True,
+            'server_result_cap': None,
+        }
+
+    def _prompt_rules(self):
+        version = self.server_version or '5'
+        return [
+            f'The database is Neo4j {version}; write Neo4j Cypher.',
+            'Only MATCH, OPTIONAL MATCH, WITH, UNWIND, RETURN, ORDER BY, SKIP and LIMIT; no write or admin clauses.',
+            'The only procedures you may CALL are db.labels(), db.relationshipTypes(), db.propertyKeys(), '
+            'db.schema.nodeTypeProperties(), db.schema.relTypeProperties() and db.schema.visualization().',
+            'Refer to nodes by elementId(n) (a string), never by id(n).',
+        ]
+
+    def _describe_error(self, exc):
+        if not isinstance(exc, Neo4jError):
+            return None
+        code = str(getattr(exc, 'code', '') or '')
+        detail = str(getattr(exc, 'message', None) or exc).strip()
+        if 'TransactionTimedOut' in code:
+            return f'Query timed out after {self.statement_timeout_ms} ms', detail
+        if code.endswith('Statement.AccessMode'):
+            return 'Refused: the database refused a write on the read-only path', detail
+        if code.startswith('Neo.ClientError.Security.'):
+            return 'Refused: the database user may not run this statement', detail
+        return 'Query failed', detail
+
     def _validate_query(self, query: str) -> Tuple[bool, str]:
         """Run EXPLAIN to check syntax without executing the query."""
         try:
@@ -194,77 +380,6 @@ class IGlobal(GraphGlobalBase):
             return False, str(e.message or e)
         except Exception as e:
             return False, str(e)
-
-    def _reflect_schema(self) -> Dict[str, Any]:
-        """Reflect node labels, their properties, and relationship types."""
-        schema: Dict[str, Any] = {'nodes': {}, 'relationships': []}
-
-        try:
-            with self.driver.session(database=self.database) as session:
-                schema['nodes'] = self._reflect_nodes(session)
-                schema['relationships'] = self._reflect_relationships(session)
-        except Exception as e:
-            warning(f'Neo4J schema reflection failed: {e}')
-
-        return schema
-
-    # ------------------------------------------------------------------
-    # Neo4J helpers
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _reflect_nodes(session) -> Dict[str, List[Tuple[str, str]]]:
-        """Read labels and their property types, falling back to bare labels."""
-        node_props: Dict[str, List[Tuple[str, str]]] = {}
-        try:
-            for record in session.run('CALL db.schema.nodeTypeProperties()'):
-                raw_label = record.get('nodeType', '')
-                label = raw_label.lstrip(':') if raw_label else ''
-                if not label:
-                    continue
-                node_props.setdefault(label, [])
-                prop = record.get('propertyName') or ''
-                if prop:
-                    types = record.get('propertyTypes') or []
-                    node_props[label].append((prop, types[0] if types else 'ANY'))
-        except Neo4jError:
-            try:
-                for record in session.run('CALL db.labels()'):
-                    label = record.get('label') or ''
-                    if label:
-                        node_props[label] = []
-            except Neo4jError:
-                pass
-        return node_props
-
-    @staticmethod
-    def _reflect_relationships(session) -> List[Dict[str, str]]:
-        """Read relationship types with endpoints, falling back to bare types."""
-        try:
-            rels = []
-            for record in session.run('CALL db.schema.visualization()'):
-                for rel in record.get('relationships') or []:
-                    # neo4j.graph.Relationship exposes metadata as attributes,
-                    # not dict keys — rel.get('type') returns None.
-                    rel_type = getattr(rel, 'type', None) or ''
-                    if rel_type:
-                        rels.append(
-                            {
-                                'type': rel_type,
-                                'start': _first_label(getattr(rel, 'start_node', None)),
-                                'end': _first_label(getattr(rel, 'end_node', None)),
-                            }
-                        )
-            return rels
-        except Neo4jError:
-            try:
-                return [
-                    {'type': r.get('relationshipType', ''), 'start': '', 'end': ''}
-                    for r in session.run('CALL db.relationshipTypes()')
-                    if r.get('relationshipType')
-                ]
-            except Neo4jError:
-                return []
 
     @staticmethod
     def _build_auth(config: Dict[str, Any]) -> Any:
@@ -284,6 +399,21 @@ class IGlobal(GraphGlobalBase):
 def _needs_auto_commit(query: str) -> bool:
     """Return True for a statement Neo4j refuses to run inside an explicit transaction."""
     return bool(_AUTO_COMMIT_ONLY.search(strip_cypher_literals(query)))
+
+
+def _quote(name: str) -> str:
+    """Neo4j identifier quoting: back-quotes, with embedded back-quotes doubled."""
+    return '`' + str(name).replace('`', '``') + '`'
+
+
+def role_is_read_only(privileges: List[Dict[str, Any]]) -> bool:
+    """True when every GRANTED privilege of the current user is a read privilege.
+
+    ``privileges`` are rows of ``SHOW USER PRIVILEGES YIELD access, action``.
+    An empty list is not proof of anything, so it is not read-only-verified.
+    """
+    granted = [str(p.get('action', '')).lower() for p in privileges if str(p.get('access', '')).upper() == 'GRANTED']
+    return bool(granted) and all(action in READ_ONLY_PRIVILEGES for action in granted)
 
 
 def _record_to_dict(record: neo4j.Record) -> Dict[str, Any]:
@@ -315,11 +445,3 @@ def _serialize_value(value: Any) -> Any:
     if hasattr(value, 'isoformat'):
         return value.isoformat()
     return str(value)
-
-
-def _first_label(node: Any) -> str:
-    """Extract the first label from a neo4j Node object, or '' if unavailable."""
-    if node is None or not hasattr(node, 'labels'):
-        return ''
-    labels = list(node.labels)
-    return labels[0] if labels else ''

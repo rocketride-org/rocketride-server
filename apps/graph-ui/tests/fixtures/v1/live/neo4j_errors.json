@@ -1,0 +1,8 @@
+{
+  "refused_write": "Refused: read_query is read-only; this statement writes (CREATE)\nUse the write console (execute) on a node with allow_execute enabled.",
+  "refused_call": "Refused: CALL apoc.periodic.iterate is not on the read-only procedure allowlist\nAllowed: db.labels, db.propertyKeys, db.relationshipTypes, db.schema.nodeTypeProperties, db.schema.relTypeProperties, db.schema.visualization",
+  "invalid_input": "Invalid read_query input: \"limit\" must be an integer >= 1 (got True)",
+  "db_error": "Query failed\nInvalid input 'RETURN': expected a graph pattern, a parameter, ')', ':', 'IS', 'WHERE' or '{' (line 1, column 10 (offset: 9))\n\"MATCH (n RETURN n\"\n          ^",
+  "execute_disabled": "execute tool is disabled for this node (set allow_execute=true)",
+  "timeout": "Query timed out after 300 ms\nThe transaction has been terminated. Retry your operation in a new transaction, and you should see a successful result. The transaction has not completed within the timeout specified at its start by the client. You may want to retry with a longer timeout."
+}

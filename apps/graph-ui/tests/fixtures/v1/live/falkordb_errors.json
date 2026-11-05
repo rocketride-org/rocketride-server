@@ -1,0 +1,3 @@
+{
+  "refused_write": "Refused: read_query is read-only; this statement writes\ngraph.RO_QUERY is to be executed only on read-only queries"
+}

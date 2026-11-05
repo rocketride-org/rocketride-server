@@ -1,0 +1,614 @@
+{
+  "database": "neo4j",
+  "labels": [
+    "Fresha33079d5",
+    "Freshly",
+    "GxBlob",
+    "GxCompany",
+    "GxEmployee",
+    "GxPerson",
+    "GxAcc",
+    "Paper",
+    "Person"
+  ],
+  "nodes": {
+    "Fresha33079d5": [
+      {
+        "property": "added",
+        "type": "boolean"
+      }
+    ],
+    "Freshly": [
+      {
+        "property": "added",
+        "type": "boolean"
+      }
+    ],
+    "GxBlob": [
+      {
+        "property": "b",
+        "type": "unknown"
+      }
+    ],
+    "GxCompany": [
+      {
+        "property": "name",
+        "type": "string"
+      }
+    ],
+    "GxEmployee": [
+      {
+        "property": "age",
+        "type": "integer"
+      },
+      {
+        "property": "big",
+        "type": "integer"
+      },
+      {
+        "property": "born",
+        "type": "temporal"
+      },
+      {
+        "property": "home",
+        "type": "point"
+      },
+      {
+        "property": "meta",
+        "type": "string"
+      },
+      {
+        "property": "name",
+        "type": "string"
+      },
+      {
+        "property": "seen",
+        "type": "temporal"
+      },
+      {
+        "property": "tenure",
+        "type": "temporal"
+      }
+    ],
+    "GxPerson": [
+      {
+        "property": "age",
+        "type": "integer"
+      },
+      {
+        "property": "big",
+        "type": "integer"
+      },
+      {
+        "property": "born",
+        "type": "temporal"
+      },
+      {
+        "property": "home",
+        "type": "point"
+      },
+      {
+        "property": "meta",
+        "type": "string"
+      },
+      {
+        "property": "name",
+        "type": "string"
+      },
+      {
+        "property": "seen",
+        "type": "temporal"
+      },
+      {
+        "property": "tenure",
+        "type": "temporal"
+      }
+    ],
+    "GxAcc": [
+      {
+        "property": "added",
+        "type": "boolean"
+      },
+      {
+        "property": "born",
+        "type": "integer"
+      },
+      {
+        "property": "name",
+        "type": "string"
+      },
+      {
+        "property": "title",
+        "type": "string"
+      }
+    ],
+    "Paper": [
+      {
+        "property": "title",
+        "type": "string"
+      }
+    ],
+    "Person": [
+      {
+        "property": "born",
+        "type": "integer"
+      },
+      {
+        "property": "name",
+        "type": "string"
+      }
+    ]
+  },
+  "relationships": [
+    {
+      "type": "GX_KNOWS",
+      "start": "GxEmployee",
+      "end": "GxPerson"
+    },
+    {
+      "type": "GX_KNOWS",
+      "start": "GxPerson",
+      "end": "GxEmployee"
+    },
+    {
+      "type": "GX_KNOWS",
+      "start": "GxPerson",
+      "end": "GxPerson"
+    },
+    {
+      "type": "GX_LIKES",
+      "start": "GxEmployee",
+      "end": "GxEmployee"
+    },
+    {
+      "type": "GX_LIKES",
+      "start": "GxEmployee",
+      "end": "GxPerson"
+    },
+    {
+      "type": "GX_LIKES",
+      "start": "GxPerson",
+      "end": "GxEmployee"
+    },
+    {
+      "type": "GX_LIKES",
+      "start": "GxPerson",
+      "end": "GxPerson"
+    },
+    {
+      "type": "GX_WORKS_AT",
+      "start": "GxEmployee",
+      "end": "GxCompany"
+    },
+    {
+      "type": "GX_WORKS_AT",
+      "start": "GxPerson",
+      "end": "GxCompany"
+    },
+    {
+      "type": "KNOWS",
+      "start": "GxAcc",
+      "end": "GxAcc"
+    },
+    {
+      "type": "KNOWS",
+      "start": "GxAcc",
+      "end": "Person"
+    },
+    {
+      "type": "KNOWS",
+      "start": "Person",
+      "end": "GxAcc"
+    },
+    {
+      "type": "KNOWS",
+      "start": "Person",
+      "end": "Person"
+    },
+    {
+      "type": "WROTE",
+      "start": "GxAcc",
+      "end": "GxAcc"
+    },
+    {
+      "type": "WROTE",
+      "start": "GxAcc",
+      "end": "Paper"
+    },
+    {
+      "type": "WROTE",
+      "start": "Person",
+      "end": "GxAcc"
+    },
+    {
+      "type": "WROTE",
+      "start": "Person",
+      "end": "Paper"
+    }
+  ],
+  "schema": {
+    "version": 2,
+    "labels": [
+      {
+        "name": "Fresha33079d5",
+        "properties": [
+          {
+            "name": "added",
+            "types": [
+              "boolean"
+            ]
+          }
+        ],
+        "count": 1,
+        "count_estimated": false
+      },
+      {
+        "name": "Freshly",
+        "properties": [
+          {
+            "name": "added",
+            "types": [
+              "boolean"
+            ]
+          }
+        ],
+        "count": 1,
+        "count_estimated": false
+      },
+      {
+        "name": "GxBlob",
+        "properties": [
+          {
+            "name": "b",
+            "types": [
+              "unknown"
+            ]
+          }
+        ],
+        "count": 1,
+        "count_estimated": false
+      },
+      {
+        "name": "GxCompany",
+        "properties": [
+          {
+            "name": "name",
+            "types": [
+              "string"
+            ]
+          }
+        ],
+        "count": 1,
+        "count_estimated": false
+      },
+      {
+        "name": "GxEmployee",
+        "properties": [
+          {
+            "name": "age",
+            "types": [
+              "integer"
+            ]
+          },
+          {
+            "name": "big",
+            "types": [
+              "integer"
+            ]
+          },
+          {
+            "name": "born",
+            "types": [
+              "temporal"
+            ]
+          },
+          {
+            "name": "home",
+            "types": [
+              "point"
+            ]
+          },
+          {
+            "name": "meta",
+            "types": [
+              "string"
+            ]
+          },
+          {
+            "name": "name",
+            "types": [
+              "string"
+            ]
+          },
+          {
+            "name": "seen",
+            "types": [
+              "temporal"
+            ]
+          },
+          {
+            "name": "tenure",
+            "types": [
+              "temporal"
+            ]
+          }
+        ],
+        "count": 1,
+        "count_estimated": false
+      },
+      {
+        "name": "GxPerson",
+        "properties": [
+          {
+            "name": "age",
+            "types": [
+              "integer"
+            ]
+          },
+          {
+            "name": "big",
+            "types": [
+              "integer"
+            ]
+          },
+          {
+            "name": "born",
+            "types": [
+              "temporal"
+            ]
+          },
+          {
+            "name": "home",
+            "types": [
+              "point"
+            ]
+          },
+          {
+            "name": "meta",
+            "types": [
+              "string"
+            ]
+          },
+          {
+            "name": "name",
+            "types": [
+              "string"
+            ]
+          },
+          {
+            "name": "seen",
+            "types": [
+              "temporal"
+            ]
+          },
+          {
+            "name": "tenure",
+            "types": [
+              "temporal"
+            ]
+          }
+        ],
+        "count": 2,
+        "count_estimated": false
+      },
+      {
+        "name": "GxAcc",
+        "properties": [
+          {
+            "name": "added",
+            "types": [
+              "boolean"
+            ]
+          },
+          {
+            "name": "born",
+            "types": [
+              "integer"
+            ]
+          },
+          {
+            "name": "name",
+            "types": [
+              "string"
+            ]
+          },
+          {
+            "name": "title",
+            "types": [
+              "string"
+            ]
+          }
+        ],
+        "count": 5,
+        "count_estimated": false
+      },
+      {
+        "name": "Paper",
+        "properties": [
+          {
+            "name": "title",
+            "types": [
+              "string"
+            ]
+          }
+        ],
+        "count": 2,
+        "count_estimated": false
+      },
+      {
+        "name": "Person",
+        "properties": [
+          {
+            "name": "born",
+            "types": [
+              "integer"
+            ]
+          },
+          {
+            "name": "name",
+            "types": [
+              "string"
+            ]
+          }
+        ],
+        "count": 6,
+        "count_estimated": false
+      }
+    ],
+    "relationship_types": [
+      {
+        "type": "GX_KNOWS",
+        "endpoints": [
+          {
+            "start": "GxEmployee",
+            "end": "GxPerson",
+            "observed": true
+          },
+          {
+            "start": "GxPerson",
+            "end": "GxEmployee",
+            "observed": true
+          },
+          {
+            "start": "GxPerson",
+            "end": "GxPerson",
+            "observed": true
+          }
+        ],
+        "properties": [
+          {
+            "name": "since",
+            "types": [
+              "integer"
+            ]
+          }
+        ],
+        "count": 3,
+        "count_estimated": false
+      },
+      {
+        "type": "GX_LIKES",
+        "endpoints": [
+          {
+            "start": "GxEmployee",
+            "end": "GxEmployee",
+            "observed": true
+          },
+          {
+            "start": "GxEmployee",
+            "end": "GxPerson",
+            "observed": true
+          },
+          {
+            "start": "GxPerson",
+            "end": "GxEmployee",
+            "observed": true
+          },
+          {
+            "start": "GxPerson",
+            "end": "GxPerson",
+            "observed": true
+          }
+        ],
+        "properties": [],
+        "count": 1,
+        "count_estimated": false
+      },
+      {
+        "type": "GX_WORKS_AT",
+        "endpoints": [
+          {
+            "start": "GxEmployee",
+            "end": "GxCompany",
+            "observed": true
+          },
+          {
+            "start": "GxPerson",
+            "end": "GxCompany",
+            "observed": true
+          }
+        ],
+        "properties": [
+          {
+            "name": "role",
+            "types": [
+              "string"
+            ]
+          }
+        ],
+        "count": 1,
+        "count_estimated": false
+      },
+      {
+        "type": "KNOWS",
+        "endpoints": [
+          {
+            "start": "GxAcc",
+            "end": "GxAcc",
+            "observed": true
+          },
+          {
+            "start": "GxAcc",
+            "end": "Person",
+            "observed": true
+          },
+          {
+            "start": "Person",
+            "end": "GxAcc",
+            "observed": true
+          },
+          {
+            "start": "Person",
+            "end": "Person",
+            "observed": true
+          }
+        ],
+        "properties": [
+          {
+            "name": "since",
+            "types": [
+              "integer"
+            ]
+          }
+        ],
+        "count": 4,
+        "count_estimated": false
+      },
+      {
+        "type": "WROTE",
+        "endpoints": [
+          {
+            "start": "GxAcc",
+            "end": "GxAcc",
+            "observed": true
+          },
+          {
+            "start": "GxAcc",
+            "end": "Paper",
+            "observed": true
+          },
+          {
+            "start": "Person",
+            "end": "GxAcc",
+            "observed": true
+          },
+          {
+            "start": "Person",
+            "end": "Paper",
+            "observed": true
+          }
+        ],
+        "properties": [],
+        "count": 2,
+        "count_estimated": false
+      }
+    ],
+    "sampled": true,
+    "truncated": false,
+    "refreshed_at": "2026-10-04T13:22:01.924Z",
+    "source": "startup",
+    "stale": false,
+    "error": null,
+    "capable": true
+  }
+}

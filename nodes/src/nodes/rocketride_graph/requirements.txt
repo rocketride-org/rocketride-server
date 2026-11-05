@@ -1,1 +1,3 @@
 psycopg2-binary==2.9.12
+# The AGE translator's parser was generated with ANTLR 4.13.2; its runtime must match.
+antlr4-python3-runtime==4.13.2

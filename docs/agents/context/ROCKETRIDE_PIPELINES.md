@@ -666,17 +666,30 @@ only, no lanes.
 ```text
 chat → graph_falkordb → response_answers
                       → response_table
-	[controlled by graph store: llm (required — writes the Cypher)]
+	[controlled by graph store: llm (writes the Cypher for questions)]
 ```
 
-All three share the shape: `questions` in; `table`, `text`, `answers` out; an `llm` control
-connection is REQUIRED (it crafts Cypher from the question). Config is profile-based —
-`graph_falkordb` profile `default` takes `host`, `port`, `graph`, and a `db_description`
-(describe the schema so the LLM writes good Cypher); `graph_neo4j` defaults
-`database: "neo4j"`; `rocketride_graph` requires a configured RocketRide database broker,
-available on RocketRide Cloud or a self-hosted engine configured with that broker. It takes
-no database connection settings in the pipeline. Their classType also includes `tool`, so
-an agent can control a graph store as a tool instead.
+All three share the shape: `questions` in; `table`, `text`, `answers` out. The `llm` control
+connection crafts Cypher from a question, so the questions lane and the `get_data` /
+`get_query` tools need it. Config is profile-based — `graph_falkordb` profile `default` takes
+`host`, `port`, `graph`, and a `db_description` (describe the schema so the LLM writes good
+Cypher); `graph_neo4j` defaults `database: "neo4j"`; `rocketride_graph` requires a configured
+RocketRide database broker, available on RocketRide Cloud or a self-hosted engine configured
+with that broker. It takes no database connection settings in the pipeline. Their classType
+also includes `tool`, so an agent can control a graph store as a tool instead. An agent wired
+that way sees every graph tool in its catalog: `get_data` / `get_query` (natural language;
+need the `llm`), `read_query` (Cypher the agent writes; read-only; up to 1,000 rows by
+default, capped by the node's row cap: `max_rows` on `graph_falkordb` (250 by default) and on
+`rocketride_graph` (1,000 by default), the execute row cap on `graph_neo4j`, never above
+25,000; pass a smaller `limit`), `get_schema` (the cached schema snapshot) / `refresh_schema`
+(re-reads the schema from the database on every call; prefer `get_schema`), `dialect`, and
+`execute` (refused unless `allow_execute` is on).
+
+For direct tool use without questions, wire the graph node to a `tools` source and call its
+tools through `client.tool()`: `read_query` (Cypher you write, read-only on every engine,
+with bound `params` and a row `limit`), `get_schema` / `refresh_schema`, `dialect` (engine,
+capabilities, limits) and `execute` (only when `allow_execute` is on). Such a tools-only
+pipeline starts without an `llm` node; only `get_data` / `get_query` then fail.
 
 **Writing to a graph store** goes through its `execute` tool (node config
 `allow_execute: true`) or `client.database.query` — raw Cypher, no LLM. A write whose result
@@ -1057,7 +1070,7 @@ you already operate Postgres.
 | --- | --- | --- | --- |
 | 'Find content like this' — semantic similarity over chunks | Vector | `qdrant`, `postgres` (pgvector), `pinecone`, `milvus`, `chroma`, `weaviate`, `rocketride_vector` (built-in) | `documents` in via embedding (ingest); `questions` in via embedding (search). No LLM port |
 | Exact answers over structured tables — filters, joins, aggregates | Relational | `db_postgres`, `db_mysql`, `db_clickhouse`, `db_supabase`, `rocketride_sql` (built-in) | `questions` → `table`/`text`/`answers`; `llm` control for natural-language questions (crafts SQL), not needed for raw SQL via `execute`. No ingestion lanes — data already lives in the DB |
-| 'How is A connected to B' — relationship traversal | Graph | `graph_neo4j`, `graph_falkordb`, `rocketride_graph` (built-in) | `questions` → `table`/`text`/`answers`; `llm` control REQUIRED (crafts Cypher). Queries an EXISTING graph (Pattern 14) |
+| 'How is A connected to B' — relationship traversal | Graph | `graph_neo4j`, `graph_falkordb`, `rocketride_graph` (built-in) | `questions` → `table`/`text`/`answers`; `llm` control REQUIRED for questions (crafts Cypher). A tools-only pipeline (`read_query`, `get_schema`, `dialect`) needs no `llm`. Queries an EXISTING graph (Pattern 14) |
 
 Rules of thumb: unstructured documents you must search → vector (Patterns 1/3). Numbers,
 inventories, transactions → relational (give the LLM a good `db_description`). Entity

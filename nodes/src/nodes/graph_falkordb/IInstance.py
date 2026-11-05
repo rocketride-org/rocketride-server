@@ -86,7 +86,10 @@ class IInstance(GraphInstanceBase):
                     'description': 'Result rows; nodes/edges are serialized to objects.',
                 },
                 'row_count': {'type': 'integer'},
-                'truncated': {'type': 'boolean', 'description': 'True if rows were cut at the configured cap.'},
+                'truncated': {
+                    'type': 'boolean',
+                    'description': 'True if rows were cut at the cap (max_rows, kept below the server RESULTSET_SIZE).',
+                },
                 'stats': {
                     'type': 'object',
                     'description': 'Write counters (only when writes are enabled and occurred).',
@@ -103,7 +106,7 @@ class IInstance(GraphInstanceBase):
                 if self.IGlobal.allow_writes
                 else 'Read-only: write clauses (CREATE/MERGE/SET/DELETE) are rejected by the server.'
             )
-            + f' At most {self.IGlobal.max_rows} rows are returned.'
+            + f' At most {self.IGlobal.read_row_cap} rows are returned.'
         ),
     )
     def query(self, args):
@@ -121,11 +124,14 @@ class IInstance(GraphInstanceBase):
             # Writes go through GRAPH.QUERY only when the node owner enabled them;
             # otherwise GRAPH.RO_QUERY makes the server reject them.
             run = graph.query if self.IGlobal.allow_writes else graph.ro_query
-            result = run(cypher, params=params or None, timeout=self.IGlobal.query_timeout_ms)
+            # The node's timeout clamped to the server's TIMEOUT_MAX, which
+            # refuses a larger one.
+            result = run(cypher, params=params or None, timeout=self.IGlobal.statement_timeout_ms)
         except RedisError as e:
             return {'error': str(e), 'columns': [], 'rows': [], 'row_count': 0, 'truncated': False}
 
-        cap = self.IGlobal.max_rows
+        # max_rows, kept below RESULTSET_SIZE: a reply the server cut reads as truncated.
+        cap = self.IGlobal.read_row_cap
         raw_rows = result.result_set or []
         rows = [[_serialize_value(cell) for cell in row] for row in raw_rows[:cap]]
 

@@ -1,1 +1,2 @@
-neo4j
+# Pinned to the version the live suites validate; nodes/test gets it through the engine constraints.
+neo4j==6.3.1
