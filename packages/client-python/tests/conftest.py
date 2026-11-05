@@ -72,7 +72,8 @@ from rocketride import RocketRideClient
 # =========================================================================
 
 TEST_CONFIG: Dict[str, Any] = {
-    'uri': os.getenv('ROCKETRIDE_URI', 'http://localhost:5565'),
+    # An IP, not 'localhost': on Windows the name tries ::1 first, ~2 s per connect.
+    'uri': os.getenv('ROCKETRIDE_URI', 'http://127.0.0.1:5565'),
     'auth': os.getenv('ROCKETRIDE_APIKEY', 'MYAPIKEY'),
     'timeout': 30.0,
 }

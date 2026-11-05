@@ -477,6 +477,11 @@ class Store(DocumentStoreBase):
     def addChunks(self, chunks: List[Doc], checkCollection: bool = True) -> None:
         """
         Add document chunks to the document store.
+
+        Args:
+            chunks: The batch to write.
+            checkCollection: Create the collection if it is missing and check that the chunks match its
+                embedding model and vector size; createCollection passes False when it writes its control row.
         """
         # If no documents present, get out
         if not len(chunks):
@@ -486,15 +491,10 @@ class Store(DocumentStoreBase):
         if checkCollection and not self.createCollection(chunks):
             return
 
-        # Clear the object id list
-        objectIds: Dict = {}
+        # The objects this batch starts over
+        objectIds = self.objectIdsToReplace(chunks)
 
-        # For each document
-        for chunk in chunks:
-            # Save this object id
-            objectIds[chunk.metadata.objectId] = True
-
-        # Erase all documents/chunks associated with that ObjectId in one operation
+        # Erase all documents/chunks associated with those ObjectIds in one operation
         # TODO: Start discussion about better use of upsert() method to increase performance)
         if len(objectIds):
             # Delete entities
