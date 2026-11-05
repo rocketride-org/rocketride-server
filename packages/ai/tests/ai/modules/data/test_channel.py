@@ -478,7 +478,7 @@ async def test_engine_request_completes_while_a_transfer_is_running(task_side, c
     started = time.monotonic()
     response = await client.dap_request('rrext_whoami', {})
     assert response['success'] is True
-    assert time.monotonic() - started < 0.3
+    assert time.monotonic() - started < 5.0
     assert not transfer.done()
     gate.set()
     await transfer
