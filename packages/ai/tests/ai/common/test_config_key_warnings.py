@@ -155,11 +155,12 @@ class TestAgainstTheRealCatalogue:
                 return
         raise AssertionError('llm_openai/services.json not found')
 
-    def test_common_node_name_does_not_trigger_a_typo_warning(self, monkeypatch):
+    @pytest.mark.parametrize('key', ['name', 'type'])
+    def test_common_editor_fields_do_not_trigger_a_typo_warning(self, monkeypatch, key):
         said = []
         monkeypatch.setattr('ai.common.config.warning', said.append)
         for node, service in self._services():
-            Config._warnMisnamedKeys(node, service, {'name': 'My display label'})
+            Config._warnMisnamedKeys(node, service, {key: node})
         assert said == []
 
 
@@ -196,3 +197,37 @@ def test_node_name_does_not_suppress_real_tool_name_typo(monkeypatch):
     assert len(said) == 1
     assert '"serverNam"' in said[0]
     assert '"serverName"' in said[0]
+
+
+@pytest.mark.parametrize('token', ['test-pat', '${ROCKETRIDE_CANVAS_GITHUB_TOKEN}'])
+@pytest.mark.parametrize('nested', [False, True])
+def test_github_editor_type_preserves_auth_settings_without_warning(monkeypatch, token, nested):
+    """The canvas node type must not be mistaken for a truncated authType."""
+    repo_root = Path(__file__).resolve().parents[5]
+    service = json5.loads((repo_root / 'nodes/src/nodes/tool_github/services.json').read_text(encoding='utf-8'))
+    said = []
+    monkeypatch.setattr('ai.common.config.getServiceDefinition', lambda _node: service)
+    monkeypatch.setattr('ai.common.config.warning', said.append)
+    settings = {'type': 'tool_github', 'authType': 'pat', 'token': token, 'readOnly': True}
+    config = {'profile': 'default', 'default': settings} if nested else settings
+
+    resolved = Config.getNodeConfig('tool_github', config)
+
+    assert said == []
+    assert resolved['type'] == 'tool_github'
+    assert resolved['authType'] == 'pat'
+    assert resolved['token'] == token
+    assert resolved['readOnly'] is True
+
+
+def test_editor_type_does_not_suppress_real_auth_type_typo(monkeypatch):
+    said = []
+    monkeypatch.setattr('ai.common.config.warning', said.append)
+    Config._warnMisnamedKeys(
+        'tool_github',
+        {'fields': {'github.authType': {'type': 'string'}}},
+        {'type': 'tool_github', 'authTyp': 'pat'},
+    )
+    assert len(said) == 1
+    assert '"authTyp"' in said[0]
+    assert '"authType"' in said[0]
