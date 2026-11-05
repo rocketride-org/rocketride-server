@@ -338,6 +338,9 @@ test('budget: the heatmap at the cap is one canvas, a bounded handful of element
 test('budget: the table alternative at the cap shows 20 rows at a time, every row reachable through Previous and Next', () => {
 	const pages: number[] = [];
 	const make = (page: number): React.ReactElement => body({ state: bigState(), labelOf: bigLabel, showTable: true, tablePage: page, onTablePage: (p) => pages.push(p) });
+	// One throwaway render first: the budget is the steady-state cost of a page, not the module's cold start (the first
+	// render of a process pays for compiling the component on a slow runner).
+	make(0);
 	const { ms, out } = timed(() => make(1));
 	assert.ok(ms < 50, `rendered in ${ms.toFixed(1)} ms`);
 	assert.equal((out.match(/<th scope="row"/g) ?? []).length, 20);

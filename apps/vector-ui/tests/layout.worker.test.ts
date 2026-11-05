@@ -342,7 +342,8 @@ test('nothing the main thread loads reaches the layouts or d3-force, even indire
 		}
 	};
 	walk(path.join(ROOT, 'views', 'MapView.tsx'));
-	const names = [...seen].map((f) => path.relative(ROOT, f));
+	// POSIX names: path.relative uses backslashes on Windows.
+	const names = [...seen].map((f) => path.relative(ROOT, f).replace(/\\/g, '/'));
 	for (const banned of ['map/layout.core.ts', 'map/tsne.core.ts', 'map/layout.server.ts', 'map/layout.worker.ts']) assert.ok(!names.includes(banned), `${banned} is reachable from MapView`);
 	assert.ok(!external.has('d3-force'), 'd3-force is reachable from MapView');
 	assert.ok(names.includes('map/workerClient.ts') && names.includes('map/spawnWorker.ts'), 'the walk reached the client');
