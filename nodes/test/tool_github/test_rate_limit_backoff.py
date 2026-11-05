@@ -73,6 +73,7 @@ def node(monkeypatch):
             get_token=Mock(return_value=TOKEN),
             tools=frozenset(),
             graphql_max_bytes=github_client.DEFAULT_GRAPHQL_MAX_BYTES,
+            graphql_allow_mutations=False,
         )
         request = Mock()
         monkeypatch.setattr(github_client.requests, 'request', request)
@@ -278,6 +279,7 @@ def test_graphql_200_rate_limited_without_a_usable_reset_waits_a_minute(node):
 def test_graphql_200_rate_limited_with_partial_data_is_returned_not_retried(node):
     # GitHub ran part of the mutation; resending it could run that part twice.
     node.inst.IGlobal.read_only = False
+    node.inst.IGlobal.graphql_allow_mutations = True
     body = {
         'data': {'first': {'clientMutationId': 'a'}, 'second': None},
         'errors': [{'type': 'RATE_LIMITED', 'path': ['second'], 'message': 'API rate limit exceeded.'}],

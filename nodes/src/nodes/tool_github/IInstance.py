@@ -1102,11 +1102,12 @@ class IInstance(IInstanceBase):
         description=(
             'Run a GitHub GraphQL document (POST /graphql). Returns data.data and data.errors as GitHub sent '
             'them, with rate_limit; GraphQL errors are returned, not raised. In read-only mode a document '
-            'with a mutation operation is refused before it is sent.'
+            'with a mutation operation is refused before it is sent; with read-only mode off, mutations run '
+            'only when graphqlAllowMutations is on.'
         ),
     )
     def graphql(self, args):
-        """Run a GraphQL document; mutations are refused in read-only mode."""
+        """Run a GraphQL document; mutations are refused in read-only mode, and otherwise unless graphqlAllowMutations is on."""
         args = normalize_tool_input(args, tool_name='graphql')
         query = args.get('query')
         if not isinstance(query, str) or not query.strip():
@@ -1117,12 +1118,15 @@ class IInstance(IInstanceBase):
         operation_name = args.get('operationName')
         if operation_name is not None and (not isinstance(operation_name, str) or not operation_name.strip()):
             raise ValueError('graphql: operationName must be a non-empty string')
-        if self.IGlobal.read_only:
-            # Checked before a token is minted, so nothing reaches GitHub. The whole
-            # document is checked: operationName does not exempt a mutation in it.
-            refusal = graphql_guard.mutation_refusal(query)
-            if refusal:
-                return github_client.failure_result(refusal)
+        # Checked before a token is minted, so nothing reaches GitHub. The whole
+        # document is checked: operationName does not exempt a mutation in it.
+        refusal = graphql_guard.mutation_refusal(query)
+        if refusal and self.IGlobal.read_only:
+            return github_client.failure_result(refusal)
+        if refusal and not self.IGlobal.graphql_allow_mutations:
+            # Off by default: a mutation can do anything the credential allows, far more
+            # than the write tools, so existing settings do not enable GraphQL mutations.
+            return github_client.failure_result(graphql_guard.not_allowed(refusal))
         return self._with_credentials(
             lambda credential, secrets: github_client.graphql_result(
                 credential,

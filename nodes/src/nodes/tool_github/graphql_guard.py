@@ -63,6 +63,24 @@ UNCHECKABLE_REFUSED = (
 )
 
 
+# With readOnly off, the same documents are refused until graphqlAllowMutations is on.
+MUTATION_NOT_ALLOWED = (
+    'graphql refused: the document contains a mutation operation, and graphqlAllowMutations is off. A '
+    'mutation can do anything the credential allows, such as merging a pull request or deleting a '
+    'branch, so turn graphqlAllowMutations on in the node configuration to run mutations.'
+)
+UNCHECKABLE_NOT_ALLOWED = (
+    'graphql refused: the document has an unterminated string or unbalanced brackets, so it cannot be '
+    'checked for a mutation operation, and graphqlAllowMutations is off. Fix the document, or turn '
+    'graphqlAllowMutations on in the node configuration to send it as written.'
+)
+
+
+def not_allowed(refusal: str) -> str:
+    """The message for ``refusal`` (a value ``mutation_refusal`` returned) when readOnly is off."""
+    return UNCHECKABLE_NOT_ALLOWED if refusal == UNCHECKABLE_REFUSED else MUTATION_NOT_ALLOWED
+
+
 def mutation_refusal(document: str) -> str | None:
     """Return the refusal message when read-only mode must not send ``document``, else ``None``."""
     names = top_level_names(document)

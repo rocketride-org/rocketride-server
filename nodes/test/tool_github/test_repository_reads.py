@@ -52,6 +52,7 @@ def node(monkeypatch):
             get_token=Mock(return_value=TOKEN),
             tools=frozenset(),
             graphql_max_bytes=github_client.DEFAULT_GRAPHQL_MAX_BYTES,
+            graphql_allow_mutations=False,
             retry_policy=github_client.RetryPolicy(),
         )
         request = Mock()

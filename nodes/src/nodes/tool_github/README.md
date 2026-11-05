@@ -287,7 +287,12 @@ appears outside all of them, where operation keywords live.
   unbalanced brackets), which the GraphQL grammar does not allow.
 - **Not checked:** `subscription` operations, which are sent as written.
 
-With `readOnly` off, every document is sent as written.
+With `readOnly` off, a document that contains a mutation operation is still refused, with a
+message naming `graphqlAllowMutations`, until that setting is on; it is off by default, so a
+pipeline that adds nothing does not gain GraphQL mutations. A mutation can do anything the
+credential allows, such as merging a pull request or deleting a branch, far more than the
+write tools. With `readOnly` off and `graphqlAllowMutations` on, every document is sent as
+written (see [GraphQL mutations](#graphql-mutations)).
 
 ### Releases
 
@@ -331,8 +336,8 @@ With `readOnly` off, every document is sent as written.
 ## Configuration
 
 An authentication method with its credentials (see Authentication), a default
-repository, a read-only switch, a tool allowlist, a GraphQL response cap and a
-rate-limit retry budget. The behavioral ones are detailed below.
+repository, a read-only switch, a tool allowlist, a GraphQL mutation switch, a GraphQL
+response cap and a rate-limit retry budget. The behavioral ones are detailed below.
 
 ### Default Repository
 
@@ -359,7 +364,8 @@ Always allowed: `file_get`, `file_list`, `issue_get`, `issue_list`, `pr_get`, `p
 `repo_languages`, `label_list`, `user_get`.
 
 Checked per document: `graphql` runs queries in read-only mode and refuses any document
-that contains a `mutation` operation (see [GraphQL](#graphql)).
+that contains a `mutation` operation (see [GraphQL](#graphql)). With read-only mode off, a
+mutation also needs `graphqlAllowMutations` (see [GraphQL mutations](#graphql-mutations)).
 
 Note the default is `false`, a freshly added node can write. Turn read-only mode on
 explicitly for inspect-only agents.
@@ -374,6 +380,17 @@ may resolve to, works too. Empty or absent registers every tool. An unknown name
 the pipeline at start with an error listing the unknown names and every valid one. The
 allowlist does not lift read-only mode: a write tool on the list is still refused while
 `readOnly` is on.
+
+### GraphQL mutations
+
+`graphqlAllowMutations` (default `false`) lets `graphql` run a document that contains a
+mutation operation while `readOnly` is off. It is off by default because a mutation can do
+anything the credential allows, such as merging a pull request, deleting a branch or
+changing branch protection, far more than this node's write tools, and because a pipeline
+written before `graphql` existed should not gain GraphQL mutations. With it off, such a
+document returns `status: null` and a message naming the setting, before anything is sent;
+a document the check cannot lex is refused the same way (see [GraphQL](#graphql)). Read-only
+mode refuses mutations whatever this setting says.
 
 ### GraphQL response cap
 
@@ -550,6 +567,7 @@ pytest nodes/test/tool_github/test_app_auth_live.py -v
 | `github.appId` | `string` | **App ID**<br/>The numeric App ID from your GitHub App's settings page. | `""` |
 | `github.authType` | `string` | **Authentication method**<br/>Personal Access Token is simplest for individual/dev use. GitHub App auth mints short-lived, auto-rotating installation tokens — recommended for unattended pipelines against an org's repos. | `"pat"` |
 | `github.defaultRepo` | `string` | **Default Repository**<br/>Default repo in owner/repo format (e.g. acme/myapp). Tool calls that omit the repo parameter will use this value. | `""` |
+| `github.graphqlAllowMutations` | `boolean` | **GraphQL mutations**<br/>With read-only mode off, lets graphql run a document that contains a mutation operation. Off by default: a mutation can do anything the credential allows, such as merging a pull request, deleting a branch or changing branch protection, far more than the write tools. Read-only mode refuses mutations whatever this says. | `false` |
 | `github.graphqlMaxResponseBytes` | `integer` | **GraphQL response cap (bytes)**<br/>Largest graphql response body the node reads, in bytes after decompression. A larger response returns an error naming this cap instead of the data. Default 4194304 (4 MiB). | `4194304` |
 | `github.installationId` | `string` | **Installation ID**<br/>The installation ID for the org/account where the App is installed (found in the installation's settings URL). | `""` |
 | `github.privateKey` | `string` | **App Private Key (.pem)**<br/>Upload the PEM private key generated for your GitHub App. Used to sign short-lived JWTs; never sent to GitHub directly. | `""` |

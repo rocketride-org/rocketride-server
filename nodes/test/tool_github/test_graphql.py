@@ -68,6 +68,7 @@ def node(monkeypatch):
             get_token=Mock(return_value=TOKEN),
             tools=frozenset(),
             graphql_max_bytes=github_client.DEFAULT_GRAPHQL_MAX_BYTES,
+            graphql_allow_mutations=False,
             retry_policy=github_client.RetryPolicy(sleep=sleep),
         )
         request = Mock()
@@ -293,8 +294,33 @@ def test_invalid_operation_name_is_refused_before_anything_is_sent(node, operati
     node.request.assert_not_called()
 
 
-def test_mutation_is_sent_when_read_only_is_off(node):
+@pytest.mark.parametrize(
+    'query',
+    [MUTATION, 'query Q { viewer { login } } mutation M { addStar(input: {starrableId: "x"}) { clientMutationId } }'],
+)
+def test_mutation_is_refused_with_read_only_off_until_mutations_are_allowed(node, query):
     node.inst.IGlobal.read_only = False
+    result = node.inst.graphql({'query': query})
+    assert result['status'] is None
+    assert 'data' not in result
+    assert result['message'].startswith(
+        'graphql refused: the document contains a mutation operation, and graphqlAllowMutations is off.'
+    )
+    assert 'readOnly' not in result['message']
+    node.request.assert_not_called()
+
+
+def test_an_uncheckable_document_is_refused_with_read_only_off_until_mutations_are_allowed(node):
+    node.inst.IGlobal.read_only = False
+    result = node.inst.graphql({'query': 'query { viewer { login '})
+    assert result['status'] is None
+    assert 'cannot be checked for a mutation operation, and graphqlAllowMutations is off' in result['message']
+    node.request.assert_not_called()
+
+
+def test_mutation_is_sent_when_read_only_is_off_and_mutations_are_allowed(node):
+    node.inst.IGlobal.read_only = False
+    node.inst.IGlobal.graphql_allow_mutations = True
     node.request.return_value = gql_response({'data': {'addStar': {'clientMutationId': None}}})
     result = node.inst.graphql({'query': MUTATION})
     assert result['status'] == 200
@@ -306,6 +332,7 @@ def test_mutation_is_sent_when_read_only_is_off(node):
 @pytest.mark.parametrize('failure', ['timeout', 'connection', 'invalid-json', 'response-cap'])
 def test_ambiguous_mutation_outcome_does_not_advise_blind_retry(node, query, failure):
     node.inst.IGlobal.read_only = False
+    node.inst.IGlobal.graphql_allow_mutations = True
     if failure in {'timeout', 'connection'}:
         error = requests.Timeout if failure == 'timeout' else requests.ConnectionError
         node.request.side_effect = error(TOKEN)

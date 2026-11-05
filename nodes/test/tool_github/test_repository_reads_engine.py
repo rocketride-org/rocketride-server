@@ -56,6 +56,7 @@ def instance(monkeypatch):
             read_only=True,
             tools=frozenset(),
             graphql_max_bytes=module.github_client.DEFAULT_GRAPHQL_MAX_BYTES,
+            graphql_allow_mutations=False,
             retry_policy=module.github_client.RetryPolicy(sleep=Mock()),
         )
         request = Mock()
@@ -226,8 +227,10 @@ def test_graphql_dispatches_with_json_input(instance):
     assert request.call_args.kwargs['json'] == args
 
 
-def test_graphql_mutation_refused_in_read_only_mode_through_dispatch(instance):
+@pytest.mark.parametrize('allow_mutations', [False, True])
+def test_graphql_mutation_refused_in_read_only_mode_through_dispatch(instance, allow_mutations):
     inst, request = instance
+    inst.IGlobal.graphql_allow_mutations = allow_mutations
     param = {
         'op': 'tool.invoke',
         'tool_name': 'graphql',
@@ -237,6 +240,27 @@ def test_graphql_mutation_refused_in_read_only_mode_through_dispatch(instance):
     assert param['output']['status'] is None
     assert 'readOnly' in param['output']['message']
     request.assert_not_called()
+
+
+def test_graphql_mutation_refused_with_read_only_off_until_allowed_through_dispatch(instance):
+    inst, request = instance
+    inst.IGlobal.read_only = False
+    param = {
+        'op': 'tool.invoke',
+        'tool_name': 'graphql',
+        'input': {'query': 'mutation { addStar { clientMutationId } }'},
+    }
+    inst.invoke(param)
+    assert param['output']['status'] is None
+    assert 'graphqlAllowMutations is off' in param['output']['message']
+    assert 'readOnly' not in param['output']['message']
+    request.assert_not_called()
+    inst.IGlobal.graphql_allow_mutations = True
+    request.return_value = Mock(status_code=200, headers={}, ok=True)
+    request.return_value.iter_content = Mock(return_value=[b'{"data": {"addStar": {"clientMutationId": null}}}'])
+    inst.invoke(param)
+    assert param['output']['status'] == 200
+    assert request.call_count == 1
 
 
 def test_allowlist_limits_discovery_and_dispatch(instance):

@@ -25,6 +25,7 @@
 				"defaultRepo": "",
 				"readOnly": false,
 				"tools": [],
+				"graphqlAllowMutations": false,
 				"graphqlMaxResponseBytes": 4194304,
 				"rateLimitBudgetSeconds": 60,
 				"rateLimitMaxRetries": 3
@@ -107,6 +108,17 @@
 			"default": [],
 			"optional": true
 		},
+		"github.graphqlAllowMutations": {
+			"type": "boolean",
+			"title": "GraphQL mutations",
+			"description": "With read-only mode off, lets graphql run a document that contains a mutation operation. Off by default: a mutation can do anything the credential allows, such as merging a pull request, deleting a branch or changing branch protection, far more than the write tools. Read-only mode refuses mutations whatever this says.",
+			"default": false,
+			"enum": [
+				[true, "Yes: run mutations"],
+				[false, "No: queries only"]
+			],
+			"optional": true
+		},
 		"github.graphqlMaxResponseBytes": {
 			"type": "integer",
 			"title": "GraphQL response cap (bytes)",
@@ -139,7 +151,7 @@
 		{
 			"section": "Pipe",
 			"title": "GitHub",
-			"properties": ["type", "github.authType", "github.defaultRepo", "github.readOnly", "github.tools", "github.graphqlMaxResponseBytes", "github.rateLimitBudgetSeconds", "github.rateLimitMaxRetries"]
+			"properties": ["type", "github.authType", "github.defaultRepo", "github.readOnly", "github.tools", "github.graphqlAllowMutations", "github.graphqlMaxResponseBytes", "github.rateLimitBudgetSeconds", "github.rateLimitMaxRetries"]
 		}
 	]
 }

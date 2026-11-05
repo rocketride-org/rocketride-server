@@ -152,10 +152,42 @@ def test_out_of_range_integer_options_fail_at_start_naming_the_field(key, value)
         _begin({key: value})
 
 
+def test_graphql_mutations_are_off_by_default():
+    assert _begin({}).graphql_allow_mutations is False
+
+
+@pytest.mark.parametrize(
+    ('raw', 'expected'),
+    [(True, True), (False, False), ('true', True), ('False', False), (' TRUE ', True), ('', False), (None, False)],
+)
+def test_graphql_allow_mutations_reads_booleans_and_their_spellings(raw, expected):
+    assert _begin({'graphqlAllowMutations': raw}).graphql_allow_mutations is expected
+
+
+@pytest.mark.parametrize('raw', ['yes', 1, 0, 'on', [True]])
+def test_a_bad_graphql_allow_mutations_fails_at_start_naming_the_field(raw):
+    with pytest.raises(ValueError, match='graphqlAllowMutations must be true or false'):
+        _begin({'graphqlAllowMutations': raw})
+
+
+def test_validate_config_warns_about_a_bad_flag_without_raising():
+    with scoped_stubs({'token': 'ghp_options', 'graphqlAllowMutations': 'maybe'}):
+        from tool_github.IGlobal import IGlobal, warning
+
+        glb = IGlobal()
+        glb.glb = types.SimpleNamespace(logicalType='tool_github', connConfig={})
+        glb.validateConfig()
+        messages = [call.args[0] for call in warning.call_args_list]
+    assert messages == ['tool_github: graphqlAllowMutations must be true or false']
+
+
 def test_end_global_resets_the_options():
-    glb = _begin({'tools': ALLOWED, 'rateLimitBudgetSeconds': 5, 'graphqlMaxResponseBytes': 2048})
+    glb = _begin(
+        {'tools': ALLOWED, 'rateLimitBudgetSeconds': 5, 'graphqlMaxResponseBytes': 2048, 'graphqlAllowMutations': True}
+    )
     glb.endGlobal()
     assert glb.tools == frozenset()
+    assert glb.graphql_allow_mutations is False
     assert glb.graphql_max_bytes == 4 * 1024 * 1024
     assert glb.retry_policy.budget_seconds == 60
 

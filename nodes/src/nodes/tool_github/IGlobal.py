@@ -136,6 +136,18 @@ def _read_int(cfg, option: tuple) -> int:
     return value
 
 
+def _read_flag(cfg, key: str, default: bool = False) -> bool:
+    """Read a yes-or-no option; blank means the default, and the strings true and false are accepted."""
+    raw = cfg.get(key)
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return default
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, str) and raw.strip().lower() in ('true', 'false'):
+        return raw.strip().lower() == 'true'
+    raise ValueError(f'tool_github: {key} must be true or false')
+
+
 def _read_tools(raw) -> frozenset:
     """Parse the ``tools`` allowlist; empty means every tool. Unknown names fail."""
     if raw is None:
@@ -163,6 +175,7 @@ def _read_options(cfg) -> dict:
     """Parse the non-auth options; ``beginGlobal`` and ``validateConfig`` share it."""
     return {
         'tools': _read_tools(cfg.get('tools')),
+        'graphqlAllowMutations': _read_flag(cfg, 'graphqlAllowMutations'),
         'graphqlMaxResponseBytes': _read_int(cfg, _GRAPHQL_MAX_BYTES),
         'rateLimitBudgetSeconds': _read_int(cfg, _RETRY_BUDGET),
         'rateLimitMaxRetries': _read_int(cfg, _MAX_RETRIES),
@@ -181,6 +194,7 @@ class IGlobal(IGlobalBase):
     read_only: bool = False
     tools: frozenset = frozenset()
     graphql_max_bytes: int = github_client.DEFAULT_GRAPHQL_MAX_BYTES
+    graphql_allow_mutations: bool = False
     retry_policy: github_client.RetryPolicy = github_client.RetryPolicy()
 
     _cached_token: str = ''
@@ -203,6 +217,7 @@ class IGlobal(IGlobalBase):
         options = _read_options(cfg)
         self.tools = options['tools']
         self.graphql_max_bytes = options['graphqlMaxResponseBytes']
+        self.graphql_allow_mutations = options['graphqlAllowMutations']
         self.retry_policy = github_client.RetryPolicy(
             budget_seconds=options['rateLimitBudgetSeconds'],
             max_retries=options['rateLimitMaxRetries'],
@@ -234,6 +249,7 @@ class IGlobal(IGlobalBase):
         self.read_only = False
         self.tools = frozenset()
         self.graphql_max_bytes = github_client.DEFAULT_GRAPHQL_MAX_BYTES
+        self.graphql_allow_mutations = False
         self.retry_policy = github_client.RetryPolicy()
         self._cached_token = ''
         self._cached_expiry = 0.0
