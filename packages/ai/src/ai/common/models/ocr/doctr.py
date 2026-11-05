@@ -57,7 +57,21 @@ class DocTRLoader(BaseLoader):
         pretrained: bool = True,
         **kwargs,
     ) -> Tuple[Dict[str, Any], Dict[str, Any], int]:
-        """Load docTR OCR predictor."""
+        """Load docTR OCR predictor.
+
+        Args:
+            model_name: Ignored; docTR's models are ``detection_model`` and ``recognition_model``.
+            device: ``'cpu'``, ``'cuda'`` or ``'cuda:N'``; the CUDA default when None.
+            allocate_gpu: The model server's allocator, called with the memory needed; it picks the GPU.
+            exclude_gpus: GPUs ``allocate_gpu`` must not pick.
+            detection_model: The docTR detection architecture.
+            recognition_model: The docTR recognition architecture.
+            pretrained: Whether to load pretrained weights.
+            **kwargs: Ignored.
+
+        Returns:
+            (model bundle with the predictor and its device, metadata, GPU index or -1 on CPU).
+        """
         DocTRLoader._ensure_dependencies()
 
         # Import opencv BEFORE doctr - this ensures opencv-contrib-python-headless
@@ -96,7 +110,8 @@ class DocTRLoader(BaseLoader):
                 pretrained=pretrained,
             )
             if torch_device != 'cpu':
-                predictor = predictor.cuda()
+                # .cuda() would take the current device, not the one chosen above
+                predictor = predictor.to(torch_device)
         except Exception as e:
             logger.error(f'Failed to load docTR: {e}')
             raise
