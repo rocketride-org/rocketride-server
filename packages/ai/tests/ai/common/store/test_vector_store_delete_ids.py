@@ -7,7 +7,7 @@ echoed in the reply beside deleted_count.
 
 import pytest
 
-from ._vectordb_tool_harness import Tools, make_store
+from ._vectordb_tool_harness import Tools, core, make_store
 
 
 def test_the_reply_echoes_the_distinct_ids_and_counts_them():
@@ -15,7 +15,7 @@ def test_the_reply_echoes_the_distinct_ids_and_counts_them():
 
     result = Tools(store).delete({'object_ids': [' a ', 'a', 'b', '']})
 
-    assert result == {'success': True, 'deleted_count': 2, 'object_ids': ['a', 'b']}
+    assert core(result) == {'success': True, 'deleted_count': 2, 'object_ids': ['a', 'b']}
     store.remove.assert_called_once_with(['a', 'b'])
 
 
@@ -24,8 +24,9 @@ def test_the_control_row_cannot_be_deleted():
 
     result = Tools(store).delete({'object_ids': ['a', 'schema']})
 
-    assert result['success'] is False
-    assert result['error'] == "delete: object_id 'schema' is reserved for the store's control row"
+    # The store's control record is refused before the driver, with the contract's RESERVED_ID code.
+    assert result['success'] is False and result['code'] == 'RESERVED_ID'
+    assert "'schema' is the collection's control record" in result['error']
     store.remove.assert_not_called()
 
 
@@ -46,7 +47,7 @@ def test_the_messages_are_unchanged(object_ids, message):
 
     result = Tools(store).delete(args)
 
-    assert result == {'success': False, 'error': message}
+    assert core(result) == {'success': False, 'error': message} and result['code'] == 'INVALID_INPUT'
     store.remove.assert_not_called()
 
 

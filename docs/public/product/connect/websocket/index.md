@@ -88,6 +88,23 @@ task. Every request on the pipe (`write`, `close`, ...) carries that same
 followed immediately by the `\n` byte and the raw payload bytes -- `data` never
 appears in the JSON itself.
 
+A **tool call** uses the same command with `subcommand: "tool"`: it names the
+`tool`, optionally the `nodeId` that owns it (without one, the first node that
+has the tool answers), and its `input`; the response `body.result` is the tool's
+answer. The engine attaches the caller to every tool call itself (the kind of
+key the connection signed in with: account key, task token or public task key;
+plus the task's team and organization) and replaces any `caller` argument a
+client sends. Node tools that change data use it to decide whether to act.
+
+```json
+{
+	"type": "request",
+	"seq": 5,
+	"command": "rrext_process",
+	"arguments": { "subcommand": "tool", "tool": "stats", "nodeId": "store_1", "input": {}, "token": "$TASK_TOKEN" }
+}
+```
+
 ### Responses
 
 The engine answers each request with a **response** that echoes the original
@@ -132,7 +149,7 @@ than inferring one from the prose.
 | `TASK_NOT_REGISTERED` | The token, public key or project/source names no live task: never started, terminated, replaced by another client, or the engine restarted (the task registry is in-memory and rebuilt at boot, so every previously issued token is invalid after a restart). |
 | `TASK_AMBIGUOUS` | An unscoped lookup matched several running tasks; retry with a scope. |
 | `TASK_COMPLETED` | The task finished before the request could be served. |
-| `TASK_STOPPED` | The task was stopped or cancelled before the request. |
+| `TASK_STOPPED` | The task was stopped or cancelled, or is terminating (a restart passes through this state), before the request reached the pipeline. The request was not sent, so it is safe to retry once the task is running again. |
 | `OUT_OF_CREDITS` | The org is out of credit, so the task refuses a new pipe; clears when it tops up. |
 
 These codes ride command replies. A task key rejected while the connection is

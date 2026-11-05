@@ -41,6 +41,11 @@ This configures the environment, resolves dependencies, and builds all modules. 
 | `<module>:test` | Run tests |
 
 Not all modules support all commands. Run `./builder --help` for the full list.
+`nodes:test-db` runs only the live-database suites and requires their
+databases (an unreachable server fails it; `RR_REQUIRE_DB_TESTS=0` makes them
+optional), while `nodes:test` runs them after the mocked pass and requires
+them only with `RR_REQUIRE_DB_TESTS` set. See
+[Testing nodes](../nodes/testing.md#live-database-tests).
 
 ### Modules reference
 
@@ -65,7 +70,7 @@ Not all modules support all commands. Run `./builder --help` for the full list.
 | `mcp-widgets` | MCP Apps widgets (embedded UI served by the ai MCP module) | build, clean, test |
 | `models` | LLM model sync | stamp-locals, update |
 | `monitor-ui` | Server monitor web interface | build, clean |
-| `nodes` | Pipeline nodes | build, clean, test, test-contracts, test-full |
+| `nodes` | Pipeline nodes | build, clean, test, test-contracts, test-db, test-full |
 | `parse` | C++ and Java filter extracting content from documents (Tika) | build |
 | `profiler-ui` | cProfile process profiler | build, clean |
 | `rocket-ui` | Data toolchain interface application | build, clean, dev |
@@ -76,6 +81,7 @@ Not all modules support all commands. Run `./builder --help` for the full list.
 | `test-ui` | Test UI application | build, clean, dev |
 | `ui` | All UI applications | build, clean, register |
 | `vcpkg` | C++ package manager (auto-installed for server build) | bootstrap, clone |
+| `vector-ui` | Vector Explorer application | build, clean, dev, e2e-live, test |
 | `vscode` | VSCode extension | build, compile, clean |
 | `world-ui` | Hello World demo application | build, clean |
 

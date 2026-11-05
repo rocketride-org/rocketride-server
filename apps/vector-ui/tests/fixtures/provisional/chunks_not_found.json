@@ -1,0 +1,5 @@
+{
+	"success": false,
+	"code": "NOT_FOUND",
+	"error": "No document with objectId 'bd98a386-0e58-59e3-a967-f56f03bbb405' is stored in this collection."
+}

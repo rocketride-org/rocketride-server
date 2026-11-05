@@ -1,16 +1,135 @@
+import functools
 import importlib
 import json
 import threading
 from abc import abstractmethod, ABC
-from typing import List, Callable, Dict, Any, Optional, Set, Tuple
+from typing import TYPE_CHECKING, List, Callable, Dict, Any, FrozenSet, Optional, Sequence, Set, Tuple
 from rocketlib import IInstanceBase, tool_function, warning
 from ..schema import Doc, DocFilter, DocMetadata, Question, QuestionText, QuestionType, Answer
+from . import vx_write_gate
+from .errors import StoreUnsupported, ToolRefusal
+from .vx_defaults import AGENT_WRITE_IDS_MAX, VECTOR_TOOL_LIMITS
+from .vx_tools import (  # noqa: F401 - re-exported for the drivers that override the hooks
+    ListingGuard,
+    VectorExplorerTools,
+    decodeCursor,
+    defaultCursorState,
+    deletedFilter,
+    docKey as _vxDocKey,
+    documentRow,
+    encodeCursor,
+    hasVector,
+    invalidCursor,
+    matchesDeleted,
+    metadataValue,
+    normalize_tool_input,
+    read_vectors,
+    safe_error,
+    vectordb_tool,
+)
+from .vx_tools import _strings_arg
+from .vx_tools_ext import VectorExplorerExtTools
+from .vx_types import CONTROL_OBJECT_ID, ChunkPage, DocListFilter, DocPage, KnnGraph, StoreInfo
 
-# The objectId of the control row createCollection writes to every collection
-# (model name and vector size, read on every collection check). DocumentStoreBase,
-# the tool mixin and the drivers refer to it through this name; store_elasticsearch
-# still spells the literal.
-CONTROL_OBJECT_ID = 'schema'
+if TYPE_CHECKING:  # annotations only: numpy is imported where a hook needs it
+    import numpy as np
+
+    from .vx_types import Deleted, Key
+
+
+def _unsupported(hook: str) -> Exception:
+    """Build the ``StoreUnsupported`` an optional hook raises when the driver does not implement it."""
+    return StoreUnsupported(f'{hook} is not supported by this store')
+
+
+#: ``dialect.backend`` for a provider (node logical type) whose driver does not set ``VX_BACKEND``.
+_BACKEND_BY_PROVIDER: Dict[str, str] = {
+    'postgres': 'pgvector',
+    'rocketride_vector': 'pgvector',
+    'qdrant': 'qdrant',
+    'chroma': 'chroma',
+    'milvus': 'milvus',
+    'weaviate': 'weaviate',
+    'pinecone': 'pinecone',
+    'astra_db': 'astra',
+    'astra': 'astra',
+    'mongodb+srv': 'atlas',
+    'atlas': 'atlas',
+}
+
+#: Metadata keys ``DocMetadata(pInstance)`` adds for the explorer (contract section 2.3). A driver
+#: that cannot store them (:meth:`DocumentStoreBase.vxStoresExtras`) never sees them in ``addChunks``.
+VX_METADATA_EXTRAS: Tuple[str, ...] = ('size', 'modifyTime', 'ingestedAt')
+
+#: Driver modules that write one table column per metadata key (``model_dump().keys()`` as the
+#: INSERT column list) and therefore fail on an unknown key until they keep extras elsewhere.
+_COLUMN_PER_KEY_MODULES = frozenset({'store_postgres', 'rocketride_vector'})
+
+#: Most times the default ``scrollChunks`` slides an empty window forward (each slide doubles it).
+_SCROLL_SLIDES_MAX = 64
+
+#: Driver methods that change stored rows; ``DocumentStoreBase.__init_subclass__`` guards them.
+_VX_GUARDED_WRITES = ('addChunks', 'remove', 'removeCounted', 'markDeleted', 'markActive')
+
+
+def _guarded_write(name: str, method: Callable) -> Callable:
+    """Wrap a driver write method: extras trimmed for ``addChunks``, cached counts dropped afterwards.
+
+    A removal or a trash write also drops the cached samples, so ``project``, ``neighbors``
+    and ``similarity_matrix`` never serve a point that left the collection or went to the
+    trash; an upload keeps them (the points they hold are still stored and live).
+    """
+    if name == 'addChunks':
+
+        @functools.wraps(method)
+        def guarded(self, chunks, *args, **kw):
+            try:
+                return method(self, self.vxWritableChunks(chunks), *args, **kw)
+            finally:
+                self.vxForgetCounts()
+
+    else:
+
+        @functools.wraps(method)
+        def guarded(self, *args, **kw):
+            try:
+                return method(self, *args, **kw)
+            finally:
+                self.vxForgetCounts()
+                self.vxForgetSamples()
+
+    guarded.__vx_write_guard__ = True
+    return guarded
+
+
+def _without_extras(doc: Doc) -> Doc:
+    """Return ``doc`` without :data:`VX_METADATA_EXTRAS` in its metadata (a copy; ``doc`` is not changed)."""
+    metadata = getattr(doc, 'metadata', None)
+    extra = getattr(metadata, 'model_extra', None)
+    if not extra or not any(name in extra for name in VX_METADATA_EXTRAS):
+        return doc
+    trimmed = metadata.model_copy()
+    object.__setattr__(
+        trimmed,
+        '__pydantic_extra__',
+        {name: value for name, value in extra.items() if name not in VX_METADATA_EXTRAS},
+    )
+    copy = doc.model_copy()
+    copy.metadata = trimmed
+    return copy
+
+
+def _int_or_none(value: Any) -> Optional[int]:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _docKey(doc: Doc) -> str:
+    return f'{metadataValue(doc, "objectId")}#{metadataValue(doc, "chunkId")}'
 
 
 class DocumentStoreBase(ABC):
@@ -31,6 +150,13 @@ class DocumentStoreBase(ABC):
         self.modelName: str = ''
         self.threshold_search = 0.5
         self.collectionLock = threading.Lock()
+
+        # The node's logical type ('qdrant', 'postgres', ...); reported by the explorer tools.
+        self.provider: str = provider
+
+        # Whether the last query model compared against the control record differed
+        # from it (None until a search names a model). A warning, never a refusal.
+        self.modelMismatch: Optional[bool] = None
 
     @abstractmethod
     def _doesCollectionExist() -> bool:
@@ -134,8 +260,9 @@ class DocumentStoreBase(ABC):
         Mark the set of documents with the given objectId as deleted.
 
         They then will not be returned from the search without specifying deleted=True.
-        Returns the number of chunk rows the backend reports as matched, or None
-        when it does not report one (the historical return; callers treat both the same).
+        Returns the number of chunks the call moved to the trash (0 for a document already
+        there or not stored), or None when the backend cannot count; the ``soft_delete``
+        tool answers it as ``matched_chunks``.
         """
 
     @abstractmethod
@@ -144,35 +271,9 @@ class DocumentStoreBase(ABC):
         Mark the set of documents with the given objectId as active.
 
         This occurs if a document now "comes back" after begin deleted.
-        Returns the matched chunk rows like markDeleted, or None.
+        Returns the number of chunks the call took out of the trash (0 for a document not
+        in it), or None when the backend cannot count; ``restore`` answers it.
         """
-
-    # Optional capability: a listing of documents that loses nothing. getPaths
-    # keys its result by parent path, so two documents under one path collapse
-    # into one entry and a document's chunk count is not available at all. A
-    # driver that implements listDocuments and countDocuments below sets this
-    # True; the list_documents tool and the document_count of stats are offered
-    # only then, every other driver keeps its tool surface as it was.
-    supports_document_listing: bool = False
-
-    def listDocuments(
-        self, parent: str | None = None, offset: int = 0, limit: int = 100, deleted: bool = False
-    ) -> List[Dict[str, Any]]:
-        """
-        Return one row per document, ordered by objectId, as the requested page.
-
-        Each row is ``{'object_id': str, 'parent': str | None, 'chunk_count': int}``.
-        ``deleted`` selects active documents (False) or soft-deleted ones (True),
-        ``parent`` is an exact filter, and the store's own control row is never
-        listed. ``chunk_count`` counts the chunks in the selected state.
-        """
-        raise NotImplementedError(f'{type(self).__name__} does not list documents')
-
-    def countDocuments(self, parent: str | None = None, deleted: bool = False) -> int:
-        """
-        Return how many documents listDocuments would page through for the same filter.
-        """
-        raise NotImplementedError(f'{type(self).__name__} does not count documents')
 
     @abstractmethod
     def render(self, objectId: str, callback: Callable[[str], None]) -> None:
@@ -181,6 +282,498 @@ class DocumentStoreBase(ABC):
 
         Rehydrates all the chunks into the proper order.
         """
+
+    # ------------------------------------------------------------------
+    # Optional explorer hooks (docs/development/nodes/vector-tool-contract.md, section 2)
+    #
+    # None of these is abstract: a driver overrides the ones its backend can
+    # answer natively and inherits the rest. A hook that cannot be answered
+    # raises ``StoreUnsupported`` (``ai.common.store.errors``), which the tool
+    # wrapper reports as ``{success: false, code: 'UNSUPPORTED'}``. Every hook
+    # excludes the control record (objectId ``'schema'``) from what it returns.
+    #
+    # The defaults below work on any driver through the abstract API (``get``,
+    # ``remove``) and the count hooks; ``sampleChunks`` and ``getVectors`` have
+    # no portable default because no driver returns embeddings from ``get``.
+    # ------------------------------------------------------------------
+
+    #: Capability names a driver declares in addition to the hooks it overrides, for example
+    #: ``'sample_stratified_native'``, ``'knn_native'``, ``'documents_distinct'``,
+    #: ``'documents_sorted'``, ``'search_keyword'`` (vocabulary: ``vx_types.CAPABILITY_KEYS``).
+    VX_DRIVER_CAPABILITIES: FrozenSet[str] = frozenset()
+
+    #: The optional hooks :meth:`capabilities` inspects.
+    VX_HOOKS: Tuple[str, ...] = (
+        'describe',
+        'scoreInfo',
+        'countChunks',
+        'countDocumentsWhere',
+        'listDocumentPage',
+        'scrollChunks',
+        'sampleChunks',
+        'getVectors',
+        'knnGraph',
+        'removeCounted',
+    )
+
+    #: ``dialect.backend`` of the driver ('pgvector', 'qdrant', ...). None: derived from the provider.
+    VX_BACKEND: Optional[str] = None
+
+    #: ``dialect.keyword_match`` (contract section 4.4-G): how ``searchKeyword`` matches the question's
+    #: text, from ``vx_types.KEYWORD_MATCHES``. ``'substring'``: a fragment anywhere in the chunk text
+    #: (pgvector's ``ILIKE``, Chroma's ``$contains``); ``'token'``: whole words of a full-text index
+    #: (Qdrant's ``MatchText``). None: the driver has no keyword search, or does not say.
+    VX_KEYWORD_MATCH: Optional[str] = None
+
+    #: ``dialect.support``: 'supported' once the driver's unmocked suites pass on a new and a legacy
+    #: collection, else 'experimental'. A driver lane sets it; mocked evidence never does.
+    VX_SUPPORT: str = 'experimental'
+
+    #: Whether ``addChunks`` may receive the explorer's metadata extras (:data:`VX_METADATA_EXTRAS`).
+    #: None: derived by :meth:`vxStoresExtras` (False for pgvector, True for payload stores). A driver
+    #: that keeps extras (pgvector in its ``meta`` column) sets True; one that cannot sets False.
+    VX_STORES_EXTRAS: Optional[bool] = None
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        """Route every driver's own write methods through the explorer's guards.
+
+        ``addChunks`` goes through :meth:`vxWritableChunks`, so a driver that cannot store
+        the explorer's metadata extras keeps ingesting exactly what it wrote before; it and
+        ``remove``, ``removeCounted``, ``markDeleted`` and ``markActive`` then drop the cached
+        ``stats`` figures (:meth:`vxForgetCounts`), whether they succeed or fail, and all but
+        ``addChunks`` drop the cached samples too (:meth:`vxForgetSamples`). Covers every path
+        to the driver: ``writeDocuments`` (the data lane), nodes that call the store directly,
+        ``createCollection`` and the tools.
+        """
+        super().__init_subclass__(**kwargs)
+        for name in _VX_GUARDED_WRITES:
+            method = cls.__dict__.get(name)
+            if method is None or getattr(method, '__isabstractmethod__', False):
+                continue
+            if getattr(method, '__vx_write_guard__', False):
+                continue
+            setattr(cls, name, _guarded_write(name, method))
+
+    def vxForgetCounts(self) -> None:
+        """Drop the ``stats`` figures cached for this store, so the next ``stats`` recounts."""
+        state = self.__dict__.get('_vx_state')
+        if state is not None:
+            state.forget_counts()
+
+    def vxForgetSamples(self) -> None:
+        """Drop the samples cached for this store (after a removal or a trash write)."""
+        state = self.__dict__.get('_vx_state')
+        if state is not None:
+            state.forget_samples()
+
+    def vxChunksInState(self, objectIds: Sequence[str], deleted: bool) -> Optional[int]:
+        """Count the chunks of ``objectIds`` in the trash (``deleted``) or out of it, through :meth:`countChunks`.
+
+        A driver whose update does not report what it changed counts the chunks a
+        ``markDeleted`` (``deleted=False``) or ``markActive`` (``deleted=True``) is about to
+        move, so both return a count. None when the driver cannot count with a filter.
+        """
+        ids = [str(oid) for oid in objectIds or [] if str(oid) != CONTROL_OBJECT_ID]
+        if not ids:
+            return 0
+        count = self.countChunks(deletedFilter('deleted' if deleted else 'active', objectIds=ids))
+        return count if isinstance(count, int) and not isinstance(count, bool) and count >= 0 else None
+
+    def vxStoresExtras(self) -> bool:
+        """Return whether this driver stores the explorer's metadata extras.
+
+        :attr:`VX_STORES_EXTRAS` when the driver sets it; otherwise False for the pgvector
+        backend and the drivers that write one column per metadata key, True for the rest
+        (Qdrant, Chroma, Milvus, Weaviate and Pinecone keep them in the payload).
+        """
+        declared = type(self).VX_STORES_EXTRAS
+        if isinstance(declared, bool):
+            return declared
+        if self.vxBackend() == 'pgvector':
+            return False
+        return not _COLUMN_PER_KEY_MODULES.intersection(type(self).__module__.split('.'))
+
+    def vxWritableChunks(self, chunks: List[Doc]) -> List[Doc]:
+        """Return ``chunks`` as this driver can store them: without the metadata extras when it cannot.
+
+        The caller's documents are never changed; a trimmed document is a copy.
+        """
+        if not chunks or not isinstance(chunks, (list, tuple)) or self.vxStoresExtras():
+            return chunks
+        return [_without_extras(doc) for doc in chunks]
+
+    def capabilities(self) -> FrozenSet[str]:
+        """
+        Return what this driver implements natively.
+
+        The result is the names of the hooks in :attr:`VX_HOOKS` that the driver
+        overrides (``type(self).hook is not DocumentStoreBase.hook``) plus the
+        driver's :attr:`VX_DRIVER_CAPABILITIES`. The tools map this onto the
+        ``dialect.capabilities`` keys.
+        """
+        cls = type(self)
+        overridden = {
+            name for name in DocumentStoreBase.VX_HOOKS if getattr(cls, name) is not getattr(DocumentStoreBase, name)
+        }
+        return frozenset(overridden) | frozenset(cls.VX_DRIVER_CAPABILITIES)
+
+    def vxBackend(self) -> str:
+        """Return the backend family reported as ``dialect.backend``."""
+        if self.VX_BACKEND:
+            return self.VX_BACKEND
+        provider = str(getattr(self, 'provider', '') or '')
+        return _BACKEND_BY_PROVIDER.get(provider, provider or 'unknown')
+
+    def vxCollectionName(self) -> Optional[str]:
+        """Return the collection (table, index) name, never a database or host name; None when unknown."""
+        for attr in ('collection_name', 'collection', 'table', 'index_name', 'indexName'):
+            value = getattr(self, attr, None)
+            if isinstance(value, str) and value:
+                return value
+        return None
+
+    def _readControlRecord(self) -> bool:
+        """Read the control record; load ``vectorSize``/``modelName`` and return True when exactly one exists."""
+        flt = DocFilter(objectIds=[CONTROL_OBJECT_ID], isDeleted=True)
+        flt.deleted = 'all'
+        docs = self.get(flt, checkCollection=False)
+        controls = [d for d in docs if metadataValue(d, 'objectId') == CONTROL_OBJECT_ID]
+        if len(controls) != 1:
+            return False
+        self.vectorSize = int(metadataValue(controls[0], 'vectorSize') or 0)
+        self.modelName = str(metadataValue(controls[0], 'modelName') or '')
+        return True
+
+    def describe(self) -> StoreInfo:
+        """
+        Describe the store: backend, collection, metric, dimension, model, index, size, caveats.
+
+        Never raises for a missing collection: it answers ``collection_exists=False``
+        and ``control_record=None``. Never carries a host, port, DSN, credential or
+        database name.
+
+        Default: existence through ``_doesCollectionExist()``, model and dimension from
+        the control record, the configured similarity as the metric;
+        ``backend_version``, ``index``, ``size_bytes`` and ``meta_column`` None. The
+        caveat ``model_mismatch`` is added when the last query model compared by
+        :meth:`doesCollectionExist` differed from the stored one.
+        """
+        from .vx_math import normalize_metric
+
+        exists = bool(self._doesCollectionExist())
+        control: Optional[bool] = None
+        if exists:
+            with self.collectionLock:
+                control = self._readControlRecord()
+        caveats: List[str] = []
+        if getattr(self, 'modelMismatch', None):
+            caveats.append('model_mismatch')
+        known = exists and bool(control)
+        return StoreInfo(
+            backend=self.vxBackend(),
+            backend_version=None,
+            collection=self.vxCollectionName(),
+            collection_exists=exists,
+            control_record=control,
+            meta_column=None,
+            metric=normalize_metric(getattr(self, 'similarity', None)) if exists else None,
+            dimension=(self.vectorSize or None) if known else None,
+            model=(self.modelName or None) if known else None,
+            index=None,
+            size_bytes=None,
+            caveats=caveats,
+        )
+
+    def scoreInfo(self) -> Dict[str, Any]:
+        """
+        Describe how ``Doc.score`` is computed for this store.
+
+        Keys: ``formula`` (text), ``higher_is_better`` (bool), ``floor`` (the driver's legacy
+        floor below which search drops rows), ``threshold`` (the node's configured score
+        threshold), and optionally ``range``.
+        """
+        return {'formula': 'unknown', 'higher_is_better': True, 'floor': 0.2, 'threshold': self.threshold_search}
+
+    def effectiveFloor(self, docFilter: DocFilter) -> float:
+        """
+        Return the score floor a search with ``docFilter`` applies.
+
+        ``docFilter.minScore`` when it is set (it may be ``-inf`` to keep every row),
+        otherwise the driver's legacy floor (``scoreInfo()['floor']``). Agents never set
+        ``minScore``, so their results are unchanged.
+        """
+        min_score = getattr(docFilter, 'minScore', None)
+        if min_score is not None:
+            return float(min_score)
+        return float(self.scoreInfo()['floor'])
+
+    def countChunks(self, docFilter: DocFilter) -> Optional[int]:
+        """
+        Count the chunk rows matching ``docFilter`` (control record excluded).
+
+        A driver that counts selects rows by :meth:`resolveDeleted`, never by the
+        legacy ``isDeleted`` flag alone: some backends read ``isDeleted=True`` as
+        "deleted rows only", so ``deleted='all'`` would count no active row (and
+        :meth:`removeCounted` would report a stored document as empty).
+
+        Default: None (the backend cannot count with a filter).
+        """
+        return None
+
+    def countDocumentsWhere(self, docFilter: DocFilter) -> Optional[int]:
+        """
+        Count the distinct objectIds matching ``docFilter`` (control record excluded).
+
+        Rows are selected by :meth:`resolveDeleted`, as in :meth:`countChunks`.
+
+        Default: None.
+        """
+        return None
+
+    def listDocumentPage(
+        self,
+        *,
+        cursor: Optional[str],
+        limit: int,
+        object_ids: Optional[Sequence[str]],
+        deleted: 'Deleted',
+        sort: str,
+        filter: Optional[DocListFilter] = None,
+    ) -> DocPage:
+        """
+        Return one page of documents (one row per objectId).
+
+        ``cursor`` is the opaque ``next_cursor`` of the previous page (None for the first
+        page); ``object_ids`` restricts the listing; ``sort`` is ``'path'``.
+
+        ``filter`` (contract section 4.4-A) restricts the listing further. The ``documents``
+        tool passes it only to a driver that declares ``documents_filter`` in
+        :attr:`VX_DRIVER_CAPABILITIES`, so a driver whose override does not take it is never
+        handed one. A driver applies the keys it can and names the others in
+        ``DocPage.filter_ignored``; the tool answers ``filter_applied`` from that. This
+        default applies none of them and names every given key.
+
+        Default (``distinct=False``, ``sorted=False``):
+        ``get(DocFilter(chunkIds=[0], deleted=deleted, limit=limit + 1, offset=cursor.offset))``,
+        sorted by ``(parent, objectId)`` within the page; ``chunks=None``,
+        ``counts_exact=False``, ``total=None``, caveat ``documents_by_first_chunk`` (a
+        document is listed by its chunk 0; the ``list_documents`` tool reads the trash after
+        the last page for the documents whose chunk 0 is there but which have a live chunk). The opaque cursor is
+        ``{'o': offset, 'f': first key of the previous page}``; when a page's first key
+        equals ``cursor['f']`` the backend ignored the offset, so the page ends with
+        ``next_cursor=None`` and the caveat ``'documents_paging_unsupported'``.
+
+        A cursor the hook did not issue raises :func:`invalidCursor` (``INVALID_INPUT``)
+        before the backend is asked; a driver with its own cursor does the same.
+        """
+        offset, previous_first = defaultCursorState(cursor)
+        limit = max(1, int(limit))
+        flt = deletedFilter(
+            deleted,
+            chunkIds=[0],
+            objectIds=list(object_ids) if object_ids else None,
+            limit=limit + 1,
+            offset=offset,
+        )
+        raw = self.get(flt)
+        first_key = _docKey(raw[0]) if raw else None
+        ignored = filter.given() if filter is not None else ()
+        if previous_first is not None and first_key == previous_first:
+            return DocPage(
+                items=[],
+                next_cursor=None,
+                total=None,
+                counts_exact=False,
+                distinct=False,
+                sorted=False,
+                caveats=['documents_by_first_chunk', 'documents_paging_unsupported'],
+                filter_ignored=ignored,
+            )
+        items = [
+            documentRow(doc)
+            for doc in raw[:limit]
+            if metadataValue(doc, 'objectId') != CONTROL_OBJECT_ID
+            and (not object_ids or metadataValue(doc, 'objectId') in object_ids)
+            and matchesDeleted(doc, deleted)
+        ]
+        items.sort(key=lambda row: (row.path, row.objectId))
+        next_cursor = encodeCursor({'o': offset + limit, 'f': first_key}) if len(raw) > limit else None
+        return DocPage(
+            items=items,
+            next_cursor=next_cursor,
+            total=None,
+            counts_exact=False,
+            distinct=False,
+            sorted=False,
+            caveats=['documents_by_first_chunk'],
+            filter_ignored=ignored,
+        )
+
+    def scrollChunks(self, objectId: str, *, after_chunk: int, limit: int, deleted: 'Deleted') -> ChunkPage:
+        """
+        Return the chunks of one document after ``after_chunk``, in chunk order, without embeddings.
+
+        Default: ``get(DocFilter(objectIds=[objectId], minChunkId=after_chunk + 1,
+        maxChunkId=after_chunk + limit, deleted=deleted))`` sorted by chunkId, plus a
+        one-row probe past the window for ``has_more``. When the window is empty but the
+        probe finds a later chunk, the window slides forward (doubling its width, never
+        past the probed chunk's own window) until it holds a chunk, so a page is never
+        empty while chunks follow: the first page of a document carries its first stored
+        chunk however its ids are spaced (a document whose chunk 0 was removed answers
+        its chunk 1). A page holds at most ``limit`` chunks; ``next_after`` is the end of
+        the window read, or the last chunk returned when the window held more.
+        """
+        if objectId == CONTROL_OBJECT_ID:
+            return ChunkPage(docs=[], has_more=False, next_after=int(after_chunk))
+        limit = max(1, int(limit))
+        low = int(after_chunk) + 1
+        high = int(after_chunk) + limit
+        rows = self._vxChunkWindow(objectId, low, high, deleted)
+        following: Optional[int] = None
+        probed = False
+        if not rows:
+            following, probed = self._vxChunkAfter(objectId, high, deleted), True
+            width = limit
+            for _ in range(_SCROLL_SLIDES_MAX):
+                if following is None:
+                    break
+                low, width = high + 1, width * 2
+                high = min(following + limit - 1, low + width - 1)
+                rows = self._vxChunkWindow(objectId, low, high, deleted)
+                if rows or high >= following:  # found, or the probed chunk went away meanwhile
+                    probed = False
+                    break
+        if len(rows) > limit:
+            rows = rows[:limit]
+            return ChunkPage(docs=[doc for _, doc in rows], has_more=True, next_after=rows[-1][0])
+        if not probed:
+            following = self._vxChunkAfter(objectId, high, deleted)
+        return ChunkPage(docs=[doc for _, doc in rows], has_more=following is not None, next_after=high)
+
+    def _vxChunkWindow(self, objectId: str, low: int, high: int, deleted: 'Deleted') -> List[Tuple[int, Doc]]:
+        """``(chunkId, doc)`` of the document's chunks in ``[low, high]``, sorted, without embeddings."""
+        window = self.get(
+            deletedFilter(
+                deleted, objectIds=[objectId], minChunkId=low, maxChunkId=high, limit=high - low + 1, offset=0
+            )
+        )
+        by_chunk: Dict[int, Doc] = {}
+        for doc in window:
+            chunk = _int_or_none(metadataValue(doc, 'chunkId'))
+            if (
+                metadataValue(doc, 'objectId') == objectId
+                and chunk is not None
+                and low <= chunk <= high
+                and matchesDeleted(doc, deleted)
+            ):
+                doc.embedding = None
+                by_chunk.setdefault(chunk, doc)
+        return [(chunk, by_chunk[chunk]) for chunk in sorted(by_chunk)]
+
+    def _vxChunkAfter(self, objectId: str, high: int, deleted: 'Deleted') -> Optional[int]:
+        """The id of some chunk of the document above ``high`` (a one-row probe), or None."""
+        beyond = self.get(deletedFilter(deleted, objectIds=[objectId], minChunkId=high + 1, limit=1, offset=0))
+        for doc in beyond:
+            chunk = _int_or_none(metadataValue(doc, 'chunkId'))
+            if (
+                metadataValue(doc, 'objectId') == objectId
+                and chunk is not None
+                and chunk > high
+                and matchesDeleted(doc, deleted)
+            ):
+                return chunk
+        return None
+
+    def sampleChunks(
+        self,
+        *,
+        n: int,
+        seed: int,
+        strategy: str,
+        docFilter: DocFilter,
+        include_keys: Sequence['Key'],
+    ) -> Tuple[List[Doc], str]:
+        """
+        Draw up to ``n`` chunks WITH embeddings; return ``(docs, strategy_used)``.
+
+        ``strategy`` is ``'random'``, ``'stratified'`` or ``'first'`` (``strategy_used`` is one
+        of those). A driver implements ``'stratified'`` only where it is cheap and native
+        (pgvector ``ROW_NUMBER() OVER (PARTITION BY objectid ORDER BY random())``, Atlas
+        ``$sample`` per group) and raises ``StoreUnsupported`` otherwise, so the shared
+        sampler falls back. ``include_keys`` are keys the caller already holds; a driver
+        may skip them.
+
+        Default: raise ``StoreUnsupported``.
+        """
+        raise _unsupported('sampleChunks')
+
+    def getVectors(self, keys: Sequence['Key']) -> List[Doc]:
+        """
+        Return the chunks for ``keys`` WITH embeddings; each Doc carries ``metadata.pointId``.
+
+        Reads by filter (``objectId IN ... AND chunkId IN ...``, paired client-side,
+        deleted rows included). A driver with deterministic ids may first try
+        ``uuid5(NAMESPACE_URL, f'{objectId}#{chunkId}')`` and MUST fall back to the
+        filter for every miss (older rows have random ids). Missing keys are omitted.
+
+        Default: raise ``StoreUnsupported``.
+        """
+        raise _unsupported('getVectors')
+
+    def knnGraph(self, keys: Sequence['Key'], vectors: 'np.ndarray', metric: str, k: int) -> KnnGraph:
+        """
+        Return the k-nearest-neighbour graph over the sampled ``keys`` (rows of ``vectors``).
+
+        Default: ``vx_math.knn(metric, vectors, k)``, ``source='node'``.
+        Qdrant overrides it with ``search_matrix_offsets`` (``source='native'``).
+        """
+        from .vx_math import knn
+
+        offsets, cols, sims = knn(metric, vectors, k)
+        k_eff = max(0, min(int(k), len(keys) - 1))
+        return KnnGraph(k=k_eff, offsets_row=offsets, cols=cols, sims=sims, source='node')
+
+    def removeCounted(self, objectIds: List[str]) -> Optional[int]:
+        """
+        Remove every chunk of ``objectIds``; return the rows actually removed (None when unknown).
+
+        Never removes the control record. Default:
+        ``n = countChunks(DocFilter(objectIds=objectIds, deleted='all')); self.remove(objectIds); return n``.
+        """
+        ids = [oid for oid in objectIds if oid != CONTROL_OBJECT_ID]
+        if not ids:
+            return 0
+        count = self.countChunks(deletedFilter('all', objectIds=list(ids)))
+        self.remove(ids)
+        return count
+
+    def removeTrashed(self, objectIds: List[str]) -> Optional[int]:
+        """
+        Permanently remove the chunks of ``objectIds`` that are in the trash, and only those.
+
+        The condition is part of the store operation itself (one SQL statement, one delete by
+        filter that includes the deleted flag), so a chunk a concurrent ``restore`` has just made
+        live is never removed: the check and the delete cannot be separated. Returns the rows
+        removed (None when the backend cannot say). Never removes the control record.
+
+        There is no safe default (a delete by id would remove live chunks too), so a driver
+        that cannot express the condition keeps this one: ``delete {deleted_only}`` is then
+        refused with ``UNSUPPORTED``.
+        """
+        raise StoreUnsupported(f'{type(self).__name__} cannot delete only the chunks that are in the trash')
+
+    @staticmethod
+    def resolveDeleted(docFilter: DocFilter) -> 'Deleted':
+        """
+        Return which rows ``docFilter`` covers: ``'active'``, ``'deleted'`` or ``'all'``.
+
+        ``docFilter.deleted`` when it is set; otherwise ``isDeleted`` None or False reads
+        as ``'active'`` and True as ``'all'``.
+        """
+        deleted = getattr(docFilter, 'deleted', None)
+        if deleted in ('active', 'deleted', 'all'):
+            return deleted
+        return 'all' if getattr(docFilter, 'isDeleted', None) is True else 'active'
 
     def _getDocKey(self, doc: Doc) -> Tuple[str, int]:
         return (doc.metadata.objectId, doc.metadata.chunkId)
@@ -517,14 +1110,20 @@ class DocumentStoreBase(ABC):
         """
         Check if the collection exists and verifies its integrity.
 
-        If a `modelName` is provided, it ensures that the existing collection was encoded with the same model.
+        If a `modelName` is provided it is compared with the collection's stored model
+        and the outcome is recorded in ``self.modelMismatch`` (reported by ``describe()``
+        and the explorer tools as ``model_mismatch``). A mismatch never makes this
+        return False: reads keep working as they always have.
 
-        :param modelName: Optional name of the embedding model to validate against the collection.
-        :return: True if the collection exists and matches the model (if specified), otherwise False.
+        :param modelName: Optional name of the embedding model the caller's vectors were made with.
+        :return: True if the collection exists, otherwise False.
         """
         # Acquire the lock to ensure thread-safe checking
         with self.collectionLock:
-            return self._checkCollectionExists()
+            exists = self._checkCollectionExists()
+        if exists and modelName and self.modelName:
+            self.modelMismatch = modelName != self.modelName
+        return exists
 
     def createCollection(self, documents: List[Doc]):
         """
@@ -671,66 +1270,23 @@ _VECTORDB_TOOL_MAX_GET_LIMIT = 100
 # chunks once, orders them by chunkId here and slices. This is also the most
 # chunks one document can have and still be fully readable through the tool.
 _VECTORDB_TOOL_GET_FETCH_LIMIT = 10_000
-_VECTORDB_TOOL_MAX_LIST_LIMIT = 1000
-_VECTORDB_TOOL_DEFAULT_LIST_LIMIT = 100
 _VECTORDB_DEFAULT_SERVER_NAME = 'vectordb'
+_OBJDIR_MAX_LIMIT = 1000
+_OBJDIR_SCAN_MAX = 10000
+
+#: What ``objdir`` answers in ``warning`` when its listing stopped before the page was full.
+_OBJDIR_STOPPED = {
+    'cap': 'objdir read its limit of {rows} rows before the page was full: the list is incomplete.',
+    'budget': 'objdir ran out of its time budget before the page was full: the list is incomplete.',
+    'stale': 'The store stopped handing out new documents before the page was full: the list may be incomplete.',
+}
 
 
-def _normalize_vectordb_tool_input(input_obj: Any) -> Dict[str, Any]:
-    """Normalize a tool-call payload into a plain ``dict``.
-
-    Handles ``None``, plain dicts, pydantic models (``model_dump`` / ``dict``),
-    JSON strings, and nested ``input`` wrappers the host may produce. A
-    nested ``input`` value of any supported shape (dict, JSON string,
-    pydantic model) is re-normalized before merging with any sibling
-    ``extras`` in the outer payload so values like ``{'input': '{"query":
-    "x"}'}`` or ``{'input': SomeModel(...)}`` are handled correctly.
-    """
-    if input_obj is None:
-        return {}
-
-    # Pydantic (v2 prefers model_dump; fall back to v1 dict())
-    if hasattr(input_obj, 'model_dump') and callable(getattr(input_obj, 'model_dump')):
-        input_obj = input_obj.model_dump()
-    elif hasattr(input_obj, 'dict') and callable(getattr(input_obj, 'dict')):
-        try:
-            input_obj = input_obj.dict()
-        except TypeError:
-            # Not a pydantic-style ``dict()`` (e.g. builtin dict) — leave as is.
-            pass
-
-    # JSON string
-    if isinstance(input_obj, str):
-        try:
-            parsed = json.loads(input_obj)
-            if isinstance(parsed, dict):
-                input_obj = parsed
-            else:
-                warning(f'vectordb tool: JSON input did not parse to a dict (got {type(parsed).__name__})')
-                return {}
-        except (json.JSONDecodeError, ValueError) as exc:
-            warning(f'vectordb tool: malformed JSON input, returning empty dict: {exc}')
-            return {}
-
-    if not isinstance(input_obj, dict):
-        warning(f'vectordb tool: unexpected input type {type(input_obj).__name__}')
-        return {}
-
-    # Unwrap nested ``input`` wrappers the host may produce. Re-run the
-    # normalizer on the inner value so string-, model- or dict-wrapped
-    # payloads all get the same treatment.
-    if 'input' in input_obj:
-        inner_raw = input_obj['input']
-        extras = {k: v for k, v in input_obj.items() if k != 'input'}
-        inner = _normalize_vectordb_tool_input(inner_raw)
-        if isinstance(inner, dict):
-            input_obj = {**inner, **extras}
-
-    input_obj.pop('security_context', None)
-    return input_obj
+#: The normaliser every store tool's input goes through (kept under its historical name).
+_normalize_vectordb_tool_input = normalize_tool_input
 
 
-class VectorStoreToolMixin:
+class VectorStoreToolMixin(VectorExplorerExtTools, VectorExplorerTools):
     """
     Expose vector DB search/upsert/delete and the document listing as agent tools.
 
@@ -760,16 +1316,20 @@ class VectorStoreToolMixin:
     writes the team's tenant database) defaults it to off, because ``objdir``
     and ``get`` together return the whole table to any caller of the
     pipeline's tool path. ``allow_write`` then decides whether the write tools
-    (``upsert``, ``delete``, ``soft_delete`` and ``restore``) are among them.
-    ``list_documents`` is offered only by a driver that sets
-    ``supports_document_listing`` (see ``DocumentStoreBase``), since no
-    driver-independent listing exists. While a switch is off the affected tools are
-    left out of ``_collect_tool_methods``, so the engine neither lists nor
-    dispatches them (an invoke fails as a tool the node has no handler for);
-    the check inside each tool is a second line of defence for direct calls
-    and returns ``{"success": false, "error": ...}`` like the mixin's other
-    failures. The SQL nodes keep raw execution behind an ``allow_execute``
-    switch in the same spirit (there, ``execute`` raises).
+    (``upsert``, ``delete``, ``soft_delete`` and ``restore``) are among them. While a
+    switch is off the affected tools are left out of ``_collect_tool_methods``,
+    so the engine neither lists nor dispatches them (an invoke fails as a tool
+    the node has no handler for); :meth:`_vectordb_surface_refusal`, which the
+    shared tool envelope (``vectordb_tool``) runs before every tool, is a second
+    line of defence for direct calls and returns ``{"success": false, "error":
+    ...}``. The SQL nodes keep raw execution behind an ``allow_execute`` switch
+    in the same spirit (there, ``execute`` raises).
+
+    Those two switches are the outer gate: whether a tool exists for this node
+    at all, and so ``allow_write`` alone decides whether an agent may write. A
+    write tool that exists still runs ``vx_write_gate.check_write`` first, the
+    inner gate: who is calling (an agent, or a DAP caller through a Tools source
+    with an account or task key) and, for DAP calls, the node's ``allow_writes``.
     """
 
     # --- Configuration knobs (override via IGlobal) ------------------------
@@ -865,59 +1425,36 @@ class VectorStoreToolMixin:
             ),
         }
 
-    _VECTORDB_WRITE_TOOLS = frozenset({'upsert', 'delete', 'soft_delete', 'restore'})
-    _VECTORDB_LISTING_TOOLS = frozenset({'list_documents'})
+    _VECTORDB_WRITE_TOOLS = frozenset(vx_write_gate.WRITE_TOOLS)
 
-    def _vectordb_supports_document_listing(self) -> bool:
-        """Whether the bound driver implements the optional document listing.
+    def _vectordb_surface_refusal(self, tool: str) -> Optional[Dict[str, Any]]:
+        """The outer gate for one call: None when this node offers ``tool``, else the failure object.
 
-        Read without raising, since discovery may run before a store is bound;
-        only an explicit ``True`` counts, so a stand-in object does not opt in.
+        Run by the shared tool envelope (``vectordb_tool``) before the tool reads its
+        input, for every store tool: the tools switch first, then, for a write tool,
+        the write switch.
         """
-        store = getattr(getattr(self, 'IGlobal', None), 'store', None)
-        return getattr(store, 'supports_document_listing', False) is True
-
-    def _vectordb_listing_unavailable(self, tool: str) -> Dict[str, Any]:
-        """The failure object a listing tool returns on a driver without the capability."""
-        return {
-            'success': False,
-            'error': f'{self._vectordb_server_name()}.{tool} is not available: this store does not list documents',
-        }
+        if not self._vectordb_expose_tools():
+            return self._vectordb_tools_refused(tool)
+        if tool in self._VECTORDB_WRITE_TOOLS and not self._vectordb_allow_write():
+            return self._vectordb_write_refused(tool)
+        return None
 
     def _collect_tool_methods(self):
-        """Advertise no tools while the node does not expose them, the write tools only when it allows writes.
+        """List the tools this node advertises: none unless it exposes tools, and no write tool unless it allows writes.
 
-        The engine's ``tool.query`` discovery walks this; leaving a tool out
-        means an agent never sees a tool it cannot call (the pattern
-        ``tool_filesystem`` uses for its allow flags). A direct invocation is
-        still refused by the tools themselves. ``list_documents`` is left out
-        on a driver without ``supports_document_listing`` for the same reason.
+        ``tool.query`` discovery reads this map, so a tool left out of it is
+        one a caller never sees (``tool_filesystem`` hides its tools behind
+        its allow flags the same way). Calling a hidden tool by name is still
+        refused, by the envelope's outer gate.
         """
         if not self._vectordb_expose_tools():
             return {}
-        methods = super()._collect_tool_methods()
-        hidden = set()
+        advertised = dict(super()._collect_tool_methods())
         if not self._vectordb_allow_write():
-            hidden |= self._VECTORDB_WRITE_TOOLS
-        if not self._vectordb_supports_document_listing():
-            hidden |= self._VECTORDB_LISTING_TOOLS
-        return {name: method for name, method in methods.items() if name not in hidden}
-
-    @staticmethod
-    def _vectordb_clean_object_ids(tool: str, object_ids: Any) -> Tuple[Optional[List[str]], Optional[str]]:
-        """Return the stripped, de-duplicated object IDs of a write tool, or an error message.
-
-        Order is kept. The store's control row is refused here, before any
-        write tool reaches the driver.
-        """
-        if not isinstance(object_ids, list) or not object_ids:
-            return None, f'{tool} requires a non-empty "object_ids" array'
-        clean_ids = list(dict.fromkeys(str(oid).strip() for oid in object_ids if str(oid).strip()))
-        if not clean_ids:
-            return None, f'{tool}: no valid object IDs provided'
-        if CONTROL_OBJECT_ID in clean_ids:
-            return None, f"{tool}: object_id '{CONTROL_OBJECT_ID}' is reserved for the store's control row"
-        return clean_ids, None
+            for write_tool in self._VECTORDB_WRITE_TOOLS:
+                advertised.pop(write_tool, None)
+        return advertised
 
     def _vectordb_compute_embedding(self, query_text: str) -> Optional[List[float]]:
         """Attempt to compute a query embedding for semantic search.
@@ -1014,16 +1551,28 @@ class VectorStoreToolMixin:
             'failure (missing embedder, empty query, store error).'
         ),
     )
+    @vectordb_tool
     def search(self, args):
-        """Search for documents in the vector database."""
-        args = _normalize_vectordb_tool_input(args)
-        if not self._vectordb_expose_tools():
-            return self._vectordb_tools_refused('search')
+        """Search for documents in the vector database.
+
+        Legacy input (``query``, ``top_k``, ``filter`` with objectId/nodeId/parent) behaves
+        as before and the answer gains ``success``, ``rank``, ``warnings`` and
+        ``mode_used``. External callers may also pass ``vector`` (with
+        ``embedding_model``), ``mode`` ('auto'|'semantic'|'keyword'), the filter keys
+        ``objectIds``/``isTable``/``minChunkId``/``maxChunkId``, ``deleted``,
+        ``include_below_floor`` and ``include_below_threshold``; results of a vector
+        search add ``raw_score``, ``sim``, ``below_threshold`` and ``below_floor`` and
+        come sorted by score.
+        """
         store = self._vectordb_store()
 
-        query_text = str(args.get('query', '')).strip()
-        if not query_text:
-            return {'success': False, 'error': 'search requires a non-empty "query" string'}
+        mode = args.get('mode', 'auto') or 'auto'
+        if mode not in ('auto', 'semantic', 'keyword'):
+            raise ToolRefusal('INVALID_INPUT', "mode must be 'auto', 'semantic' or 'keyword'.")
+        vector = args.get('vector')
+        query_text = str(args.get('query', '') or '').strip()
+        if vector is None and not query_text:
+            raise ToolRefusal('INVALID_INPUT', 'search requires a non-empty "query" string')
 
         default_top_k = self._vectordb_default_top_k()
         try:
@@ -1032,54 +1581,86 @@ class VectorStoreToolMixin:
             top_k = default_top_k
         top_k = max(1, min(top_k, _VECTORDB_TOOL_MAX_TOP_K))
 
-        raw_filter = args.get('filter') or {}
-        doc_filter = DocFilter()
-        if isinstance(raw_filter, dict):
-            object_id = raw_filter.get('objectId')
-            if object_id:
-                doc_filter.objectIds = [object_id] if isinstance(object_id, str) else list(object_id)
-            node_id = raw_filter.get('nodeId')
-            if node_id:
-                doc_filter.nodeId = node_id
-            parent = raw_filter.get('parent')
-            if parent:
-                doc_filter.parent = parent
-
+        doc_filter = self._vectordb_search_filter(args)
         doc_filter.limit = top_k
+        if args.get('include_below_floor') is True:
+            doc_filter.minScore = float('-inf')
+        include_below_threshold = args.get('include_below_threshold') is True
+
+        warnings: List[str] = []
         question = QuestionText(text=query_text)
-
-        # Require an embedding provider for semantic search. The control-plane
-        # invoke() path does not flow through the data-lane embedding filters,
-        # so nodes must bind IGlobal.embed_query at startup.
-        embedding = self._vectordb_compute_embedding(query_text)
-        if embedding is None:
-            return {
-                'success': False,
-                'error': (
-                    f'no embedding provider bound to IGlobal.embed_query; configure an embedding sub-block for the {self._vectordb_server_name()} node to enable semantic search'
-                ),
-            }
-
-        question.embedding = embedding
-        embed_model = getattr(getattr(self, 'IGlobal', None), 'embed_model_name', None)
-        if isinstance(embed_model, str) and embed_model:
-            question.embedding_model = embed_model
-        try:
-            docs: List[Doc] = store.searchSemantic(question, doc_filter)
-        except Exception as exc:
-            warning(
-                f'vectordb tool: semantic search failed ({type(exc).__name__}: {exc}); falling back to keyword search. Check that the store is initialized and the embedding model matches the collection.'
-            )
+        explicit_vector: Optional[List[float]] = None
+        if vector is not None:
+            explicit_vector = self._vectordb_vector(vector)
+            if not store._doesCollectionExist():
+                raise ToolRefusal('COLLECTION_MISSING', 'The collection does not exist yet; add a document first.')
             try:
-                docs = store.searchKeyword(question, doc_filter)
-            except Exception as exc2:
-                return {'success': False, 'error': f'vectordb tool: search failed: {exc2}'}
+                store.doesCollectionExist()
+            except Exception:
+                pass
+            if store.vectorSize and len(explicit_vector) != int(store.vectorSize):
+                raise ToolRefusal(
+                    'DIMENSION_MISMATCH',
+                    f'The vector has {len(explicit_vector)} values; this collection stores {int(store.vectorSize)}.',
+                )
+            supplied_model = args.get('embedding_model')
+            if (
+                isinstance(supplied_model, str)
+                and supplied_model
+                and store.modelName
+                and supplied_model != store.modelName
+            ):
+                warnings.append('model_mismatch')
+            question.embedding = explicit_vector
+            question.embedding_model = (
+                supplied_model if isinstance(supplied_model, str) and supplied_model else None
+            ) or (store.modelName or None)
+        elif mode != 'keyword':
+            # Require an embedding provider for semantic search. The control-plane
+            # invoke() path does not flow through the data-lane embedding filters,
+            # so nodes must bind IGlobal.embed_query at startup.
+            embedding = self._vectordb_compute_embedding(query_text)
+            if embedding is None:
+                raise ToolRefusal(
+                    'NO_EMBEDDER',
+                    f'no embedding provider bound to IGlobal.embed_query; configure an embedding sub-block for the {self._vectordb_server_name()} node to enable semantic search',
+                )
+            question.embedding = embedding
+            embed_model = getattr(getattr(self, 'IGlobal', None), 'embed_model_name', None)
+            if isinstance(embed_model, str) and embed_model:
+                question.embedding_model = embed_model
 
+        if mode == 'keyword':
+            docs: List[Doc] = store.searchKeyword(question, doc_filter)
+            mode_used = 'keyword'
+        else:
+            try:
+                docs = store.searchSemantic(question, doc_filter)
+                mode_used = 'semantic'
+            except Exception as exc:
+                if mode == 'semantic':
+                    raise
+                warning(
+                    f'vectordb tool: semantic search failed ({safe_error(exc)}); falling back to keyword search. Check that the store is initialized and the embedding model matches the collection.'
+                )
+                warnings.extend(['keyword_fallback', f'semantic search failed: {safe_error(exc)}'])
+                docs = store.searchKeyword(question, doc_filter)
+                mode_used = 'keyword'
+
+        docs = [doc for doc in docs if metadataValue(doc, 'objectId') != CONTROL_OBJECT_ID]
+        if explicit_vector is not None:
+            docs.sort(key=lambda doc: -(doc.score if isinstance(doc.score, (int, float)) else float('-inf')))
+
+        sims: Dict[Any, float] = {}
+        if explicit_vector is not None and docs:
+            sims = self._vectordb_result_sims(store, explicit_vector, docs)
         score_threshold = self._vectordb_score_threshold()
+        floor = store.effectiveFloor(DocFilter()) if explicit_vector is not None else None
+        node_threshold = getattr(store, 'threshold_search', None)
         results: List[Dict[str, Any]] = []
         for doc in docs:
             score = getattr(doc, 'score', 0.0) or 0.0
-            if score_threshold > 0 and score < score_threshold:
+            if not include_below_threshold and score_threshold > 0 and score < score_threshold:
                 continue
             meta: Dict[str, Any] = {}
             if doc.metadata:
@@ -1089,19 +1670,107 @@ class VectorStoreToolMixin:
                     'parent': doc.metadata.parent,
                     'chunkId': doc.metadata.chunkId,
                 }
-            results.append(
-                {
-                    'content': doc.page_content or '',
-                    'score': score,
-                    'metadata': meta,
-                }
-            )
+            item: Dict[str, Any] = {'content': doc.page_content or '', 'score': score, 'metadata': meta}
+            if explicit_vector is not None:
+                item['raw_score'] = score
+                item['sim'] = sims.get(_vxDocKey(doc), score)
+                item['below_threshold'] = isinstance(node_threshold, (int, float)) and score < node_threshold
+                item['below_floor'] = score < floor
+            results.append(item)
 
         trimmed = results[:top_k]
+        for rank, item in enumerate(trimmed, start=1):
+            item['rank'] = rank
         return {
+            'success': True,
             'results': trimmed,
             'total': len(trimmed),
+            'warnings': warnings,
+            'mode_used': mode_used,
         }
+
+    def _vectordb_search_filter(self, args: Dict[str, Any]) -> DocFilter:
+        """Build the search filter from the legacy keys plus the explorer's extensions."""
+        raw_filter = args.get('filter') or {}
+        if not isinstance(raw_filter, dict):
+            raw_filter = {}
+        # Without ``deleted`` the filter is the legacy one, so agents' results do not change.
+        if args.get('deleted') is None:
+            doc_filter = DocFilter()
+        else:
+            deleted = args['deleted']
+            if deleted not in ('active', 'deleted', 'all'):
+                raise ToolRefusal('INVALID_INPUT', "deleted must be 'active', 'deleted' or 'all'.")
+            doc_filter = deletedFilter(deleted)
+        object_ids: List[str] = []
+        object_id = raw_filter.get('objectId')
+        if object_id:
+            object_ids.extend([object_id] if isinstance(object_id, str) else list(object_id))
+        extra_ids = raw_filter.get('objectIds')
+        if extra_ids is not None:
+            # The explorer's scope (contract section 4.4-B), checked like filter.object_ids of sample
+            # and neighbors: a list of 1 to scope_keys_max non-empty strings (one string is one id).
+            # A list over the cap is refused by its length before its items are looked at. The
+            # legacy objectId key is neither capped nor checked, so agents' calls do not change.
+            cap = VECTOR_TOOL_LIMITS['scope_keys_max']
+            if isinstance(extra_ids, (list, tuple)) and len(extra_ids) > cap:
+                raise ToolRefusal(
+                    'LIMIT_EXCEEDED',
+                    f'filter.objectIds names {len(extra_ids):,} documents; a search takes at most {cap:,}. '
+                    'Narrow the scope.',
+                )
+            if isinstance(extra_ids, str):
+                extra_ids = [extra_ids]
+            object_ids.extend(_strings_arg(extra_ids, 'filter.objectIds', cap))
+        if object_ids:
+            doc_filter.objectIds = list(dict.fromkeys(str(oid) for oid in object_ids))
+        node_id = raw_filter.get('nodeId')
+        if node_id:
+            doc_filter.nodeId = node_id
+        parent = raw_filter.get('parent')
+        if parent:
+            doc_filter.parent = parent
+        if isinstance(raw_filter.get('isTable'), bool):
+            doc_filter.isTable = raw_filter['isTable']
+        for key in ('minChunkId', 'maxChunkId'):
+            value = raw_filter.get(key)
+            if value is not None:
+                if isinstance(value, bool) or not isinstance(value, int):
+                    raise ToolRefusal('INVALID_INPUT', f'filter.{key} must be an integer.')
+                setattr(doc_filter, key, value)
+        return doc_filter
+
+    @staticmethod
+    def _vectordb_vector(value: Any) -> List[float]:
+        """Validate a caller-supplied vector."""
+        import math
+
+        if not isinstance(value, (list, tuple)) or not value:
+            raise ToolRefusal('INVALID_INPUT', 'vector must be a non-empty list of numbers.')
+        out: List[float] = []
+        for item in value:
+            if isinstance(item, bool) or not isinstance(item, (int, float)) or not math.isfinite(float(item)):
+                raise ToolRefusal('INVALID_INPUT', 'vector must be a non-empty list of finite numbers.')
+            out.append(float(item))
+        return out
+
+    def _vectordb_result_sims(
+        self, store: 'DocumentStoreBase', vector: List[float], docs: List[Doc]
+    ) -> Dict[Any, float]:
+        """Similarity of each result to ``vector``, recomputed from the stored vectors where the store returns them."""
+        from .vx_math import normalize_metric, similarity
+
+        keys = [key for key in (_vxDocKey(doc) for doc in docs) if key is not None]
+        try:
+            stored = {key: doc.embedding for key, doc in read_vectors(store, keys).items()}
+        except Exception:
+            return {}
+        metric = normalize_metric(getattr(store, 'similarity', None)) or 'cosine'
+        out: Dict[Any, float] = {}
+        for key, embedding in stored.items():
+            if key is not None and len(embedding) == len(vector):
+                out[key] = round(float(similarity(metric, [vector], [embedding])[0, 0]), 5)
+        return out
 
     @tool_function(
         input_schema={
@@ -1185,18 +1854,24 @@ class VectorStoreToolMixin:
             'Returns {"success": false, "error": "..."} when embeddings cannot be obtained.'
         ),
     )
+    @vectordb_tool
     def upsert(self, args):
-        """Add or update documents in the vector database."""
-        args = _normalize_vectordb_tool_input(args)
-        if not self._vectordb_expose_tools():
-            return self._vectordb_tools_refused('upsert')
-        if not self._vectordb_allow_write():
-            return self._vectordb_write_refused('upsert')
+        """Add or update documents in the vector database (gated; see ``vx_write_gate``)."""
         store = self._vectordb_store()
 
+        # The gate runs first (on the documents as sent), then the input is checked.
         raw_docs = args.get('documents', [])
+        candidates = [raw for raw in raw_docs if isinstance(raw, dict)] if isinstance(raw_docs, list) else []
+        decision = vx_write_gate.check_write(
+            'upsert',
+            object_ids=[str(raw.get('object_id', '')).strip() for raw in candidates],
+            allow_writes=self._vx_allow_writes(),
+            supplies_embedding=any(
+                raw.get('embedding') is not None or raw.get('embedding_model') for raw in candidates
+            ),
+        )
         if not isinstance(raw_docs, list) or not raw_docs:
-            return {'success': False, 'error': 'upsert requires a non-empty "documents" array'}
+            raise ToolRefusal('INVALID_INPUT', 'upsert requires a non-empty "documents" array')
 
         embed_model_name = getattr(getattr(self, 'IGlobal', None), 'embed_model_name', None)
 
@@ -1270,25 +1945,57 @@ class VectorStoreToolMixin:
             else:
                 computed = self._vectordb_compute_embedding(content)
                 if computed is None:
-                    return {
-                        'success': False,
-                        'error': (
-                            f'no embedding provider bound to IGlobal.embed_query; configure an embedding sub-block for the {self._vectordb_server_name()} node or supply pre-computed "embedding" and "embedding_model" per document'
-                        ),
-                    }
+                    raise ToolRefusal(
+                        'NO_EMBEDDER',
+                        f'no embedding provider bound to IGlobal.embed_query; configure an embedding sub-block for the {self._vectordb_server_name()} node or supply pre-computed "embedding" and "embedding_model" per document',
+                    )
                 doc.embedding = computed
                 doc.embedding_model = embed_model_name or ''
 
             docs.append(doc)
 
         if not docs:
-            return {'success': False, 'error': 'upsert: no valid documents provided'}
+            raise ToolRefusal('INVALID_INPUT', 'upsert: no valid documents provided')
 
+        self._vectordb_check_collection_fit(store, docs)
+        store.addChunks(docs)
+        object_ids = list(dict.fromkeys(doc.metadata.objectId for doc in docs))
+        self._vx_forget_counts(store)
+        self._vx_log_write('vector.upsert', object_ids, len(docs), decision.origin)
+        return {
+            'success': True,
+            'count': len(docs),
+            'skipped': skipped,
+            'audit': self._vx_audit('vector.upsert', store, object_ids, len(docs), decision),
+        }
+
+    @staticmethod
+    def _vectordb_check_collection_fit(store: 'DocumentStoreBase', docs: List[Doc]) -> None:
+        """Refuse documents embedded with another model or dimension than an existing collection's.
+
+        ``MODEL_MISMATCH`` / ``DIMENSION_MISMATCH`` before anything is written (the store's own
+        check would raise a plain exception after the call reached it). A collection that does
+        not exist yet, or whose control record cannot be read, is left to ``addChunks``.
+        """
         try:
-            store.addChunks(docs)
-        except Exception as exc:
-            return {'success': False, 'error': str(exc)}
-        return {'success': True, 'count': len(docs), 'skipped': skipped}
+            exists = bool(store._doesCollectionExist()) and bool(store.doesCollectionExist())
+        except Exception:  # the store decides in addChunks, as before
+            return
+        if not exists:
+            return
+        for doc in docs:
+            model = doc.embedding_model
+            if store.modelName and isinstance(model, str) and model and model != store.modelName:
+                raise ToolRefusal(
+                    'MODEL_MISMATCH',
+                    f"This collection was embedded with '{store.modelName}' and these documents with "
+                    f"'{model}'; documents embedded with different models cannot be stored together.",
+                )
+            if store.vectorSize and hasVector(doc) and len(doc.embedding) != int(store.vectorSize):
+                raise ToolRefusal(
+                    'DIMENSION_MISMATCH',
+                    f'The vectors have {len(doc.embedding)} values; this collection stores {int(store.vectorSize)}.',
+                )
 
     @tool_function(
         input_schema={
@@ -1319,41 +2026,88 @@ class VectorStoreToolMixin:
         },
         description='Delete documents from the vector database by their object IDs.',
     )
+    @vectordb_tool
     def delete(self, args):
-        """Delete documents from the vector database by object IDs."""
-        args = _normalize_vectordb_tool_input(args)
-        if not self._vectordb_expose_tools():
-            return self._vectordb_tools_refused('delete')
-        if not self._vectordb_allow_write():
-            return self._vectordb_write_refused('delete')
+        """Delete documents from the vector database by object IDs (gated; see ``vx_write_gate``).
+
+        The only permanent delete. With ``deleted_only`` (the Vector Explorer's "Empty
+        trash") a document is removed only when every chunk of it is in the trash; one
+        that still has a live chunk (a later ingest batch added it) is left whole and named
+        in ``kept_live``. The permanent delete is conditional on the trashed state inside the
+        store operation (``removeTrashed``), so a restore that lands between the live check and
+        the delete keeps its document: it is named in ``kept_live`` too, and ``removed_chunks``
+        counts what was actually deleted. A store that cannot express the condition refuses
+        ``deleted_only`` with ``UNSUPPORTED``.
+        """
         store = self._vectordb_store()
 
-        clean_ids, error = self._vectordb_clean_object_ids('delete', args.get('object_ids', []))
-        if error is not None:
-            return {'success': False, 'error': error}
+        # The gate runs first (on the ids as sent), then the input is checked.
+        object_ids = args.get('object_ids', [])
+        clean_ids = [str(oid).strip() for oid in object_ids if str(oid).strip()] if isinstance(object_ids, list) else []
+        decision = vx_write_gate.check_write(
+            'delete',
+            object_ids=clean_ids,
+            allow_writes=self._vx_allow_writes(),
+        )
+        if not isinstance(object_ids, list) or not object_ids:
+            raise ToolRefusal('INVALID_INPUT', 'delete requires a non-empty "object_ids" array')
+        if not clean_ids:
+            raise ToolRefusal('INVALID_INPUT', 'delete: no valid object IDs provided')
+        if decision.origin != 'agent' and len(clean_ids) > VECTOR_TOOL_LIMITS['write_ids_max']:
+            raise ToolRefusal(
+                'INVALID_INPUT', f'object_ids must be a list of 1 to {VECTOR_TOOL_LIMITS["write_ids_max"]} strings.'
+            )
+        deleted_only = args.get('deleted_only', False)
+        if deleted_only is None:
+            deleted_only = False
+        if not isinstance(deleted_only, bool):
+            raise ToolRefusal('INVALID_INPUT', 'deleted_only must be true or false.')
+        if deleted_only and decision.origin == 'agent' and len(clean_ids) > AGENT_WRITE_IDS_MAX:
+            # Each id may cost a live check; an agent's plain delete keeps develop's open list.
+            raise ToolRefusal('INVALID_INPUT', f'object_ids must be a list of 1 to {AGENT_WRITE_IDS_MAX} strings.')
+        unique_ids = list(dict.fromkeys(clean_ids))
+        kept_live = self._vx_with_live_chunk(store, unique_ids) if deleted_only else []
+        targets = [oid for oid in unique_ids if oid not in kept_live]
+        not_found: List[str] = []
+        rows: Optional[int] = 0
+        if targets and deleted_only:
+            not_found, rows, raced = self._vx_remove_trashed(store, targets)
+            kept_live = kept_live + raced
+        elif targets:
+            _removed, not_found, rows = self._vx_remove(store, targets)
+        # The audit names every id the call named, as without deleted_only (kept_live and
+        # not_found say which of them were left alone); rows is what went.
+        self._vx_log_write('vector.delete', unique_ids, rows, decision.origin)
+        return {
+            'success': True,
+            'deleted_count': len(unique_ids),
+            'object_ids': unique_ids,
+            'removed_chunks': rows,
+            'not_found': not_found,
+            'kept_live': kept_live,
+            'audit': self._vx_audit('vector.delete', store, unique_ids, rows, decision),
+        }
 
-        store.remove(clean_ids)
-        return {'success': True, 'deleted_count': len(clean_ids), 'object_ids': clean_ids}
+    # --- The trash and the document listing (#2704's names, the explorer's shapes) --------------
+    #
+    # Defined here, on the class #2704 edits, not on a mixin: a merge of #2704 then meets
+    # them as a textual conflict or a duplicate method of this one class, never as a method
+    # of another class in the MRO that this one would silently shadow
+    # (nodes/test/test_vector_tool_set.py holds every tool to one owner).
 
-    def _vectordb_mark(self, tool: str, args, *, deleted: bool):
-        """Shared body of ``soft_delete`` and ``restore``: the write gate, the ID clean-up, one driver call."""
-        args = _normalize_vectordb_tool_input(args)
-        if not self._vectordb_expose_tools():
-            return self._vectordb_tools_refused(tool)
-        if not self._vectordb_allow_write():
-            return self._vectordb_write_refused(tool)
-        store = self._vectordb_store()
-
-        clean_ids, error = self._vectordb_clean_object_ids(tool, args.get('object_ids', []))
-        if error is not None:
-            return {'success': False, 'error': error}
-
-        matched = store.markDeleted(clean_ids) if deleted else store.markActive(clean_ids)
-        # A driver reports the chunk rows it matched, or nothing (the historical
-        # None); the reply never claims a count the driver did not give.
-        if isinstance(matched, bool) or not isinstance(matched, int) or matched < 0:
-            matched = None
-        return {'success': True, 'object_ids': clean_ids, 'matched_chunks': matched}
+    @tool_function(
+        input_schema=VectorExplorerTools.LIST_DOCUMENTS_INPUT,
+        output_schema=VectorExplorerTools.LIST_DOCUMENTS_OUTPUT,
+        description=(
+            'List the documents in this vector database one by one (equal paths are not collapsed), each with '
+            'its path and chunk count, in pages ordered by path. Follow next_cursor for the next page. '
+            "deleted='deleted' (or true) lists the trash; parent keeps one exact path."
+        ),
+    )
+    @vectordb_tool
+    def list_documents(self, args):
+        """One page of the document directory (see ``VectorExplorerTools._vx_list_documents``)."""
+        return self._vx_list_documents(args)
 
     @tool_function(
         input_schema={
@@ -1379,20 +2133,34 @@ class VectorStoreToolMixin:
                 'matched_chunks': {
                     'type': ['integer', 'null'],
                     'description': (
-                        'Chunk rows the store matched for those IDs (0 when none of them exists), or null '
-                        'when the store does not report a count.'
+                        'Chunk rows the store holds for those IDs in either state (0 when none of them exists), '
+                        'or null when the store does not report a count.'
                     ),
                 },
+                'moved_chunks': {
+                    'type': ['integer', 'null'],
+                    'description': (
+                        'Chunks the call moved to the trash (0 for documents already there), or null when the '
+                        'store does not count.'
+                    ),
+                },
+                'not_found': {
+                    'type': 'array',
+                    'items': {'type': 'string'},
+                    'description': 'Object IDs with nothing stored.',
+                },
+                'audit': {'type': 'object'},
             },
         },
         description=(
-            'Move documents to the trash by object ID: their chunks stay stored but leave search, objdir, '
-            'get and the active listing until restore. Delete removes them for good instead.'
+            'Move documents to the trash by object ID: their chunks stay stored but leave search, objdir, get '
+            'and the active listing until restore. delete removes them for good instead.'
         ),
     )
+    @vectordb_tool
     def soft_delete(self, args):
-        """Hide documents from retrieval while keeping their chunks, by object ID."""
-        return self._vectordb_mark('soft_delete', args, deleted=True)
+        """Move documents to the trash (gated; see ``VectorExplorerTools._vx_trash_write``)."""
+        return self._vx_trash_write('soft_delete', args, deleted=True)
 
     @tool_function(
         input_schema={
@@ -1418,111 +2186,34 @@ class VectorStoreToolMixin:
                 'matched_chunks': {
                     'type': ['integer', 'null'],
                     'description': (
-                        'Chunk rows the store matched for those IDs (0 when none of them exists), or null '
-                        'when the store does not report a count.'
+                        'Chunk rows the store holds for those IDs in either state (0 when none of them exists), '
+                        'or null when the store does not report a count.'
                     ),
                 },
-            },
-        },
-        description=(
-            'Take documents out of the trash by object ID, so soft-deleted chunks are searchable and readable '
-            'again. A document removed with delete cannot be restored.'
-        ),
-    )
-    def restore(self, args):
-        """Return soft-deleted documents to retrieval, by object ID."""
-        return self._vectordb_mark('restore', args, deleted=False)
-
-    @tool_function(
-        input_schema={
-            'type': 'object',
-            'properties': {
-                'parent': {
-                    'type': 'string',
-                    'description': 'Optional exact parent path; only documents stored under it are listed.',
+                'moved_chunks': {
+                    'type': ['integer', 'null'],
+                    'description': (
+                        'Chunks the call took out of the trash (0 for documents not in it), or null when the '
+                        'store does not count.'
+                    ),
                 },
-                'deleted': {
-                    'type': 'boolean',
-                    'description': 'false (default) lists active documents, true lists the trash.',
-                },
-                'offset': {
-                    'type': 'integer',
-                    'minimum': 0,
-                    'description': 'Number of documents to skip (default 0); pages are ordered by object ID.',
-                },
-                'limit': {
-                    'type': 'integer',
-                    'minimum': 1,
-                    'description': 'Maximum number of documents to return (default 100, cap 1000).',
-                },
-            },
-        },
-        output_schema={
-            'type': 'object',
-            'properties': {
-                'documents': {
+                'not_found': {
                     'type': 'array',
-                    'items': {
-                        'type': 'object',
-                        'properties': {
-                            'object_id': {'type': 'string'},
-                            'parent': {'type': ['string', 'null']},
-                            'chunk_count': {'type': 'integer', 'description': 'Chunks in the listed state.'},
-                        },
-                    },
+                    'items': {'type': 'string'},
+                    'description': 'Object IDs with nothing stored.',
                 },
-                'total': {'type': 'integer', 'description': 'Documents matching the filter, over all pages.'},
-                'offset': {'type': 'integer'},
-                'has_more': {'type': 'boolean', 'description': 'Whether a page follows this one.'},
-                'success': {'type': 'boolean'},
+                'audit': {'type': 'object'},
             },
         },
         description=(
-            'List the documents in this vector database one by one, with object ID, parent path and chunk '
-            'count, ordered by object ID; unlike objdir, documents that share a parent path are all listed. '
-            'Offered only by stores that support it. Set deleted=true to list the trash.'
+            'Take documents out of the trash by object ID, so their chunks are searchable and readable again. '
+            'A document not in the trash is left as it is; one removed with delete cannot be restored.'
         ),
     )
-    def list_documents(self, args):
-        """List documents individually (object ID, parent, chunk count) on a driver that supports it."""
-        args = _normalize_vectordb_tool_input(args)
-        if not self._vectordb_expose_tools():
-            return self._vectordb_tools_refused('list_documents')
-        if not self._vectordb_supports_document_listing():
-            return self._vectordb_listing_unavailable('list_documents')
-        store = self._vectordb_store()
-
-        parent = args.get('parent', None)
-        if parent is not None and not isinstance(parent, str):
-            return {'success': False, 'error': 'list_documents: parent must be a string'}
-        deleted = args.get('deleted', None)
-        if deleted is None:
-            deleted = False
-        if not isinstance(deleted, bool):
-            return {'success': False, 'error': 'list_documents: deleted must be a boolean'}
-        from ai.common.utils import optional_int
-
-        try:
-            offset = optional_int(args, 'offset', default=0, lo=0, tool_name='list_documents')
-            limit = optional_int(
-                args, 'limit', default=_VECTORDB_TOOL_DEFAULT_LIST_LIMIT, lo=1, tool_name='list_documents'
-            )
-        except ValueError as exc:
-            return {'success': False, 'error': str(exc)}
-
-        limit = min(limit, _VECTORDB_TOOL_MAX_LIST_LIMIT)
-        # One row past the page says whether a page follows; it comes from the
-        # same read as the page, so it stays right when the count below and the
-        # page disagree under concurrent writes.
-        rows = store.listDocuments(parent=parent, offset=offset, limit=limit + 1, deleted=deleted)
-        total = store.countDocuments(parent=parent, deleted=deleted)
-        return {
-            'success': True,
-            'documents': rows[:limit],
-            'total': total,
-            'offset': offset,
-            'has_more': len(rows) > limit,
-        }
+    @vectordb_tool
+    def restore(self, args):
+        """Take documents out of the trash (gated; see ``VectorExplorerTools._vx_trash_write``)."""
+        return self._vx_trash_write('restore', args, deleted=False)
 
     @tool_function(
         input_schema={
@@ -1532,7 +2223,7 @@ class VectorStoreToolMixin:
                     'type': 'string',
                     'description': (
                         'Optional parent path; lists documents stored under exactly this parent '
-                        '(Atlas matches it as a case-insensitive pattern, Qdrant as a text match).'
+                        '(Atlas matches it as a case-insensitive pattern).'
                     ),
                 },
                 'offset': {
@@ -1559,25 +2250,116 @@ class VectorStoreToolMixin:
         },
         description='List unique document paths stored in this vector database.',
     )
+    @vectordb_tool
     def objdir(self, args):
-        """List unique document paths in this vector store."""
-        args = _normalize_vectordb_tool_input(args)
-        if not self._vectordb_expose_tools():
-            return self._vectordb_tools_refused('objdir')
+        """List unique document paths in this vector store.
+
+        ``paths`` maps each path to an objectId as before; the control record is never
+        listed. ``parent``, when given, is an exact path (as develop's drivers read it),
+        never a prefix. ``offset`` must be 0 or more and ``limit`` 1 or more (at most
+        1000 are returned); a page counts distinct PATHS (#2668), each mapped to its lowest
+        objectId. On a driver with a native document listing (``listDocumentPage``),
+        ``entries`` lists every document under the page's paths (path and objectId, equal
+        paths not collapsed) and deleted documents are left out. On any other
+        driver the answer is the driver's own ``getPaths`` page, as before: the default
+        listing pages by offset, which several backends ignore or read as a point id.
+
+        ``truncated`` is True when the listing stopped before the page was full and before
+        the store ran out of documents (the scan cap, the time budget, or a store that
+        stopped paging); ``warning`` then says why, because the list is incomplete.
+        """
         store = self._vectordb_store()
 
         parent = args.get('parent', None)
+        if parent is not None and not isinstance(parent, str):
+            raise ToolRefusal('INVALID_INPUT', 'objdir: parent must be a string')
         from ai.common.utils import optional_int
 
         try:
             offset = optional_int(args, 'offset', default=0, lo=0, tool_name='objdir')
-            limit = optional_int(args, 'limit', default=_VECTORDB_TOOL_MAX_OBJDIR_LIMIT, lo=1, tool_name='objdir')
+            limit = optional_int(args, 'limit', default=_OBJDIR_MAX_LIMIT, lo=1, tool_name='objdir')
         except ValueError as exc:
-            return {'success': False, 'error': str(exc)}
+            raise ToolRefusal('INVALID_INPUT', str(exc)) from None
+        limit = min(limit, _OBJDIR_MAX_LIMIT)
 
-        limit = min(limit, _VECTORDB_TOOL_MAX_OBJDIR_LIMIT)
-        paths = store.getPaths(parent=parent, offset=offset, limit=limit)
-        return {'success': True, 'paths': paths}
+        entries: Optional[List[Dict[str, str]]] = None
+        stopped: Optional[str] = None
+        if 'listDocumentPage' in store.capabilities():
+            try:
+                entries, stopped = self._vectordb_objdir_listing(store, parent, offset, limit)
+            except StoreUnsupported:
+                entries, stopped = None, None
+        if entries is None:
+            legacy = store.getPaths(parent=parent, offset=offset, limit=limit) or {}
+            entries = [
+                {'path': str(path), 'objectId': str(oid)}
+                for path, oid in legacy.items()
+                if oid != CONTROL_OBJECT_ID and path not in (None, 'None', 'null')
+            ]
+
+        paths: Dict[str, str] = {}
+        for entry in entries:
+            paths.setdefault(entry['path'], entry['objectId'])
+        answer: Dict[str, Any] = {'success': True, 'paths': paths, 'entries': entries, 'truncated': stopped is not None}
+        if stopped is not None:
+            answer['warning'] = _OBJDIR_STOPPED[stopped].format(rows=_OBJDIR_SCAN_MAX)
+            warning(f'vectordb tool: objdir on {self._vectordb_server_name()}: {answer["warning"]}')
+        return answer
+
+    @staticmethod
+    def _vectordb_objdir_listing(
+        store: 'DocumentStoreBase', parent: Optional[str], offset: int, limit: int
+    ) -> Tuple[List[Dict[str, str]], Optional[str]]:
+        """``objdir`` entries from a native ``listDocumentPage``: active documents at ``parent``, paged.
+
+        Each document is listed once. Paging ends after ``_OBJDIR_SCAN_MAX`` rows or as
+        :class:`ListingGuard` decides (empty or repeated pages, a listing that cannot
+        page, the time budget), so a driver whose cursor never ends cannot hang the tool.
+
+        Returns the entries and why the listing stopped short of a full page while the
+        store may hold more (a key of ``_OBJDIR_STOPPED``), or None when the page is full
+        or the listing ended.
+        """
+        # #2668: a page counts distinct PATHS, as it did on develop; each path appears once in ``paths`` (its
+        # lowest object ID) and ``entries`` still lists every document under the paths of the page.
+        groups: Dict[str, List[str]] = {}
+        seen: set = set()
+        scanned = 0
+        stopped: Optional[str] = None
+        wanted = offset + limit
+        page_size = VECTOR_TOOL_LIMITS['documents_page']
+        guard = ListingGuard(_OBJDIR_SCAN_MAX, page_size, VECTOR_TOOL_LIMITS['sample_budget_ms'] / 1000.0)
+        cursor: Optional[str] = None
+        while True:
+            page = store.listDocumentPage(
+                cursor=cursor,
+                limit=page_size,
+                object_ids=None,
+                deleted='active',
+                sort='path',
+            )
+            new_documents = 0
+            for row in page.items:
+                if row.objectId == CONTROL_OBJECT_ID or row.objectId in seen:
+                    continue
+                seen.add(row.objectId)
+                new_documents += 1
+                if row.deleted or (parent is not None and row.path != parent):
+                    continue
+                groups.setdefault(row.path, []).append(row.objectId)
+            scanned += len(page.items)
+            # Rows arrive ordered by path on a sorted listing: once one path past the page has started, the
+            # page's own paths (and every document under them) are complete. Otherwise read it all.
+            if page.sorted and len(groups) > wanted:
+                break
+            if guard.stop(page, new_documents) or scanned >= _OBJDIR_SCAN_MAX:
+                if guard.reason != 'complete' and len(groups) < wanted:
+                    stopped = guard.reason if guard.reason in ('budget', 'stale') else 'cap'
+                break
+            cursor = page.next_cursor
+        chosen = sorted(groups)[offset:wanted]
+        entries = [{'path': path, 'objectId': oid} for path in chosen for oid in sorted(groups[path])]
+        return entries, stopped
 
     @tool_function(
         input_schema={
@@ -1631,22 +2413,28 @@ class VectorStoreToolMixin:
             'ceiling was hit. An unknown object ID, or one in the trash, returns {"success": false, "error": "..."}.'
         ),
     )
+    @vectordb_tool
     def get(self, args):
-        """Retrieve document chunks by objectId."""
-        args = _normalize_vectordb_tool_input(args)
-        if not self._vectordb_expose_tools():
-            return self._vectordb_tools_refused('get')
+        """Retrieve document chunks by objectId, in pages ordered by chunk ID.
+
+        offset counts chunks after that sort, total is the document's chunk count
+        and has_more says whether another page follows. The driver is asked for the
+        whole document (up to _VECTORDB_TOOL_GET_FETCH_LIMIT chunks; truncated says
+        when that ceiling was hit) and the page is cut here, so offset means the same
+        on every backend. The Vector Explorer pages a document by chunk id through the
+        chunks tool instead.
+        """
         store = self._vectordb_store()
 
-        object_id = (args.get('object_id') or '').strip()
+        object_id = str(args.get('object_id') or '').strip()
         if not object_id:
-            return {'success': False, 'error': 'object_id is required'}
+            raise ToolRefusal('INVALID_INPUT', 'object_id is required')
         if object_id == CONTROL_OBJECT_ID:
-            return {
-                'success': False,
-                'error': f"get: object_id '{object_id}' is reserved for the store's control row",
-                'object_id': object_id,
-            }
+            raise ToolRefusal(
+                'RESERVED_ID',
+                f"get: object_id '{object_id}' is reserved for the store's control row",
+                {'object_id': object_id},
+            )
 
         from ai.common.utils import optional_int
 
@@ -1654,7 +2442,7 @@ class VectorStoreToolMixin:
             offset = optional_int(args, 'offset', default=0, lo=0, tool_name='get')
             limit = optional_int(args, 'limit', default=_VECTORDB_TOOL_MAX_GET_LIMIT, lo=1, tool_name='get')
         except ValueError as exc:
-            return {'success': False, 'error': str(exc)}
+            raise ToolRefusal('INVALID_INPUT', str(exc)) from None
 
         limit = min(limit, _VECTORDB_TOOL_MAX_GET_LIMIT)
         # The driver is asked for the whole document (see _VECTORDB_TOOL_GET_FETCH_LIMIT);
@@ -1667,25 +2455,20 @@ class VectorStoreToolMixin:
         )
         docs = store.get(doc_filter)
         if not docs:
-            # Not a page past the end: nothing is readable under this id. A
-            # document in the trash is told apart from an unknown one, since
-            # restore makes the first readable again. Every driver returns its
-            # soft-deleted rows for isDeleted=True (the base finds its control
-            # row that way), so one more read of a single row decides. A driver
-            # whose get ignores limit (Pinecone) pays a second full read here,
-            # on the miss path only.
-            in_trash = store.get(DocFilter(objectIds=[object_id], offset=0, limit=1, isDeleted=True))
-            if in_trash and self._vectordb_allow_write():
-                error = f"get: document '{object_id}' is soft-deleted; restore it to read it"
-            elif in_trash:
-                # restore is a write tool: do not point to a tool this node does not offer.
-                error = (
-                    f"get: document '{object_id}' is soft-deleted; this node does not offer restore "
-                    'while writes through tools are off'
-                )
-            else:
-                error = f"get: no document with object_id '{object_id}'"
-            return {'success': False, 'error': error, 'object_id': object_id}
+            # Not a page past the end: nothing is readable under this id. A document in the trash
+            # (no live chunk, so every chunk is there) is told apart from an unknown one, since
+            # restore makes the first readable again.
+            if self._vx_in_trash(store, object_id):
+                if self._vectordb_allow_write():
+                    message = f"get: document '{object_id}' is soft-deleted; restore it to read it"
+                else:
+                    # restore is a write tool: do not point to a tool this node does not offer.
+                    message = (
+                        f"get: document '{object_id}' is soft-deleted; this node does not offer restore "
+                        'while writes through tools are off'
+                    )
+                raise ToolRefusal('IN_TRASH', message, {'object_id': object_id})
+            raise ToolRefusal('NOT_FOUND', f"get: no document with object_id '{object_id}'", {'object_id': object_id})
 
         chunks = [
             {
@@ -1697,7 +2480,7 @@ class VectorStoreToolMixin:
                 else 0,
                 'metadata': doc.metadata
                 if isinstance(doc.metadata, dict)
-                else vars(doc.metadata)
+                else dict(vars(doc.metadata))
                 if hasattr(doc.metadata, '__dict__')
                 else {},
             }
@@ -1742,7 +2525,7 @@ class VectorStoreToolMixin:
                 },
                 'document_count': {
                     'type': ['integer', 'null'],
-                    'description': 'Active documents, or null on a store that does not list documents.',
+                    'description': 'Active documents, or null where the store cannot count them.',
                 },
                 'model': {'type': 'string', 'description': 'Embedding model name.'},
                 'vector_size': {'type': 'integer', 'description': 'Embedding vector dimension.'},
@@ -1754,28 +2537,24 @@ class VectorStoreToolMixin:
             'documents where the store can tell, the embedding model and the vector size.'
         ),
     )
+    @vectordb_tool
     def stats(self, args):
-        """Return collection statistics for this vector store."""
-        if not self._vectordb_expose_tools():
-            return self._vectordb_tools_refused('stats')
+        """Return collection statistics for this vector store.
+
+        ``count``, ``model`` and ``vector_size`` keep their meaning (``count`` is every
+        stored row, the control record included); ``model`` and ``vector_size`` come
+        from the control record. The answer adds documents, chunks, deleted chunks,
+        tables, documents without a first chunk and the average chunks per document
+        (None where the store cannot count). ``{"mode": "quick"}`` returns the raw count
+        with the cached figures (``counts_as_of``), recounting only when nothing is cached,
+        the figures are older than ``counts_cached_s`` or the store was written since. A
+        missing collection answers ``count: 0`` with ``collection_exists: false``.
+        """
         store = self._vectordb_store()
-
-        # The model name and vector size are read from the control row when the
-        # base checks the collection, which a task that only reads through tools
-        # may not have done yet; check now rather than report empty values.
-        if not store.modelName or not store.vectorSize:
-            try:
-                store.doesCollectionExist()
-            except Exception as exc:  # noqa: BLE001 - the base wraps every cause in a plain Exception
-                # The base refuses a collection without exactly one control row;
-                # stats still answers with the counts and leaves the two empty.
-                warning(f"{self._vectordb_server_name()}.stats: the collection's control row could not be read: {exc}")
-        document_count = store.countDocuments() if self._vectordb_supports_document_listing() else None
-
-        return {
-            'success': True,
-            'count': store.count_documents(),
-            'document_count': document_count,
-            'model': store.modelName,
-            'vector_size': store.vectorSize,
-        }
+        mode = args.get('mode', 'full') or 'full'
+        if mode not in ('full', 'quick'):
+            raise ToolRefusal('INVALID_INPUT', "mode must be 'full' or 'quick'.")
+        answer = self._vx_stats(store, mode)
+        # #2704's name for the active documents figure, kept so its callers read the same answer.
+        answer['document_count'] = answer.get('documents')
+        return answer

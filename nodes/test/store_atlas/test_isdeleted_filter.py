@@ -23,7 +23,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 # ---------------------------------------------------------------------------
-# Mock heavy dependencies BEFORE importing the atlas module
+# Stand in for heavy dependencies only where they are not installed: a stub
+# left in sys.modules would replace the real pymongo/numpy for every later test.
 # ---------------------------------------------------------------------------
 
 for mod_name in (
@@ -32,10 +33,12 @@ for mod_name in (
     'pymongo.database',
     'pymongo.errors',
     'pymongo.operations',
+    'numpy',
 ):
-    sys.modules.setdefault(mod_name, MagicMock())
-
-sys.modules.setdefault('numpy', MagicMock())
+    try:
+        importlib.import_module(mod_name)
+    except ImportError:
+        sys.modules.setdefault(mod_name, MagicMock())
 
 
 # ---------------------------------------------------------------------------
@@ -225,7 +228,10 @@ def test_trash_round_trip_filters_paths_before_paging(store):
             for field, value in query.items():
                 actual = row['meta'][field.removeprefix('meta.')]
                 if isinstance(value, dict):
-                    if not re.search(value['$regex'], actual, re.IGNORECASE):
+                    if '$ne' in value:  # the control record is left out of the listing
+                        if actual == value['$ne']:
+                            return False
+                    elif not re.search(value['$regex'], actual, re.IGNORECASE):
                         return False
                 elif actual != value:
                     return False

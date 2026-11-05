@@ -1,0 +1,423 @@
+// =============================================================================
+// MIT License
+// Copyright (c) 2026 Aparavi Software AG
+// =============================================================================
+
+// =============================================================================
+// MAP WIRING: rules pinned by reading the source (no React DOM harness)
+// =============================================================================
+
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { test } from 'node:test';
+
+const SRC = path.resolve(__dirname, '..', 'src');
+const strip = (text: string): string => text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+const read = (rel: string): string => strip(fs.readFileSync(path.join(SRC, rel), 'utf8'));
+const MAP_COMPONENTS = ['MapToolbar', 'AdvancedPopover', 'ExportMenu', 'SavedViewsMenu', 'SimilarityMatrix', 'ClustersPanel', 'RecommendPanel', 'PointCanvas', 'PointInspector', 'NeighbourList', 'DuplicatesPanel', 'OutliersPanel', 'PointsTable', 'Legend', 'HeatStrip'];
+const files = [...fs.readdirSync(path.join(SRC, 'map')).map((f) => `map/${f}`), ...MAP_COMPONENTS.map((n) => `components/${n}.tsx`), 'views/MapView.tsx'];
+
+test('no map file stops event propagation or listens for keys above the map (shell drawers and dialogs keep their keys)', () => {
+	for (const file of files) {
+		const text = read(file);
+		assert.doesNotMatch(text, /stopPropagation|stopImmediatePropagation/, `${file} stops propagation`);
+		assert.doesNotMatch(text, /(window|document)\.addEventListener\(\s*'key/, `${file} listens for keys on ${'window/document'}`);
+		assert.doesNotMatch(text, /from 'three'|from 'react-window'|crypto\.subtle/, `${file} uses a dependency the app may not`);
+	}
+});
+
+test('the canvas observes its size, follows devicePixelRatio, redraws when revealed, and exposes data-points', () => {
+	const canvas = read('components/PointCanvas.tsx');
+	assert.match(canvas, /new ResizeObserver\(/);
+	assert.match(canvas, /devicePixelRatio/);
+	assert.match(canvas, /data-points=\{visibleCount\}/);
+	assert.match(canvas, /role="application"/);
+	assert.match(canvas, /tabIndex=\{0\}/);
+	assert.match(canvas, /addEventListener\('wheel', onWheel, \{ passive: false \}\)/);
+	assert.match(canvas, /props\.visible !== false/);
+	assert.match(canvas, /createWebglRenderer\(canvas, \(\) => requestDraw\(\)\) \?\? createCanvas2dRenderer\(canvas\)/);
+	const gl = read('map/renderer.webgl.ts');
+	assert.match(gl, /ALIASED_POINT_SIZE_RANGE/);
+	assert.match(gl, /'webglcontextlost'/);
+	assert.match(gl, /'webglcontextrestored'/);
+});
+
+test('the view re-reads the theme tokens when the shell switches theme, and honours reduced motion (Safari 13 listeners too)', () => {
+	const view = read('views/MapView.tsx');
+	assert.match(view, /new MutationObserver\(/);
+	assert.match(view, /getComputedStyle\(document\.documentElement\)/);
+	assert.match(view, /prefers-reduced-motion: reduce/);
+	assert.match(view, /addListener\(/);
+});
+
+test('the view samples on first open with the node\'s default size, sends neighbour calls through the newest-wins queue, and lays out in the worker', () => {
+	const view = read('views/MapView.tsx');
+	assert.match(view, /limits\.sample_default/);
+	assert.match(view, /createLatestQueue/);
+	assert.match(view, /createLayoutClient\(\{ createWorker: spawnLayoutWorker \}\)/);
+	assert.match(view, /overlap < [\w.]*pcaOverlap/, 'the neighbour layout is kept only when it is at least as good as PCA');
+	assert.match(view, /forgetCameras\(\)/, 'a reset to no connection forgets the cameras');
+	assert.match(view, /data-knn-overlap=/);
+	assert.match(view, /data-pca-overlap=/);
+});
+
+test('the browser lanes can read the map\'s state: tooltip, query, rays, layout, points', () => {
+	const view = read('views/MapView.tsx');
+	assert.match(view, /data-query-state=/);
+	assert.match(view, /data-rays=\{rays\.length\}/);
+	assert.match(view, /data-layout-state=\{layoutState\}/);
+	assert.match(read('components/PointCanvas.tsx'), /data-map-tooltip/);
+});
+
+test('light samples are dithered within their 2-decimal rounding on PCA, so no lattice is drawn', () => {
+	assert.match(read('views/MapView.tsx'), /sample\.mode === 'light' \? ditherRounded\(pca, 0\.01, /);
+});
+
+test('every removal on the map goes to the console uncut: staged where it stages (stageRemove), else confirmed (requestRemove); never a cap here', () => {
+	const view = read('views/MapView.tsx');
+	assert.match(view, /<SelectionTab[\s\S]*?onRemove=\{\(ids\) => removeDocuments\(ids\)\}/);
+	const remove = callbackBody(view, 'removeDocuments');
+	assert.match(remove, /if \(actions\.stageRemove && sample\) \{\s*const targets = removeTargetsOf\(sample, objectIds\);\s*actions\.stageRemove\(targets\);\s*actions\.announce\(stagedAnnouncement\(targets\.length\)\);\s*\} else actions\.requestRemove\(objectIds\);/, 'staged with the sample\'s paths and announced, else confirmed');
+	assert.equal((view.match(/actions\.requestRemove\(/g) ?? []).length, 1, 'removeDocuments is the one way out');
+	assert.doesNotMatch(view, /requestRemove\([^)]*\.slice\(|\.slice\(0, limits\.write_ids_max\)/, 'the map never truncates a removal to write_ids_max');
+});
+
+test('the view gives the canvas the layout shown, the lasso count and the overlaps, so its root carries the lanes\' attribute table', () => {
+	const view = read('views/MapView.tsx');
+	assert.match(view, /<PointCanvas[\s\S]*?layout=\{layout\}[\s\S]*?selectionCount=\{lassoKeys\.length > 0 \? lassoKeys\.length : null\}[\s\S]*?overlap=\{quality \? \{ layout: quality\.overlap, pca: quality\.pcaOverlap \} : null\}/);
+	assert.match(view, /setLayoutState\('running'\);[\s\S]{0,200}setQuality\(null\)/, 'a new run clears the previous overlaps');
+	const canvas = read('components/PointCanvas.tsx');
+	// Written by each frame from what it drew; React never renders them (it would overwrite the frame's values).
+	assert.match(canvas, /Object\.assign\(el\.dataset, overlayDataset\(drawn\)\)/);
+	assert.match(canvas, /el\.dataset\.drawCount = /);
+	assert.match(canvas, /el\.dataset\.camera = cameraSignature\(camera\)/);
+	assert.doesNotMatch(canvas, /data-(star|rays|links|chunk-path|draw-count|camera)=\{/);
+	// The hover box is a tooltip for the lanes and assistive tech, and keeps the perf lane's attribute.
+	assert.match(canvas, /<div role="tooltip" data-map-tooltip=\{tooltip\.index\}/);
+});
+
+test('the Lasso toggle stays pressed after a selection (the next outline selects again); Lasso, L or Escape turn it off', () => {
+	const view = read('views/MapView.tsx');
+	const onLasso = /const onLasso = useCallback\(([\s\S]*?)\n\t\t\[sample/.exec(view);
+	assert.ok(onLasso, 'onLasso found');
+	assert.doesNotMatch(onLasso[1] as string, /setLasso\(/, 'a finished lasso leaves the toggle as the user set it');
+	assert.match(view, /onToggleLasso=\{\(\) => setLasso\(\(on\) => !on\)\}/);
+	assert.match(view, /action === 'lasso'\) setLasso\(\(on\) => !on\)/);
+});
+
+test('sign-out forgets that the map sampled, so the same connection samples again on its next first open', () => {
+	const view = read('views/MapView.tsx');
+	const reset = /if \(state\.connectionKey === null\) \{([\s\S]*?)\n\t\t\}/.exec(view);
+	assert.ok(reset, 'the reset-to-no-connection branch');
+	assert.match(reset[1] as string, /autoSampled\.current = null/);
+	assert.match(reset[1] as string, /forgetCameras\(\)/);
+});
+
+test('neighbour ends outside the sample survive SAMPLE_EXPIRED: the sample is drawn again (keeping the clicked key) and the point inspected again, once', () => {
+	const view = read('views/MapView.tsx');
+	const quiet = /const pinKeysQuiet = async \(([\s\S]*?)\n\t\};/.exec(view);
+	assert.ok(quiet, 'pinKeysQuiet');
+	assert.match(quiet[1] as string, /isExpired\(/);
+	assert.match(quiet[1] as string, /repick\.current = \{ key: keyString\(key\[0\], key\[1\]\), drawnAt: sampleModel\.receivedAt \}/);
+	assert.match(quiet[1] as string, /resample\(\[/);
+	assert.match(quiet[1] as string, /!retried/, 'the second inspection does not re-sample again');
+	assert.match(view, /void onPick\(index, true\)/);
+	// The re-drawn sample is recognised by its arrival (a new model), not by its answer object or id: the same seed
+	// and keys give the same sample id, and pinning a point also makes a new model with the same receivedAt.
+	assert.match(view, /if \(pending === null \|\| !sampleModel \|\| sampleModel\.receivedAt === pending\.drawnAt\) return;/);
+	assert.match(view, /void onPick\(index, true\);[\s\S]{0,120}\}, \[sampleModel\]\);/);
+});
+
+test('a chat highlight embeds the question the chat told the map, keeps a star already placed for it, and otherwise drops the map query for the sources\' centre', () => {
+	const view = read('views/MapView.tsx');
+	assert.match(view, /const plan = chatQueryPlan\(\{ told: state\.query, mapQuery: query\?\.text \?\? null, embedReady \}\);/);
+	assert.doesNotMatch(view, /if \(state\.query && model\.embed\.enabled[^\n]*runQuery\(state\.query/, 'the old rule re-embedded the last MAP query');
+	// 'run': the star of another question must not stand in while the new one is embedded (or if embedding fails).
+	const run = /if \(plan === 'run'\) \{([\s\S]*?)\n\t\t\t\}/.exec(view);
+	assert.ok(run, "the 'run' branch");
+	assert.ok((run[1] as string).indexOf('clearQuery()') >= 0 && (run[1] as string).indexOf('clearQuery()') < (run[1] as string).indexOf('void runQuery(state.query as string, false)'), 'cleared, then embedded');
+	// 'centroid': the map query is dropped, and the selection forgets it.
+	const centroid = /else if \(plan === 'centroid' && \(query !== null \|\| state\.query !== null\)\) \{([\s\S]*?)\n\t\t\t\}/.exec(view);
+	assert.ok(centroid, "the 'centroid' branch");
+	assert.match(centroid[1] as string, /clearQuery\(\);/);
+	assert.match(centroid[1] as string, /selection\.setQuery\(null\)/);
+	// While the question is placed there is no star; the centre appears only if placing it fails.
+	assert.match(run[1] as string, /setPlacingAnswer\(true\);/);
+	assert.match(run[1] as string, /void runQuery\(state\.query as string, false\)\.finally\(\(\) => setPlacingAnswer\(false\)\);/);
+	const star = /const star: IStar \| null = useMemo\(\(\) => \{([\s\S]*?)\n\t\}, \[([^\]]*)\]\);/.exec(view);
+	assert.ok(star, 'the star memo');
+	assert.match(star[1] as string, /if \(highlight\?\.source === 'chat'\) \{\s*if \(placingAnswer\) return null;/);
+	assert.match(star[2] as string, /\bplacingAnswer\b/);
+	// 'keep' changes nothing: no branch of its own.
+	assert.doesNotMatch(view, /plan === 'keep'/);
+	assert.match(view, /queryBlocker\(/);
+});
+
+test('a light sample on PCA says its positions are spread within their 0.01 rounding step', () => {
+	const view = read('views/MapView.tsx');
+	assert.match(view, /sample\?\.mode === 'light' && layout === 'pca' \? \[LIGHT_POSITIONS\]/);
+});
+
+test('a map mounted hidden holds no WebGL context: the renderer is created on the first reveal and let go only on unmount', () => {
+	const canvas = read('components/PointCanvas.tsx');
+	const create = /useEffect\(\(\) => \{\s*ensureMapStyle\(\);([\s\S]*?)\n\t\}, \[([^\]]*)\]\);/.exec(canvas);
+	assert.ok(create, 'the renderer effect');
+	assert.match(create[1] as string, /if \(!canvas \|\| !wanted \|\| rendererRef\.current !== null\) return/, 'no context while hidden, and only one');
+	assert.match(create[2] as string, /\bwanted\b/, 'the effect runs again on reveal');
+	assert.match(canvas, /const wanted = props\.visible !== false;/);
+	assert.match(canvas, /useEffect\(\s*\(\) => \(\) => \{[\s\S]*?rendererRef\.current\?\.destroy\(\);[\s\S]*?\},\s*\[\],?\s*\);/, 'destroyed on unmount only');
+	assert.match(canvas, /rendererKind === 'none' \?/, 'the no-canvas note is for a browser that cannot draw, not for a map not shown yet');
+});
+
+test('a press keeps working when the browser refuses pointer capture (the gesture starts either way)', () => {
+	const canvas = read('components/PointCanvas.tsx');
+	const down = /const onDown = \(event: PointerEvent\): void => \{([\s\S]*?)\n\t\t\};/.exec(canvas);
+	assert.ok(down, 'onDown');
+	const body = down[1] as string;
+	assert.match(body, /try \{[\s\S]*?el\.setPointerCapture\(event\.pointerId\);[\s\S]*?\} catch \{/);
+	assert.ok(body.indexOf('gesture.down(') > body.indexOf('} catch {'), 'gesture.down runs after (outside) the try/catch');
+});
+
+test('the Table alternative hides the canvas instead of replacing it (the lanes read data-points / data-selected while the table shows; no WebGL context per toggle)', () => {
+	const view = read('views/MapView.tsx');
+	const column = /<div style=\{MAP_STYLES\.canvasColumn\}>([\s\S]*?)<Legend /.exec(view);
+	assert.ok(column, 'the canvas column');
+	const body = column[1] as string;
+	assert.match(body, /<PointsTable /);
+	assert.match(body, /<PointCanvas\s/);
+	assert.doesNotMatch(body, /\)\s*:\s*\(\s*<PointCanvas|:\s*<PointCanvas/, 'PointCanvas is not the other branch of the table toggle');
+	assert.match(body, /\{table \? \(\s*<div[^>]*>\s*<PointsTable /, 'the table is shown only while toggled on');
+	assert.match(body, /<div style=\{\{ display: table \? 'none' : 'flex', [^}]*\}\}>\s*<PointCanvas\s/, 'the canvas wrapper is hidden, not removed, under the table');
+	assert.match(body, /<PointCanvas[\s\S]*?visible=\{visible && !table\}/, 'nothing is drawn (and no context created) while the table shows');
+	assert.match(view, /useState\(initialTable === true\)/, 'initialTable only sets where the toggle starts');
+});
+
+test("the Heat strip tab reads the store's scope scores through heatScores: a chunk the store does not hold has no similarity, not 0", () => {
+	const view = read('views/MapView.tsx');
+	assert.match(view, /import \{ heatScores \} from '\.\.\/vector\/heat';/);
+	assert.match(view, /scores: heatScores\(ids, answer\.value\.scores\)/);
+	assert.doesNotMatch(view, /sim: scores\[t\] as number/, 'a null score was drawn as a similarity');
+});
+
+// -----------------------------------------------------------------------------
+// Clusters, edges, star B, isolation, the PNG's snapshot, no browser storage
+// -----------------------------------------------------------------------------
+
+/** The body of a `const name = useCallback(...)` in a source (to its dependency list). */
+function callbackBody(text: string, name: string): string {
+	const at = text.indexOf(`const ${name} = useCallback(`);
+	assert.ok(at >= 0, `${name} found`);
+	const end = text.indexOf('\n\t);', at);
+	const close = text.indexOf('}, [', at);
+	return text.slice(at, Math.min(end > 0 ? end : Infinity, close > 0 ? close : Infinity));
+}
+
+test('controls over data the browser holds never sample: Minimum size, colour, edges, Expand selected, isolation', () => {
+	const view = read('views/MapView.tsx');
+	for (const name of ['onMinSize', 'onColourBy', 'onEdges', 'onEdgesM', 'onExpandSelected', 'onSlowEdges', 'isolate', 'onShowAll', 'onExpandIsolation']) {
+		const body = callbackBody(view, name);
+		assert.doesNotMatch(body, /drawSample|resample|callTool|callRecommend|channel\.invoke/, `${name} calls the store`);
+	}
+	// Clusters are asked only of a node that offers them, and a scope travels with the sample.
+	assert.match(view, /model\.capabilities\.clusters === true \? \{ cluster: \{ method: 'knn-components' as const, labels: true \} \}/);
+	assert.match(view, /scopeRef\.current \? \{ filter: \{ object_ids: \[\.\.\.scopeRef\.current\] \} \}/);
+});
+
+test('the slow-frame rule drops to 3 edges per point only while edgesAutoDegrade is on (the perf lane turns it off)', () => {
+	const view = read('views/MapView.tsx');
+	const body = callbackBody(view, 'onSlowEdges');
+	assert.match(body, /if \(!edgesAutoDegrade \|\| edges !== 'neighbours' \|\| edgesPerPoint <= 3\) return;/);
+	assert.match(view, /const edgesAutoDegrade = props\.edgesAutoDegrade !== false;/);
+	const canvas = read('components/PointCanvas.tsx');
+	assert.match(canvas, /if \(countsAsSlowEdges\(\{ drewEdges: edgesDrawn, dimRebuild: cache\.dimRebuild, ms: ended - started \}, SLOW_FRAME_MS\)\)/, 'only frames that drew edges count, and never one rebuilt only for a new dimming');
+	assert.match(canvas, /cache\.dimRebuild = cache\.edges === edges && cache\.positions === positions && camera\.mode === '2d' && cache\.dimVersion !== dim\.version;/);
+	assert.match(canvas, /cache\.slow >= 2 && !cache\.fired/, 'twice, then once per edge set');
+});
+
+test('Search\'s Compare places two stars: the highlight runs the compare plan, B is embedded through the one embed call and drawn hollow with its own rays', () => {
+	const view = read('views/MapView.tsx');
+	// A B with no star is placed again on the next showing; A then B, never two `project` calls at once.
+	assert.match(view, /const compare = comparePlan\(\{ told: state\.query, toldB: state\.queryB, mapQuery: query\?\.text \?\? null, mapQueryB: queryB\?\.item \? queryB\.text : null, embedReady \}\);/);
+	assert.match(view, /void placeCompared\(compare, \(\) => runQuery\(state\.query as string, false, false\), \(\) => runQueryB\(state\.queryB as string\)\);/);
+	assert.doesNotMatch(view, /void runQueryB\(/, 'B is never started beside A');
+	assert.match(view, /<PointCanvas[\s\S]*?starB=\{starB\}[\s\S]*?raysB=\{raysB\}/);
+	const runB = /const runQueryB = async \(text: string\): Promise<void> => \{([\s\S]*?)\n\t\};/.exec(view);
+	assert.ok(runB, 'runQueryB');
+	assert.match(runB[1] as string, /await embedQuestion\(text\)/);
+	// No star: the status line says why (and nothing claims a star).
+	assert.match(runB[1] as string, /if \(item === null\) \{\s*setNotice\(starBNotPlaced\(projected === null \? STAR_B_NEEDS_PROJECT : !projected\.ok \? mapFailure\(projected\.code, projected\.message\) : null\)\);\s*return;\s*\}/);
+	assert.match(runB[1] as string, /setNotice\(starBNotPlaced\(mapFailure\(embedded\.code, embedded\.message\)\)\)/);
+	assert.match(view, /\.\.\.\(queryB && starB \? \[`Hollow star: "\$\{queryB\.text\}" \(compared on the Query tab\)`\] : \[\]\),/, 'the legend line only while the star is drawn');
+	assert.match(view, /data-query-b-state=\{queryB === null \? 'none' : starB \? 'placed' : 'failed'\}/);
+	// A projection answered for a sample replaced meanwhile is dropped (B, A and the pinned keys), said for A and B.
+	assert.match(runB[1] as string, /const placed = model\.capabilities\.project === false \? null : await projectOn\(sampleModel\.sampleId,/);
+	assert.match(runB[1] as string, /if \(!onSample\(placed\?\.sampleId \?\? null, selection\.getState\(\)\.sampleModel\?\.sampleId\)\) \{\s*setNotice\(starBNotPlaced\(STAR_B_SAMPLE_CHANGED\)\);\s*return;\s*\}[\s\S]*setQueryBView\(/);
+	const runA = /const runQuery = async \(text: string[^)]*\): Promise<void> => \{([\s\S]*?)\n\t\};/.exec(view);
+	assert.ok(runA, 'runQuery');
+	assert.match(runA[1] as string, /if \(!onSample\(placed\?\.sampleId \?\? null, selection\.getState\(\)\.sampleModel\?\.sampleId\)\) \{\s*setNotice\(QUERY_SAMPLE_CHANGED\);\s*return;\s*\}[\s\S]*setQueryView\(/);
+	assert.match(view, /if \(!onSample\(placed\.sampleId, selection\.getState\(\)\.sampleModel\?\.sampleId\)\) return \[\];[\s\S]*?selection\.addPinned\(items\);/, 'pinKeys too');
+	// The question's vector is the map's only once it is drawn on this sample (the Heat strip and Recommend's "with
+	// query" read it), A and B alike: set once, after the guard.
+	const after = (body: string, guard: string, assign: string): void => {
+		assert.equal(body.split(assign).length - 1, 1, `${assign} once`);
+		assert.ok(body.indexOf(guard) >= 0 && body.indexOf(guard) < body.indexOf(assign), `${assign} after the sample guard`);
+	};
+	after(runA[1] as string, 'if (!onSample(placed?.sampleId ?? null, selection.getState().sampleModel?.sampleId))', 'queryVector.current = vector;');
+	after(runB[1] as string, 'if (!onSample(placed?.sampleId ?? null, selection.getState().sampleModel?.sampleId))', 'queryVectorB.current = vector;');
+	// The selected point's hollow neighbour ends: the same guard before anything is drawn or re-sampled.
+	const quiet = /const pinKeysQuiet = async \([^)]*\): Promise<IProjectItem\[\]> => \{([\s\S]*?)\n\t\};/.exec(view);
+	assert.ok(quiet, 'pinKeysQuiet');
+	assert.match(quiet[1] as string, /const asked = sampleModel\.sampleId;\s*const answer = await callTool<IProjectResult>\(channel, 'project', \{ sample_id: asked,[^\n]*\n\s*(?:\/\/[^\n]*\n\s*)?if \(!onSample\(asked, selection\.getState\(\)\.sampleModel\?\.sampleId\)\) return \[\];\s*if \(isExpired\(answer\) && !retried\)/);
+	assert.doesNotMatch(view, /withSampleRetry\(/, 'every project goes through projectOn');
+	// A new sample clears star B's placement even when the query is kept (a redraw for it): its place is in the old basis.
+	assert.match(view, /const resetView = useCallback\(\(keepQuery: boolean\): void => \{[\s\S]*?setQueryBView\(null\);\s*queryVectorB\.current = null;\s*if \(!keepQuery\) \{\s*setQueryView\(null\);/);
+	// A question typed on the map drops the compared pair.
+	assert.match(view, /if \(ownQuery\) clearCompare\(\);/);
+	const canvas = read('components/PointCanvas.tsx');
+	assert.match(canvas, /Object\.assign\(el\.dataset, extrasDataset\(extras\)\)/);
+});
+
+test('the edge layer is drawn on its own canvas only when the camera, the size or the edge set changes, and the frame says what it drew', () => {
+	const canvas = read('components/PointCanvas.tsx');
+	assert.match(canvas, /if \(!rebuild && key === cache\.drawnKey\) return false;/);
+	assert.match(canvas, /el\.dataset\.edges = String\(cache\.segments\)/);
+	assert.match(canvas, /edgeTransform2d\(camera, vp, size\.dpr\)/, '2D strokes the cached paths through the camera transform');
+	assert.doesNotMatch(canvas, /data-edges=\{/);
+	// The widths follow the screen's pixel ratio (two device pixels at least) in 3D too, and the extras' hover edges.
+	assert.match(canvas, /strokeEdgePaths\(ctx, cache\.paths, colour, edgeWidth\(size\.dpr\)\);/);
+	assert.doesNotMatch(canvas, /strokeEdgePaths\([^)]*, 1\);/);
+	assert.match(canvas, /coloursRef\.current\.overlay, size\.dpr\);\n/);
+});
+
+test('every map notice and failure goes on the toolbar\'s status line: nothing is put between the toolbar and the map', () => {
+	const view = read('views/MapView.tsx');
+	assert.match(view, /const said = statusNotice\(\{ error, notice, savedQuery, hasSample: sample !== null \}\);/);
+	assert.match(view, /<MapToolbar[\s\S]*?notice=\{lineNotice\}[\s\S]*?\n\t\t\t\/>\s*\{!sample \? \(\s*<div style=\{\{ padding: 16 \}\}>\s*\{error \? \(/, 'the toolbar, then the empty state (its banner inside it) or the map');
+	assert.doesNotMatch(view, /\{notice \? </, 'no notice paragraph');
+	assert.doesNotMatch(view, /This view had the query/, 'the saved query is the status line\'s too');
+	// Every notice the view sets reaches that one line.
+	for (const set of ['setNotice(LAYOUT_NOT_BETTER)', 'setNotice(EDGES_DEGRADED)', 'setNotice(outcome.kind === \'cancelled\' ? LAYOUT_CANCELLED : outcome.message)']) assert.ok(view.includes(set), set);
+	const toolbar = read('components/MapToolbar.tsx');
+	assert.match(toolbar, /const words = props\.busy \?\? notice\?\.text \?\? '';/);
+	// A failure keeps its alert and is repeated whole in the legend's notes.
+	assert.match(view, /const lineNotice = said && \{ text: said\.text, failure: said\.kind === 'error',/);
+	assert.match(view, /const legendNotes = \[\s*\.\.\.\(sample && error \? \[failedLine\(error\)\] : \[\]\),/);
+});
+
+test('a resize keeps the camera\'s zoom relative to the fit (resizeCamera, the fit\'s own padding), never the smaller of the two ratios', () => {
+	const canvas = read('components/PointCanvas.tsx');
+	assert.match(canvas, /const next = resizeCamera\(cameraRef\.current, boundsOf\(p\.positions, 2, p\.hidden \?\? null\), before, \{ width: rect\.width, height: rect\.height \}, FIT_PADDING\);/);
+	assert.match(canvas, /fitCamera\(bounds, vp, FIT_PADDING\)/, 'the same padding as the fit');
+	assert.match(canvas, /if \(fitScaleRef\.current !== null\) fitScaleRef\.current \*= next\.scale \/ cameraRef\.current\.scale;/, 'the labels\' zoom threshold follows');
+	assert.doesNotMatch(canvas, /Math\.min\(rect\.width \/ before\.width/);
+});
+
+test('the PNG copies the edge layer, then the points through the renderer\'s snapshot, then the overlay', () => {
+	const canvas = read('components/PointCanvas.tsx');
+	const copy = /report\(\(\): HTMLCanvasElement \| null => \{([\s\S]*?)\n\t\t\}\);/.exec(canvas);
+	assert.ok(copy, 'the snapshotter');
+	const body = copy[1] as string;
+	const edges = body.indexOf('target.drawImage(edgeRef.current');
+	const points = body.indexOf('renderer.snapshot(target)');
+	const overlay = body.indexOf('target.drawImage(overlayRef.current');
+	assert.ok(edges >= 0 && points > edges && overlay > points, 'edges, points, overlay');
+	const view = read('views/MapView.tsx');
+	assert.match(view, /const source = snap\(\);/, 'the map\'s PNG goes through the snapshot');
+});
+
+test('nothing on the map is kept in browser storage; Recommend examples live in the per-connection cache the registry clears', () => {
+	const sources = [...fs.readdirSync(path.join(SRC, 'map')).map((f) => `map/${f}`), 'views/MapView.tsx', ...['MapToolbar', 'PointCanvas', 'PointsTable', 'Legend', 'ClustersPanel'].map((n) => `components/${n}.tsx`)];
+	for (const file of sources) assert.doesNotMatch(read(file), /localStorage|sessionStorage|indexedDB/, file);
+	const view = read('views/MapView.tsx');
+	assert.match(view, /recommendExamples\.set\(model\.connectionKey, next\)/);
+	assert.match(view, /recommendExamples\.get\(model\.connectionKey\) \?\? NO_EXAMPLES/);
+});
+
+// -----------------------------------------------------------------------------
+// Popovers, dimming, the edge colours
+// -----------------------------------------------------------------------------
+
+test('every toolbar popover (Advanced, Export, Views) is placed by usePopover: measured before paint, closed on a window resize with the focus back on its button', () => {
+	const hook = read('components/AdvancedPopover.tsx');
+	assert.match(hook, /const useBrowserLayoutEffect = typeof document !== 'undefined' \? useLayoutEffect : useEffect;/, 'a layout effect in the browser (no server warning)');
+	assert.match(hook, /useBrowserLayoutEffect\(\(\) => \{[\s\S]*?getBoundingClientRect\(\)[\s\S]*?placePopover\(/, 'measured, then placed');
+	assert.match(hook, /const area = clipArea\(\{ width: window\.innerWidth, height: window\.innerHeight \}, clippingRects\(root\)\);/, 'inside the window and every clipping ancestor');
+	assert.match(hook, /style\.overflowX !== 'visible' \|\| style\.overflowY !== 'visible'/);
+	assert.match(hook, /const onResize = \(\): void => closeRef\.current\(true\);/, 'resize closes and refocuses');
+	assert.match(hook, /window\.addEventListener\('resize', onResize\)/);
+	assert.match(hook, /document\.addEventListener\('pointerdown', onDown\)/);
+	assert.match(hook, /const close = useCallback\(\(refocus: boolean\): void => \{\s*setOpen\(false\);\s*if \(refocus\) trigger\.current\?\.focus\(\);/);
+	assert.match(hook, /const action = popoverKey\(event\.key, event\.defaultPrevented\);/, 'Escape through popoverKey (skips a handled one)');
+	for (const file of ['components/ExportMenu.tsx', 'components/SavedViewsMenu.tsx']) {
+		const text = read(file);
+		assert.match(text, /usePopover\(open/, `${file} is placed by usePopover`);
+		assert.match(text, /placement=\{placement\}/);
+		assert.doesNotMatch(text, /addEventListener\('mousedown'/, `${file} closes through the hook`);
+	}
+});
+
+test('New sample in Advanced closes the panel and puts the focus on Advanced before drawing (drawing disables the controls); the toolbar holds the focus of a control that is disabled or removed', () => {
+	const toolbar = read('components/MapToolbar.tsx');
+	assert.match(toolbar, /onClick=\{\(\) => \{\s*close\(true\);\s*props\.onSample\(\{ n, mode, seed: seed \+ 1 \}\);/);
+	assert.match(toolbar, /<div ref=\{root\} role="toolbar" aria-label="Map controls" tabIndex=\{-1\}/, 'the toolbar can take the focus');
+	assert.match(toolbar, /useFocusHold\(root\);/);
+	assert.match(toolbar, /const action = focusHold\(\{ last: known\(last\.current\), held: known\(held\.current\), active: where \}\);/, 'the rule is the pure focusHold');
+	assert.match(toolbar, /\} else if \(action === 'hold' \|\| action === 'take'\) \{[\s\S]*?holder\.current = panel !== null && el\.contains\(panel\) \? panel : el;[\s\S]*?holder\.current\.focus\(\);/, 'the open Advanced panel holds the focus for a control in it (so it stays open), else the toolbar');
+	assert.match(toolbar, /back\?\.focus\(\);/);
+});
+
+test('the canvas fades what the view (or the hovered cluster) dims, says how many in data-dimmed, and strokes the edges in their own opaque colours', () => {
+	const canvas = read('components/PointCanvas.tsx');
+	assert.match(canvas, /const dim = applyDim\(renderer\);\s*renderer\.render\(/, 'the mask is applied before the frame is drawn (and so before a snapshot)');
+	assert.match(canvas, /el\.dataset\.dimmed = String\(dim\.count\)/);
+	assert.doesNotMatch(canvas, /data-dimmed=\{/, 'written by the frame, not by React');
+	assert.match(canvas, /const colour = coloursRef\.current\.edges;/);
+	assert.doesNotMatch(canvas, /overlay\.other[^\n]*strokeEdgePaths|strokeEdgePaths\([^)]*overlay\.other/);
+	assert.match(canvas, /dimmed: dim\.mask/, 'labels at faded medoids are skipped');
+	const view = read('views/MapView.tsx');
+	assert.match(view, /<PointCanvas[\s\S]*?dimmed=\{dimmed\}[\s\S]*?dimOnHover=\{/);
+	assert.match(view, /return dimMask\(sample\.n, \{/);
+});
+
+test('no map file draws a literal fallback colour where the palette has one (an unthemed host gets the fallbacks for its mode)', () => {
+	for (const file of ['components/PointCanvas.tsx', 'views/MapView.tsx', 'map/exportPng.ts']) {
+		const text = read(file);
+		assert.doesNotMatch(text, /'#ffffff'|'#1a1a1a'|'#0078d4'|'#666666'/, `${file} has a literal fallback`);
+	}
+	assert.match(read('map/exportPng.ts'), /const p = palette \?\? FALLBACK_PALETTE;/);
+	assert.match(read('views/MapView.tsx'), /const theme = palette \?\? FALLBACK_PALETTE;/);
+	// The surface a faded point is mixed toward is the one behind the canvas and under the PNG.
+	assert.match(read('components/PointCanvas.tsx'), /const surface = p\.surfaces\.default;/);
+	assert.match(read('components/PointCanvas.tsx'), /background: 'var\(--rr-bg-default\)'/);
+	assert.match(read('views/MapView.tsx'), /octx\.fillStyle = theme\.surfaces\.default;/);
+});
+
+test('the edge layer fades the edges whose two ends are faded: split by the dimming, stroked first, and rebuilt when the dimming changes', () => {
+	const canvas = read('components/PointCanvas.tsx');
+	assert.match(canvas, /const rebuild = cache\.edges !== edges \|\| cache\.positions !== positions \|\| cache\.dimVersion !== dim\.version/);
+	assert.match(canvas, /makePath, dim\.mask\);/);
+	const faded = canvas.indexOf('strokeEdgePaths(ctx, cache.fadedPaths, faded, t.lineWidth);');
+	const lit = canvas.indexOf('strokeEdgePaths(ctx, cache.paths, colour, t.lineWidth);');
+	assert.ok(faded > 0 && lit > faded, 'faded first, then lit');
+	assert.match(canvas, /el\.dataset\.edgesDimmed = String\(cache\.fadedSegments\)/);
+	assert.match(canvas, /const edgesDrawn = drawEdges\(camera, vp, dim\);/);
+});
+
+test('every overlay mark the view hands the canvas reaches the frame: the shown duplicate group\'s rings, and the fade mask for the marks on faded points', () => {
+	const canvas = read('components/PointCanvas.tsx');
+	const model = /const model: IOverlayModel = \{([\s\S]*?)\n\t\t\t\};/.exec(canvas);
+	assert.ok(model, 'the overlay model');
+	assert.match(model[1] as string, /duplicateRings: o\.duplicateRings \?\? \[\]/);
+	assert.match(model[1] as string, /faded: dim\.mask/);
+});
+
+test('an open popover closes when its container changes width without the window (a split pane), focus back on its button; hovering a label fades like hovering a point', () => {
+	const hook = read('components/AdvancedPopover.tsx');
+	assert.match(hook, /new ResizeObserver\(\(entries\) => \{[\s\S]*?if \(width === null\) width = next;\s*else if \(next !== width\) closeRef\.current\(true\);/);
+	assert.match(hook, /observer\?\.disconnect\(\);/);
+	const canvas = read('components/PointCanvas.tsx');
+	assert.match(canvas, /hoverUnderRef\.current = index !== null \? \(clusterOf\?\.\[index\] \?\? -1\) : cluster;\s*holdHover\(\);/, 'a point\'s cluster, else the hovered label\'s');
+	assert.match(canvas, /const cluster = !p\.dimmed && p\.dimOnHover && clusterOf !== null \? \(hoverHoldRef\.current\.cluster \?\? -1\) : -1;/, 'the held cluster fades the rest');
+	assert.match(canvas, /if \(action === null \|\| \(action === 'clear' && props\.canClear === false\)\) return;/, 'Escape with nothing to clear is not the map\'s');
+});

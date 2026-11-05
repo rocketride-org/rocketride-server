@@ -94,8 +94,11 @@ class PreProcessor(PreProcessorBase):
         This prevents 'unexpected keyword argument' errors across splitters.
         """
         try:
-            params = set(inspect.signature(cls.__init__).parameters.keys())
-            params.discard('self')
+            params = set()
+            for klass in cls.__mro__:
+                if '__init__' in vars(klass):
+                    params |= set(inspect.signature(klass.__init__).parameters)
+            params -= {'self', 'args', 'kwargs'}
             return {k: v for k, v in kwargs.items() if k in params}
         except (ValueError, TypeError):
             # If signature cannot be inspected, return kwargs as-is

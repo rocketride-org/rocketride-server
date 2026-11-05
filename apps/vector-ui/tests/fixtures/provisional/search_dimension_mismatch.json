@@ -1,0 +1,5 @@
+{
+	"success": false,
+	"code": "DIMENSION_MISMATCH",
+	"error": "The vector has 768 values; this collection stores 384."
+}

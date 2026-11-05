@@ -36,11 +36,69 @@ Mocked Components:
 Storage:
     - Uses class-level storage to persist data across operations within a test
     - Call MockWeaviateClient.reset() between tests to clear state
+    - Values are typed as the server types them: a property the collection does not
+      declare is auto-schemaed on first write (numbers as ``number``, returned as
+      floats; RFC 3339 strings as ``date``, returned as datetimes)
 """
 
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 import hashlib
+import re
+
+
+# =============================================================================
+# Auto-schema (what the server does with properties a collection does not declare)
+# =============================================================================
+
+#: Objects a query returns when it sets no limit (the server's QUERY_DEFAULTS_LIMIT)
+QUERY_DEFAULTS_LIMIT = 10
+
+#: An RFC 3339 timestamp, which auto-schema types as ``date`` (AUTOSCHEMA_DEFAULT_DATE)
+_RFC3339 = re.compile(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$')
+
+
+def _data_type_name(data_type: Any) -> str:
+    """'text', 'int', 'number', 'date', ... for a DataType member or its value."""
+    return str(getattr(data_type, 'value', data_type))
+
+
+def _infer_type(value: Any) -> str:
+    """The type auto-schema gives an undeclared property: numbers become 'number', timestamps 'date'."""
+    if isinstance(value, bool):
+        return 'boolean'
+    if isinstance(value, (int, float)):
+        return 'number'
+    if isinstance(value, datetime) or (isinstance(value, str) and _RFC3339.match(value)):
+        return 'date'
+    if isinstance(value, str):
+        return 'text'
+    return 'object'
+
+
+def _as_type(data_type: str, value: Any) -> Any:
+    """A value as the server stores (and the client returns) it for a property of ``data_type``."""
+    if value is None:
+        return None
+    if data_type == 'number' and isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    if data_type == 'int' and isinstance(value, (int, float)) and not isinstance(value, bool):
+        return int(value)
+    if data_type == 'date' and isinstance(value, str):
+        return datetime.fromisoformat(value.replace('Z', '+00:00')).astimezone(timezone.utc)
+    return value
+
+
+def _apply_schema(collection_name: str, properties: Dict[str, Any]) -> Dict[str, Any]:
+    """Type ``properties`` by the collection's schema, adding undeclared ones as auto-schema would."""
+    schema = MockCollections._schemas.setdefault(collection_name, {})
+    typed = {}
+    for key, value in properties.items():
+        if key not in schema and value is not None:
+            schema[key] = _infer_type(value)
+        typed[key] = _as_type(schema.get(key, ''), value)
+    return typed
 
 
 # =============================================================================
@@ -57,11 +115,15 @@ class MetadataResult:
 
 @dataclass
 class QueryObject:
-    """Object returned from queries."""
+    """Object returned from queries.
+
+    Like the real client (v4), ``vector`` is a dict of named vectors
+    (``{'default': [...]}``) and is empty unless ``include_vector`` was asked for.
+    """
 
     uuid: str
     properties: Dict[str, Any]
-    vector: Optional[List[float]] = None
+    vector: Dict[str, List[float]] = field(default_factory=dict)
     metadata: MetadataResult = field(default_factory=MetadataResult)
 
 
@@ -79,78 +141,115 @@ class AggregateResult:
     total_count: int
 
 
+@dataclass
+class GroupedBy:
+    """The property and value an aggregate group was built from."""
+
+    prop: str
+    value: Any
+
+
+@dataclass
+class AggregateGroup:
+    """One group of a grouped aggregate."""
+
+    grouped_by: GroupedBy
+    total_count: int
+    properties: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class AggregateGroupByReturn:
+    """Result of an aggregate with ``group_by``."""
+
+    groups: List[AggregateGroup]
+
+
+@dataclass
+class DeleteManyReturn:
+    """Result of ``data.delete_many``."""
+
+    matches: int
+    successful: int
+    failed: int = 0
+
+
 # =============================================================================
 # Filter Classes
 # =============================================================================
 
 
 class Filter:
-    """Mock filter for Weaviate queries."""
+    """Mock filter for Weaviate queries.
 
-    def __init__(self, conditions: List[Dict] = None, logic: str = 'and'):
+    A filter is a tree: leaf ``conditions`` and nested ``children`` combined
+    with ``logic`` ('and' / 'or'), so ``all_of([any_of([...]), ...])`` keeps
+    the inner 'or' as the real client does.
+    """
+
+    def __init__(self, conditions: List[Dict] = None, logic: str = 'and', children: List['Filter'] = None):
         self.conditions = conditions or []
         self.logic = logic
+        self.children = children or []
 
     @classmethod
     def by_property(cls, name: str) -> 'FilterByProperty':
         return FilterByProperty(name)
 
     @classmethod
+    def by_id(cls) -> 'FilterByProperty':
+        return FilterByProperty('_id')
+
+    @classmethod
     def all_of(cls, filters: List['Filter']) -> 'Filter':
-        combined = Filter(logic='and')
-        for f in filters:
-            if isinstance(f, Filter):
-                combined.conditions.append({'filter': f})
-        return combined
+        return Filter(logic='and', children=[f for f in filters if isinstance(f, Filter)])
 
     @classmethod
     def any_of(cls, filters: List['Filter']) -> 'Filter':
-        combined = Filter(logic='or')
-        for f in filters:
-            if isinstance(f, Filter):
-                combined.conditions.append({'filter': f})
-        return combined
+        return Filter(logic='or', children=[f for f in filters if isinstance(f, Filter)])
 
     def __and__(self, other: 'Filter') -> 'Filter':
         return Filter.all_of([self, other])
 
-    def matches(self, properties: Dict[str, Any]) -> bool:
-        """Check if properties match this filter."""
-        if not self.conditions:
+    def __or__(self, other: 'Filter') -> 'Filter':
+        return Filter.any_of([self, other])
+
+    @staticmethod
+    def _matches_condition(cond: Dict[str, Any], properties: Dict[str, Any], uuid: Optional[str]) -> bool:
+        prop_name = cond.get('property')
+        op = cond.get('op')
+        value = cond.get('value')
+        prop_value = uuid if prop_name == '_id' else properties.get(prop_name)
+
+        if op == 'equal':
+            return prop_value == value
+        if op == 'not_equal':
+            return prop_value != value
+        if op == 'like':
+            # Simple wildcard matching
+            pattern = value.replace('*', '')
+            return pattern.lower() in str(prop_value).lower() if prop_value is not None else False
+        if op == 'greater_or_equal':
+            return prop_value >= value if prop_value is not None else False
+        if op == 'greater_than':
+            return prop_value > value if prop_value is not None else False
+        if op == 'less_or_equal':
+            return prop_value <= value if prop_value is not None else False
+        if op == 'less_than':
+            return prop_value < value if prop_value is not None else False
+        if op in ('in', 'contains_any'):
+            return prop_value in value if value else False
+        return True
+
+    def matches(self, properties: Dict[str, Any], uuid: Optional[str] = None) -> bool:
+        """Check if properties (and the object's uuid, for ``by_id``) match this filter."""
+        results = [self._matches_condition(cond, properties, uuid) for cond in self.conditions]
+        results += [child.matches(properties, uuid) for child in self.children]
+        if not results:
             return True
-
-        results = []
-        for cond in self.conditions:
-            if 'filter' in cond:
-                results.append(cond['filter'].matches(properties))
-                continue
-            prop_name = cond.get('property')
-            op = cond.get('op')
-            value = cond.get('value')
-
-            prop_value = properties.get(prop_name)
-
-            if op == 'equal':
-                results.append(prop_value == value)
-            elif op == 'like':
-                # Simple wildcard matching
-                pattern = value.replace('*', '')
-                results.append(pattern.lower() in str(prop_value).lower() if prop_value is not None else False)
-            elif op == 'greater_or_equal':
-                results.append(prop_value >= value if prop_value is not None else False)
-            elif op == 'less_or_equal':
-                results.append(prop_value <= value if prop_value is not None else False)
-            elif op == 'less_than':
-                results.append(prop_value < value if prop_value is not None else False)
-            elif op == 'in':
-                results.append(prop_value in value if value else False)
-            else:
-                results.append(True)
-
         if self.logic == 'and':
-            return all(results) if results else True
-        else:  # or
-            return any(results) if results else True
+            return all(results)
+        return any(results)
 
 
 class FilterByProperty:
@@ -159,30 +258,34 @@ class FilterByProperty:
     def __init__(self, name: str):
         self.name = name
 
-    def equal(self, value: Any) -> Filter:
+    def _leaf(self, op: str, value: Any) -> Filter:
         f = Filter()
-        f.conditions.append({'property': self.name, 'op': 'equal', 'value': value})
+        f.conditions.append({'property': self.name, 'op': op, 'value': value})
         return f
+
+    def equal(self, value: Any) -> Filter:
+        return self._leaf('equal', value)
+
+    def not_equal(self, value: Any) -> Filter:
+        return self._leaf('not_equal', value)
 
     def like(self, value: str) -> Filter:
-        f = Filter()
-        f.conditions.append({'property': self.name, 'op': 'like', 'value': value})
-        return f
+        return self._leaf('like', value)
 
     def greater_or_equal(self, value: Any) -> Filter:
-        f = Filter()
-        f.conditions.append({'property': self.name, 'op': 'greater_or_equal', 'value': value})
-        return f
+        return self._leaf('greater_or_equal', value)
+
+    def greater_than(self, value: Any) -> Filter:
+        return self._leaf('greater_than', value)
 
     def less_or_equal(self, value: Any) -> Filter:
-        f = Filter()
-        f.conditions.append({'property': self.name, 'op': 'less_or_equal', 'value': value})
-        return f
+        return self._leaf('less_or_equal', value)
 
     def less_than(self, value: Any) -> Filter:
-        f = Filter()
-        f.conditions.append({'property': self.name, 'op': 'less_than', 'value': value})
-        return f
+        return self._leaf('less_than', value)
+
+    def contains_any(self, values: List[Any]) -> Filter:
+        return self._leaf('contains_any', list(values))
 
 
 # =============================================================================
@@ -211,15 +314,16 @@ class MockBatchContext:
 
     def add_object(self, properties: Dict, uuid: str, vector: List[float]):
         """Add object to batch."""
-        self.objects_to_add.append({'uuid': uuid, 'properties': properties, 'vector': vector})
+        self.objects_to_add.append({'uuid': str(uuid), 'properties': properties, 'vector': vector})
 
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        # Commit all objects
+        # Commit all objects (an existing uuid is overwritten, as in Weaviate), typed by the schema
         for obj in self.objects_to_add:
-            self.collection._storage[obj['uuid']] = {'properties': obj['properties'], 'vector': obj['vector']}
+            properties = _apply_schema(self.collection.name, dict(obj['properties']))
+            self.collection._storage[obj['uuid']] = {'properties': properties, 'vector': obj['vector']}
         return False
 
 
@@ -234,6 +338,13 @@ class MockBatch:
         return MockBatchContext(self.collection)
 
 
+def _named_vector(stored: Optional[List[float]], include_vector: bool) -> Dict[str, List[float]]:
+    """The ``vector`` of a returned object: ``{'default': [...]}`` when requested, else empty."""
+    if include_vector and stored is not None:
+        return {'default': list(stored)}
+    return {}
+
+
 class MockQuery:
     """Mock query operations."""
 
@@ -246,6 +357,8 @@ class MockQuery:
         filters: Optional[Filter] = None,
         limit: int = 10,
         return_metadata: Optional[MetadataQuery] = None,
+        include_vector: bool = False,
+        **kwargs,
     ) -> QueryResult:
         """Perform vector similarity search."""
         results = []
@@ -254,11 +367,7 @@ class MockQuery:
             properties = data['properties']
 
             # Apply filters
-            if filters and not filters.matches(properties):
-                continue
-
-            # Skip deleted documents
-            if properties.get('isDeleted', False):
+            if filters and not filters.matches(properties, uuid):
                 continue
 
             # Calculate cosine similarity
@@ -274,7 +383,7 @@ class MockQuery:
                 QueryObject(
                     uuid=uuid,
                     properties=self._serialize_properties(properties),
-                    vector=stored_vector,
+                    vector=_named_vector(stored_vector, include_vector),
                     metadata=metadata,
                 )
             )
@@ -284,27 +393,42 @@ class MockQuery:
 
         return QueryResult(objects=results[:limit])
 
-    def fetch_objects(self, filters: Optional[Filter] = None, limit: int = 100, offset: int = 0) -> QueryResult:
-        """Fetch objects matching filters."""
+    def fetch_objects(
+        self,
+        filters: Optional[Filter] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        after: Optional[str] = None,
+        include_vector: bool = False,
+        **kwargs,
+    ) -> QueryResult:
+        """Fetch objects matching filters (insertion order; ``after`` continues from a uuid)."""
         results = []
 
         for uuid, data in self.collection._storage.items():
             properties = data['properties']
 
             # Apply filters
-            if filters and not filters.matches(properties):
+            if filters and not filters.matches(properties, uuid):
                 continue
 
             results.append(
                 QueryObject(
                     uuid=uuid,
                     properties=self._serialize_properties(properties),
-                    vector=data.get('vector'),
+                    vector=_named_vector(data.get('vector'), include_vector),
                     metadata=MetadataResult(),
                 )
             )
 
-        return QueryResult(objects=results[offset : offset + limit])
+        if after is not None:
+            ids = [obj.uuid for obj in results]
+            results = results[ids.index(str(after)) + 1 :] if str(after) in ids else []
+
+        # Without a limit the server answers QUERY_DEFAULTS_LIMIT (10) objects
+        start = offset or 0
+        stop = start + (QUERY_DEFAULTS_LIMIT if limit is None else limit)
+        return QueryResult(objects=results[start:stop])
 
     def _cosine_distance(self, v1: List[float], v2: List[float]) -> float:
         """Calculate cosine distance between two vectors."""
@@ -340,20 +464,22 @@ class MockData:
     def __init__(self, collection: 'MockCollection'):
         self.collection = collection
 
-    def delete_many(self, where: Filter):
+    def delete_many(self, where: Filter) -> DeleteManyReturn:
         """Delete objects matching filter."""
         to_delete = []
         for uuid, data in self.collection._storage.items():
-            if where.matches(data['properties']):
+            if where.matches(data['properties'], uuid):
                 to_delete.append(uuid)
 
         for uuid in to_delete:
             del self.collection._storage[uuid]
 
+        return DeleteManyReturn(matches=len(to_delete), successful=len(to_delete))
+
     def update(self, uuid: str, properties: Dict):
         """Update object properties."""
         if uuid in self.collection._storage:
-            self.collection._storage[uuid]['properties'].update(properties)
+            self.collection._storage[uuid]['properties'].update(_apply_schema(self.collection.name, dict(properties)))
 
 
 class MockAggregate:
@@ -362,11 +488,60 @@ class MockAggregate:
     def __init__(self, collection: 'MockCollection'):
         self.collection = collection
 
-    def over_all(self, filters: Optional[Filter] = None, total_count: bool = False) -> AggregateResult:
-        """Get aggregate statistics: the number of objects that match ``filters`` (all of them without one)."""
-        rows = self.collection._storage.values()
-        matching = [data for data in rows if filters is None or filters.matches(data['properties'])]
-        return AggregateResult(total_count=len(matching))
+    def over_all(self, filters: Optional[Filter] = None, group_by: Any = None, total_count: bool = False, **kwargs):
+        """Count the objects matching ``filters``; with ``group_by``, count per property value."""
+        matching = [
+            data['properties']
+            for uuid, data in self.collection._storage.items()
+            if filters is None or filters.matches(data['properties'], uuid)
+        ]
+        if group_by is None:
+            return AggregateResult(total_count=len(matching))
+        prop = group_by if isinstance(group_by, str) else group_by.prop
+        limit = None if isinstance(group_by, str) else group_by.limit
+        counts: Dict[Any, int] = {}
+        for properties in matching:
+            value = properties.get(prop)
+            counts[value] = counts.get(value, 0) + 1
+        groups = [AggregateGroup(grouped_by=GroupedBy(prop=prop, value=v), total_count=n) for v, n in counts.items()]
+        return AggregateGroupByReturn(groups=groups[:limit] if limit else groups)
+
+
+@dataclass
+class _VectorIndexConfig:
+    """What ``config.get().vector_index_config`` reports."""
+
+    distance_metric: Any
+    ef_construction: int = 128
+    max_connections: int = 32
+
+
+@dataclass
+class _CollectionConfig:
+    """What ``collection.config.get()`` returns."""
+
+    name: str
+    vector_index_config: Optional[_VectorIndexConfig]
+    vector_index_type: Optional[str]
+
+
+class MockConfig:
+    """Mock ``collection.config``."""
+
+    def __init__(self, collection: 'MockCollection'):
+        self.collection = collection
+
+    def get(self) -> _CollectionConfig:
+        """Return the configuration the collection was created with."""
+        created = MockCollections._configs.get(self.collection.name) or {}
+        index = created.get('vector_index_config') or {}
+        if not index:
+            return _CollectionConfig(name=self.collection.name, vector_index_config=None, vector_index_type=None)
+        return _CollectionConfig(
+            name=self.collection.name,
+            vector_index_config=_VectorIndexConfig(distance_metric=index.get('distance_metric')),
+            vector_index_type=index.get('type'),
+        )
 
 
 class MockCollection:
@@ -385,6 +560,7 @@ class MockCollection:
         self.data = MockData(self)
         self.batch = MockBatch(self)
         self.aggregate = MockAggregate(self)
+        self.config = MockConfig(self)
 
 
 # =============================================================================
@@ -395,8 +571,11 @@ class MockCollection:
 class MockCollections:
     """Mock collections manager."""
 
-    # Class-level set of collection names
+    # Class-level set of collection names, the arguments they were created with, and their
+    # schema (property name -> data type), which auto-schema extends on writes
     _collections: set = set()
+    _configs: Dict[str, Dict[str, Any]] = {}
+    _schemas: Dict[str, Dict[str, str]] = {}
 
     def exists(self, name: str) -> bool:
         """Check if collection exists."""
@@ -409,6 +588,10 @@ class MockCollections:
     def create(self, name: str, **kwargs) -> MockCollection:
         """Create a new collection."""
         MockCollections._collections.add(name)
+        MockCollections._configs[name] = dict(kwargs)
+        MockCollections._schemas[name] = {
+            prop.name: _data_type_name(prop.data_type) for prop in kwargs.get('properties') or []
+        }
         return MockCollection(name)
 
 
@@ -428,10 +611,16 @@ class MockWeaviateClient:
         """Close the client connection."""
         self._closed = True
 
+    def get_meta(self) -> Dict[str, Any]:
+        """Server metadata, as ``WeaviateClient.get_meta()`` returns it."""
+        return {'hostname': 'http://[::]:8080', 'version': '1.30.0-mock', 'modules': {}}
+
     @classmethod
     def reset(cls):
         """Reset all mock state for testing."""
         MockCollections._collections.clear()
+        MockCollections._configs.clear()
+        MockCollections._schemas.clear()
         MockCollection._all_storage.clear()
 
 

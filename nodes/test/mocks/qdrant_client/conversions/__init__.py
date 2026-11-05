@@ -49,10 +49,13 @@ Node code may import as:
 from . import common_types
 
 # Re-export for convenience
-from .common_types import CollectionInfo, VectorParams
+from .common_types import CollectionConfig, CollectionInfo, CollectionParams, HnswConfig, VectorParams
 
 __all__ = [
     'common_types',
+    'CollectionConfig',
     'CollectionInfo',
+    'CollectionParams',
+    'HnswConfig',
     'VectorParams',
 ]

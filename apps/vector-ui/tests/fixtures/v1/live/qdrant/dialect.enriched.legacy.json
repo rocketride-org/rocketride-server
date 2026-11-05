@@ -1,0 +1,33 @@
+{
+  "__scrub__": [],
+  "success": true,
+  "size_bytes": null,
+  "keyword_match": "token",
+  "capabilities": {
+    "describe": true,
+    "count": true,
+    "count_documents": true,
+    "documents": true,
+    "documents_distinct": true,
+    "documents_sorted": false,
+    "chunks": true,
+    "vectors": true,
+    "sample": true,
+    "sample_light": true,
+    "sample_stratified_native": false,
+    "knn_native": true,
+    "project": true,
+    "neighbors": true,
+    "search_vector": true,
+    "search_keyword": true,
+    "remove": true,
+    "remove_count": true,
+    "soft_delete": true,
+    "clusters": true,
+    "documents_filter": false,
+    "recommend_best_score": true,
+    "projection": [
+      "pca"
+    ]
+  }
+}

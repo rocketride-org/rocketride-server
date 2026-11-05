@@ -19,6 +19,17 @@ from typing import Any, Dict, List, Optional
 from rocketlib import ToolDescriptor
 from rocketlib.types import IInvokeOp, IInvokeTool, IInvokeMemory
 
+try:
+    from ai.common.tool_context import agent_context, stamp_param
+except ImportError:  # host.py is also loaded on its own, without the engine's ai package
+    agent_context = stamp_param = None
+
+
+def _stamp_agent_call(param: Any) -> None:
+    """Mark a tool param as an agent call (origin 'agent'), so the tool can tell it apart from a DAP call."""
+    if stamp_param is not None:
+        stamp_param(param, agent_context())
+
 
 class ToolNotFoundError(ValueError):
     """The agent asked for a tool that is not in the catalog, even after the
@@ -201,6 +212,7 @@ class AgentHostServices:
             # Build the invoke using the original (un-prefixed) name so the
             # provider's _owns_tool() match works.
             param = IInvokeTool.Validate(tool_name=entry['tool_id'], input=input)
+            _stamp_agent_call(param)
 
             # Call the tool to validate - throws on error
             self._invoker.instance.invoke(param, component_id=entry['node_id'])
@@ -224,6 +236,7 @@ class AgentHostServices:
             # Build the invoke using the original (un-prefixed) name so the
             # provider's _owns_tool() match works.
             param = IInvokeTool.Invoke(tool_name=entry['tool_id'], input=args)
+            _stamp_agent_call(param)
 
             # Invoke it
             self._invoker.instance.invoke(param, component_id=entry['node_id'])

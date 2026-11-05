@@ -1,0 +1,24 @@
+{
+  "__scrub__": [
+    "computed_at",
+    "counts_as_of"
+  ],
+  "success": true,
+  "count": 36,
+  "model": "sentence-transformers/all-MiniLM-L6-v2",
+  "vector_size": 384,
+  "collection_exists": true,
+  "documents": 8,
+  "documents_without_first_chunk": 0,
+  "chunks": 35,
+  "deleted_chunks": 0,
+  "deleted_documents": 0,
+  "raw_count": 36,
+  "tables": 3,
+  "avg_chunks_per_document": 4.375,
+  "dimension": 384,
+  "metric": "cosine",
+  "computed_at": "<scrubbed>",
+  "counts_as_of": "<scrubbed>",
+  "document_count": 8
+}

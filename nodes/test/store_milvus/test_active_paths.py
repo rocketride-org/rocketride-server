@@ -6,7 +6,6 @@
 """Milvus must filter trash in the server query before applying its page."""
 
 import importlib.util
-import json
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -32,9 +31,11 @@ def test_paths_filter_trash_before_paging(parent, monkeypatch):
     store.client.query.return_value = [{'meta': {'parent': '/documents', 'objectId': 'doc'}}]
 
     assert store.getPaths(parent=parent, offset=3, limit=2) == {'/documents': 'doc'}
-    expression = "meta['chunkId'] == 0 and meta['isDeleted'] == false"
+    # Chunk 0 of the live documents, never the control record; the path is quoted by the driver's own escape
+    # (single quotes), the one every filter of this driver goes through.
+    expression = "meta['chunkId'] == 0 and meta['isDeleted'] == false and meta['objectId'] != 'schema'"
     if parent is not None:
-        expression += f' and meta["parent"] == {json.dumps(parent)}'
+        expression += f" and meta['parent'] == '{module._escape_milvus_str(parent)}'"
     store.client.query.assert_called_once_with(
         collection_name='documents', filter=expression, output_fields=['meta'], offset=3, limit=2
     )

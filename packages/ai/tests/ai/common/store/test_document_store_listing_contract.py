@@ -1,108 +1,63 @@
-"""The optional document listing on DocumentStoreBase, and the mutation counts (#2587).
+"""The document listing on DocumentStoreBase, and the mutation counts (#2587, #2704).
 
-A driver opts into list_documents by implementing listDocuments and
-countDocuments and setting supports_document_listing; the base itself does
-neither, so every existing driver is unchanged. markDeleted and markActive may
-now return the matched chunk rows, and may still return nothing.
+#2704 made a driver opt into list_documents by implementing listDocuments and
+countDocuments and setting supports_document_listing. Here the base lists
+documents for every driver: its default ``listDocumentPage`` reads the first chunk of
+each document through ``get``, so a driver that implements nothing is listed, and
+one that has a native listing overrides it. markDeleted and markActive may
+return the chunks they moved, and may still return nothing (the answer says null).
 """
 
-import pytest
-
+from ai.common.schema import Doc, DocMetadata
 from ai.common.store.document_store import DocumentStoreBase
 
-from ._vectordb_tool_harness import Tools
+from ._vectordb_tool_harness import FakeDriver, Tools
 
 
-class _Driver(DocumentStoreBase):
-    """The smallest driver the abstract base accepts; reads answer empty, writes do nothing."""
+def _chunk(object_id, parent, chunk_id=0):
+    return Doc(
+        page_content=f'{object_id}#{chunk_id}',
+        metadata=DocMetadata(objectId=object_id, chunkId=chunk_id, parent=parent, isDeleted=False),
+    )
 
-    def __init__(self):
-        super().__init__('fake', {}, {})
-        # Known model and width, so stats has no control row to look up.
-        self.modelName = 'test-model'
-        self.vectorSize = 3
-        self.marked = []
 
-    def _doesCollectionExist(self):
-        return True
+class _StoredDriver(FakeDriver):
+    """A driver that stores two documents and reports no count from markDeleted / markActive."""
 
-    def _createCollection(self):
-        return True
-
-    def count_documents(self):
-        return 0
-
-    def searchKeyword(self, query, docFilter):
-        return []
-
-    def searchSemantic(self, query, docFilter):
-        return []
+    ROWS = {'a': '/a', 'b': '/b'}
 
     def get(self, docFilter, checkCollection=True):
-        return []
-
-    def getPaths(self, parent=None, offset=0, limit=1000):
-        return {}
-
-    def addChunks(self, chunks):
-        return None
-
-    def remove(self, objectIds):
-        return None
-
-    def markDeleted(self, objectIds):
-        self.marked.append(('deleted', objectIds))
-
-    def markActive(self, objectIds):
-        self.marked.append(('active', objectIds))
-
-    def render(self, objectId, callback):
-        return None
+        wanted = docFilter.objectIds or list(self.ROWS)
+        return [_chunk(oid, self.ROWS[oid]) for oid in wanted if oid in self.ROWS]
 
 
-class _ListingDriver(_Driver):
-    supports_document_listing = True
-
-    def listDocuments(self, parent=None, offset=0, limit=100, deleted=False):
-        rows = [
-            {'object_id': 'a', 'parent': '/a', 'chunk_count': 2},
-            {'object_id': 'b', 'parent': '/b', 'chunk_count': 1},
-        ]
-        return rows[offset : offset + limit]
-
-    def countDocuments(self, parent=None, deleted=False):
-        return 2
+def test_the_base_has_no_listing_flag_and_no_listing_methods_to_implement():
+    """#2704's opt-in (supports_document_listing, listDocuments, countDocuments) is gone: nothing calls it."""
+    for name in ('supports_document_listing', 'listDocuments', 'countDocuments'):
+        assert not hasattr(DocumentStoreBase, name)
 
 
-def test_the_base_does_not_list_documents():
-    driver = _Driver()
-
-    assert DocumentStoreBase.supports_document_listing is False
-    assert driver.supports_document_listing is False
-    with pytest.raises(NotImplementedError, match='_Driver does not list documents'):
-        driver.listDocuments()
-    with pytest.raises(NotImplementedError, match='_Driver does not count documents'):
-        driver.countDocuments()
-
-
-def test_a_driver_opts_in_by_implementing_both_and_setting_the_flag():
-    tools = Tools(_ListingDriver())
+def test_a_driver_that_implements_nothing_is_listed_through_get():
+    tools = Tools(_StoredDriver())
 
     assert 'list_documents' in tools._collect_tool_methods()
-    assert tools.list_documents({'limit': 1}) == {
-        'success': True,
-        'documents': [{'object_id': 'a', 'parent': '/a', 'chunk_count': 2}],
-        'total': 2,
-        'offset': 0,
-        'has_more': True,
-    }
-    assert tools.stats({})['document_count'] == 2
+    result = tools.list_documents({})
+    assert result['success'] is True
+    assert result['documents'] == [
+        {'object_id': 'a', 'parent': '/a', 'chunk_count': None},
+        {'object_id': 'b', 'parent': '/b', 'chunk_count': None},
+    ]
+    assert (result['offset'], result['has_more']) == (0, False)
 
 
 def test_a_driver_that_reports_no_count_still_serves_the_trash_tools():
-    driver = _Driver()
+    driver = _StoredDriver()
     tools = Tools(driver)
 
-    assert tools.soft_delete({'object_ids': ['a']}) == {'success': True, 'object_ids': ['a'], 'matched_chunks': None}
-    assert tools.restore({'object_ids': ['a']}) == {'success': True, 'object_ids': ['a'], 'matched_chunks': None}
+    soft = tools.soft_delete({'object_ids': ['a']})
+    restored = tools.restore({'object_ids': ['a']})
+
+    for answer in (soft, restored):
+        assert answer['success'] is True and answer['object_ids'] == ['a']
+        assert answer['matched_chunks'] is None and answer['moved_chunks'] is None
     assert driver.marked == [('deleted', ['a']), ('active', ['a'])]

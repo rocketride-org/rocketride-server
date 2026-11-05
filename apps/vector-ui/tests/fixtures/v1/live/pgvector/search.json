@@ -1,0 +1,54 @@
+{
+  "__scrub__": [],
+  "success": true,
+  "results": [
+    {
+      "content": "Drinking water at Falcon Station comes from the Glassbrook spring, piped two kilometres downhill to the settling tank behind the generator shed. Every visitor signs the arrival book and attends the safety briefing before leaving the main hut. Walking alone beyond the marker cairns needs the duty officer's approval and a handheld radio. Waste is sorted into burnables, recyclables and return-to-base; nothing is buried on site. The settling tank holds about eleven thousand litres; the duty officer reads the float gauge every morning and writes the level in the water log. All drinking water passes the ceramic filter bank and the ultraviolet lamp before it reaches the kitchen tap.\n\n## Power",
+      "score": 0.8026,
+      "metadata": {
+        "objectId": "75b89d86-a64e-5143-bf50-55d4a7fd8cd2",
+        "nodeId": "9a0b9f66-f693-4b3b-a85b-bb810261c26e",
+        "parent": "C:/demo/handbooks/falcon_handbook.md",
+        "chunkId": 1
+      },
+      "raw_score": 0.8026,
+      "sim": 0.8026,
+      "below_threshold": false,
+      "below_floor": false,
+      "rank": 1
+    },
+    {
+      "content": "# Falcon Station handbook\n\n## Water\n\nWalking alone beyond the marker cairns needs the duty officer's approval and a handheld radio. Every visitor signs the arrival book and attends the safety briefing before leaving the main hut. Polar foxes visit the rubbish store at night, so its door stays latched at all times. Diesel for the backup generator arrives by snow tractor twice a winter and by boat once in late summer. The satellite terminal carries email and weather files only; voice calls go through the radio or the emergency beacon.",
+      "score": 0.5795,
+      "metadata": {
+        "objectId": "75b89d86-a64e-5143-bf50-55d4a7fd8cd2",
+        "nodeId": "9a0b9f66-f693-4b3b-a85b-bb810261c26e",
+        "parent": "C:/demo/handbooks/falcon_handbook.md",
+        "chunkId": 0
+      },
+      "raw_score": 0.5795,
+      "sim": 0.5795,
+      "below_threshold": false,
+      "below_floor": false,
+      "rank": 2
+    },
+    {
+      "content": "Food stores hold four months of dry rations, rotated so the oldest stock is always used first. The sauna doubles as the drying room for wet gear; never leave fuel or batteries inside it. The station doctor holds a clinic each Tuesday; the medical cabinet key hangs in the duty office. If a scheduled check-in is missed twice, the base starts the overdue procedure and calls the nearest neighbouring station.\n\n## Safety\n\nWaste is sorted into burnables, recyclables and return-to-base; nothing is buried on site. When the spring freezes in deep winter, Falcon Station switches to the meltwater cistern and boils every litre used for cooking. Food stores hold four months of dry rations, rotated so the oldest stock is always used first.\n\n## Stores",
+      "score": 0.5209,
+      "metadata": {
+        "objectId": "75b89d86-a64e-5143-bf50-55d4a7fd8cd2",
+        "nodeId": "9a0b9f66-f693-4b3b-a85b-bb810261c26e",
+        "parent": "C:/demo/handbooks/falcon_handbook.md",
+        "chunkId": 4
+      },
+      "raw_score": 0.5209,
+      "sim": 0.5209,
+      "below_threshold": false,
+      "below_floor": false,
+      "rank": 3
+    }
+  ],
+  "total": 3,
+  "warnings": [],
+  "mode_used": "semantic"
+}

@@ -1,0 +1,45 @@
+{
+  "__scrub__": [],
+  "success": true,
+  "items": [
+    {
+      "key": [
+        "75b89d86-a64e-5143-bf50-55d4a7fd8cd2",
+        1
+      ],
+      "sim": 0.6455,
+      "score": 0.6455,
+      "below_floor": false,
+      "path": "C:/demo/handbooks/falcon_handbook.md",
+      "chunkId": 1,
+      "preview": "Drinking water at Falcon Station comes from the Glassbrook spring, piped two kilometres downhill to the settling tank\u2026"
+    },
+    {
+      "key": [
+        "75b89d86-a64e-5143-bf50-55d4a7fd8cd2",
+        2
+      ],
+      "sim": 0.6183,
+      "score": 0.6183,
+      "below_floor": false,
+      "path": "C:/demo/handbooks/falcon_handbook.md",
+      "chunkId": 2,
+      "preview": "The station doctor holds a clinic each Tuesday; the medical cabinet key hangs in the duty office. Radio check-ins with\u2026"
+    },
+    {
+      "key": [
+        "75b89d86-a64e-5143-bf50-55d4a7fd8cd2",
+        5
+      ],
+      "sim": 0.5599,
+      "score": 0.5599,
+      "below_floor": false,
+      "path": "C:/demo/handbooks/falcon_handbook.md",
+      "chunkId": 5,
+      "preview": "If a scheduled check-in is missed twice, the base starts the overdue procedure and calls the nearest neighbouring\u2026"
+    }
+  ],
+  "metric": "cosine",
+  "scope": "collection",
+  "k_requested": 3
+}

@@ -1,0 +1,6 @@
+{
+  "__scrub__": [],
+  "success": false,
+  "code": "UNSUPPORTED",
+  "error": "best_score is not supported by this store; use average_vector."
+}

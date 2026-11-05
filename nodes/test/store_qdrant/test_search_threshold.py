@@ -11,82 +11,52 @@ filters against the raw similarity score, so it must not be passed to the engine
 The threshold cut is applied post-rescale by the base store (_addDoc).
 """
 
-import sys
-import importlib.util
 import unittest
-from pathlib import Path
-from unittest.mock import MagicMock
 
-NODES_SRC = Path(__file__).parent.parent.parent / 'src' / 'nodes'
+from ai.common.schema import DocFilter, QuestionText
 
+from ._mock_driver import load_driver, make_doc, make_store
 
-class _FakeDocumentStoreBase:
-    def doesCollectionExist(self, *a, **kw):
-        return True
+_drv = load_driver('_qdrant_store_threshold')
 
 
-_STUB_NAMES = (
-    'numpy',
-    'qdrant_client',
-    'qdrant_client.models',
-    'qdrant_client.http',
-    'qdrant_client.http.models',
-    'qdrant_client.conversions',
-    'qdrant_client.conversions.common_types',
-    'depends',
-    'ai',
-    'ai.common',
-    'ai.common.schema',
-    'ai.common.config',
-)
+def _make_store(similarity: str):
+    _drv.QdrantClient.reset()
+    store = make_store(_drv, collection='c', similarity=similarity, score=0.7)
+    store.addChunks([make_doc('doc-a', 0, [1.0, 0.0])])
+    calls = []
+    real = store.client.query_points
 
-# Snapshot every name we touch (setdefault set + ai.common.store), then restore
-# in finally so these stubs never leak to sibling tests run in the same process.
-_saved = {_name: sys.modules.get(_name) for _name in (*_STUB_NAMES, 'ai.common.store')}
-try:
-    for _name in _STUB_NAMES:
-        sys.modules[_name] = MagicMock()
-    _store_mod = MagicMock()
-    _store_mod.DocumentStoreBase = _FakeDocumentStoreBase
-    sys.modules['ai.common.store'] = _store_mod
+    def spy(*args, **kwargs):
+        calls.append(kwargs)
+        return real(*args, **kwargs)
 
-    _spec = importlib.util.spec_from_file_location('_qdrant_store', str(NODES_SRC / 'store_qdrant' / 'qdrant.py'))
-    _qdrant_mod = importlib.util.module_from_spec(_spec)
-    _spec.loader.exec_module(_qdrant_mod)
-    Store = _qdrant_mod.Store
-finally:
-    for _name, _mod in _saved.items():
-        if _mod is None:
-            sys.modules.pop(_name, None)
-        else:
-            sys.modules[_name] = _mod
+    store.client.query_points = spy
+    return store, calls
 
 
-def _make_store(similarity: str) -> Store:
-    store = object.__new__(Store)
-    store.client = MagicMock()
-    store.client.query_points.return_value.points = []
-    store.collection = 'c'
-    store.threshold_search = 0.7
-    store.similarity = similarity
-    return store
-
-
-def _run_search(store: Store) -> None:
-    query = MagicMock(embedding=[0.1, 0.2], embedding_model='m')
-    store.searchSemantic(query, MagicMock(offset=0, limit=10))
+def _run_search(store) -> None:
+    query = QuestionText(text='q')
+    query.embedding = [0.1, 0.2]
+    query.embedding_model = 'unit-model'
+    store.searchSemantic(query, DocFilter(offset=0, limit=10))
 
 
 class TestScoreThresholdNotPassedToEngine(unittest.TestCase):
+    def tearDown(self):
+        _drv.QdrantClient.reset()
+
     def test_cosine(self):
-        store = _make_store('Cosine')
+        store, calls = _make_store('Cosine')
         _run_search(store)
-        self.assertNotIn('score_threshold', store.client.query_points.call_args.kwargs)
+        self.assertEqual(len(calls), 1)
+        self.assertNotIn('score_threshold', calls[0])
 
     def test_non_cosine(self):
-        store = _make_store('Dot')
+        store, calls = _make_store('Dot')
         _run_search(store)
-        self.assertNotIn('score_threshold', store.client.query_points.call_args.kwargs)
+        self.assertEqual(len(calls), 1)
+        self.assertNotIn('score_threshold', calls[0])
 
 
 if __name__ == '__main__':

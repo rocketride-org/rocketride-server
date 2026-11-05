@@ -3,14 +3,17 @@
 # Copyright (c) 2026 Aparavi Software AG
 # =============================================================================
 
-"""Real PostgreSQL tests for the vector-store trash and listing tools on both Postgres drivers (#2587).
+"""Real PostgreSQL tests for the vector-store trash and listing tools on both Postgres drivers (#2587, #2704).
 
-Covers what the unit tests cannot: the listing and counting SQL, the matched
-row counts of markDeleted and markActive, objdir pages that count paths, and
-the tools (list_documents, soft_delete, restore, get, upsert, stats) on a real
-store. Runs with the built engine and RR_TEST_PG_DSN like
-test_vector_store_writes_full.py, whose fixture it shares; set
-RR_REQUIRE_DB_TESTS=1 to fail instead of skip. Each test uses a unique table.
+Covers what the unit tests cannot: the listing and counting SQL, the row counts of markDeleted and
+markActive, objdir pages that count paths, and the tools (list_documents, soft_delete, restore, get,
+upsert, stats) on a real store. Runs with the built engine and RR_TEST_PG_DSN like
+test_vector_store_writes_full.py, whose fixture it shares; set RR_REQUIRE_DB_TESTS=1 to fail instead
+of skip. Each test uses a unique table.
+
+#2704's driver contract (``listDocuments`` / ``countDocuments`` / ``supports_document_listing``) is
+gone: every driver lists through ``listDocumentPage`` and pages with a cursor. The tools answer
+#2704's keys (``documents``, ``total``, ``offset``, ``has_more``) beside the explorer's.
 """
 
 import types
@@ -23,6 +26,30 @@ from .test_vector_store_writes_full import store_env as _shared_store_env
 store_env = _shared_store_env
 
 _EMBEDDING = [1.0, 0.0, 0.0]
+
+
+class _AgentTools:
+    """The store instance base on a real store, every tool called as an agent's (the write gate fails closed otherwise)."""
+
+    def __init__(self, tool):
+        self._tool = tool
+
+    def __getattr__(self, name):
+        attr = getattr(self._tool, name)
+        if not callable(attr) or name.startswith('_'):
+            return attr
+
+        def call(*args, **kwargs):
+            from ai.common.tool_context import ToolCallContext, tool_call
+
+            context = ToolCallContext(origin='agent', source_type=None, targeted=True, caller={'auth': 'agent'})
+            with tool_call(context):
+                return attr(*args, **kwargs)
+
+        return call
+
+    def _collect_tool_methods(self):
+        return self._tool._collect_tool_methods()
 
 
 def _tools(store, allow_write=True):
@@ -42,7 +69,7 @@ def _tools(store, allow_write=True):
         expose_tools=True,
         allow_write=allow_write,
     )
-    return tool
+    return _AgentTools(tool)
 
 
 def _tool_doc(object_id, content, **metadata):
@@ -59,73 +86,80 @@ def _seed(store):
     store.addChunks([_doc('b', 1, 'b1'), _doc('a', content='a0'), _doc('b', 0, 'b0'), other])
 
 
+def _page(store, deleted='active', limit=100, cursor=None):
+    return store.listDocumentPage(cursor=cursor, limit=limit, object_ids=None, deleted=deleted, sort='path')
+
+
+def _rows(page):
+    return [(row.objectId, row.path, row.chunks) for row in page.items]
+
+
 # ---------------------------------------------------------------------------
-# Driver contract: listDocuments / countDocuments
+# Driver contract: listDocumentPage
 # ---------------------------------------------------------------------------
 
 
-def test_the_drivers_opt_into_the_listing(store_env):
+def test_the_drivers_list_documents_natively(store_env):
     store, _, _ = store_env
-    assert store.supports_document_listing is True
     # Before any write there is no collection: empty, not an error.
-    assert store.listDocuments() == []
-    assert store.countDocuments() == 0
+    assert _page(store).items == []
+    assert not hasattr(store, 'supports_document_listing')
 
 
-def test_listing_has_one_row_per_document_in_object_id_order(store_env):
+def test_listing_has_one_row_per_document_in_path_order(store_env):
     store, _, _ = store_env
     _seed(store)
 
-    assert store.listDocuments() == [
-        {'object_id': 'a', 'parent': '/test', 'chunk_count': 1},
-        {'object_id': 'b', 'parent': '/test', 'chunk_count': 2},
-        {'object_id': 'c', 'parent': '/other', 'chunk_count': 1},
-    ]
-    assert store.countDocuments() == 3
+    page = _page(store)
+
+    # Ordered by (path, objectId); the control row is never listed.
+    assert _rows(page) == [('c', '/other', 1), ('a', '/test', 1), ('b', '/test', 2)]
+    assert (page.total, page.next_cursor, page.distinct, page.sorted) == (3, None, True, True)
 
 
 def test_listing_filters_on_the_exact_parent(store_env):
     store, _, _ = store_env
     _seed(store)
+    tool = _tools(store, allow_write=False)
 
-    assert [row['object_id'] for row in store.listDocuments(parent='/test')] == ['a', 'b']
-    assert store.countDocuments(parent='/test') == 2
-    assert store.listDocuments(parent='/tes') == []
-    assert store.countDocuments(parent='/absent') == 0
+    assert [row['object_id'] for row in tool.list_documents({'parent': '/test'})['documents']] == ['a', 'b']
+    assert tool.list_documents({'parent': '/tes'})['documents'] == []
+    assert tool.list_documents({'parent': '/absent'})['documents'] == []
 
 
-def test_listing_pages_in_order_and_never_lists_the_control_row(store_env):
+def test_listing_pages_by_cursor_and_never_lists_the_control_row(store_env):
     store, _, _ = store_env
     store.addChunks([_doc(f'doc-{i:02d}', content=f'd{i}') for i in reversed(range(5))])
 
-    pages = [store.listDocuments(offset=offset, limit=2) for offset in (0, 2, 4, 6)]
+    seen, cursor = [], None
+    for _ in range(4):
+        page = _page(store, limit=2, cursor=cursor)
+        seen.append([row.objectId for row in page.items])
+        cursor = page.next_cursor
+        if cursor is None:
+            break
 
-    assert [[row['object_id'] for row in page] for page in pages] == [
-        ['doc-00', 'doc-01'],
-        ['doc-02', 'doc-03'],
-        ['doc-04'],
-        [],
-    ]
-    assert store.countDocuments() == 5
+    assert seen == [['doc-00', 'doc-01'], ['doc-02', 'doc-03'], ['doc-04']]
     # The control row carries isDeleted, like a trashed document; neither list has it.
-    assert 'schema' not in {row['object_id'] for row in store.listDocuments(deleted=True)}
-    assert store.countDocuments(deleted=True) == 0
+    assert 'schema' not in {row.objectId for row in _page(store, deleted='deleted').items}
+    assert _page(store, deleted='deleted').items == []
 
 
 def test_documents_move_between_the_active_list_and_the_trash(store_env):
     store, _, _ = store_env
     _seed(store)
 
-    # The matched count is chunk rows: b has two.
+    # The count is the chunk rows the call moved: b has two.
     assert store.markDeleted(['b', 'never-stored']) == 2
-    assert [row['object_id'] for row in store.listDocuments()] == ['a', 'c']
-    assert store.listDocuments(deleted=True) == [{'object_id': 'b', 'parent': '/test', 'chunk_count': 2}]
-    assert (store.countDocuments(), store.countDocuments(deleted=True)) == (2, 1)
+    assert [row.objectId for row in _page(store).items] == ['c', 'a']
+    assert _rows(_page(store, deleted='deleted')) == [('b', '/test', 2)]
 
     assert store.markActive(['b']) == 2
-    assert store.countDocuments(deleted=True) == 0
-    assert [row['object_id'] for row in store.listDocuments()] == ['a', 'b', 'c']
+    assert _page(store, deleted='deleted').items == []
+    assert [row.objectId for row in _page(store).items] == ['c', 'a', 'b']
     assert store.markDeleted(['never-stored']) == 0
+    # Documents already in the other state move nothing.
+    assert store.markActive(['b']) == 0
 
 
 def test_mark_counts_are_zero_without_a_collection(store_env):
@@ -154,8 +188,17 @@ def test_path_pages_count_paths_not_documents(store_env):
     assert store.getPaths(offset=2, limit=2) == {'/c': 'z'}
     assert store.getPaths(offset=4, limit=2) == {}
 
+    # #2668 at the tool: a page counts distinct paths (each mapped to its lowest object id); `entries` lists
+    # every document under the page's paths.
     tool = _tools(store)
-    assert tool.objdir({'limit': 2}) == {'success': True, 'paths': {'/aa': 'x1', '/b': 'y'}}
+    objdir = tool.objdir({'limit': 2})
+    assert objdir['success'] is True and objdir['paths'] == {'/aa': 'x1', '/b': 'y'}
+    assert [(entry['path'], entry['objectId']) for entry in objdir['entries']] == [
+        ('/aa', 'x1'),
+        ('/aa', 'x2'),
+        ('/aa', 'x3'),
+        ('/b', 'y'),
+    ]
     assert tool.objdir({'offset': 2, 'limit': 2})['paths'] == {'/c': 'z'}
 
     # The parent filter narrows the distinct paths the same way.
@@ -173,8 +216,8 @@ def test_paths_list_a_document_whatever_its_chunk_ids(store_env):
 
     assert store.getPaths() == {'/late': 'late', '/test': 'early'}
     assert tool.list_documents({})['documents'] == [
-        {'object_id': 'early', 'parent': '/test', 'chunk_count': 1},
         {'object_id': 'late', 'parent': '/late', 'chunk_count': 1},
+        {'object_id': 'early', 'parent': '/test', 'chunk_count': 1},
     ]
 
 
@@ -183,30 +226,39 @@ def test_paths_list_a_document_whatever_its_chunk_ids(store_env):
 # ---------------------------------------------------------------------------
 
 
-def test_list_documents_tool_pages_with_total_and_has_more(store_env):
+def test_list_documents_tool_pages_with_both_key_sets(store_env):
     store, _, _ = store_env
     tool = _tools(store, allow_write=False)
     assert 'list_documents' in tool._collect_tool_methods()
-    assert tool.list_documents({}) == {'success': True, 'documents': [], 'total': 0, 'offset': 0, 'has_more': False}
+    empty = tool.list_documents({})
+    assert (empty['success'], empty['documents'], empty['total'], empty['offset'], empty['has_more']) == (
+        True,
+        [],
+        0,
+        0,
+        False,
+    )
 
     _seed(store)
     first = tool.list_documents({'limit': 2})
-    assert first == {
-        'success': True,
-        'documents': [
-            {'object_id': 'a', 'parent': '/test', 'chunk_count': 1},
-            {'object_id': 'b', 'parent': '/test', 'chunk_count': 2},
-        ],
-        'total': 3,
-        'offset': 0,
-        'has_more': True,
-    }
-    second = tool.list_documents({'limit': 2, 'offset': 2})
-    assert [row['object_id'] for row in second['documents']] == ['c']
-    assert (second['total'], second['has_more']) == (3, False)
+    # #2704's keys (rows are in path order now: /other before /test) ...
+    assert first['documents'] == [
+        {'object_id': 'c', 'parent': '/other', 'chunk_count': 1},
+        {'object_id': 'a', 'parent': '/test', 'chunk_count': 1},
+    ]
+    assert (first['total'], first['offset'], first['has_more']) == (3, 0, True)
+    # ... and the explorer's.
+    assert [item['objectId'] for item in first['items']] == ['c', 'a'] and first['next_cursor']
+
+    second = tool.list_documents({'limit': 2, 'cursor': first['next_cursor']})
+    assert [row['object_id'] for row in second['documents']] == ['b']
+    assert (second['total'], second['has_more'], second['next_cursor']) == (3, False, None)
     assert tool.list_documents({'parent': '/other'})['documents'] == [
         {'object_id': 'c', 'parent': '/other', 'chunk_count': 1}
     ]
+    # An offset past 0 is refused, naming the cursor.
+    refused = tool.list_documents({'offset': 2})
+    assert refused['success'] is False and refused['code'] == 'INVALID_INPUT' and 'cursor' in refused['error']
 
 
 def test_soft_delete_and_restore_tools_round_trip(store_env):
@@ -214,31 +266,44 @@ def test_soft_delete_and_restore_tools_round_trip(store_env):
     _seed(store)
     tool = _tools(store)
 
-    assert tool.soft_delete({'object_ids': ['b', 'b', 'ghost']}) == {
-        'success': True,
-        'object_ids': ['b', 'ghost'],
-        'matched_chunks': 2,
-    }
-    assert [row['object_id'] for row in tool.list_documents({})['documents']] == ['a', 'c']
+    soft = tool.soft_delete({'object_ids': ['b', 'b', 'ghost']})
+    assert (soft['success'], soft['object_ids'], soft['matched_chunks'], soft['moved_chunks']) == (
+        True,
+        ['b', 'ghost'],
+        2,
+        2,
+    )
+    assert soft['not_found'] == ['ghost']
+    assert [row['object_id'] for row in tool.list_documents({})['documents']] == ['c', 'a']
     assert [row['object_id'] for row in tool.list_documents({'deleted': True})['documents']] == ['b']
     assert tool.objdir({})['paths'] == {'/other': 'c', '/test': 'a'}
-    assert tool.get({'object_id': 'b'}) == {
-        'success': False,
-        'error': "get: document 'b' is soft-deleted; restore it to read it",
-        'object_id': 'b',
-    }
+    trashed = tool.get({'object_id': 'b'})
+    assert (trashed['success'], trashed['code'], trashed['object_id']) == (False, 'IN_TRASH', 'b')
+    assert trashed['error'] == "get: document 'b' is soft-deleted; restore it to read it"
     stats = tool.stats({})
     assert (stats['count'], stats['document_count']) == (5, 2)  # four chunks and the control row; two documents
 
-    assert tool.restore({'object_ids': ['b']}) == {'success': True, 'object_ids': ['b'], 'matched_chunks': 2}
+    restored = tool.restore({'object_ids': ['b']})
+    assert (restored['success'], restored['object_ids'], restored['matched_chunks'], restored['moved_chunks']) == (
+        True,
+        ['b'],
+        2,
+        2,
+    )
     assert tool.get({'object_id': 'b'})['total'] == 2
     assert tool.list_documents({'deleted': True})['documents'] == []
     assert tool.stats({})['document_count'] == 3
 
-    # Delete is final: restore afterwards matches nothing.
+    # Restoring a live document matches its rows and moves none.
+    again = tool.restore({'object_ids': ['b']})
+    assert (again['matched_chunks'], again['moved_chunks']) == (2, 0)
+
+    # Delete is final: restore afterwards finds nothing.
     assert tool.delete({'object_ids': ['b']})['success'] is True
-    assert tool.restore({'object_ids': ['b']})['matched_chunks'] == 0
-    assert tool.get({'object_id': 'b'})['error'] == "get: no document with object_id 'b'"
+    gone = tool.restore({'object_ids': ['b']})
+    assert (gone['matched_chunks'], gone['moved_chunks'], gone['not_found']) == (0, 0, ['b'])
+    unknown = tool.get({'object_id': 'b'})
+    assert (unknown['code'], unknown['error']) == ('NOT_FOUND', "get: no document with object_id 'b'")
 
 
 def test_write_tools_stay_behind_the_write_switch_on_the_real_store(store_env):
@@ -246,10 +311,12 @@ def test_write_tools_stay_behind_the_write_switch_on_the_real_store(store_env):
     _seed(store)
     tool = _tools(store, allow_write=False)
 
-    assert set(tool._collect_tool_methods()) == {'search', 'objdir', 'get', 'stats', 'list_documents'}
+    offered = set(tool._collect_tool_methods())
+    assert {'search', 'objdir', 'get', 'stats', 'list_documents'} <= offered
+    assert not offered & {'upsert', 'delete', 'soft_delete', 'restore'}
     for name in ('soft_delete', 'restore'):
         assert getattr(tool, name)({'object_ids': ['a']})['success'] is False
-    assert store.countDocuments() == 3
+    assert _page(store).total == 3
 
 
 def test_upsert_tool_numbers_the_chunks_of_one_document(store_env):
@@ -267,7 +334,7 @@ def test_upsert_tool_numbers_the_chunks_of_one_document(store_env):
         }
     )
 
-    assert result == {'success': True, 'count': 4, 'skipped': 0}
+    assert (result['success'], result['count'], result['skipped']) == (True, 4, 0)
     page = tool.get({'object_id': 'long'})
     assert [(chunk['chunkId'], chunk['content']) for chunk in page['chunks']] == [
         (0, 'first'),
@@ -275,27 +342,27 @@ def test_upsert_tool_numbers_the_chunks_of_one_document(store_env):
         (2, 'third'),
     ]
     assert tool.list_documents({})['documents'] == [
-        {'object_id': 'long', 'parent': '/long.pdf', 'chunk_count': 3},
         {'object_id': 'short', 'parent': '/', 'chunk_count': 1},
+        {'object_id': 'long', 'parent': '/long.pdf', 'chunk_count': 3},
     ]
     # Replacing the document through upsert replaces every chunk, as before.
     assert tool.upsert({'documents': [_tool_doc('long', 'rewritten')]})['count'] == 1
-    assert tool.list_documents({})['documents'][0]['chunk_count'] == 1
+    assert {row['object_id']: row['chunk_count'] for row in tool.list_documents({})['documents']}['long'] == 1
 
 
 def test_stats_tool_loads_the_control_row_for_a_reader_that_never_wrote(store_env):
     store, _, _ = store_env
     _seed(store)
-    # A second store on the same table, never written through: model unknown until stats checks.
+    # A second store on the same table, never written through.
     reader = type(store)(store.node if store.node != 'rocketride' else 'rocketride_vector', _reader_config(store), {})
     try:
-        assert (reader.modelName, reader.vectorSize) == ('', 0)
+        # The driver reads the table's control record when it opens, so a reader knows the model at once.
+        assert (reader.modelName, reader.vectorSize) == ('test-model', 3)
         stats = _tools(reader, allow_write=False).stats({})
-        assert stats == {'success': True, 'count': 5, 'document_count': 3, 'model': 'test-model', 'vector_size': 3}
+        assert (stats['success'], stats['count'], stats['document_count']) == (True, 5, 3)
+        assert (stats['model'], stats['vector_size']) == ('test-model', 3)
     finally:
-        if reader.client is not None:
-            reader.client.close()
-            reader.client = None
+        reader.close()
 
 
 def _reader_config(store):
@@ -310,3 +377,46 @@ def _reader_config(store):
             database=getattr(store, 'database', None),
         )
     return config
+
+
+# ---------------------------------------------------------------------------
+# D6-VX-1: a permanent delete is conditional on the trashed state
+# ---------------------------------------------------------------------------
+
+
+def test_remove_trashed_deletes_only_the_chunks_still_in_the_trash(store_env):
+    store, raw, table = store_env
+    _seed(store)
+    store.markDeleted(['b', 'c'])
+    store.markActive(['c'])  # restored before the delete
+
+    assert (
+        store.removeTrashed(['a', 'b', 'c', 'schema']) == 2
+    )  # b's two chunks; a and c are live, schema is never touched
+    with raw.cursor() as cur:
+        cur.execute(f"SELECT objectId FROM {table} WHERE objectId != 'schema' ORDER BY objectId")
+        assert [row[0] for row in cur.fetchall()] == ['a', 'c']
+        cur.execute(f"SELECT count(*) FROM {table} WHERE objectId = 'schema'")
+        assert cur.fetchone()[0] == 1
+
+
+def test_a_restore_between_the_live_check_and_the_permanent_delete_keeps_the_document(store_env):
+    store, _, _ = store_env
+    _seed(store)
+    tool = _tools(store)
+    assert tool.soft_delete({'object_ids': ['b', 'c']})['success']
+    inner = tool._tool
+    original = inner._vx_with_live_chunk
+
+    def check_then_restore(st, ids):
+        kept = original(st, ids)
+        assert tool.restore({'object_ids': ['b']})['success']  # a concurrent restore lands here
+        return kept
+
+    inner._vx_with_live_chunk = check_then_restore
+    answer = tool.delete({'object_ids': ['b', 'c'], 'deleted_only': True})
+
+    assert answer['success'] is True and answer['kept_live'] == ['b'], answer
+    assert answer['removed_chunks'] == 1  # c's chunk: what the store actually deleted
+    assert [row['object_id'] for row in tool.list_documents({})['documents']] == ['a', 'b']
+    assert tool.get({'object_id': 'b'})['total'] == 2

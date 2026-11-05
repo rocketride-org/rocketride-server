@@ -26,14 +26,17 @@
 #
 # Sits on the shared store base like store_postgres, differing only in how it
 # connects: there are no host/user/password fields; the task engine delivers
-# the authorized DSN for this node's scope / target. The base supplies the lifecycle (open the
-# store outside CONFIG mode, wire the tool-path embedder, register the
-# transform key) and, through StoreInstanceBase, the agent tools.
+# the authorized DSN for this node's scope / target (ai.common.rocketride_db).
+# The base supplies the lifecycle (open the store outside CONFIG mode, wire the
+# tool-path embedder, register the transform key) and, through
+# StoreInstanceBase, the agent and Vector Explorer tools.
 #
-# The table is the team's managed database, so the whole tool surface is
+# The table is in a managed RocketRide database, so the whole tool surface is
 # opt-in through the expose_tools setting (off by default), and the write tools
 # (upsert, delete, soft_delete, restore) also need the allow_write setting (off
-# by default). The data lanes are always available.
+# by default). Past that outer gate, a write from a DAP caller (the Vector
+# Explorer's trash) still needs allow_writes, and the write gate's caller
+# rules apply (vx_write_gate). The data lanes are always available.
 # ------------------------------------------------------------------------------
 import os
 import re
@@ -54,13 +57,15 @@ class IGlobal(StoreGlobalBase):
     # Read by VectorStoreToolMixin when the engine lists or dispatches tools.
     # The base resolves the rrvector.expose_tools setting at start; this class
     # default keeps the tool surface off when nothing is configured, because
-    # objdir and get together return the whole table of the team's managed
-    # database to any caller of the pipeline's tool path.
+    # objdir and get (and the Vector Explorer's documents and chunks) together
+    # return the whole table of the managed database to any caller of the
+    # pipeline's tool path.
     expose_tools: bool = False
 
     # Read by VectorStoreToolMixin before a write tool runs. The base resolves
     # the rrvector.allow_write setting at start; this class default keeps
-    # writes off when nothing is configured.
+    # writes off when nothing is configured. It is the one switch for agent
+    # writes, as on every store node: the write gate has no agent switch.
     allow_write: bool = False
 
     def _open_store(self, logical_type: str, conn_config: Dict[str, Any], bag: Dict[str, Any]):
@@ -70,7 +75,7 @@ class IGlobal(StoreGlobalBase):
         return Store(logical_type, conn_config, bag)
 
     def _sub_key(self) -> str:
-        """Return the transform sub-key, scoped by tenant.
+        """Return the transform sub-key, scoped by tenant: <tenant database>/<table>.
 
         The resolved DSN points at the per-tenant database, so key on that
         database: the store must not be shared across tenants even when the
@@ -137,6 +142,13 @@ class IGlobal(StoreGlobalBase):
                     pass
         except Exception as e:
             warning(_format_error(e))
+
+    def endGlobal(self) -> None:
+        """Close the store's connections, then let the base drop the store."""
+        store = getattr(self, 'store', None)
+        if store is not None and hasattr(store, 'close'):
+            store.close()
+        super().endGlobal()
 
 
 def _format_error(e: Exception) -> str:

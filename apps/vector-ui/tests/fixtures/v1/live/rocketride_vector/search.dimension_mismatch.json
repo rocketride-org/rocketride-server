@@ -1,0 +1,6 @@
+{
+  "__scrub__": [],
+  "success": false,
+  "code": "DIMENSION_MISMATCH",
+  "error": "The vector has 10 values; this collection stores 384."
+}

@@ -1,0 +1,18 @@
+{
+	"success": true,
+	"count": 1322,
+	"model": "sentence-transformers/all-MiniLM-L6-v2",
+	"vector_size": 384,
+	"collection_exists": true,
+	"documents": 43,
+	"documents_without_first_chunk": 1,
+	"chunks": 1321,
+	"deleted_chunks": 0,
+	"raw_count": 1322,
+	"tables": 3,
+	"avg_chunks_per_document": 30.72093,
+	"dimension": 384,
+	"metric": "cosine",
+	"computed_at": "2026-10-08T18:31:03Z",
+	"counts_as_of": "2026-10-08T18:31:03Z"
+}

@@ -42,8 +42,31 @@ Usage:
             print("Warning: This document has been deleted")
 """
 
-from typing import Any, Dict
+import time
+from typing import Any, Dict, Optional
 from pydantic import BaseModel, Field, ConfigDict
+
+
+def _entry_int(entry: Any, name: str) -> Optional[int]:
+    """Return ``entry.<name>`` when the engine entry carries it as an integer, else None.
+
+    Engine entries expose ``has<Name>`` flags; a False flag means the value is not set.
+    """
+    has = getattr(entry, 'has' + name[0].upper() + name[1:], None)
+    if has is False:
+        return None
+    try:
+        value = getattr(entry, name, None)
+    except Exception:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
+
+
+def _utc_now_iso() -> str:
+    """Return the current UTC time as ISO-8601 with a ``Z`` suffix, to the second."""
+    return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
 
 
 class DocMetadata(BaseModel):
@@ -120,20 +143,32 @@ class DocMetadata(BaseModel):
             pInstance: Processing instance exposing `instance.currentObject` and
                        `IEndpoint.endpoint.jobConfig['nodeId']`. Optional.
             **data: Explicit field overrides or direct values when `pInstance` is not given.
+
+        With `pInstance`, the defaults also carry three extra keys a vector store
+        keeps where its backend can: `size` and `modifyTime` from the object being
+        processed (left out when the object does not carry them) and `ingestedAt`,
+        the UTC time the metadata was built (ISO-8601, e.g. `2026-10-08T18:20:11Z`).
         """
         if pInstance is not None:
             # Build defaults from the instance context.
+            current = pInstance.instance.currentObject
             defaults = {
-                'objectId': pInstance.instance.currentObject.objectId,
+                'objectId': current.objectId,
                 'chunkId': 0,
                 'nodeId': pInstance.IEndpoint.endpoint.jobConfig['nodeId'],
-                'parent': pInstance.instance.currentObject.path,
-                'permissionId': pInstance.instance.currentObject.permissionId,
-                'signature': pInstance.instance.currentObject.componentId,
+                'parent': current.path,
+                'permissionId': current.permissionId,
+                'signature': current.componentId,
                 'isDeleted': False,
                 'isTable': False,
                 'tableId': 0,
             }
+            # Extras for the vector store explorer; absent values stay absent.
+            for name in ('size', 'modifyTime'):
+                value = _entry_int(current, name)
+                if value is not None:
+                    defaults[name] = value
+            defaults['ingestedAt'] = _utc_now_iso()
             # Merge explicit overrides
             defaults.update(data)
             super().__init__(**defaults)

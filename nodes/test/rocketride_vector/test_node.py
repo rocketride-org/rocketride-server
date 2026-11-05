@@ -64,14 +64,24 @@ def test_open_store_builds_the_driver_store_from_the_raw_config(node_modules):
 
 
 def test_iglobal_overrides_only_the_store_hooks(node_modules):
-    # Lifecycle (beginGlobal, endGlobal, validateConfig) and the switch
-    # resolution belong to StoreGlobalBase; the node supplies the three hooks.
+    # Lifecycle (beginGlobal, validateConfig) and the switch resolution belong
+    # to StoreGlobalBase; the node supplies the three hooks, and endGlobal only
+    # to close the shared pgvector driver's pooled connections before the base
+    # drops the store.
     # Exact equality holds because the conftest stands in for the base with a
     # plain class; under the real ABC base ``vars()`` would also show ``_abc_impl``.
     iglobal, _, _ = node_modules
     own = {name for name in vars(iglobal.IGlobal) if not name.startswith('__')}
 
-    assert own == {'serverName', 'expose_tools', 'allow_write', '_open_store', '_sub_key', '_probe_connection'}
+    assert own == {
+        'serverName',
+        'expose_tools',
+        'allow_write',
+        '_open_store',
+        '_sub_key',
+        '_probe_connection',
+        'endGlobal',
+    }
 
 
 def test_sub_key_is_scoped_by_the_tenant_database(node_modules):

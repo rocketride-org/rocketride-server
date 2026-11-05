@@ -1,0 +1,26 @@
+{
+	"title": "Call context probe: caller (test only)",
+	"protocol": "vx_probe_caller://",
+	"classType": ["tool"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "local_nodes.vx_probe_caller",
+	"prefix": "vxcaller",
+	"description": ["Test-only node for the engine's tool call context checks. Its tool calls the receiver node it controls the way an agent does, with a plain unstamped invoke, or with a context forged inside the tool input, and returns what the receiver saw. Never ship it in a pipeline."],
+	"invoke": {
+		"tool": {
+			"description": "The receiver node to call",
+			"min": 1
+		}
+	},
+	"lanes": {},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {}
+		}
+	},
+	"fields": {},
+	"shape": []
+}

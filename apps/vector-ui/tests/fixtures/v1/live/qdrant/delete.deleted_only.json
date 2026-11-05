@@ -1,0 +1,33 @@
+{
+  "__scrub__": [
+    "teamId",
+    "userId"
+  ],
+  "success": true,
+  "deleted_count": 2,
+  "object_ids": [
+    "91ae15d4-3f6e-589f-bb81-72301f2ca1b6",
+    "75b89d86-a64e-5143-bf50-55d4a7fd8cd2"
+  ],
+  "removed_chunks": 5,
+  "not_found": [],
+  "kept_live": [
+    "75b89d86-a64e-5143-bf50-55d4a7fd8cd2"
+  ],
+  "audit": {
+    "action": "vector.delete",
+    "node": "store_1",
+    "provider": "qdrant",
+    "collection": "vx_tp_wire",
+    "object_ids": [
+      "91ae15d4-3f6e-589f-bb81-72301f2ca1b6",
+      "75b89d86-a64e-5143-bf50-55d4a7fd8cd2"
+    ],
+    "rows": 5,
+    "caller": {
+      "auth": "account",
+      "userId": "<scrubbed>",
+      "teamId": "<scrubbed>"
+    }
+  }
+}

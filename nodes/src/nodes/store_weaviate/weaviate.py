@@ -22,7 +22,7 @@
 # =============================================================================
 
 # ------------------------------------------------------------------------------
-# Interface implementation for the Qdrant store
+# Interface implementation for the Weaviate store
 # ------------------------------------------------------------------------------
 # We now have real requirements, so load them before we start
 # loading our driver
@@ -32,25 +32,299 @@ from depends import depends
 requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
 depends(requirements)
 
-from typing import List, Callable, Dict, Any, cast
-import numpy as np
+from typing import List, Callable, Dict, Any, Iterable, Iterator, Optional, Sequence, Tuple
 import re
 import time
+import functools
+import json
+import uuid
+import base64
+from datetime import datetime, timezone
 
 import weaviate
 from weaviate.client import WeaviateClient
+from weaviate.classes.aggregate import GroupByAggregate
 from weaviate.classes.init import AdditionalConfig, Timeout, Auth
 from weaviate.classes.query import Filter, MetadataQuery
 from weaviate.collections.collection import Collection
 from weaviate.classes.config import VectorDistances
-from weaviate.util import generate_uuid5
 import weaviate.classes.config as wc
 
 from weaviate.exceptions import UnexpectedStatusCodeError, WeaviateBaseError
 
 from ai.common.schema import Doc, DocFilter, DocMetadata, QuestionText
 from ai.common.store import DocumentStoreBase
+from ai.common.store.errors import StoreError, StoreUnsupported, ToolRefusal
+from ai.common.store.vx_types import DELETED_VALUES, ChunkPage, DocPage, DocumentRow, StoreInfo
 from ai.common.config import Config
+
+# objectId of the collection's control record
+CONTROL_OBJECT_ID = 'schema'
+
+# Weaviate answers at most this many objects for offset + limit (QUERY_MAXIMUM_RESULTS)
+MAX_QUERY_RESULTS = 10000
+
+# Objects read per page when updating a document's chunks
+UPDATE_PAGE = 1000
+
+# Largest number of documents countDocumentsWhere groups before it gives up (None)
+MAX_GROUPS = 10000
+
+# Weaviate distance -> the explorer's metric vocabulary (None: no vector-space equivalent)
+METRICS = {'cosine': 'cosine', 'dot': 'ip', 'l2-squared': 'l2'}
+
+# Most objectId x chunkId combinations one vectors read asks for, and ids per id lookup
+VECTOR_BATCH_ROWS = 4096
+FETCH_BATCH_IDS = 500
+
+
+# Network libraries under the clients (their errors can name the server too)
+_TRANSPORTS = ('grpc', 'httpx', 'httpcore', 'h11', 'h2', 'urllib3', 'requests', 'aiohttp', 'ssl', 'socket', 'dns')
+
+#: Libraries whose errors can carry the server address: the client and the transports under it
+_CLIENT_MODULES = frozenset(('weaviate', 'authlib') + _TRANSPORTS)
+
+
+def _error_code(error: BaseException) -> Optional[str]:
+    """The client's error code (a number or an UPPER_CASE name) when the exception carries one."""
+    for name in ('code', 'status_code', 'status', 'error_code'):
+        try:
+            value = getattr(error, name, None)
+        except Exception:
+            continue
+        if isinstance(value, bool) or callable(value):
+            continue
+        if isinstance(value, int):
+            return str(value)
+        if isinstance(value, str) and re.fullmatch(r'[A-Z][A-Z0-9_]{0,63}', value):
+            return value
+    return None
+
+
+def _one_per_chunk(docs: Iterable[Doc]) -> List[Doc]:
+    """``docs`` in chunk order, one per chunk id (an earlier retried write may have stored a chunk twice)."""
+    by_chunk: Dict[int, Doc] = {}
+    for doc in docs:
+        by_chunk.setdefault(doc.metadata.chunkId, doc)
+    return [by_chunk[chunk] for chunk in sorted(by_chunk)]
+
+
+def _deleted_mode(docFilter: DocFilter, deleted: Optional[str]) -> str:
+    """
+    The rows a read covers: 'active', 'deleted' or 'all'.
+
+    ``deleted`` wins over ``DocFilter.deleted``; with neither, the legacy ``isDeleted`` flag decides.
+    Any other value is INVALID_INPUT (it must not quietly read as 'all' here and 'active' there).
+    """
+    asked = deleted if deleted is not None else getattr(docFilter, 'deleted', None)
+    if asked is None:
+        return DocumentStoreBase.resolveDeleted(docFilter)
+    if asked not in DELETED_VALUES:
+        raise ToolRefusal('INVALID_INPUT', 'deleted must be active, deleted or all')
+    return asked
+
+
+def _module_root(name: Any) -> str:
+    """The top-level package of a module name ('grpc' for 'grpc._channel')."""
+    return str(name or '').split('.', 1)[0]
+
+
+def _from_client(error: BaseException) -> bool:
+    """
+    Whether ``error`` came out of the client library or the network under it.
+
+    It does when its type is defined there, when it is a network failure (an OSError: refused
+    connections, timeouts, DNS and TLS errors) or when a frame of those libraries raised it (a
+    plain ValueError raised inside the client still carries the client's text). An error the
+    driver's own code raises (a KeyError on an odd row, say) does not.
+    """
+    if isinstance(error, OSError) or _module_root(type(error).__module__) in _CLIENT_MODULES:
+        return True
+    trace = error.__traceback__
+    while trace is not None:
+        if _module_root(trace.tb_frame.f_globals.get('__name__')) in _CLIENT_MODULES:
+            return True
+        trace = trace.tb_next
+    return False
+
+
+def _client_failure(error: BaseException) -> Optional[BaseException]:
+    """The client-library exception in ``error``'s chain, or None when the driver raised it itself."""
+    seen = set()
+    link: Optional[BaseException] = error
+    while link is not None and id(link) not in seen:
+        seen.add(id(link))
+        if isinstance(link, (StoreError, StoreUnsupported, ToolRefusal)):
+            return None
+        if _from_client(link):
+            return link
+        link = link.__cause__ or link.__context__
+    return None
+
+
+def _backend_errors(operation: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    """
+    Re-raise a client failure inside ``operation`` as a StoreError with a fixed, host-free message.
+
+    Client errors name the server (host, port, endpoint) and the tool wrapper answers a failure
+    with the exception's text, so the text becomes 'Weaviate <operation> failed: <ErrorClass> (code N)'.
+    The driver's own exceptions (refusals, ValueError for offsets, messages it wrote) pass through.
+    """
+
+    def decorate(fn: Callable[..., Any]) -> Callable[..., Any]:
+        @functools.wraps(fn)
+        def call(*args: Any, **kwargs: Any) -> Any:
+            try:
+                return fn(*args, **kwargs)
+            except Exception as error:
+                failure = _client_failure(error)
+                if failure is None:
+                    raise
+                code = _error_code(failure)
+                detail = type(failure).__name__ + (f' (code {code})' if code else '')
+                raise StoreError(f'Weaviate {operation} failed: {detail}') from error
+
+        return call
+
+    return decorate
+
+
+def _keyed_uuid(objectId: str, chunkId: int) -> str:
+    """The point id of a chunk: uuid5 of '<objectId>#<chunkId>'."""
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f'{objectId}#{chunkId}'))
+
+
+def _is_count(value: Any) -> bool:
+    """Whether a cursor field is a non-negative integer (a float or a boolean is not)."""
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def _encode_cursor(offset: int, first: Optional[str]) -> str:
+    """Opaque listing cursor: the next offset and the first objectId of the page just served."""
+    raw = json.dumps({'o': offset, 'f': first}, separators=(',', ':')).encode('utf-8')
+    return base64.urlsafe_b64encode(raw).decode('ascii').rstrip('=')
+
+
+def _decode_cursor(cursor: Optional[str]) -> Tuple[int, Optional[str]]:
+    """Read a cursor from :func:`_encode_cursor`; anything else is INVALID_INPUT."""
+    if not cursor:
+        return 0, None
+    try:
+        padded = cursor + '=' * (-len(cursor) % 4)
+        data = json.loads(base64.urlsafe_b64decode(padded.encode('ascii')).decode('utf-8'))
+        offset = data['o']
+        first = data.get('f')
+        if not _is_count(offset) or offset > MAX_QUERY_RESULTS:
+            raise ValueError('cursor out of range')
+        if first is not None and not isinstance(first, str):
+            raise ValueError('cursor out of range')
+        return offset, first
+    except Exception:
+        raise ToolRefusal('INVALID_INPUT', 'cursor is not one this store issued')
+
+
+def _key_batches(keys: Sequence[Tuple[str, int]]) -> Iterator[Tuple[List[str], List[int]]]:
+    """Group keys into (objectIds, chunkIds) reads whose cross product stays within VECTOR_BATCH_ROWS."""
+    by_object: Dict[str, set] = {}
+    for object_id, chunk_id in keys:
+        by_object.setdefault(object_id, set()).add(chunk_id)
+    batch_objects: List[str] = []
+    batch_chunks: set = set()
+    for object_id in sorted(by_object):
+        merged = batch_chunks | by_object[object_id]
+        if batch_objects and (len(batch_objects) + 1) * len(merged) > VECTOR_BATCH_ROWS:
+            yield batch_objects, sorted(batch_chunks)
+            batch_objects, merged = [], set(by_object[object_id])
+        batch_objects.append(object_id)
+        batch_chunks = merged
+    if batch_objects:
+        yield batch_objects, sorted(batch_chunks)
+
+
+# Doubling steps the chunk scroll takes to find the next chunk id after a gap
+GAP_SEARCH_STEPS = 64
+
+
+def _first_chunk_after(exists: Callable[[int, int], bool], high: int, span: int) -> Optional[int]:
+    """
+    The smallest chunk id above ``high``, found with existence probes.
+
+    ``exists(low, top)`` says whether a chunk id lies in (low, top]. Windows of doubling width
+    find the first non-empty one, then a binary search finds its smallest id: a few probes of
+    one row each instead of one empty page per ``span`` ids. Reading "any row beyond the window"
+    would not do: Weaviate returns rows in storage order, not chunk order. None when nothing is
+    within reach.
+    """
+    low, width = high, max(1, span)
+    for _ in range(GAP_SEARCH_STEPS):
+        top = low + width
+        if exists(low, top):
+            break
+        low, width = top, width * 2
+    else:
+        return None
+    empty, found = low, top
+    while found - empty > 1:
+        middle = (empty + found) // 2
+        if exists(low, middle):
+            found = middle
+        else:
+            empty = middle
+    return found
+
+
+def _all(*filters: Optional[Filter]) -> Optional[Filter]:
+    """AND of the given filters, None entries dropped; None when nothing is left."""
+    present = [f for f in filters if f is not None]
+    if not present:
+        return None
+    if len(present) == 1:
+        return present[0]
+    return Filter.all_of(present)
+
+
+def _any_equal(prop: str, values: Sequence[Any]) -> Filter:
+    """``prop`` equals one of ``values``."""
+    return Filter.any_of([Filter.by_property(prop).equal(v) for v in values])
+
+
+#: Integer properties a collection may hold as Weaviate numbers (auto-schema types undeclared ints as 'number')
+INT_PROPERTIES = frozenset({'chunkId', 'tableId', 'permissionId', 'vectorSize', 'size', 'modifyTime'})
+
+
+def _iso_utc(value: datetime) -> str:
+    """A datetime as the ISO-8601 UTC string it was written as ('2026-10-08T18:20:11Z')."""
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).isoformat().replace('+00:00', 'Z')
+
+
+def _plain_properties(properties: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Stored properties as the driver wrote them, nulls dropped.
+
+    A collection created before ``size``, ``modifyTime`` and ``ingestedAt`` were declared had
+    them auto-schemaed on the first write: the timestamp as a date (the client returns a datetime)
+    and the integers as numbers (floats). They come back as the ISO string and integers.
+    """
+    plain: Dict[str, Any] = {}
+    for key, value in (properties or {}).items():
+        if value is None:
+            continue
+        if isinstance(value, datetime):
+            value = _iso_utc(value)
+        elif key in INT_PROPERTIES and isinstance(value, float) and value.is_integer():
+            value = int(value)
+        plain[key] = value
+    return plain
+
+
+def _vector_of(obj: Any) -> List[float]:
+    """The embedding of a returned object (v4 clients return named vectors)."""
+    vector = getattr(obj, 'vector', None)
+    if isinstance(vector, dict):
+        vector = vector.get('default', next(iter(vector.values()), None))
+    return [float(x) for x in vector or []]
 
 
 # How long a trash update pauses after a page that left the number of pending
@@ -88,6 +362,12 @@ class Store(DocumentStoreBase):
             VectorDistances.L2_SQUARED,
         }
     )
+
+    #: Vector Explorer support level. Only an unmocked live suite can promote a driver.
+    VX_SUPPORT: str = 'experimental'
+
+    #: Capabilities beyond the hooks this driver overrides.
+    VX_DRIVER_CAPABILITIES = frozenset({'search_keyword'})
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
         """
@@ -206,6 +486,11 @@ class Store(DocumentStoreBase):
             wc.Property(name='tableId', data_type=wc.DataType.INT),
             wc.Property(name='vectorSize', data_type=wc.DataType.INT),
             wc.Property(name='modelName', data_type=wc.DataType.TEXT),
+            # The explorer's metadata extras, declared so auto-schema never types them
+            # (it would make ingestedAt a date and the integers numbers)
+            wc.Property(name='size', data_type=wc.DataType.INT),
+            wc.Property(name='modifyTime', data_type=wc.DataType.INT),
+            wc.Property(name='ingestedAt', data_type=wc.DataType.TEXT),
         ]
 
         # Shared across both index types; only vector_index_config differs.
@@ -257,9 +542,12 @@ class Store(DocumentStoreBase):
                 # network failure that says nothing about the real cause.
                 raise hnswError from hfreshError
 
-    def _convertFilter(self, docFilter: DocFilter) -> Filter:
+    def _convertFilter(self, docFilter: DocFilter, deleted: Optional[str] = None) -> Optional[Filter]:
         """
         Build the generic filter based on required permissions, node, parent, etc.
+
+        ``deleted`` ('active' | 'deleted' | 'all') overrides what the filter itself asks for
+        (``DocFilter.deleted``, else the legacy ``isDeleted`` flag). None when nothing filters.
         """
         # Declare the must list to start addding conditions
         must: List[Filter] = []
@@ -272,34 +560,26 @@ class Store(DocumentStoreBase):
             must.append(Filter.by_property('isTable').equal(docFilter.isTable))
 
         if docFilter.tableIds is not None:
-            may: List[Filter] = []
-            for tableId in docFilter.tableIds:
-                may.append(Filter.by_property('tableId').equal(tableId))
-            must.append(Filter.any_of(may))
+            must.append(_any_equal('tableId', docFilter.tableIds))
 
         if docFilter.parent is not None:
             must.append(Filter.by_property('parent').equal(docFilter.parent))
 
         if docFilter.permissions is not None:
-            may: List[Filter] = []
-            for permissionId in docFilter.permissions:
-                may.append(Filter.by_property('permissionId').equal(permissionId))
-            must.append(Filter.any_of(may))
+            must.append(_any_equal('permissionId', docFilter.permissions))
 
         if docFilter.objectIds is not None:
-            may: List[Filter] = []
-            for objectId in docFilter.objectIds:
-                may.append(Filter.by_property('objectId').equal(objectId))
-            must.append(Filter.any_of(may))
+            must.append(_any_equal('objectId', docFilter.objectIds))
 
-        if docFilter.isDeleted is None or not docFilter.isDeleted:
+        # Soft-deleted rows: active (default), deleted only, or all
+        mode = _deleted_mode(docFilter, deleted)
+        if mode == 'active':
             must.append(Filter.by_property('isDeleted').equal(False))
+        elif mode == 'deleted':
+            must.append(Filter.by_property('isDeleted').equal(True))
 
         if docFilter.chunkIds is not None:
-            may: List[Filter] = []
-            for chunkId in docFilter.chunkIds:
-                may.append(Filter.by_property('chunkId').equal(chunkId))
-            must.append(Filter.any_of(may))
+            must.append(_any_equal('chunkId', docFilter.chunkIds))
 
         if docFilter.minChunkId is not None:
             must.append(Filter.by_property('chunkId').greater_or_equal(docFilter.minChunkId))
@@ -307,38 +587,59 @@ class Store(DocumentStoreBase):
         if docFilter.maxChunkId is not None:
             must.append(Filter.by_property('chunkId').less_or_equal(docFilter.maxChunkId))
 
-        return Filter.all_of(must)
+        return _all(*must)
 
-    def _convertToDocs(self, points: Dict) -> List[Doc]:
+    def _metricKey(self) -> str:
+        """The configured distance as its Weaviate name ('cosine', 'dot', ...)."""
+        return str(getattr(self.similarity, 'value', self.similarity)).lower()
+
+    def _score(self, distance: float) -> float:
+        """Map a Weaviate distance onto a higher-is-better score."""
+        metric = self._metricKey()
+        if metric == 'cosine':
+            # Cosine distance is 1 - cosine similarity, in [0, 2]
+            return (2.0 - distance) / 2.0
+        if metric == 'dot':
+            # Dot distance is the negative dot product
+            return -float(distance)
+        # l2-squared, manhattan, hamming: 0 is identical, larger is farther
+        return 1.0 / (1.0 + max(float(distance), 0.0))
+
+    def _toDoc(self, point: Any, *, score: float = 0.0, with_vector: bool = False) -> Doc:
+        """A Doc from a returned object; carries ``metadata.pointId`` and, on request, the embedding."""
+        properties = _plain_properties(point.properties)
+        content = properties.pop('content', None)
+        properties['pointId'] = str(point.uuid)
+        doc = Doc(score=score, page_content=content, metadata=DocMetadata(**properties))
+        if with_vector:
+            doc.embedding = _vector_of(point)
+        return doc
+
+    def _convertToDocs(self, points: Dict, floor: Optional[float] = None) -> List[Doc]:
         """
         Convert a list of points or records to a docGroup.
 
-        Groupsall document chunks  together
+        Search hits (points with a distance) below ``floor`` are dropped.
         """
         docs: List[Doc] = []
 
         # Now, add the documents to the results
         for point in points:
             # Get the payload content and metadata
-            metadata = cast(
-                DocMetadata, {k: v for k, v in point.properties.items() if k not in {'content'} and v is not None}
-            )
-            content = point.properties.get('content')
+            metadata = _plain_properties(point.properties)
+            content = metadata.pop('content', None)
 
             if point.metadata.distance is not None:
-                if self.similarity == 'cosine':
-                    score = (point.metadata.distance + 1) / 2
-                else:
-                    score = float(1.0 / (1.0 + np.exp(point.metadata.distance / -100)))
+                score = self._score(point.metadata.distance)
 
-                # Ignore it if it doesn't have a high enough score
-                if score < 0.20:
+                # Ignore it if it is under the floor
+                if floor is not None and score < floor:
                     continue
             else:
                 score = 0.0
 
             # Create asearc new document
-            doc = Doc(score=score, page_content=content, metadata=metadata)
+            doc = Doc(score=score, page_content=content, metadata=DocMetadata(**metadata))
 
             # Append it to this documents chunks
             docs.append(doc)
@@ -346,6 +647,7 @@ class Store(DocumentStoreBase):
         # Return it
         return docs
 
+    @_backend_errors('count_documents')
     def count_documents(self) -> int:
         """
         Return the number of vectors in the document store, not the number of documents themselves.
@@ -360,6 +662,7 @@ class Store(DocumentStoreBase):
         response = self.collectionObj.aggregate.over_all(total_count=True)
         return response.total_count
 
+    @_backend_errors('searchKeyword')
     def searchKeyword(self, query: QuestionText, docFilter: DocFilter) -> List[Doc]:
         """
         Keyword search.
@@ -372,11 +675,12 @@ class Store(DocumentStoreBase):
         # Declare the results list
         docs: List[Doc] = []
 
-        # Build up the filters
-        filter = self._convertFilter(docFilter=docFilter)
+        # Build up the filters; match on the question text (not on the question's repr)
+        text = getattr(query, 'text', None) or ''
+        filter = _all(self._convertFilter(docFilter=docFilter), Filter.by_property('content').like(f'*{text}*'))
 
         points = self.collectionObj.query.fetch_objects(
-            filters=(filter & Filter.by_property('content').like(f'*{query}*')),
+            filters=filter,
             limit=docFilter.limit,
         )
 
@@ -385,6 +689,7 @@ class Store(DocumentStoreBase):
 
         return docs
 
+    @_backend_errors('searchSemantic')
     def searchSemantic(self, query: QuestionText, docFilter: DocFilter) -> List[Doc]:
         """
         Semantic search.
@@ -410,7 +715,7 @@ class Store(DocumentStoreBase):
 
         # We cannot support non-zero offsets
         if docFilter.offset:
-            raise BaseException('Non-zero offset is not supported in semantic searching')
+            raise ValueError('Non-zero offset is not supported in semantic searching')
 
         points = self.collectionObj.query.near_vector(
             near_vector=query.embedding,
@@ -419,12 +724,13 @@ class Store(DocumentStoreBase):
             return_metadata=MetadataQuery(distance=True),
         )
 
-        # Convert the points into groups
-        docs = self._convertToDocs(points.objects)
+        # Convert the points into groups, dropping hits under the floor
+        docs = self._convertToDocs(points.objects, floor=self.effectiveFloor(docFilter))
 
         # Return them
         return docs
 
+    @_backend_errors('get')
     def get(self, docFilter: DocFilter, checkCollection: bool = True) -> List[Doc]:
         """
         Retrieve document groups matching a given filter.
@@ -437,10 +743,13 @@ class Store(DocumentStoreBase):
         # Convert filter to Weaviate format
         filter_expr = self._convertFilter(docFilter)
 
-        results = self.collectionObj.query.fetch_objects(filters=filter_expr, limit=docFilter.limit)
+        results = self.collectionObj.query.fetch_objects(
+            filters=filter_expr, limit=docFilter.limit, offset=docFilter.offset or None
+        )
         # Convert results to Docs
         return self._convertToDocs(results.objects)
 
+    @_backend_errors('getPaths')
     def getPaths(self, parent: str | None = None, offset: int = 0, limit: int = 1000) -> Dict[str, str]:
         """
         Retrieve unique parent paths.
@@ -450,9 +759,12 @@ class Store(DocumentStoreBase):
         if not self.doesCollectionExist():
             return {}
 
-        must: List[Filter] = []
-        must.append(Filter.by_property('chunkId').equal(0))
-        must.append(Filter.by_property('isDeleted').equal(False))
+        # Chunk 0 of the live documents, never the control record
+        must: List[Filter] = [
+            Filter.by_property('chunkId').equal(0),
+            Filter.by_property('isDeleted').equal(False),
+            Filter.by_property('objectId').not_equal(CONTROL_OBJECT_ID),
+        ]
 
         # If parent specified, add condition
         if parent is not None:
@@ -474,9 +786,25 @@ class Store(DocumentStoreBase):
 
         return paths
 
+    @_backend_errors('createCollection')
+    def createCollection(self, documents: List[Doc]) -> bool:
+        """Create the collection as the base does; a client failure is reported without the server address."""
+        return super().createCollection(documents)
+
+    @_backend_errors('doesCollectionExist')
+    def doesCollectionExist(self, modelName: str = None) -> bool:
+        """Check the collection as the base does; a client failure is reported without the server address."""
+        return super().doesCollectionExist(modelName)
+
+    @_backend_errors('addChunks')
     def addChunks(self, chunks: List[Doc], checkCollection: bool = True) -> None:
         """
         Add document chunks to the document store.
+
+        A batch holding chunk 0 of an object starts a new version of it, so the
+        object's older chunks are removed first; later batches of the same object
+        (the embedding nodes send long documents in several) are added to it.
+        Object ids are keyed by (objectId, chunkId), so rewriting a chunk replaces it.
 
         Args:
             chunks: The batch to write.
@@ -495,25 +823,13 @@ class Store(DocumentStoreBase):
         objectIds = self.objectIdsToReplace(chunks)
 
         # Erase all documents/chunks associated with those ObjectIds in one operation
-        # TODO: Start discussion about better use of upsert() method to increase performance)
         if len(objectIds):
-            # Delete entities
-            objectIdFilter: List[Filter] = []
-            for objectId in objectIds:
-                objectIdFilter.append(Filter.by_property('objectId').equal(objectId))
-            self.collectionObj.data.delete_many(where=Filter.any_of(objectIdFilter))
+            self.collectionObj.data.delete_many(where=_any_equal('objectId', list(objectIds)))
 
         # Enter context manager
         with self.collectionObj.batch.dynamic() as batch:
             # For each document
             for chunk in chunks:
-                # Build the object payload
-                data = {
-                    'content': chunk.page_content,
-                }
-                data.update(chunk.metadata)
-
-                unique_identifier = ','.join([f'{key}={value}' for key, value in data.items()])
                 # Get the embedding
                 embedding = chunk.embedding
 
@@ -521,8 +837,16 @@ class Store(DocumentStoreBase):
                 if embedding is None:
                     raise Exception('No embedding in document')
 
+                # Build the object payload: content plus the metadata (extras included, Nones dropped)
+                data = {'content': chunk.page_content}
+                data.update(chunk.metadata.model_dump(exclude_none=True))
+
                 # Add object (including vector) to batch queue
-                batch.add_object(properties=data, uuid=generate_uuid5(unique_identifier), vector=chunk.embedding)
+                batch.add_object(
+                    properties=data,
+                    uuid=_keyed_uuid(chunk.metadata.objectId, chunk.metadata.chunkId),
+                    vector=embedding,
+                )
 
         # Check for failed objects
         if len(self.collectionObj.batch.failed_objects) > 0:
@@ -530,6 +854,7 @@ class Store(DocumentStoreBase):
 
         return
 
+    @_backend_errors('remove')
     def remove(self, objectIds: List[str]) -> None:
         """
         Delete all documents with a matching objectIds from the document store.
@@ -549,20 +874,20 @@ class Store(DocumentStoreBase):
         return
 
     def _setDeleted(self, objectIds: List[str], deleted: bool) -> None:
-        """Update every matching chunk, draining batches in the opposite state.
-
-        Filtering out chunks already updated keeps each query bounded without
-        using offsets into a shrinking result set or the server's result window.
         """
+        Set ``isDeleted`` on every chunk of ``objectIds``, draining the chunks still in the other state.
+
+        A query without a limit returns only the server's default of 10 objects, so the chunks are read a
+        page at a time (``UPDATE_PAGE``); each update takes a chunk out of the next read, which keeps every
+        query bounded without offsets into a shrinking result set or the server's result window. Same
+        name, arguments and return as #2704's helper, so either copy serves both callers.
+        """
+        # By definition, if the collection does not exists, there
+        # is nothing to mark
         if not objectIds or not self.doesCollectionExist():
             return
 
-        pending = Filter.all_of(
-            [
-                Filter.any_of([Filter.by_property('objectId').equal(oid) for oid in objectIds]),
-                Filter.by_property('isDeleted').equal(not deleted),
-            ]
-        )
+        pending = _all(_any_equal('objectId', list(objectIds)), Filter.by_property('isDeleted').equal(not deleted))
         # Progress is the number of chunks still pending, recounted after each
         # page: O(1) state however many chunks the call touches. A page that
         # leaves the count where it was is a stall (a lagging replica, or an
@@ -571,7 +896,7 @@ class Store(DocumentStoreBase):
         remaining = self.collectionObj.aggregate.over_all(filters=pending, total_count=True).total_count or 0
         stalls = 0
         while True:
-            points = self.collectionObj.query.fetch_objects(filters=pending, limit=1000)
+            points = self.collectionObj.query.fetch_objects(filters=pending, limit=UPDATE_PAGE)
             if not points.objects:
                 return
             for point in points.objects:
@@ -587,75 +912,464 @@ class Store(DocumentStoreBase):
                 )
             time.sleep(_REPEAT_PAUSE_SECONDS)
 
-    def markDeleted(self, objectIds: List[str]) -> None:
-        """Hide every chunk of the named documents from ordinary retrieval."""
+    @_backend_errors('markDeleted')
+    def markDeleted(self, objectIds: List[str]) -> Optional[int]:
+        """
+        Mark the set of documents with the given objectId as deleted.
+
+        They then will not be returned from the search without specifying deleted=True.
+        Returns the chunks moved to the trash, counted before the update.
+        """
+        if not objectIds or not self.doesCollectionExist():
+            return 0
+        moving = self.vxChunksInState(objectIds, deleted=False)
         self._setDeleted(objectIds, True)
+        return moving
 
-    def markActive(self, objectIds: List[str]) -> None:
-        """Restore every soft-deleted chunk of the named documents."""
+    @_backend_errors('markActive')
+    def markActive(self, objectIds: List[str]) -> Optional[int]:
+        """
+        Mark the set of documents with the given objectId as active.
+
+        This occurs if a document now "comes back" after begin deleted.
+        Returns the chunks taken out of the trash, counted before the update.
+        """
+        if not objectIds or not self.doesCollectionExist():
+            return 0
+        moving = self.vxChunksInState(objectIds, deleted=True)
         self._setDeleted(objectIds, False)
+        return moving
 
+    @_backend_errors('render')
     def render(self, objectId: str, callback: Callable[[str], None]) -> None:
         """
         Given an object id, render the complete document.
 
-        Rehydrates all the chunks into the proper order.
+        Rehydrates all the chunks into the proper order, one window of chunk ids at a time
+        (``renderChunkSize``, at most the MAX_QUERY_RESULTS objects one Weaviate query returns).
         """
         # By definition, if the collection does not exists, there
         # is nothing to render
         if not self.doesCollectionExist():
             return
 
-        # Since chunks are returned in any order, and a single objectId
-        # may contain tens of thousands of chunks, we grave them one
-        # group at a time (renderChunkSize), put them into an array,
-        # join them and call the callback
+        window = max(1, min(int(self.renderChunkSize), MAX_QUERY_RESULTS))
         offset = 0
         while True:
-            # Build filter for getting a set of chunks within the offset range
+            # The chunks within this window of chunk ids, in any order
             points = self.collectionObj.query.fetch_objects(
                 filters=(
                     Filter.by_property('objectId').equal(objectId)
                     & Filter.by_property('chunkId').greater_or_equal(offset)
-                    & Filter.by_property('chunkId').less_than(offset + self.renderChunkSize)
+                    & Filter.by_property('chunkId').less_than(offset + window)
+                ),
+                limit=window,
+            ).objects
+
+            # Order this window's chunks by chunk id
+            parts: Dict[int, str] = {}
+            for point in points:
+                properties = _plain_properties(point.properties)
+                chunk = properties.get('chunkId')
+                if isinstance(chunk, int) and offset <= chunk < offset + window:
+                    parts[chunk] = properties.get('content') or ''
+
+            # If we got no items back, we are done
+            if not parts:
+                break
+
+            # Join it together and call the output function
+            callback(''.join(parts[chunk] for chunk in sorted(parts)))
+
+            # If the window was not full, must be done
+            if max(parts) < offset + window - 1:
+                break
+
+            offset += window
+
+    # ------------------------------------------------------------------
+    # Vector Explorer hooks (docs/development/nodes/vector-tool-contract.md)
+    # ------------------------------------------------------------------
+
+    def _notControl(self) -> Filter:
+        """Excludes the control record."""
+        return Filter.by_property('objectId').not_equal(CONTROL_OBJECT_ID)
+
+    def _count(self, filters: Optional[Filter]) -> int:
+        """Objects matching ``filters``."""
+        return int(self.collectionObj.aggregate.over_all(filters=filters, total_count=True).total_count or 0)
+
+    def _countByObject(self, filters: Optional[Filter], limit: int) -> Dict[Any, int]:
+        """Objects matching ``filters`` per objectId (at most ``limit`` groups)."""
+        result = self.collectionObj.aggregate.over_all(
+            filters=filters, group_by=GroupByAggregate(prop='objectId', limit=limit), total_count=True
+        )
+        return {group.grouped_by.value: int(group.total_count or 0) for group in result.groups}
+
+    def _readControl(self) -> Tuple[Optional[bool], Optional[int], Optional[str]]:
+        """(control record present, vector size, model) read from the control record."""
+        points = self.collectionObj.query.fetch_objects(
+            filters=Filter.by_property('objectId').equal(CONTROL_OBJECT_ID), limit=2
+        ).objects
+        if len(points) != 1:
+            return False, None, None
+        properties = _plain_properties(points[0].properties)
+        size = properties.get('vectorSize')
+        model = properties.get('modelName')
+        if isinstance(size, int) and size > 0:
+            self.vectorSize = size
+        if isinstance(model, str) and model:
+            self.modelName = model
+        return True, size if isinstance(size, int) else None, model if isinstance(model, str) else None
+
+    @_backend_errors('describe')
+    def describe(self) -> StoreInfo:
+        """Describe the collection; never raises for a missing one and never names the host."""
+        metric_key = self._metricKey()
+        caveats = ['experimental']
+        if metric_key == 'cosine':
+            caveats.append('score_scale_inverted_fixed')
+        version = None
+        try:
+            version = (self.client.get_meta() or {}).get('version')
+        except Exception:
+            version = None
+
+        if not self._doesCollectionExist():
+            return StoreInfo(
+                backend='weaviate',
+                backend_version=version,
+                collection=self.collection or None,
+                collection_exists=False,
+                control_record=None,
+                meta_column=None,
+                metric=METRICS.get(metric_key),
+                dimension=None,
+                model=None,
+                index=None,
+                size_bytes=None,
+                caveats=caveats,
+            )
+
+        control, dimension, model = self._readControl()
+
+        index = None
+        try:
+            config = self.collectionObj.config.get()
+            index_config = getattr(config, 'vector_index_config', None)
+            index_type = getattr(config, 'vector_index_type', None)
+            if index_type is not None or index_config is not None:
+                params = {}
+                for key in ('ef_construction', 'max_connections', 'ef'):
+                    value = getattr(index_config, key, None)
+                    if isinstance(value, int):
+                        params[key] = value
+                distance = getattr(index_config, 'distance_metric', None)
+                index = {
+                    'type': str(getattr(index_type, 'value', index_type)) if index_type is not None else None,
+                    'metric': str(getattr(distance, 'value', distance)) if distance is not None else None,
+                    'params': params,
+                }
+        except Exception:
+            index = None
+
+        return StoreInfo(
+            backend='weaviate',
+            backend_version=version,
+            collection=self.collection,
+            collection_exists=True,
+            control_record=control,
+            meta_column=None,
+            metric=METRICS.get(metric_key),
+            dimension=dimension,
+            model=model,
+            index=index,
+            size_bytes=None,
+            caveats=caveats,
+        )
+
+    def scoreInfo(self) -> Dict[str, Any]:
+        """How Doc.score is computed on Weaviate."""
+        metric = self._metricKey()
+        if metric == 'cosine':
+            formula, score_range = '1 - cosine distance / 2', [0, 1]
+        elif metric == 'dot':
+            formula, score_range = 'dot product (negated dot distance)', None
+        else:
+            formula, score_range = f'1 / (1 + {metric} distance)', [0, 1]
+        return {
+            'formula': formula,
+            'range': score_range,
+            'higher_is_better': True,
+            'floor': 0.2,
+            'threshold': self.threshold_search,
+        }
+
+    @_backend_errors('countChunks')
+    def countChunks(self, docFilter: DocFilter) -> Optional[int]:
+        """Chunk objects matching ``docFilter``, control record excluded."""
+        if not self._doesCollectionExist():
+            return 0
+        return self._count(_all(self._convertFilter(docFilter), self._notControl()))
+
+    @_backend_errors('countDocumentsWhere')
+    def countDocumentsWhere(self, docFilter: DocFilter) -> Optional[int]:
+        """Distinct objectIds matching ``docFilter`` (group by objectId); None above the group cap."""
+        if not self._doesCollectionExist():
+            return 0
+        groups = self._countByObject(_all(self._convertFilter(docFilter), self._notControl()), MAX_GROUPS)
+        return len(groups) if len(groups) < MAX_GROUPS else None
+
+    @_backend_errors('listDocumentPage')
+    def listDocumentPage(
+        self,
+        *,
+        cursor: Optional[str],
+        limit: int,
+        object_ids: Optional[Sequence[str]],
+        deleted: str,
+        sort: str,
+    ) -> DocPage:
+        """
+        One page of documents: chunk-0 objects by offset, with per-document counts grouped by objectId.
+
+        A document whose chunk 0 is missing is not listed (``countDocumentsWhere`` still counts it);
+        rows arrive in storage order.
+        """
+        offset, previous_first = _decode_cursor(cursor)
+        limit = max(1, int(limit))
+        caveats = ['documents_unsorted', 'documents_by_first_chunk']
+
+        # No collection, or an empty id list (no document asked for): an empty last page
+        if (object_ids is not None and not object_ids) or not self._doesCollectionExist():
+            return DocPage(
+                items=[], next_cursor=None, total=0, counts_exact=True, distinct=False, sorted=False, caveats=caveats
+            )
+
+        # Weaviate answers offset + limit <= QUERY_MAXIMUM_RESULTS only: serve what fits, then stop with a note
+        window_left = MAX_QUERY_RESULTS - offset
+        if window_left <= 0:
+            return DocPage(
+                items=[],
+                next_cursor=None,
+                total=None,
+                counts_exact=True,
+                distinct=False,
+                sorted=False,
+                caveats=caveats + ['documents_paging_unsupported'],
+            )
+
+        first_chunks = _all(
+            self._convertFilter(
+                DocFilter(chunkIds=[0], objectIds=list(object_ids) if object_ids else None), deleted=deleted
+            ),
+            self._notControl(),
+        )
+        fetch = min(limit + 1, window_left)
+        points = self.collectionObj.query.fetch_objects(filters=first_chunks, offset=offset, limit=fetch).objects
+
+        # The backend ignored the offset: this page repeats the previous one
+        if previous_first is not None and points and (points[0].properties or {}).get('objectId') == previous_first:
+            return DocPage(
+                items=[],
+                next_cursor=None,
+                total=None,
+                counts_exact=True,
+                distinct=False,
+                sorted=False,
+                caveats=caveats + ['documents_paging_unsupported'],
+            )
+
+        has_more = len(points) > limit
+        if not has_more and fetch <= limit and len(points) == fetch:
+            # The window ended on a full page: more documents may exist beyond it
+            caveats = caveats + ['documents_paging_unsupported']
+        points = points[:limit]
+        page_ids = []
+        for point in points:
+            object_id = (point.properties or {}).get('objectId')
+            if object_id and object_id not in page_ids:
+                page_ids.append(object_id)
+
+        counts = {}
+        if page_ids:
+            counts = self._countByObject(
+                self._convertFilter(DocFilter(objectIds=page_ids), deleted=deleted), len(page_ids)
+            )
+
+        items: List[DocumentRow] = []
+        seen = set()
+        for point in points:
+            properties = _plain_properties(point.properties)
+            object_id = properties.get('objectId')
+            if not object_id or object_id in seen:
+                continue
+            seen.add(object_id)
+            items.append(
+                DocumentRow(
+                    objectId=object_id,
+                    path=properties.get('parent') or '',
+                    chunks=counts.get(object_id),
+                    has_first_chunk=True,
+                    deleted=bool(properties.get('isDeleted')),
+                    tables=None,
+                    nodeId=properties.get('nodeId'),
+                    size=properties.get('size'),
+                    modifyTime=properties.get('modifyTime'),
+                    ingestedAt=properties.get('ingestedAt'),
+                    pointId=str(point.uuid),
                 )
             )
 
-            # Create a renderChunkSize array with empty
-            # entries. This will allow us to join even when
-            # a chunk doesn't come back
-            # Process the results
-            text = [''] * self.renderChunkSize
-            lastIndex = -1
+        first = (points[0].properties or {}).get('objectId') if points else None
+        return DocPage(
+            items=items,
+            next_cursor=_encode_cursor(offset + limit, first) if has_more else None,
+            total=self._count(first_chunks),
+            counts_exact=True,
+            distinct=False,
+            sorted=False,
+            caveats=caveats,
+        )
 
-            for point in points.objects:
-                content = point.properties.get('content')
-                chunk = point.properties.get('chunkId')
-                index = chunk - offset
+    @_backend_errors('scrollChunks')
+    def scrollChunks(self, objectId: str, *, after_chunk: int, limit: int, deleted: str) -> ChunkPage:
+        """
+        The chunks of one document after ``after_chunk``, in chunk order, without embeddings.
 
-                # Should never happen since we gave it an offset
-                if chunk < offset:
-                    continue
+        Reads the window of chunk ids (after_chunk, after_chunk + limit] and orders it here. When
+        the window is empty but the document goes on, the next chunk id is found with a few one-row
+        probes and the window starts there.
+        """
+        after_chunk = int(after_chunk)
+        limit = max(1, int(limit))
+        if objectId == CONTROL_OBJECT_ID or not self._doesCollectionExist():
+            return ChunkPage(docs=[], has_more=False, next_after=after_chunk)
 
-                text[index] = content
-                if index > lastIndex:
-                    lastIndex = index
+        document = self._convertFilter(DocFilter(objectIds=[objectId]), deleted=deleted)
 
-            # Compute the number of items we are going to process
-            numberOfItems = lastIndex + 1
+        def window(low: int, high: int, *, probe: bool = False) -> List[Any]:
+            return self.collectionObj.query.fetch_objects(
+                filters=_all(
+                    document,
+                    Filter.by_property('chunkId').greater_than(low),
+                    Filter.by_property('chunkId').less_or_equal(high),
+                ),
+                limit=1 if probe else min(limit * 4, MAX_QUERY_RESULTS),
+            ).objects
 
-            # If we got no items back, we are done
-            if numberOfItems < 1:
+        def beyond(high: int) -> bool:
+            return bool(
+                self.collectionObj.query.fetch_objects(
+                    filters=_all(document, Filter.by_property('chunkId').greater_than(high)), limit=1
+                ).objects
+            )
+
+        low = after_chunk
+        points = window(low, low + limit)
+        more = beyond(low + limit)
+        if not points and more:
+            first = _first_chunk_after(lambda lo, hi: bool(window(lo, hi, probe=True)), low + limit, limit)
+            if first is not None:
+                low = first - 1
+                points = window(low, low + limit)
+                more = beyond(low + limit)
+        docs = _one_per_chunk(self._toDoc(point) for point in points)
+        if more:
+            next_after = low + limit
+        else:
+            next_after = docs[-1].metadata.chunkId if docs else after_chunk
+        return ChunkPage(docs=docs, has_more=more, next_after=next_after)
+
+    @_backend_errors('sampleChunks')
+    def sampleChunks(
+        self,
+        *,
+        n: int,
+        seed: int,
+        strategy: str,
+        docFilter: DocFilter,
+        include_keys: Sequence[Tuple[str, int]],
+    ) -> Tuple[List[Doc], str]:
+        """Up to ``n`` chunks with embeddings in object-id order ('first'); stratified is not native."""
+        if strategy == 'stratified':
+            raise StoreUnsupported('sampleChunks(strategy="stratified") is not native on Weaviate')
+        if not self._doesCollectionExist():
+            return [], 'first'
+        pinned = {(str(o), int(c)) for o, c in include_keys or []}
+        points = self.collectionObj.query.fetch_objects(
+            filters=_all(self._convertFilter(docFilter), self._notControl()),
+            limit=min(max(1, int(n)) + len(pinned), MAX_QUERY_RESULTS),
+            include_vector=True,
+        ).objects
+        docs = []
+        for point in points:
+            doc = self._toDoc(point, with_vector=True)
+            if (doc.metadata.objectId, doc.metadata.chunkId) in pinned:
+                continue
+            docs.append(doc)
+            if len(docs) >= n:
                 break
+        return docs, 'first'
 
-            # Join it together
-            fullText = ''.join(text[0:numberOfItems])
+    @_backend_errors('getVectors')
+    def getVectors(self, keys: Sequence[Tuple[str, int]]) -> List[Doc]:
+        """
+        Chunks with embeddings for ``keys``, in request order.
 
-            # Call the output function
-            callback(fullText)
+        Tries the keyed ids first, then reads every miss by filter (older objects have other ids).
+        """
+        wanted = [(str(o), int(c)) for o, c in keys or [] if o != CONTROL_OBJECT_ID]
+        if not wanted or not self._doesCollectionExist():
+            return []
+        found: Dict[Tuple[str, int], Doc] = {}
 
-            # If we got less than we asked for, must be done
-            if numberOfItems < self.renderChunkSize:
-                break
+        # Fast path: keyed ids
+        for start in range(0, len(wanted), FETCH_BATCH_IDS):
+            batch = wanted[start : start + FETCH_BATCH_IDS]
+            points = self.collectionObj.query.fetch_objects(
+                filters=Filter.by_id().contains_any([_keyed_uuid(o, c) for o, c in batch]),
+                limit=len(batch),
+                include_vector=True,
+            ).objects
+            for point in points:
+                doc = self._toDoc(point, with_vector=True)
+                found.setdefault((doc.metadata.objectId, doc.metadata.chunkId), doc)
 
-            offset += self.renderChunkSize
+        # Misses: by objectId and chunkId
+        missing = [key for key in wanted if key not in found]
+        for object_ids, chunk_ids in _key_batches(missing):
+            points = self.collectionObj.query.fetch_objects(
+                filters=_all(_any_equal('objectId', object_ids), _any_equal('chunkId', chunk_ids)),
+                limit=min(len(object_ids) * len(chunk_ids), MAX_QUERY_RESULTS),
+                include_vector=True,
+            ).objects
+            for point in points:
+                doc = self._toDoc(point, with_vector=True)
+                found.setdefault((doc.metadata.objectId, doc.metadata.chunkId), doc)
+
+        return [found[key] for key in wanted if key in found]
+
+    @_backend_errors('removeCounted')
+    def removeCounted(self, objectIds: List[str]) -> Optional[int]:
+        """Remove every chunk of ``objectIds``; return the objects removed (counted first)."""
+        ids = [o for o in objectIds or [] if o != CONTROL_OBJECT_ID]
+        if not ids or not self._doesCollectionExist():
+            return 0
+        removed = self._count(_any_equal('objectId', ids))
+        self.collectionObj.data.delete_many(where=_any_equal('objectId', ids))
+        return removed
+
+    def removeTrashed(self, objectIds: List[str]) -> Optional[int]:
+        """Delete the chunks of ``objectIds`` that are in the trash, and only those, in one operation; return the rows removed.
+
+        The deleted flag is part of the delete's own filter, so a chunk a concurrent ``restore`` has just made
+        live is never removed. Never the control record.
+        """
+        ids = [o for o in objectIds or [] if o != CONTROL_OBJECT_ID]
+        if not ids or not self._doesCollectionExist():
+            return 0
+        trashed = _all(_any_equal('objectId', ids), Filter.by_property('isDeleted').equal(True))
+        removed = self._count(trashed)
+        self.collectionObj.data.delete_many(where=trashed)
+        return removed

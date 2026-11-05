@@ -29,6 +29,7 @@ from ai.constants import CONST_DATA_OPEN_TARGET_WAIT, CONST_DATA_PIPE_TIMEOUT, C
 from ai.common.dap import DAPConn
 from ai.common.cprofile_manager import profiler
 from ai.common.schema import Question, Doc, Answer
+from ai.common.tool_context import dap_context, stamp_param
 from rocketlib import (
     APERR,
     AVI_ACTION,
@@ -1028,6 +1029,32 @@ class DataConn(DAPConn):
         component = component.replace('*', '')
         monitorOther('DBG', f'{op}*{pipe_id:x}*0*{component}*{payload}')
 
+    def _source_type(self) -> Optional[str]:
+        """Return the provider of this task's source component, or None when it cannot be read.
+
+        This is ``'tools'``, ``'chat'``, ``'dropper'``, ``'webhook'``, ... for the
+        source the task was started from: the provider of the component that
+        ``taskConfig.pipeline.source`` names. The target endpoint's own logical
+        type is not it (that is the pipeline's Null target endpoint).
+        """
+        try:
+            pipeline = self._target.taskConfig.get('pipeline')
+            if hasattr(pipeline, 'toDict'):
+                pipeline = pipeline.toDict()
+            if not isinstance(pipeline, dict):
+                return None
+            source_id = pipeline.get('source')
+            components = pipeline.get('components')
+            if not isinstance(source_id, str) or not source_id or not isinstance(components, list):
+                return None
+            for component in components:
+                if isinstance(component, dict) and component.get('id') == source_id:
+                    provider = component.get('provider')
+                    return provider if isinstance(provider, str) and provider else None
+        except Exception:
+            return None
+        return None
+
     async def _tool(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
         """
         Invoke a @tool_function on a pipeline node.
@@ -1046,6 +1073,15 @@ class DataConn(DAPConn):
                   node that owns the tool handles the call.
                 - input (dict, optional): Arguments forwarded to the tool.
                 - pipe_id (int, optional): Pipe ID of an already-open pipe.
+                - caller (dict): The caller as the server sees it, set by the
+                  server (``DataCommands.on_rrext_process``), never by the
+                  client. Missing or malformed reads as ``'unknown'``.
+
+        Every invoke param this builds carries the call context
+        (``ai.common.tool_context``): origin ``'dap'``, the calling task's
+        source type (see :pymeth:`_source_type`), whether a node was named,
+        and the caller. The tool input is passed through unchanged and is
+        never read as context.
 
         Returns:
             DAP response with ``body.result`` set to the tool's return value.
@@ -1089,6 +1125,15 @@ class DataConn(DAPConn):
         call_label = f'{node_id}.{tool_name}()' if node_id else f'{tool_name}()'
 
         def tool_sync():
+            # The call context every candidate's param carries: built here
+            # from the server-side view only (the source task's type, the
+            # node the request named, the caller the server attached).
+            call_context = dap_context(
+                source_type=self._source_type(),
+                node_id=node_id,
+                caller=args.get('caller'),
+            )
+
             # Use caller's open pipe if provided, otherwise borrow one
             if conn_pipe is not None:
                 pipe = conn_pipe.pipe
@@ -1129,6 +1174,7 @@ class DataConn(DAPConn):
                         continue
                     component = node.pipeType.id
                     param = IInvokeTool.Invoke(tool_name=tool_name, input=tool_input)
+                    stamp_param(param, call_context)
 
                     # Trace the attempt: enter the node with the tool + input,
                     # leave with the outcome (return / skip / error) + timing.

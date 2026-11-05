@@ -1,0 +1,40 @@
+{
+  "__scrub__": [
+    "pointId"
+  ],
+  "success": true,
+  "items": [
+    {
+      "objectId": "75b89d86-a64e-5143-bf50-55d4a7fd8cd2",
+      "path": "C:/demo/handbooks/falcon_handbook.md",
+      "chunks": 6,
+      "has_first_chunk": false,
+      "tables": 0,
+      "deleted": false,
+      "nodeId": "9a0b9f66-f693-4b3b-a85b-bb810261c26e",
+      "size": null,
+      "modifyTime": null,
+      "ingestedAt": null,
+      "pointId": "<scrubbed>",
+      "max_chunk_id": 6,
+      "deleted_chunks": 0
+    }
+  ],
+  "next_cursor": null,
+  "total": 1,
+  "counts_exact": true,
+  "distinct": true,
+  "sorted": true,
+  "documents": [
+    {
+      "object_id": "75b89d86-a64e-5143-bf50-55d4a7fd8cd2",
+      "parent": "C:/demo/handbooks/falcon_handbook.md",
+      "chunk_count": 6
+    }
+  ],
+  "offset": 0,
+  "has_more": false,
+  "filter_applied": "server",
+  "filter_ignored": [],
+  "caveats": []
+}

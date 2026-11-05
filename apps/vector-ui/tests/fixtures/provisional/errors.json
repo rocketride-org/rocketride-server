@@ -1,0 +1,109 @@
+{
+	"INVALID_INPUT": {
+		"success": false,
+		"code": "INVALID_INPUT",
+		"error": "object_ids must be a list of 1 to 100 strings."
+	},
+	"UNSUPPORTED": {
+		"success": false,
+		"code": "UNSUPPORTED",
+		"error": "sampleChunks is not supported by this store"
+	},
+	"NOT_FOUND": {
+		"success": false,
+		"code": "NOT_FOUND",
+		"error": "No document with that objectId is stored in this collection."
+	},
+	"RESERVED_ID": {
+		"success": false,
+		"code": "RESERVED_ID",
+		"error": "'schema' is the collection's control record and cannot be removed."
+	},
+	"COLLECTION_MISSING": {
+		"success": false,
+		"code": "COLLECTION_MISSING",
+		"error": "The collection does not exist yet; add a document first."
+	},
+	"STORE_ERROR": {
+		"success": false,
+		"code": "STORE_ERROR",
+		"error": "OperationalError: the store did not answer"
+	},
+	"DIMENSION_MISMATCH": {
+		"success": false,
+		"code": "DIMENSION_MISMATCH",
+		"error": "The vector has 768 values; this collection stores 384."
+	},
+	"MODEL_MISMATCH": {
+		"success": false,
+		"code": "MODEL_MISMATCH",
+		"error": "The vector was made with another embedding model than this collection."
+	},
+	"NO_EMBEDDER": {
+		"success": false,
+		"code": "NO_EMBEDDER",
+		"error": "No embedding node is bound to this store; pass a vector instead of a query."
+	},
+	"LIMIT_EXCEEDED": {
+		"success": false,
+		"code": "LIMIT_EXCEEDED",
+		"error": "Light mode is limited to 5000 points."
+	},
+	"SAMPLE_EXPIRED": {
+		"success": false,
+		"code": "SAMPLE_EXPIRED",
+		"error": "The sample is no longer held by the node. Draw the sample again."
+	},
+	"BUSY": {
+		"success": false,
+		"code": "BUSY",
+		"error": "Another sample or projection is running on this store; try again when it ends."
+	},
+	"TIMEOUT": {
+		"success": false,
+		"code": "TIMEOUT",
+		"error": "The sample did not finish within 60 s."
+	},
+	"RATE_LIMITED": {
+		"success": false,
+		"code": "RATE_LIMITED",
+		"error": "Too many embed calls on this task; try again in 12 s.",
+		"retry_after_s": 12
+	},
+	"WRITES_DISABLED": {
+		"success": false,
+		"code": "WRITES_DISABLED",
+		"error": "Removing documents is turned off on this store node (allow_writes)."
+	},
+	"WRITES_SOURCE": {
+		"success": false,
+		"code": "WRITES_SOURCE",
+		"error": "Only a Tools source may remove documents."
+	},
+	"WRITES_PUBLIC": {
+		"success": false,
+		"code": "WRITES_PUBLIC",
+		"error": "The store refused this request."
+	},
+	"WRITES_BROADCAST": {
+		"success": false,
+		"code": "WRITES_BROADCAST",
+		"error": "The store refused this request: name the node the write is for."
+	},
+	"WRITES_UNKNOWN_CALLER": {
+		"success": false,
+		"code": "WRITES_UNKNOWN_CALLER",
+		"error": "The engine did not identify this request, so the store refused the write."
+	},
+	"READS_PUBLIC": {
+		"success": false,
+		"code": "READS_PUBLIC",
+		"error": "The store refused this request."
+	},
+	"IN_TRASH": {
+		"success": false,
+		"code": "IN_TRASH",
+		"error": "chunks: the document 'doc00' is in the trash; restore it to read it",
+		"object_id": "doc00"
+	}
+}

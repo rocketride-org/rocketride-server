@@ -133,7 +133,7 @@
 		{
 			"section": "Pipe",
 			"title": "MongoDB Atlas Vector Store",
-			"properties": ["vector.cloud.host", "vector.apikey", "vector.score", "vector.database", "vector.collection", "atlas.serverName"]
+			"properties": ["vector.cloud.host", "vector.apikey", "vector.score", "vector.database", "vector.collection", "atlas.serverName", "vector.allow_writes"]
 		},
 		{
 			"section": "Transform",

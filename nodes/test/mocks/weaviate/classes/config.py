@@ -41,8 +41,8 @@ class DataType(Enum):
     BLOB = 'blob'
 
 
-class VectorDistances(Enum):
-    """Vector distance metrics."""
+class VectorDistances(str, Enum):
+    """Vector distance metrics (a str enum, as in the real client: ``VectorDistances.COSINE == 'cosine'``)."""
 
     COSINE = 'cosine'
     DOT = 'dot'
