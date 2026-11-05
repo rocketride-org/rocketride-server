@@ -663,8 +663,11 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
         This is the database's own guarantee that a generated statement cannot change it; ``is_sql_safe`` is a
         first pass over its shape. On PostgreSQL it covers one statement only, see below.
 
-        - PostgreSQL: a READ ONLY transaction (``postgresql_readonly``, set before the transaction begins)
-          with ``SET LOCAL statement_timeout``. psycopg2 sends a ``;``-chain as one string: a ``COMMIT`` or
+        - PostgreSQL: a READ ONLY transaction (``SET TRANSACTION READ ONLY`` as its first statement) with
+          ``SET LOCAL statement_timeout``; both end with the transaction, so nothing is left on the session.
+          SQLAlchemy's ``postgresql_readonly`` is not used: it leaves the connection set to READ WRITE
+          afterwards, also for a role whose default is read-only. Both callers run one statement and do not
+          commit, so the block is one transaction. psycopg2 sends a ``;``-chain as one string: a ``COMMIT`` or
           ``ROLLBACK`` in it ends the transaction, so the statements after it can write, and a ``SET`` or
           ``set_config()`` in it lifts the time limit for the statements after it. ``is_sql_safe`` rejects
           any chain; on PostgreSQL that rule is part of the guarantee. MySQL and MariaDB (pymysql connects
@@ -682,8 +685,10 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
           table functions run when the user holds their grants.
         - SQLite: ``PRAGMA query_only``.
 
-        Nothing outlives the block: the transaction is rolled back, and what was set on the session is reset
-        before the connection goes back to the pool. A connection whose reset fails is discarded. Reads of
+        Nothing outlives the block: the transaction is rolled back, and the session settings the block changed
+        get back the values they had before it (which the server, ``init_connect`` or a role may have set, so
+        not the defaults) before the connection goes back to the pool. A connection whose reset fails is
+        discarded. Reads of
         server files and signals to other sessions (``pg_read_file``, ``pg_terminate_backend``, ``LOAD_FILE``)
         are reads to the database: only a role without those privileges stops them.
 
@@ -696,8 +701,7 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
         timeout = int(self.READ_QUERY_TIMEOUT)
         with self.engine.connect() as conn:
             if dialect == 'postgresql':
-                # Before the transaction begins; SQLAlchemy resets it when the connection goes back to the pool
-                conn.execution_options(postgresql_readonly=True)
+                conn.exec_driver_sql('SET TRANSACTION READ ONLY')
                 conn.exec_driver_sql(f'SET LOCAL statement_timeout = {timeout * 1000}')
                 yield conn
                 return
@@ -706,15 +710,20 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
                 return
             if dialect in ('mysql', 'mariadb'):
                 # The session, not one transaction: DDL commits implicitly and would start a read-write one
-                setting, value = (
-                    ('max_statement_time', timeout)
-                    if conn.dialect.is_mariadb
-                    else ('max_execution_time', timeout * 1000)
-                )
+                mariadb = conn.dialect.is_mariadb
+                setting, value = ('max_statement_time', timeout) if mariadb else ('max_execution_time', timeout * 1000)
+                read_only = 'tx_read_only' if mariadb else 'transaction_read_only'
+                was_read_only, was_limit = conn.exec_driver_sql(
+                    f'SELECT @@SESSION.{read_only}, @@SESSION.{setting}'
+                ).one()
                 begin = ['SET SESSION TRANSACTION READ ONLY', f'SET SESSION {setting} = {value}']
-                end = ['SET SESSION TRANSACTION READ WRITE', f'SET SESSION {setting} = DEFAULT']
+                end = [
+                    f'SET SESSION TRANSACTION READ {"ONLY" if was_read_only else "WRITE"}',
+                    f'SET SESSION {setting} = {was_limit}',
+                ]
             else:
-                begin, end = ['PRAGMA query_only = ON'], ['PRAGMA query_only = OFF']
+                was_query_only = conn.exec_driver_sql('PRAGMA query_only').scalar()
+                begin, end = ['PRAGMA query_only = ON'], [f'PRAGMA query_only = {"ON" if was_query_only else "OFF"}']
             try:
                 for statement in begin:
                     conn.exec_driver_sql(statement)

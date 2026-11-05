@@ -173,7 +173,8 @@ answer is emitted instead of executing SQL.
 The `EXPLAIN` and the query run in a read-only session
 (`SET SESSION TRANSACTION READ ONLY`), which refuses writes and DDL, with
 `max_execution_time` (`max_statement_time` on MariaDB) set to 60 seconds; both
-are reset before the connection is reused. The shape check is a first pass, not
+get back the values the session had before, not the server defaults, before the
+connection is reused. The shape check is a first pass, not
 the guarantee, and a read-only session does not stop `LOAD_FILE()` or
 `SELECT ... INTO OUTFILE`, because a file is not a table: connect as a user that
 has `SELECT` on the tables it should answer from and no `FILE` privilege.

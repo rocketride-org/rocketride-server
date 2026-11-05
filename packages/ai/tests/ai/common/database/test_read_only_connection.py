@@ -136,6 +136,17 @@ def test_sqlite_connection_is_writable_again_after_the_block(sqlite_global):
     assert _count(sqlite_global.engine) == 3
 
 
+def test_sqlite_query_only_set_before_the_block_stays_on(sqlite_global):
+    """A connection that was query-only before the block is query-only after it, not read-write."""
+    with sqlite_global.engine.connect() as conn:
+        conn.exec_driver_sql('PRAGMA query_only = ON')
+    with sqlite_global.read_only_connection() as conn:
+        conn.exec_driver_sql('SELECT 1')
+    with sqlite_global.engine.connect() as conn:
+        assert conn.exec_driver_sql('PRAGMA query_only').scalar() == 1
+        conn.exec_driver_sql('PRAGMA query_only = OFF')
+
+
 def test_generated_query_paths_use_the_read_only_connection(sqlite_global):
     """``_executeSQLQuery`` and the EXPLAIN check cannot write, whatever the statement says."""
     inst = _Instance.__new__(_Instance)
@@ -159,15 +170,17 @@ def test_an_unknown_dialect_runs_nothing():
 
 
 class _RecordingConnection:
-    """A connection that records what the block runs on it."""
+    """A connection that records what the block runs on it, and whose session reads ``session``."""
 
-    def __init__(self, is_mariadb=False):
+    def __init__(self, is_mariadb=False, session=(0, 0)):
         """Nothing run yet.
 
         Args:
             is_mariadb: What the connection's dialect says about the server.
+            session: What a read of the session's settings returns before the block.
         """
         self.dialect = SimpleNamespace(is_mariadb=is_mariadb)
+        self.session = session
         self.statements = []
         self.invalidated = False
 
@@ -176,8 +189,12 @@ class _RecordingConnection:
 
         Args:
             statement: The SQL.
+
+        Returns:
+            A result whose ``one()`` is ``session`` and whose ``scalar()`` is its first value.
         """
         self.statements.append(statement)
+        return SimpleNamespace(one=lambda: self.session, scalar=lambda: self.session[0])
 
     def rollback(self):
         """Roll back (nothing to do)."""
@@ -207,22 +224,42 @@ def _engine_with(dialect, conn):
 
 
 @pytest.mark.parametrize(
-    ('dialect', 'is_mariadb', 'setting', 'value'),
-    [('mysql', False, 'max_execution_time', 2000), ('mariadb', True, 'max_statement_time', 2)],
+    ('dialect', 'is_mariadb', 'read_only', 'setting', 'value'),
+    [
+        ('mysql', False, 'transaction_read_only', 'max_execution_time', 2000),
+        ('mariadb', True, 'tx_read_only', 'max_statement_time', 2),
+    ],
 )
-def test_a_mariadb_url_gets_the_mysql_read_only_session(dialect, is_mariadb, setting, value):
+def test_a_mariadb_url_gets_the_mysql_read_only_session(dialect, is_mariadb, read_only, setting, value):
     """A ``mariadb+`` URL names the dialect ``mariadb``: it gets the MySQL read-only session with MariaDB's limit."""
     conn = _RecordingConnection(is_mariadb)
     with _global(_engine_with(dialect, conn)).read_only_connection():
         pass
 
     assert conn.statements == [
+        f'SELECT @@SESSION.{read_only}, @@SESSION.{setting}',
         'SET SESSION TRANSACTION READ ONLY',
         f'SET SESSION {setting} = {value}',
         'SET SESSION TRANSACTION READ WRITE',
-        f'SET SESSION {setting} = DEFAULT',
+        f'SET SESSION {setting} = 0',
     ]
     assert not conn.invalidated
+
+
+@pytest.mark.parametrize(
+    ('dialect', 'session', 'end'),
+    [
+        ('mysql', (1, 5000), ['SET SESSION TRANSACTION READ ONLY', 'SET SESSION max_execution_time = 5000']),
+        ('sqlite', (1,), ['PRAGMA query_only = ON']),
+    ],
+)
+def test_the_session_gets_back_what_it_had_not_the_defaults(dialect, session, end):
+    """A session the server or a role made read-only, or gave a stricter limit, is not reset to read-write."""
+    conn = _RecordingConnection(session=session)
+    with _global(_engine_with(dialect, conn)).read_only_connection():
+        pass
+
+    assert conn.statements[-len(end) :] == end
 
 
 class _ResetFailingConnection(_RecordingConnection):
@@ -233,10 +270,14 @@ class _ResetFailingConnection(_RecordingConnection):
 
         Args:
             statement: The SQL.
+
+        Returns:
+            The recorded result.
         """
-        super().exec_driver_sql(statement)
+        result = super().exec_driver_sql(statement)
         if statement == 'PRAGMA query_only = OFF':
             raise OperationalError(statement, {}, Exception('connection lost'))
+        return result
 
 
 def test_a_connection_whose_reset_fails_is_discarded(monkeypatch):
@@ -247,7 +288,7 @@ def test_a_connection_whose_reset_fails_is_discarded(monkeypatch):
     with _global(_engine_with('sqlite', conn)).read_only_connection():
         pass
 
-    assert conn.statements == ['PRAGMA query_only = ON', 'PRAGMA query_only = OFF']
+    assert conn.statements == ['PRAGMA query_only', 'PRAGMA query_only = ON', 'PRAGMA query_only = OFF']
     assert conn.invalidated
     assert 'discarding it' in warnings[0]
 
@@ -257,7 +298,8 @@ def test_a_connection_whose_reset_fails_is_discarded(monkeypatch):
 # ---------------------------------------------------------------------------
 
 # Per dialect: table DDL, statements the database must refuse inside the block, a query that runs past the
-# time limit, and a query that reads the session settings the block changed (None where they live per query)
+# time limit, one whose EXPLAIN would (None where planning does not run it), and a query that reads the
+# session settings the block changed (None where they live per query)
 _LIVE = {
     'postgresql': {
         'env': 'RR_TEST_PG_DSN',
@@ -278,6 +320,7 @@ _LIVE = {
             'DROP SEQUENCE IF EXISTS {t}_seq',
         ],
         'slow': 'SELECT pg_sleep(30)',
+        'slow_explain': None,
         'session': "SELECT current_setting('statement_timeout'), current_setting('transaction_read_only')",
         'session_default': ('0', 'off'),
     },
@@ -295,6 +338,8 @@ _LIVE = {
         'extra': [],
         'drop': ['DROP TABLE IF EXISTS {t}', 'DROP TABLE IF EXISTS {t}_new', 'DROP TABLE IF EXISTS {t}_copy'],
         'slow': 'SELECT count(*) FROM information_schema.columns a, information_schema.columns b, information_schema.columns c',
+        # MySQL runs a constant subquery while it plans, so this EXPLAIN sleeps; MariaDB's does not
+        'slow_explain': 'SELECT * FROM (SELECT 1 a) x WHERE a = (SELECT SLEEP(30))',
         'session': 'SELECT @@SESSION.transaction_read_only',
         'session_default': (0,),
     },
@@ -312,6 +357,7 @@ _LIVE = {
         'extra': [],
         'drop': ['DROP TABLE IF EXISTS {t}', 'DROP TABLE IF EXISTS {t}_new'],
         'slow': 'SELECT count() FROM numbers(1000000000000)',
+        'slow_explain': None,
         'session': None,
         'session_default': None,
     },
@@ -410,6 +456,64 @@ def test_live_connection_is_ordinary_again_after_the_block(live):
         assert conn.exec_driver_sql(f'SELECT count(*) FROM {table}').scalar() == 1
         if case['session']:
             assert tuple(conn.exec_driver_sql(case['session']).one()) == case['session_default']
+
+
+def test_live_explain_check_stops_near_the_limit(live):
+    """The EXPLAIN check is time-limited too, also where planning runs part of the query."""
+    glb, _table, case = live
+    if not case['slow_explain']:
+        pytest.skip('this server plans the slow query without running it')
+    start = time.monotonic()
+    glb._validateQuery(case['slow_explain'])
+    assert time.monotonic() - start < glb.READ_QUERY_TIMEOUT + 10
+
+
+# Per server: statements that make a session read-only with a stricter limit (what a role default, the server's
+# global value or init_connect can do), a read of both, what it returns, and the statements that undo them
+_STRICT_SESSION = {
+    'postgresql': (
+        ['SET SESSION default_transaction_read_only = on', 'SET SESSION statement_timeout = 5000'],
+        "SELECT current_setting('transaction_read_only'), current_setting('statement_timeout')",
+        ('on', '5s'),
+        ['SET SESSION default_transaction_read_only = off', 'SET SESSION statement_timeout = DEFAULT'],
+    ),
+    'mysql': (
+        ['SET SESSION TRANSACTION READ ONLY', 'SET SESSION max_execution_time = 5000'],
+        'SELECT @@SESSION.transaction_read_only, @@SESSION.max_execution_time',
+        (1, 5000),
+        ['SET SESSION TRANSACTION READ WRITE', 'SET SESSION max_execution_time = DEFAULT'],
+    ),
+    'mariadb': (
+        ['SET SESSION TRANSACTION READ ONLY', 'SET SESSION max_statement_time = 5'],
+        'SELECT @@SESSION.tx_read_only, @@SESSION.max_statement_time',
+        (1, 5.0),
+        ['SET SESSION TRANSACTION READ WRITE', 'SET SESSION max_statement_time = DEFAULT'],
+    ),
+}
+
+
+def test_live_a_strict_session_comes_back_as_it_was(live):
+    """A pooled session that was read-only with a stricter limit is not reset to read-write and the defaults."""
+    glb, _table, _case = live
+    dialect = glb.engine.dialect
+    server = 'mariadb' if getattr(dialect, 'is_mariadb', False) else dialect.name
+    if server not in _STRICT_SESSION:
+        pytest.skip('ClickHouse sends its settings with each query: there is no session to restore')
+    strict, read, expected, undo = _STRICT_SESSION[server]
+    with glb.engine.connect() as conn:
+        for statement in strict:
+            conn.exec_driver_sql(statement)
+        conn.commit()
+    try:
+        with glb.read_only_connection() as conn:
+            conn.execute(text('SELECT 1')).fetchall()
+        with glb.engine.connect() as conn:
+            assert tuple(conn.exec_driver_sql(read).one()) == expected
+    finally:
+        with glb.engine.connect() as conn:
+            for statement in undo:
+                conn.exec_driver_sql(statement)
+            conn.commit()
 
 
 class _ProfileConnection:
