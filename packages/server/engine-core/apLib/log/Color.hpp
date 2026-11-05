@@ -49,6 +49,14 @@ namespace ap {
 // BG_BLUE = 44
 // BG_DEFAULT = 49
 
+//-------------------------------------------------------------------------
+/// @details
+///		Returns the ANSI escape code sequence for the specified log color
+///	@param[in] color
+///		The color enum value to convert
+///	@returns
+///		The ANSI escape sequence, or an empty view if colors are disabled
+//-------------------------------------------------------------------------
 inline TextView colorCode(Color color) noexcept {
     // This is a kludgy way to disable colors in output, but it works
     if (log::options().disableAllColors) return {};
@@ -69,6 +77,14 @@ inline TextView colorCode(Color color) noexcept {
     }
 }
 
+//-------------------------------------------------------------------------
+/// @details
+///		Returns the canonical string name for the specified log color
+///	@param[in] color
+///		The color enum value to convert
+///	@returns
+///		Case-insensitive string view naming the color
+//-------------------------------------------------------------------------
 inline iTextView colorName(Color color) noexcept {
     switch (color) {
         case Color::Red:
@@ -98,6 +114,16 @@ inline void __toString(Color color, BufferT &buff,
     if (!opts.noColors()) buff << colorCode(color);
 }
 
+//-------------------------------------------------------------------------
+/// @details
+///		Parses a Color enum value from a string buffer (case-insensitive)
+///	@param[out] color
+///		Receives the parsed Color value on success
+///	@param[in] buff
+///		Input string buffer containing the color name
+///	@returns
+///		Error if the color name is unrecognized
+//-------------------------------------------------------------------------
 template <typename BufferT>
 inline Error __fromString(Color &color, const BufferT &buff) noexcept {
     iText name = buff.toString();

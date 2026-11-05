@@ -36,4 +36,25 @@ TEST_CASE("log::Colors") {
         }
         REQUIRE(_fsc<Color>("invalid").hasCcode());
     }
+
+    SECTION("Invalid --log.decorationColor keeps default on init") {
+        auto savedCmdLine = application::cmdline();
+        auto savedColor = log::options().decorationColor;
+        auto savedIsAtty = log::options().isAtty;
+        auto savedDisableAllColors = log::options().disableAllColors;
+
+        log::options().decorationColor = Color::Green;
+        application::cmdline().addArg("--log.decorationColor=invalid");
+        application::Options::get().init();
+        log::init();
+
+        REQUIRE(log::options().decorationColor == Color::Green);
+
+        application::cmdline().addArg("--log.decorationColor=");
+        application::Options::get().init();
+        application::cmdline() = savedCmdLine;
+        log::options().decorationColor = savedColor;
+        log::options().isAtty = savedIsAtty;
+        log::options().disableAllColors = savedDisableAllColors;
+    }
 }

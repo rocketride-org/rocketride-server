@@ -69,7 +69,10 @@ static application::Opt IsAtty{"--log.isAtty"};
 static application::Opt LogFile{"--log.file"};
 static application::Opt LogTruncate{"--log.truncate", "0"};
 
-// Initializes the log subsystem
+//-------------------------------------------------------------------------
+/// @details
+///		Initializes the log subsystem from command-line options
+//-------------------------------------------------------------------------
 void init() noexcept {
     // Log to file if indicated
     if (LogFile) {
