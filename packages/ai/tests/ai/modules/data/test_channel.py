@@ -488,7 +488,8 @@ async def test_engine_request_completes_while_a_transfer_is_running(task_side, c
 async def test_a_transfer_longer_than_one_timeout_completes_when_each_chunk_is_on_time(
     task_side, commands, monkeypatch
 ):
-    monkeypatch.setattr(channel_module, 'CONST_CHANNEL_CONNECT_TIMEOUT', 0.05)
+    # Room for request_sync to start on a loaded runner; the 3 s transfer still outlasts connect + exchange (2.5 s).
+    monkeypatch.setattr(channel_module, 'CONST_CHANNEL_CONNECT_TIMEOUT', 0.5)
     chunk = 4096
     monkeypatch.setattr(registry, 'CONST_CHANNEL_CHUNK', chunk)
 

@@ -4979,6 +4979,7 @@ class TestPipelineTimeout:
                 deadline = time.monotonic() + 5
                 while endpoint._run_text_pipeline.call_count < 2 and time.monotonic() < deadline:
                     await asyncio.sleep(0.01)
+                assert endpoint._run_text_pipeline.call_count == 2, 'both hung runs must hold a worker'
                 endpoint._emit_event_pipeline.reset_mock()
 
                 # A new message cannot get a slot; it still reports timeout instead of hanging.

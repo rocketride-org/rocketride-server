@@ -173,20 +173,26 @@ describe('DevSession', () => {
 		const session = new DevSession({ app, workspaceRoot: ws, engineOrigin: 'http://localhost:5565', install: false, watchPackageJson: false, onState: (s) => states.push(s) });
 
 		const origin = await session.start();
-		await waitFor(() => states.includes('ok'));
-
-		// the per-session wrapper is the preview's front door
 		const rocketrideDir = path.join(app.folder, '.rocketride');
-		const wrapperNames = fs.readdirSync(rocketrideDir).filter((name) => name.startsWith('dev-proxy.'));
-		expect(wrapperNames).toHaveLength(1);
-		const wrapper = fs.readFileSync(path.join(rocketrideDir, wrapperNames[0]), 'utf8');
-		await session.stop();
+		let wrapperName = '';
+		let wrapper = '';
+		try {
+			await waitFor(() => states.includes('ok'));
+
+			// the per-session wrapper is the preview's front door
+			const wrapperNames = fs.readdirSync(rocketrideDir).filter((name) => name.startsWith('dev-proxy.'));
+			expect(wrapperNames).toHaveLength(1);
+			wrapperName = wrapperNames[0];
+			wrapper = fs.readFileSync(path.join(rocketrideDir, wrapperName), 'utf8');
+		} finally {
+			await session.stop();
+		}
 
 		expect(origin).toBe('http://localhost:3999');
 		expect(wrapper).toContain('"http://localhost:5565"');
 		expect(wrapper).toContain('"/apps/acme.clock/dev"');
 		// stop() removes the session's own wrapper
-		expect(fs.existsSync(path.join(rocketrideDir, wrapperNames[0]))).toBe(false);
+		expect(fs.existsSync(path.join(rocketrideDir, wrapperName))).toBe(false);
 		expect(states).toContain('ok');
 		expect(states[states.length - 1]).toBe('stopped');
 	});
