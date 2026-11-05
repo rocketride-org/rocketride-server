@@ -4975,6 +4975,10 @@ class TestPipelineTimeout:
                 # Two runs hang and keep their workers: the pipeline pool is full.
                 for _ in range(2):
                     await asyncio.wait_for(endpoint._process_message(_make_message(content='q')), 5)
+                # Both hung runs must hold their workers before the pool counts as full.
+                deadline = time.monotonic() + 5
+                while endpoint._run_text_pipeline.call_count < 2 and time.monotonic() < deadline:
+                    await asyncio.sleep(0.01)
                 endpoint._emit_event_pipeline.reset_mock()
 
                 # A new message cannot get a slot; it still reports timeout instead of hanging.
@@ -4995,12 +4999,20 @@ class TestPipelineTimeout:
 
     def test_a_timed_out_run_keeps_its_slot_until_it_returns(self):
         release = threading.Event()
+        entered = threading.Event()
         endpoint = _make_endpoint()
+
+        def hang():
+            entered.set()
+            release.wait(10)
 
         async def scenario():
             with mock.patch.object(_ENDPOINT_MODULE, 'PIPELINE_WORKERS', 1):
-                hung = asyncio.ensure_future(endpoint._run_pipeline(release.wait, 10))
-                await asyncio.sleep(0.05)
+                hung = asyncio.ensure_future(endpoint._run_pipeline(hang))
+                deadline = time.monotonic() + 5
+                while not entered.is_set() and time.monotonic() < deadline:
+                    await asyncio.sleep(0.01)
+                assert entered.is_set(), 'the hung run never started'
                 hung.cancel()  # what a timeout does to the awaiting side
                 second = asyncio.ensure_future(endpoint._run_pipeline(lambda: 'next'))
                 await asyncio.sleep(0.1)

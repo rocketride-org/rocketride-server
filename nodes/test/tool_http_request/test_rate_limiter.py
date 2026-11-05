@@ -20,7 +20,35 @@ import pytest
 # engine runtime).
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / 'src' / 'nodes' / 'tool_http_request'))
 
+import rate_limiter  # noqa: E402
 from rate_limiter import RateLimiter, RateLimitError  # noqa: E402
+
+
+class _Clock:
+    """A hand-driven stand-in for the ``time`` module the rate limiter reads."""
+
+    def __init__(self):
+        self.now = 1000.0
+
+    def monotonic(self) -> float:
+        """Return the current fake time in seconds."""
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        """Move the fake time forward.
+
+        Args:
+            seconds (float): How far to move the clock.
+        """
+        self.now += seconds
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    """Freeze the rate limiter's clock so token refills happen only when a test advances it."""
+    fake = _Clock()
+    monkeypatch.setattr(rate_limiter, 'time', fake)
+    return fake
 
 
 class TestAcquireRelease:
@@ -42,7 +70,7 @@ class TestAcquireRelease:
 class TestPerSecondEnforcement:
     """Per-second token bucket rejects once exhausted."""
 
-    def test_exceeds_per_second_limit(self):
+    def test_exceeds_per_second_limit(self, clock):
         rl = RateLimiter(max_per_second=2, max_per_minute=100, max_concurrent=10)
         rl.acquire()
         rl.acquire()
@@ -122,7 +150,7 @@ class TestTokenRestorationOnSemaphoreRejection:
         rl.acquire()
         rl.release()
 
-    def test_semaphore_not_leaked_on_token_rejection(self):
+    def test_semaphore_not_leaked_on_token_rejection(self, clock):
         """Semaphore slot is released when token-bucket check fails.
 
         With max_concurrent=2 and max_per_second=2: after two successful
@@ -150,7 +178,7 @@ class TestTokenRestorationOnSemaphoreRejection:
         rl.release()
 
         # Wait for per-second tokens to fully refill (capacity=2).
-        time.sleep(1.2)
+        clock.advance(1.2)
 
         # Both semaphore slots should be free.  If the failed acquire
         # leaked a slot, the second acquire here would raise a

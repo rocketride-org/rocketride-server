@@ -1093,15 +1093,33 @@ def test_a_wide_flat_dict_costs_a_bounded_walk():
     import time
 
     executor = _load_executor()
-    result = {f'k{i:06d}': i for i in range(5000)}
 
-    start = time.perf_counter()
-    summary = executor._describe(result)
-    elapsed = time.perf_counter() - start
+    def best_time(width: int, repeats: int):
+        """Fastest of several runs of `_describe` on a flat dict of `width` fields.
+
+        Args:
+            width (int): Number of fields in the dict.
+            repeats (int): How many runs to time.
+
+        Returns:
+            tuple[float, str]: The fastest run in seconds, and its summary.
+        """
+        result = {f'k{i:06d}': i for i in range(width)}
+        best = float('inf')
+        summary = ''
+        for _ in range(repeats):
+            start = time.perf_counter()
+            summary = executor._describe(result)
+            best = min(best, time.perf_counter() - start)
+        return best, summary
+
+    narrow, _ = best_time(500, 7)
+    wide, summary = best_time(5000, 3)
 
     assert len(summary) <= executor._SUMMARY_HARD_CAP
     assert 'k000000: 0' in summary
-    assert elapsed < 0.5, f'{elapsed:.3f}s for 5,000 fields'
+    # A linear walk grows about 10x for 10x the fields; a walk that rescans the summary per field grows about 100x.
+    assert wide < narrow * 40, f'{wide:.4f}s for 5,000 fields vs {narrow:.4f}s for 500'
 
 
 def test_a_list_given_all_it_wants_shows_a_last_row_shorter_than_the_notice():

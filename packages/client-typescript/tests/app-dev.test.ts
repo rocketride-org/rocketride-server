@@ -173,7 +173,7 @@ describe('DevSession', () => {
 		const session = new DevSession({ app, workspaceRoot: ws, engineOrigin: 'http://localhost:5565', install: false, watchPackageJson: false, onState: (s) => states.push(s) });
 
 		const origin = await session.start();
-		await new Promise((resolve) => setTimeout(resolve, 200));
+		await waitFor(() => states.includes('ok'));
 
 		// the per-session wrapper is the preview's front door
 		const rocketrideDir = path.join(app.folder, '.rocketride');
