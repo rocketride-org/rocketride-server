@@ -23,7 +23,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import React, { Children, type ComponentType, type ReactElement } from 'react';
+import React, { Children, type ComponentType, type ReactElement, type ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 import BaseInputTemplate from '../base-input-template/BaseInputTemplate';
@@ -49,7 +49,7 @@ test('opted-in inputs render one focusable info trigger outside the hidden notch
 
 test('info trigger blocks Enter and Space from activating a parent label', () => {
 	const label = FieldLabelWithInfo({ label: 'Read-only mode', description: 'Prevents write operations.', fieldTitle: 'Read-only mode' }) as ReactElement<Record<string, unknown>>;
-	const tooltip = Children.toArray(label.props.children)[1] as ReactElement<Record<string, unknown>>;
+	const tooltip = Children.toArray(label.props.children as ReactNode)[1] as ReactElement<Record<string, unknown>>;
 	const trigger = tooltip.props.children as ReactElement<Record<string, unknown>>;
 	const onKeyDown = trigger.props.onKeyDown as (event: Record<string, unknown>) => void;
 

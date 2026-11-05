@@ -32,8 +32,19 @@ This module works in conjunction with TaskServer to:
 - Handle processing errors and edge cases
 """
 
-from typing import TYPE_CHECKING, Dict, Any
+import re
+from typing import TYPE_CHECKING, Dict, Any, Optional
+from ai.account import account
 from ai.common.dap import DAPConn, TransportBase
+from ai.common.tool_context import caller_from_auth
+
+# Most object ids one audit record carries (the write tools accept at most 100).
+AUDIT_OBJECT_IDS_MAX = 100
+
+# The audit labels the vector write tools use: `vector.<snake_case name>`. Any
+# node reached by a tool call can return an `audit` block, so only this
+# namespace is recorded (under source 'vector').
+AUDIT_ACTION_PATTERN = re.compile(r'vector\.[a-z][a-z0-9_]{0,63}')
 
 # Only import for type checking to avoid circular import errors
 if TYPE_CHECKING:
@@ -139,9 +150,25 @@ class DataCommands(DAPConn):
             # This is critical as tasks may be in startup, initialization, or other states
             await task.wait_for_running()
 
+            # A tool call carries the caller as THIS server sees it: whatever
+            # caller the client put in the arguments is replaced. The node
+            # tools read it from the call context the task builds from it.
+            caller = None
+            control = None
+            arguments = request.get('arguments')
+            if isinstance(arguments, dict) and arguments.get('subcommand') == 'tool':
+                control = self._task_control_for(request)
+                caller = self._server_caller(control)
+                request = {**request, 'arguments': {**arguments, 'caller': caller}}
+
             # Forward the data processing request to the task instance and get
             # the raw response from the subprocess.
             subprocess_response = await task._send_data(request)
+
+            # Write tools report what they changed in an `audit` block; record
+            # it once, server-side, with ids and counts only.
+            if caller is not None:
+                await self._forward_audit(subprocess_response, caller, control)
 
             # Rebuild the response envelope keyed off the INBOUND request so the
             # inbound DAPConn can correlate it back to the originating chat client.
@@ -163,3 +190,83 @@ class DataCommands(DAPConn):
 
             # Re-raise the exception to maintain error propagation to client
             raise
+
+    # =========================================================================
+    # TOOL CALLER AND AUDIT
+    # =========================================================================
+
+    def _task_control_for(self, request: Dict[str, Any]) -> Optional[Any]:
+        """Return the task control of the request's task, or None when it cannot be read."""
+        try:
+            return self._server.get_task_control(self.get_task_token(request))
+        except Exception as e:
+            self.debug_message(f'Tool caller: task control unavailable ({type(e).__name__})')
+            return None
+
+    def _server_caller(self, control: Optional[Any]) -> Dict[str, Any]:
+        """Return the caller block for this connection: key kind, user, the task's team and org.
+
+        The kind follows the key the connection signed in with (public task key,
+        task token, or an account credential); the key itself is never copied.
+        """
+        info = getattr(self, '_account_info', None)
+        return caller_from_auth(
+            getattr(info, 'auth', None),
+            user_id=getattr(info, 'userId', None),
+            team_id=getattr(control, 'teamId', None),
+            org_id=getattr(control, 'orgId', None),
+        )
+
+    async def _forward_audit(self, subprocess_response: Any, caller: Dict[str, Any], control: Optional[Any]) -> None:
+        """Record a tool result's ``audit`` block with ``account.audit``.
+
+        Only a dict result whose ``audit`` block names an ``action`` in the
+        ``vector.<snake_case name>`` namespace (``AUDIT_ACTION_PATTERN``) is
+        recorded; the caller kind, team, org and source component come from the
+        server, never from the block.
+        The record carries the node, provider, collection, at most
+        ``AUDIT_OBJECT_IDS_MAX`` object ids, the caller kind and team, the source
+        component, the rows changed and the outcome; never content or vectors.
+        An audit failure is logged and does not fail the call.
+        """
+        body = subprocess_response.get('body') if isinstance(subprocess_response, dict) else None
+        result = body.get('result') if isinstance(body, dict) else None
+        audit = result.get('audit') if isinstance(result, dict) else None
+        if not isinstance(audit, dict):
+            return
+        action = audit.get('action')
+        if not isinstance(action, str) or not AUDIT_ACTION_PATTERN.fullmatch(action):
+            return
+
+        def _text(value: Any) -> Optional[str]:
+            return value if isinstance(value, str) and value else None
+
+        raw_ids = audit.get('object_ids')
+        object_ids = [oid for oid in raw_ids if isinstance(oid, str)] if isinstance(raw_ids, list) else []
+        rows = audit.get('rows')
+        code = result.get('code')
+        request_data = {
+            'node': _text(audit.get('node')),
+            'provider': _text(audit.get('provider')),
+            'collection': _text(audit.get('collection')),
+            'object_ids': object_ids[:AUDIT_OBJECT_IDS_MAX],
+            'caller_auth': caller.get('auth'),
+            'teamId': caller.get('teamId'),
+            'source': _text(getattr(control, 'source', None)),
+        }
+        response_data = {
+            'rows': rows if isinstance(rows, int) and not isinstance(rows, bool) else None,
+            'success': result.get('success') is True,
+            'code': code if isinstance(code, str) else None,
+        }
+        try:
+            await account.audit(
+                caller.get('userId'),
+                source='vector',
+                reason=action,
+                request_data=request_data,
+                response_data=response_data,
+                org_id=caller.get('orgId'),
+            )
+        except Exception as e:
+            self.debug_message(f'Tool audit for {action} failed: {type(e).__name__}: {e}')

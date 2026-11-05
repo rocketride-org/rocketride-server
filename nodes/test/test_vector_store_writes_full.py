@@ -79,9 +79,9 @@ def store_env(monkeypatch, request):
         yield store, raw, table
     finally:
         try:
-            if store is not None and store.client is not None:
-                store.client.close()
-                store.client = None
+            if store is not None:
+                # The shared pgvector driver owns a connection pool; close() releases it.
+                store.close()
         finally:
             try:
                 raw.rollback()
@@ -144,8 +144,18 @@ def test_every_flush_of_one_object_is_kept(store_env):
     assert _rows(raw, table) == [('big', 0, 'again'), ('big', 1, 'again')]
 
 
+def test_a_repeated_chunk_without_chunk_zero_replaces_the_stored_row(store_env):
+    """Deliberate deviation from #2962, which keeps both copies: a stored chunk number sent again replaces it."""
+    store, raw, table = store_env
+    store.addChunks([_doc('a', 0, 'a0'), _doc('a', 1, 'a1'), _doc('a', 2, 'a2'), _doc('b', 0, 'b0')])
+    store.addChunks([_doc('a', 1, 'a1 corrected')])
+    assert _rows(raw, table) == [('a', 0, 'a0'), ('a', 1, 'a1 corrected'), ('a', 2, 'a2'), ('b', 0, 'b0')]
+
+
 def test_failed_batch_rolls_back_deletion_and_partial_inserts(store_env):
     import psycopg2
+
+    from ai.common.store.errors import StoreError
 
     store, raw, table = store_env
     # Seed directly so the baseline metadata bug cannot mask the delete-before-
@@ -158,7 +168,10 @@ def test_failed_batch_rolls_back_deletion_and_partial_inserts(store_env):
     raw.commit()
     bad = _doc('b')
     bad.embedding = [float('nan'), 0.0, 0.0]
-    with pytest.raises(psycopg2.DataError, match='NaN'):
+    # pgvector rejects the NaN on the server ("NaN not allowed in vector"). The shared
+    # driver's pool.run_write maps that psycopg2 error to StoreError, keeping the server's
+    # text; develop's single-connection driver let the psycopg2.DataError through.
+    with pytest.raises((psycopg2.DataError, StoreError), match='NaN'):
         store.addChunks([_doc(content='replacement'), bad], checkCollection=False)
     assert _rows(raw, table) == [('a', 0, 'original'), ('b', 0, 'original'), ('c', 0, 'untouched')]
     # A failed transaction must be rolled back so this same connection works.

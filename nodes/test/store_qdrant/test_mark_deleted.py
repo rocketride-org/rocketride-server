@@ -7,8 +7,11 @@
 Tests for Qdrant store markDeleted / markActive payload path.
 
 Validates that soft-delete flags are written to the nested ``meta.isDeleted``
-path (matching the query filter and payload index), preserving the other
-metadata fields so a soft-deleted document can still be found and restored.
+path (matching the query filter and payload index) instead of a top-level
+``isDeleted`` field, and that the update names ``meta`` as the target key:
+Qdrant's ``set_payload`` overwrites top-level keys, so sending
+``{'meta': {'isDeleted': True}}`` would replace the whole ``meta`` object and
+drop ``objectId``, ``chunkId`` and the rest.
 
 Usage:
     python -m pytest nodes/test/store_qdrant/test_mark_deleted.py -v
@@ -52,40 +55,48 @@ class _FakeDocumentStoreBase:
         return True
 
 
-# Install module-level stubs before any qdrant imports
-_mock_store_mod = MagicMock()
-_mock_store_mod.DocumentStoreBase = _FakeDocumentStoreBase
+_CLIENT_STUBS = (
+    'qdrant_client',
+    'qdrant_client.models',
+    'qdrant_client.http',
+    'qdrant_client.http.models',
+    'qdrant_client.conversions',
+    'qdrant_client.conversions.common_types',
+)
 
-_mock_config_mod = MagicMock()
-_mock_schema_mod = MagicMock()
 
-# Prefer the installed client's local backend for the round-trip regression.
-# Keep the existing lightweight unit tests runnable without that dependency.
+def _load_qdrant_module(stubs):
+    """Execute qdrant.py with ``stubs`` as MagicMocks, then restore ``sys.modules``.
+
+    A stub left behind would shadow the real modules for every later test in the same process.
+    """
+    saved = {name: sys.modules.get(name) for name in stubs}
+    try:
+        for name in stubs:
+            sys.modules[name] = MagicMock()
+
+        # -------------------------------------------------------------------
+        # Import qdrant.py DIRECTLY (bypassing __init__.py which pulls IEndpoint etc.)
+        # -------------------------------------------------------------------
+        spec = importlib.util.spec_from_file_location('_qdrant_store', str(NODES_SRC / 'store_qdrant' / 'qdrant.py'))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    finally:
+        for name, previous in saved.items():
+            if previous is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = previous
+
+
+# Prefer the installed client: the lightweight unit tests work with it. Without it (a test process where it is
+# installed only later, as a node's depends() does), stub the client and numpy while qdrant.py executes.
 try:
     importlib.import_module('qdrant_client')
+    _qdrant_mod = _load_qdrant_module(('numpy',))
 except ImportError:
-    pass
-
-for name, mock in {
-    'numpy': MagicMock(),
-    'qdrant_client': MagicMock(),
-    'qdrant_client.models': MagicMock(),
-    'qdrant_client.http': MagicMock(),
-    'qdrant_client.http.models': MagicMock(),
-    'qdrant_client.conversions': MagicMock(),
-    'qdrant_client.conversions.common_types': MagicMock(),
-}.items():
-    sys.modules.setdefault(name, mock)
-
-
-# ---------------------------------------------------------------------------
-# Import qdrant.py DIRECTLY (bypassing __init__.py which pulls IEndpoint etc.)
-# ---------------------------------------------------------------------------
-
-_qdrant_path = NODES_SRC / 'store_qdrant' / 'qdrant.py'
-_spec = importlib.util.spec_from_file_location('_qdrant_store', str(_qdrant_path))
-_qdrant_mod = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_qdrant_mod)
+    _qdrant_mod = _load_qdrant_module(('numpy',) + _CLIENT_STUBS)
 
 Store = _qdrant_mod.Store
 
@@ -95,9 +106,23 @@ Store = _qdrant_mod.Store
 # ---------------------------------------------------------------------------
 
 
-def _make_store() -> Store:
+def _real_store_class():
+    """The driver's Store bound to the installed qdrant-client, or skip when only the protocol mock is there.
+
+    The module-level import may have run before the client was installed and bound the driver to stubs:
+    the tests that drive the real client's in-process backend load their own copy at run time.
+    """
+    import pytest
+    from qdrant_client import QdrantClient
+
+    if QdrantClient.__module__ != 'qdrant_client.qdrant_client':
+        pytest.skip('requires the real qdrant-client, not the protocol mock')
+    return _load_qdrant_module(('numpy',)).Store
+
+
+def _make_store(store_class=None) -> Store:
     """Create a Store instance with a mocked QdrantClient (bypasses __init__)."""
-    store = object.__new__(Store)
+    store = object.__new__(store_class or Store)
     store.client = MagicMock()
     store.collection = 'test-collection'
     store.vectorSize = 384
@@ -117,25 +142,25 @@ class TestQdrantMarkDeleted:
     """Verify markDeleted writes to the correct nested payload path."""
 
     def test_markDeleted_writes_meta_isDeleted_true(self):
-        """MarkDeleted must set meta.isDeleted = True, not top-level isDeleted."""
+        """MarkDeleted must set meta.isDeleted = True inside meta, not replace meta."""
         store = _make_store()
 
         store.markDeleted(['obj-1', 'obj-2'])
 
         store.client.set_payload.assert_called_once()
         _, kwargs = store.client.set_payload.call_args
-        assert kwargs['payload'] == {'isDeleted': True}
+        assert kwargs['payload'] == {'isDeleted': True}, kwargs['payload']
         assert kwargs['key'] == 'meta'
 
     def test_markActive_writes_meta_isDeleted_false(self):
-        """MarkActive must set meta.isDeleted = False, not top-level isDeleted."""
+        """MarkActive must set meta.isDeleted = False inside meta, not replace meta."""
         store = _make_store()
 
         store.markActive(['obj-1'])
 
         store.client.set_payload.assert_called_once()
         _, kwargs = store.client.set_payload.call_args
-        assert kwargs['payload'] == {'isDeleted': False}
+        assert kwargs['payload'] == {'isDeleted': False}, kwargs['payload']
         assert kwargs['key'] == 'meta'
 
     def test_markDeleted_skips_when_collection_missing(self):
@@ -157,14 +182,20 @@ class TestQdrantMarkDeleted:
         store.client.set_payload.assert_not_called()
 
 
-def test_trash_round_trip_preserves_metadata_with_real_qdrant():
+def test_trash_round_trip_preserves_metadata_with_real_qdrant(monkeypatch):
     """The real client's local backend must preserve siblings under meta."""
     from copy import deepcopy
     from types import SimpleNamespace
 
     import pytest
     from qdrant_client import QdrantClient, models
+    from ai.common.store import vx_write_gate
     from ai.common.store.document_store import VectorStoreToolMixin
+
+    from ..test_vector_write_gate import agent
+
+    # The write gate fails closed without a call context: run the tools as an agent's.
+    monkeypatch.setattr(vx_write_gate, '_current_tool_call', lambda: agent())
 
     if QdrantClient.__module__ != 'qdrant_client.qdrant_client':
         pytest.skip('requires the real qdrant-client, not the protocol mock')
@@ -185,7 +216,7 @@ def test_trash_round_trip_preserves_metadata_with_real_qdrant():
                 for i, payload in original.items()
             ],
         )
-        store = _make_store()
+        store = _make_store(_real_store_class())
         store.client = client
         tools = VectorStoreToolMixin()
         tools.IGlobal = SimpleNamespace(store=store, expose_tools=True, allow_write=True)
@@ -196,7 +227,8 @@ def test_trash_round_trip_preserves_metadata_with_real_qdrant():
             expected[i]['meta']['isDeleted'] = True
         assert {p.id: p.payload for p in client.retrieve(store.collection, ids=list(original))} == expected
         assert tools.objdir({})['paths'] == {'/b': 'b'}
-        assert 'soft-deleted' in tools.get({'object_id': 'a'})['error']
+        trashed = tools.get({'object_id': 'a'})
+        assert trashed['code'] == 'IN_TRASH' and 'soft-deleted' in trashed['error']
 
         assert tools.restore({'object_ids': ['a']})['success'] is True
         assert {p.id: p.payload for p in client.retrieve(store.collection, ids=list(original))} == original
@@ -236,7 +268,7 @@ def _in_process_store(payloads: dict):
         'test-collection',
         points=[models.PointStruct(id=pid, vector=[1.0, 0.0], payload=payload) for pid, payload in payloads.items()],
     )
-    store = _make_store()
+    store = _make_store(_real_store_class())
     store.client = client
     return store, client
 

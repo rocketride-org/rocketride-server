@@ -1,0 +1,58 @@
+{
+	"name": "@rocketride/vector-ui",
+	"version": "1.1.0",
+	"private": true,
+	"description": "Vector store console and map over pipeline store nodes",
+	"license": "MIT",
+	"appManifest": {
+		"id": "rocketride.vector",
+		"projectId": "5c94285d-1311-42b8-bc6b-6233f45d1cb2",
+		"publisher": "RocketRide",
+		"name": "Vector Explorer",
+		"description": "Manage and visualise the documents in a vector store through pipeline store nodes",
+		"icon": "./src/icon.svg",
+		"readme": "./README.md",
+		"categories": [
+			"tools",
+			"devTool"
+		],
+		"mode": "free",
+		"authenticated": true,
+		"showStatusBar": true,
+		"include": [
+			"apps/shared"
+		]
+	},
+	"scripts": {
+		"build": "rsbuild build",
+		"build:prod": "rsbuild build --env-mode production",
+		"dev": "rsbuild dev",
+		"typecheck": "tsc --noEmit",
+		"typecheck:tests": "tsc -p tsconfig.test.json --noEmit"
+	},
+	"browserslist": [
+		"chrome >= 81",
+		"edge >= 83",
+		"firefox >= 76",
+		"safari >= 13"
+	],
+	"dependencies": {
+		"@module-federation/rsbuild-plugin": "^2.5.1",
+		"d3": "~7.9.0",
+		"d3-force": "~3.0.0",
+		"react": "^18.2.0",
+		"react-dom": "^18.2.0",
+		"rocketride": "workspace:*",
+		"shell": "file:../../.rocketride/shell/shell.tgz"
+	},
+	"devDependencies": {
+		"@rsbuild/core": "~2.2.12",
+		"@rsbuild/plugin-react": "~2.0.1",
+		"@types/d3": "~7.4.3",
+		"@types/d3-force": "~3.0.10",
+		"@types/react": "~18.3.31",
+		"@types/react-dom": "~18.3.7",
+		"tsx": "~4.23.1",
+		"typescript": "^5.3.0"
+	}
+}

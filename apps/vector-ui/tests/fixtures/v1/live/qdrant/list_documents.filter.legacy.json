@@ -1,0 +1,86 @@
+{
+  "__scrub__": [
+    "next_cursor",
+    "pointId"
+  ],
+  "success": true,
+  "items": [
+    {
+      "objectId": "012cc655-30be-5e9c-a91c-9359f91650b6",
+      "path": "C:/demo/ops/memo_q3.txt",
+      "chunks": 4,
+      "has_first_chunk": true,
+      "tables": 0,
+      "deleted": false,
+      "nodeId": "9a0b9f66-f693-4b3b-a85b-bb810261c26e",
+      "size": null,
+      "modifyTime": null,
+      "ingestedAt": null,
+      "pointId": "<scrubbed>",
+      "max_chunk_id": null,
+      "deleted_chunks": null
+    },
+    {
+      "objectId": "fd5a9a5d-ec71-5bd1-9b0a-68abdf2ca88b",
+      "path": "C:/demo/kitchen/winter_stew.md",
+      "chunks": 2,
+      "has_first_chunk": true,
+      "tables": 0,
+      "deleted": false,
+      "nodeId": "9a0b9f66-f693-4b3b-a85b-bb810261c26e",
+      "size": null,
+      "modifyTime": null,
+      "ingestedAt": null,
+      "pointId": "<scrubbed>",
+      "max_chunk_id": null,
+      "deleted_chunks": null
+    },
+    {
+      "objectId": "1129707a-1e62-58c9-8a71-a2f675f0209f",
+      "path": "C:/demo/observatory/telescope_calibration.md",
+      "chunks": 3,
+      "has_first_chunk": true,
+      "tables": 0,
+      "deleted": false,
+      "nodeId": "9a0b9f66-f693-4b3b-a85b-bb810261c26e",
+      "size": null,
+      "modifyTime": null,
+      "ingestedAt": null,
+      "pointId": "<scrubbed>",
+      "max_chunk_id": null,
+      "deleted_chunks": null
+    }
+  ],
+  "next_cursor": "<scrubbed>",
+  "total": 8,
+  "counts_exact": true,
+  "distinct": true,
+  "sorted": false,
+  "documents": [
+    {
+      "object_id": "012cc655-30be-5e9c-a91c-9359f91650b6",
+      "parent": "C:/demo/ops/memo_q3.txt",
+      "chunk_count": 4
+    },
+    {
+      "object_id": "fd5a9a5d-ec71-5bd1-9b0a-68abdf2ca88b",
+      "parent": "C:/demo/kitchen/winter_stew.md",
+      "chunk_count": 2
+    },
+    {
+      "object_id": "1129707a-1e62-58c9-8a71-a2f675f0209f",
+      "parent": "C:/demo/observatory/telescope_calibration.md",
+      "chunk_count": 3
+    }
+  ],
+  "offset": 0,
+  "has_more": true,
+  "filter_applied": "none",
+  "filter_ignored": [
+    "path_prefix"
+  ],
+  "caveats": [
+    "documents_unsorted",
+    "documents_filter_client"
+  ]
+}

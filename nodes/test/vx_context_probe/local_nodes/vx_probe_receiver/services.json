@@ -1,0 +1,23 @@
+{
+	"title": "Call context probe: receiver (test only)",
+	"protocol": "vx_probe_receiver://",
+	"classType": ["tool"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "local_nodes.vx_probe_receiver",
+	"prefix": "vxprobe",
+	"description": ["Test-only node for the engine's tool call context checks. Its tools report the call context the engine attached to the call, return payloads of a requested size, and include one tool listed for external callers only. It takes the questions and tags lanes only so that chat and dropper tasks reach it; nothing is sent on them. Never ship it in a pipeline."],
+	"lanes": {
+		"questions": [],
+		"tags": []
+	},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {}
+		}
+	},
+	"fields": {},
+	"shape": []
+}

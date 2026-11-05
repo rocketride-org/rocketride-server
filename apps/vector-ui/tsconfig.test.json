@@ -1,0 +1,28 @@
+{
+	// Typechecks tests/ alongside the source it exercises.
+	//
+	// The app's own program (tsconfig.json) includes src/** and
+	// rsbuild.config.mts only, so tests/ would be checked by nothing: tsx
+	// erases types rather than checking them. This second program covers
+	// tests/ as well; `typecheck` (the name scripts/lib/uiAudit.js requires of
+	// every app) keeps describing what this remote actually ships.
+	//
+	// `types` names @types/node outright: it is a root devDependency this app
+	// does not declare, and the tests need it for node:test/node:assert.
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"types": [
+			"node"
+		]
+	},
+	"include": [
+		"src/**/*.ts",
+		"src/**/*.tsx",
+		"tests/**/*.ts",
+		"tests/**/*.tsx"
+	],
+	"exclude": [
+		"node_modules",
+		"dist"
+	]
+}

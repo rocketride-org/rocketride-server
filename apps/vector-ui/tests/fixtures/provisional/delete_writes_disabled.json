@@ -1,0 +1,5 @@
+{
+	"success": false,
+	"code": "WRITES_DISABLED",
+	"error": "Removing documents is turned off on this store node (allow_writes)."
+}

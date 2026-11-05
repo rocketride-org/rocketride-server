@@ -112,6 +112,16 @@ class Embedding(EmbeddingBase):
         # Return it
         return self._tokenSize
 
+    @property
+    def query_prefix(self) -> str:
+        """Return the prefix prepended to every question (the embed tool reports it)."""
+        return self._query_prefix
+
+    @property
+    def document_prefix(self) -> str:
+        """Return the prefix prepended to every document chunk (the embed tool reports it)."""
+        return self._document_prefix
+
     # Encode the given string return a list of vectors
     def encodeQuestion(self, question: Question) -> List:
         """Given a string (document), encode the document into a vector.

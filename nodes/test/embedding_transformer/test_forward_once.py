@@ -18,6 +18,7 @@ rocketlib and ai.common.* are stubbed and the node is loaded from source, so no
 engine, server or model is involved.
 """
 
+import contextlib
 import importlib.util
 import os
 import sys
@@ -43,6 +44,13 @@ class FakeQuestion:
 
 class FakeEmbeddingBase:
     """Stand-in for ai.common.embedding.EmbeddingBase, needed only by IGlobal's annotation."""
+
+
+class FakeEmbedToolMixin:
+    """Stand-in for ai.common.embed_tool.EmbedToolMixin; its lock is covered by test_embed_tool.py."""
+
+    def _embed_batch(self):
+        return contextlib.nullcontext()
 
 
 class _PreventDefaultRaised(Exception):
@@ -91,6 +99,7 @@ def _load_iinstance():
         'ai.common.schema': types.ModuleType('ai.common.schema'),
         'ai.common.config': types.ModuleType('ai.common.config'),
         'ai.common.embedding': types.ModuleType('ai.common.embedding'),
+        'ai.common.embed_tool': types.ModuleType('ai.common.embed_tool'),
     }
     stubs['rocketlib'].IInstanceBase = FakeIInstanceBase
     stubs['rocketlib'].IGlobalBase = FakeIGlobalBase
@@ -98,6 +107,7 @@ def _load_iinstance():
     stubs['ai.common.schema'].Doc = FakeDoc
     stubs['ai.common.schema'].Question = FakeQuestion
     stubs['ai.common.embedding'].EmbeddingBase = FakeEmbeddingBase
+    stubs['ai.common.embed_tool'].EmbedToolMixin = FakeEmbedToolMixin
     stubs['ai.common.config'].Config = type('FakeConfig', (), {'getNodeConfig': staticmethod(lambda lt, cc: {})})
 
     for name, stub in stubs.items():

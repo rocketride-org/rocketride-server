@@ -1,0 +1,26 @@
+{
+	"success": true,
+	"items": [
+		{
+			"chunkId": 0,
+			"content": "Quarterly report. Summary of operations, budget and staffing for the third quarter.",
+			"length": 83,
+			"isTable": false,
+			"tableId": 0,
+			"isDeleted": false,
+			"pointId": "d9a3b0c6-544b-56a9-96a7-f9a991a42054",
+			"metadata": {
+				"objectId": "b7d9f0ed-3e89-583f-9dbe-195a39648e40",
+				"chunkId": 0,
+				"parent": "report.pdf",
+				"nodeId": "chunk_1",
+				"isTable": false,
+				"tableId": 0,
+				"isDeleted": false
+			}
+		}
+	],
+	"has_more": true,
+	"next_after": 0,
+	"total": 19
+}

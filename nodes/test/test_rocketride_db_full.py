@@ -37,21 +37,33 @@ Requires a container on the live pin (PG16 + pgvector), e.g.::
         pgvector/pgvector:pg16
     docker exec rr-pg-phase1 psql -U rruser -d rrtenant -c 'CREATE EXTENSION IF NOT EXISTS vector;'
 
+The ``rocketride_vector`` cases run the node's real classes over the shared
+pgvector driver, with the DSN delivered in ``ROCKETRIDE_DB_DSNS`` (the
+production delivery path), once directly and once through a transaction-mode
+pooler.
+
 Configuration via environment variables:
     RR_TEST_PG_DSN — libpq URL of the test database
                      (default: postgresql://rruser:rrpass@localhost:55432/rrtenant)
+    RR_TEST_PGVECTOR_POOLER_DSN — the same database behind PgBouncer in
+                     transaction mode; the pooled rocketride_vector cases are
+                     not run without it
 
 Skips cleanly when the database is unreachable.
 """
 
 from __future__ import annotations
 
+import contextlib
+import dataclasses
+import importlib
 import importlib.util
 import json
 import os
 import sys
 import urllib.parse
 import types
+import uuid
 
 from ._store_base_stubs import store_base_stubs
 
@@ -413,29 +425,9 @@ class TestRocketrideSqlE2E:
 
 
 # ---------------------------------------------------------------------------
-# rocketride_vector end-to-end (incl. HNSW index verification)
+# rocketride_vector end-to-end (the shared pgvector driver, the HNSW index,
+# the tool surface), directly and through the transaction-mode pooler
 # ---------------------------------------------------------------------------
-
-
-def _load_vector_store(monkeypatch):
-    search_module = _load_from_path(
-        'ai.common.store.pgvector_store', _AI_SRC / 'ai/common/store/pgvector_store.py', register=False
-    )
-    monkeypatch.setitem(sys.modules, 'ai.common.store.pgvector_store', search_module)
-
-    iglobal = _load_from_path('nodes.rocketride_vector.IGlobal', _VEC_NODE_DIR / 'IGlobal.py', register=False)
-    pkg = types.ModuleType('nodes.rocketride_vector')
-    pkg.__path__ = [str(_VEC_NODE_DIR)]
-    pkg.IGlobal = iglobal
-    monkeypatch.setitem(sys.modules, 'nodes.rocketride_vector', pkg)
-    monkeypatch.setitem(sys.modules, 'nodes.rocketride_vector.IGlobal', iglobal)
-    store = _load_from_path(
-        'nodes.rocketride_vector.rocketride_vector',
-        _VEC_NODE_DIR / 'rocketride_vector.py',
-        register=False,
-    )
-    monkeypatch.setitem(sys.modules, 'nodes.rocketride_vector.rocketride_vector', store)
-    return store.Store
 
 
 _NODE_LOADER_ALIASES = (
@@ -449,15 +441,6 @@ _NODE_LOADER_ALIASES = (
             'nodes.rocketride_sql',
             'nodes.rocketride_sql.IGlobal',
             'nodes.rocketride_sql.IInstance',
-        ),
-    ),
-    (
-        _load_vector_store,
-        (
-            'ai.common.store.pgvector_store',
-            'nodes.rocketride_vector',
-            'nodes.rocketride_vector.IGlobal',
-            'nodes.rocketride_vector.rocketride_vector',
         ),
     ),
 )
@@ -490,8 +473,75 @@ def test_node_loader_restores_existing_module_aliases(rr_env, monkeypatch, loade
     assert all(sys.modules[alias] is existing[alias] for alias in aliases)
 
 
-VEC_TABLE = 'rr_vec_e2e'
+# The rocketride_vector cases run the node's real classes (StoreGlobalBase,
+# StoreInstanceBase, the shared pgvector driver, the schema) rather than the
+# stand-ins above, once directly and once through the pooler when
+# RR_TEST_PGVECTOR_POOLER_DSN is set.
+
+POOLER_DSN = os.environ.get('RR_TEST_PGVECTOR_POOLER_DSN', '').strip()
 DIMS = 8
+_VEC_MODULES = (
+    'nodes.rocketride_vector',
+    'nodes.rocketride_vector.IEndpoint',
+    'nodes.rocketride_vector.IGlobal',
+    'nodes.rocketride_vector.IInstance',
+    'nodes.rocketride_vector.rocketride_vector',
+)
+
+
+@pytest.fixture(params=['direct', 'pooler'])
+def vec_dsn(request) -> str:
+    """The DSN the server injects: the database itself, or the transaction-mode pooler in front of it."""
+    if request.param == 'pooler':
+        if not POOLER_DSN:
+            pytest.skip('NOT RUN: RR_TEST_PGVECTOR_POOLER_DSN is not set (the transaction-mode pooler pass)')
+        try:
+            psycopg2.connect(POOLER_DSN, connect_timeout=3).close()
+        except Exception:
+            if _DB_TESTS_REQUIRED:
+                pytest.fail(f'RR_TEST_PGVECTOR_POOLER_DSN is set but not reachable: {POOLER_DSN}')
+            pytest.skip(f'NOT RUN: pooler not reachable at {POOLER_DSN}')
+        return POOLER_DSN
+    return TEST_DSN
+
+
+@pytest.fixture()
+def rv(monkeypatch, vec_dsn):
+    """The real rocketride_vector node, its DSN delivered the way the task engine delivers it."""
+    import depends as real_depends
+
+    depends_mod = types.ModuleType('depends')
+    depends_mod.__dict__.update(real_depends.__dict__)
+    depends_mod.depends = lambda *a, **kw: None  # the requirements are installed; never resolve them in a test
+    monkeypatch.setitem(sys.modules, 'depends', depends_mod)
+    for name in _VEC_MODULES:  # always the real modules, never a stand-in another suite registered
+        monkeypatch.delitem(sys.modules, name, raising=False)
+    from ai.common.config import Config
+
+    monkeypatch.setattr(Config, 'getNodeConfig', staticmethod(lambda provider, connConfig: dict(connConfig)))
+    monkeypatch.setenv('ROCKETRIDE_DB_DSNS', json.dumps({'org': vec_dsn}))
+    monkeypatch.delenv('ROCKETRIDE_DB_RESOLVE_ERROR', raising=False)
+    store_mod = importlib.import_module('nodes.rocketride_vector.rocketride_vector')
+    iglobal_mod = importlib.import_module('nodes.rocketride_vector.IGlobal')
+    iinstance_mod = importlib.import_module('nodes.rocketride_vector.IInstance')
+    from ai.common.schema import Doc, DocFilter, DocMetadata, QuestionText
+
+    return types.SimpleNamespace(
+        dsn=vec_dsn,
+        Store=store_mod.Store,
+        IGlobal=iglobal_mod.IGlobal,
+        IInstance=iinstance_mod.IInstance,
+        Doc=Doc,
+        DocFilter=DocFilter,
+        DocMetadata=DocMetadata,
+        QuestionText=QuestionText,
+        monkeypatch=monkeypatch,
+    )
+
+
+def _unique_table(prefix: str) -> str:
+    """A table name no other test (or parallel worker) uses."""
+    return f'{prefix}_{uuid.uuid4().hex[:8]}'
 
 
 def _unit_vec(rng):
@@ -499,207 +549,460 @@ def _unit_vec(rng):
     return (v / np.linalg.norm(v)).tolist()
 
 
+@contextlib.contextmanager
+def _called_as(rv, ctx):
+    """Run the body as the tool call ``ctx``, the way the engine's dispatcher runs a tool method.
+
+    Where the engine does not record the call context yet (``tool_call`` is an
+    interface there), the node module's lookup stands in for it, so the node
+    sees exactly ``ctx``; where it does, nothing is replaced.
+    """
+    from ai.common import tool_context
+
+    with tool_context.tool_call(ctx):
+        if tool_context.current_tool_call() is not None:
+            yield
+            return
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(sys.modules[rv.IInstance.__module__], 'current_tool_call', lambda: ctx)
+            yield
+
+
+def _begin_vector_node(rv, config):
+    """Run the node's real beginGlobal (open the store, register the transform key).
+
+    The tool tests run past the outer gate: unless ``config`` sets them,
+    expose_tools and allow_write are on (both default off on the node).
+    """
+    from rocketlib import OPEN_MODE
+
+    config = {'expose_tools': True, 'allow_write': True, **config}
+    glb = rv.IGlobal()
+    glb.IEndpoint = types.SimpleNamespace(
+        endpoint=types.SimpleNamespace(openMode=OPEN_MODE.SOURCE, bag={}, parameters={})
+    )
+    glb.glb = types.SimpleNamespace(logicalType='rocketride_vector', connConfig=config)
+    glb.beginGlobal()
+    inst = rv.IInstance()
+    inst.IGlobal = glb
+    return glb, inst
+
+
 class TestRocketrideVectorE2E:
     @pytest.fixture()
-    def vec_store(self, rr_env, monkeypatch, raw_conn):
-        with raw_conn.cursor() as cur:
-            cur.execute(f'DROP TABLE IF EXISTS {VEC_TABLE}')
-            raw_conn.commit()
-        store_cls = _load_vector_store(monkeypatch)
-        store = store_cls('rocketride_vector', {'collection': VEC_TABLE, 'similarity': 'cosine'}, {})
+    def vec_store(self, rv, raw_conn):
+        table = _unique_table('vx_l2_rr_e2e')
+        store = rv.Store('rocketride_vector', {'collection': table, 'similarity': 'cosine'}, {})
         yield store
-        # Close the driver connection before dropping, so a test that leaves
-        # it inside a transaction cannot block the DROP on its locks.
-        if store.client is not None:
-            store.client.close()
-            store.client = None
+        store.close()
         with raw_conn.cursor() as cur:
-            cur.execute(f'DROP TABLE IF EXISTS {VEC_TABLE}')
+            cur.execute("SET lock_timeout = '10s'")
+            cur.execute(f'DROP TABLE IF EXISTS {table}')
             raw_conn.commit()
 
-    def _chunks(self, schema, contents_and_embeddings):
-        docs = []
-        for i, (content, embedding) in enumerate(contents_and_embeddings):
-            docs.append(
-                schema.Doc(
-                    page_content=content,
-                    metadata={
-                        'objectId': f'obj-{i}',
-                        'nodeId': 'test-node',
-                        'parent': '/test',
-                        'permissionId': 0,
-                        'isDeleted': False,
-                        'chunkId': 0,
-                        'isTable': False,
-                        'tableId': 0,
-                        'vectorSize': len(embedding),
-                        'modelName': 'test-model',
-                    },
-                    embedding=embedding,
-                    embedding_model='test-model',
-                )
+    def _chunks(self, rv, contents_and_embeddings, chunk_id=0):
+        return [
+            rv.Doc(
+                page_content=content,
+                metadata=rv.DocMetadata(
+                    objectId=f'obj-{i}',
+                    chunkId=chunk_id,
+                    nodeId='test-node',
+                    parent='/test',
+                    permissionId=0,
+                    isDeleted=False,
+                    isTable=False,
+                    tableId=0,
+                    signature='component-signature',
+                    chunk_index=chunk_id,
+                ),
+                embedding=embedding,
+                embedding_model='test-model',
             )
-        return docs
+            for i, (content, embedding) in enumerate(contents_and_embeddings)
+        ]
 
-    def test_first_write_creates_table_and_hnsw_index(self, rr_env, vec_store, raw_conn):
+    def test_connects_via_the_injected_dsn_and_reports_no_connection_details(self, rv, vec_store):
+        assert vec_store.database == TEST_DB_NAME
+        info = vec_store.describe()
+        assert info.collection == vec_store.table and info.collection_exists is False
+        assert 'shared_org_table' in info.caveats
+        dumped = json.dumps(dataclasses.asdict(info))
+        fields = urllib.parse.urlparse(rv.dsn)
+        for secret in (fields.hostname, str(fields.port), fields.username, fields.password, TEST_DB_NAME):
+            assert secret not in dumped
+
+    def test_first_write_creates_table_and_hnsw_index(self, rv, vec_store, raw_conn):
         rng = np.random.default_rng(7)
-        vec_store.addChunks(self._chunks(rr_env.schema, [(f'doc {i}', _unit_vec(rng)) for i in range(100)]))
+        vec_store.addChunks(self._chunks(rv, [(f'doc {i}', _unit_vec(rng)) for i in range(100)]))
 
         with raw_conn.cursor() as cur:
-            cur.execute('SELECT indexname, indexdef FROM pg_indexes WHERE tablename = %s', (VEC_TABLE,))
+            cur.execute('SELECT indexname, indexdef FROM pg_indexes WHERE tablename = %s', (vec_store.table,))
             indexes = {name: ddl for name, ddl in cur.fetchall()}
+            cur.execute(
+                f'SELECT count(*), count(signature), count(meta) FROM {vec_store.table} WHERE objectid <> %s',
+                ('schema',),
+            )
+            counts = cur.fetchone()
+        raw_conn.rollback()
 
-        index_name = f'{VEC_TABLE}_embedding_hnsw'
+        index_name = f'{vec_store.table}_embedding_hnsw'
         assert index_name in indexes
         assert 'USING hnsw (embedding vector_cosine_ops)' in indexes[index_name]
         assert "m='16'" in indexes[index_name]
         assert "ef_construction='64'" in indexes[index_name]
+        # A real Doc (signature and chunker extras included) is stored, not refused.
+        assert counts == (100, 100, 100)
 
-    def test_semantic_search_uses_hnsw_index_not_seq_scan(self, rr_env, vec_store, raw_conn):
+    def test_semantic_search_uses_hnsw_index_not_seq_scan(self, rv, vec_store, raw_conn):
         """The acceptance check: the node's own search SQL must use the index.
 
         The planner rightly prefers a seq scan on tiny tables, so load enough
         rows (and ANALYZE) that index cost wins; then EXPLAIN the exact
-        ``semantic_search`` statement the driver executes.
+        statement the driver executes for a semantic search.
         """
+        from psycopg2 import sql as pgsql
+
         rng = np.random.default_rng(11)
-        # Insert in one bulk statement (the driver's row-at-a-time insert is
-        # too slow for a 2000-row planner fixture); create the table + index
-        # through the driver's first-write path first.
-        vec_store.addChunks(self._chunks(rr_env.schema, [('seed doc', _unit_vec(rng))]))
+        vec_store.addChunks(self._chunks(rv, [('seed doc', _unit_vec(rng))]))
         with raw_conn.cursor() as cur:
             cur.execute(
-                f'INSERT INTO {VEC_TABLE} (content, objectId, chunkId, isDeleted, embedding) '
+                f'INSERT INTO {vec_store.table} (content, objectId, chunkId, isDeleted, embedding) '
                 f"SELECT 'doc '||i, 'obj-'||i, 0, false, "
                 f"(SELECT ('['||string_agg((random()*2-1)::text, ',')||']')::vector "
                 f' FROM generate_series(1,{DIMS}) WHERE i=i) '
                 f'FROM generate_series(1, 2000) i'
             )
-            cur.execute(f'ANALYZE {VEC_TABLE}')
+            cur.execute(f'ANALYZE {vec_store.table}')
             raw_conn.commit()
 
-        # EXPLAIN the exact statement the driver runs for semantic search.
-        search_module = sys.modules['ai.common.store.pgvector_store']
-        search_sql = search_module.SEARCH_SQL['semantic_search'].format(
-            collection=VEC_TABLE, similarity_operator='<=>', where_clause=''
-        )
-        probe = _unit_vec(rng)
-        with raw_conn.cursor() as cur:
-            cur.execute(f'EXPLAIN {search_sql}', (str(probe), 5))
-            plan = '\n'.join(row[0] for row in cur.fetchall())
+        from ai.common.store.pgvector.sql import vector_literal
 
-        assert f'Index Scan using {VEC_TABLE}_embedding_hnsw' in plan, plan
+        statement, params = vec_store._sql.semantic(
+            vec_store._cached_columns(),
+            'cosine',
+            vector_literal(_unit_vec(rng)),
+            vec_store._where(rv.DocFilter()),
+            5,
+            0,
+        )
+        with raw_conn.cursor() as cur:
+            cur.execute(pgsql.SQL('EXPLAIN ') + statement, params)
+            plan = '\n'.join(row[0] for row in cur.fetchall())
+        raw_conn.rollback()
+
+        assert f'Index Scan using {vec_store.table}_embedding_hnsw' in plan, plan
         assert 'Seq Scan' not in plan, plan
 
-    def test_semantic_search_returns_nearest_document(self, rr_env, vec_store):
+    def test_semantic_search_returns_nearest_document(self, rv, vec_store):
         rng = np.random.default_rng(23)
         vectors = [(f'doc {i}', _unit_vec(rng)) for i in range(50)]
-        vec_store.addChunks(self._chunks(rr_env.schema, vectors))
+        vec_store.addChunks(self._chunks(rv, vectors))
 
-        # Query with (nearly) the exact embedding of doc 17 — it must come back first.
-        target = vectors[17][1]
-        query = rr_env.schema.QuestionText('find doc 17')
-        query.embedding = target
-        results = vec_store.searchSemantic(query, rr_env.schema.DocFilter(limit=5))
+        # Query with the exact embedding of doc 17: it must come back first.
+        query = rv.QuestionText(text='find doc 17')
+        query.embedding = vectors[17][1]
+        results = vec_store.searchSemantic(query, rv.DocFilter(limit=5))
         assert results, 'semantic search returned nothing'
         assert results[0].page_content == 'doc 17'
         assert results[0].score > 0.99
 
-    def test_upsert_replaces_same_object_id(self, rr_env, vec_store):
+    def test_upsert_replaces_same_object_id(self, rv, vec_store):
         rng = np.random.default_rng(31)
-        first = self._chunks(rr_env.schema, [('original', _unit_vec(rng))])
-        vec_store.addChunks(first)
-        replacement = self._chunks(rr_env.schema, [('replaced', _unit_vec(rng))])
-        vec_store.addChunks(replacement)
-        assert vec_store.count_documents() == 1
+        vec_store.addChunks(self._chunks(rv, [('original', _unit_vec(rng))]))
+        vec_store.addChunks(self._chunks(rv, [('replaced', _unit_vec(rng))]))
+        assert vec_store.count_documents() == 2  # the chunk and the control record
+        assert vec_store.countChunks(rv.DocFilter()) == 1
 
-    # A transaction-mode pooler (PgBouncer) holds a server connection for as
-    # long as a client sits inside a transaction. A long-lived node left
-    # "idle in transaction" pins one of the database's few pooler slots for
-    # its whole lifetime, so between calls the session must be plain "idle".
-    @staticmethod
-    def _session_state(raw_conn, store) -> str:
-        """The node's backend state as the server sees it (pg_stat_activity)."""
-        with raw_conn.cursor() as cur:
-            cur.execute('SELECT state FROM pg_stat_activity WHERE pid = %s', (store.client.get_backend_pid(),))
-            state = cur.fetchone()[0]
-        # pg_stat_activity is snapshotted per transaction: end ours so the
-        # next probe sees fresh state.
-        raw_conn.rollback()
-        return state
+    def test_wide_vectors_skip_index_with_warning(self, rv, raw_conn):
+        import ai.common.store.pgvector.driver as driver
 
-    def test_session_idle_after_connect(self, rr_env, vec_store, raw_conn):
-        assert self._session_state(raw_conn, vec_store) == 'idle'
-
-    def test_session_idle_after_each_read(self, rr_env, vec_store, raw_conn):
-        rng = np.random.default_rng(41)
-        vectors = [(f'doc {i}', _unit_vec(rng)) for i in range(5)]
-        vec_store.addChunks(self._chunks(rr_env.schema, vectors))
-        assert self._session_state(raw_conn, vec_store) == 'idle', 'after addChunks'
-
-        query = rr_env.schema.QuestionText('doc')
-        query.embedding = vectors[0][1]
-        reads = {
-            '_doesCollectionExist': lambda: vec_store._doesCollectionExist(),
-            'count_documents': lambda: vec_store.count_documents(),
-            'searchSemantic': lambda: vec_store.searchSemantic(query, rr_env.schema.DocFilter(limit=5)),
-            'searchKeyword': lambda: vec_store.searchKeyword(query, rr_env.schema.DocFilter(limit=5)),
-            'get': lambda: vec_store.get(rr_env.schema.DocFilter(limit=5)),
-            'getPaths': lambda: vec_store.getPaths(),
-            'render': lambda: vec_store.render('obj-0', lambda _text: None),
-        }
-        for name, read in reads.items():
-            read()
-            assert self._session_state(raw_conn, vec_store) == 'idle', f'after {name}'
-
-    def test_session_idle_after_each_single_statement_write(self, rr_env, vec_store, raw_conn):
-        rng = np.random.default_rng(43)
-        vec_store.addChunks(self._chunks(rr_env.schema, [('doc', _unit_vec(rng))]))
-        for name in ('markDeleted', 'markActive', 'remove'):
-            getattr(vec_store, name)(['obj-0'])
-            assert self._session_state(raw_conn, vec_store) == 'idle', f'after {name}'
-
-    def test_session_idle_after_failed_read(self, rr_env, vec_store, raw_conn):
-        rng = np.random.default_rng(47)
-        vec_store.addChunks(self._chunks(rr_env.schema, [('doc', _unit_vec(rng))]))
-        query = rr_env.schema.QuestionText('doc')
-        query.embedding = [1.0, 0.0]  # wrong width: the server rejects the comparison
-        with pytest.raises(Exception, match='dimensions'):
-            vec_store.searchSemantic(query, rr_env.schema.DocFilter(limit=5))
-        assert self._session_state(raw_conn, vec_store) == 'idle'
-        # ...and the connection is still usable (no aborted transaction).
-        assert vec_store.count_documents() == 1
-
-    def test_session_idle_after_failed_write(self, rr_env, vec_store, raw_conn):
-        rng = np.random.default_rng(53)
-        vec_store.addChunks(self._chunks(rr_env.schema, [('original', _unit_vec(rng))]))
-        bad = self._chunks(rr_env.schema, [('replacement', _unit_vec(rng))])
-        bad[0].embedding = [1.0, 0.0]  # wrong width: the INSERT fails after the DELETE ran
-        with pytest.raises(Exception):
-            vec_store.addChunks(bad, checkCollection=False)
-        assert self._session_state(raw_conn, vec_store) == 'idle'
-        # The replacement is still atomic: the failed batch left the original in place.
-        docs = vec_store.get(rr_env.schema.DocFilter(objectIds=['obj-0'], limit=5))
-        assert [d.page_content for d in docs] == ['original']
-        # ...and the connection is back in autocommit, so later reads open no transaction.
-        assert vec_store.client.autocommit is True
-        assert self._session_state(raw_conn, vec_store) == 'idle', 'after a read following the failed write'
-
-    def test_wide_vectors_skip_index_with_warning(self, rr_env, monkeypatch, raw_conn):
-        wide_table = 'rr_vec_wide_e2e'
-        with raw_conn.cursor() as cur:
-            cur.execute(f'DROP TABLE IF EXISTS {wide_table}')
-            raw_conn.commit()
-        store_cls = _load_vector_store(monkeypatch)
-        store = store_cls('rocketride_vector', {'collection': wide_table, 'similarity': 'cosine'}, {})
+        warnings: list = []
+        rv.monkeypatch.setattr(driver, 'warning', warnings.append)
+        wide_table = _unique_table('vx_l2_rr_wide')
+        store = rv.Store('rocketride_vector', {'collection': wide_table, 'similarity': 'cosine'}, {})
         try:
             store._createCollection(vectorSize=2001)
             with raw_conn.cursor() as cur:
                 cur.execute('SELECT indexname FROM pg_indexes WHERE tablename = %s', (wide_table,))
                 index_names = [row[0] for row in cur.fetchall()]
+            raw_conn.rollback()
             assert not any('hnsw' in name for name in index_names)
-            assert any('Skipping index' in w for w in rr_env.warnings)
+            assert any('Skipping index' in w for w in warnings)
         finally:
+            store.close()
             with raw_conn.cursor() as cur:
                 cur.execute(f'DROP TABLE IF EXISTS {wide_table}')
                 raw_conn.commit()
+
+
+class TestRocketrideVectorNode:
+    """The node's lifecycle and tool surface through its real IGlobal/IInstance."""
+
+    @pytest.fixture()
+    def table(self, raw_conn):
+        name = _unique_table('vx_l2_rr_node')
+        yield name
+        with raw_conn.cursor() as cur:
+            cur.execute("SET lock_timeout = '10s'")
+            cur.execute(f'DROP TABLE IF EXISTS {name}')
+            raw_conn.commit()
+
+    def test_node_uses_the_store_bases(self, rv):
+        from ai.common.store import StoreGlobalBase, StoreInstanceBase, VectorStoreToolMixin
+        from ai.common.store.pgvector import PgVectorStore
+
+        assert issubclass(rv.IGlobal, StoreGlobalBase)
+        assert issubclass(rv.IInstance, StoreInstanceBase) and issubclass(rv.IInstance, VectorStoreToolMixin)
+        assert issubclass(rv.Store, PgVectorStore)
+
+    def test_services_declare_the_tool_and_the_write_switches(self):
+        from ai.common.store.vx_defaults import VECTOR_ALLOW_WRITES_DEFAULT
+
+        text = (_VEC_NODE_DIR / 'services.json').read_text(encoding='utf-8')
+        text = '\n'.join(line for line in text.splitlines() if not line.strip().startswith('//'))
+        services = json.loads(text)
+        assert services['classType'] == ['store', 'tool']
+        assert services['capabilities'] == ['invoke']
+        fields = services['fields']
+        # The outer gate (#2631): the tool surface and the write tools, both off by default.
+        assert fields['rrvector.expose_tools']['default'] is False
+        assert fields['rrvector.allow_write']['default'] is False
+        # The write gate's DAP switch. Agents have no switch of their own: allow_write alone decides theirs.
+        assert fields['rrvector.allow_writes']['default'] is VECTOR_ALLOW_WRITES_DEFAULT
+        assert not [name for name in fields if 'agent_writes' in name]
+        properties = set(fields['rrvector.cloud']['properties'])
+        assert {'rrvector.expose_tools', 'rrvector.allow_write', 'rrvector.allow_writes'} <= properties
+        # The allow_writes default lives in vx_defaults only: no profile pins it.
+        assert all('allow_writes' not in profile for profile in services['preconfig']['profiles'].values())
+
+    def test_tools_are_hidden_and_refused_with_the_shipped_switches(self, rv, table):
+        """With expose_tools and allow_write at their defaults (off), no tool is offered or runs."""
+        from ai.common.tool_context import ToolCallContext
+
+        rng = np.random.default_rng(40)
+        glb, inst = _begin_vector_node(
+            rv, {'collection': table, 'similarity': 'cosine', 'expose_tools': False, 'allow_write': False}
+        )
+        ctx = ToolCallContext(origin='agent', source_type=None, targeted=True, caller={'auth': 'agent'})
+        try:
+            self._seed(rv, glb, rng)
+            assert inst._collect_tool_methods() == {}
+            with _called_as(rv, ctx):
+                for answer in (inst.stats({}), inst.objdir({}), self._write(inst, rng, 'delete', 'doc')):
+                    assert answer['success'] is False and 'expose_tools=true' in answer['error'], answer
+            self._unchanged(rv, glb)
+        finally:
+            glb.endGlobal()
+
+    def test_write_tools_are_hidden_and_refused_until_allow_write(self, rv, table):
+        from ai.common.tool_context import ToolCallContext
+
+        rng = np.random.default_rng(39)
+        glb, inst = _begin_vector_node(
+            rv, {'collection': table, 'similarity': 'cosine', 'allow_write': False, 'allow_writes': True}
+        )
+        ctx = ToolCallContext(origin='agent', source_type=None, targeted=True, caller={'auth': 'agent'})
+        try:
+            self._seed(rv, glb, rng)
+            offered = set(inst._collect_tool_methods())
+            assert {'search', 'objdir', 'get', 'stats'} <= offered
+            assert offered.isdisjoint({'upsert', 'delete', 'soft_delete', 'restore'})
+            with _called_as(rv, ctx):
+                answer = self._write(inst, rng, 'delete', 'doc')
+            assert answer['success'] is False and 'allow_write=true' in answer['error'], answer
+            self._unchanged(rv, glb)
+        finally:
+            glb.endGlobal()
+
+    def test_begin_global_opens_the_store_and_keys_on_the_tenant(self, rv, table):
+        glb, inst = _begin_vector_node(rv, {'collection': table, 'similarity': 'cosine'})
+        try:
+            assert glb.TRANFORM_KEY_TAG_NAME == f'rocketride_vector://{TEST_DB_NAME}/{table}/status'.lower()
+            stats = inst.stats({})
+            assert stats['success'] is True and stats['count'] == 0
+        finally:
+            glb.endGlobal()
+        assert glb.store is None
+
+    def test_stats_after_restart_report_the_stored_model(self, rv, table):
+        """A fresh task (nothing written by it) still reports the collection's model and dimension (D6)."""
+        rng = np.random.default_rng(41)
+        writer, _ = _begin_vector_node(rv, {'collection': table, 'similarity': 'cosine'})
+        try:
+            writer.store.addChunks(
+                [
+                    rv.Doc(
+                        page_content='kestrel',
+                        metadata=rv.DocMetadata(objectId='doc', chunkId=0, isDeleted=False),
+                        embedding=_unit_vec(rng),
+                        embedding_model='test-model',
+                    )
+                ]
+            )
+        finally:
+            writer.endGlobal()
+        reader, inst = _begin_vector_node(rv, {'collection': table, 'similarity': 'cosine'})
+        try:
+            stats = inst.stats({})
+            assert (stats['model'], stats['vector_size'], stats['count']) == ('test-model', DIMS, 2)
+        finally:
+            reader.endGlobal()
+
+    @staticmethod
+    def _seed(rv, glb, rng):
+        glb.store.addChunks(
+            [
+                rv.Doc(
+                    page_content='kept',
+                    metadata=rv.DocMetadata(objectId='doc', chunkId=0, isDeleted=False),
+                    embedding=_unit_vec(rng),
+                    embedding_model='test-model',
+                )
+            ]
+        )
+
+    @staticmethod
+    def _write(inst, rng, tool, object_id):
+        if tool == 'delete':
+            return inst.delete({'object_ids': [object_id]})
+        document = {
+            'content': 'new',
+            'object_id': object_id,
+            'embedding': _unit_vec(rng),
+            'embedding_model': 'test-model',
+        }
+        return inst.upsert({'documents': [document]})
+
+    @staticmethod
+    def _unchanged(rv, glb):
+        """The seeded document is still there, nothing else was written, and the control record is intact."""
+        assert glb.store.countChunks(rv.DocFilter()) == 1
+        assert glb.store.countChunks(rv.DocFilter(objectIds=['doc'])) == 1
+        assert glb.store.count_documents() == 2
+        assert (glb.store.modelName, glb.store.vectorSize) == ('test-model', DIMS)
+
+    def test_write_tools_stay_listed(self, rv):
+        from ai.common.store import StoreInstanceBase
+
+        for name in ('upsert', 'delete'):
+            assert getattr(rv.IInstance, name).__tool_meta__ == getattr(StoreInstanceBase, name).__tool_meta__
+
+    @pytest.mark.parametrize('allow_writes', [False, True])
+    @pytest.mark.parametrize('tool', ['delete', 'upsert'])
+    def test_tool_writes_without_a_call_context_are_refused(self, rv, table, allow_writes, tool):
+        """A write that carries no call context is refused whatever the switch says; the rows stay."""
+        rng = np.random.default_rng(44)
+        config = {'collection': table, 'similarity': 'cosine', 'allow_writes': allow_writes}
+        glb, inst = _begin_vector_node(rv, config)
+        try:
+            self._seed(rv, glb, rng)
+            for object_id in ('doc', 'other', 'schema'):
+                answer = self._write(inst, rng, tool, object_id)
+                assert answer['success'] is False, answer
+                assert answer['code'] == ('RESERVED_ID' if object_id == 'schema' else 'WRITES_UNKNOWN_CALLER')
+            self._unchanged(rv, glb)
+        finally:
+            glb.endGlobal()
+
+    @pytest.mark.parametrize(
+        ('origin', 'switches', 'object_id', 'code'),
+        [
+            ('dap', {'allow_writes': False}, 'doc', 'WRITES_DISABLED'),
+            ('agent', {}, 'schema', 'RESERVED_ID'),
+            ('dap', {'allow_writes': True}, 'schema', 'RESERVED_ID'),
+        ],
+    )
+    @pytest.mark.parametrize('tool', ['delete', 'upsert'])
+    def test_tool_writes_refused_by_the_switches_and_the_reserved_id(
+        self, rv, table, origin, switches, object_id, code, tool
+    ):
+        from ai.common.tool_context import ToolCallContext
+
+        rng = np.random.default_rng(45)
+        glb, inst = _begin_vector_node(rv, {'collection': table, 'similarity': 'cosine', **switches})
+        if origin == 'dap':
+            ctx = ToolCallContext(origin='dap', source_type='tools', targeted=True, caller={'auth': 'account'})
+        else:
+            ctx = ToolCallContext(origin='agent', source_type=None, targeted=True, caller={'auth': 'agent'})
+        try:
+            self._seed(rv, glb, rng)
+            with _called_as(rv, ctx):
+                answer = self._write(inst, rng, tool, object_id)
+            assert answer['success'] is False and answer['code'] == code, answer
+            self._unchanged(rv, glb)
+        finally:
+            glb.endGlobal()
+
+    @pytest.mark.parametrize(
+        'switches',
+        [{}, {'allow_writes': False, 'agent_writes': False}],
+        ids=['defaults', 'dap-writes-off-and-a-stray-agent-switch'],
+    )
+    def test_an_agent_s_upsert_and_delete_with_a_call_context_reach_the_store(self, rv, table, switches):
+        """allow_write alone decides an agent's write: allow_writes and a stray agent_writes key are not read."""
+        from ai.common.tool_context import ToolCallContext
+
+        rng = np.random.default_rng(46)
+        glb, inst = _begin_vector_node(rv, {'collection': table, 'similarity': 'cosine', **switches})
+        assert not hasattr(glb, 'agent_writes')
+        ctx = ToolCallContext(origin='agent', source_type=None, targeted=True, caller={'auth': 'agent'})
+        try:
+            self._seed(rv, glb, rng)
+            with _called_as(rv, ctx):
+                stored = self._write(inst, rng, 'upsert', 'other')
+                removed = self._write(inst, rng, 'delete', 'doc')
+            assert stored['success'] is True and removed['success'] is True, (stored, removed)
+            assert glb.store.countChunks(rv.DocFilter(objectIds=['other'])) == 1
+            assert glb.store.countChunks(rv.DocFilter(objectIds=['doc'])) == 0
+        finally:
+            glb.endGlobal()
+
+    def test_writes_refused_with_the_switch_off(self, rv, table):
+        """A DAP call from a Tools source is refused while rrvector.allow_writes is off; the rows stay."""
+        from ai.common.tool_context import ToolCallContext, tool_call
+
+        rng = np.random.default_rng(42)
+        glb, inst = _begin_vector_node(rv, {'collection': table, 'similarity': 'cosine', 'allow_writes': False})
+        try:
+            glb.store.addChunks(
+                [
+                    rv.Doc(
+                        page_content='kept',
+                        metadata=rv.DocMetadata(objectId='doc', chunkId=0, isDeleted=False),
+                        embedding=_unit_vec(rng),
+                        embedding_model='test-model',
+                    )
+                ]
+            )
+            ctx = ToolCallContext(origin='dap', source_type='tools', targeted=True, caller={'auth': 'account'})
+            with tool_call(ctx):
+                removed = inst.soft_delete({'object_ids': ['doc']})
+                deleted = inst.delete({'object_ids': ['doc']})
+            assert removed['success'] is False and removed['code'] == 'WRITES_DISABLED'
+            assert deleted['success'] is False and deleted['code'] == 'WRITES_DISABLED'
+            assert glb.store.countChunks(rv.DocFilter()) == 1
+        finally:
+            glb.endGlobal()
+
+    def test_writes_refused_without_a_call_context(self, rv, table):
+        """With the switch on, a call that carries no call context is refused; the rows stay."""
+        rng = np.random.default_rng(43)
+        glb, inst = _begin_vector_node(rv, {'collection': table, 'similarity': 'cosine', 'allow_writes': True})
+        try:
+            glb.store.addChunks(
+                [
+                    rv.Doc(
+                        page_content='kept',
+                        metadata=rv.DocMetadata(objectId='doc', chunkId=0, isDeleted=False),
+                        embedding=_unit_vec(rng),
+                        embedding_model='test-model',
+                    )
+                ]
+            )
+            for tool in (inst.soft_delete, inst.restore, inst.delete):
+                answer = tool({'object_ids': ['doc']})
+                assert answer['success'] is False and answer['code'] == 'WRITES_UNKNOWN_CALLER'
+            assert glb.store.countChunks(rv.DocFilter()) == 1
+        finally:
+            glb.endGlobal()

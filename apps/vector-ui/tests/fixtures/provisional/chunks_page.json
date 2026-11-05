@@ -1,0 +1,68 @@
+{
+	"success": true,
+	"items": [
+		{
+			"chunkId": 0,
+			"content": "# Kestrel field guide\n\nThe kestrel hovers into the wind before it drops on prey. This guide covers nesting ledges, survey timing and the spring count.",
+			"length": 150,
+			"isTable": false,
+			"tableId": 0,
+			"isDeleted": false,
+			"pointId": "6df68429-1d3e-5eed-bbfc-6c41d8ea51dd",
+			"metadata": {
+				"objectId": "91ae15d4-3f6e-589f-bb81-72301f2ca1b6",
+				"chunkId": 0,
+				"parent": "C:/demo/field/kestrel_field_guide.md",
+				"nodeId": "chunk_1",
+				"isTable": false,
+				"tableId": 0,
+				"isDeleted": false,
+				"size": 7419,
+				"ingestedAt": "2026-10-08T18:20:11Z"
+			}
+		},
+		{
+			"chunkId": 1,
+			"content": "## Nesting\n\nPairs return to the same ledge each spring. Survey from the north path before 09:00 and log every sighting with the time.",
+			"length": 133,
+			"isTable": false,
+			"tableId": 0,
+			"isDeleted": false,
+			"pointId": "23474ede-f342-54e1-bd43-1933ce7b7807",
+			"metadata": {
+				"objectId": "91ae15d4-3f6e-589f-bb81-72301f2ca1b6",
+				"chunkId": 1,
+				"parent": "C:/demo/field/kestrel_field_guide.md",
+				"nodeId": "chunk_1",
+				"isTable": false,
+				"tableId": 0,
+				"isDeleted": false,
+				"size": 7419,
+				"ingestedAt": "2026-10-08T18:20:11Z"
+			}
+		},
+		{
+			"chunkId": 2,
+			"content": "## Survey protocol\n\nWalk the transect at a steady pace. Record the station, the count and the weather. Do not approach a nest.",
+			"length": 126,
+			"isTable": false,
+			"tableId": 0,
+			"isDeleted": false,
+			"pointId": "db745600-a393-555c-8154-5bbe1c7c03c5",
+			"metadata": {
+				"objectId": "91ae15d4-3f6e-589f-bb81-72301f2ca1b6",
+				"chunkId": 2,
+				"parent": "C:/demo/field/kestrel_field_guide.md",
+				"nodeId": "chunk_1",
+				"isTable": false,
+				"tableId": 0,
+				"isDeleted": false,
+				"size": 7419,
+				"ingestedAt": "2026-10-08T18:20:11Z"
+			}
+		}
+	],
+	"has_more": true,
+	"next_after": 2,
+	"total": 12
+}

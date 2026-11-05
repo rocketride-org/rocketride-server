@@ -15,7 +15,7 @@ node READMEs describe the functions for the people who call them.
 | Function | Kind | Offered when |
 | --- | --- | --- |
 | `search`, `objdir`, `get`, `stats` | read | `expose_tools` is on |
-| `list_documents` | read | `expose_tools` is on and the driver sets `supports_document_listing` |
+| `list_documents` | read | `expose_tools` is on (every driver lists; see below) |
 | `upsert`, `delete`, `soft_delete`, `restore` | write | `expose_tools` and `allow_write` are on |
 
 `StoreGlobalBase.beginGlobal` resolves `expose_tools` and `allow_write` from
@@ -30,10 +30,16 @@ authorization.
 
 Every function returns `{"success": false, "error": "..."}` for a missing or
 invalid input, a refused write, a missing embedding provider, or (for `get`) an
-object ID the store does not hold. Pagination values go through
+object ID the store does not hold (`code: "NOT_FOUND"`; a document that is in
+the trash is `IN_TRASH`, the reserved ID `RESERVED_ID`). Pagination values go through
 `ai.common.utils.optional_int`: integers or integer strings, bounds checked,
 booleans and floats rejected, caps applied silently (100 chunks for `get`, 1000
-documents for `list_documents`, 1000 paths for `objdir`).
+paths for `objdir`, a page counting distinct paths; `list_documents` defaults to
+100 documents, clamps to 1000 and says so in `warnings`, and refuses a limit
+below 1). The explorer's tools (`dialect`, `chunks`, `vectors`,
+`sample`, ...) sit beside these for apps and are specified in
+[vector-tool-contract.md](vector-tool-contract.md), which is the authority for
+every answer shape; this page covers what a driver author has to implement.
 
 ## The reserved object ID
 
@@ -42,55 +48,43 @@ under the object ID `schema` (its `isDeleted` is true; it carries the model
 name and vector size, read on every collection check). `upsert`, `delete`,
 `soft_delete`, `restore` and `get` refuse that ID before any driver call.
 
-## Optional capability: listing documents
+## Listing documents
 
 `getPaths` lists active documents only, filtering out soft-deleted chunks
 before applying the page. It keys its result by parent path, so documents
 that share a path collapse into one entry and no chunk count is available.
 On most drivers `offset` and `limit` count chunk-0 records, so a page can
 hold fewer than `limit` paths while more follow; the two Postgres stores and
-Astra group by path first and count paths. `parent` is an exact match except
-on Atlas (a case-insensitive pattern) and Qdrant (a text match).
-A driver that can do better opts in:
+Astra group by path first and count paths (every chunk counts, so a document
+whose chunks start above 0 is listed too). `parent` is an exact match except
+on Atlas (a case-insensitive pattern).
 
-```python
-class Store(DocumentStoreBase):
-    supports_document_listing = True
-
-    def listDocuments(self, parent=None, offset=0, limit=100, deleted=False) -> List[Dict[str, Any]]: ...
-    def countDocuments(self, parent=None, deleted=False) -> int: ...
-```
-
-The contract:
-
-- One row per document, `{'object_id': str, 'parent': str | None, 'chunk_count': int}`,
-  ordered by `object_id`, then the requested `offset` and `limit` applied.
-- `deleted=False` lists active documents, `deleted=True` the soft-deleted ones;
-  `chunk_count` counts the chunks in the listed state. The control row is never
-  listed.
-- `parent` is an exact filter. When a document's chunks carry different parents,
-  pick one deterministically (the Postgres drivers take the lowest).
-- `countDocuments` returns the number of documents `listDocuments` would page
-  through for the same filter.
-- Without a collection both return empty (`[]`, `0`), not an error.
-
-The `list_documents` tool asks the driver for `limit + 1` rows to derive
-`has_more` from the same read as the page, and `total` from `countDocuments`.
-`stats` adds `document_count` (active documents) on such a driver and reports
-`null` on the others. Only the literal `True` counts as opting in, so a
-stand-in object in a test does not advertise the tool by accident. The two
-Postgres drivers implement it with `GROUP BY objectId` and
-`COUNT(DISTINCT objectId)`; other drivers keep their tool surface unchanged
-until they implement both methods.
+`list_documents` is offered by every driver. It lists one row per document,
+paged with a cursor, through `DocumentStoreBase.listDocumentPage`: the default
+reads the first chunk of each document through `get`; a driver with a native
+listing overrides it (the Postgres drivers group by object ID and count the
+page's chunks). The answer carries the explorer's keys (`items`,
+`next_cursor`, `total`, ...) and #2704's as aliases: `documents` (rows
+`{object_id, parent, chunk_count}`), `total`, `offset` (always 0) and
+`has_more`. An `offset` other than 0 is refused with `INVALID_INPUT` naming
+`cursor`. `stats` adds `document_count` (active documents, `null` where the
+store cannot count them). #2704's opt-in (`supports_document_listing`,
+`listDocuments`, `countDocuments`) no longer exists; a driver implements
+`listDocumentPage` (and `countDocumentsWhere` / `countChunks` for counts) as
+described in the contract, section 2.2.
 
 ## Trash: `markDeleted` and `markActive`
 
 `soft_delete` and `restore` call the driver methods every store already has.
-Both may return the number of chunk rows the backend matched, or `None` as
-before; the tools report it as `matched_chunks` (`null` when the driver gives
-no count) and never claim a count the driver did not give. The Postgres
-drivers return the statement's row count; Chroma returns the number of
-chunks it updated.
+Both return the number of chunks the call moved into or out of the trash (0
+for a document already in that state), or `None` where the backend cannot
+count; the tools report it as `moved_chunks` and never claim a count the driver
+did not give (a negative number, a boolean or a string is `null`). The Postgres
+drivers return the statement's row count of the rows in the other state (-1,
+not known, is `None`); Chroma returns the number of chunks it updated.
+`matched_chunks` keeps #2704's meaning, the chunk rows the store holds for the
+IDs in either state, counted once for the whole call where the store can count
+(otherwise it equals `moved_chunks`).
 
 Both operations must preserve content and all metadata other than
 `isDeleted`, and must update every matching chunk even when a document spans
@@ -109,11 +103,15 @@ chunks it touches, and pays one count query per batch.
 - `packages/ai/tests/ai/common/store/`: the mixin on a mock store, one file per
   behaviour (switches, trash tools, listing, `get` not-found, `upsert` chunk
   numbering, `stats`, the base contract), plus the engine's real
-  `IInstanceBase` collector where available.
-- `nodes/test/test_vector_store_writes_full.py` and
-  `nodes/test/test_vector_store_listing_full.py`: both Postgres drivers on a
-  real pgvector database (`RR_TEST_PG_DSN`, `RR_REQUIRE_DB_TESTS=1` to fail
-  instead of skip), driver methods and tools alike.
+  `IInstanceBase` collector where available. The tools run as an agent's call
+  (the write gate fails closed without a call context): see `as_agent` in
+  `_vectordb_tool_harness.py`.
+- `nodes/test/test_vector_store_writes_full.py`,
+  `nodes/test/test_vector_store_listing_full.py` and
+  `nodes/test/test_pgvector_search.py` (filtered HNSW recovery): both Postgres
+  drivers on a real pgvector database (`RR_TEST_PG_DSN`,
+  `RR_REQUIRE_DB_TESTS=1` to fail instead of skip), driver methods and tools
+  alike.
 - `nodes/test/test_rocketride_vector_tools_full.py`: the managed node's
   switches and shipped profile on the real store.
 

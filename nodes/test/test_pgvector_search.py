@@ -3,7 +3,7 @@
 # Copyright (c) 2026 Aparavi Software AG
 # =============================================================================
 
-"""Filtered HNSW regressions for both PostgreSQL vector stores and their tools.
+"""Filtered HNSW regressions for both PostgreSQL vector stores and their tools (#2955).
 
 Uses the same RR_TEST_PG_DSN / RR_REQUIRE_DB_TESTS setup as the write suite.
 Deliberately not named *_full.py: Linux CI provisions pgvector but the normal
@@ -11,6 +11,11 @@ nodes:test runner excludes that suffix. Other platforms skip without a DB.
 The fixture deliberately puts more excluded neighbours ahead of the eligible
 documents than HNSW's default candidate budget. EXPLAIN checks the executed
 query, so a sequential scan cannot accidentally make the regression pass.
+
+Both drivers are the shared ``PgVectorStore`` (pooled connections, ``SET LOCAL
+hnsw.iterative_scan = strict_order`` inside each read transaction, the exact
+recovery in ``_semantic_with_recovery``); the statements are recorded through
+the pool's cursor factory.
 """
 
 from concurrent.futures import ThreadPoolExecutor
@@ -31,8 +36,11 @@ def indexed_store(store_env, request):
     import numpy as np
     from psycopg2.extras import execute_values
 
+    from ai.common.store.pgvector.sql import OPERATORS
+
     store, raw, table = store_env
-    store.similarity = store.similarityDict[request.param]
+    store.metric = {'cosine': 'cosine', 'l2': 'l2', 'inner_product': 'ip'}[request.param]
+    store.similarity = OPERATORS[store.metric]
     dimensions = 32
     query = [1.0] + [0.0] * (dimensions - 1)
     seed = _doc('seed', content='unrelated document')
@@ -84,37 +92,60 @@ def indexed_store(store_env, request):
         cur.execute(f'ANALYZE {table}')
     raw.commit()
 
+    # The driver also keeps a btree index on (objectid, chunkid), which the planner prefers for a filter on
+    # object IDs: this suite exercises the HNSW scan, so only the HNSW index stays.
+    with raw.cursor() as cur:
+        cur.execute(
+            "SELECT indexname FROM pg_indexes WHERE tablename = %s AND indexname NOT LIKE '%%_pkey' "
+            "AND indexname NOT LIKE '%%_embedding_hnsw'",
+            (table,),
+        )
+        for (name,) in cur.fetchall():
+            cur.execute(f'DROP INDEX "{name}"')
+    raw.commit()
+
     # Selective metadata filters can make the planner prefer a table scan.
     # Exercise HNSW explicitly on these isolated test connections; the exact
     # retry must still work without that index. Avoid JIT's artificial cost
     # threshold when a table scan is the only possible plan for the retry.
-    for connection in (store.client, raw):
-        with connection.cursor() as cur:
-            cur.execute('SET enable_seqscan = off')
-            cur.execute('SET jit = off')
-            cur.execute('SET hnsw.ef_search = 40')
-        connection.commit()
+    with raw.cursor() as cur:
+        cur.execute('SET enable_seqscan = off')
+        cur.execute('SET jit = off')
+        cur.execute('SET hnsw.ef_search = 40')
+    raw.commit()
 
-    # Record statements that the production driver actually executes.
+    # Record the semantic statements the production driver actually executes, on the connections it
+    # opens (the pool builds each one from these arguments), and give those connections the same session
+    # settings; the pool's idle connection is dropped so the next call opens one that has both.
     searches = []
-
-    # Instrument the DB cursor rather than store helper methods so this same
-    # fixture can exercise the pre-fix drivers, which used direct cursors.
     from psycopg2.extensions import cursor
 
     class RecordingCursor(cursor):
         def execute(self, sql, params=None):
-            if ' AS distance ' in sql:
-                searches.append((sql, params))
+            text = sql.as_string(self) if hasattr(sql, 'as_string') else str(sql)
+            if text.startswith('/* rr-pgvector:semantic') and ' AS "distance"' in text:
+                searches.append((text, list(params) if params is not None else None))
             return super().execute(sql, params)
 
-    store.client.cursor_factory = RecordingCursor
+    store._db._connect_args['cursor_factory'] = RecordingCursor
+    store._db._connect_args['options'] = '-c enable_seqscan=off -c jit=off -c hnsw.ef_search=40'
+    store._db._pool.close_idle()
     # Register the numpy adapter on the diagnostic connection too.
     from pgvector.psycopg2 import register_vector
 
     register_vector(raw)
     raw.commit()
     yield store, raw, table, query, searches
+
+
+def _assert_session_clean(store):
+    """No transaction is left open and SET LOCAL did not leak: a fresh checkout sees the default setting."""
+    with store._db._checkout() as conn:
+        assert conn.get_transaction_status() == 0
+        with conn.cursor() as cur:
+            cur.execute('SHOW hnsw.iterative_scan')
+            assert cur.fetchone()[0] == 'off', 'SET LOCAL must not leak beyond the search'
+        conn.rollback()
 
 
 def _plan(raw, statement):
@@ -157,11 +188,7 @@ def test_semantic_search_survives_trash_and_restore(indexed_store):
     assert [doc['metadata']['objectId'] for doc in after['results']] == [f'active-{i:02d}' for i in range(5)]
     assert len(searches) == 1
     assert 'distance + 0' not in searches[0][0]
-    assert store.client.autocommit is True
-    assert store.client.get_transaction_status() == 0
-    with store.client.cursor() as cur:
-        cur.execute('SHOW hnsw.iterative_scan')
-        assert cur.fetchone()[0] == 'off', 'SET LOCAL must not leak beyond the search'
+    _assert_session_clean(store)
     assert tool.get({'object_id': 'near'})['success'] is False
     assert tool.list_documents({'deleted': True})['documents'] == [
         {'object_id': 'near', 'parent': '/near', 'chunk_count': 100}
@@ -212,8 +239,7 @@ def test_empty_filtered_search_stays_empty(indexed_store):
     store, _, _, query, searches = indexed_store
     question = QuestionText(text='nearest document', embedding=query)
     assert store.searchSemantic(question, DocFilter(parent='/missing', limit=5)) == []
-    assert store.client.autocommit is True
-    assert store.client.get_transaction_status() == 0
+    _assert_session_clean(store)
     assert len(searches) == 2, 'An empty ANN answer needs exact confirmation'
 
 
@@ -298,7 +324,7 @@ def test_search_omits_vectors_without_a_cosine_distance(indexed_store, missing, 
     from ai.common.schema import DocFilter, QuestionText
 
     store, raw, table, query, searches = indexed_store
-    store._iterative_scan = False  # Exercise the compatibility path for pgvector before 0.8.
+    store._db.iterative_scan = False  # Exercise the compatibility path for pgvector before 0.8.
     with raw.cursor() as cur:
         if not ann_index:
             cur.execute(f'DROP INDEX {table}_embedding_hnsw')
@@ -318,7 +344,7 @@ def test_legacy_fallback_recovers_matches_after_trash(indexed_store):
     from ai.common.schema import DocFilter, QuestionText
 
     store, raw, table, query, searches = indexed_store
-    store._iterative_scan = False
+    store._db.iterative_scan = False
     store.markDeleted(['near'])
     results = store.searchSemantic(QuestionText(text='nearest', embedding=query), DocFilter(limit=5))
     assert [doc.metadata.objectId for doc in results] == [f'active-{i:02d}' for i in range(5)]
@@ -328,22 +354,19 @@ def test_legacy_fallback_recovers_matches_after_trash(indexed_store):
 
 
 def test_failed_iterative_query_releases_transaction_and_local_setting(indexed_store):
-    """A failed search leaves the shared connection usable and unpinned."""
-    import psycopg2
+    """A failed search leaves the pool usable and unpinned: the transaction ended and SET LOCAL went with it."""
     from ai.common.schema import DocFilter, QuestionText
+    from ai.common.store.errors import StoreError, ToolRefusal
 
     store, _, _, query, _ = indexed_store
-    with pytest.raises(psycopg2.DataError, match='different vector dimensions'):
+    # The driver reports the failure as its own error, never the client's text.
+    with pytest.raises((StoreError, ToolRefusal)):
         store.searchSemantic(QuestionText(text='bad dimensions', embedding=[1.0, 0.0]), DocFilter(limit=5))
-    assert store.client.autocommit is True
-    assert store.client.get_transaction_status() == 0
-    with store.client.cursor() as cur:
-        cur.execute('SHOW hnsw.iterative_scan')
-        assert cur.fetchone()[0] == 'off'
+    _assert_session_clean(store)
     assert store.searchSemantic(QuestionText(text='nearest', embedding=query), DocFilter(limit=5))
 
 
-def test_shared_connection_serializes_iterative_searches(indexed_store):
+def test_the_pool_serializes_iterative_searches_without_leaking_transactions(indexed_store):
     """Concurrent callers do not leak transactions or overlap connection settings."""
     from ai.common.schema import DocFilter, QuestionText
 
@@ -352,5 +375,4 @@ def test_shared_connection_serializes_iterative_searches(indexed_store):
     with ThreadPoolExecutor(max_workers=3) as pool:
         results = list(pool.map(lambda _: store.searchSemantic(question, DocFilter(limit=5)), range(6)))
     assert all({doc.metadata.objectId for doc in docs} == {'near'} for docs in results)
-    assert store.client.autocommit is True
-    assert store.client.get_transaction_status() == 0
+    _assert_session_clean(store)

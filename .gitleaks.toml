@@ -19,6 +19,8 @@ paths = ['''\.pipe(\.json)?$''']
     regexes = [
         '''\$[A-Z0-9_]+''',
         '''\$\{[A-Z0-9_]+\}''',
+        # The literal placeholder the Vector Explorer templates ship (apps/vector-ui/templates).
+        '''^replace-with-your-key$''',
     ]
 
 # Custom rule: detect hardcoded keys in services.json node configs
@@ -34,6 +36,8 @@ paths = ['''services.*\.json$''']
     regexes = [
         '''\$[A-Z0-9_]+''',
         '''\$\{[A-Z0-9_]+\}''',
+        # The literal placeholder the Vector Explorer templates ship (apps/vector-ui/templates).
+        '''^replace-with-your-key$''',
     ]
 
 # Global allowlist — skip lock files, build output, test fixtures

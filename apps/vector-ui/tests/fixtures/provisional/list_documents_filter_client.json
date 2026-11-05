@@ -1,0 +1,65 @@
+{
+	"success": true,
+	"items": [
+		{
+			"objectId": "75b89d86-a64e-5143-bf50-55d4a7fd8cd2",
+			"path": "C:/demo/handbooks/falcon_handbook.md",
+			"chunks": 31,
+			"has_first_chunk": true,
+			"tables": 0,
+			"deleted": false,
+			"nodeId": "chunk_1",
+			"size": 40214,
+			"modifyTime": null,
+			"ingestedAt": "2026-10-08T18:20:11Z",
+			"pointId": "76d57a1c-26e2-5ad0-b88c-b9405dce880c",
+			"max_chunk_id": null,
+			"deleted_chunks": null
+		},
+		{
+			"objectId": "91ae15d4-3f6e-589f-bb81-72301f2ca1b6",
+			"path": "C:/demo/field/kestrel_field_guide.md",
+			"chunks": 12,
+			"has_first_chunk": true,
+			"tables": 0,
+			"deleted": false,
+			"nodeId": "chunk_1",
+			"size": 7419,
+			"modifyTime": null,
+			"ingestedAt": "2026-10-08T18:20:11Z",
+			"pointId": "6df68429-1d3e-5eed-bbfc-6c41d8ea51dd",
+			"max_chunk_id": null,
+			"deleted_chunks": null
+		},
+		{
+			"objectId": "e75b1be4-9c82-5266-96b3-b894c6fe4113",
+			"path": "C:/demo/greenhouse/orchid_notes.pdf",
+			"chunks": 6,
+			"has_first_chunk": true,
+			"tables": 0,
+			"deleted": false,
+			"nodeId": "chunk_1",
+			"size": 181220,
+			"modifyTime": null,
+			"ingestedAt": "2026-10-08T18:20:11Z",
+			"pointId": "459ea560-0859-5475-93cf-cf0effbc5bfe",
+			"max_chunk_id": null,
+			"deleted_chunks": null
+		}
+	],
+	"next_cursor": "eyJvIjoiNmRmNjg0MjktMWQzZS01ZWVkLWJiZmMtNmM0MWQ4ZWE1MWRkIn0",
+	"total": null,
+	"counts_exact": false,
+	"distinct": true,
+	"sorted": false,
+	"filter_applied": "none",
+	"filter_ignored": [
+		"path_prefix",
+		"file_types"
+	],
+	"caveats": [
+		"documents_by_first_chunk",
+		"documents_unsorted",
+		"documents_filter_client"
+	]
+}

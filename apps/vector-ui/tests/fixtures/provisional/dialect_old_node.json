@@ -1,0 +1,5 @@
+{
+	"rejected": {
+		"message": "No handler found for tool \"dialect\" on node \"store_1\""
+	}
+}

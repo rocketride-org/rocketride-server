@@ -19,11 +19,10 @@ real round trip on pgvector is in ``test_vector_store_writes_full.py``.
 
 from __future__ import annotations
 
-import contextlib
 import importlib.util
-import json
 import re
 import sys
+import threading
 import types
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -76,6 +75,7 @@ class _Log:
     def __init__(self) -> None:
         """Start empty."""
         self.deleted: list[list[str]] = []
+        self.key_deleted: list[tuple[str, tuple[int, ...]]] = []
         self.stored: list[tuple[str, int]] = []
 
     def delete(self, object_ids) -> None:
@@ -88,9 +88,62 @@ class _Log:
         self.deleted.append(ids)
         self.stored = [(object_id, chunk_id) for object_id, chunk_id in self.stored if object_id not in ids]
 
+    def delete_keys(self, keys) -> None:
+        """Record a delete of single chunks and drop them.
+
+        The port's stores write a batch that lacks an object's chunk 0 by replacing the chunks with the same
+        ``(objectId, chunkId)`` key, so a retried batch never stores a chunk twice. That is not a delete of the object.
+
+        Args:
+            keys: The ``(object_id, chunk_id)`` pairs the delete targets.
+        """
+        keys = {(object_id, int(chunk_id)) for object_id, chunk_id in keys}
+        self.key_deleted.extend(sorted(keys))
+        self.stored = [key for key in self.stored if key not in keys]
+
+    def put(self, key: tuple[str, int], row_id: str) -> None:
+        """Store a chunk under a row id: writing the same id again replaces the row, as a keyed upsert does.
+
+        Args:
+            key: The ``(object_id, chunk_id)`` of the chunk.
+            row_id: The id the store keys the row by.
+        """
+        self.rows = getattr(self, 'rows', {})
+        if row_id in self.rows and self.rows[row_id] in self.stored:
+            self.stored.remove(self.rows[row_id])
+        self.rows[row_id] = key
+        self.stored.append(key)
+
+
+class _SqlProbe:
+    """Stands in for the shared pgvector driver's SQL builder: the statements come back as plain markers."""
+
+    def delete(self, where):
+        """Return a DELETE marker and the filter it would run with.
+
+        Args:
+            where: The ``Where`` the driver built.
+
+        Returns:
+            ``('DELETE', where)``.
+        """
+        return 'DELETE', where
+
+    def insert(self, columns, rows):
+        """Return an INSERT marker that carries the column list.
+
+        Args:
+            columns: The columns written.
+            rows: How many rows the statement holds.
+
+        Returns:
+            A tuple the cursor reads.
+        """
+        return ('INSERT', list(columns))
+
 
 class _Cursor:
-    """A psycopg2 cursor stand-in that logs the driver's DELETE and INSERT statements."""
+    """A cursor stand-in that logs the shared pgvector driver's DELETE and INSERT markers."""
 
     def __init__(self, log: _Log) -> None:
         """Log into ``log``.
@@ -100,19 +153,24 @@ class _Cursor:
         """
         self.log = log
 
-    def execute(self, sql: str, params=()) -> None:
-        """Log a DELETE by object IDs or an INSERT of one chunk.
+    def execute(self, statement, params=()) -> None:
+        """Log a DELETE (by object IDs or by chunk keys) or an INSERT of rows.
 
         Args:
-            sql: The statement the driver built.
-            params: Its bound values.
+            statement: The marker the probe returned.
+            params: The ``Where`` of a DELETE, or the flat row values of an INSERT.
         """
-        if sql.startswith('DELETE'):
-            self.log.delete(params[0])
-        elif sql.startswith('INSERT'):
-            columns = [column.strip() for column in re.search(r'\(([^)]*)\)\s*VALUES', sql).group(1).split(',')]
-            row = dict(zip(columns, params))
-            self.log.stored.append((row['objectId'], row['chunkId']))
+        if statement == 'DELETE':
+            if params.keys:
+                self.log.delete_keys(params.keys)
+            else:
+                self.log.delete(params.object_ids)
+        elif statement[0] == 'INSERT':
+            columns = statement[1]
+            width = len(columns)
+            for start in range(0, len(params), width):
+                row = dict(zip(columns, params[start : start + width]))
+                self.log.put((row['objectid'], row['chunkid']), f'{row["objectid"]}#{row["chunkid"]}')
 
 
 def _pinecone(monkeypatch: pytest.MonkeyPatch) -> tuple[object, _Log]:
@@ -131,9 +189,13 @@ def _pinecone(monkeypatch: pytest.MonkeyPatch) -> tuple[object, _Log]:
     store.payload_limit = 1 << 30
     store.client = MagicMock()
     store.remove = log.delete
-    store.client.Index.return_value.upsert.side_effect = lambda vectors: log.stored.extend(
-        (vector['metadata']['objectId'], vector['metadata']['chunkId']) for vector in vectors
-    )
+
+    def upsert(vectors) -> None:
+        """Store the vectors by id: an id written again replaces its row."""
+        for vector in vectors:
+            log.put((vector['metadata']['objectId'], vector['metadata']['chunkId']), vector['id'])
+
+    store.client.Index.return_value.upsert.side_effect = upsert
     return store, log
 
 
@@ -157,12 +219,27 @@ def _milvus(monkeypatch: pytest.MonkeyPatch) -> tuple[object, _Log]:
     store.collection = 'test'
     store.bulkInsertBatchSize = 50
     store.client = MagicMock()
-    store.client.delete.side_effect = lambda collection_name, filter: log.delete(
-        json.loads(re.search(r'in (\[.*\])$', filter).group(1))
-    )
-    store.client.upsert.side_effect = lambda collection_name, data: log.stored.extend(
-        (row['meta'].objectId, row['meta'].chunkId) for row in data
-    )
+
+    def delete(collection_name, filter) -> None:
+        """Read the two filters the driver sends: every chunk of some objects, or single chunks of one object."""
+        keyed = re.search(r"meta\['objectId'\] == '([^']*)' and meta\['chunkId'\] in \[([^\]]*)\]", filter)
+        if keyed:
+            log.delete_keys((keyed.group(1), int(c)) for c in keyed.group(2).split(','))
+        else:
+            ids = re.search(r'in \[(.*)\]$', filter).group(1)
+            log.delete([value.strip().strip("'") for value in ids.split(', ')])
+
+    def upsert(collection_name, data) -> None:
+        """Store the rows; the meta of a row is a dict, or the metadata object."""
+        for row in data:
+            meta = row['meta']
+            object_id, chunk_id = (
+                (meta['objectId'], meta['chunkId']) if isinstance(meta, dict) else (meta.objectId, meta.chunkId)
+            )
+            log.put((object_id, chunk_id), f'{object_id}#{chunk_id}')
+
+    store.client.delete.side_effect = delete
+    store.client.upsert.side_effect = upsert
     return store, log
 
 
@@ -210,6 +287,7 @@ def _weaviate(monkeypatch: pytest.MonkeyPatch) -> tuple[object, _Log]:
         'weaviate.classes.init',
         'weaviate.classes.query',
         'weaviate.classes.config',
+        'weaviate.classes.aggregate',
         'weaviate.collections',
         'weaviate.collections.collection',
         'weaviate.util',
@@ -223,9 +301,47 @@ def _weaviate(monkeypatch: pytest.MonkeyPatch) -> tuple[object, _Log]:
     store.collectionObj.batch.failed_objects = []
     store.collectionObj.data.delete_many.side_effect = lambda where: log.delete([value for _, value in where])
     batch = store.collectionObj.batch.dynamic.return_value.__enter__.return_value
-    batch.add_object.side_effect = lambda properties, uuid, vector: log.stored.append(
-        (properties['objectId'], properties['chunkId'])
+    batch.add_object.side_effect = lambda properties, uuid, vector: log.put(
+        (properties['objectId'], properties['chunkId']), str(uuid)
     )
+    return store, log
+
+
+def _pgvector_store(
+    monkeypatch: pytest.MonkeyPatch, node: str, driver: str, *, with_iglobal: bool
+) -> tuple[object, _Log]:
+    """Build a pgvector-backed store whose write transaction's statements are logged.
+
+    The port's two Postgres nodes share one driver (``ai.common.store.pgvector``); the node only wires it up.
+    The write runs against a probe in place of the SQL builder and a cursor that logs into the test's log.
+
+    Args:
+        monkeypatch: Restores ``sys.modules`` after the test.
+        node: The node folder under ``nodes/src/nodes``.
+        driver: The node's driver module.
+        with_iglobal: Load the node's IGlobal first.
+
+    Returns:
+        The store and its log.
+    """
+    module = _load_driver(monkeypatch, node, driver, (), with_iglobal=with_iglobal)
+    from ai.common.store.pgvector import sql as pgsql
+
+    log = _Log()
+    store = module.Store.__new__(module.Store)
+    store.collection = 'test'
+    store._write_lock = threading.RLock()
+    store._state_lock = threading.RLock()
+    store._exists = True
+    store._sql = _SqlProbe()
+    store._meta_column = lambda: True
+    store._columns_now = lambda: list(pgsql.WRITE_COLUMNS)
+    store._row = lambda chunk, columns: [
+        getattr(chunk.metadata, {'objectid': 'objectId', 'chunkid': 'chunkId'}.get(name, name), None)
+        for name in columns
+    ]
+    store.INSERT_BATCH = 100
+    store._db = types.SimpleNamespace(run_write=lambda work: work(_Cursor(log)))
     return store, log
 
 
@@ -238,19 +354,7 @@ def _postgres(monkeypatch: pytest.MonkeyPatch) -> tuple[object, _Log]:
     Returns:
         The store and its log.
     """
-    module = _load_driver(
-        monkeypatch, 'store_postgres', 'postgres', ('psycopg2', 'pgvector', 'pgvector.psycopg2'), with_iglobal=True
-    )
-    log = _Log()
-    store = module.Store.__new__(module.Store)
-    store.collection = 'test'
-
-    def transaction() -> contextlib.AbstractContextManager[_Cursor]:
-        """Open a transaction whose cursor logs into ``log``."""
-        return contextlib.nullcontext(_Cursor(log))
-
-    store._transaction = transaction
-    return store, log
+    return _pgvector_store(monkeypatch, 'store_postgres', 'postgres', with_iglobal=True)
 
 
 def _rocketride_vector(monkeypatch: pytest.MonkeyPatch) -> tuple[object, _Log]:
@@ -262,23 +366,7 @@ def _rocketride_vector(monkeypatch: pytest.MonkeyPatch) -> tuple[object, _Log]:
     Returns:
         The store and its log.
     """
-    module = _load_driver(
-        monkeypatch,
-        'rocketride_vector',
-        'rocketride_vector',
-        ('psycopg2', 'pgvector', 'pgvector.psycopg2'),
-        with_iglobal=True,
-    )
-    log = _Log()
-    store = module.Store.__new__(module.Store)
-    store.collection = 'test'
-
-    def transaction() -> contextlib.AbstractContextManager[_Cursor]:
-        """Open a transaction whose cursor logs into ``log``."""
-        return contextlib.nullcontext(_Cursor(log))
-
-    store._transaction = transaction
-    return store, log
+    return _pgvector_store(monkeypatch, 'rocketride_vector', 'rocketride_vector', with_iglobal=True)
 
 
 _DRIVERS = {
@@ -362,3 +450,25 @@ def test_pinecone_never_deletes_the_control_row(monkeypatch):
     store, log = _pinecone(monkeypatch)
     store.addChunks(_chunks(CONTROL_OBJECT_ID, [0]) + _chunks('a', [0]), checkCollection=False)
     assert log.deleted == [['a']]
+
+
+def test_a_repeated_chunk_without_chunk_zero_replaces_the_stored_one(store_log):
+    """The port's stores key a chunk by (objectId, chunkId): sending a stored chunk again replaces it.
+
+    Develop's #2962 keeps both copies of a chunk number a batch without chunk 0 repeats (its rows get generated
+    ids). Here the retried or corrected chunk takes the place of the stored one, so an object never holds two
+    chunks with one key, and the chunks around it stay. A batch that holds chunk 0 still replaces the whole object.
+    """
+    store, log = store_log
+    store.addChunks(_chunks('a', [0, 1, 2]), checkCollection=False)
+    store.addChunks(_chunks('a', [1]), checkCollection=False)
+    assert sorted(log.stored) == [('a', 0), ('a', 1), ('a', 2)]
+    assert log.deleted == [['a']], 'only the first batch, which holds chunk 0, deletes the object'
+
+
+def test_a_repeated_chunk_does_not_touch_other_objects_or_chunks(store_log):
+    """Replacing one chunk of an object leaves its other chunks and other objects as they are."""
+    store, log = store_log
+    store.addChunks(_chunks('a', [0, 1, 2]) + _chunks('b', [0, 1]), checkCollection=False)
+    store.addChunks(_chunks('a', [2]) + _chunks('b', [1]), checkCollection=False)
+    assert sorted(log.stored) == [('a', 0), ('a', 1), ('a', 2), ('b', 0), ('b', 1)]

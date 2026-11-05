@@ -103,9 +103,23 @@ Delete documents by ID.
 
 Takes a required `object_ids` string array and removes all points whose `meta.objectId` matches. Returns `{"success": true, "deleted_count": n}`.
 
-### `soft_delete` and `restore`
+### `list_documents`
 
-Move documents to the trash and back by object ID. Both take a required `object_ids` string array; `soft_delete` marks every point whose `meta.objectId` matches as deleted, so it leaves search and the read tools until `restore` clears the mark. Both return `{"success": true, "object_ids": [...], "matched_chunks": null}`, since this store does not count the points it marks. A document removed with `delete` cannot be restored. Both need a Qdrant server of 1.8 or newer, since they update only the nested `meta.isDeleted` field.
+List the documents one by one, with their path and chunk count, in pages ordered by path.
+
+Pass the previous answer's `next_cursor` as `cursor` for the next page. `deleted` is `'active'` (default), `'deleted'` (the trash) or `'all'` (`true` and `false` stand for `'deleted'` and `'active'`); `parent` keeps the documents stored under exactly that path. Returns `{"success": true, "items": [...], "next_cursor": ..., "total": n}`.
+
+### `soft_delete`
+
+Move documents to the trash by ID.
+
+Takes a required `object_ids` string array. The chunks stay stored but leave search, `objdir`, `get` and the listing until `restore`. Returns `{"success": true, "object_ids": [...], "matched_chunks": n, "moved_chunks": m, "not_found": [...]}`, where `moved_chunks` counts the chunks moved and `matched_chunks` the chunk rows the store holds for those IDs.
+
+### `restore`
+
+Take documents out of the trash by ID.
+
+Takes a required `object_ids` string array; a document not in the trash is left as it is. Returns the same shape as `soft_delete`.
 
 ## Profiles
 
@@ -129,6 +143,20 @@ Pipeline agents address all eight functions documented above by node ID, for
 example `<node id>.search` or `<node id>.restore`; changing this label does not
 change those addresses.
 
+### Write switches
+
+Allow document management from tool calls (`allow_writes`) is off by default.
+Turn it on in the pipeline whose Tools source should be able to remove
+documents from the collection, or add them with the `upsert` tool, through
+tool calls, for example the pipeline the Vector Explorer manages. Even when it
+is on, such a write is accepted only from a Tools source of the pipeline,
+addressed to this node; calls from the pipeline's chat or ingest sources are
+refused. Documents the pipeline's own lanes write are not affected by this
+switch.
+
+The switch does not apply to an agent in this pipeline: its `upsert` and
+`delete` calls work as they always have.
+
 ## Authentication
 
 Self-hosted Qdrant typically needs no credentials: leave `apikey` empty. For Qdrant Cloud, set `host` to your instance endpoint (`<instance>.<region>.qdrant.io`) and provide the cluster API key in `apikey`. The key is passed as the `api_key` argument of the Qdrant client.
@@ -137,11 +165,21 @@ Self-hosted Qdrant typically needs no credentials: leave `apikey` empty. For Qdr
 
 ### Scoring and relevance
 
-Raw Qdrant scores are rescaled to `[0, 1]` before filtering. For `Cosine` similarity the rescaling is `(score + 1) / 2`; for other metrics a sigmoid is applied. Results below a hard floor of `0.20` are always dropped as noise, and the configured retrieval `score` threshold is applied on top of that in the rescaled space (applied by the base store, not passed to Qdrant as `score_threshold`).
+Raw Qdrant scores are rescaled before filtering, so that a higher score always means a closer chunk. For `Cosine` and `Dot` similarity the rescaling is `(score + 1) / 2`, which is `[0, 1]` for unit-length (normalised) embeddings: an identical vector scores 1.0 and an opposite one 0. For `Euclid` and `Manhattan`, whose raw score is a distance, it is `1 / (1 + distance)`. Earlier versions of this node applied a sigmoid to `Dot` scores, which put every result near 0.5; thresholds tuned against those scores need revisiting. Results below a floor of `0.20` are dropped as noise unless the caller sets its own minimum score (the Vector Explorer does, to show what the floor hides), and the configured retrieval `score` threshold is applied on top of that in the rescaled space (applied by the base store, not passed to Qdrant as `score_threshold`).
 
-The similarity metric defaults to `Cosine`; `Euclid`, `Dot`, and `Manhattan` are also accepted. Any other value raises a configuration error at startup. Semantic search uses exact search (`SearchParams(exact=True)`) and does not support a non-zero result offset; keyword search and plain filtered gets use Qdrant scroll and do support offsets.
+The similarity metric defaults to `Cosine`; `Euclid`, `Dot`, and `Manhattan` are also accepted. Any other value raises a configuration error at startup. Semantic search uses exact search (`SearchParams(exact=True)`) and does not support a non-zero result offset. Keyword search and plain filtered gets do: a numeric offset skips that many matching chunks (Qdrant's own scroll offset is a point id, so the node walks the matches in id order). A `parent` filter matches the exact path, also when listing paths.
 
-Deletion of source files is handled as a soft delete: chunks are marked `meta.isDeleted: true` and excluded from all searches by default. They are only returned when the filter explicitly asks for deleted documents. A document that reappears is marked active again.
+Deletion of source files is handled as a soft delete: `isDeleted` is set to `true` inside each chunk's `meta` payload (the rest of `meta` is kept) and the chunks are excluded from all searches by default. They are only returned when the filter explicitly asks for deleted documents. A document that reappears is marked active again.
+
+### Point ids
+
+Each chunk is stored under a point id derived from its document and position, `uuid5(NAMESPACE_URL, '<objectId>#<chunkId>')`, so a chunk always maps to one point and re-ingesting a document overwrites its points in place. Collections written by earlier versions of this node hold random point ids; every read by document and chunk falls back to a payload filter for those, so old and new collections work alike.
+
+### Vector Explorer
+
+The node answers the Vector Explorer's store calls natively. Documents are listed from their first chunks in storage order (the app sorts what it has loaded), with chunk and table counts from exact facets. The first page counts every document once; documents whose first chunk is missing (every document minus those with a first chunk) are listed after the others, from a list built once per listing. Counts and that sweep are exact up to 10,000 distinct documents; above that the total is unknown and the listing says its count is capped. Above the cap the sweep covers the 10,000 most-chunked documents and reads their first chunks rather than faceting over that list: on Qdrant 1.17.1 an exact facet over 10,000 ids took 17 to 35 seconds, while reading their first chunks takes about 0.1 second, so a 10,503-document listing pages through in about 1.3 seconds with no page above 0.2 second. A collection created outside this node may lack the keyword index on `meta.objectId` that Qdrant needs for facets; such a collection is counted by reading its rows instead (up to 200,000 rows).
+
+The neighbour graph for the map is computed by Qdrant itself (the distance-matrix API, restricted to the sampled points) for samples of up to 500 points; larger samples, the explorer's default of 1,000 included, are computed on the node, and the explorer reports which one computed it. Qdrant's memory for that call grows faster than the sample and stays allocated afterwards, even after the collection is dropped: on Qdrant 1.17.1, 500-point graphs left nothing measurable, while 1,000-point graphs left between about 125 MB (a 3,000-point collection) and 630 MB (eight graphs on a 12,000-point collection). Either way the similarities are recomputed from the vectors, so every view uses one definition. Random samples come from Qdrant's random sampling, which takes no seed.
 
 ### Save-time validation
 
@@ -191,5 +229,5 @@ When the configuration is saved, the node validates it with a fast read-only pro
 
 ## Source
 
-[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> View source](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/store_qdrant)
+[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> View source](https://github.com/nihalnihalani/rocketride-server/tree/develop/nodes/src/nodes/store_qdrant)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

@@ -148,3 +148,46 @@ describe('RocketRideClient.chat() failure', () => {
 		expect((caught as Error).message).toBe('socket closed');
 	});
 });
+
+describe('call() keeps the server code', () => {
+	/** A real client whose transport answers every request with `response`. */
+	function clientAnswering(response: Record<string, unknown>): RocketRideClient {
+		const client = new RocketRideClient({ env: {} });
+		const stub = client as unknown as Record<string, unknown>;
+		stub.request = async () => response;
+		return client;
+	}
+
+	async function toolAndCatch(client: RocketRideClient): Promise<unknown> {
+		try {
+			await client.tool({ token: 'tk_task', tool: 'read_query', nodeId: 'graph_1', input: {} });
+		} catch (e) {
+			return e;
+		}
+		throw new Error('expected tool() to reject');
+	}
+
+	it('rejects tool() with a DAPException carrying the code and the unchanged message', async () => {
+		const stopped = { type: 'response', success: false, message: 'Task is stopped', code: 'TASK_STOPPED' };
+		const caught = await toolAndCatch(clientAnswering(stopped));
+
+		expect(caught).toBeInstanceOf(DAPException);
+		expect(caught).toBeInstanceOf(Error);
+		const e = caught as DAPException;
+		expect(e.message).toBe('Task is stopped');
+		expect(e.code).toBe('TASK_STOPPED');
+	});
+
+	it('leaves code undefined for an uncoded failure, as a plain Error did', async () => {
+		const caught = await toolAndCatch(clientAnswering({ type: 'response', success: false, message: 'execute tool is disabled' }));
+
+		expect(caught).toBeInstanceOf(DAPException);
+		expect((caught as DAPException).message).toBe('execute tool is disabled');
+		expect((caught as DAPException).code).toBeUndefined();
+	});
+
+	it('keeps the command fallback message when the server sends none', async () => {
+		const client = clientAnswering({ type: 'response', success: false });
+		await expect(client.call('rrext_get_tasks')).rejects.toThrow('rrext_get_tasks failed');
+	});
+});

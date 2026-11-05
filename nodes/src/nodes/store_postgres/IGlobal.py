@@ -49,6 +49,13 @@ class IGlobal(StoreGlobalBase):
         """Return the transform sub-key: host/port/collection."""
         return f'{self.store.host}/{self.store.port}/{self.store.collection}'
 
+    def endGlobal(self) -> None:
+        """Close the store's connections, then let the base drop the store."""
+        store = getattr(self, 'store', None)
+        if store is not None and hasattr(store, 'close'):
+            store.close()
+        super().endGlobal()
+
     def _probe_connection(self, config: Dict[str, Any]) -> None:
         """
         Validate PostgreSQL vector store config with fast, read-only probes.

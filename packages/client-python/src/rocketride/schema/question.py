@@ -285,6 +285,10 @@ class QuestionText(BaseModel):
     embedding_model: Optional[str] = None  # Model name for embeddings
     embedding: Optional[List[float]] = None  # Vector representation
 
+    def __str__(self) -> str:
+        """Return the question text, so ``f'%{query}%'`` matches on the text alone."""
+        return self.text
+
 
 class QuestionType(str, Enum):
     """

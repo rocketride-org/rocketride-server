@@ -1,0 +1,5 @@
+{
+	"success": false,
+	"code": "WRITES_UNKNOWN_CALLER",
+	"error": "The engine did not identify this request, so the store refused the write."
+}

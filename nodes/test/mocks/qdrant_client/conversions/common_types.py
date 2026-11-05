@@ -68,6 +68,30 @@ class VectorParams:
 
 
 @dataclass
+class HnswConfig:
+    """HNSW index parameters of a collection (Qdrant's defaults)."""
+
+    m: int = 16
+    ef_construct: int = 100
+    full_scan_threshold: int = 10000
+
+
+@dataclass
+class CollectionParams:
+    """``CollectionInfo.config.params``: the vector configuration."""
+
+    vectors: Any = None
+
+
+@dataclass
+class CollectionConfig:
+    """``CollectionInfo.config``."""
+
+    params: CollectionParams = field(default_factory=CollectionParams)
+    hnsw_config: HnswConfig = field(default_factory=HnswConfig)
+
+
+@dataclass
 class CollectionInfo:
     """
     Information about a collection.
@@ -75,15 +99,19 @@ class CollectionInfo:
     Returned by get_collection() to provide metadata about the collection.
 
     Attributes:
-        vectors_count: Number of vectors (points) in the collection
+        vectors_count: Number of vectors (points) in the collection (older clients)
+        points_count: Number of points in the collection (current clients)
         payload_schema: Dict mapping field names to their indexed types
+        config: Vector configuration and HNSW parameters
 
-    Note: The real CollectionInfo has many more fields (status, config,
-    optimizer_status, etc.) but the RocketRide store only uses these.
+    Note: The real CollectionInfo has more fields (status, optimizer_status, ...);
+    the RocketRide store only reads these.
     """
 
     vectors_count: int = 0
     payload_schema: Dict[str, Any] = field(default_factory=dict)
+    points_count: int = 0
+    config: CollectionConfig = field(default_factory=CollectionConfig)
 
 
 # =============================================================================

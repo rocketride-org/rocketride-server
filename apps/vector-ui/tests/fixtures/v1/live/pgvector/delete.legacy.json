@@ -1,0 +1,29 @@
+{
+  "__scrub__": [
+    "teamId",
+    "userId"
+  ],
+  "success": true,
+  "deleted_count": 1,
+  "object_ids": [
+    "dcfda41e-afa5-5f8d-b1c7-860cc0e03189"
+  ],
+  "removed_chunks": 4,
+  "not_found": [],
+  "kept_live": [],
+  "audit": {
+    "action": "vector.delete",
+    "node": "store_1",
+    "provider": "postgres",
+    "collection": "vx_tp_wire_legacy",
+    "object_ids": [
+      "dcfda41e-afa5-5f8d-b1c7-860cc0e03189"
+    ],
+    "rows": 4,
+    "caller": {
+      "auth": "account",
+      "userId": "<scrubbed>",
+      "teamId": "<scrubbed>"
+    }
+  }
+}

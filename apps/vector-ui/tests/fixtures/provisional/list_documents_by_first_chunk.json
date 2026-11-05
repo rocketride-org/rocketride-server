@@ -1,0 +1,79 @@
+{
+	"success": true,
+	"items": [
+		{
+			"objectId": "91ae15d4-3f6e-589f-bb81-72301f2ca1b6",
+			"path": "C:/demo/field/kestrel_field_guide.md",
+			"chunks": null,
+			"has_first_chunk": true,
+			"tables": 0,
+			"deleted": false,
+			"nodeId": "chunk_1",
+			"size": 7419,
+			"modifyTime": null,
+			"ingestedAt": "2026-10-08T18:20:11Z",
+			"pointId": "6df68429-1d3e-5eed-bbfc-6c41d8ea51dd"
+		},
+		{
+			"objectId": "af6ceb64-dbe3-5ba5-aecf-f390d5606445",
+			"path": "C:/demo/finance/budget_2026.xlsx",
+			"chunks": null,
+			"has_first_chunk": true,
+			"tables": 3,
+			"deleted": false,
+			"nodeId": "chunk_1",
+			"size": 48211,
+			"modifyTime": null,
+			"ingestedAt": "2026-10-08T18:20:11Z",
+			"pointId": "15807d9c-2c5c-55d5-83e4-b37e346335fe"
+		},
+		{
+			"objectId": "e75b1be4-9c82-5266-96b3-b894c6fe4113",
+			"path": "C:/demo/greenhouse/orchid_notes.pdf",
+			"chunks": null,
+			"has_first_chunk": true,
+			"tables": 0,
+			"deleted": false,
+			"nodeId": "chunk_1",
+			"size": 181220,
+			"modifyTime": null,
+			"ingestedAt": "2026-10-08T18:20:11Z",
+			"pointId": "459ea560-0859-5475-93cf-cf0effbc5bfe"
+		},
+		{
+			"objectId": "dcfda41e-afa5-5f8d-b1c7-860cc0e03189",
+			"path": "C:/demo/greenhouse/orchid_notes.txt",
+			"chunks": null,
+			"has_first_chunk": true,
+			"tables": 0,
+			"deleted": false,
+			"nodeId": "chunk_1",
+			"size": 6120,
+			"modifyTime": null,
+			"ingestedAt": "2026-10-08T18:20:11Z",
+			"pointId": "66b162c7-a5da-51a7-948e-1a1e7e1e7647"
+		},
+		{
+			"objectId": "75b89d86-a64e-5143-bf50-55d4a7fd8cd2",
+			"path": "C:/demo/handbooks/falcon_handbook.md",
+			"chunks": null,
+			"has_first_chunk": true,
+			"tables": 0,
+			"deleted": false,
+			"nodeId": "chunk_1",
+			"size": 40214,
+			"modifyTime": null,
+			"ingestedAt": "2026-10-08T18:20:11Z",
+			"pointId": "76d57a1c-26e2-5ad0-b88c-b9405dce880c"
+		}
+	],
+	"next_cursor": null,
+	"total": 5,
+	"counts_exact": false,
+	"distinct": true,
+	"sorted": false,
+	"caveats": [
+		"documents_by_first_chunk",
+		"documents_unsorted"
+	]
+}

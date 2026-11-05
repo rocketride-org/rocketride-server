@@ -1,0 +1,43 @@
+{
+	"namespace": "6ba7b811-9dad-11d1-80b4-00c04fd430c8",
+	"prefix": "null://Stream/",
+	"rule": "objectId = uuid5(NAMESPACE_URL, prefix + NFC(relPath)) (rocketlib types.py; the engine derives it when the upload carries no objectId)",
+	"cases": [
+		{
+			"name": "report.pdf",
+			"objectId": "b7d9f0ed-3e89-583f-9dbe-195a39648e40"
+		},
+		{
+			"name": "a/report.pdf",
+			"objectId": "84676437-9562-5be8-8a82-cd34fc466492"
+		},
+		{
+			"name": "b/report.pdf",
+			"objectId": "d00965ce-bb6d-5136-8c2b-de707504c360"
+		},
+		{
+			"name": "C:/demo/handbooks/falcon_handbook.md",
+			"objectId": "75b89d86-a64e-5143-bf50-55d4a7fd8cd2"
+		},
+		{
+			"name": "Uploaded/naïve résumé.pdf",
+			"objectId": "dfc583a1-da22-5cfb-ab9b-de8c2a6d15d3"
+		},
+		{
+			"name": "日本語/資料.pdf",
+			"objectId": "997a42a7-8212-5d8b-8d0f-8433bc1d7181"
+		},
+		{
+			"name": "with space/and+plus&amp.txt",
+			"objectId": "5c7eb763-06a4-57f3-bfe5-deb7d6dd2d01"
+		},
+		{
+			"name": "📄 notes.md",
+			"objectId": "c705de68-109c-5a35-ace9-e7238a991296"
+		},
+		{
+			"name": "deep/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/file.txt",
+			"objectId": "998be542-c223-57f2-9ab4-7b0699172a4e"
+		}
+	]
+}
