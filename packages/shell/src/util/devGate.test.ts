@@ -49,8 +49,11 @@ function fakeSession(initial: Array<[string, string]> = []) {
 }
 
 /** Stage window/sessionStorage, reset the devGate caches, run, restore. */
-async function withBoot(search: string, session: ReturnType<typeof fakeSession>, run: () => void | Promise<void>, opts: { framed?: boolean } = {}): Promise<void> {
-	const win: Record<string, unknown> = { location: { search, pathname: '/' } };
+async function withBoot(search: string, session: ReturnType<typeof fakeSession>, run: () => void | Promise<void>, opts: { framed?: boolean; origin?: string; nodeEnv?: string } = {}): Promise<void> {
+	// The dev relay serves loopback dev servers: stage one unless a test says otherwise.
+	const win: Record<string, unknown> = { location: { search, pathname: '/', origin: opts.origin ?? 'http://localhost:5565' } };
+	const originalNodeEnv = process.env.NODE_ENV;
+	if (opts.nodeEnv) process.env.NODE_ENV = opts.nodeEnv;
 	win.self = win;
 	win.top = opts.framed ? {} : win;
 	const originals = (['window', 'sessionStorage'] as const).map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)] as const);
@@ -60,6 +63,7 @@ async function withBoot(search: string, session: ReturnType<typeof fakeSession>,
 	try {
 		await run();
 	} finally {
+		process.env.NODE_ENV = originalNodeEnv;
 		resetDevGateForTests();
 		for (const [key, original] of originals) {
 			if (original) Object.defineProperty(globalThis, key, original);
@@ -140,4 +144,39 @@ test('updateTabSession merges, persists, and updates the cache', async () => {
 		updateTabSession({ appId: 'local.other' });
 		assert.equal(tabSession().appId, 'local.other');
 	});
+});
+
+// =============================================================================
+// PRODUCTION BUILD + RELAY POLICY (rocketride-saas#1020)
+// =============================================================================
+
+test('a production build is never a dev tab: neither the URL nor the persisted copy makes tabSession().dev true', async () => {
+	const persisted = [['rr:tab', JSON.stringify({ dev: true, appId: 'local.alarm', authOrigin: 'http://localhost:5565' })]] as Array<[string, string]>;
+	for (const [search, initial] of [['?rrdev=1', []], ['?appid=local.alarm&rrdev=1&rrauthorigin=http%3A%2F%2Flocalhost%3A5565', []], ['', persisted], ['?code=abc', persisted]] as Array<[string, Array<[string, string]>]>) {
+		const session = fakeSession(initial);
+		await withBoot(search, session, () => {
+			assert.equal(tabSession().dev, false, `${search || '(bare)'} ${initial.length ? 'with a persisted dev copy' : ''}`);
+			assert.equal(devRelayOrigin(), '', 'and it has no relay');
+		}, { nodeEnv: 'production' });
+	}
+	// The facts a production tab keeps are the identity ones (deep links still lock the app).
+	await withBoot('?appid=local.alarm&rrdev=1', fakeSession(), () => {
+		assert.equal(tabSession().appId, 'local.alarm');
+	}, { nodeEnv: 'production' });
+});
+
+test('the dev relay is honoured only by a top-level shell served from a loopback origin', async () => {
+	const url = '?appid=local.alarm&rrdev=1&rrauthorigin=https%3A%2F%2Frocketride.ai';
+	for (const origin of ['http://localhost:3013', 'http://127.0.0.1:3013', 'http://[::1]:3013']) {
+		await withBoot(url, fakeSession(), () => {
+			assert.equal(devRelayOrigin(), 'https://rocketride.ai', origin);
+		}, { origin });
+	}
+	// A dev flavor served from a real origin (the production origin behind `?rrdev=1`) must not
+	// let a link steer its sign-in redirect; lookalikes and an opaque origin are not loopback.
+	for (const origin of ['https://cloud.rocketride.example', 'http://cloud.rocketride.example', 'http://localhost.evil.test:3013', 'https://127.0.0.1.evil.test', 'null', '']) {
+		await withBoot(url, fakeSession(), () => {
+			assert.equal(devRelayOrigin(), '', JSON.stringify(origin));
+		}, { origin });
+	}
 });

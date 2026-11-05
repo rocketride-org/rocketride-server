@@ -43,7 +43,10 @@
  *     not here: it answers `rrdev:*` messages only from a verified embedder
  *     (the VS Code App Builder webview, or the web App Builder on the shell's
  *     own origin — isTrustedEmbedderMessage) and loads dev remotes only from
- *     loopback dev servers.
+ *     loopback dev servers. The credential-persisting conveniences (a
+ *     `#rrtoken=` fragment, the dev sign-in relay) work only on a shell
+ *     served from loopback, so a bare link to the production origin cannot
+ *     sign a tab in or steer its sign-in.
  *
  * Steps: copy shell-dev's hashed assets into shell (hash-named — no
  * collisions), extract each flavor's script/css tags from its emitted html,

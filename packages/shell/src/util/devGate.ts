@@ -67,6 +67,24 @@ export function devBootConfig(): DevBootConfig | null {
 }
 
 // =============================================================================
+// BUILD MODE
+// =============================================================================
+
+/**
+ * Whether this bundle is a DEVELOPMENT build: `rsbuild dev`, or the dev
+ * FLAVOR stitched beside the production assets (scripts/stitch-flavors.mjs).
+ * The bundler bakes `process.env.NODE_ENV` as a literal, so in a production
+ * bundle this is the constant `false` — it is the ONLY input to the dev
+ * gate, and nothing a page URL, sessionStorage or an opener/embedder can
+ * supply is ever consulted.
+ *
+ * @returns True in a development build, false in a production build.
+ */
+function isDevBuild(): boolean {
+	return process.env.NODE_ENV !== 'production';
+}
+
+// =============================================================================
 // TAB SESSION — the ONE boot identity of this browsing context
 // =============================================================================
 
@@ -138,7 +156,12 @@ export function tabSession(): TabSession {
 		persisted = JSON.parse(sessionScopedStore().getItem(TAB_SESSION_KEY) ?? '{}') as Partial<TabSession>;
 	} catch { /* unreadable copy — URL facts only */ }
 	const session: TabSession = {
-		dev: dev || persisted.dev === true,
+		// A dev tab is a tab whose dev HOOKS are installed — and a production
+		// build never installs them, so no URL / persisted copy makes a
+		// production build "dev" (see isDevHooksEnabled). The picker (which
+		// reads the same URL / copy pre-bundle) is what routes such a tab to
+		// the dev flavor; this build only reports facts it will honour.
+		dev: isDevBuild() && (dev || persisted.dev === true),
 		appId: appId || (typeof persisted.appId === 'string' ? persisted.appId : ''),
 		authOrigin: authOrigin || (typeof persisted.authOrigin === 'string' ? persisted.authOrigin : ''),
 		// Remembered identity has no URL source — persisted copy only. Only
@@ -204,7 +227,9 @@ let gateResult: boolean | undefined;
  * never read as a capability here.
  *
  * Even when the hooks are on, every inbound `rrdev:*` message is still
- * vetted by isTrustedEmbedderMessage().
+ * vetted by isTrustedEmbedderMessage(), and the credential-persisting dev
+ * conveniences (`#rrtoken`, the sign-in relay) additionally require a
+ * loopback-served shell (isLoopbackShell()).
  *
  * Read once at first call and cached.
  *
@@ -212,7 +237,7 @@ let gateResult: boolean | undefined;
  */
 export function isDevHooksEnabled(): boolean {
 	if (gateResult === undefined) {
-		gateResult = process.env.NODE_ENV !== 'production';
+		gateResult = isDevBuild();
 	}
 	return gateResult;
 }
@@ -300,12 +325,18 @@ export function isSameOriginEmbed(): boolean {
  * origin is a random dev port Zitadel cannot know; the engine's probe
  * cannot help either — through the dev proxy it resolves to the proxy
  * itself). It rides the tab session, so it survives the OAuth round trip.
- * Dev-gated and top-level only.
+ * Dev-gated, top-level and loopback-served only.
  *
- * @returns The relay origin, or '' (production, framed, or never given).
+ * @returns The relay origin, or '' (production, framed, not on a loopback
+ *          shell, or never given).
  */
 export function devRelayOrigin(): string {
-	if (!isDevHooksEnabled() || isFramedShell()) return '';
+	// Loopback shells only: the relay exists for a dev server on a random
+	// localhost port (the bounce that completes it only ever targets
+	// loopback), so a shell served from anywhere else — the production
+	// origin, reached by a bare `?rrdev=1&rrauthorigin=` link — has no use
+	// for it and must not let a URL steer its sign-in redirect.
+	if (!isDevHooksEnabled() || isFramedShell() || !isLoopbackShell()) return '';
 	try {
 		return tabSession().authOrigin;
 	} catch {
@@ -384,6 +415,19 @@ function parseHttpOrigin(origin: unknown): URL | null {
 export function isLoopbackOrigin(origin: string): boolean {
 	const url = parseHttpOrigin(origin);
 	return url !== null && isLoopbackHostname(url.hostname);
+}
+
+/**
+ * Whether THIS shell is served from a loopback origin — the only place the
+ * credential-persisting dev conveniences (`#rrtoken` seeding, the sign-in
+ * relay) make sense: they exist for `rocketride app dev` / `pnpm start`, whose
+ * shell is a dev server on localhost. A shell served from anywhere else (the
+ * production origin included) never honours them, whatever its URL says.
+ *
+ * @returns True when `window.location.origin` is a loopback http(s) origin.
+ */
+export function isLoopbackShell(): boolean {
+	try { return isLoopbackOrigin(window.location.origin); } catch { return false; }
 }
 
 /**

@@ -59,7 +59,7 @@ import { CLIENT_EVENT_OP } from '../ops/clientOps';
 import type { IOpBus, IBusRequestOptions, BusOpHandler } from '../ops/busOps';
 import { createRetainedRegistry, localRetainedPort } from '../ops/retained';
 import type { IRetainedPort, RetainedSubscriber } from '../ops/retained';
-import { isEmbeddedDevShell, isSameOriginEmbed, isDevHooksEnabled, isFramedShell, tokenStore, tabSession, updateTabSession } from '../util/devGate';
+import { isEmbeddedDevShell, isSameOriginEmbed, isDevHooksEnabled, isFramedShell, isLoopbackShell, tokenStore, tabSession, updateTabSession } from '../util/devGate';
 import { TelemetryChannel, type TelemetryFact } from '../util/telemetryChannel';
 import { AUTH_START_STAMP_KEY, getStoredVerifier, clearStoredVerifier, getStoredRedirectUri, clearStoredRedirectUri } from '../util/pkce';
 import { getAuthPhase, setAuthPhase } from './authPhase';
@@ -874,8 +874,12 @@ export class ConnectionManager implements IConnectionManager {
 		// The terminal dev host (`rocketride app dev`) hands the workspace
 		// credential in the URL FRAGMENT — never sent on the wire, stripped
 		// before anything else reads the URL, honored ONLY in a top-level
-		// dev shell (framed previews inherit their embedder's session via
-		// rrdev:auth, and production builds have no dev gate). Seeding goes
+		// dev shell served from a LOOPBACK origin (framed previews inherit
+		// their embedder's session via rrdev:auth; production builds have no
+		// dev gate; and a dev flavor served from a real origin — the
+		// production origin included — must not let a bare link sign the tab
+		// in as a chosen credential: the launcher only ever opens its own
+		// localhost dev server). Seeding goes
 		// through saveToken so the /apps cookie primes exactly like any
 		// other sign-in; the normal stored-token path below then connects.
 		// The fragment is the LAUNCHER's definitive session directive (the
@@ -889,7 +893,11 @@ export class ConnectionManager implements IConnectionManager {
 		// is reserved for an explicit logout or an abandoned sign-in. An
 		// ABSENT fragment leaves the tab's own state alone.
 		const bootHash = String(window.location.hash ?? '');
-		if (isDevHooksEnabled() && !isFramedShell() && bootHash.startsWith('#rrtoken=')) {
+		const tokenSeedDirective = isDevHooksEnabled() && !isFramedShell() && bootHash.startsWith('#rrtoken=');
+		if (tokenSeedDirective && !isLoopbackShell()) {
+			console.warn('[shell] ignoring #rrtoken: dev token seeding is honoured only by a shell served from a loopback dev server');
+		}
+		if (tokenSeedDirective && isLoopbackShell()) {
 			const seeded = decodeURIComponent(bootHash.slice('#rrtoken='.length));
 			// Strip the fragment FIRST (replaceState rewrites the history
 			// entry) so the credential survives in no URL bar, history

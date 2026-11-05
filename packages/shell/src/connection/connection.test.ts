@@ -2251,3 +2251,83 @@ test('an EMPTY #rrtoken fragment (--no-auth) clears the remembered session, rese
 		assert.deepEqual(stripped, ['/?appid=local.alarm&rrdev=1'], 'the fragment is stripped, the query kept');
 	});
 });
+
+// =============================================================================
+// #rrtoken SEEDING — who may sign a tab in from a URL fragment (rocketride-saas#1020)
+// =============================================================================
+
+/**
+ * Boots a manager on a stubbed top-level (or framed) page whose URL carries a
+ * `#rrtoken=` fragment and reports what the seeding step did.
+ */
+async function bootWithFragment(opts: { origin: string; hash: string; nodeEnv?: string; framed?: boolean }): Promise<{ saved: string[]; cleared: number; stripped: string[]; warned: string[] }> {
+	const original = process.env.NODE_ENV;
+	process.env.NODE_ENV = opts.nodeEnv ?? 'development';
+	const stripped: string[] = [];
+	const warned: string[] = [];
+	const warn = console.warn;
+	console.warn = (...args: unknown[]) => { warned.push(args.map(String).join(' ')); };
+	const win: Record<string, unknown> = {
+		location: { search: '?appid=local.alarm&rrdev=1', pathname: '/', origin: opts.origin, hash: opts.hash },
+		history: { state: null, replaceState: (_s: unknown, _t: string, url: string) => { stripped.push(url); } },
+	};
+	win.self = win;
+	win.top = opts.framed ? {} : win;
+	const saved: string[] = [];
+	let cleared = 0;
+	try {
+		await withGlobals({ window: win, sessionStorage: recordingSession().storage }, async () => {
+			const { manager } = createTestManager();
+			manager.client = testClient();
+			manager._attachPromise = Promise.resolve();
+			manager.saveToken = (token: string) => { saved.push(token); };
+			manager.clearToken = () => { cleared++; };
+			manager.loadToken = () => saved[0] ?? '';
+			manager.connectForBootstrap = async () => ({ result: authenticatedResult, appId: '' });
+			await manager.bootstrap();
+		});
+	} finally {
+		console.warn = warn;
+		process.env.NODE_ENV = original;
+		resetDevGateForTests();
+	}
+	return { saved, cleared, stripped, warned };
+}
+
+test('#rrtoken seeding is honoured by a top-level dev shell on a loopback origin (the launcher\'s own dev server)', async () => {
+	for (const origin of ['http://localhost:3925', 'http://127.0.0.1:3925', 'https://localhost:3000']) {
+		const seeded = await bootWithFragment({ origin, hash: '#rrtoken=rr_seeded_key' });
+		assert.deepEqual(seeded.saved, ['rr_seeded_key'], origin);
+		assert.deepEqual(seeded.stripped, ['/?appid=local.alarm&rrdev=1'], `${origin}: the fragment is stripped`);
+		const signedOut = await bootWithFragment({ origin, hash: '#rrtoken=' });
+		assert.equal(signedOut.cleared >= 1, true, `${origin}: the empty directive (--no-auth) still resets the tab`);
+	}
+});
+
+test('#rrtoken is IGNORED on a dev flavor served from a real origin: a bare link cannot sign the tab in or out', async () => {
+	// The production origin serves the dev flavor behind `?rrdev=1`: this is
+	// the "needs no opener or frame" vector of the issue's 5 Nov update.
+	for (const origin of ['https://cloud.rocketride.example', 'http://cloud.rocketride.example', 'https://localhost.evil.test', 'http://localhost.evil.test:3925', 'https://127.0.0.1.evil.test']) {
+		const seeded = await bootWithFragment({ origin, hash: '#rrtoken=attacker_credential' });
+		assert.deepEqual(seeded.saved, [], `${origin}: no token was saved`);
+		assert.equal(seeded.cleared, 0, `${origin}: nothing was cleared`);
+		assert.deepEqual(seeded.stripped, [], `${origin}: the fragment is left alone (nothing here consumes it)`);
+		assert.ok(seeded.warned.some((w) => w.includes('#rrtoken')), `${origin}: the refusal is logged for the developer`);
+		const signedOut = await bootWithFragment({ origin, hash: '#rrtoken=' });
+		assert.equal(signedOut.cleared, 0, `${origin}: an empty fragment cannot clear the victim's session either`);
+	}
+});
+
+test('#rrtoken is ignored by a PRODUCTION build, even on a loopback origin', async () => {
+	const seeded = await bootWithFragment({ origin: 'http://localhost:3925', hash: '#rrtoken=attacker_credential', nodeEnv: 'production' });
+	assert.deepEqual(seeded.saved, []);
+	assert.equal(seeded.cleared, 0);
+	const signedOut = await bootWithFragment({ origin: 'http://localhost:3925', hash: '#rrtoken=', nodeEnv: 'production' });
+	assert.equal(signedOut.cleared, 0);
+});
+
+test('#rrtoken is ignored by a FRAMED shell (previews inherit their embedder\'s session via rrdev:auth)', async () => {
+	const seeded = await bootWithFragment({ origin: 'http://localhost:3925', hash: '#rrtoken=attacker_credential', framed: true });
+	assert.deepEqual(seeded.saved, []);
+	assert.equal(seeded.cleared, 0);
+});

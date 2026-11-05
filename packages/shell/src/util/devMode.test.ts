@@ -38,7 +38,7 @@ import assert from 'node:assert/strict';
 import test, { afterEach, mock } from 'node:test';
 import { handleEmbedderMessage, installDevHooks } from './devMode';
 import type { EmbedderMessageDeps } from './devMode';
-import { isAllowedDevRemoteEntry, isAllowedEmbedderOrigin, isDevHooksEnabled, isEmbeddedDevShell, isTrustedEmbedderMessage, normalizeDevRemoteEntry, resetDevGateForTests, tokenStore, trustedParentOrigin } from './devGate';
+import { isAllowedDevRemoteEntry, isAllowedEmbedderOrigin, isDevHooksEnabled, isEmbeddedDevShell, isTrustedEmbedderMessage, normalizeDevRemoteEntry, resetDevGateForTests, tabSession, tokenStore, trustedParentOrigin } from './devGate';
 import { isDevPreviewPage } from './appLoader';
 
 const SHELL_ORIGIN = 'https://cloud.example.test';
@@ -164,6 +164,7 @@ test('the production gate is constant: every URL / storage / boot-config combina
 					if (bootConfig) Reflect.set(window, '__rrDevBoot', { appId: 'org.victim' });
 					const label = JSON.stringify({ search, sessionDev, framed, bootConfig });
 					assert.equal(isDevHooksEnabled(), false, label);
+					assert.equal(tabSession().dev, false, `${label}: a production build is never a dev tab`);
 				}
 			}
 		}
