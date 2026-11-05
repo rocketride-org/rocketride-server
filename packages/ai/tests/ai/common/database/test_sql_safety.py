@@ -210,7 +210,7 @@ def test_into_inside_string_does_not_false_positive():
         "SELECT 1 /*M! INTO OUTFILE '/tmp/f' */",
         'SELECT /*+ SET_VAR(max_execution_time=0) */ SLEEP(100)',
         # A backslash closes nothing in a PostgreSQL string, so the INTO here is real on PostgreSQL
-        "SELECT 'a' INTO new_t FROM t -- '",
+        "SELECT 'a\\' INTO new_t FROM t -- '",
         # A dollar-quoted string hides a quote from a reader that does not know dollar quoting
         "SELECT $$'$$ INTO new_t FROM t",
     ],

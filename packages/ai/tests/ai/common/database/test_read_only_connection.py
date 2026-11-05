@@ -17,7 +17,8 @@ DSN is set, and skip otherwise:
 - ``RR_TEST_MYSQL_DSN`` (MySQL or MariaDB, ``mysql+pymysql://...``),
 - ``RR_TEST_CLICKHOUSE_DSN`` (``clickhouse+native://...``).
 
-Each live test uses its own table and drops it; the role needs CREATE.
+Each live test uses its own table and drops it; the role needs CREATE. The ClickHouse profile test creates
+and drops its own users, and skips when the role may not.
 """
 
 import os
@@ -27,7 +28,7 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, make_url, text
 from sqlalchemy.exc import OperationalError, ProgrammingError
 
 from ai.common.database.db_global_base import DatabaseGlobalBase
@@ -356,47 +357,117 @@ def test_live_connection_is_ordinary_again_after_the_block(live):
 
 
 class _ProfileConnection:
-    """A ClickHouse connection stand-in that answers the profile's ``readonly`` level."""
+    """A ClickHouse connection stand-in that answers the ``system.settings`` lookup."""
 
-    def __init__(self, level):
-        """Answer ``level``; count the lookups.
+    def __init__(self, readonly, max_execution_time):
+        """Answer with these rows; count the lookups.
 
         Args:
-            level: The profile's readonly level.
+            readonly: ``(value, readonly, min, max)`` of the ``readonly`` setting, as ClickHouse returns them.
+            max_execution_time: The same for ``max_execution_time``.
         """
-        self.level = level
+        self.rows = [('readonly', *readonly), ('max_execution_time', *max_execution_time)]
         self.lookups = 0
 
     def exec_driver_sql(self, statement):
-        """Answer the readonly lookup.
+        """Answer the settings lookup.
 
         Args:
             statement: The SQL; only the lookup is expected.
 
         Returns:
-            An object whose ``scalar()`` is the level, as a string the way ClickHouse returns it.
+            The rows ``(name, value, readonly, min, max)``.
         """
-        assert statement == "SELECT getSetting('readonly')"
+        assert statement.startswith('SELECT name, value, readonly, min, max FROM system.settings')
         self.lookups += 1
-        return SimpleNamespace(scalar=lambda: str(self.level))
+        return iter(self.rows)
+
+
+# (value, readonly, min, max) per setting, as system.settings shows them for each kind of profile (ClickHouse 24.8)
+_WRITABLE = ('0', 0, None, None)
+_READONLY_1 = ('1', 1, None, None)
 
 
 @pytest.mark.parametrize(
-    ('level', 'settings'),
+    ('readonly', 'max_execution_time', 'settings', 'warns'),
     [
-        (0, {'max_execution_time': 2, 'readonly': 1}),
-        (1, {}),
-        (2, {'max_execution_time': 2}),
+        pytest.param(_WRITABLE, ('0', 0, None, None), {'readonly': 1, 'max_execution_time': 2}, False, id='writable'),
+        pytest.param(_READONLY_1, ('0', 1, None, None), {}, True, id='readonly1-no-limit'),
+        pytest.param(_READONLY_1, ('300', 1, None, None), {}, True, id='readonly1-longer-limit'),
+        pytest.param(_READONLY_1, ('1', 1, None, None), {}, False, id='readonly1-stricter-limit'),
+        pytest.param(_READONLY_1, ('0', 0, '1', '60'), {'max_execution_time': 2}, False, id='changeable-in-readonly'),
+        pytest.param(('2', 1, None, None), ('0', 0, None, None), {'max_execution_time': 2}, False, id='readonly2'),
+        pytest.param(_WRITABLE, ('0', 0, None, '1'), {'readonly': 1, 'max_execution_time': 1}, False, id='max-below'),
+        pytest.param(
+            _WRITABLE, ('0', 0, None, '1.5'), {'readonly': 1, 'max_execution_time': 1.5}, False, id='max-fraction'
+        ),
+        pytest.param(_WRITABLE, ('0', 0, '5', None), {'readonly': 1, 'max_execution_time': 5}, False, id='min-above'),
+        pytest.param(_WRITABLE, ('1.5', 0, None, None), {'readonly': 1}, False, id='stricter-profile-limit'),
+        pytest.param(_WRITABLE, ('0', 1, None, None), {'readonly': 1}, True, id='const-limit'),
     ],
 )
-def test_clickhouse_sends_only_the_settings_the_profile_allows(level, settings):
-    """A user already read-only by profile may not send readonly (readonly=1: no setting at all), or every query fails."""
+def test_clickhouse_sends_only_the_settings_the_profile_allows(
+    monkeypatch, readonly, max_execution_time, settings, warns
+):
+    """A setting the user may not change fails every query, a looser limit would replace the profile's: neither is sent."""
+    warnings = []
+    monkeypatch.setattr('ai.common.database.db_global_base.warning', warnings.append)
     glb = _global(None)
-    conn = _ProfileConnection(level)
+    conn = _ProfileConnection(readonly, max_execution_time)
 
     assert glb._clickhouse_read_settings(conn, 2) == settings
     assert glb._clickhouse_read_settings(conn, 2) == settings
     assert conn.lookups == 1
+    assert len(warnings) == (1 if warns else 0)
+    if warns:
+        assert 'max_execution_time' in warnings[0] and 'CHANGEABLE_IN_READONLY' in warnings[0]
+
+
+# Profiles of the live users: (SETTINGS clause, the time limit a query runs under, whether the node warns)
+_LIVE_PROFILES = [
+    pytest.param('readonly = 1', 0, True, id='readonly1'),
+    pytest.param('readonly = 1, max_execution_time MIN 1 MAX 60 CHANGEABLE_IN_READONLY', 2, False, id='changeable'),
+    pytest.param('readonly = 2', 2, False, id='readonly2'),
+    pytest.param('max_execution_time MAX 1', 1, False, id='max-below'),
+    pytest.param('max_execution_time = 1', 1, False, id='stricter-profile-limit'),
+    pytest.param('max_execution_time = 0 CONST', 0, True, id='const-limit'),
+]
+
+
+@pytest.mark.parametrize(('profile', 'limit', 'warns'), _LIVE_PROFILES)
+def test_live_clickhouse_profiles_run_read_only(monkeypatch, profile, limit, warns):
+    """A ClickHouse user with each kind of profile runs a query read-only, under the strictest limit it may have."""
+    dsn = os.environ.get('RR_TEST_CLICKHOUSE_DSN')
+    if not dsn:
+        pytest.skip('Set RR_TEST_CLICKHOUSE_DSN to run against a live ClickHouse server')
+    warnings = []
+    monkeypatch.setattr('ai.common.database.db_global_base.warning', warnings.append)
+    admin = create_engine(dsn)
+    user, password = f'rr_profile_{uuid4().hex[:12]}', uuid4().hex
+    try:
+        with admin.connect() as conn:
+            conn.exec_driver_sql(
+                f"CREATE USER {user} IDENTIFIED WITH sha256_password BY '{password}' SETTINGS {profile}"
+            )
+    except Exception as e:  # noqa: BLE001 - each server says no in its own way
+        admin.dispose()
+        pytest.skip(f'The DSN user cannot create users: {e}')
+    engine = create_engine(make_url(dsn).set(username=user, password=password))
+    try:
+        glb = _global(engine)
+        with glb.read_only_connection() as conn:
+            row = conn.exec_driver_sql("SELECT getSetting('readonly'), getSetting('max_execution_time')").one()
+        assert int(row[0]) >= 1
+        assert float(row[1]) == limit
+        assert len(warnings) == (1 if warns else 0)
+        with pytest.raises(Exception):  # noqa: B017 - the driver raises its own class
+            with glb.read_only_connection() as conn:
+                conn.exec_driver_sql(f'CREATE TABLE {user}_t (id Int32) ENGINE = Memory')
+    finally:
+        engine.dispose()
+        with admin.connect() as conn:
+            conn.exec_driver_sql(f'DROP USER IF EXISTS {user}')
+        admin.dispose()
 
 
 class _DriverError(Exception):
