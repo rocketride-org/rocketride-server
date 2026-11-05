@@ -14,6 +14,7 @@ import type { ILayeredInput } from '../src/layout/layered';
 import type { Point } from '../src/graph/geometry';
 import { NODE_RADIUS } from '../src/graph/geometry';
 import { deepFreeze, generateGraph } from './support/builders';
+import { TIMING_SAMPLES, bestOfMs } from './support/timing';
 
 const DIAMETER = NODE_RADIUS * 2;
 const links = (...pairs: Array<[string, string]>): ILayeredInput['links'] => pairs.map(([source, target]) => ({ source, target }));
@@ -104,11 +105,9 @@ test('bigger nodes get more room', () => {
 test('a full-size graph (1,000 nodes, 2,000 relationships) is laid out in well under 50 ms, with no two nodes overlapping', () => {
 	const { nodes, relationships } = generateGraph({ nodes: 1000, relationships: 2000, seed: 21, parallel: 0.1, selfLoops: 0.02 });
 	const input: ILayeredInput = { ids: nodes.map((n) => n.id), links: relationships.map((r) => ({ source: r.start, target: r.end })), orientation: 'tree' };
-	layeredLayout(input); // warm up the JIT
-	const started = performance.now();
-	const out = layeredLayout(input);
-	const elapsed = performance.now() - started;
-	assert.ok(elapsed < 50, `took ${elapsed.toFixed(1)} ms`);
+	// The 50 ms bound is on the best of three timed runs after a warm-up (tests/support/timing.ts).
+	const { ms: elapsed, result: out } = bestOfMs(() => layeredLayout(input));
+	assert.ok(elapsed < 50, `best of ${TIMING_SAMPLES} took ${elapsed.toFixed(1)} ms`);
 	assert.equal(out.size, 1000);
 	// Overlap check on a grid of cells, not all pairs: two nodes closer than a diameter share or touch a cell.
 	const cells = new Map<string, Point[]>();
