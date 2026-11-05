@@ -258,7 +258,10 @@ only; App auth is configured on the node.
 `user_get` uses `GET /user` with a PAT. In App mode it signs an App JWT for
 `GET /app` and returns the App's slug as `login` and `"App"` as `type`; this is the
 App identity, not the installation owner or a human user. Repository reads keep
-using the configured installation token and its existing refresh mechanism.
+using the configured installation token and its existing refresh mechanism. A 200
+whose body names no user (no `login`) or no App (no `slug`) is a shape failure like any
+other unexpected body: it keeps the status and the counters, has no `data`, and says
+what was expected.
 
 The node signs a short-lived JWT with the private key, exchanges it for an installation
 access token (`POST /app/installations/{id}/access_tokens`), and caches the result.

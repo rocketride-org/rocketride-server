@@ -172,13 +172,14 @@ class IInstance(IInstanceBase):
         return self.IGlobal.get_token()
 
     def _repo(self, args: dict, tool_name: str = '') -> str:
+        """The call's repository, or the configured default; every error names ``tool_name``."""
+        prefix = f'{tool_name}: ' if tool_name else ''
         repo = args.get('repo') or self.IGlobal.default_repo or ''
         if not isinstance(repo, str):
-            prefix = f'{tool_name}: ' if tool_name else ''
             raise ValueError(f'{prefix}repo must be in owner/repo format')
         repo = repo.strip()
         if not repo:
-            raise ValueError('repo is required (or configure a default repo in the node settings)')
+            raise ValueError(f'{prefix}repo is required (or configure a default repo in the node settings)')
         return repo
 
     def _require_write(self) -> None:
@@ -836,14 +837,24 @@ class IInstance(IInstanceBase):
     def user_get(self, args):
         """Identify a PAT user or the App itself without returning credentials."""
         normalize_tool_input(args, tool_name='user_get')
-        is_app = self.IGlobal.auth_type == 'app'
-        result = repository_reads.expect_object(self._get('/app' if is_app else '/user', app_identity=is_app))
-        if 'data' in result:
-            data = result['data']
-            result['data'] = {
-                'login': data.get('slug') if is_app else data.get('login'),
-                'type': 'App' if is_app else data.get('type'),
-            }
+        if self.IGlobal.auth_type == 'app':
+            # GET /app takes the App JWT and answers with the App's slug.
+            result = repository_reads.expect_object(self._get('/app', app_identity=True))
+            if 'data' not in result:
+                return result
+            identity = result['data'].get('slug')
+            if not isinstance(identity, str):
+                return github_client.shape_failure(result, 'an object naming the App')
+            result['data'] = {'login': identity, 'type': 'App'}
+            return result
+        # GET /user answers with the PAT user's login and type.
+        result = repository_reads.expect_object(self._get('/user'))
+        if 'data' not in result:
+            return result
+        identity = result['data'].get('login')
+        if not isinstance(identity, str):
+            return github_client.shape_failure(result, 'an object naming the user')
+        result['data'] = {'login': identity, 'type': result['data'].get('type')}
         return result
 
     # =======================================================================

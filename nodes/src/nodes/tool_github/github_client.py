@@ -187,14 +187,47 @@ def call(
     *,
     params: dict | None = None,
     body: dict | None = None,
-    include_metadata: bool = False,
 ) -> Any:
-    """Make an authenticated GitHub API call and return parsed JSON.
+    """Make an authenticated GitHub API call and return the parsed JSON body.
 
     Raises ``ValueError`` with a human-readable message on HTTP errors.
-    Returns an empty dict for 204 No Content responses. ``include_metadata``
-    opts into the response envelope used by the repository-read tools; existing
-    callers continue to receive only the parsed body.
+    Returns an empty dict for 204 No Content responses.
+    """
+    resp = _exchange(token, method, path, params=params, body=body)
+    return {} if resp.status_code == 204 else resp.json()
+
+
+def call_with_metadata(
+    token: str,
+    method: str,
+    path: str,
+    *,
+    params: dict | None = None,
+    body: dict | None = None,
+) -> dict:
+    """The same call, returned as the result envelope the repository-read tools use.
+
+    ``envelope`` of the status, the rate-limit counters, the next page and the parsed
+    body (an empty object for 204). HTTP errors raise as ``call`` raises them; the
+    caller turns them into failure results.
+    """
+    resp = _exchange(token, method, path, params=params, body=body)
+    return envelope(resp.status_code, resp.headers, {} if resp.status_code == 204 else resp.json())
+
+
+def _exchange(
+    token: str,
+    method: str,
+    path: str,
+    *,
+    params: dict | None = None,
+    body: dict | None = None,
+) -> requests.Response:
+    """Send one authenticated request with the node's retry policy and return a 2xx response.
+
+    Shared by ``call`` and ``call_with_metadata``, which only differ in what they return.
+    A rate limit is retried (at most three attempts with bounded waits); any other
+    non-2xx answer raises ``GitHubAPIError``, and a transport failure ``ValueError``.
     """
     headers = {
         'Authorization': f'Bearer {token}',
@@ -204,7 +237,7 @@ def call(
 
     url = BASE_URL + path
 
-    def _attempt() -> Any:
+    def _attempt() -> requests.Response:
         try:
             resp = requests.request(
                 method.upper(),
@@ -216,9 +249,6 @@ def call(
             )
         except requests.RequestException as exc:
             raise ValueError(f'GitHub request failed: {exc}') from exc
-
-        if resp.status_code == 204:
-            return envelope(resp.status_code, resp.headers, {}) if include_metadata else {}
 
         if not resp.ok:
             is_rate_limit = resp.status_code == 429 or (
@@ -234,8 +264,7 @@ def call(
 
             _raise_github_error(resp)
 
-        data = resp.json()
-        return envelope(resp.status_code, resp.headers, data) if include_metadata else data
+        return resp
 
     def github_rate_limit_wait(retry_state: RetryCallState) -> float:
         exc = retry_state.outcome.exception()
@@ -356,6 +385,7 @@ def _error_message(exc: GitHubAPIError, secrets: tuple[str, ...] = ()) -> str:
 
 
 def _error_detail(error) -> str:
+    """One entry of GitHub's ``errors`` list as text: its ``message`` when it has one."""
     detail = error.get('message') if isinstance(error, dict) else None
     return detail if isinstance(detail, str) else str(error)
 
@@ -383,7 +413,7 @@ def get_result(token: str, path: str, *, params: dict | None = None, secrets: tu
     """
     secrets = (token, *secrets)
     try:
-        result = call(token, 'GET', path, params=params, include_metadata=True)
+        result = call_with_metadata(token, 'GET', path, params=params)
     except GitHubAPIError as exc:
         result = failure_result(_error_message(exc, secrets), exc.status_code, exc.headers)
         if isinstance(exc.body, dict) and isinstance(exc.body.get('documentation_url'), str):

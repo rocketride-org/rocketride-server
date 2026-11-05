@@ -300,6 +300,38 @@ def test_app_identity_uses_signed_jwt_not_installation_token(node, rsa_private_k
     assert rsa_private_key_pem not in json.dumps(result)
 
 
+def test_pat_identity_without_a_login_is_a_shape_failure(node):
+    # A 200 that names no user must not become a success with login None.
+    inst, request, _ = node
+    request.return_value = response({'type': 'User', 'id': 7}, headers={'X-RateLimit-Remaining': '41'})
+    result = inst.user_get({})
+    assert result['status'] == 200
+    assert 'data' not in result
+    assert result['message'] == 'GitHub returned an unexpected response body; expected an object naming the user.'
+    assert result['rate_limit']['remaining'] == 41
+
+
+def test_app_identity_without_a_slug_is_a_shape_failure(node, rsa_private_key_pem):
+    inst, request, _ = node
+    inst.IGlobal.auth_type = 'app'
+    inst.IGlobal.app_id = '123'
+    inst.IGlobal.private_key_pem = rsa_private_key_pem
+    request.return_value = response({'name': 'My App', 'owner': {'login': 'owner'}})
+    result = inst.user_get({})
+    assert result['status'] == 200
+    assert 'data' not in result
+    assert result['message'] == 'GitHub returned an unexpected response body; expected an object naming the App.'
+    assert request.call_args.args == ('GET', 'https://api.github.com/app')
+
+
+def test_a_missing_repo_names_the_tool(node):
+    inst, request, _ = node
+    inst.IGlobal.default_repo = ''
+    with pytest.raises(ValueError, match='^label_list: repo is required'):
+        inst.label_list({})
+    request.assert_not_called()
+
+
 def test_app_identity_with_a_bad_key_is_a_safe_failure(node):
     inst, request, _ = node
     inst.IGlobal.auth_type = 'app'

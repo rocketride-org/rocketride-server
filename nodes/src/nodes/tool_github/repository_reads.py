@@ -35,9 +35,12 @@ _REPO_RE = re.compile(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+')
 
 
 def repository_path(repo: str, tool_name: str = '') -> str:
-    """Validate a repository identifier before it becomes part of an API path."""
+    """Validate a repository identifier before it becomes part of an API path.
+
+    ``repo`` is a string already: ``IInstance._repo`` checks the type and names the tool.
+    """
     prefix = f'{tool_name}: ' if tool_name else ''
-    if not isinstance(repo, str) or not _REPO_RE.fullmatch(repo):
+    if not _REPO_RE.fullmatch(repo):
         raise ValueError(f'{prefix}repo must be in owner/repo format')
     if any(part in ('.', '..') for part in repo.split('/')):
         raise ValueError(f'{prefix}repo must be in owner/repo format')
