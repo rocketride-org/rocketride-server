@@ -1636,7 +1636,22 @@ def test_closing_a_url_client_closes_its_pool_owner_once_and_a_host_port_client_
 
 
 def test_the_node_never_calls_from_url_on_the_falkordb_class():
-    source = (_NODE_DIR / 'IGlobal.py').read_text()
-    assert 'FalkorDB.from_url' not in source.replace('``FalkorDB.from_url``', '').replace(
-        "``FalkorDB.from_url's", ''
-    ), 'FalkorDB.from_url hands its pool to a throwaway client whose collection disconnects it'
+    """FalkorDB.from_url hands its pool to a throwaway client whose collection disconnects it (see above).
+
+    Read from the syntax tree, so comments, docstrings and wording cannot satisfy or break it, and with an explicit
+    encoding: the node source holds non-ASCII text and CI's locale may be ASCII.
+    """
+    import ast
+
+    tree = ast.parse((_NODE_DIR / 'IGlobal.py').read_text(encoding='utf-8'))
+    calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute)
+        and node.attr == 'from_url'
+        and isinstance(node.value, ast.Name)
+        and node.value.id in {'FalkorDB', 'falkordb'}
+    ]
+    assert calls == [], f'FalkorDB.from_url is used at line(s) {[c.lineno for c in calls]}'
+    # The premise: the check sees the attribute it looks for (redis.Redis.from_url is the allowed one).
+    assert any(isinstance(n, ast.Attribute) and n.attr == 'from_url' for n in ast.walk(tree))
