@@ -31,7 +31,8 @@ import path from 'node:path';
 
 const DIR = __dirname;
 const modules = fs.readdirSync(DIR).filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts'));
-const read = (file: string): string => fs.readFileSync(path.join(DIR, file), 'utf8');
+// Line endings normalised: a Windows checkout is CRLF (.gitattributes `* text=auto`).
+const read = (file: string): string => fs.readFileSync(path.join(DIR, file), 'utf8').replace(/\r\n/g, '\n');
 
 describe('the dev-tool deep entry', () => {
 	it('has the modules the lanes import', () => {
@@ -74,7 +75,7 @@ describe('the dev-tool deep entry', () => {
 	});
 
 	it("is not re-exported from the library barrel (its promise: no VALUE import from 'shell')", () => {
-		const barrel = fs.readFileSync(path.join(DIR, '..', 'index.ts'), 'utf8');
+		const barrel = fs.readFileSync(path.join(DIR, '..', 'index.ts'), 'utf8').replace(/\r\n/g, '\n');
 		assert.doesNotMatch(barrel, /devtool/);
 	});
 });

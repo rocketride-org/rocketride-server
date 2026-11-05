@@ -329,10 +329,13 @@ describe('createFrameCaller — waits for its controller (CE-9)', () => {
 		const h = createDevToolHarness();
 		const caller = createFrameCaller<FrameOps>({ ...frameOf(h), waitForController: false });
 		await settle();
-		const call = caller.callReply('f.echo', { x: 1 }, { timeoutMs: 60 });
+		// The outcome is observed from the start: settle() takes ~12 timer ticks, which on a slow
+		// (Windows) runner outlasts a short call timeout, and an unobserved rejection is a crash.
+		const outcome = caller.callReply('f.echo', { x: 1 }, { timeoutMs: 400 }).then(() => null, (error: unknown) => error);
 		await settle();
-		assert.equal(h.wire.filter((entry) => (entry.value as { __rrtool?: string })?.__rrtool === 'call').length, 1);
-		await assert.rejects(call, (error: unknown) => error instanceof ExplorerToolError && /did not answer/.test(error.message));
+		assert.equal(h.wire.filter((entry) => (entry.value as { __rrtool?: string })?.__rrtool === 'call').length, 1, 'posted at once, without waiting for readiness');
+		const error = await outcome;
+		assert.ok(error instanceof ExplorerToolError && /did not answer/.test(error.message), 'no controller answers it');
 		caller.dispose();
 	});
 });
