@@ -124,6 +124,13 @@ class IInstance(IInstanceBase):
             warning(f'OCR table extraction failed: {e}\n{traceback.format_exc()}')
 
     def writeImage(self, action: int, mimeType: str, buffer: bytes):
+        """Collect an image stream; at its end OCR the text to the text lane and the tables to the table lane.
+
+        Args:
+            action: ``AVI_ACTION.BEGIN``, ``WRITE`` or ``END``.
+            mimeType: The image type; a GIF is read frame by frame.
+            buffer: A chunk of the image for ``WRITE``.
+        """
         # Handle AVI_BEGIN action
         if action == AVI_ACTION.BEGIN:
             # BEGIN carries the stream descriptor (not image bytes); start empty so
@@ -174,6 +181,17 @@ class IInstance(IInstanceBase):
             self.instance.writeText(text)
 
     def writeDocuments(self, documents: List[Doc]):
+        """OCR image documents to the text and documents lanes, and their tables to the table lane.
+
+        The image documents do not go on: ``preventDefault`` stops the engine passing them to
+        the next node.
+
+        Args:
+            documents: Documents of type ``Image`` with base64 page content.
+
+        Raises:
+            ValueError: A document is not an image.
+        """
         txtdocs: List[Doc] = []
 
         # Iterate through the documents

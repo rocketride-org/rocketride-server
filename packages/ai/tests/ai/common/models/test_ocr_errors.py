@@ -18,7 +18,18 @@ _WRAPPERS = [
 
 
 def _local(monkeypatch, mod, cls, loader, item):
-    """Build the wrapper in local mode with a loader whose inference returns ``item`` per image."""
+    """Build the wrapper in local mode with a loader whose inference returns ``item`` per image.
+
+    Args:
+        monkeypatch: pytest's monkeypatch fixture.
+        mod: The wrapper's module.
+        cls: The wrapper class.
+        loader: Its loader class.
+        item: What inference returns for each image.
+
+    Returns:
+        The wrapper.
+    """
     monkeypatch.setattr(mod, 'get_model_server_address', lambda: None)
     monkeypatch.setattr(loader, 'load', staticmethod(lambda **kw: ({'device': 'cpu'}, {}, None)))
     monkeypatch.setattr(loader, 'preprocess', staticmethod(lambda model, images, metadata=None: {'images': images}))

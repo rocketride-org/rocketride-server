@@ -79,7 +79,11 @@ class ModelServerOCR(OCRInstance):
 
     @property
     def ocr(self):
-        """Lazy-load the OCR engine from model server (or local fallback)."""
+        """The table OCR engine, loaded once on first use (from the model server or in-process).
+
+        Returns:
+            The engine; threads that arrive together wait for one load.
+        """
         if self._ocr is None:
             # pages of several worker threads arrive together; load one engine, not one each
             with self._ocr_lock:
@@ -89,6 +93,14 @@ class ModelServerOCR(OCRInstance):
         return self._ocr
 
     def _load(self):
+        """Create the engine named by ``self.engine``.
+
+        Returns:
+            A ``DocTR``, ``EasyOCR`` or ``Surya`` instance.
+
+        Raises:
+            ValueError: The engine name is unknown.
+        """
         if self.engine == 'doctr':
             from ai.common.models import DocTR
 
@@ -368,6 +380,7 @@ class ModelServerOCR(OCRInstance):
 
 class IGlobal(IGlobalBase):
     def beginGlobal(self):
+        """Create the node's text reader and its table OCR adapter; concurrent reads need no node lock."""
         # Import what we need
         from .ocr import Reader
         from img2table.document import Image as Img2TableImage

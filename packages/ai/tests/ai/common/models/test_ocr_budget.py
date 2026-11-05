@@ -12,6 +12,7 @@ _A4_200DPI = (2200, 1700)  # height, width
 
 
 def test_easyocr_cost_follows_the_detector_input():
+    """The EasyOCR cost grows with the largest image the detector sees, capped at 2560 px."""
     assert EasyOCRLoader.inference_cost_mb({'dimensions': [_A4_200DPI]}) == pytest.approx(1.25 * (32 + 600 * 3.74))
     # the detector caps the long side at 2560 px, so larger scans cost the same
     capped = EasyOCRLoader.inference_cost_mb({'dimensions': [(6000, 4000)]})
@@ -25,12 +26,30 @@ class _Recorder:
     """Stands in for ``device_budget``: records each call's device and cost, admits everything."""
 
     def __init__(self):
+        """Record nothing yet."""
         self.calls = []
         self.inside = False
 
     def __call__(self, device):
+        """Stand in for ``device_budget``.
+
+        Args:
+            device: The device the wrapper asked for.
+
+        Returns:
+            A guard that records the device, the cost and whether a call is inside.
+        """
+
         @contextlib.contextmanager
         def reserve(cost):
+            """Record the cost and mark the call inside while the block runs.
+
+            Args:
+                cost: The cost the wrapper stated.
+
+            Yields:
+                None, while the call is inside.
+            """
             self.calls.append((device, cost))
             self.inside = True
             try:
@@ -51,6 +70,14 @@ class _Recorder:
     ],
 )
 def test_local_read_waits_for_its_device(monkeypatch, mod, cls, loader, cost):
+    """Each wrapper runs ``inference`` inside its device's budget, with its cost.
+
+    Args:
+        mod: The wrapper's module.
+        cls: The wrapper class.
+        loader: Its loader class.
+        cost: The cost it should state.
+    """
     recorder = _Recorder()
     monkeypatch.setattr(mod, 'device_budget', recorder)
     monkeypatch.setattr(mod, 'get_model_server_address', lambda: None)
@@ -63,6 +90,16 @@ def test_local_read_waits_for_its_device(monkeypatch, mod, cls, loader, cost):
     ran_inside = []
 
     def inference(model, pre, metadata=None):
+        """Record whether the guard holds the call, and return no results.
+
+        Args:
+            model: Ignored.
+            pre: Ignored.
+            metadata: Ignored.
+
+        Returns:
+            An empty list.
+        """
         ran_inside.append(recorder.inside)
         return [{'text': 'x', 'boxes': []}]
 

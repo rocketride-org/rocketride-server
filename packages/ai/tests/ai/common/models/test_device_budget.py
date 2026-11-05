@@ -20,9 +20,17 @@ class _Probe:
     """Device memory as the guard reads it: driver free, own cache not in use, own allocated (MB)."""
 
     def __init__(self, free, cache_free=0.0, allocated=0.0):
+        """Start the device at the given memory (MB).
+
+        Args:
+            free: Driver free memory.
+            cache_free: This process's unused torch cache.
+            allocated: This process's torch allocated memory.
+        """
         self.free, self.cache_free, self.allocated = free, cache_free, allocated
 
     def __call__(self):
+        """Return (free, cache_free, allocated) as they stand now."""
         return self.free, self.cache_free, self.allocated
 
 
@@ -30,9 +38,15 @@ class _Neighbours:
     """Whether NVML lists another engine process on the GPU."""
 
     def __init__(self, present=False):
+        """Start with or without a neighbour.
+
+        Args:
+            present: Whether NVML lists another engine process.
+        """
         self.present = present
 
     def __call__(self):
+        """Return whether a neighbour is listed now."""
         return self.present
 
 
@@ -40,15 +54,22 @@ class _Release:
     """Counts cache releases and how many calls were inside at each."""
 
     def __init__(self, budget_of=lambda: None):
+        """Count nothing yet.
+
+        Args:
+            budget_of: Returns the guard under test, to record how many calls were inside at each release.
+        """
         self.inside_at = []
         self._budget_of = budget_of
 
     def __call__(self):
+        """Record one release."""
         budget = self._budget_of()
         self.inside_at.append(len(budget._inside) if budget else -1)
 
     @property
     def count(self):
+        """Return how many releases happened."""
         return len(self.inside_at)
 
 
@@ -56,29 +77,52 @@ class _Call:
     """One call held inside the guard until ``leave``."""
 
     def __init__(self, budget, cost):
+        """Start the call in its own thread.
+
+        Args:
+            budget: The guard to enter.
+            cost: The call's cost in MB, or ``None``.
+        """
         self.entered = threading.Event()
         self._leave = threading.Event()
         self._thread = threading.Thread(target=self._run, args=(budget, cost), daemon=True)
         self._thread.start()
 
     def _run(self, budget, cost):
+        """Enter the guard, signal it, and hold the place until ``leave``.
+
+        Args:
+            budget: The guard to enter.
+            cost: The call's cost in MB, or ``None``.
+        """
         with budget.reserve(cost):
             self.entered.set()
             self._leave.wait(10)
 
     def enters(self):
+        """Return whether the call enters within ``_ENTERS`` seconds."""
         return self.entered.wait(_ENTERS)
 
     def stays_out(self):
+        """Return whether the call is still out after ``_STAYS_OUT`` seconds."""
         return not self.entered.wait(_STAYS_OUT)
 
     def leave(self):
+        """Let the call leave and wait for its thread."""
         self._leave.set()
         self._thread.join(5)
 
 
 def _inside(calls, expected):
-    """How many of ``calls`` are inside once ``expected`` had the time to enter and the rest to wait."""
+    """How many of ``calls`` are inside once ``expected`` had the time to enter and the rest to wait.
+
+    Args:
+        calls: The calls started.
+        expected: How many of them should get in.
+
+    Returns:
+        How many are inside.
+    """
     deadline = time.monotonic() + _ENTERS
     while sum(c.entered.is_set() for c in calls) < expected and time.monotonic() < deadline:
         time.sleep(0.01)
@@ -87,6 +131,14 @@ def _inside(calls, expected):
 
 
 def _wait_for(condition):
+    """Wait up to ``_ENTERS`` seconds for a condition.
+
+    Args:
+        condition: Returns True once it holds.
+
+    Returns:
+        Whether it holds at the end.
+    """
     deadline = time.monotonic() + _ENTERS
     while not condition() and time.monotonic() < deadline:
         time.sleep(0.01)
@@ -95,16 +147,28 @@ def _wait_for(condition):
 
 @pytest.fixture(autouse=True)
 def _fast_recheck(monkeypatch):
+    """Re-check fast, read the process list on every admission, and keep idle releases out of the way."""
     monkeypatch.setattr(budgetmod, 'RECHECK_S', 0.02)
     monkeypatch.setattr(budgetmod, 'NEIGHBOURS_TTL_S', 0.0)
     monkeypatch.setattr(budgetmod, 'IDLE_RELEASE_S', 60.0)  # tests of the idle release set their own
 
 
 def _gpu(probe, neighbours=None, release=None):
+    """Build a GPU guard on fakes.
+
+    Args:
+        probe: The memory probe.
+        neighbours: The neighbour probe; none listed by default.
+        release: The cache release; a counting fake by default.
+
+    Returns:
+        The guard of ``cuda:0``.
+    """
     return DeviceBudget('cuda:0', probe, neighbours or _Neighbours(), release or _Release())
 
 
 def test_first_call_enters_whatever_it_costs():
+    """A call larger than the card still enters when nothing else is inside."""
     first = _Call(_gpu(_Probe(free=100)), cost=5000)
     assert first.enters()
     first.leave()
@@ -112,6 +176,12 @@ def test_first_call_enters_whatever_it_costs():
 
 @pytest.mark.parametrize('extra, fits', [(0, True), (1, False)])
 def test_second_call_enters_only_if_it_fits(extra, fits):
+    """A second call enters only if it fits beside the first, margin included.
+
+    Args:
+        extra: MB the second call needs beyond what is left.
+        fits: Whether it should enter beside the first.
+    """
     budget = _gpu(_Probe(free=4000))
     first = _Call(budget, 1000)
     assert first.enters()
@@ -124,6 +194,7 @@ def test_second_call_enters_only_if_it_fits(extra, fits):
 
 
 def test_own_torch_cache_counts_as_free():
+    """This process's unused torch cache counts as free memory."""
     budget = _gpu(_Probe(free=600, cache_free=3000))
     first = _Call(budget, 1000)
     assert first.enters()
@@ -134,6 +205,7 @@ def test_own_torch_cache_counts_as_free():
 
 
 def test_memory_a_call_already_holds_is_not_counted_twice():
+    """Memory a call inside already allocated is not claimed again."""
     probe = _Probe(free=3000)
     budget = _gpu(probe)
     first = _Call(budget, 2000)
@@ -147,6 +219,7 @@ def test_memory_a_call_already_holds_is_not_counted_twice():
 
 
 def test_memory_freed_elsewhere_is_seen_without_a_release():
+    """A waiter sees memory another process frees, without a call leaving."""
     probe = _Probe(free=1000)
     budget = _gpu(probe)
     first = _Call(budget, 500)
@@ -161,6 +234,7 @@ def test_memory_freed_elsewhere_is_seen_without_a_release():
 
 
 def test_at_most_four_calls_on_a_gpu():
+    """No more than ``MAX_CONCURRENT`` calls are inside a GPU, whatever memory is left."""
     budget = _gpu(_Probe(free=1e6))
     calls = [_Call(budget, 1) for _ in range(budgetmod.MAX_CONCURRENT + 1)]
     assert _inside(calls, budgetmod.MAX_CONCURRENT) == budgetmod.MAX_CONCURRENT
@@ -169,6 +243,7 @@ def test_at_most_four_calls_on_a_gpu():
 
 
 def test_calls_enter_in_arrival_order():
+    """A large waiting call is not overtaken by smaller ones that would fit."""
     budget = _gpu(_Probe(free=2000))
     first = _Call(budget, 1000)
     assert first.enters()
@@ -184,6 +259,7 @@ def test_calls_enter_in_arrival_order():
 
 
 def test_unknown_cost_runs_alone():
+    """A call of unknown cost waits for the device to empty and keeps others out."""
     budget = _gpu(_Probe(free=1e6))
     first = _Call(budget, 100)
     assert first.enters()
@@ -200,6 +276,7 @@ def test_unknown_cost_runs_alone():
 
 
 def test_cpu_slots():
+    """A CPU guard admits ``CPU_SLOTS`` calls."""
     budget = DeviceBudget('cpu')
     calls = [_Call(budget, 1) for _ in range(budgetmod.CPU_SLOTS + 1)]
     assert _inside(calls, budgetmod.CPU_SLOTS) == budgetmod.CPU_SLOTS
@@ -208,6 +285,7 @@ def test_cpu_slots():
 
 
 def test_a_failed_call_leaves_the_guard():
+    """A call that raises frees its place."""
     budget = _gpu(_Probe(free=100))
     with pytest.raises(RuntimeError):
         with budget.reserve(5000):
@@ -218,9 +296,11 @@ def test_a_failed_call_leaves_the_guard():
 
 
 def test_a_failed_memory_read_leaves_the_queue():
+    """A probe that raises takes the waiting call out of the queue."""
     reads = []
 
     def probe():
+        """Raise on the first read, then report plenty of memory."""
         reads.append(1)
         if len(reads) == 1:
             raise RuntimeError('CUDA error: unspecified launch failure')
@@ -236,6 +316,7 @@ def test_a_failed_memory_read_leaves_the_queue():
 
 
 def test_the_cache_is_released_once_the_device_stays_idle(monkeypatch):
+    """The cache goes back only after the last call left and the device stayed idle."""
     monkeypatch.setattr(budgetmod, 'IDLE_RELEASE_S', 0.05)
     release = _Release()
     budget = _gpu(_Probe(free=4000), release=release)
@@ -250,6 +331,7 @@ def test_the_cache_is_released_once_the_device_stays_idle(monkeypatch):
 
 
 def test_the_cache_is_kept_for_a_waiting_call(monkeypatch):
+    """A call that leaves while another waits keeps the cache for it."""
     monkeypatch.setattr(budgetmod, 'IDLE_RELEASE_S', 0.05)
     release = _Release()
     budget = _gpu(_Probe(free=1000), release=release)
@@ -267,6 +349,7 @@ def test_the_cache_is_kept_for_a_waiting_call(monkeypatch):
 
 
 def test_back_to_back_calls_keep_the_cache(monkeypatch):
+    """Calls in quick succession keep the cache; one release follows the last."""
     monkeypatch.setattr(budgetmod, 'IDLE_RELEASE_S', 0.5)
     release = _Release()
     budget = _gpu(_Probe(free=1e6), release=release)
@@ -280,6 +363,7 @@ def test_back_to_back_calls_keep_the_cache(monkeypatch):
 
 
 def test_a_call_inside_when_the_idle_spell_ends_keeps_the_cache(monkeypatch):
+    """A call that entered during the idle spell is not robbed of its cache when the timer fires."""
     monkeypatch.setattr(budgetmod, 'IDLE_RELEASE_S', 1.0)
     budget = None
     release = _Release(lambda: budget)
@@ -298,6 +382,7 @@ def test_a_call_inside_when_the_idle_spell_ends_keeps_the_cache(monkeypatch):
 
 
 def test_beside_a_neighbour_every_call_starts_without_cache():
+    """Beside a neighbour the cache is released before each call, never with a call inside."""
     budget = None
     release = _Release(lambda: budget)
     budget = _gpu(_Probe(free=1e6), _Neighbours(present=True), release)
@@ -314,10 +399,12 @@ def test_beside_a_neighbour_every_call_starts_without_cache():
 
 
 def test_a_failed_cache_release_does_not_fail_the_call(monkeypatch):
+    """A release that raises is logged once and the calls still succeed."""
     warnings = []
     monkeypatch.setattr(budgetmod, 'logger', types.SimpleNamespace(warning=lambda *args: warnings.append(args)))
 
     def release():
+        """Fail as a broken device would."""
         raise RuntimeError('CUDA error: an illegal memory access was encountered')
 
     budget = _gpu(_Probe(free=1e6), _Neighbours(present=True), release)
@@ -328,6 +415,7 @@ def test_a_failed_cache_release_does_not_fail_the_call(monkeypatch):
 
 
 def test_the_process_list_is_reused_for_a_while(monkeypatch):
+    """NVML is asked at most once per ``NEIGHBOURS_TTL_S``."""
     monkeypatch.setattr(budgetmod, 'NEIGHBOURS_TTL_S', 60.0)
     reads = []
     budget = _gpu(_Probe(free=1e6), lambda: reads.append(1) or False)
@@ -338,6 +426,7 @@ def test_the_process_list_is_reused_for_a_while(monkeypatch):
 
 
 def test_a_neighbour_means_one_call_at_a_time():
+    """With a neighbour listed, a second call waits for the first."""
     budget = _gpu(_Probe(free=1e6), _Neighbours(present=True))
     first = _Call(budget, 100)
     assert first.enters()
@@ -349,6 +438,7 @@ def test_a_neighbour_means_one_call_at_a_time():
 
 
 def test_calls_inside_finish_when_a_neighbour_appears():
+    """Calls inside keep running when a neighbour appears; new ones wait."""
     neighbours = _Neighbours()
     budget = _gpu(_Probe(free=1e6), neighbours)
     first, second = _Call(budget, 100), _Call(budget, 100)
@@ -365,6 +455,7 @@ def test_calls_inside_finish_when_a_neighbour_appears():
 
 
 def test_a_lone_call_waits_for_memory_while_the_neighbour_drains():
+    """Right after a neighbour appears, a lone call waits until its cost fits."""
     probe = _Probe(free=1000)
     budget = _gpu(probe, _Neighbours(present=True))
     lone = _Call(budget, 2000)
@@ -376,6 +467,7 @@ def test_a_lone_call_waits_for_memory_while_the_neighbour_drains():
 
 
 def test_a_lone_call_enters_after_the_wait_as_with_the_lock(monkeypatch):
+    """After ``SHARED_WAIT_S`` a lone call enters even if it does not fit."""
     monkeypatch.setattr(budgetmod, 'SHARED_WAIT_S', 0.2)
     budget = _gpu(_Probe(free=100), _Neighbours(present=True))
     lone = _Call(budget, 5000)
@@ -384,6 +476,7 @@ def test_a_lone_call_enters_after_the_wait_as_with_the_lock(monkeypatch):
 
 
 def test_a_lone_call_of_unknown_cost_enters_beside_a_neighbour():
+    """A lone call of unknown cost enters beside a neighbour, as with the lock."""
     budget = _gpu(_Probe(free=100), _Neighbours(present=True))
     lone = _Call(budget, None)
     assert lone.enters()
@@ -391,6 +484,7 @@ def test_a_lone_call_of_unknown_cost_enters_beside_a_neighbour():
 
 
 def test_the_budget_returns_when_the_neighbour_leaves():
+    """Once the neighbour leaves, calls share the device again."""
     neighbours = _Neighbours(present=True)
     budget = _gpu(_Probe(free=1e6), neighbours)
     first = _Call(budget, 100)
@@ -408,37 +502,54 @@ _NAMES = {10: 'engine.exe', 11: 'Engine.exe', 20: 'dwm.exe', 21: 'chrome.exe'}
 
 
 def _name_of(pid):
+    """Name a fake process.
+
+    Args:
+        pid: The process id.
+
+    Returns:
+        Its name, or ``'?'`` when it has none.
+    """
     return _NAMES.get(pid, '?')
 
 
 def test_desktop_processes_are_not_neighbours():
+    """Desktop processes on the GPU are not neighbours."""
     assert not _has_neighbour({10, 20, 21}, 10, 'engine.exe', _name_of)
 
 
 def test_another_engine_process_is_a_neighbour():
+    """Another process named like this one is a neighbour."""
     assert _has_neighbour({10, 11, 20}, 10, 'engine.exe', _name_of)
 
 
 def test_a_process_that_cannot_be_named_is_a_neighbour():
+    """A process whose name cannot be read is a neighbour."""
     assert _has_neighbour({10, 30, 20}, 10, 'engine.exe', _name_of)
 
 
 def test_in_another_pid_namespace_one_unnamed_process_is_this_one():
+    """In another PID namespace one unnamed process is this one; a second is a neighbour."""
     # NVML lists host pids: this process is 5 inside its namespace and 30 on the host
     assert not _has_neighbour({30, 20}, 5, 'engine', _name_of)
     assert _has_neighbour({30, 31, 20}, 5, 'engine', _name_of)
 
 
 def test_no_nvml_means_a_neighbour(monkeypatch):
+    """Without NVML the guard assumes a neighbour."""
     monkeypatch.setitem(sys.modules, 'pynvml', None)
     assert budgetmod._nvml_neighbours('cuda:0')() is True
 
 
 def test_a_failed_process_name_read_falls_back_and_is_read_again(monkeypatch):
+    """A failed name read means a neighbour, is logged once, and is retried on the next listing."""
     reads = []
 
     class _Process:
+        """This process, whose name cannot be read the first two times."""
+
         def name(self):
+            """Raise twice, then return the engine's name."""
             reads.append(1)
             if len(reads) <= 2:
                 raise RuntimeError('access denied')
@@ -466,6 +577,7 @@ def test_a_failed_process_name_read_falls_back_and_is_read_again(monkeypatch):
 
 
 def test_the_cuda_release_hands_the_cache_back():
+    """The real release frees memory torch cached on a CUDA device."""
     torch = pytest.importorskip('torch')
     if not torch.cuda.is_available():
         pytest.skip('needs a CUDA device')
@@ -479,6 +591,7 @@ def test_the_cuda_release_hands_the_cache_back():
 
 
 def test_one_guard_per_device(monkeypatch):
+    """``cuda`` and ``cuda:0`` share one guard; other devices get their own."""
     monkeypatch.setattr(budgetmod, 'is_model_server_enabled', lambda: False)
     monkeypatch.setattr(budgetmod, '_cuda_probe', lambda device: _Probe(free=1e6))
     monkeypatch.setattr(budgetmod, '_budgets', {})
@@ -489,6 +602,7 @@ def test_one_guard_per_device(monkeypatch):
 
 
 def test_model_server_mode_is_a_no_op(monkeypatch):
+    """With ``--modelserver`` the guard admits every call at once."""
     monkeypatch.setattr(budgetmod, 'is_model_server_enabled', lambda: True)
     guard = device_budget('cuda:0')
     held = [guard.reserve(None) for _ in range(8)]

@@ -142,6 +142,11 @@ class _StubInstance:
         self.texts: list = []
 
     def hasListener(self, lane: str) -> bool:
+        """Return whether a lane is wired; only the text lane is.
+
+        Args:
+            lane: The lane name.
+        """
         return lane == 'text'
 
     def writeText(self, text) -> None:
@@ -177,17 +182,39 @@ class _OneFrameGif:
     """What ``Image.open`` returns for an animated GIF of one frame."""
 
     def convert(self, _mode: str) -> '_OneFrameGif':
+        """Return this frame as it is.
+
+        Args:
+            _mode: Ignored.
+        """
         return self
 
     def tell(self) -> int:
+        """Return the current frame, always 0."""
         return 0
 
     def seek(self, _frame: int) -> None:
+        """End the frames.
+
+        Args:
+            _frame: Ignored.
+
+        Raises:
+            EOFError: Always; the GIF has one frame.
+        """
         raise EOFError
 
 
 def _ocr(glb: IGlobal, source: str) -> list:
-    """Run one image through ``writeImage`` (BEGIN, WRITE, END) as the engine does, or one image document."""
+    """Run one image through ``writeImage`` (BEGIN, WRITE, END) as the engine does, or one image document.
+
+    Args:
+        glb: The node global with the stub reader.
+        source: A mime type for ``writeImage``, or ``'documents'``.
+
+    Returns:
+        What the stub reader returned.
+    """
     node = IInstance.__new__(IInstance)
     node.IGlobal = glb
     node.instance = _StubInstance()
@@ -202,10 +229,20 @@ def _ocr(glb: IGlobal, source: str) -> list:
 
 
 def _run_threads(n: int, read: Callable[[], list]) -> list:
+    """Run ``read`` in ``n`` threads at once.
+
+    Args:
+        n: The number of threads.
+        read: Reads one image.
+
+    Returns:
+        The errors the threads raised.
+    """
     results: list = []
     errors: list = []
 
     def work() -> None:
+        """Run ``read`` once and keep its error."""
         try:
             results.append(read())
         except Exception as e:  # surfaced through the assert below
@@ -223,7 +260,14 @@ def _run_threads(n: int, read: Callable[[], list]) -> list:
 @pytest.mark.parametrize('source', ['image/png', 'image/gif', 'documents'])
 @pytest.mark.parametrize('model_server', [False, True], ids=['local', 'model-server'])
 def test_reads_run_concurrently(make_global, monkeypatch, model_server: bool, source: str) -> None:
-    """Worker threads are inside ``read`` at the same time (a node lock would break the barrier)."""
+    """Worker threads are inside ``read`` at the same time (a node lock would break the barrier).
+
+    Args:
+        make_global: Builds the node global with a stub reader.
+        monkeypatch: pytest's monkeypatch fixture.
+        model_server: Whether the engine runs with ``--modelserver``.
+        source: A mime type for ``writeImage``, or ``'documents'``.
+    """
     glb = make_global(model_server=model_server)
     if source == 'image/gif':
         monkeypatch.setattr(_iinstance_mod, 'Image', types.SimpleNamespace(open=lambda *_a, **_kw: _OneFrameGif()))
@@ -241,6 +285,7 @@ def test_table_engine_is_loaded_once(monkeypatch) -> None:
     loads: list = []
 
     def slow_load() -> object:
+        """Load slowly, so threads that arrive together overlap."""
         loads.append(1)
         time.sleep(0.05)
         return object()
@@ -250,6 +295,7 @@ def test_table_engine_is_loaded_once(monkeypatch) -> None:
     engines: list = []
 
     def first_page() -> None:
+        """Ask for the engine, as a worker's first page does."""
         barrier.wait()
         engines.append(adapter.ocr)
 

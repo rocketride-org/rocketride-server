@@ -282,6 +282,12 @@ class EasyOCRLoader(BaseLoader):
         Measured (torch 2.10, easyocr 1.7.2): about 32 MB plus 600 MB per megapixel the
         detector sees (long side capped at ``canvas_size``, 2560), x1.25 for the caching
         allocator. Recognition batches do not move the peak.
+
+        Args:
+            preprocessed: The output of ``preprocess``; its ``dimensions`` give each image's size.
+
+        Returns:
+            The cost in MB.
         """
         megapixels = 0.0
         for height, width in preprocessed.get('dimensions', []):
@@ -483,7 +489,14 @@ class EasyOCR:
         return results[0] if single_input else results
 
     def _read_local(self, images: List[bytes]) -> List[Dict]:
-        """Execute local OCR with perf timing."""
+        """Run OCR in this process and report its timings; inference waits in its device's ``device_budget``.
+
+        Args:
+            images: Encoded images.
+
+        Returns:
+            One result per image, as ``read`` returns them.
+        """
         # Preprocess phase — decode images and prepare for model
         t0 = time.perf_counter()
         preprocessed = EasyOCRLoader.preprocess(self._model, images, self._metadata)

@@ -114,6 +114,11 @@ class _StubReader:
 
 class _StubIGlobal:
     def __init__(self, reader: _StubReader) -> None:
+        """Hold the reader.
+
+        Args:
+            reader: The stub reader.
+        """
         self.reader = reader
         # no `table_ocr` attribute, so extract_tables_from_image returns early
 

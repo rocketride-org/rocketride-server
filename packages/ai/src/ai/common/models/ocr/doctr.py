@@ -144,6 +144,12 @@ class DocTRLoader(BaseLoader):
         """Peak device memory of ``inference``: about 0.4 GB allocated, 0.9 GB reserved at any page size.
 
         Measured on torch 2.10, python-doctr 1.1.0; the predictor resizes each page to 1024 px.
+
+        Args:
+            preprocessed: The output of ``preprocess``; the cost does not depend on it.
+
+        Returns:
+            900 MB.
         """
         return 900.0
 
@@ -282,7 +288,14 @@ class DocTR:
         return results[0] if single_input else results
 
     def _read_local(self, images: List[bytes]) -> List[Dict]:
-        """Execute local OCR with perf timing."""
+        """Run OCR in this process and report its timings; inference waits in its device's ``device_budget``.
+
+        Args:
+            images: Encoded images.
+
+        Returns:
+            One result per image, as ``read`` returns them.
+        """
         # Preprocess phase — decode images and prepare for model
         t0 = time.perf_counter()
         preprocessed = DocTRLoader.preprocess(self._model, images, self._metadata)

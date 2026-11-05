@@ -76,11 +76,20 @@ Release = Callable[[], None]
 
 
 def _cuda_probe(device: str) -> Probe:
+    """Read the memory of a CUDA device as the guard needs it.
+
+    Args:
+        device: The device, ``'cuda:N'``.
+
+    Returns:
+        A probe returning (driver free MB, this process's unused torch cache MB, its torch allocated MB).
+    """
     from ai.common.torch import torch
 
     index = int(device.split(':')[1])
 
     def probe() -> Tuple[float, float, float]:
+        """Return (driver free MB, own unused torch cache MB, own torch allocated MB) of the device."""
         free, _ = torch.cuda.mem_get_info(index)
         reserved = torch.cuda.memory_reserved(index)
         allocated = torch.cuda.memory_allocated(index)
@@ -90,9 +99,18 @@ def _cuda_probe(device: str) -> Probe:
 
 
 def _cuda_release(device: str) -> Release:
+    """Hand this process's unused torch cache on a CUDA device back to the driver.
+
+    Args:
+        device: The device, ``'cuda:N'``.
+
+    Returns:
+        A callable that runs ``torch.cuda.empty_cache()`` on that device.
+    """
     index = int(device.split(':')[1])
 
     def release() -> None:
+        """Run ``torch.cuda.empty_cache()`` on the device; memory in use stays."""
         from ai.common.torch import torch
 
         with torch.cuda.device(index):
@@ -102,7 +120,18 @@ def _cuda_release(device: str) -> Release:
 
 
 def _has_neighbour(pids: Set[int], own_pid: int, own_name: str, name_of: Callable[[int], str]) -> bool:
-    """Whether ``pids`` (the processes NVML lists on a GPU) hold another process named like ours, or one not named."""
+    """Whether the processes NVML lists on a GPU include another engine process.
+
+    Args:
+        pids: The process ids NVML lists on the device.
+        own_pid: This process's id.
+        own_name: This process's executable name, lower case.
+        name_of: Names a process id; ``'?'`` when it cannot.
+
+    Returns:
+        True if another process is named like this one or cannot be named. In another PID
+        namespace, where NVML lists host pids, one unnamed process is taken to be this one.
+    """
     unnamed = 0
     for pid in pids - {own_pid}:
         name = name_of(pid)
@@ -117,10 +146,20 @@ def _has_neighbour(pids: Set[int], own_pid: int, own_name: str, name_of: Callabl
 
 
 def _nvml_neighbours(device: str) -> Neighbours:
+    """Find other engine processes on a CUDA device through NVML.
+
+    Args:
+        device: The device, ``'cuda:N'``.
+
+    Returns:
+        A callable telling whether another engine process may hold the device; True when NVML
+        cannot be read.
+    """
     index = int(device.split(':')[1])
     nvml: Dict[str, Any] = {}
 
     def neighbours() -> bool:
+        """Return whether NVML lists another engine process on the device (True when it cannot tell)."""
         try:
             import psutil
             import pynvml
@@ -156,7 +195,14 @@ class DeviceBudget:
         neighbours: Optional[Neighbours] = None,
         release: Optional[Release] = None,
     ):
-        """Guard ``device`` ('cuda:N' or another device); ``probe`` reads its memory, ``neighbours`` its other engines, ``release`` frees its cache."""
+        """Guard one device.
+
+        Args:
+            device: ``'cuda:N'``, or another device such as ``'cpu'``.
+            probe: Reads the device's memory; the CUDA probe by default on a GPU.
+            neighbours: Tells whether another engine process holds the device; NVML by default on a GPU.
+            release: Hands this process's unused cache back; ``torch.cuda.empty_cache`` by default on a GPU.
+        """
         self.device = device
         self._gpu = device.startswith('cuda')
         self._probe = probe if probe or not self._gpu else _cuda_probe(device)
@@ -174,7 +220,14 @@ class DeviceBudget:
 
     @contextlib.contextmanager
     def reserve(self, cost_mb: Optional[float]) -> Iterator[None]:
-        """Run the block as one call costing ``cost_mb``; ``None`` = alone on the device (cost not known)."""
+        """Run the block as one call on the device, once the guard admits it.
+
+        Args:
+            cost_mb: The memory the call needs in MB; ``None`` (not known) runs it alone on the device.
+
+        Yields:
+            None, while the call holds its place.
+        """
         ticket = object()
         with self._cond:
             self._queue.append(ticket)
@@ -195,6 +248,7 @@ class DeviceBudget:
                 self._cond.notify_all()
 
     def _release_when_idle(self) -> None:
+        """Release the cache once the device has stayed idle for ``IDLE_RELEASE_S``; the caller holds the lock."""
         # calls that come back to back keep the cache; re-allocating it costs each of them
         self._drains += 1
         timer = threading.Timer(IDLE_RELEASE_S, self._release_if_still_idle, args=(self._drains,))
@@ -202,11 +256,17 @@ class DeviceBudget:
         timer.start()
 
     def _release_if_still_idle(self, drain: int) -> None:
+        """Release the cache if no call came since the drain that started the timer.
+
+        Args:
+            drain: The drain count when the timer started.
+        """
         with self._cond:
             if drain == self._drains and not self._inside and not self._queue:
                 self._free_cache()
 
     def _free_cache(self) -> None:
+        """Hand the unused cache back to the driver; a failure is logged once, never raised."""
         try:
             self._release()
         except Exception as e:
@@ -216,6 +276,11 @@ class DeviceBudget:
                 logger.warning('%s: cannot release the torch cache (%s)', self.device, e)
 
     def _sharing(self) -> bool:
+        """Whether another engine process holds the device, asked at most every ``NEIGHBOURS_TTL_S``.
+
+        Returns:
+            The last answer of ``neighbours``; the moment it turns true starts ``SHARED_WAIT_S``.
+        """
         now = time.monotonic()
         if now - self._neighbours_read >= NEIGHBOURS_TTL_S:
             self._neighbours_read = now
@@ -226,6 +291,14 @@ class DeviceBudget:
         return self._shared
 
     def _admits(self, cost_mb: Optional[float]) -> bool:
+        """Whether the call at the head of the queue may enter now; the caller holds the lock.
+
+        Args:
+            cost_mb: The call's memory in MB, or ``None`` when not known.
+
+        Returns:
+            True if it may enter.
+        """
         if not self._gpu:
             if not self._inside:
                 return True
@@ -252,7 +325,17 @@ class DeviceBudget:
 
 
 class _NoBudget:
+    """The guard with ``--modelserver``: admits every call at once."""
+
     def reserve(self, cost_mb: Optional[float]) -> contextlib.AbstractContextManager:
+        """Admit the call at once.
+
+        Args:
+            cost_mb: Ignored.
+
+        Returns:
+            A context manager that does nothing.
+        """
         return contextlib.nullcontext()
 
 
@@ -262,7 +345,14 @@ _budgets_lock = threading.Lock()
 
 
 def device_budget(device: str):
-    """Return the process-wide guard of ``device`` ('cpu', 'cuda' or 'cuda:N'); a no-op with ``--modelserver``."""
+    """Return the process-wide guard of a device.
+
+    Args:
+        device: ``'cpu'``, ``'cuda'`` (taken as ``'cuda:0'``) or ``'cuda:N'``.
+
+    Returns:
+        The device's ``DeviceBudget``, created on first use; a no-op guard with ``--modelserver``.
+    """
     if is_model_server_enabled():
         return _NO_BUDGET
     device = str(device)

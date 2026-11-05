@@ -379,7 +379,14 @@ class TrOCR:
         return results[0] if single_input else results
 
     def _read_local(self, images: List[bytes]) -> List[Dict]:
-        """Execute local OCR with perf timing."""
+        """Run OCR in this process and report its timings; inference waits in its device's ``device_budget``.
+
+        Args:
+            images: Encoded images.
+
+        Returns:
+            One result per image, as ``read`` returns them.
+        """
         # Preprocess phase — decode images and prepare for model
         t0 = time.perf_counter()
         preprocessed = TrOCRLoader.preprocess(self._model, images, self._metadata)
