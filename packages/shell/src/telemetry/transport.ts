@@ -264,6 +264,31 @@ export function initPostHog(): void {
 	identity.sdkStarted();
 }
 
+/**
+ * An app page became active or inactive after the SDK started: posthog-js reads capture_pageleave per page leave,
+ * but only from its config, which init set from the page state of that moment. The host calls this only when the
+ * value changes (set_config also re-runs each extension's start-or-stop check; a running replay is left as is). The
+ * consented instance is updated only while it is the active one: a torn-down instance stays inert, and the revive
+ * (reviveConfig) and a fresh creation both read the live page state.
+ *
+ * @param active - Whether an app page is active now.
+ */
+export function syncPageActive(active: boolean): void {
+	if (!mode) {
+		return;
+	}
+	const config = { capture_pageleave: active };
+	quietly(() => {
+		posthog.set_config(config);
+	});
+	if (mode.isConsented()) {
+		const consented = mode.active();
+		quietly(() => {
+			consented.set_config(config);
+		});
+	}
+}
+
 /** The posthog-js calls the queue registers through once the SDK started (both instances). */
 export function registerOnInstances(props: Record<string, unknown>): void {
 	try { posthog.register(props); } catch { /* never throws */ }

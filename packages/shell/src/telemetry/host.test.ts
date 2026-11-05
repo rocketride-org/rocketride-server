@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Identity, type IdentityMode } from './identity.ts';
-import { clearTelemetryOnSignOut, initTelemetryHost, knownSignedOutForTests, loadTransportForTests, markTelemetrySignedIn, resetTelemetryHostForTests, setTelemetryIdentity } from './host.ts';
+import { clearTelemetryOnSignOut, initTelemetryHost, knownSignedOutForTests, loadTransportForTests, markTelemetrySignedIn, resetTelemetryHostForTests, setPageActive, setTelemetryIdentity } from './host.ts';
 import { HOLD_STORAGE_KEY } from './sdkQueue.ts';
 import { resetDevGateForTests } from '../util/devGate.ts';
 
@@ -95,6 +95,7 @@ function fakeTransport(userState: string) {
 		initPostHog: () => { log.push('init'); started = true; identity.sdkStarted(); },
 		active: () => sdk,
 		registerOnInstances: () => {},
+		syncPageActive: (active: boolean) => { log.push(`syncPageActive:${active}`); },
 	};
 	return { log, module: module as unknown as Parameters<typeof loadTransportForTests>[0] };
 }
@@ -169,6 +170,32 @@ test('after the bind, identity reports go straight to the transport', async () =
 		clearTelemetryOnSignOut();
 		setTelemetryIdentity(false, null);
 		assert.equal(knownSignedOutForTests(), true);
+	});
+});
+
+test('a page-active change after the SDK start is pushed to the live instances', async () => {
+	const { win, runTimers } = page();
+	await withGlobals({ window: win, document: docHidden }, () => {
+		resetTelemetryHostForTests();
+		const t = fakeTransport('anonymous');
+		loadTransportForTests(t.module);
+		runTimers();
+		setPageActive(true);
+		setPageActive(false);
+		assert.deepEqual(t.log.filter((entry) => entry.startsWith('syncPageActive')), ['syncPageActive:true', 'syncPageActive:false']);
+	});
+});
+
+test('an unchanged page-active value, or one set before the SDK start, pushes nothing', async () => {
+	const { win, runTimers } = page();
+	await withGlobals({ window: win, document: docHidden }, () => {
+		resetTelemetryHostForTests();
+		const t = fakeTransport('anonymous');
+		loadTransportForTests(t.module);
+		setPageActive(true); // before the start: the init reads it through isPage()
+		runTimers();
+		setPageActive(true); // unchanged after the start
+		assert.deepEqual(t.log.filter((entry) => entry.startsWith('syncPageActive')), []);
 	});
 });
 

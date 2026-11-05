@@ -320,7 +320,14 @@ export function registerSuperProperties(props: Record<string, unknown>): void {
  * The TelemetryProvider flips this with the app lifecycle.
  */
 export function setPageActive(active: boolean): void {
+	if (active === pageActive) {
+		return;
+	}
 	pageActive = active;
+	// Before the start the init reads isPage(); after it the live instances need the new value pushed.
+	if (transport && queue.started) {
+		transport.syncPageActive(active);
+	}
 }
 
 /**
@@ -453,7 +460,7 @@ export function resetTelemetryHostForTests(): void {
  * does (replay, then the start schedule), without fetching posthog-js. The
  * host counts as enabled, as it is whenever the chunk import runs.
  */
-export function loadTransportForTests(module: Pick<typeof Transport, 'bindTransport' | 'transportIdentity' | 'startWebVitals' | 'initPostHog' | 'active' | 'registerOnInstances'>): void {
+export function loadTransportForTests(module: Pick<typeof Transport, 'bindTransport' | 'transportIdentity' | 'startWebVitals' | 'initPostHog' | 'active' | 'registerOnInstances' | 'syncPageActive'>): void {
 	enabled = true;
 	onTransportLoaded(module as typeof Transport);
 }

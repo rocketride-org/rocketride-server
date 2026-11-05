@@ -136,4 +136,26 @@ describe('privacySignalOn', () => {
 		expect(() => privacySignalOn()).not.toThrow();
 		expect(privacySignalOn()).toBe(false);
 	});
+
+	it('still honors GPC when an earlier signal getter throws', () => {
+		const nav = { globalPrivacyControl: true };
+		Object.defineProperty(nav, 'doNotTrack', {
+			get() {
+				throw new Error('blocked');
+			},
+		});
+		install(nav);
+		expect(privacySignalOn()).toBe(true);
+	});
+
+	it('still honors DNT when the GPC getter throws', () => {
+		const nav = { doNotTrack: '1' };
+		Object.defineProperty(nav, 'globalPrivacyControl', {
+			get() {
+				throw new Error('blocked');
+			},
+		});
+		install(nav);
+		expect(privacySignalOn()).toBe(true);
+	});
 });

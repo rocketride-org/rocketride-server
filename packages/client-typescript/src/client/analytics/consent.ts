@@ -59,21 +59,38 @@ function isSignalEnabled(value: unknown): boolean {
 }
 
 /**
+ * Read one signal on its own, so a throwing getter (or a missing global)
+ * reads as no signal without hiding the others.
+ *
+ * @param read - Reads the raw signal value.
+ * @returns True when the value is an enabled signal.
+ */
+function readSignal(read: () => unknown): boolean {
+	try {
+		return isSignalEnabled(read());
+	} catch {
+		return false;
+	}
+}
+
+/**
  * Read the browser's DNT/GPC signals before any analytics path runs.
  * PostHog's cookieless mode does not enforce respect_dnt itself. One copy,
  * like the record parser: the consent surfaces, the capture gates and the
- * sign-in-path readers all honor the same signals.
+ * sign-in-path readers all honor the same signals. Each signal is read
+ * separately: any enabled, readable signal wins; a throw alone is no signal.
  *
  * @returns True for an enabled signal; false outside a browser.
  */
 export function privacySignalOn(): boolean {
-	try {
-		const nav = navigator as Navigator & { msDoNotTrack?: unknown; globalPrivacyControl?: unknown };
-		const win = window as Window & { doNotTrack?: unknown };
-		return isSignalEnabled(nav.doNotTrack) || isSignalEnabled(nav.msDoNotTrack) || isSignalEnabled(win.doNotTrack) || isSignalEnabled(nav.globalPrivacyControl);
-	} catch {
-		return false;
-	}
+	type Nav = Navigator & { msDoNotTrack?: unknown; globalPrivacyControl?: unknown };
+	type Win = Window & { doNotTrack?: unknown };
+	return (
+		readSignal(() => (navigator as Nav).doNotTrack) ||
+		readSignal(() => (navigator as Nav).msDoNotTrack) ||
+		readSignal(() => (window as Win).doNotTrack) ||
+		readSignal(() => (navigator as Nav).globalPrivacyControl)
+	);
 }
 
 /**
