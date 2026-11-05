@@ -213,7 +213,7 @@ class AccountApi:
         team_id: str | None = None,
     ) -> CreateKeyResult:
         """
-        Create a new API key (PAT) and return the raw key string.
+        Create a new API key (PAT) and return the raw key string and its granted expiry.
 
         When team_id is None (default) the key inherits all teams and
         permissions from the user. When team_id is set, the key is scoped
@@ -224,11 +224,15 @@ class AccountApi:
             name: Human-readable label for the key.
             permissions: Permission strings. Required when team_id is set;
                 None means inherit all from the user.
-            expires_at: Optional ISO timestamp for key expiration. None means no expiry.
+            expires_at: Optional ISO timestamp for key expiration. None asks for no
+                expiry. The server may grant an EARLIER expiry (a key created over a
+                sign-in session expires with that session's bound).
             team_id: Optional team UUID to scope this key to.
 
         Returns:
-            Dict containing the raw key string under the ``key`` field.
+            Dict with the raw key string under ``key`` and, when the server reports
+            it, the granted expiry under ``expiresAt`` (ISO timestamp, or None for
+            no expiry). ``expiresAt`` is absent when the server did not report it.
         """
         kwargs: dict = {
             'subcommand': 'create',
@@ -242,7 +246,11 @@ class AccountApi:
             kwargs['teamId'] = team_id
 
         body = await self._client.call('rrext_account_keys', **kwargs)
-        return {'key': body['key']}
+        result: CreateKeyResult = {'key': body['key']}
+        record = body.get('record')
+        if isinstance(record, dict) and 'expiresAt' in record:
+            result['expiresAt'] = record['expiresAt']
+        return result
 
     async def revoke_key(self, key_id: str) -> None:
         """

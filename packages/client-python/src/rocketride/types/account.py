@@ -39,12 +39,12 @@ Types Defined:
     TeamMemberRecord: A member record scoped to a specific team.
     ProfileUpdate: Mutable profile fields submitted when saving edits.
     CreateKeyParams: Parameters for creating a new API key.
-    CreateKeyResult: Result containing the raw key string.
+    CreateKeyResult: Result containing the raw key string and its granted expiry.
     InviteMemberParams: Parameters for inviting a new member.
     TeamMemberParams: Parameters for adding or updating a team member.
 """
 
-from typing import TypedDict
+from typing import Optional, TypedDict
 
 
 # =============================================================================
@@ -326,8 +326,23 @@ class CreateKeyParams(TypedDict, total=False):
     expiresAt: str
 
 
-CreateKeyResult = TypedDict('CreateKeyResult', {'key': str})
-"""Result of creating a new API key, containing the raw key string."""
+class _CreateKeyResultRequired(TypedDict):
+    key: str
+
+
+class CreateKeyResult(_CreateKeyResultRequired, total=False):
+    """
+    Result of creating a new API key.
+
+    ``key`` is the raw key string (shown once). ``expiresAt`` is the expiry the
+    server actually granted, as an ISO timestamp, or None when the key does not
+    expire; it can be earlier than the requested one (a key created over a
+    sign-in session expires with that session's bound). It is absent when the
+    server did not report it (an older server), so a missing value must not be
+    read as "never expires".
+    """
+
+    expiresAt: Optional[str]
 
 
 class InviteMemberParams(TypedDict):
