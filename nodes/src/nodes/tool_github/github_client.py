@@ -46,10 +46,7 @@ import jwt
 import requests
 from tenacity import RetryCallState, Retrying, retry_if_exception_type, stop_after_attempt, wait_exponential
 
-if __package__:
-    from .graphql_guard import mutation_refusal
-else:  # The standalone HTTP tests also import this module directly.
-    from graphql_guard import mutation_refusal
+from .graphql_guard import mutation_refusal
 
 
 class GitHubAPIError(ValueError):
@@ -486,12 +483,22 @@ class CallBudget:
         self.waited = 0.0
 
 
-class _Handed:
-    """Calls a credential and remembers every token it returned, for redaction."""
+class Handed:
+    """A credential provider that remembers every token it returned, for redaction.
 
-    def __init__(self, credential) -> None:
+    ``get_result`` and ``graphql_result`` redact with ``tokens``. ``IInstance._with_credentials``
+    passes one in, so the node and the client read the same list and nothing counts a
+    handed-out token twice.
+    """
+
+    def __init__(self, credential: Credential) -> None:
         self._credential = credential
         self.tokens: list[str] = []
+
+    @classmethod
+    def of(cls, credential: Credential | Handed) -> Handed:
+        """``credential`` itself when it is already one of these, else a new provider around it."""
+        return credential if isinstance(credential, cls) else cls(credential)
 
     def __call__(self) -> str:
         token = self._credential() if callable(self._credential) else self._credential
@@ -672,10 +679,15 @@ def _rate_limit(resp: requests.Response, content: bytes, now: float, *, graphql:
 
 
 def _parse_json(content: bytes) -> Any:
+    return _decode_json(content)[0]
+
+
+def _decode_json(content: bytes) -> tuple[Any, bool]:
+    """``(value, True)`` for a JSON body, ``(None, False)`` for one that is not JSON."""
     try:
-        return json.loads(content)
+        return json.loads(content), True
     except ValueError:
-        return None
+        return None, False
 
 
 def _with_retry_after(result: dict, exc: RateLimitExhausted) -> dict:
@@ -724,7 +736,7 @@ def get_result(
     ``request_with_backoff``); an exhausted budget or retry count returns the
     rate-limit answer with ``retry_after``.
     """
-    handed = _Handed(credential)
+    handed = Handed.of(credential)
     try:
         resp, _content = request_with_backoff(handed, 'GET', path, params=params, retry=retry, budget=budget)
         if resp.status_code == 204:
@@ -769,13 +781,12 @@ def graphql_result(
     # Conservatively treat an uncheckable document like a mutation. Selecting a named
     # query in a mixed document does not establish that retrying is safe.
     may_write = mutation_refusal(query) is not None
-    transport_failure = _GRAPHQL_UNKNOWN_OUTCOME if may_write else _TRANSPORT_FAILURE
     payload: dict = {'query': query}
     if variables is not None:
         payload['variables'] = variables
     if operation_name is not None:
         payload['operationName'] = operation_name
-    handed = _Handed(credential)
+    handed = Handed.of(credential)
     try:
         resp, content = request_with_backoff(
             handed, 'POST', '/graphql', body=payload, retry=retry, max_bytes=max_bytes, graphql=True
@@ -786,37 +797,50 @@ def graphql_result(
     except AuthenticationFailed:
         result = failure_result(AUTH_FAILURE)
     except (ValueError, requests.RequestException):
-        result = failure_result(transport_failure)
+        result = failure_result(_graphql_transport_failure(may_write))
     else:
-        try:
-            body, is_json = (json.loads(content), True) if content is not None else (None, False)
-        except ValueError:
-            body, is_json = None, False
-        if content is None:
-            result = failure_result(
-                f'The GraphQL response is larger than graphqlMaxResponseBytes ({max_bytes} bytes). Select '
-                'fewer fields or a smaller page, or raise the cap in the node configuration.'
-                + (f' {_GRAPHQL_UNKNOWN_OUTCOME}' if may_write else ''),
-                None,
-                resp.headers,
-            )
-        elif not resp.ok:
-            result = _graphql_error(resp.status_code, resp.headers, body, (*handed.tokens, *secrets))
-            if may_write and resp.status_code >= 500:
-                result['message'] = f'{result["message"].rstrip()} {_GRAPHQL_UNKNOWN_OUTCOME}'
-        elif isinstance(body, dict) and ('data' in body or 'errors' in body):
-            result = envelope(resp.status_code, resp.headers, {'data': body.get('data'), 'errors': body.get('errors')})
-            result['next_page'] = None
-        elif not is_json:
-            result = failure_result(transport_failure)
-        else:
-            # JSON of the wrong shape: keep the status and counters, and GitHub's message if any.
-            result = shape_failure(envelope(resp.status_code, resp.headers, None), 'a JSON object with data or errors')
-            if isinstance(body, dict) and isinstance(body.get('message'), str):
-                result['message'] = _error_message(resp.status_code, body, (*handed.tokens, *secrets))
-                documentation_url = body.get('documentation_url')
-                result['documentation_url'] = documentation_url if isinstance(documentation_url, str) else None
+        result = _graphql_answer(
+            resp, content, max_bytes=max_bytes, may_write=may_write, secrets=(*handed.tokens, *secrets)
+        )
     return redact_result(result, (*handed.tokens, *secrets))
+
+
+def _graphql_transport_failure(may_write: bool) -> str:
+    """The message for an answer that was not used: a document that may write gets the uncertain-outcome text."""
+    return _GRAPHQL_UNKNOWN_OUTCOME if may_write else _TRANSPORT_FAILURE
+
+
+def _graphql_answer(
+    resp: requests.Response, content: bytes | None, *, max_bytes: int, may_write: bool, secrets: tuple[str, ...]
+) -> dict:
+    """Shape GitHub's answer to a GraphQL request as a result; ``content`` is ``None`` once it passed the cap."""
+    if content is None:
+        over_cap = (
+            f'The GraphQL response is larger than graphqlMaxResponseBytes ({max_bytes} bytes). Select '
+            'fewer fields or a smaller page, or raise the cap in the node configuration.'
+        )
+        if may_write:
+            over_cap = f'{over_cap} {_GRAPHQL_UNKNOWN_OUTCOME}'
+        return failure_result(over_cap, None, resp.headers)
+    body, is_json = _decode_json(content)
+    if not resp.ok:
+        result = _graphql_error(resp.status_code, resp.headers, body, secrets)
+        if may_write and resp.status_code >= 500:
+            result['message'] = f'{result["message"].rstrip()} {_GRAPHQL_UNKNOWN_OUTCOME}'
+        return result
+    if not is_json:
+        return failure_result(_graphql_transport_failure(may_write))
+    if isinstance(body, dict) and ('data' in body or 'errors' in body):
+        result = envelope(resp.status_code, resp.headers, {'data': body.get('data'), 'errors': body.get('errors')})
+        result['next_page'] = None
+        return result
+    # JSON of the wrong shape: keep the status and counters, and GitHub's message if any.
+    result = shape_failure(envelope(resp.status_code, resp.headers, None), 'a JSON object with data or errors')
+    if isinstance(body, dict) and isinstance(body.get('message'), str):
+        result['message'] = _error_message(resp.status_code, body, secrets)
+        documentation_url = body.get('documentation_url')
+        result['documentation_url'] = documentation_url if isinstance(documentation_url, str) else None
+    return result
 
 
 # ---------------------------------------------------------------------------

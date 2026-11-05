@@ -427,8 +427,9 @@ How long it waits:
   seconds, as GitHub asks ("wait for at least one minute"), and each later one doubles:
   60, 120, 240.
 
-`rateLimitBudgetSeconds` (default 60, 0 to 3600) caps the total time one tool call
-spends waiting, across every request it makes, and `rateLimitMaxRetries` (default 3, 0
+`rateLimitBudgetSeconds` (default 60, 0 to 600) caps the total time one tool call
+spends waiting, across every request it makes (the call blocks for the whole wait, so
+the cap is ten minutes), and `rateLimitMaxRetries` (default 3, 0
 to 10) the retries of each request after its first attempt, so 3 retries means up to 4
 attempts. A wait that does not fit the budget left
 is never started. So the default budget allows one retry after a rate limit that names
@@ -575,7 +576,7 @@ pytest nodes/test/tool_github/test_app_auth_live.py -v
 | `github.graphqlMaxResponseBytes` | `integer` | **GraphQL response cap (bytes)**<br/>Largest graphql response body the node reads, in bytes after decompression. A larger response returns an error naming this cap instead of the data. Default 4194304 (4 MiB). | `4194304` |
 | `github.installationId` | `string` | **Installation ID**<br/>The installation ID for the org/account where the App is installed (found in the installation's settings URL). | `""` |
 | `github.privateKey` | `string` | **App Private Key (.pem)**<br/>Upload the PEM private key generated for your GitHub App. Used to sign short-lived JWTs; never sent to GitHub directly. | `""` |
-| `github.rateLimitBudgetSeconds` | `integer` | **Rate-limit wait budget (seconds)**<br/>Total time one call of graphql or a repository read (repo_tree, repo_contributors, repo_languages, label_list, user_get) may spend waiting out GitHub rate limits, across every request it makes: a repo_tree walk shares it among its subtree reads. A wait that does not fit is not started, and the call returns the rate-limit error with retry_after. When GitHub names no wait the waits are 60, 120, then 240 seconds, so the default allows one such retry; raise it to allow more. 0 never retries after a rate limit. | `60` |
+| `github.rateLimitBudgetSeconds` | `integer` | **Rate-limit wait budget (seconds)**<br/>Total time one call of graphql or a repository read (repo_tree, repo_contributors, repo_languages, label_list, user_get) may spend waiting out GitHub rate limits, across every request it makes: a repo_tree walk shares it among its subtree reads. A wait that does not fit is not started, and the call returns the rate-limit error with retry_after. When GitHub names no wait the waits are 60, 120, then 240 seconds, so the default allows one such retry; raise it to allow more. 0 never retries after a rate limit. The call blocks for the whole wait, so the maximum is 600 (ten minutes). | `60` |
 | `github.rateLimitMaxRetries` | `integer` | **Rate-limit retries**<br/>Retries of each request after its first attempt when GitHub answers it with a rate limit, within the call's wait budget: 3 retries means up to 4 attempts. 0 never retries. | `3` |
 | `github.readOnly` | `boolean` | **Read-only mode**<br/>When enabled, all write operations (file create/edit/delete, issue create, PR create, etc.) are blocked. Safe for agents that should only read. | `false` |
 | `github.token` | `string` | **Personal Access Token**<br/>GitHub PAT with repo, issues, pull_requests, and workflows scopes. Use a fine-grained token scoped to only the repos you need. | `""` |

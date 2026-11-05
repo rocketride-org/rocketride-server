@@ -43,6 +43,7 @@ from ai.common.utils import decode_data_url
 from rocketlib import IGlobalBase, OPEN_MODE, warning
 
 from . import github_client
+from .IInstance import validate_tool_names
 
 # Refresh an installation token this many seconds before its actual expiry, so
 # an in-flight request never races a token that dies mid-call.
@@ -114,7 +115,8 @@ def _read_auth(cfg) -> dict:
 
 # (config key, default, minimum, maximum) for the integer options.
 _GRAPHQL_MAX_BYTES = ('graphqlMaxResponseBytes', github_client.DEFAULT_GRAPHQL_MAX_BYTES, 1024, 100 * 1024 * 1024)
-_RETRY_BUDGET = ('rateLimitBudgetSeconds', github_client.DEFAULT_RETRY_BUDGET_SECONDS, 0, 3600)
+# The call blocks for the whole wait, so the budget is capped at ten minutes.
+_RETRY_BUDGET = ('rateLimitBudgetSeconds', github_client.DEFAULT_RETRY_BUDGET_SECONDS, 0, 600)
 _MAX_RETRIES = ('rateLimitMaxRetries', github_client.DEFAULT_MAX_RETRIES, 0, 10)
 
 
@@ -149,32 +151,23 @@ def _read_flag(cfg, key: str, default: bool = False) -> bool:
 
 
 def _read_tools(raw) -> frozenset:
-    """Parse the ``tools`` allowlist; empty means every tool. Unknown names fail."""
+    """Parse the ``tools`` allowlist into a set of names; empty means every tool.
+
+    Only the shape is checked here; ``validate_tool_names`` checks the names.
+    """
     if raw is None:
         return frozenset()
     if isinstance(raw, str):
         raw = raw.split(',')
     if not isinstance(raw, (list, tuple)) or not all(isinstance(name, str) for name in raw):
         raise ValueError('tool_github: tools must be a list of tool names')
-    names = frozenset(name.strip() for name in raw if name.strip())
-    if not names:
-        return frozenset()
-    # IInstance imports this module; read its tool names lazily to avoid a cycle.
-    from .IInstance import tool_names
-
-    valid = tool_names()
-    unknown = sorted(names - valid)
-    if unknown:
-        raise ValueError(
-            f'tool_github: unknown tool name(s) in tools: {", ".join(unknown)}. Valid names: {", ".join(sorted(valid))}'
-        )
-    return names
+    return frozenset(name.strip() for name in raw if name.strip())
 
 
 def _read_options(cfg) -> dict:
     """Parse the non-auth options; ``beginGlobal`` and ``validateConfig`` share it."""
     return {
-        'tools': _read_tools(cfg.get('tools')),
+        'tools': validate_tool_names(_read_tools(cfg.get('tools'))),
         'graphqlAllowMutations': _read_flag(cfg, 'graphqlAllowMutations'),
         'graphqlMaxResponseBytes': _read_int(cfg, _GRAPHQL_MAX_BYTES),
         'rateLimitBudgetSeconds': _read_int(cfg, _RETRY_BUDGET),

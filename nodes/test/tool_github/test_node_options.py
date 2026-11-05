@@ -109,7 +109,7 @@ def test_validate_config_warns_about_a_bad_integer_without_raising():
         glb.glb = types.SimpleNamespace(logicalType='tool_github', connConfig={})
         glb.validateConfig()
         messages = [call.args[0] for call in warning.call_args_list]
-    assert messages == ['tool_github: rateLimitBudgetSeconds must be an integer from 0 to 3600']
+    assert messages == ['tool_github: rateLimitBudgetSeconds must be an integer from 0 to 600']
 
 
 def test_integer_options_default():
@@ -138,7 +138,7 @@ def test_integer_options_accept_whole_numbers_in_any_spelling(value):
     ('key', 'value'),
     [
         ('rateLimitBudgetSeconds', -1),
-        ('rateLimitBudgetSeconds', 3601),
+        ('rateLimitBudgetSeconds', 601),
         ('rateLimitBudgetSeconds', 'soon'),
         ('rateLimitBudgetSeconds', 1.5),
         ('rateLimitMaxRetries', 11),

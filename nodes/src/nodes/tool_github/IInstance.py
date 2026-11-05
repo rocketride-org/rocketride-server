@@ -34,8 +34,10 @@ from __future__ import annotations
 
 import base64
 import functools
+import itertools
 import re
-from typing import Callable
+from collections.abc import Iterable
+from typing import TYPE_CHECKING, Callable
 
 from rocketlib import IInstanceBase, tool_function, warning
 
@@ -54,8 +56,10 @@ from .github_client import (
     clean_workflow,
     is_too_large,
 )
-from .IGlobal import IGlobal
 from . import github_client, graphql_guard, repository_reads
+
+if TYPE_CHECKING:
+    from .IGlobal import IGlobal
 
 # ---------------------------------------------------------------------------
 # Shared parameter descriptions
@@ -245,14 +249,15 @@ class IInstance(IInstanceBase):
         )
 
     def _with_credentials(
-        self, send: Callable[[Callable[[], str], tuple[str, ...]], dict], *, app_identity: bool = False
+        self, send: Callable[[github_client.Handed, tuple[str, ...]], dict], *, app_identity: bool = False
     ) -> dict:
         """Call ``send`` with a credential provider and the node's secrets; no credential reaches the result.
 
-        The provider returns the token minted here for the first attempt and mints again
-        for each retry (``IGlobal.get_token`` refreshes an installation token near its
-        expiry; an App JWT is signed again), so a retry after a long wait does not send
-        an expired credential. Every token it hands out is redacted from the result.
+        The provider is a ``github_client.Handed``: it returns the token minted here for
+        the first attempt and mints again for each retry (``IGlobal.get_token`` refreshes
+        an installation token near its expiry; an App JWT is signed again), so a retry
+        after a long wait does not send an expired credential. The client records every
+        token it hands out in ``handed.tokens``, the one list the result is redacted with.
         """
         mint = (
             # GET /app wants the App JWT, not an installation access token.
@@ -267,23 +272,21 @@ class IInstance(IInstanceBase):
             # neither belongs in a result an agent or a browser can see.
             self._auth_failed(exc)
             return github_client.failure_result(github_client.AUTH_FAILURE)
-        handed: list[str] = []
+        attempts = itertools.count()
 
         def credential() -> str:
-            if not handed:
-                handed.append(first)
+            if next(attempts) == 0:
                 return first
             try:
-                token = mint()
+                return mint()
             except Exception as exc:
                 self._auth_failed(exc)
                 raise github_client.AuthenticationFailed() from None
-            handed.append(token)
-            return token
 
+        handed = github_client.Handed(credential)
         secrets = (self.IGlobal.token, self.IGlobal.private_key_pem)
-        result = send(credential, secrets)
-        return github_client.redact_result(result, (first, *handed, *secrets))
+        result = send(handed, secrets)
+        return github_client.redact_result(result, (first, *handed.tokens, *secrets))
 
     @staticmethod
     def _auth_failed(exc: Exception) -> None:
@@ -1659,3 +1662,19 @@ class IInstance(IInstanceBase):
 def tool_names() -> frozenset[str]:
     """Every tool this node implements, read from the ``@tool_function`` stamps."""
     return frozenset(name for name in dir(IInstance) if hasattr(getattr(IInstance, name, None), '__tool_meta__'))
+
+
+def validate_tool_names(names: Iterable[str]) -> frozenset[str]:
+    """``names`` as a set when each is a tool this node implements; unknown names fail, listing the valid ones.
+
+    ``IGlobal`` parses the ``tools`` allowlist and checks it here, next to the tool
+    definitions, at pipeline start (``beginGlobal``) and in the canvas (``validateConfig``).
+    """
+    names = frozenset(names)
+    valid = tool_names()
+    unknown = sorted(names - valid)
+    if unknown:
+        raise ValueError(
+            f'tool_github: unknown tool name(s) in tools: {", ".join(unknown)}. Valid names: {", ".join(sorted(valid))}'
+        )
+    return names

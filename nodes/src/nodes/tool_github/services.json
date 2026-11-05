@@ -178,10 +178,10 @@
 		"github.rateLimitBudgetSeconds": {
 			"type": "integer",
 			"title": "Rate-limit wait budget (seconds)",
-			"description": "Total time one call of graphql or a repository read (repo_tree, repo_contributors, repo_languages, label_list, user_get) may spend waiting out GitHub rate limits, across every request it makes: a repo_tree walk shares it among its subtree reads. A wait that does not fit is not started, and the call returns the rate-limit error with retry_after. When GitHub names no wait the waits are 60, 120, then 240 seconds, so the default allows one such retry; raise it to allow more. 0 never retries after a rate limit.",
+			"description": "Total time one call of graphql or a repository read (repo_tree, repo_contributors, repo_languages, label_list, user_get) may spend waiting out GitHub rate limits, across every request it makes: a repo_tree walk shares it among its subtree reads. A wait that does not fit is not started, and the call returns the rate-limit error with retry_after. When GitHub names no wait the waits are 60, 120, then 240 seconds, so the default allows one such retry; raise it to allow more. 0 never retries after a rate limit. The call blocks for the whole wait, so the maximum is 600 (ten minutes).",
 			"default": 60,
 			"minimum": 0,
-			"maximum": 3600,
+			"maximum": 600,
 			"optional": true
 		},
 		"github.rateLimitMaxRetries": {
