@@ -81,13 +81,15 @@ arrays that preserve column order and keep duplicate column names — the shape
 ORM drivers such as Drizzle require. It returns `{rows, affected_rows}`. A
 failed statement raises `SQL execution failed:` followed by the database's own
 primary message, identically with and without a `session_id`. What is removed
-is the tail: SQLAlchemy's `[SQL: ...]` / `[parameters: ...]` echo. The primary
-sentence itself is passed through as MySQL wrote it: a `SIGNAL`'s text comes
-back whole and a constraint error names the value that collided. For a syntax
-error (`1064`), MySQL's `near '...' at line N` slice is trimmed to keep only
-the first rejected token (when it is not itself a literal) and `at line N`, so
-values bound at or after the parser stop point are not echoed back. The full
-text is written to the server log. For ClickHouse, use the
+is the tail: SQLAlchemy's `[SQL: ...]` / `[parameters: ...]` echo. For errors
+other than syntax errors (`1064`), the primary sentence is passed through as
+MySQL wrote it: a `SIGNAL`'s text comes back whole and a constraint error names
+the value that collided. For a syntax error (`1064`), MySQL's `near '...' at
+line N` slice is trimmed to keep only the first rejected token (when it is not
+itself a literal) and `at line N`, so values bound at or after the parser stop
+point are not echoed back. If the English pattern does not match, the formatter
+returns `You have an error in your SQL syntax (Error 1064).` The full text is
+written to the server log. For ClickHouse, use the
 `db_clickhouse` node: pointed at ClickHouse's MySQL interface, this node
 returns ClickHouse's error text as is, which can repeat the statement and its
 bound values. `begin` takes no arguments and returns `{session_id}`; `commit`

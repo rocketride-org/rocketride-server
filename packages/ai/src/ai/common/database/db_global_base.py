@@ -334,13 +334,16 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
           PyMySQL interpolated at or after that point; that slice is trimmed to
           keep only the first rejected token (when it is not itself a literal)
           and ``at line N``.
-        * PASSED THROUGH: the driver's own primary sentence, as the database
-          wrote it. A syntax error can quote the rejected token (sqlite3,
+        * PASSED THROUGH: for errors other than MySQL/MariaDB ``ER_PARSE_ERROR``
+          (1064), the driver's own primary sentence, as the database wrote it.
+          A syntax error can quote the rejected token (sqlite3,
           psycopg2, and MySQL 1064 after the slice trim above). It can also
           quote a value the statement merely TOUCHED rather than carried:
           PostgreSQL's ``invalid input syntax for type integer: "<value>"``
           names the offending row value for an ``INSERT ... SELECT`` or a
           ``CAST``, which may come from another table.
+          If the English MySQL 1064 pattern does not match, the formatter
+          returns ``You have an error in your SQL syntax (Error 1064).``.
 
         That is accepted, not overlooked. The recipient holds
         ``allow_execute``, so they can already read anything the database user
