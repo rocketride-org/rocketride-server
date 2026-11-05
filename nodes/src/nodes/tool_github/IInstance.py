@@ -37,7 +37,7 @@ import re
 
 from rocketlib import IInstanceBase, tool_function, warning
 
-from ai.common.utils import normalize_tool_input, optional_int, require_int, require_str
+from ai.common.utils import normalize_tool_input, require_int, require_str
 
 from .github_client import (
     GitHubAPIError,
@@ -268,12 +268,7 @@ class IInstance(IInstanceBase):
         args = normalize_tool_input(args, tool_name='tool_github')
         repo = self._repo(args)
         path = require_str(args, 'path', tool_name='file_get')
-        if isinstance(args.get('max_bytes'), str):
-            # A JSON integer only, as the repository reads take page and per_page.
-            raise ValueError(
-                f'file_get: "max_bytes" must be an integer between {FILE_MAX_BYTES_MIN} and {FILE_MAX_BYTES_LIMIT}'
-            )
-        max_bytes = optional_int(
+        max_bytes = repository_reads.json_int(
             args,
             'max_bytes',
             default=FILE_MAX_BYTES_DEFAULT,
@@ -318,21 +313,37 @@ class IInstance(IInstanceBase):
             content = _decoded_bytes(data.get('content') or '', data.get('encoding'))
             result['content'] = content.decode('utf-8', errors='replace')
             return result
-        # Between 1 MB and 100 MB the Contents API returns the metadata with an empty
-        # content and encoding "none". Read the same blob by SHA, which GitHub serves up to
-        # 100 MB, so the content matches the metadata even if the branch moved meanwhile.
+        return self._read_large_file(token, repo, result, max_bytes)
+
+    def _read_large_file(self, token: str, repo: str, result: dict, max_bytes: int) -> dict:
+        """Fill ``content`` for a file the Contents API would not inline, or say why not.
+
+        Between 1 MB and 100 MB the Contents API returns the metadata with an empty
+        content and encoding "none". The same blob is read by SHA, which GitHub serves up
+        to 100 MB, so the content matches the metadata even if the branch moved meanwhile.
+        The read needs the blob SHA and an integer size: the size is what ``max_bytes``
+        bounds before any download, and what the body is checked against after it.
+        """
+        size = result['size']
         if not result['sha']:
             result['message'] = (
-                f'The file is {result["size"]} bytes, over the 1 MB Contents API limit, and GitHub '
+                f'The file is {size} bytes, over the 1 MB Contents API limit, and GitHub '
                 'returned no blob SHA to read it by. Download it from download_url or clone the '
                 'repository with tool_git.'
             )
             return result
-        if isinstance(result['size'], int) and result['size'] > max_bytes:
+        if not isinstance(size, int) or isinstance(size, bool):
+            result['message'] = (
+                'The file is over the 1 MB Contents API limit and GitHub returned no size for it, so '
+                'max_bytes cannot bound the read; its content was not downloaded. Download it from '
+                'download_url or clone the repository with tool_git.'
+            )
+            return result
+        if size > max_bytes:
             # The metadata names the size, so a file over the cap is refused before its blob
             # is downloaded, never after the body has been read.
             result['message'] = (
-                f'The file is {result["size"]} bytes, more than max_bytes ({max_bytes}), so its content was '
+                f'The file is {size} bytes, more than max_bytes ({max_bytes}), so its content was '
                 f'not downloaded. Pass a larger max_bytes (up to {FILE_MAX_BYTES_LIMIT}) to read it, or '
                 'download it from download_url.'
             )
@@ -346,21 +357,21 @@ class IInstance(IInstanceBase):
             # exception text is not echoed, as in the repository reads.
             reason = str(e) if isinstance(e, GitHubAPIError) else 'GitHub request failed or returned invalid JSON'
             result['message'] = (
-                f'The file is {result["size"]} bytes, over the 1 MB Contents API limit, and the Git '
+                f'The file is {size} bytes, over the 1 MB Contents API limit, and the Git '
                 f'blob read failed ({reason}). Download it from download_url or clone the repository '
                 'with tool_git.'
             )
             return result
-        if isinstance(result['size'], int) and len(raw) != result['size']:
+        if len(raw) != size:
             result['message'] = (
-                f'GitHub returned {len(raw)} bytes for a {result["size"]}-byte file; the content is withheld '
+                f'GitHub returned {len(raw)} bytes for a {size}-byte file; the content is withheld '
                 'rather than returned incomplete. Download it from download_url.'
             )
             return result
         if b'\0' in raw[:_BINARY_PROBE_BYTES]:
             # git's own heuristic. Tens of megabytes of replacement characters help nobody.
             result['message'] = (
-                f'The file is {result["size"]} bytes of binary content (a NUL byte within its first '
+                f'The file is {size} bytes of binary content (a NUL byte within its first '
                 f'{_BINARY_PROBE_BYTES} bytes), which this tool returns only as text. Download it from download_url.'
             )
             return result
@@ -916,7 +927,9 @@ class IInstance(IInstanceBase):
     def repo_tree(self, args):
         """Read a repository snapshot, optionally completing a truncated tree."""
         args = normalize_tool_input(args, tool_name='repo_tree')
-        return repository_reads.repo_tree(self._get, self._repo(args, 'repo_tree'), args)
+        return repository_reads.repo_tree(
+            self._get, self._repo(args, 'repo_tree'), **repository_reads.tree_options(args)
+        )
 
     @tool_function(
         input_schema={

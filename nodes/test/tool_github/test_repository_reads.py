@@ -895,8 +895,10 @@ def test_tree_errors_are_results(node):
         {'max_requests': 0},
         {'max_requests': True},
         {'max_requests': 10001},
+        {'max_requests': '5'},
         {'max_entries': 0},
         {'max_entries': 'many'},
+        {'max_entries': '5'},
         {'max_entries': 1000001},
     ],
 )

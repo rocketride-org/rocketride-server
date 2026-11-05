@@ -60,16 +60,26 @@ def repository_path(repo: str, tool_name: str = '') -> str:
     return f'/repos/{repo}'
 
 
+def json_int(args: dict, key: str, *, default: int, lo: int, hi: int | None = None, tool_name: str) -> int:
+    """An optional integer option within bounds, as the JSON integer it must be.
+
+    ``optional_int`` already refuses a boolean and a float; this also refuses a numeric
+    string, so every integer option of the node reads the same way.
+    """
+    if isinstance(args.get(key), str):
+        bounds = f'between {lo} and {hi}' if hi is not None else f'>= {lo}'
+        raise ValueError(f'{tool_name}: "{key}" must be an integer {bounds}')
+    return optional_int(args, key, default=default, lo=lo, hi=hi, tool_name=tool_name)
+
+
 def page_params(args: dict, tool_name: str) -> dict:
     """Read ``page`` (an integer of at least 1) and clamp ``per_page`` to 1..100.
 
     Both must be JSON integers when given: a numeric string, a boolean or a float is
     refused, as ``int_arg`` refuses them for ``per_page``.
     """
-    if isinstance(args.get('page'), str):
-        raise ValueError(f'{tool_name}: "page" must be an integer >= 1')
     return {
-        'page': optional_int(args, 'page', default=1, lo=1, tool_name=tool_name),
+        'page': json_int(args, 'page', default=1, lo=1, tool_name=tool_name),
         'per_page': int_arg(args, 'per_page', default=30, lo=1, hi=100, tool_name=tool_name),
     }
 
@@ -92,25 +102,31 @@ def expect_object(result: dict) -> dict:
     return result
 
 
-def repo_tree(read, repo: str, args: dict) -> dict:
+def tree_options(args: dict) -> dict:
+    """The typed ``repo_tree`` options: ``ref`` (``HEAD`` by default), ``walk`` and the two bounds."""
+    return {
+        'ref': (optional_str(args, 'ref', default='', tool_name='repo_tree') or '').strip() or 'HEAD',
+        'walk': optional_bool(args, 'walk', default=False, tool_name='repo_tree'),
+        'max_requests': json_int(
+            args, 'max_requests', default=MAX_REQUESTS_DEFAULT, lo=1, hi=MAX_REQUESTS_LIMIT, tool_name='repo_tree'
+        ),
+        'max_entries': json_int(
+            args, 'max_entries', default=MAX_ENTRIES_DEFAULT, lo=1, hi=MAX_ENTRIES_LIMIT, tool_name='repo_tree'
+        ),
+    }
+
+
+def repo_tree(read, repo: str, *, ref: str, walk: bool, max_requests: int, max_entries: int) -> dict:
     """Read a recursive tree sorted by path, optionally completing a truncated one from subtrees.
 
-    ``ref`` defaults to ``HEAD``, the default branch. The first response's ``sha`` is the
-    SHA the ref resolved to (the commit SHA for a branch or tag); every walk request uses
-    it or a subtree SHA, so a branch moving during the walk cannot mix revisions.
-    ``truncated`` keeps GitHub's flag for the first response; ``complete`` says whether
-    every path came back. A bounded walk never claims completeness after a stop.
+    ``ref`` is the branch, tag or SHA to read (``HEAD`` is the default branch). The first
+    response's ``sha`` is the SHA the ref resolved to (the commit SHA for a branch or tag);
+    every walk request uses it or a subtree SHA, so a branch moving during the walk cannot
+    mix revisions. ``truncated`` keeps GitHub's flag for the first response; ``complete``
+    says whether every path came back. A bounded walk never claims completeness after a
+    stop. The options come typed from ``tree_options``.
     """
     path = repository_path(repo, 'repo_tree')
-    ref = (optional_str(args, 'ref', default='', tool_name='repo_tree') or '').strip() or 'HEAD'
-    walk = optional_bool(args, 'walk', default=False, tool_name='repo_tree')
-    max_requests = optional_int(
-        args, 'max_requests', default=MAX_REQUESTS_DEFAULT, lo=1, hi=MAX_REQUESTS_LIMIT, tool_name='repo_tree'
-    )
-    max_entries = optional_int(
-        args, 'max_entries', default=MAX_ENTRIES_DEFAULT, lo=1, hi=MAX_ENTRIES_LIMIT, tool_name='repo_tree'
-    )
-
     result = read(f'{path}/git/trees/{quote(ref, safe="")}', params={'recursive': '1'})
     if 'data' not in result:
         return result
@@ -131,16 +147,12 @@ def repo_tree(read, repo: str, args: dict) -> dict:
     if not walk:
         result['message'] = 'GitHub truncated the recursive listing; set walk: true to complete it from subtrees.'
         return result
-    _walk(read, path, raw['sha'], max_requests, max_entries, result)
+    _TreeWalk(read, path, raw['sha'], max_requests, max_entries, result).run()
     return result
 
 
-class _WalkStopped(Exception):
-    """Ends the subtree walk early; the entries listed so far are still returned."""
-
-
-def _walk(read, path: str, root_sha: str, max_requests: int, max_entries: int, result: dict) -> None:
-    """Complete a truncated listing from subtree reads pinned to immutable SHAs.
+class _TreeWalk:
+    """Completes a truncated listing from subtree reads pinned to immutable SHAs.
 
     Each subtree is read recursively first, which covers most of a repository in one
     request per top-level directory; only a subtree GitHub truncates again is split
@@ -149,85 +161,131 @@ def _walk(read, path: str, root_sha: str, max_requests: int, max_entries: int, r
     referenced from thousands of paths (a "git bomb"). A walk that stops early keeps
     the entries GitHub's truncated listing already named, which describe the same
     root SHA, so ``walk: true`` never returns less than ``walk: false`` would.
-    """
-    initial = result['data']['tree']
-    entries: list[dict] = []
-    pending = [('', root_sha, False)]  # (path prefix, tree or commit SHA, try a recursive read first)
-    cache: dict[str, tuple[list, bool]] = {}
-    requests_used = 0
 
-    def fetch(prefix: str, sha: str, recursive: bool) -> dict:
-        nonlocal requests_used
-        if requests_used >= max_requests:
-            waiting = len(pending) + 1
-            raise _WalkStopped(
-                f'Tree walk reached max_requests ({max_requests}) with {waiting} '
+    ``run`` drives the walk; ``_listing``, ``_read`` and ``_expand`` each return the
+    stop reason (a message) instead of a value when the walk must end, and ``_stop``
+    merges what was listed with the initial listing.
+    """
+
+    def __init__(self, read, path: str, root_sha: str, max_requests: int, max_entries: int, result: dict) -> None:
+        self._read_result = read
+        self._path = path
+        self._max_requests = max_requests
+        self._max_entries = max_entries
+        self._result = result
+        self._initial = result['data']['tree']
+        self._entries: list[dict] = []
+        # (path prefix, tree or commit SHA, try a recursive read first); the root was
+        # already read recursively and truncated, so it goes straight to its children.
+        self._pending = [('', root_sha, False)]
+        self._cache: dict[str, tuple[list, bool]] = {}
+        self._requests_used = 0
+
+    def run(self) -> None:
+        """Walk every pending subtree; on an early stop keep the initial listing's entries."""
+        stop = self._walk()
+        if stop is None:
+            self._result['data']['complete'] = True
+            entries = self._entries
+        else:
+            entries = self._stop(stop)
+        self._result['data']['tree'] = sorted(entries, key=_path)
+        self._result['data']['walked'] = True
+
+    def _walk(self) -> str | None:
+        """Loop over the pending subtrees; the stop reason, or ``None`` when every path came back."""
+        while self._pending:
+            prefix, sha, try_recursive = self._pending.pop()
+            listing = self._cache.get(sha)
+            if listing is None:
+                listing = self._listing(prefix, sha, try_recursive)
+                if isinstance(listing, str):
+                    return listing
+                self._cache[sha] = listing
+            stop = self._expand(prefix, *listing)
+            if stop is not None:
+                return stop
+        return None
+
+    def _listing(self, prefix: str, sha: str, try_recursive: bool) -> tuple[list, bool] | str:
+        """A subtree's entries and whether to descend into them, or the stop reason.
+
+        One recursive read when it fits; otherwise the direct children, which are
+        descended into one by one.
+        """
+        if try_recursive:
+            data = self._read(prefix, sha, recursive=True)
+            if isinstance(data, str):
+                return data
+            if not data.get('truncated'):
+                return (data['tree'], False)
+        data = self._read(prefix, sha, recursive=False)
+        if isinstance(data, str):
+            return data
+        if data.get('truncated'):
+            return f'GitHub truncated the non-recursive listing of "{prefix or "/"}"; the walk is incomplete.'
+        return (data['tree'], True)
+
+    def _read(self, prefix: str, sha: str, recursive: bool) -> dict | str:
+        """One subtree read within the request budget: the tree object, or the stop reason.
+
+        The result keeps the last counters GitHub sent and, after a failed read, that
+        read's status and details.
+        """
+        if self._requests_used >= self._max_requests:
+            waiting = len(self._pending) + 1
+            return (
+                f'Tree walk reached max_requests ({self._max_requests}) with {waiting} '
                 f'subtree{"" if waiting == 1 else "s"} still pending; raise it (up to {MAX_REQUESTS_LIMIT}) '
                 f'or call repo_tree with a subtree sha as ref ({SUBTREE_PATHS}).'
             )
-        subtree = read(f'{path}/git/trees/{quote(sha, safe="")}', params={'recursive': '1'} if recursive else None)
-        requests_used += 1
+        subtree = self._read_result(
+            f'{self._path}/git/trees/{quote(sha, safe="")}', params={'recursive': '1'} if recursive else None
+        )
+        self._requests_used += 1
         if subtree['status'] is not None:
             # A failure before any HTTP response carries no counters; keep the last known ones.
-            result['rate_limit'] = subtree['rate_limit']
+            self._result['rate_limit'] = subtree['rate_limit']
         if 'data' in subtree and not _is_tree(subtree['data']):
             subtree = github_client.shape_failure(subtree, 'a tree object')
         if 'data' not in subtree:
             # Keep the failure's status and details, but say the data is partial, not absent.
             status = subtree['status']
-            result['status'] = status
-            result['documentation_url'] = subtree.get('documentation_url')
+            self._result['status'] = status
+            self._result['documentation_url'] = subtree.get('documentation_url')
             reason = subtree['message'].rstrip('.')
             if status is not None and not 200 <= status < 300:
                 reason = f'GitHub API {status}: {reason}'
-            plural = '' if requests_used == 1 else 's'
-            raise _WalkStopped(
-                f'Tree walk stopped at "{prefix or "/"}" after {requests_used} request{plural}: {reason}; '
+            plural = '' if self._requests_used == 1 else 's'
+            return (
+                f'Tree walk stopped at "{prefix or "/"}" after {self._requests_used} request{plural}: {reason}; '
                 'data is partial.'
             )
         return subtree['data']
 
-    try:
-        while pending:
-            prefix, sha, try_recursive = pending.pop()
-            listing = cache.get(sha)
-            if listing is None:
-                data = fetch(prefix, sha, recursive=True) if try_recursive else None
-                if data is None or data.get('truncated'):
-                    # Too big for one recursive read: list the direct children and descend.
-                    data = fetch(prefix, sha, recursive=False)
-                    if data.get('truncated'):
-                        raise _WalkStopped(
-                            f'GitHub truncated the non-recursive listing of "{prefix or "/"}"; the walk is incomplete.'
-                        )
-                    listing = (data['tree'], True)
-                else:
-                    listing = (data['tree'], False)
-                cache[sha] = listing
-            children, descend = listing
-            for entry in children:
-                if not _is_entry(entry):
-                    continue
-                if len(entries) >= max_entries:
-                    raise _WalkStopped(
-                        f'Tree walk reached max_entries ({max_entries}); raise it (up to {MAX_ENTRIES_LIMIT}) '
-                        f'or call repo_tree with a subtree sha as ref ({SUBTREE_PATHS}).'
-                    )
-                full_path = f'{prefix}/{entry["path"]}' if prefix else entry['path']
-                entries.append({**_entry(entry), 'path': full_path})
-                if descend and entry.get('type') == 'tree' and isinstance(entry.get('sha'), str):
-                    pending.append((full_path, entry['sha'], True))
-    except _WalkStopped as stop:
-        result['message'] = str(stop)
-        # Both listings describe the same root SHA, so merging by path cannot mix revisions.
-        merged = {entry['path']: entry for entry in initial}
-        merged.update((entry['path'], entry) for entry in entries)
-        entries = list(merged.values())
-    else:
-        result['data']['complete'] = True
+    def _expand(self, prefix: str, children: list, descend: bool) -> str | None:
+        """Add a subtree's entries under ``prefix`` within the entry cap, queueing subtrees to descend into."""
+        for entry in children:
+            if not _is_entry(entry):
+                continue
+            if len(self._entries) >= self._max_entries:
+                return (
+                    f'Tree walk reached max_entries ({self._max_entries}); raise it (up to {MAX_ENTRIES_LIMIT}) '
+                    f'or call repo_tree with a subtree sha as ref ({SUBTREE_PATHS}).'
+                )
+            full_path = f'{prefix}/{entry["path"]}' if prefix else entry['path']
+            self._entries.append({**_entry(entry), 'path': full_path})
+            if descend and entry.get('type') == 'tree' and isinstance(entry.get('sha'), str):
+                self._pending.append((full_path, entry['sha'], True))
+        return None
 
-    result['data']['tree'] = sorted(entries, key=_path)
-    result['data']['walked'] = True
+    def _stop(self, message: str) -> list[dict]:
+        """Record why the walk stopped and merge what it listed with the initial listing."""
+        self._result['message'] = message
+        # Both listings describe the same root SHA, so merging by path cannot mix revisions.
+        merged = {entry['path']: entry for entry in self._initial}
+        merged.update((entry['path'], entry) for entry in self._entries)
+        return list(merged.values())
 
 
 def _is_tree(value) -> bool:

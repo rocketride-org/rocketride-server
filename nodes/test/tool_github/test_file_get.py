@@ -272,6 +272,19 @@ def test_blob_transport_or_decoding_failure_keeps_the_metadata_without_exception
     assert TOKEN not in json.dumps(result)
 
 
+@pytest.mark.parametrize('size', [None, 'big', 2000000.0])
+def test_large_file_without_an_integer_size_is_refused_before_any_blob_read(node, size):
+    # Without a size, max_bytes could not bound the download, so the blob is not read.
+    inst, request, _ = node
+    request.return_value = contents(size, encoding='none')
+    result = inst.file_get({'path': 'src/app.py', **BIG})
+    assert result['found'] is True
+    assert result['content'] is None
+    assert 'returned no size' in result['message']
+    assert 'download_url' in result['message']
+    assert request.call_count == 1
+
+
 def test_large_file_without_a_blob_sha_is_reported_without_a_request(node):
     inst, request, _ = node
     request.return_value = contents(2_000_000, encoding='none', sha=None)

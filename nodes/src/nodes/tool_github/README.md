@@ -83,7 +83,8 @@ reads the blob the metadata names (`GET /repos/{repo}/git/blobs/{sha}`), which G
 serves up to 100 MB, so the result is complete and matches the returned `sha` and
 `size` (a blob body whose length differs from `size` is withheld with a message rather
 than returned). When GitHub cannot serve the content, for a file the Contents API refuses as
-too large (over 100 MB) or when the blob read fails, `content` is `null` and `message`
+too large (over 100 MB), when the metadata names no blob SHA or no integer size (without a
+size `max_bytes` cannot bound the read), or when the blob read fails, `content` is `null` and `message`
 says why and what to do instead (download it from `download_url`, or clone the
 repository with `tool_git`). A large file with a NUL byte in its first 8000 bytes is
 binary by git's own rule and is reported the same way instead of being returned as
@@ -200,7 +201,8 @@ directory covers most repositories), and splits only a subtree GitHub truncates 
 into its direct children. `truncated` keeps GitHub's flag for the first response even
 after a successful walk; use **`complete`** to decide whether all paths were returned.
 
-Two bounds keep a walk finite. `max_requests` (default 1000, maximum 10000; retries are
+Both bounds are JSON integers: a numeric string, a boolean or a float is refused before any
+request, as for `page` and `max_bytes`. Two bounds keep a walk finite. `max_requests` (default 1000, maximum 10000; retries are
 not counted separately) limits subtree reads, and `max_entries` (default 200000, maximum
 1000000) limits the entries the walk lists, which matters when a few trees are referenced
 from thousands of paths: identical SHAs are read once and expanded at each path, so
