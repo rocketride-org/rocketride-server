@@ -350,6 +350,9 @@ class IInstance(IInstanceBase):
             return result
         try:
             blob = call(token, 'GET', f'/repos/{repo}/git/blobs/{result["sha"]}')
+            if not isinstance(blob, dict) or not isinstance(blob.get('content') or '', str):
+                # A body of another shape (a list, null, a non-text content) is an invalid body too.
+                raise ValueError('GitHub returned a blob of another shape')
             raw = _decoded_bytes(blob.get('content') or '', blob.get('encoding'))
         except ValueError as e:
             # GitHubAPIError (an HTTP refusal), a transport failure or an invalid JSON/base64 body:
