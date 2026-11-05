@@ -173,7 +173,12 @@ def test_dispatch_file_get_reads_a_large_file_through_the_blob_api(instance):
             }
         ),
     ]
-    param = {'op': 'tool.invoke', 'tool_name': 'file_get', 'input': json.dumps({'path': 'big.txt'})}
+    # Over the 1 MiB default, so the call raises the cap; the dispatch path is what this checks.
+    param = {
+        'op': 'tool.invoke',
+        'tool_name': 'file_get',
+        'input': json.dumps({'path': 'big.txt', 'max_bytes': 8 * 1024 * 1024}),
+    }
     inst.invoke(param)
     assert param['output']['found'] is True
     assert param['output']['content'] == text

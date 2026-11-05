@@ -164,11 +164,12 @@ def _relax_query(q: str, *, max_terms: int = 5) -> str | None:
 
 # Bytes git inspects for a NUL byte before treating a file as binary.
 _BINARY_PROBE_BYTES = 8000
-# file_get's max_bytes: the largest file whose content the blob path downloads. Peak
-# memory is a few times the file size (base64 body, bytes, text), so the default keeps
-# a read to some tens of megabytes. The range runs from the Contents API's 1 MiB, below
-# which the content arrives with the metadata, to GitHub's 100 MiB blob limit.
-FILE_MAX_BYTES_DEFAULT = 8 * 1024 * 1024
+# file_get's max_bytes: the largest file whose content the blob path downloads. The
+# default is the Contents API's own boundary, 1 MiB: a file whose content the metadata
+# cannot carry is reported, not downloaded, until the call asks for it, so a pipeline
+# written before this option sees no larger payloads than before. Peak memory is a few
+# times the file size (base64 body, bytes, text). The range runs to GitHub's 100 MiB blob limit.
+FILE_MAX_BYTES_DEFAULT = 1024 * 1024
 FILE_MAX_BYTES_MIN = 1024 * 1024
 FILE_MAX_BYTES_LIMIT = 100 * 1024 * 1024
 
@@ -254,13 +255,13 @@ class IInstance(IInstanceBase):
                     'maximum': FILE_MAX_BYTES_LIMIT,
                     'description': (
                         f'Largest file over 1 MB whose content is downloaded, in bytes (default '
-                        f'{FILE_MAX_BYTES_DEFAULT}, 8 MiB). A larger file comes back with content null and '
+                        f'{FILE_MAX_BYTES_DEFAULT}, 1 MiB, the Contents API boundary). A larger file comes back with content null and '
                         'a message, without being downloaded; pass a larger max_bytes to read it.'
                     ),
                 },
             },
         },
-        description='Get the decoded content and metadata of a single file from a GitHub repository. Files over 1 MB are read through the Git blob API, up to max_bytes (default 8 MiB); when a file is larger than that, GitHub cannot serve the content, or such a file is binary, content is null and message says why.',
+        description='Get the decoded content and metadata of a single file from a GitHub repository. Files over 1 MB are read through the Git blob API, up to max_bytes (default 1 MiB, so a file over 1 MB needs a max_bytes to be read); when a file is larger than that, GitHub cannot serve the content, or such a file is binary, content is null and message says why.',
     )
     def file_get(self, args):
         """Get the decoded content and metadata of a single file from a GitHub repository."""

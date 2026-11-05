@@ -67,7 +67,7 @@ Most tools accept an optional `repo` parameter (`owner/repo`). If omitted, the c
 
 | Tool | Description |
 |---|---|
-| `file_get` | Get the decoded content and metadata of a single file; files over 1 MB through the Git blob API, up to `max_bytes` (default 8 MiB) |
+| `file_get` | Get the decoded content and metadata of a single file; files over 1 MB through the Git blob API, up to `max_bytes` (default 1 MiB, so a file over 1 MB needs a `max_bytes`) |
 | `file_list` | List files and directories at a path (one directory, at most 1,000 entries, GitHub's Contents API limit, with no truncation flag); use `repo_tree` for a whole tree |
 | `file_create` | Create a new file |
 | `file_edit` | Update an existing file. Requires the current file SHA (get it from `file_get` first) |
@@ -91,14 +91,17 @@ replacement characters. None of these cases raises, whether the blob read failed
 an HTTP status, a transport error or an invalid body; the metadata request itself
 still raises as before, and `found: false` still marks a missing path.
 
-`max_bytes` (an integer from 1048576 to 104857600, default 8388608, that is 8 MiB) caps
-the files the blob path downloads. The size comes with the metadata, so a larger file is
+`max_bytes` (an integer from 1048576 to 104857600, default 1048576, that is 1 MiB) caps
+the files the blob path downloads. The default is the Contents API's own boundary, so a
+pipeline written before this option sees no larger payloads than before: a file over 1 MB
+is reported, not downloaded, until the call asks for it. The size comes with the metadata,
+so a larger file is
 refused before its blob is read: `found: true`, `content: null`, its `size`, and a
 `message` naming the size and the cap and saying that a larger `max_bytes` may be passed.
 Files of 1 MB or less arrive with the metadata and are returned as before. A blob read
 takes roughly four times the file's size in memory while the base64 body, its bytes and
-the decoded text exist together (about 200 MB for a 50 MB file), so the cap bounds a read
-to some tens of megabytes; raise it only for a file you need whole.
+the decoded text exist together (about 200 MB for a 50 MB file), so raise the cap only for
+a file you need whole.
 
 ### Issues
 

@@ -66,6 +66,10 @@ def node(monkeypatch):
         yield inst, request, github_client
 
 
+# The default max_bytes is the 1 MiB boundary, so a test that reads a larger file asks for it.
+BIG = {'max_bytes': 8 * 1024 * 1024}
+
+
 def contents(size, content=b'', encoding='base64', sha='blob-sha'):
     """The Contents API's file object; ``encoding='none'`` is what GitHub sends over 1 MB."""
     return response(
@@ -129,7 +133,7 @@ def test_large_file_is_read_through_the_blob_api(node):
     inst, request, _ = node
     size = len(LARGE_TEXT.encode())
     request.side_effect = [contents(size, encoding='none'), blob(LARGE_TEXT.encode())]
-    result = inst.file_get({'path': 'src/app.py', 'ref': 'main'})
+    result = inst.file_get({'path': 'src/app.py', 'ref': 'main', **BIG})
     assert result['content'] == LARGE_TEXT
     assert result['size'] == size
     assert result['sha'] == 'blob-sha'
@@ -143,14 +147,14 @@ def test_large_file_is_read_through_the_blob_api(node):
 
 def test_a_file_over_the_default_max_bytes_is_refused_before_its_blob_is_downloaded(node):
     inst, request, _ = node
-    size = 8 * 1024 * 1024 + 1
+    size = 1024 * 1024 + 1
     request.return_value = contents(size, encoding='none')
     result = inst.file_get({'path': 'src/app.py'})
     assert result['found'] is True
     assert result['content'] is None
     assert result['size'] == size
     assert result['message'] == (
-        f'The file is {size} bytes, more than max_bytes (8388608), so its content was not downloaded. '
+        f'The file is {size} bytes, more than max_bytes (1048576), so its content was not downloaded. '
         'Pass a larger max_bytes (up to 104857600) to read it, or download it from download_url.'
     )
     # Only the metadata request: the blob was never asked for.
@@ -160,7 +164,7 @@ def test_a_file_over_the_default_max_bytes_is_refused_before_its_blob_is_downloa
 
 def test_a_file_at_the_default_max_bytes_is_still_read(node):
     inst, request, _ = node
-    payload = b'a' * (8 * 1024 * 1024)
+    payload = b'a' * (1024 * 1024)
     request.side_effect = [contents(len(payload), encoding='none'), blob(payload)]
     result = inst.file_get({'path': 'src/app.py'})
     assert len(result['content']) == len(payload)
@@ -170,20 +174,20 @@ def test_a_file_at_the_default_max_bytes_is_still_read(node):
 
 def test_a_larger_max_bytes_reads_a_file_over_the_default(node):
     inst, request, _ = node
-    payload = b'b' * (8 * 1024 * 1024 + 4096)
+    payload = b'b' * (1024 * 1024 + 4096)
     request.side_effect = [contents(len(payload), encoding='none'), blob(payload)]
-    result = inst.file_get({'path': 'src/app.py', 'max_bytes': 9 * 1024 * 1024})
+    result = inst.file_get({'path': 'src/app.py', 'max_bytes': 2 * 1024 * 1024})
     assert len(result['content']) == len(payload)
     assert 'message' not in result
     assert request.call_args.args == ('GET', BLOB_URL)
 
 
-def test_a_smaller_max_bytes_refuses_a_file_the_default_would_read(node):
+def test_a_raised_max_bytes_still_refuses_a_file_over_it(node):
     inst, request, _ = node
-    request.return_value = contents(2_000_000, encoding='none')
-    result = inst.file_get({'path': 'src/app.py', 'max_bytes': 1_500_000})
+    request.return_value = contents(3_000_000, encoding='none')
+    result = inst.file_get({'path': 'src/app.py', 'max_bytes': 2_000_000})
     assert result['content'] is None
-    assert 'more than max_bytes (1500000)' in result['message']
+    assert 'more than max_bytes (2000000)' in result['message']
     assert request.call_count == 1
 
 
@@ -199,7 +203,7 @@ def test_large_binary_file_is_reported_not_decoded(node):
     inst, request, _ = node
     payload = b'\x89PNG\r\n\x1a\n' + b'\x00' * 1_048_577
     request.side_effect = [contents(len(payload), encoding='none'), blob(payload)]
-    result = inst.file_get({'path': 'src/app.py'})
+    result = inst.file_get({'path': 'src/app.py', **BIG})
     assert result['found'] is True
     assert result['content'] is None
     assert result['size'] == len(payload)
@@ -213,7 +217,7 @@ def test_binary_probe_covers_exactly_the_first_8000_bytes(node, nul_at, binary):
     payload = bytearray(b'a' * 1_048_577)
     payload[nul_at] = 0
     request.side_effect = [contents(len(payload), encoding='none'), blob(bytes(payload))]
-    result = inst.file_get({'path': 'src/app.py'})
+    result = inst.file_get({'path': 'src/app.py', **BIG})
     if binary:
         assert result['content'] is None
         assert 'binary' in result['message']
@@ -225,7 +229,7 @@ def test_binary_probe_covers_exactly_the_first_8000_bytes(node, nul_at, binary):
 def test_short_blob_body_is_withheld_not_returned_incomplete(node):
     inst, request, _ = node
     request.side_effect = [contents(2_000_000, encoding='none'), blob(b'only the start')]
-    result = inst.file_get({'path': 'src/app.py'})
+    result = inst.file_get({'path': 'src/app.py', **BIG})
     assert result['content'] is None
     assert 'returned 14 bytes for a 2000000-byte file' in result['message']
     assert 'download_url' in result['message']
@@ -238,7 +242,7 @@ def test_failed_blob_read_says_why_instead_of_empty_content(node, status):
         contents(2_000_000, encoding='none'),
         response({'message': 'Blob unavailable', 'documentation_url': 'https://docs.github.com/rest'}, status),
     ]
-    result = inst.file_get({'path': 'src/app.py'})
+    result = inst.file_get({'path': 'src/app.py', **BIG})
     assert result['found'] is True
     assert result['content'] is None
     assert result['sha'] == 'blob-sha'
@@ -259,7 +263,7 @@ def test_failed_blob_read_says_why_instead_of_empty_content(node, status):
 def test_blob_transport_or_decoding_failure_keeps_the_metadata_without_exception_text(node, failure):
     inst, request, _ = node
     request.side_effect = [contents(2_000_000, encoding='none'), failure]
-    result = inst.file_get({'path': 'src/app.py'})
+    result = inst.file_get({'path': 'src/app.py', **BIG})
     assert result['found'] is True
     assert result['content'] is None
     assert result['sha'] == 'blob-sha'
@@ -271,7 +275,7 @@ def test_blob_transport_or_decoding_failure_keeps_the_metadata_without_exception
 def test_large_file_without_a_blob_sha_is_reported_without_a_request(node):
     inst, request, _ = node
     request.return_value = contents(2_000_000, encoding='none', sha=None)
-    result = inst.file_get({'path': 'src/app.py'})
+    result = inst.file_get({'path': 'src/app.py', **BIG})
     assert result['content'] is None
     assert 'no blob SHA' in result['message']
     assert request.call_count == 1
