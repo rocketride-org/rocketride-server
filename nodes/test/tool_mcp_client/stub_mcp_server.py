@@ -26,6 +26,10 @@ definitions, that list is re-read on every ``tools/list`` and ``tools/call``,
 so a test can add or rename tools while the server keeps running (the
 catalog-staleness scenario of issue #1402). Otherwise the static ``TOOLS`` list
 above is served.
+
+``STUB_MCP_PAGE_SIZE=<n>`` makes ``tools/list`` return at most ``n`` tools per
+page with a ``nextCursor``. The stub's cursor is the next offset as a string; a
+client must treat it as opaque. An unknown cursor answers ``-32602``.
 """
 
 import json
@@ -69,6 +73,20 @@ def _current_tools():
     return TOOLS
 
 
+def _page_size():
+    """Return the configured tools/list page size, or 0 for a single complete page."""
+    raw = os.environ.get('STUB_MCP_PAGE_SIZE', '')
+    try:
+        size = int(raw) if raw else 0
+    except ValueError:
+        size = 0
+    return size if size > 0 else 0
+
+
+def _invalid_cursor(msg_id, cursor):
+    return {'jsonrpc': '2.0', 'id': msg_id, 'error': {'code': -32602, 'message': f'Invalid cursor: {cursor!r}'}}
+
+
 def _write(msg):
     sys.stdout.write(json.dumps(msg, ensure_ascii=False) + '\n')
     sys.stdout.flush()
@@ -98,7 +116,21 @@ def _handle(msg):
         }
 
     if method == 'tools/list':
-        return {'jsonrpc': '2.0', 'id': msg_id, 'result': {'tools': _current_tools()}}
+        tools = _current_tools()
+        page_size = _page_size()
+        if not page_size:
+            return {'jsonrpc': '2.0', 'id': msg_id, 'result': {'tools': tools}}
+        cursor = params.get('cursor')
+        try:
+            offset = int(cursor) if cursor is not None else 0
+        except (TypeError, ValueError):
+            return _invalid_cursor(msg_id, cursor)
+        if offset < 0 or offset > len(tools):
+            return _invalid_cursor(msg_id, cursor)
+        result = {'tools': tools[offset : offset + page_size]}
+        if offset + page_size < len(tools):
+            result['nextCursor'] = str(offset + page_size)
+        return {'jsonrpc': '2.0', 'id': msg_id, 'result': result}
 
     if method == 'tools/call':
         name = params.get('name')
