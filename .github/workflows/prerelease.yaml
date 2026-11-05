@@ -5,8 +5,25 @@ run-name: Prerelease ${{ github.event_name == 'workflow_dispatch' && '(manual)' 
 # cadence safe under load: if 5 PRs land in 30 minutes, only the last
 # one's nightly run completes — the previous 4 are cancelled mid-build.
 # Without this we'd burn ~25 min × 5 = 2 hours of CI minutes per burst.
+#
+# A green push to stage only feeds the engine cache (see `engine-cache`
+# below), so it has a group of its own: a stage push must not cancel
+# develop's prerelease, nor develop's the stage engine. Everything that
+# publishes the prerelease slot (develop, and any manual dispatch) stays
+# in the one `prerelease` group, so two of those never race.
+#
+# A run `init` turns away (a pull request's CI, see there) gets a group
+# of its own too: the group is joined before any job's `if:` is read, so
+# in a shared one it would cancel the real run in progress.
 concurrency:
-  group: prerelease
+  group: >-
+    ${{ github.event_name == 'workflow_run' &&
+        (github.event.workflow_run.event != 'push' ||
+         github.event.workflow_run.head_repository.full_name != github.repository) &&
+        format('prerelease-ignored-{0}', github.run_id) ||
+        github.event_name == 'workflow_run' && github.event.workflow_run.head_branch == 'stage' &&
+        'prerelease-stage' ||
+        'prerelease' }}
   cancel-in-progress: true
 
 # Top-level least-privilege. Individual jobs below raise to write only
@@ -20,6 +37,12 @@ permissions:
 # a PR that slipped through) leaves `workflow_run.conclusion=failure`
 # and the `if:` below skips the run, so a broken develop commit never
 # becomes a published prerelease.
+#
+# A green CI on stage runs only init, build and engine-cache: pull
+# requests into stage are built from stage's packages/server, which is
+# rarely develop's latest, so without stage's engine in the cache every
+# one of them compiles it. The prerelease slot, its cleanup and the
+# Docker image stay develop's (or a manual dispatch's).
 #
 # `workflow_dispatch` is the manual escape hatch for hot-fix flows
 # or for re-publishing a known-good ref out of cycle. Allowed from
@@ -37,7 +60,7 @@ permissions:
 on:
   workflow_run:
     workflows: ["CI"]
-    branches: [develop]
+    branches: [develop, stage]
     types: [completed]
   workflow_dispatch:
 
@@ -61,6 +84,14 @@ jobs:
     # code-owner review + required checks), which is the actual safety
     # guarantee.
     #
+    # The branch name alone is not that check: a pull request's CI run
+    # completes here too, and its `head_branch` is the pull request's
+    # branch, which a fork is free to call `develop` or `stage`, with
+    # `head_sha` the fork's commit. So the run must also be a push (only
+    # someone with write access pushes to this repository's branches)
+    # of this repository's code. A pull request's CI, fork or not, never
+    # reaches build, the prerelease or the engine cache.
+    #
     # On the workflow_dispatch side the dispatcher already needs
     # `Actions: write` on the repo, so the branch allowlist is more
     # about preventing accidents (someone dispatching from a stale
@@ -72,7 +103,10 @@ jobs:
         github.ref == 'refs/heads/stage' ||
         github.ref == 'refs/heads/main')) ||
       (github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.head_branch == 'develop')
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_repository.full_name == github.repository &&
+       (github.event.workflow_run.head_branch == 'develop' ||
+        github.event.workflow_run.head_branch == 'stage'))
     uses: ./.github/workflows/_init.yaml
     with:
       # `head_sha` pins the build to the exact commit whose CI passed,
@@ -100,6 +134,8 @@ jobs:
   cleanup-prereleases:
     name: Clean up prereleases
     needs: build
+    # The prerelease slot is develop's; a stage push only feeds the engine cache
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.head_branch == 'develop'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -135,6 +171,7 @@ jobs:
   prerelease:
     name: Prerelease
     needs: [init, build, cleanup-prereleases]
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.head_branch == 'develop'
     uses: ./.github/workflows/_release.yaml
     permissions:
       contents: write
@@ -152,6 +189,7 @@ jobs:
   docker:
     name: Docker
     needs: [init, build]
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.head_branch == 'develop'
     uses: ./.github/workflows/_docker.yaml
     permissions:
       contents: read
@@ -169,6 +207,65 @@ jobs:
     secrets: inherit
 
   # ---------------------------------------------------------------------------
+  # Publish the engines just built to the `engine-cache` release, named by
+  # their server source hash, and keep the newest 16 hashes there.
+  #
+  # `builder server:download` looks there first, so any build whose
+  # packages/server matches a recent develop or stage commit downloads the
+  # engine instead of compiling it. The prerelease slot only ever holds
+  # develop's latest. Runs for develop, stage (see the trigger) and manual
+  # dispatches; the build always compiles here (`nodownload`), so the cache
+  # is only ever fed engines built from source, never repackaged downloads.
+  #
+  # Pull request code cannot reach this job: `init` admits only pushes to
+  # this repository's develop and stage, and dispatches.
+  # ---------------------------------------------------------------------------
+  engine-cache:
+    name: Engine cache
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Writes go through the release-bot App token below, not GITHUB_TOKEN
+    permissions:
+      contents: read
+    steps:
+      # The publisher at the revision of this workflow file, not the built
+      # commit: stage may not have it yet
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+          sparse-checkout: scripts/release
+
+      # As _release.yaml's server release downloads them
+      - name: Download artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: server-artifacts-*
+          merge-multiple: true
+          path: engine-assets
+
+      - name: List artifacts
+        run: find engine-assets -type f | sort
+
+      # The first publish creates the `engine-cache` tag on a commit whose
+      # tree contains workflow files, which needs Workflows:write. GITHUB_TOKEN
+      # can't have it, so use the release-bot App token, as _release.yaml does.
+      - name: Generate release-bot token
+        id: bot_token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+
+      - name: Publish to the engine cache
+        env:
+          GH_TOKEN: ${{ steps.bot_token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+        run: node scripts/release/engine-cache-publish.mjs engine-assets
+
+  # ---------------------------------------------------------------------------
   # Make a failed prerelease loud.
   #
   # Docker failed on every prerelease from 2026-09-24 to 09-30 while every other
@@ -182,10 +279,13 @@ jobs:
   #
   # A run where `init` was skipped (CI on develop failed) is neither a failure
   # nor a recovery, so it changes nothing.
+  #
+  # Each branch has its own tracking issue: a green stage run (which skips
+  # the prerelease jobs) must not close develop's, nor a red one open it.
   # ---------------------------------------------------------------------------
   alert:
     name: Alert on failure
-    needs: [init, build, cleanup-prereleases, prerelease, docker]
+    needs: [init, build, cleanup-prereleases, prerelease, docker, engine-cache]
     if: always() && needs.init.result != 'skipped'
     runs-on: ubuntu-latest
     permissions:
@@ -203,7 +303,13 @@ jobs:
             const failed = Object.entries(needs)
               .filter(([, j]) => j.result === 'failure' || j.result === 'cancelled')
               .map(([name, j]) => `${name} (${j.result})`);
-            const marker = '<!-- prerelease-failure-alert -->';
+            const branch = (context.payload.workflow_run && context.payload.workflow_run.head_branch) ||
+              context.ref.replace(/^refs\/heads\//, '');
+            // develop keeps the original marker, so an issue already open still matches
+            const marker = branch === 'develop'
+              ? '<!-- prerelease-failure-alert -->'
+              : `<!-- prerelease-failure-alert:${branch} -->`;
+            const scope = branch === 'develop' ? '' : ` (${branch})`;
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             const sha = (context.payload.workflow_run && context.payload.workflow_run.head_sha) || context.sha;
 
@@ -232,7 +338,7 @@ jobs:
 
             const body = [
               marker,
-              `The prerelease run for \`${sha.slice(0, 8)}\` failed: **${failed.join(', ')}**.`,
+              `The prerelease run${scope} for \`${sha.slice(0, 8)}\` failed: **${failed.join(', ')}**.`,
               '',
               `Run: ${runUrl}`,
               '',
@@ -255,7 +361,7 @@ jobs:
             } else {
               const created = await github.rest.issues.create({
                 owner: context.repo.owner, repo: context.repo.repo,
-                title: `Prerelease failing: ${failed.join(', ')}`,
+                title: `Prerelease failing${scope}: ${failed.join(', ')}`,
                 body, labels: ['prerelease-failing'],
               });
               core.setOutput('action', 'opened');

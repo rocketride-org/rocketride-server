@@ -85,7 +85,7 @@ hotfix/*  ──┘                  │         │
 
 **Workflow:** `.github/workflows/prerelease.yaml`
 
-**Trigger:** Runs automatically on every successful `develop` CI run (`workflow_run` on the CI workflow), or can be triggered manually via the GitHub Actions UI (`workflow_dispatch`).
+**Trigger:** Runs automatically on every successful `develop` CI run (`workflow_run` on the CI workflow), or can be triggered manually via the GitHub Actions UI (`workflow_dispatch`). A successful CI run for a push to `stage` runs only the build and the [engine cache](#engine-cache) publish.
 
 ### What happens
 
@@ -116,6 +116,18 @@ hotfix/*  ──┘                  │         │
 ### Downloading nightly builds
 
 Visit the [Releases page](https://github.com/rocketride-org/rocketride-server/releases) and look for releases tagged with `-prerelease`. These contain the latest builds from the `stage` branch.
+
+### Engine cache
+
+`builder server:download` skips compiling the engine (a CI build of ~31 minutes instead of ~54) when it finds one built from the same `packages/server` source. It looks in three places, in order:
+
+1. The `engine-cache` release: `rocketride-engine-<hash>-<platform>.manifest.json` and `.tar.gz` / `.zip`, where `<hash>` is the first 16 hex characters of the server source hash.
+2. The stable release, `server-v{version}`.
+3. The prerelease, `server-v{version}-prerelease`.
+
+The first manifest whose full `server.buildHash` and `vcpkg.version` match the local ones wins. Anything missing falls through to the next, then to compiling. `--suffix=NAME` tries only `server-v{version}-NAME`, and `--nodownload` tries nothing.
+
+The `engine-cache` job in `prerelease.yaml` publishes the engines each develop and stage run just compiled (`scripts/release/engine-cache-publish.mjs`) and keeps the newest 16 hashes. The release is an internal CI cache: a prerelease, never "latest", and not something to install from. Only pushes to this repository's `develop` and `stage`, or a manual dispatch, publish to it. Pull request CI never does.
 
 ## Stable Releases
 
