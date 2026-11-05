@@ -59,6 +59,7 @@ import { ConnectionErrorBanner } from './ConnectionErrorBanner';
 import { SignedOutScreen } from './SignedOutScreen';
 import { AuthPhase } from '../../types/connection';
 import { isFramedShell, tabSession, updateTabSession } from '../../util/devGate';
+import { explainUnbuiltApp, type UnbuiltAppText } from '../../util/unbuiltApp';
 
 /**
  * Whether the tab's auth phase demands the signed-out SURFACE instead of an
@@ -645,6 +646,27 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 			: `[shell] cannot resolve app "${activeAppId}": this server has no app with that id`);
 	}, [activeAppUnresolvable, activeAppId, devLockedApp]);
 
+	// The manifest omits an app until one of its versions builds, so ask the
+	// version rail why. Only the developer org gets rows back; everyone else
+	// keeps the plain "App not found".
+	const [unbuilt, setUnbuilt] = useState<{ appId: string; text: UnbuiltAppText | null } | null>(null);
+	const askRail = activeAppUnresolvable && !devLockedApp && activeAppId !== defaultAppId && !!identity;
+	useEffect(() => {
+		const client = askRail ? ConnectionManager.getInstance().getClient() : undefined;
+		if (!client) return;
+		let current = true;
+		client
+			.listDeployments(activeAppId)
+			.then((rail) => {
+				if (current) setUnbuilt({ appId: activeAppId, text: explainUnbuiltApp(activeAppId, rail) });
+			})
+			.catch(() => undefined);
+		return () => {
+			current = false;
+		};
+	}, [askRail, activeAppId]);
+	const unbuiltText = unbuilt?.appId === activeAppId ? unbuilt.text : null;
+
 	// --- Loading guard -------------------------------------------------------
 	// Workspace still hydrating: hold the SAME phase-anchored rocket as the
 	// boot LoadingScreen — returning null here put a blank frame between two
@@ -820,14 +842,14 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 							// returns false silently for unknown ids).
 							<div style={styles.appLoadError}>
 								<div style={styles.appLoadErrorTitle}>
-									{activeAppId === defaultAppId ? 'Home app unavailable' : 'App not found'}
+									{activeAppId === defaultAppId ? 'Home app unavailable' : (unbuiltText?.title ?? 'App not found')}
 								</div>
 								<div style={styles.appLoadErrorMessage} role="alert">
 									{activeAppId === defaultAppId
 										? `This server has no home app (“${activeAppId}”) installed. It may not have been built and registered on this deployment.`
 										: devLockedApp
 											? `No dev build of “${activeAppId}” arrived from App Builder, and this server has no published app with that id. Check that the id matches appManifest.id in the app's package.json, and look for build errors in App Builder's Console pane.`
-											: `This server has no app with the id “${activeAppId}”. It may have been renamed, removed, or belong to a different RocketRide deployment.`}
+											: (unbuiltText?.message ?? `This server has no app with the id “${activeAppId}”. It may have been renamed, removed, or belong to a different RocketRide deployment.`)}
 								</div>
 								<div style={styles.appLoadErrorActions}>
 									{activeAppId === defaultAppId ? (
