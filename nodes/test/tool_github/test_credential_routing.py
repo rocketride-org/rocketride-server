@@ -772,6 +772,42 @@ def test_a_401_with_a_token_the_node_cannot_replace_is_not_retried(github):
     assert _sequence(github, 0) == [LANGUAGES]
 
 
+def test_a_drop_no_credential_serves_leaves_the_401_as_github_sent_it(github, rsa_private_key_pem):
+    """A CredentialError from drop_token means nothing to drop: no retry, GitHub's 401 is returned."""
+    github.installations = {'acme/api': 11}
+    github.routes[LANGUAGES] = _revoked('ghs_fake_11_1')
+    with real_node(app_config(rsa_private_key_pem)) as inst:
+        from tool_github.github_client import CredentialError
+
+        def unserved(token, repo=None, *, owner=None):
+            raise CredentialError('No credentialMap entry matches the repository.')
+
+        inst.IGlobal.get_token('acme/api')
+        since = len(github.calls)
+        inst.IGlobal.drop_token = unserved
+        result = dispatch(inst, 'repo_languages', {'repo': 'acme/api'})
+    assert result['status'] == 401
+    assert result['message'] == 'Bad credentials'
+    assert _sequence(github, since) == [LANGUAGES]
+
+
+def test_a_drop_that_fails_for_another_reason_is_not_hidden(github, rsa_private_key_pem):
+    """Only a CredentialError is expected from drop_token; any other failure of the drop surfaces."""
+    github.installations = {'acme/api': 11}
+    github.routes[LANGUAGES] = _revoked('ghs_fake_11_1')
+
+    def broken(token, repo=None, *, owner=None):
+        raise RuntimeError('token cache unavailable')
+
+    with real_node(app_config(rsa_private_key_pem)) as inst:
+        inst.IGlobal.get_token('acme/api')
+        since = len(github.calls)
+        inst.IGlobal.drop_token = broken
+        with pytest.raises(RuntimeError, match='token cache unavailable'):
+            dispatch(inst, 'repo_languages', {'repo': 'acme/api'})
+    assert _sequence(github, since) == [LANGUAGES]
+
+
 def test_a_401_to_a_configured_installation_is_retried_with_a_fresh_token(github, rsa_private_key_pem):
     github.routes[LANGUAGES] = _revoked('ghs_fake_456_1')
     with real_node(app_config(rsa_private_key_pem, installationId='456')) as inst:

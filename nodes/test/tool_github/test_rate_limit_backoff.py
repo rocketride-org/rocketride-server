@@ -436,7 +436,9 @@ def test_a_retry_after_a_long_wait_sends_a_freshly_minted_token(node, path):
 def test_the_tool_wrapper_redacts_every_token_handed_out(node):
     node.inst.IGlobal.get_token = Mock(side_effect=['tok-one', 'tok-two'])
     run = node.inst._redacting(
-        lambda args: node.inst._with_credentials(lambda credential, secrets: {'sent': [credential(), credential()]})
+        lambda args, ctx: node.inst._with_credentials(
+            lambda credential, secrets: {'sent': [credential(), credential()]}, ctx=ctx
+        )
     )
     assert run({}) == {'sent': ['[REDACTED]', '[REDACTED]']}
 

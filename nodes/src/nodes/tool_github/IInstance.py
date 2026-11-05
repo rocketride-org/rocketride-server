@@ -36,7 +36,6 @@ import base64
 import functools
 import itertools
 import re
-import threading
 from collections.abc import Iterable
 from typing import TYPE_CHECKING, Callable
 
@@ -81,8 +80,6 @@ _CREDENTIAL_REPO_DESC = (
 _AFFILIATIONS = ('owner', 'collaborator', 'organization_member')
 _VISIBILITIES = ('all', 'public', 'private')
 _REPO_SORTS = ('created', 'updated', 'pushed', 'full_name')
-# The tokens a tool call used, per thread, so a 401 can drop exactly those.
-_CALL = threading.local()
 # What an unknown entry of the tools allowlist must look like to be repeated back in an error.
 _TOOL_NAME_RE = re.compile(r'[A-Za-z_][A-Za-z0-9_]{0,63}')
 _PER_PAGE_DESC = 'Results per page (1–100, default 30).'
@@ -207,6 +204,42 @@ def _decoded_bytes(content: str, encoding: str | None) -> bytes:
     return content.encode('utf-8')
 
 
+class _ToolCall:
+    """What one tool call accumulates: created by the tool wrapper and handed down explicitly.
+
+    ``budget`` is the call's rate-limit budget (``rateLimitBudgetSeconds``), shared by
+    every request of the call, a walk's subtree reads and the rerun after a 401 included.
+    ``tokens`` are the tokens the call used, each with the repository or owner it served,
+    so a 401 can drop exactly those and the wrapper can redact them all. A tool called
+    outside the wrapper (``ctx`` is ``None``) gets a budget of its own and notes nothing.
+    """
+
+    def __init__(self) -> None:
+        self.budget = github_client.CallBudget()
+        self.tokens: list[tuple[str | None, str | None, str]] = []
+
+    def used(self, repo: str | None, owner: str | None, token: str) -> None:
+        """Note a token the call used and what it served."""
+        self.tokens.append((repo, owner, token))
+
+    @property
+    def handed(self) -> list[str]:
+        """The tokens the call used, in order."""
+        return [token for _repo, _owner, token in self.tokens]
+
+
+def _budget_of(ctx: _ToolCall | None) -> github_client.CallBudget:
+    """The call's shared rate-limit budget; a tool called outside the wrapper gets one of its own."""
+    return ctx.budget if ctx is not None else github_client.CallBudget()
+
+
+def _rejected(result, error: Exception | None) -> bool:
+    """Whether GitHub answered the attempt with 401: a result with status 401, or a raised 401."""
+    if error is not None:
+        return getattr(error, 'status_code', None) == 401
+    return isinstance(result, dict) and result.get('status') == 401
+
+
 class IInstance(IInstanceBase):
     IGlobal: IGlobal
 
@@ -243,41 +276,35 @@ class IInstance(IInstanceBase):
         App is uninstalled, so the mint then follows the 404 rule of ``AppCredential``.
         A second 401 is returned or raised as GitHub sent it.
 
-        The call's rate-limit budget (``rateLimitBudgetSeconds``) is created here, once per
-        call, and every request of the call draws on it, so the run after a 401 continues
-        the same budget instead of starting a new one.
+        The wrapper creates one ``_ToolCall`` per call and passes it to the tool, which
+        hands it to the helpers: every request of the call draws on its rate-limit budget
+        (``rateLimitBudgetSeconds``), so the rerun after a 401 continues the same budget,
+        and every token the call used is noted in it, for the drop and for redaction.
         """
 
         @functools.wraps(method)
         def run(args):
-            retried = False
-            _CALL.budget = github_client.CallBudget()
-            try:
-                while True:
-                    _CALL.tokens = []
-                    try:
-                        result = method(args)
-                    except Exception as exc:
-                        used = _end_call()
-                        if not retried and getattr(exc, 'status_code', None) == 401 and self._drop_rejected(used):
-                            retried = True
-                            continue
-                        safe = self._safe_error(exc, used)
-                        if safe is exc:
-                            raise
-                        break
-                    used = _end_call()
-                    if not retried and isinstance(result, dict) and result.get('status') == 401:
-                        if self._drop_rejected(used):
-                            retried = True
-                            continue
-                    return github_client.redact_result(result, self._secrets(used))
-                # Raised outside the handler, so the original error is not chained to it.
-                raise safe
-            finally:
-                _CALL.budget = None
+            ctx = _ToolCall()
+            result, error = self._run_once(method, args, ctx)
+            if _rejected(result, error) and self._drop_rejected(ctx.tokens):
+                # The installation token GitHub refused is gone: once more with a fresh one,
+                # on the same budget. The tokens of both attempts stay noted for redaction.
+                result, error = self._run_once(method, args, ctx)
+            if error is not None:
+                # Raised outside any handler, so an original that holds a secret is not
+                # chained to its redacted copy.
+                raise self._safe_error(error, ctx.tokens)
+            return github_client.redact_result(result, self._secrets(ctx.tokens))
 
         return run
+
+    @staticmethod
+    def _run_once(method: Callable, args, ctx: _ToolCall) -> tuple:
+        """One attempt at the tool: ``(result, None)``, or ``(None, error)`` when it raised."""
+        try:
+            return method(args, ctx), None
+        except Exception as exc:  # noqa: BLE001 - the wrapper decides whether to retry, redact or re-raise it
+            return None, exc
 
     def _drop_rejected(self, used: list) -> bool:
         """Drop the installation tokens a call used; True when one was dropped."""
@@ -285,7 +312,9 @@ class IInstance(IInstanceBase):
         for repo, owner, token in used:
             try:
                 dropped = self.IGlobal.drop_token(token, repo, owner=owner) or dropped
-            except Exception:  # noqa: BLE001 - nothing to drop for a call no credential serves
+            except github_client.CredentialError:
+                # No credential serves this repository or owner, so there is nothing to drop
+                # for it. Any other failure of the drop is a fault to see, not to hide.
                 continue
         return dropped
 
@@ -318,16 +347,18 @@ class IInstance(IInstanceBase):
     # Helpers
     # -----------------------------------------------------------------------
 
-    def _token(self, repo: str | None = None) -> str:
+    def _token(self, repo: str | None, ctx: _ToolCall | None) -> str:
         """The token for a call on ``repo``, chosen by the credentialMap or the node credential."""
         token = self.IGlobal.get_token(repo)
-        _used(repo, None, token)
+        if ctx is not None:
+            ctx.used(repo, None, token)
         return token
 
-    def _org_token(self, org: str) -> str:
+    def _org_token(self, org: str, ctx: _ToolCall | None) -> str:
         """The token for an organization call: the owner entry for ``org``, else the default."""
         token = self.IGlobal.get_token(owner=org)
-        _used(None, org, token)
+        if ctx is not None:
+            ctx.used(None, org, token)
         return token
 
     def _credential_repo(self, args: dict, tool_name: str) -> str | None:
@@ -361,26 +392,27 @@ class IInstance(IInstanceBase):
         self,
         path: str,
         *,
+        ctx: _ToolCall | None,
         params: dict | None = None,
         app_identity: bool = False,
         repo: str | None = None,
-        budget: github_client.CallBudget | None = None,
     ) -> dict:
         """GET with server-held credentials and the result envelope.
 
-        The tool wrapper keeps credentials out of the result. ``budget`` is the tool
-        call's shared rate-limit budget; without it this request has its own.
+        The tool wrapper keeps credentials out of the result. The request draws on the
+        call's shared rate-limit budget and notes the tokens it used in ``ctx``.
         """
-        budget = budget if budget is not None else _call_budget()
+        budget = _budget_of(ctx)
         return self._with_credentials(
             lambda credential, secrets: github_client.get_result(
                 credential, path, params=params, retry=self.IGlobal.retry_policy, secrets=secrets, budget=budget
             ),
             app_identity=app_identity,
             repo=repo,
+            ctx=ctx,
         )
 
-    def _send(self, method: str, path: str, body: dict, repo: str) -> dict:
+    def _send(self, method: str, path: str, body: dict, repo: str, *, ctx: _ToolCall | None) -> dict:
         """A write with the result envelope; retried only after a rate-limit answer (see request_result)."""
         return self._with_credentials(
             lambda credential, secrets: github_client.request_result(
@@ -390,9 +422,10 @@ class IInstance(IInstanceBase):
                 body=body,
                 retry=self.IGlobal.retry_policy,
                 secrets=secrets,
-                budget=_call_budget(),
+                budget=_budget_of(ctx),
             ),
             repo=repo,
+            ctx=ctx,
         )
 
     def _write_refusal(self, tool_name: str) -> dict | None:
@@ -410,6 +443,7 @@ class IInstance(IInstanceBase):
         *,
         app_identity: bool = False,
         repo: str | None = None,
+        ctx: _ToolCall | None = None,
     ) -> dict:
         """Call ``send`` with a credential provider for ``repo`` and the node's secrets.
 
@@ -418,16 +452,17 @@ class IInstance(IInstanceBase):
         near its expiry, an App JWT signed again), so a retry after a long wait does not
         send an expired credential. The client redacts GitHub's error message with the
         tokens in ``handed.tokens``; the tool wrapper keeps credentials out of the result,
-        so every token the provider mints is noted for it.
+        so every token the provider mints is noted in ``ctx`` for it.
         """
 
         def mint() -> str:
             if not app_identity:
-                return self._token(repo)
+                return self._token(repo, ctx)
             # GET /app wants the App JWT, not an installation access token. It is not a
             # stored secret; note it so the tool wrapper redacts it too.
             token = self.IGlobal.app_jwt(repo)
-            _used(repo, None, token)
+            if ctx is not None:
+                ctx.used(repo, None, token)
             return token
 
         try:
@@ -492,7 +527,7 @@ class IInstance(IInstanceBase):
         },
         description='Get the decoded content and metadata of a single file from a GitHub repository. Files over 1 MB are read through the Git blob API, up to max_bytes (default 1 MiB, so a file over 1 MB needs a max_bytes to be read); when a file is larger than that, GitHub cannot serve the content, or such a file is binary, content is null and message says why.',
     )
-    def file_get(self, args):
+    def file_get(self, args, ctx: _ToolCall | None = None):
         """Get the decoded content and metadata of a single file from a GitHub repository."""
         args = normalize_tool_input(args, tool_name='tool_github')
         repo = self._repo(args)
@@ -507,7 +542,7 @@ class IInstance(IInstanceBase):
         )
         params = {'ref': args['ref']} if args.get('ref') else None
         # Mint the token outside the try: a 404 from the token endpoint is not a missing file.
-        token = self._token(repo)
+        token = self._token(repo, ctx)
         try:
             data = call(token, 'GET', f'/repos/{repo}/contents/{path.lstrip("/")}', params=params)
         except GitHubAPIError as e:
@@ -626,13 +661,13 @@ class IInstance(IInstanceBase):
         },
         description='List files and directories at a path in a GitHub repository: one directory, at most 1,000 entries (the Contents API limit, with no truncation flag). Use repo_tree for a whole or large tree.',
     )
-    def file_list(self, args):
+    def file_list(self, args, ctx: _ToolCall | None = None):
         """List files and directories at a path in a GitHub repository."""
         args = normalize_tool_input(args, tool_name='tool_github')
         repo = self._repo(args)
         path = (args.get('path') or '').strip().lstrip('/')
         params = {'ref': args['ref']} if args.get('ref') else None
-        data = call(self._token(repo), 'GET', f'/repos/{repo}/contents/{path}', params=params)
+        data = call(self._token(repo, ctx), 'GET', f'/repos/{repo}/contents/{path}', params=params)
         if not isinstance(data, list):
             raise ValueError(f'Path "{path}" is a file — use file_get instead')
         return [clean_file_entry(f) for f in data]
@@ -654,7 +689,7 @@ class IInstance(IInstanceBase):
         },
         description='Create a new file in a GitHub repository.',
     )
-    def file_create(self, args):
+    def file_create(self, args, ctx: _ToolCall | None = None):
         args = normalize_tool_input(args, tool_name='tool_github')
         self._require_write()
         repo = self._repo(args)
@@ -669,7 +704,7 @@ class IInstance(IInstanceBase):
         }
         if args.get('branch'):
             body['branch'] = args['branch']
-        data = call(self._token(repo), 'PUT', f'/repos/{repo}/contents/{path.lstrip("/")}', body=body)
+        data = call(self._token(repo, ctx), 'PUT', f'/repos/{repo}/contents/{path.lstrip("/")}', body=body)
         return {
             'path': path,
             'sha': (data.get('content') or {}).get('sha'),
@@ -691,7 +726,7 @@ class IInstance(IInstanceBase):
         },
         description='Update an existing file in a GitHub repository. Requires the current file SHA (get it from file_get first).',
     )
-    def file_edit(self, args):
+    def file_edit(self, args, ctx: _ToolCall | None = None):
         args = normalize_tool_input(args, tool_name='tool_github')
         self._require_write()
         repo = self._repo(args)
@@ -708,7 +743,7 @@ class IInstance(IInstanceBase):
         }
         if args.get('branch'):
             body['branch'] = args['branch']
-        data = call(self._token(repo), 'PUT', f'/repos/{repo}/contents/{path.lstrip("/")}', body=body)
+        data = call(self._token(repo, ctx), 'PUT', f'/repos/{repo}/contents/{path.lstrip("/")}', body=body)
         return {
             'path': path,
             'sha': (data.get('content') or {}).get('sha'),
@@ -729,7 +764,7 @@ class IInstance(IInstanceBase):
         },
         description='Delete a file from a GitHub repository. Requires the current file SHA (get it from file_get first).',
     )
-    def file_delete(self, args):
+    def file_delete(self, args, ctx: _ToolCall | None = None):
         args = normalize_tool_input(args, tool_name='tool_github')
         self._require_write()
         repo = self._repo(args)
@@ -739,7 +774,7 @@ class IInstance(IInstanceBase):
         body: dict = {'message': message, 'sha': sha}
         if args.get('branch'):
             body['branch'] = args['branch']
-        call(self._token(repo), 'DELETE', f'/repos/{repo}/contents/{path.lstrip("/")}', body=body)
+        call(self._token(repo, ctx), 'DELETE', f'/repos/{repo}/contents/{path.lstrip("/")}', body=body)
         return {'deleted': True, 'path': path}
 
     # =======================================================================
@@ -757,11 +792,11 @@ class IInstance(IInstanceBase):
         },
         description='Get a single GitHub issue by number.',
     )
-    def issue_get(self, args):
+    def issue_get(self, args, ctx: _ToolCall | None = None):
         args = normalize_tool_input(args, tool_name='tool_github')
         repo = self._repo(args)
         num = require_int(args, 'issue_number', tool_name='issue_get')
-        data = call(self._token(repo), 'GET', f'/repos/{repo}/issues/{num}')
+        data = call(self._token(repo, ctx), 'GET', f'/repos/{repo}/issues/{num}')
         if data.get('pull_request'):
             raise ValueError(f'#{num} is a pull request — use pr_get instead')
         return clean_issue(data)
@@ -784,7 +819,7 @@ class IInstance(IInstanceBase):
         },
         description='List issues in a repository. Excludes pull requests.',
     )
-    def issue_list(self, args):
+    def issue_list(self, args, ctx: _ToolCall | None = None):
         args = normalize_tool_input(args, tool_name='tool_github')
         repo = self._repo(args)
         params = {
@@ -794,7 +829,7 @@ class IInstance(IInstanceBase):
             'per_page': max(1, min(int(args.get('per_page') or 30), 100)),
             'page': max(1, int(args.get('page') or 1)),
         }
-        data = call(self._token(repo), 'GET', f'/repos/{repo}/issues', params=params)
+        data = call(self._token(repo, ctx), 'GET', f'/repos/{repo}/issues', params=params)
         # GitHub issues endpoint includes PRs — filter them out
         return [clean_issue(i) for i in data if not i.get('pull_request')]
 
@@ -812,7 +847,7 @@ class IInstance(IInstanceBase):
         },
         description='Create a new issue in a GitHub repository.',
     )
-    def issue_create(self, args):
+    def issue_create(self, args, ctx: _ToolCall | None = None):
         args = normalize_tool_input(args, tool_name='tool_github')
         self._require_write()
         repo = self._repo(args)
@@ -823,7 +858,7 @@ class IInstance(IInstanceBase):
             body['labels'] = args['labels']
         if args.get('assignees'):
             body['assignees'] = args['assignees']
-        data = call(self._token(repo), 'POST', f'/repos/{repo}/issues', body=body)
+        data = call(self._token(repo, ctx), 'POST', f'/repos/{repo}/issues', body=body)
         return clean_issue(data)
 
     @tool_function(
@@ -838,13 +873,13 @@ class IInstance(IInstanceBase):
         },
         description='Post a comment on a GitHub issue.',
     )
-    def issue_comment(self, args):
+    def issue_comment(self, args, ctx: _ToolCall | None = None):
         args = normalize_tool_input(args, tool_name='tool_github')
         self._require_write()
         repo = self._repo(args)
         num = require_int(args, 'issue_number', tool_name='issue_comment')
         body = require_str(args, 'body', tool_name='issue_comment')
-        data = call(self._token(repo), 'POST', f'/repos/{repo}/issues/{num}/comments', body={'body': body})
+        data = call(self._token(repo, ctx), 'POST', f'/repos/{repo}/issues/{num}/comments', body={'body': body})
         return {'id': data.get('id'), 'html_url': data.get('html_url'), 'created_at': data.get('created_at')}
 
     @tool_function(
@@ -871,7 +906,7 @@ class IInstance(IInstanceBase):
         },
         description='Edit an existing GitHub issue (title, body, state, labels, assignees).',
     )
-    def issue_edit(self, args):
+    def issue_edit(self, args, ctx: _ToolCall | None = None):
         args = normalize_tool_input(args, tool_name='tool_github')
         self._require_write()
         repo = self._repo(args)
@@ -879,7 +914,7 @@ class IInstance(IInstanceBase):
         body = {k: args[k] for k in ('title', 'body', 'state', 'labels', 'assignees') if args.get(k) is not None}
         if not body:
             raise ValueError('issue_edit: provide at least one field to update')
-        data = call(self._token(repo), 'PATCH', f'/repos/{repo}/issues/{num}', body=body)
+        data = call(self._token(repo, ctx), 'PATCH', f'/repos/{repo}/issues/{num}', body=body)
         return clean_issue(data)
 
     @tool_function(
@@ -903,7 +938,7 @@ class IInstance(IInstanceBase):
             'in read-only mode the refusal is returned as a result.'
         ),
     )
-    def issue_add_labels(self, args):
+    def issue_add_labels(self, args, ctx: _ToolCall | None = None):
         """Append labels with POST .../labels; never replaces the existing set."""
         args = normalize_tool_input(args, tool_name='issue_add_labels')
         refusal = self._write_refusal('issue_add_labels')
@@ -913,7 +948,7 @@ class IInstance(IInstanceBase):
         path = repository_reads.repository_path(repo)
         num = require_int(args, 'issue_number', lo=1, tool_name='issue_add_labels')
         labels = require_str_list(args, 'labels', tool_name='issue_add_labels')
-        result = self._send('POST', f'{path}/issues/{num}/labels', {'labels': labels}, repo)
+        result = self._send('POST', f'{path}/issues/{num}/labels', {'labels': labels}, repo, ctx=ctx)
         return repository_reads.pick_items(result, ('name', 'color', 'description'))
 
     @tool_function(
@@ -932,7 +967,7 @@ class IInstance(IInstanceBase):
         },
         description='Lock a GitHub issue to prevent further comments.',
     )
-    def issue_lock(self, args):
+    def issue_lock(self, args, ctx: _ToolCall | None = None):
         args = normalize_tool_input(args, tool_name='tool_github')
         self._require_write()
         repo = self._repo(args)
@@ -940,7 +975,7 @@ class IInstance(IInstanceBase):
         body: dict = {}
         if args.get('lock_reason'):
             body['lock_reason'] = args['lock_reason']
-        call(self._token(repo), 'PUT', f'/repos/{repo}/issues/{num}/lock', body=body or None)
+        call(self._token(repo, ctx), 'PUT', f'/repos/{repo}/issues/{num}/lock', body=body or None)
         return {'locked': True, 'issue_number': num}
 
     # =======================================================================
@@ -958,11 +993,11 @@ class IInstance(IInstanceBase):
         },
         description='Get a single pull request by number.',
     )
-    def pr_get(self, args):
+    def pr_get(self, args, ctx: _ToolCall | None = None):
         args = normalize_tool_input(args, tool_name='tool_github')
         repo = self._repo(args)
         num = require_int(args, 'pr_number', tool_name='pr_get')
-        data = call(self._token(repo), 'GET', f'/repos/{repo}/pulls/{num}')
+        data = call(self._token(repo, ctx), 'GET', f'/repos/{repo}/pulls/{num}')
         return clean_pr(data)
 
     @tool_function(
@@ -982,7 +1017,7 @@ class IInstance(IInstanceBase):
         },
         description='List pull requests in a repository.',
     )
-    def pr_list(self, args):
+    def pr_list(self, args, ctx: _ToolCall | None = None):
         args = normalize_tool_input(args, tool_name='tool_github')
         repo = self._repo(args)
         params = {
@@ -991,7 +1026,7 @@ class IInstance(IInstanceBase):
             'per_page': max(1, min(int(args.get('per_page') or 30), 100)),
             'page': max(1, int(args.get('page') or 1)),
         }
-        data = call(self._token(repo), 'GET', f'/repos/{repo}/pulls', params=params)
+        data = call(self._token(repo, ctx), 'GET', f'/repos/{repo}/pulls', params=params)
         return [clean_pr(pr) for pr in data]
 
     @tool_function(
@@ -1009,7 +1044,7 @@ class IInstance(IInstanceBase):
         },
         description='Create a new pull request.',
     )
-    def pr_create(self, args):
+    def pr_create(self, args, ctx: _ToolCall | None = None):
         args = normalize_tool_input(args, tool_name='tool_github')
         self._require_write()
         repo = self._repo(args)
@@ -1022,7 +1057,7 @@ class IInstance(IInstanceBase):
             body['body'] = args['body']
         if args.get('draft') is not None:
             body['draft'] = bool(args['draft'])
-        data = call(self._token(repo), 'POST', f'/repos/{repo}/pulls', body=body)
+        data = call(self._token(repo, ctx), 'POST', f'/repos/{repo}/pulls', body=body)
         return clean_pr(data)
 
     @tool_function(
@@ -1050,9 +1085,9 @@ class IInstance(IInstanceBase):
             'the refusal is returned as a result.'
         ),
     )
-    def pr_request_reviewers(self, args):
+    def pr_request_reviewers(self, args, ctx: _ToolCall | None = None):
         """Request reviewers with POST .../requested_reviewers."""
-        return self._review_requests(args, 'pr_request_reviewers', 'POST')
+        return self._review_requests(args, ctx, 'pr_request_reviewers', 'POST')
 
     @tool_function(
         input_schema={
@@ -1079,11 +1114,11 @@ class IInstance(IInstanceBase):
             'mode the refusal is returned as a result.'
         ),
     )
-    def pr_remove_requested_reviewers(self, args):
+    def pr_remove_requested_reviewers(self, args, ctx: _ToolCall | None = None):
         """Remove review requests with DELETE .../requested_reviewers."""
-        return self._review_requests(args, 'pr_remove_requested_reviewers', 'DELETE')
+        return self._review_requests(args, ctx, 'pr_remove_requested_reviewers', 'DELETE')
 
-    def _review_requests(self, args, tool_name: str, method: str) -> dict:
+    def _review_requests(self, args, ctx: _ToolCall | None, tool_name: str, method: str) -> dict:
         """Shared body of the two reviewer writes: refuse in read-only mode, validate, send, shape."""
         args = normalize_tool_input(args, tool_name=tool_name)
         refusal = self._write_refusal(tool_name)
@@ -1097,7 +1132,11 @@ class IInstance(IInstanceBase):
         if not reviewers and not teams:
             raise ValueError(f'{tool_name}: give at least one login in reviewers or one team slug in team_reviewers')
         result = self._send(
-            method, f'{path}/pulls/{num}/requested_reviewers', {'reviewers': reviewers, 'team_reviewers': teams}, repo
+            method,
+            f'{path}/pulls/{num}/requested_reviewers',
+            {'reviewers': reviewers, 'team_reviewers': teams},
+            repo,
+            ctx=ctx,
         )
         if 'data' not in result:
             return result
@@ -1132,7 +1171,7 @@ class IInstance(IInstanceBase):
         },
         description='Submit a review on a pull request (approve, request changes, or comment).',
     )
-    def review_create(self, args):
+    def review_create(self, args, ctx: _ToolCall | None = None):
         args = normalize_tool_input(args, tool_name='tool_github')
         self._require_write()
         repo = self._repo(args)
@@ -1143,7 +1182,7 @@ class IInstance(IInstanceBase):
         body: dict = {'event': event}
         if args.get('body'):
             body['body'] = args['body']
-        data = call(self._token(repo), 'POST', f'/repos/{repo}/pulls/{num}/reviews', body=body)
+        data = call(self._token(repo, ctx), 'POST', f'/repos/{repo}/pulls/{num}/reviews', body=body)
         return {
             'id': data.get('id'),
             'state': data.get('state'),
@@ -1164,7 +1203,7 @@ class IInstance(IInstanceBase):
         },
         description='List all reviews on a pull request.',
     )
-    def review_list(self, args):
+    def review_list(self, args, ctx: _ToolCall | None = None):
         args = normalize_tool_input(args, tool_name='tool_github')
         repo = self._repo(args)
         num = require_int(args, 'pr_number', tool_name='review_list')
@@ -1172,7 +1211,7 @@ class IInstance(IInstanceBase):
             'per_page': max(1, min(int(args.get('per_page') or 30), 100)),
             'page': max(1, int(args.get('page') or 1)),
         }
-        data = call(self._token(repo), 'GET', f'/repos/{repo}/pulls/{num}/reviews', params=params)
+        data = call(self._token(repo, ctx), 'GET', f'/repos/{repo}/pulls/{num}/reviews', params=params)
         return [
             {
                 'id': r.get('id'),
@@ -1196,12 +1235,12 @@ class IInstance(IInstanceBase):
         },
         description='Get a single review on a pull request.',
     )
-    def review_get(self, args):
+    def review_get(self, args, ctx: _ToolCall | None = None):
         args = normalize_tool_input(args, tool_name='tool_github')
         repo = self._repo(args)
         num = require_int(args, 'pr_number', tool_name='review_get')
         rid = require_int(args, 'review_id', tool_name='review_get')
-        data = call(self._token(repo), 'GET', f'/repos/{repo}/pulls/{num}/reviews/{rid}')
+        data = call(self._token(repo, ctx), 'GET', f'/repos/{repo}/pulls/{num}/reviews/{rid}')
         return {
             'id': data.get('id'),
             'state': data.get('state'),
@@ -1223,14 +1262,14 @@ class IInstance(IInstanceBase):
         },
         description='Update the body of a pending review on a pull request.',
     )
-    def review_update(self, args):
+    def review_update(self, args, ctx: _ToolCall | None = None):
         args = normalize_tool_input(args, tool_name='tool_github')
         self._require_write()
         repo = self._repo(args)
         num = require_int(args, 'pr_number', tool_name='review_update')
         rid = require_int(args, 'review_id', tool_name='review_update')
         body = require_str(args, 'body', tool_name='review_update')
-        data = call(self._token(repo), 'PUT', f'/repos/{repo}/pulls/{num}/reviews/{rid}', body={'body': body})
+        data = call(self._token(repo, ctx), 'PUT', f'/repos/{repo}/pulls/{num}/reviews/{rid}', body={'body': body})
         return {'id': data.get('id'), 'state': data.get('state'), 'body': data.get('body')}
 
     # =======================================================================
@@ -1246,10 +1285,10 @@ class IInstance(IInstanceBase):
         },
         description='Get metadata for a GitHub repository (stars, forks, language, default branch, etc.).',
     )
-    def repo_get(self, args):
+    def repo_get(self, args, ctx: _ToolCall | None = None):
         args = normalize_tool_input(args, tool_name='tool_github')
         repo = self._repo(args)
-        data = call(self._token(repo), 'GET', f'/repos/{repo}')
+        data = call(self._token(repo, ctx), 'GET', f'/repos/{repo}')
         return clean_repo(data)
 
     @tool_function(
@@ -1281,13 +1320,15 @@ class IInstance(IInstanceBase):
         },
         description='Read a repository tree recursively, sorted by path, with truncated and complete flags; walk completes a truncated tree from subtree reads pinned to the same snapshot. Returns data and rate_limit; data.sha is the SHA the ref resolved to: a commit SHA for a branch, tag or commit, which repo_tree and file_get accept as ref to read the same snapshot; a tree SHA passed as ref comes back as itself and works only with repo_tree.',
     )
-    def repo_tree(self, args):
+    def repo_tree(self, args, ctx: _ToolCall | None = None):
         """Read a repository snapshot, optionally completing a truncated tree."""
         args = normalize_tool_input(args, tool_name='repo_tree')
         repo = self._repo(args, 'repo_tree')
         # One rate-limit budget for the whole call, shared by every subtree read of a walk
         # and kept across the tool wrapper's retry after a 401.
-        read = functools.partial(self._get, repo=repo, budget=_call_budget())
+        # One budget for every read of the walk, also when the tool is called outside the wrapper.
+        ctx = ctx if ctx is not None else _ToolCall()
+        read = functools.partial(self._get, repo=repo, ctx=ctx)
         return repository_reads.repo_tree(read, repo, **repository_reads.tree_options(args))
 
     @tool_function(
@@ -1301,14 +1342,14 @@ class IInstance(IInstanceBase):
         },
         description='List repository contributors with login, contributions and type. Returns data, next_page and rate_limit.',
     )
-    def repo_contributors(self, args):
+    def repo_contributors(self, args, ctx: _ToolCall | None = None):
         """Read one page of contributors without exposing private profile fields."""
         args = normalize_tool_input(args, tool_name='repo_contributors')
         repo = self._repo(args, 'repo_contributors')
         path = repository_reads.repository_path(repo, 'repo_contributors')
         params = repository_reads.page_params(args, 'repo_contributors')
         return repository_reads.pick_items(
-            self._get(f'{path}/contributors', params=params, repo=repo), ('login', 'contributions', 'type')
+            self._get(f'{path}/contributors', params=params, repo=repo, ctx=ctx), ('login', 'contributions', 'type')
         )
 
     @tool_function(
@@ -1318,12 +1359,12 @@ class IInstance(IInstanceBase):
         },
         description='Get a repository language-to-byte-count map in data, with rate_limit metadata.',
     )
-    def repo_languages(self, args):
+    def repo_languages(self, args, ctx: _ToolCall | None = None):
         """Read language byte counts, including an empty map for an empty repository."""
         args = normalize_tool_input(args, tool_name='repo_languages')
         repo = self._repo(args, 'repo_languages')
         path = repository_reads.repository_path(repo, 'repo_languages')
-        return repository_reads.expect_object(self._get(f'{path}/languages', repo=repo))
+        return repository_reads.expect_object(self._get(f'{path}/languages', repo=repo, ctx=ctx))
 
     @tool_function(
         input_schema={
@@ -1336,14 +1377,14 @@ class IInstance(IInstanceBase):
         },
         description='List repository labels with name, color and description. Returns data, next_page and rate_limit.',
     )
-    def label_list(self, args):
+    def label_list(self, args, ctx: _ToolCall | None = None):
         """Read one page of labels without changing any issue's labels."""
         args = normalize_tool_input(args, tool_name='label_list')
         repo = self._repo(args, 'label_list')
         path = repository_reads.repository_path(repo, 'label_list')
         params = repository_reads.page_params(args, 'label_list')
         return repository_reads.pick_items(
-            self._get(f'{path}/labels', params=params, repo=repo), ('name', 'color', 'description')
+            self._get(f'{path}/labels', params=params, repo=repo, ctx=ctx), ('name', 'color', 'description')
         )
 
     @tool_function(
@@ -1353,7 +1394,7 @@ class IInstance(IInstanceBase):
         },
         description='Identify the configured credential: PAT user login/type, or GitHub App slug with type App. Returns data and rate_limit.',
     )
-    def user_get(self, args):
+    def user_get(self, args, ctx: _ToolCall | None = None):
         """Identify a PAT user or the App itself without returning credentials."""
         args = normalize_tool_input(args, tool_name='user_get')
         repo = self._credential_repo(args, 'user_get')
@@ -1363,7 +1404,7 @@ class IInstance(IInstanceBase):
             return github_client.failure_result(str(exc))
         if is_app:
             # GET /app takes the App JWT and answers with the App's slug.
-            result = repository_reads.expect_object(self._get('/app', app_identity=True, repo=repo))
+            result = repository_reads.expect_object(self._get('/app', app_identity=True, repo=repo, ctx=ctx))
             if 'data' not in result:
                 return result
             identity = result['data'].get('slug')
@@ -1372,7 +1413,7 @@ class IInstance(IInstanceBase):
             result['data'] = {'login': identity, 'type': 'App'}
             return result
         # GET /user answers with the PAT user's login and type.
-        result = repository_reads.expect_object(self._get('/user', repo=repo))
+        result = repository_reads.expect_object(self._get('/user', repo=repo, ctx=ctx))
         if 'data' not in result:
             return result
         identity = result['data'].get('login')
@@ -1416,7 +1457,7 @@ class IInstance(IInstanceBase):
             'only when graphqlAllowMutations is on.'
         ),
     )
-    def graphql(self, args):
+    def graphql(self, args, ctx: _ToolCall | None = None):
         """Run a GraphQL document; mutations are refused in read-only mode, and otherwise unless graphqlAllowMutations is on."""
         args = normalize_tool_input(args, tool_name='graphql')
         query = args.get('query')
@@ -1447,9 +1488,10 @@ class IInstance(IInstanceBase):
                 retry=self.IGlobal.retry_policy,
                 max_bytes=self.IGlobal.graphql_max_bytes,
                 secrets=secrets,
-                budget=_call_budget(),
+                budget=_budget_of(ctx),
             ),
             repo=repo,
+            ctx=ctx,
         )
 
     # =======================================================================
@@ -1467,14 +1509,14 @@ class IInstance(IInstanceBase):
         },
         description='List releases for a repository.',
     )
-    def release_list(self, args):
+    def release_list(self, args, ctx: _ToolCall | None = None):
         args = normalize_tool_input(args, tool_name='tool_github')
         repo = self._repo(args)
         params = {
             'per_page': max(1, min(int(args.get('per_page') or 30), 100)),
             'page': max(1, int(args.get('page') or 1)),
         }
-        data = call(self._token(repo), 'GET', f'/repos/{repo}/releases', params=params)
+        data = call(self._token(repo, ctx), 'GET', f'/repos/{repo}/releases', params=params)
         return [clean_release(r) for r in data]
 
     @tool_function(
@@ -1488,11 +1530,11 @@ class IInstance(IInstanceBase):
         },
         description='Get a single release by ID.',
     )
-    def release_get(self, args):
+    def release_get(self, args, ctx: _ToolCall | None = None):
         args = normalize_tool_input(args, tool_name='tool_github')
         repo = self._repo(args)
         rid = require_int(args, 'release_id', tool_name='release_get')
-        return clean_release(call(self._token(repo), 'GET', f'/repos/{repo}/releases/{rid}'))
+        return clean_release(call(self._token(repo, ctx), 'GET', f'/repos/{repo}/releases/{rid}'))
 
     @tool_function(
         input_schema={
@@ -1509,7 +1551,7 @@ class IInstance(IInstanceBase):
         },
         description='Create a new release in a repository.',
     )
-    def release_create(self, args):
+    def release_create(self, args, ctx: _ToolCall | None = None):
         args = normalize_tool_input(args, tool_name='tool_github')
         self._require_write()
         repo = self._repo(args)
@@ -1520,7 +1562,7 @@ class IInstance(IInstanceBase):
         for k in ('body', 'draft', 'prerelease'):
             if args.get(k) is not None:
                 body[k] = args[k]
-        return clean_release(call(self._token(repo), 'POST', f'/repos/{repo}/releases', body=body))
+        return clean_release(call(self._token(repo, ctx), 'POST', f'/repos/{repo}/releases', body=body))
 
     @tool_function(
         input_schema={
@@ -1538,7 +1580,7 @@ class IInstance(IInstanceBase):
         },
         description='Update an existing release.',
     )
-    def release_update(self, args):
+    def release_update(self, args, ctx: _ToolCall | None = None):
         args = normalize_tool_input(args, tool_name='tool_github')
         self._require_write()
         repo = self._repo(args)
@@ -1546,7 +1588,7 @@ class IInstance(IInstanceBase):
         body = {k: args[k] for k in ('tag_name', 'name', 'body', 'draft', 'prerelease') if args.get(k) is not None}
         if not body:
             raise ValueError('release_update: provide at least one field to update')
-        return clean_release(call(self._token(repo), 'PATCH', f'/repos/{repo}/releases/{rid}', body=body))
+        return clean_release(call(self._token(repo, ctx), 'PATCH', f'/repos/{repo}/releases/{rid}', body=body))
 
     @tool_function(
         input_schema={
@@ -1559,12 +1601,12 @@ class IInstance(IInstanceBase):
         },
         description='Delete a release from a repository.',
     )
-    def release_delete(self, args):
+    def release_delete(self, args, ctx: _ToolCall | None = None):
         args = normalize_tool_input(args, tool_name='tool_github')
         self._require_write()
         repo = self._repo(args)
         rid = require_int(args, 'release_id', tool_name='release_delete')
-        call(self._token(repo), 'DELETE', f'/repos/{repo}/releases/{rid}')
+        call(self._token(repo, ctx), 'DELETE', f'/repos/{repo}/releases/{rid}')
         return {'deleted': True, 'release_id': rid}
 
     # =======================================================================
@@ -1582,14 +1624,14 @@ class IInstance(IInstanceBase):
         },
         description='List all workflows in a repository.',
     )
-    def workflow_list(self, args):
+    def workflow_list(self, args, ctx: _ToolCall | None = None):
         args = normalize_tool_input(args, tool_name='tool_github')
         repo = self._repo(args)
         params = {
             'per_page': max(1, min(int(args.get('per_page') or 30), 100)),
             'page': max(1, int(args.get('page') or 1)),
         }
-        data = call(self._token(repo), 'GET', f'/repos/{repo}/actions/workflows', params=params)
+        data = call(self._token(repo, ctx), 'GET', f'/repos/{repo}/actions/workflows', params=params)
         return [clean_workflow(w) for w in (data.get('workflows') or [])]
 
     @tool_function(
@@ -1606,11 +1648,11 @@ class IInstance(IInstanceBase):
         },
         description='Get a single workflow by ID or filename.',
     )
-    def workflow_get(self, args):
+    def workflow_get(self, args, ctx: _ToolCall | None = None):
         args = normalize_tool_input(args, tool_name='tool_github')
         repo = self._repo(args)
         wid = require_str(args, 'workflow_id', tool_name='workflow_get')
-        return clean_workflow(call(self._token(repo), 'GET', f'/repos/{repo}/actions/workflows/{wid}'))
+        return clean_workflow(call(self._token(repo, ctx), 'GET', f'/repos/{repo}/actions/workflows/{wid}'))
 
     @tool_function(
         input_schema={
@@ -1632,7 +1674,7 @@ class IInstance(IInstanceBase):
         },
         description='Trigger a workflow_dispatch event to manually run a workflow.',
     )
-    def workflow_dispatch(self, args):
+    def workflow_dispatch(self, args, ctx: _ToolCall | None = None):
         args = normalize_tool_input(args, tool_name='tool_github')
         self._require_write()
         repo = self._repo(args)
@@ -1641,7 +1683,7 @@ class IInstance(IInstanceBase):
         body: dict = {'ref': ref}
         if args.get('inputs'):
             body['inputs'] = args['inputs']
-        call(self._token(repo), 'POST', f'/repos/{repo}/actions/workflows/{wid}/dispatches', body=body)
+        call(self._token(repo, ctx), 'POST', f'/repos/{repo}/actions/workflows/{wid}/dispatches', body=body)
         return {'dispatched': True, 'workflow_id': wid, 'ref': ref}
 
     @tool_function(
@@ -1655,12 +1697,12 @@ class IInstance(IInstanceBase):
         },
         description='Enable a previously disabled workflow.',
     )
-    def workflow_enable(self, args):
+    def workflow_enable(self, args, ctx: _ToolCall | None = None):
         args = normalize_tool_input(args, tool_name='tool_github')
         self._require_write()
         repo = self._repo(args)
         wid = require_str(args, 'workflow_id', tool_name='workflow_enable')
-        call(self._token(repo), 'PUT', f'/repos/{repo}/actions/workflows/{wid}/enable')
+        call(self._token(repo, ctx), 'PUT', f'/repos/{repo}/actions/workflows/{wid}/enable')
         return {'enabled': True, 'workflow_id': wid}
 
     @tool_function(
@@ -1674,12 +1716,12 @@ class IInstance(IInstanceBase):
         },
         description='Disable a workflow so it will not run.',
     )
-    def workflow_disable(self, args):
+    def workflow_disable(self, args, ctx: _ToolCall | None = None):
         args = normalize_tool_input(args, tool_name='tool_github')
         self._require_write()
         repo = self._repo(args)
         wid = require_str(args, 'workflow_id', tool_name='workflow_disable')
-        call(self._token(repo), 'PUT', f'/repos/{repo}/actions/workflows/{wid}/disable')
+        call(self._token(repo, ctx), 'PUT', f'/repos/{repo}/actions/workflows/{wid}/disable')
         return {'disabled': True, 'workflow_id': wid}
 
     @tool_function(
@@ -1693,11 +1735,11 @@ class IInstance(IInstanceBase):
         },
         description='Get billable minutes and run counts for a workflow.',
     )
-    def workflow_get_usage(self, args):
+    def workflow_get_usage(self, args, ctx: _ToolCall | None = None):
         args = normalize_tool_input(args, tool_name='tool_github')
         repo = self._repo(args)
         wid = require_str(args, 'workflow_id', tool_name='workflow_get_usage')
-        return call(self._token(repo), 'GET', f'/repos/{repo}/actions/workflows/{wid}/timing')
+        return call(self._token(repo, ctx), 'GET', f'/repos/{repo}/actions/workflows/{wid}/timing')
 
     # =======================================================================
     # ORGANIZATION
@@ -1720,7 +1762,7 @@ class IInstance(IInstanceBase):
         },
         description='List repositories belonging to a GitHub organization.',
     )
-    def org_list_repos(self, args):
+    def org_list_repos(self, args, ctx: _ToolCall | None = None):
         args = normalize_tool_input(args, tool_name='tool_github')
         org = require_str(args, 'org', tool_name='org_list_repos')
         params = {
@@ -1728,7 +1770,7 @@ class IInstance(IInstanceBase):
             'per_page': max(1, min(int(args.get('per_page') or 30), 100)),
             'page': max(1, int(args.get('page') or 1)),
         }
-        data = call(self._org_token(org), 'GET', f'/orgs/{org}/repos', params=params)
+        data = call(self._org_token(org, ctx), 'GET', f'/orgs/{org}/repos', params=params)
         return [clean_repo(r) for r in data]
 
     # =======================================================================
@@ -1774,7 +1816,7 @@ class IInstance(IInstanceBase):
             '(PAT) or the repositories the App installation can access (GitHub App auth).'
         ),
     )
-    def user_get_repos(self, args):
+    def user_get_repos(self, args, ctx: _ToolCall | None = None):
         args = normalize_tool_input(args, tool_name='tool_github')
         username = (args.get('username') or '').strip()
         # Only the new filters are checked strictly; paging and type are read as they always were.
@@ -1804,7 +1846,7 @@ class IInstance(IInstanceBase):
                     "user_get_repos: under GitHub App auth this lists the installation's repositories, which "
                     'take only page and per_page (installation_repos also returns the installation_id)'
                 )
-            data = call(self._token(repo), 'GET', '/installation/repositories', params=paging)
+            data = call(self._token(repo, ctx), 'GET', '/installation/repositories', params=paging)
             return [clean_repo(r) for r in data.get('repositories', [])]
         params = {
             # The default type stays for existing callers; GitHub refuses any type next to the filters.
@@ -1815,7 +1857,7 @@ class IInstance(IInstanceBase):
             **paging,
         }
         path = f'/users/{username}/repos' if username else '/user/repos'
-        data = call(self._token(repo), 'GET', path, params=params)
+        data = call(self._token(repo, ctx), 'GET', path, params=params)
         return [clean_repo(r) for r in data]
 
     @tool_function(
@@ -1839,7 +1881,7 @@ class IInstance(IInstanceBase):
             'installation_id used and total_count. GitHub App auth only. Returns data, next_page and rate_limit.'
         ),
     )
-    def installation_repos(self, args):
+    def installation_repos(self, args, ctx: _ToolCall | None = None):
         """Read one page of GET /installation/repositories with the installation's token."""
         args = normalize_tool_input(args, tool_name='installation_repos')
         repo = self._credential_repo(args, 'installation_repos')
@@ -1854,12 +1896,12 @@ class IInstance(IInstanceBase):
             installation_id = int(self.IGlobal.installation_id_for(repo))
         except github_client.CredentialError as exc:
             return github_client.failure_result(str(exc))
-        result = self._get('/installation/repositories', params=params, repo=repo)
+        result = self._get('/installation/repositories', params=params, repo=repo, ctx=ctx)
         if 'data' not in result:
             return result
         # After a reinstall the mint can find a new installation (the 404 rule): report the
         # one whose token the request carried, as the tool wrapper noted it.
-        used = [token for _repo, _owner, token in getattr(_CALL, 'tokens', None) or []]
+        used = ctx.handed if ctx is not None else []
         minted_by = self.IGlobal.installation_of(used[-1], repo) if used else None
         if minted_by is not None:
             installation_id = int(minted_by)
@@ -1893,13 +1935,13 @@ class IInstance(IInstanceBase):
         },
         description='Invite a user to a GitHub organization by email.',
     )
-    def user_invite(self, args):
+    def user_invite(self, args, ctx: _ToolCall | None = None):
         args = normalize_tool_input(args, tool_name='tool_github')
         self._require_write()
         org = require_str(args, 'org', tool_name='user_invite')
         email = require_str(args, 'email', tool_name='user_invite')
         body: dict = {'email': email, 'role': args.get('role', 'direct_member')}
-        data = call(self._org_token(org), 'POST', f'/orgs/{org}/invitations', body=body)
+        data = call(self._org_token(org, ctx), 'POST', f'/orgs/{org}/invitations', body=body)
         return {
             'id': data.get('id'),
             'email': data.get('email'),
@@ -1930,7 +1972,7 @@ class IInstance(IInstanceBase):
         },
         description='Search code across GitHub repositories. Returns matching file paths, repo, and a snippet.',
     )
-    def search_code(self, args):
+    def search_code(self, args, ctx: _ToolCall | None = None):
         args = normalize_tool_input(args, tool_name='tool_github')
         q = require_str(args, 'query', tool_name='search_code')
         repo = (args.get('repo') or self.IGlobal.default_repo or '').strip()
@@ -1941,12 +1983,12 @@ class IInstance(IInstanceBase):
             'per_page': max(1, min(int(args.get('per_page') or 30), 100)),
             'page': max(1, int(args.get('page') or 1)),
         }
-        data = call(self._token(repo), 'GET', '/search/code', params=params)
+        data = call(self._token(repo, ctx), 'GET', '/search/code', params=params)
         if not data.get('items'):
             relaxed = _relax_query(q)
             if relaxed and relaxed != q:
                 params['q'] = relaxed
-                data = call(self._token(repo), 'GET', '/search/code', params=params)
+                data = call(self._token(repo, ctx), 'GET', '/search/code', params=params)
         return [
             {
                 'name': item.get('name'),
@@ -1977,7 +2019,7 @@ class IInstance(IInstanceBase):
         },
         description='Search issues and pull requests across GitHub. Useful for finding bug reports and edge cases related to a node.',
     )
-    def search_issues(self, args):
+    def search_issues(self, args, ctx: _ToolCall | None = None):
         args = normalize_tool_input(args, tool_name='tool_github')
         q = require_str(args, 'query', tool_name='search_issues')
         repo = (args.get('repo') or self.IGlobal.default_repo or '').strip()
@@ -1990,12 +2032,12 @@ class IInstance(IInstanceBase):
             'per_page': max(1, min(int(args.get('per_page') or 30), 100)),
             'page': max(1, int(args.get('page') or 1)),
         }
-        data = call(self._token(repo), 'GET', '/search/issues', params=params)
+        data = call(self._token(repo, ctx), 'GET', '/search/issues', params=params)
         if not data.get('items'):
             relaxed = _relax_query(q)
             if relaxed and relaxed != q:
                 params['q'] = relaxed
-                data = call(self._token(repo), 'GET', '/search/issues', params=params)
+                data = call(self._token(repo, ctx), 'GET', '/search/issues', params=params)
         results = []
         for i in data.get('items') or []:
             cleaned = clean_issue(i)
@@ -2023,7 +2065,7 @@ class IInstance(IInstanceBase):
         },
         description='List commits in a repository, optionally filtered to a specific file path. Useful for understanding what changed recently.',
     )
-    def commit_list(self, args):
+    def commit_list(self, args, ctx: _ToolCall | None = None):
         args = normalize_tool_input(args, tool_name='tool_github')
         repo = self._repo(args)
         params = {
@@ -2032,7 +2074,7 @@ class IInstance(IInstanceBase):
             'per_page': max(1, min(int(args.get('per_page') or 30), 100)),
             'page': max(1, int(args.get('page') or 1)),
         }
-        data = call(self._token(repo), 'GET', f'/repos/{repo}/commits', params=params)
+        data = call(self._token(repo, ctx), 'GET', f'/repos/{repo}/commits', params=params)
         return [clean_commit(c) for c in data]
 
     @tool_function(
@@ -2046,11 +2088,11 @@ class IInstance(IInstanceBase):
         },
         description='Get a single commit including its diff stats and changed files.',
     )
-    def commit_get(self, args):
+    def commit_get(self, args, ctx: _ToolCall | None = None):
         args = normalize_tool_input(args, tool_name='tool_github')
         repo = self._repo(args)
         sha = require_str(args, 'sha', tool_name='commit_get')
-        data = call(self._token(repo), 'GET', f'/repos/{repo}/commits/{sha}')
+        data = call(self._token(repo, ctx), 'GET', f'/repos/{repo}/commits/{sha}')
         result = clean_commit(data)
         stats = data.get('stats') or {}
         result['stats'] = {
@@ -2069,26 +2111,6 @@ class IInstance(IInstanceBase):
             for f in (data.get('files') or [])
         ]
         return result
-
-
-def _call_budget() -> github_client.CallBudget:
-    """The running tool call's rate-limit budget, set by the tool wrapper; a new one outside it."""
-    budget = getattr(_CALL, 'budget', None)
-    return budget if budget is not None else github_client.CallBudget()
-
-
-def _end_call() -> list:
-    """The tokens the tool call that just ended used; stops noting tokens on this thread."""
-    used = getattr(_CALL, 'tokens', None) or []
-    _CALL.tokens = None
-    return used
-
-
-def _used(repo: str | None, owner: str | None, token: str) -> None:
-    """Note a token the current tool call used, when the call runs through ``_redacting``."""
-    tokens = getattr(_CALL, 'tokens', None)
-    if tokens is not None:
-        tokens.append((repo, owner, token))
 
 
 def _names(args: dict, key: str, tool_name: str) -> list[str]:
