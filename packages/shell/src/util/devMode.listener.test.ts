@@ -383,3 +383,24 @@ test('a dev flavor served from the cloud origin never self-registers from its UR
 	assert.equal(loader.isDevRemote('org_bare'), false);
 	await assert.rejects(loader.waitForDevRemote('org.bare'), /loopback dev server/, 'the hold falls into its published fallback instead of waiting 30s');
 });
+
+test('a page on another loopback port gets nothing from a loopback dev shell that holds the seeded token (real listener)', async () => {
+	// The terminal host seeds `rocketride app dev`'s credential into the dev
+	// proxy shell on http://localhost:<port>; any page on ANY loopback origin
+	// (another local server, evil.localhost) that frames it must stay a stranger.
+	const SHELL = 'http://localhost:7201';
+	for (const attacker of ['http://127.0.0.1:7202', 'http://evil.localhost:7202', 'http://[::1]:7202']) {
+		const page = await bootShell({ framed: true, origin: SHELL, ancestorOrigin: attacker, search: '?appid=org.vsc&rrdev=1' });
+		const cm = connection.ConnectionManager.getInstance();
+		cm.saveToken('seeded-by-rocketride-app-dev');
+		deliver(page, { type: 'rrdev:auth', token: 'attacker-token' }, attacker, page.parent);
+		deliver(page, { type: 'rrdev:auth', token: '' }, attacker, page.parent);
+		deliver(page, registerRemoteOf('org_loopback_attacker'), attacker, page.parent);
+		console.log('boot href ?code=FAKE-OAUTH-CODE');
+		restoreConsole();
+		assert.equal(cm.loadToken(), 'seeded-by-rocketride-app-dev', `${attacker}: the token is untouched`);
+		assert.equal(loader.isDevRemote('org_loopback_attacker'), false, `${attacker}: no remote`);
+		assert.deepEqual(rows(page, 'shell:devConsole'), [], `${attacker}: no console rows`);
+		assert.equal(page.reloads(), 0, attacker);
+	}
+});

@@ -362,7 +362,8 @@ export function devRelayOrigin(): string {
 //      the shell is an iframe inside the `vscode-webview://<id>` App Builder
 //      page, so the sender is the PARENT and e.origin is `vscode-webview://<id>`.
 //      The shell itself is served from the extension's loopback dev proxy
-//      (`http://localhost:<port>`) or any engine.
+//      (`http://localhost:<port>`) or any engine — but the SENDER is never a
+//      loopback page.
 //   2. Web App Builder preview (apps/rocket-ui AppBuilderProvider.tsx): the
 //      builder is a page of the shell's OWN origin and posts `rrdev:auth` to
 //      (a) its preview iframe — the sender is the PARENT, e.origin is the
@@ -376,9 +377,16 @@ export function devRelayOrigin(): string {
 // site has a different one, and one that can run script ON the shell's origin
 // has already won (it can read the session token from localStorage itself).
 //
-// The opener relation is accepted ONLY from the shell's own origin (flow 2b):
-// a page that merely window.open()s the shell is its opener, so "is the
-// opener" alone proves nothing.
+// The closed set is therefore exactly: `vscode-webview://<id>` as PARENT only,
+// and the shell's own origin as PARENT or OPENER. The opener relation is
+// accepted ONLY from the shell's own origin (flow 2b): a page that merely
+// window.open()s the shell is its opener, so "is the opener" alone proves
+// nothing. Loopback origins are not senders (see isAllowedEmbedderOrigin).
+//
+// Known compatibility cost of a closed set (each is refused, by design):
+// browser-hosted VS Code / Codespaces (webview origins `*.vscode-cdn.net`),
+// code-server (a webview origin on its own host), and any other embedder that
+// is neither `vscode-webview://` nor the shell's own origin.
 
 /**
  * Whether a hostname is loopback: `localhost`, `*.localhost`, 127.0.0.0/8 or
@@ -432,13 +440,16 @@ export function isLoopbackShell(): boolean {
 
 /**
  * Whether `origin` (a `MessageEvent.origin`) belongs to the closed set of
- * expected dev embedders of a shell served from `shellOrigin`:
+ * expected dev embedders of a shell served from `shellOrigin` — exactly two
+ * members:
  *   - `vscode-webview://<id>` (the VS Code extension's webview), whichever
  *     engine serves the shell;
- *   - the shell's OWN origin (the web App Builder; see the section comment);
- *   - a loopback http(s) origin on any port, but ONLY when the shell is itself
- *     served from a loopback origin — a page on localhost must not be able to
- *     drive a shell served from a real (cloud) origin.
+ *   - the shell's OWN origin (the web App Builder; see the section comment).
+ * A loopback origin is NOT a member, not even for a loopback-served shell: no
+ * sender in this repo is one (VS Code is `vscode-webview://`, the web builder
+ * is same-origin, the terminal host sends no messages), and trusting
+ * "any other localhost port" would let any page on any local server drive a
+ * dev shell whose localStorage holds the token `rocketride app dev` seeded.
  * Opaque origins ('null'), an opaque/unparsable shell origin (so `'null' ===
  * 'null'` can never read as "same origin"), unparsable values and everything
  * else are refused.
@@ -456,10 +467,7 @@ export function isAllowedEmbedderOrigin(origin: string, shellOrigin: string): bo
 	if (url.protocol === 'vscode-webview:') return url.host.length > 0 && origin === `vscode-webview://${url.host}`;
 	const sender = parseHttpOrigin(origin);
 	const shell = parseHttpOrigin(shellOrigin);
-	if (!sender || !shell) return false;
-	if (sender.origin === shell.origin) return true;
-	// Loopback embedder: only for a loopback-served shell.
-	return isLoopbackHostname(sender.hostname) && isLoopbackHostname(shell.hostname);
+	return sender !== null && shell !== null && sender.origin === shell.origin;
 }
 
 /**

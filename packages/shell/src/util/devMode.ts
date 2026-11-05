@@ -47,10 +47,10 @@
  *   - the web App Builder (apps/rocket-ui AppBuilderProvider.tsx), a page of
  *     the shell's OWN origin — the PARENT of its preview iframe and the OPENER
  *     of its debug tab (it posts `rrdev:auth`; same-origin only).
- * A loopback embedder is trusted only for a loopback-served shell. Messages
- * from anyone else — a cross-origin window.opener, a foreign framing page,
- * any other origin, or an unrelated window — are ignored, and registerRemote
- * entries must be loopback dev-server URLs.
+ * Messages from anyone else — a cross-origin window.opener, a foreign framing
+ * page, a loopback page (a loopback origin is never a sender), any other
+ * origin, or an unrelated window — are ignored, and registerRemote entries
+ * must be loopback dev-server URLs.
  */
 
 import React from 'react';

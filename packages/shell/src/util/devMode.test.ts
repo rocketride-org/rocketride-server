@@ -355,30 +355,29 @@ test('the OPENER relation accepts only the shell\'s own origin, never the other 
 	assert.deepEqual(b.calls, NOTHING);
 });
 
-test('a loopback embedder is accepted only by a loopback-served shell', () => {
-	// Local engine / `pnpm start`: shell on localhost, embedder on another localhost port.
-	const local = stagePage({ nodeEnv: 'development', framed: true, shellOrigin: 'http://localhost:5565' });
-	const a = recordingDeps();
-	for (const origin of ['http://localhost:5173', 'http://127.0.0.1:8080', 'http://[::1]:3000']) {
-		send(a.deps, REGISTER, origin, local.parent);
+test('a loopback origin is never a sender: denied for a cloud shell AND a loopback shell, as parent AND as opener', () => {
+	// The critic's repro: any page on any loopback port (another local server,
+	// `evil.localhost`) framing or opening a dev shell on `http://localhost:<port>`
+	// — whose localStorage holds the token `rocketride app dev` seeded.
+	const senders = ['http://localhost:5173', 'http://localhost:5565', 'http://127.0.0.1:5173', 'http://127.0.0.1:5565', 'http://127.1.2.3:8080', 'http://[::1]:3000', 'http://evil.localhost:5173', 'https://localhost:3000', 'http://localhost.evil.test:5173', 'http://127.0.0.1.evil.test'];
+	for (const shellOrigin of [SHELL_ORIGIN, 'http://localhost:5565', 'http://127.0.0.1:5565']) {
+		for (const framed of [true, false]) {
+			const page = stagePage({ nodeEnv: 'development', framed, shellOrigin });
+			const { deps, calls } = recordingDeps('user-token');
+			mock.method(console, 'warn', () => {});
+			const source = framed ? page.parent : page.opener;
+			for (const origin of senders) {
+				// A loopback sender is "the same origin" only when it IS the shell's own origin.
+				if (origin === shellOrigin) continue;
+				send(deps, AUTH, origin, source);
+				send(deps, { type: 'rrdev:auth', token: '' }, origin, source);
+				send(deps, REGISTER, origin, source);
+			}
+			assert.deepEqual(calls, NOTHING, `shell ${shellOrigin}, ${framed ? 'parent' : 'opener'}`);
+			assert.equal(trustedParentOrigin(), '', 'and no console rows would be aimed at it');
+			mock.restoreAll();
+		}
 	}
-	assert.equal(a.calls.register.length, 3);
-
-	// Cloud-served shell: the same loopback parent is refused for rrdev:auth and registerRemote.
-	const cloud = stagePage({ nodeEnv: 'development', framed: true });
-	const b = recordingDeps('user-token');
-	mock.method(console, 'warn', () => {});
-	send(b.deps, AUTH, 'http://localhost:5173', cloud.parent);
-	send(b.deps, REGISTER, 'http://localhost:5173', cloud.parent);
-	assert.deepEqual(b.calls, NOTHING);
-
-	// A loopback shell is still not trusting lookalike hosts.
-	const local2 = stagePage({ nodeEnv: 'development', framed: true, shellOrigin: 'http://localhost:5565' });
-	const c = recordingDeps('user-token');
-	for (const origin of ['http://localhost.evil.test:5173', 'http://127.0.0.1.evil.test', 'https://evil.test']) {
-		send(c.deps, AUTH, origin, local2.parent);
-	}
-	assert.deepEqual(c.calls, NOTHING);
 });
 
 test('unrelated window messages are ignored silently', () => {
@@ -421,7 +420,7 @@ const POLICY: PolicyRow[] = [
 	{ id: 'P7', what: 'a vscode-webview opener (only a PARENT may be one)', shell: CLOUD, relation: 'opener', sender: 'vscode-webview://abc-123', allow: false },
 	{ id: 'P8', what: 'loopback page frames a CLOUD-served shell', shell: CLOUD, relation: 'parent', sender: 'http://localhost:5173', allow: false },
 	{ id: 'P9', what: 'loopback page window.open()s a CLOUD-served shell', shell: CLOUD, relation: 'opener', sender: 'http://localhost:5173', allow: false },
-	{ id: 'P10', what: 'loopback page frames a loopback-served shell (no sender in this repo; retained for third-party dev embedders)', shell: LOCAL, relation: 'parent', sender: 'http://localhost:5173', allow: true },
+	{ id: 'P10', what: 'loopback page frames a loopback-served shell (no in-repo sender; was trusted before, now denied)', shell: LOCAL, relation: 'parent', sender: 'http://localhost:5173', allow: false },
 	{ id: 'P11', what: 'loopback page window.open()s a loopback-served shell', shell: LOCAL, relation: 'opener', sender: 'http://localhost:5173', allow: false },
 	{ id: 'P12', what: 'sandboxed / opaque sender frames the shell', shell: CLOUD, relation: 'parent', sender: 'null', allow: false },
 	{ id: 'P13', what: 'sandboxed / opaque sender opens the shell', shell: CLOUD, relation: 'opener', sender: 'null', allow: false },
@@ -434,6 +433,10 @@ const POLICY: PolicyRow[] = [
 	{ id: 'P20', what: 'production build: the VS Code parent', shell: CLOUD, relation: 'parent', sender: 'vscode-webview://abc-123', allow: false, nodeEnv: 'production' },
 	{ id: 'P21', what: 'production build: the same-origin parent', shell: CLOUD, relation: 'parent', sender: CLOUD, allow: false, nodeEnv: 'production' },
 	{ id: 'P22', what: 'production build: the same-origin opener', shell: CLOUD, relation: 'opener', sender: CLOUD, allow: false, nodeEnv: 'production' },
+	{ id: 'P23', what: 'another loopback origin (127.0.0.1) frames a localhost-served shell', shell: 'http://localhost:7201', relation: 'parent', sender: 'http://127.0.0.1:7202', allow: false },
+	{ id: 'P24', what: 'evil.localhost frames a localhost-served shell', shell: 'http://localhost:7201', relation: 'parent', sender: 'http://evil.localhost:7202', allow: false },
+	{ id: 'P25', what: 'the SAME loopback origin frames a loopback-served shell (the web builder on a local engine)', shell: LOCAL, relation: 'parent', sender: LOCAL, allow: true },
+	{ id: 'P26', what: 'the SAME loopback origin opens a loopback-served shell (debug tab on a local engine)', shell: LOCAL, relation: 'opener', sender: LOCAL, allow: true },
 ];
 
 for (const row of POLICY) {
@@ -449,7 +452,7 @@ for (const row of POLICY) {
 // The predicates
 // ---------------------------------------------------------------------------
 
-test('isAllowedEmbedderOrigin: vscode-webview anywhere, the shell\'s own origin, loopback only for a loopback shell', () => {
+test('isAllowedEmbedderOrigin: exactly vscode-webview or the shell\'s own origin — no loopback origin is a member', () => {
 	const LOCAL_SHELL = 'http://localhost:5565';
 	const bad = ['', 'null', 'https://attacker.example', 'http://localhost.attacker.example', 'http://127.0.0.1.attacker.example', 'vscode-webview://', 'vscode-webview://abc/extra', 'vscode-webviewx://abc', 'vscode-webview.evil.test', 'http://localhost:5173/path', 'ftp://localhost', 'javascript:alert(1)', 'not a url', 'http://10.0.0.1', 'https://cloud.example.test.evil.test', 'http://cloud.example.test', 'https://cloud.example.test:8443', 'https://cloud.example.test/'];
 	for (const shell of [SHELL_ORIGIN, LOCAL_SHELL]) assert.equal(isAllowedEmbedderOrigin('vscode-webview://abc-123', shell), true, shell);
@@ -465,8 +468,9 @@ test('isAllowedEmbedderOrigin: vscode-webview anywhere, the shell\'s own origin,
 		assert.equal(isAllowedEmbedderOrigin('null', shell), false, `null vs ${JSON.stringify(shell)}`);
 		assert.equal(isAllowedEmbedderOrigin(shell, shell), false, `${JSON.stringify(shell)} vs itself`);
 	}
-	for (const o of ['http://localhost:5173', 'https://localhost', 'http://127.0.0.1:3000', 'http://127.1.2.3:3000', 'http://[::1]:3000', 'http://app.localhost:3000']) {
-		assert.equal(isAllowedEmbedderOrigin(o, LOCAL_SHELL), true, o);
+	// No loopback origin is a sender — for either kind of shell (only the shell's OWN origin is).
+	for (const o of ['http://localhost:5173', 'https://localhost', 'http://127.0.0.1:3000', 'http://127.1.2.3:3000', 'http://[::1]:3000', 'http://app.localhost:3000', 'http://127.0.0.1:5565']) {
+		assert.equal(isAllowedEmbedderOrigin(o, LOCAL_SHELL), false, `${o} vs loopback shell`);
 		assert.equal(isAllowedEmbedderOrigin(o, SHELL_ORIGIN), false, `${o} vs cloud shell`);
 	}
 });
@@ -496,6 +500,19 @@ test('trustedParentOrigin names only a trusted embedder, so console rows are nev
 	stagePage({ nodeEnv: 'development', framed: false });
 	assert.equal(trustedParentOrigin(), '');
 	stagePage({ nodeEnv: 'production', framed: true, parentSameOrigin: true });
+	assert.equal(trustedParentOrigin(), '');
+});
+
+test('trustedParentOrigin: a loopback ancestor is no embedder, even of a loopback-served shell', () => {
+	stagePage({ nodeEnv: 'development', framed: true, shellOrigin: 'http://localhost:5565' });
+	const win = window as unknown as { location: { ancestorOrigins?: string[] } };
+	for (const ancestor of ['http://127.0.0.1:5173', 'http://localhost:5173', 'http://evil.localhost:5173', 'http://[::1]:5173']) {
+		win.location.ancestorOrigins = [ancestor];
+		assert.equal(trustedParentOrigin(), '', ancestor);
+	}
+	// ...and the referrer fallback agrees.
+	win.location.ancestorOrigins = undefined;
+	Reflect.set(globalThis, 'document', { referrer: 'http://127.0.0.1:5173/page' });
 	assert.equal(trustedParentOrigin(), '');
 });
 
