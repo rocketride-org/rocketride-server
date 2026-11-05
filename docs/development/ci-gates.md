@@ -161,13 +161,22 @@ helm template rocketride deploy/helm/rocketride \
 ./builder docs:validate
 ```
 
-Two deterministic checkers, run as a builder task rather than a bespoke CI
+Three deterministic checkers, run as a builder task rather than a bespoke CI
 job: node READMEs against [the node README schema](nodes/readme-schema.md),
-and client-doc parity against
-[the client README schema](clients/readme-schema.md). The task validates the
-nodes changed relative to the merge base with `develop` (blocking), checks
-client-doc parity (blocking), and validates the whole node corpus (`--all`,
-blocking). `docs:test` runs it first, so `./builder test` and the
+client-doc parity against
+[the client README schema](clients/readme-schema.md), and the CLI docs
+against the commands both CLIs register (`scripts/validate-cli-docs.py`). The
+task validates the nodes changed relative to the merge base with `develop`
+(blocking), checks client-doc parity (blocking), checks the CLI docs
+(blocking), and validates the whole node corpus (`--all`, blocking).
+
+The CLI check reads the Python CLI's parser and the TypeScript CLI's sources
+directly, so it needs `pnpm install` but no client build. It fails when
+`ROCKETRIDE_CLI.md` leaves out a command, when its table of commands and flags
+that only one package has is wrong, or when the Commands table in
+`docs/public/product/connect/cli.mdx` misses a top-level command. The
+`Doc schemas` workflow also runs on changes to either CLI's source, so a new
+command fails CI until the docs list it. `docs:test` runs it first, so `./builder test` and the
 `Docs site build` CI job both carry it. CodeRabbit reviews the *accuracy* of a
 node README; this task owns its *structure*.
 
@@ -178,7 +187,7 @@ python3 scripts/validate-node-readme.py nodes/src/nodes/<node>
 ```
 
 The validator's own unit tests (`tests/test_validate_node_readme.py`) run inside
-`docs:validate` on every PR, alongside the two schema checks above.
+`docs:validate` on every PR, alongside the checks above.
 `./builder nodes:test` also runs this same file as part of the node contract
 suite; that invocation stays in place, but `docs:validate` is what gates it on
 every doc-path PR.
@@ -217,7 +226,7 @@ ruff check && ruff format --check
 node scripts/build.js docs:check
 node scripts/build.js docs:test && node scripts/build.js docs:build   # if you touched docs
 ./builder build && ./builder test --sequential                        # if you touched code
-node scripts/build.js docs:validate                                # node README + client-doc schemas
+node scripts/build.js docs:validate                                # node README, client-doc, and CLI-doc checks
 ```
 
 ---

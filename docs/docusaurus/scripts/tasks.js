@@ -204,10 +204,11 @@ async function resolvePython() {
 /**
  * docs:validate — the deterministic documentation checks, run as a builder
  * task so `docs:test` (and therefore `./builder test`) carries them; CI does
- * not own them. Three phases:
+ * not own them. Four phases:
  *   1. client-doc parity — blocking
- *   2. the whole node corpus (--all) — blocking
- *   3. the node README schema validator's own unit tests — blocking
+ *   2. CLI docs against both CLIs' registered commands — blocking
+ *   3. the whole node corpus (--all) — blocking
+ *   4. the node README schema validator's own unit tests — blocking
  */
 function makeValidateAction() {
 	return {
@@ -218,13 +219,16 @@ function makeValidateAction() {
 			// 1. client-doc parity — blocking
 			await execCommand(python, ['scripts/validate-client-docs.py'], { task, cwd: PROJECT_ROOT });
 
-			// 2. the whole node corpus — blocking now that it is clean
+			// 2. CLI docs — blocking; reads both CLIs' command trees from source
+			await execCommand(python, ['scripts/validate-cli-docs.py'], { task, cwd: PROJECT_ROOT });
+
+			// 3. the whole node corpus — blocking now that it is clean
 			await execCommand(python, ['scripts/validate-node-readme.py', '--all', 'nodes/src/nodes'], {
 				task,
 				cwd: PROJECT_ROOT,
 			});
 
-			// 3. the validator's own regression tests — the only per-PR gate on
+			// 4. the validator's own regression tests — the only per-PR gate on
 			// scripts/validate-node-readme.py itself; nodes:test also runs this
 			// file, but nothing in .github/workflows invokes nodes:test.
 			// The engine carries pytest; a PATH Python may not (docs-schemas.yml

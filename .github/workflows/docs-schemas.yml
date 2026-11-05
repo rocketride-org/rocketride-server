@@ -5,7 +5,9 @@
 #  validators, plus docs:build and docs:check) on doc-path pull requests into
 #  develop (and direct pushes to it). ci.yml deliberately does not carry
 #  them — the paths filter below keeps doc-only machinery from spending the
-#  shared pipeline's minutes, and non-doc changes from spending these.
+#  shared pipeline's minutes, and non-doc changes from spending these. The CLI
+#  source paths are here because docs:validate checks the CLI docs against the
+#  commands both CLIs register (scripts/validate-cli-docs.py).
 # ---------------------------------------------------------------------------
 name: Doc schemas
 
@@ -19,6 +21,10 @@ on:
       - 'nodes/src/nodes/**/services*.json'
       - 'scripts/validate-node-readme.py'
       - 'scripts/validate-client-docs.py'
+      - 'scripts/validate-cli-docs.py'
+      - 'scripts/cli-command-tree.js'
+      - 'packages/client-python/src/rocketride/cli/**'
+      - 'packages/client-typescript/src/cli/**'
       - 'tests/test_validate_node_readme.py'
       - 'pnpm-lock.yaml'
       - '.github/workflows/docs-schemas.yml'
@@ -30,6 +36,10 @@ on:
       - 'nodes/src/nodes/**/services*.json'
       - 'scripts/validate-node-readme.py'
       - 'scripts/validate-client-docs.py'
+      - 'scripts/validate-cli-docs.py'
+      - 'scripts/cli-command-tree.js'
+      - 'packages/client-python/src/rocketride/cli/**'
+      - 'packages/client-typescript/src/cli/**'
       - 'tests/test_validate_node_readme.py'
       - 'pnpm-lock.yaml'
       - '.github/workflows/docs-schemas.yml'

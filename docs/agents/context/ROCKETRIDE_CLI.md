@@ -3,20 +3,22 @@
 The `rocketride` command is installed with the SDK in either language
 (`pip install rocketride` or `npm install rocketride`; use `pnpm exec
 rocketride` / `npx rocketride` for local installs). The two packages do not
-ship the same set of commands:
+ship the same set of commands. This table lists every command and flag that
+only one package has:
 
-| Command | TypeScript (`npm`) | Python (`pip`) |
+| Command or flag | TypeScript (`npm`) | Python (`pip`) |
 |---|---|---|
-| `init`, `login`, `validate`, `start`, `upload`, `list`, `stop`, `store …`, `profile …` | Yes | Yes |
-| `app create`, `app verify`, `app deploy` | Yes | Yes, without `app verify --store` and `app deploy --publish` |
-| `app dev`, `publish`, `unpublish`, `disable`, `versions`, `where`, `log`, `submit`, `withdraw`, `reply`, `developer` | Yes | No |
-| `deploy …` | Yes | Yes, except `deploy source-config` |
+| `app dev`, `app publish`, `app unpublish`, `app disable`, `app versions`, `app where`, `app log`, `app submit`, `app withdraw`, `app reply`, `app developer status`, `app developer register` | Yes | No |
+| `deploy source-config` | Yes | No |
+| `app verify --store`, `app deploy --publish`, `init --deploy` | Yes | No |
 | `diff`, `otel` | No | Yes |
 
-A command that both packages ship takes the flags this document lists for
-it in either package, so a recipe that uses only shared commands ports
-between languages unchanged. With only the Python package installed, run
-the TypeScript-only commands through `npx rocketride`.
+Both packages ship every other command and flag in this document, so a
+recipe that uses only those ports between languages unchanged. With only
+the Python package installed, run the TypeScript-only commands through
+`npx rocketride`.
+
+<!-- scripts/validate-cli-docs.py checks this table and every command in this document against both CLIs. Keep the table to commands and flags that only one package has. -->
 
 **When to use it.** You have a shell. Prefer the command for every one-shot
 lifecycle operation — validate, run, upload, store, deploy, publish,
