@@ -22,6 +22,7 @@ import {
 	parseEngineAssetName,
 	planPrune,
 	publish,
+	stampUsage,
 } from './engine-cache-publish.mjs';
 
 const HASH = 'a'.repeat(16) + 'b'.repeat(48);
@@ -92,7 +93,9 @@ function fakeGh({ exists = true, assets = [], gone = [], failures = {}, createRa
 				...assets,
 				...uploaded.map((name, i) => ({ id: 1000 + i, name, created_at: '2026-11-05T11:00:00Z' })),
 			];
-			return listed.map((a) => `${a.id}\t${a.name}\t${a.created_at}\n`).join('');
+			return listed
+				.map((a) => `${a.id}\t${a.name}\t${a.created_at}\t${a.download_count ?? 0}\t${a.label ?? ''}\n`)
+				.join('');
 		}
 		if (args[0] === 'api') return '4242\n';
 		throw new Error(`unexpected gh ${args.join(' ')}`);
@@ -179,6 +182,11 @@ describe('planPrune', () => {
 		);
 	});
 
+	it('ranks a hash by its last download, so one still in use outlives newer ones', () => {
+		const assets = [{ ...asset(1, hashes[0], 1), used_at: '2026-11-05T12:00:00Z' }, asset(2, hashes[1], 2)];
+		assert.deepEqual(planPrune(assets, 1).kept, [hashes[0]]);
+	});
+
 	it('never deletes a protected hash or a foreign asset', () => {
 		const assets = [
 			asset(1, hashes[0], 1),
@@ -188,6 +196,37 @@ describe('planPrune', () => {
 		const { kept, remove } = planPrune(assets, 1, [hashes[0]]);
 		assert.deepEqual(kept, [hashes[1], hashes[0]]);
 		assert.deepEqual(remove, []);
+	});
+});
+
+describe('stampUsage', () => {
+	const NOW = '2026-11-05T12:00:00Z';
+	const name = (h) => `rocketride-engine-${h}-linux-x64.tar.gz`;
+
+	it('stamps an asset whose download count grew, and keeps the last stamp otherwise', () => {
+		const assets = [
+			{
+				...asset(1, 'a'.repeat(16), 1),
+				download_count: 3,
+				label: `${name('a'.repeat(16))} (downloads 2 as of 2026-11-05T10:30:00Z)`,
+			},
+			{
+				...asset(2, 'b'.repeat(16), 2),
+				download_count: 2,
+				label: `${name('b'.repeat(16))} (downloads 2 as of 2026-11-05T10:30:00Z)`,
+			},
+			{ ...asset(3, 'c'.repeat(16), 3), download_count: 0, label: '' },
+			{ ...asset(4, 'd'.repeat(16), 4), download_count: 5, label: '' },
+		];
+		const { assets: stamped, relabel } = stampUsage(assets, NOW);
+		assert.deepEqual(
+			stamped.map((a) => a.used_at),
+			[NOW, '2026-11-05T10:30:00Z', '2026-11-05T10:03:00Z', NOW]
+		);
+		assert.deepEqual(relabel, [
+			{ id: 1, label: `${name('a'.repeat(16))} (downloads 3 as of ${NOW})` },
+			{ id: 4, label: `${name('d'.repeat(16))} (downloads 5 as of ${NOW})` },
+		]);
 	});
 });
 

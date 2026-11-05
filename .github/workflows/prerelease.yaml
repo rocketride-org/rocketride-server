@@ -208,7 +208,7 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # Publish the engines just built to the `engine-cache` release, named by
-  # their server source hash, and keep the newest 16 hashes there.
+  # their server source hash, and keep the 16 most recently used hashes there.
   #
   # `builder server:download` looks there first, so any build whose
   # packages/server matches a recent develop or stage commit downloads the

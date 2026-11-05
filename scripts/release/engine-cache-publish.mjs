@@ -7,8 +7,8 @@
 
 /**
  * Publish the engines a CI build packaged to the `engine-cache` release, named
- * by the server source hash they were built from, and prune it to the newest
- * hashes.
+ * by the server source hash they were built from, and prune it to the most
+ * recently used hashes.
  *
  * `builder server:download` (packages/server/scripts/tasks.js) looks there
  * before the stable release and the prerelease. Those two slots only hold the
@@ -47,7 +47,7 @@ const NOTES = [
 	'`builder server:download` checks here before the stable release and the prerelease.',
 	'',
 	'Published by `.github/workflows/prerelease.yaml` (`scripts/release/engine-cache-publish.mjs`),',
-	`which keeps the newest ${DEFAULT_KEEP} hashes.`,
+	`which keeps the ${DEFAULT_KEEP} most recently used hashes.`,
 ].join('\n');
 
 const PLATFORMS = ['linux-x64', 'win64', 'darwin-arm64', 'darwin-x64'];
@@ -100,13 +100,48 @@ export async function collectArtifacts(dir) {
 	return artifacts;
 }
 
+// The label of an engine asset records its download count and when a run
+// last saw that count grow: "<name> (downloads 12 as of 2026-11-05T17:40:00Z)"
+const USAGE_LABEL = /\(downloads (\d+) as of (\S+)\)$/;
+
 /**
- * Which engine-cache assets to delete so only the newest hashes remain.
+ * When each engine asset was last used, and the labels to rewrite.
  *
- * A hash is as new as its newest asset, so one published again moves back to
- * the front. Assets not named like an engine are never touched.
+ * GitHub keeps only a running download count per asset. Each run compares it
+ * with the count stored in the label by an earlier run; a count that grew
+ * means a download since then, so the asset is stamped with this run's time.
+ * An asset never downloaded is as recent as its upload.
  *
- * @param {Array<{id: number, name: string, created_at: string}>} assets - The release's assets
+ * @param {Array<{id: number, name: string, created_at: string, download_count?: number, label?: string}>} assets
+ * @param {string} now - This run's time, ISO 8601
+ * @returns {{assets: Array<Object>, relabel: Array<{id: number, label: string}>}} The
+ *   assets with `used_at` set, and the labels to write
+ */
+export function stampUsage(assets, now) {
+	const relabel = [];
+	const stamped = assets.map((asset) => {
+		if (!parseEngineAssetName(asset.name)) return asset;
+		const [, count = '0', seenAt] = USAGE_LABEL.exec(asset.label || '') || [];
+		const downloads = asset.download_count || 0;
+		if (downloads > Number(count)) {
+			relabel.push({ id: asset.id, label: `${asset.name} (downloads ${downloads} as of ${now})` });
+			return { ...asset, used_at: now };
+		}
+		return { ...asset, used_at: seenAt && seenAt > asset.created_at ? seenAt : asset.created_at };
+	});
+	return { assets: stamped, relabel };
+}
+
+/**
+ * Which engine-cache assets to delete so only the most recently used hashes
+ * remain.
+ *
+ * A hash is as recent as its most recent asset: its last upload, or the last
+ * download a run saw (`used_at`, see stampUsage). So a hash that pull requests
+ * keep downloading stays, and one published again moves back to the front.
+ * Assets not named like an engine are never touched.
+ *
+ * @param {Array<{id: number, name: string, created_at: string, used_at?: string}>} assets - The release's assets
  * @param {number} keep - How many hashes to keep
  * @param {Iterable<string>} [protect] - Hash prefixes kept whatever their age (the ones just published)
  * @returns {{kept: string[], remove: Array<{id: number, name: string, created_at: string}>}}
@@ -116,8 +151,9 @@ export function planPrune(assets, keep, protect = []) {
 	for (const asset of assets) {
 		const parsed = parseEngineAssetName(asset.name);
 		if (!parsed) continue;
+		const at = asset.used_at || asset.created_at;
 		const seen = newest.get(parsed.hash16);
-		if (!seen || asset.created_at > seen) newest.set(parsed.hash16, asset.created_at);
+		if (!seen || at > seen) newest.set(parsed.hash16, at);
 	}
 
 	const byAge = [...newest.keys()].sort((a, b) => newest.get(b).localeCompare(newest.get(a)) || a.localeCompare(b));
@@ -206,14 +242,14 @@ async function listAssets(gh, repo) {
 		'--paginate',
 		`repos/${repo}/releases/${id}/assets?per_page=100`,
 		'--jq',
-		'.[] | [.id, .name, .created_at] | @tsv',
+		'.[] | [.id, .name, .created_at, .download_count, (.label // "")] | @tsv',
 	]);
 	return out
 		.split('\n')
 		.filter(Boolean)
 		.map((line) => {
-			const [assetId, name, createdAt] = line.split('\t');
-			return { id: Number(assetId), name, created_at: createdAt };
+			const [assetId, name, createdAt, downloads, label] = line.split('\t');
+			return { id: Number(assetId), name, created_at: createdAt, download_count: Number(downloads) || 0, label };
 		});
 }
 
@@ -228,6 +264,7 @@ async function listAssets(gh, repo) {
  * @param {Function} [opts.gh] - Runs gh with an argument list, resolves with stdout
  * @param {Function} [opts.log]
  * @param {Function} [opts.wait] - Sleep between retries
+ * @param {Function} [opts.now] - This run's time, ISO 8601
  * @returns {Promise<{published: string[], removed: string[], failed: string[]}>}
  */
 export async function publish({
@@ -238,6 +275,7 @@ export async function publish({
 	gh = runGh,
 	log = console.log,
 	wait = sleep,
+	now = () => new Date().toISOString(),
 }) {
 	const artifacts = await collectArtifacts(dir);
 	for (const a of artifacts) log(`${a.platform}: buildHash ${a.hash}, vcpkg ${a.vcpkg}`);
@@ -285,11 +323,15 @@ export async function publish({
 		await fs.rm(staging, { recursive: true, force: true });
 	}
 
-	const removed = await prune(gh, repo, keep, new Set(artifacts.map((a) => a.hash.slice(0, 16))), { dryRun, log });
+	const removed = await prune(gh, repo, keep, new Set(artifacts.map((a) => a.hash.slice(0, 16))), {
+		dryRun,
+		log,
+		now,
+	});
 	return { published: [...new Set(published)], removed, failed };
 }
 
-async function prune(gh, repo, keep, protect, { dryRun, log }) {
+async function prune(gh, repo, keep, protect, { dryRun, log, now }) {
 	let assets;
 	try {
 		assets = await listAssets(gh, repo);
@@ -302,7 +344,21 @@ async function prune(gh, repo, keep, protect, { dryRun, log }) {
 		throw error;
 	}
 
-	const { kept, remove } = planPrune(assets, keep, protect);
+	const { assets: stamped, relabel } = stampUsage(assets, now());
+	for (const { id, label } of relabel) {
+		if (dryRun) {
+			log(`[dry-run] would label asset ${id}: ${label}`);
+			continue;
+		}
+		try {
+			await gh(['api', '-X', 'PATCH', '-f', `label=${label}`, `repos/${repo}/releases/assets/${id}`]);
+		} catch (error) {
+			// Only ranking depends on it, so a failed label must not fail the run
+			log(`::warning::Could not label asset ${id}: ${error.message}`);
+		}
+	}
+
+	const { kept, remove } = planPrune(stamped, keep, protect);
 	log(`Keeping ${kept.length} hash(es): ${kept.join(', ')}`);
 
 	const removed = [];
