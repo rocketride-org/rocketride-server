@@ -55,7 +55,8 @@ function reachable(entry: string): string[] {
 		seen.add(rel);
 		const text = read(rel);
 		for (const match of text.matchAll(/^import\s+(?!type\b)[^;]*?from\s+'(\.[^']+)'/gm)) {
-			const base = path.join(path.dirname(rel), match[1]);
+			// POSIX joins: the walk's keys are '/'-separated paths on every platform (path.join would give '\\' on Windows).
+			const base = path.posix.join(path.posix.dirname(rel), match[1]);
 			const file = ['.ts', '.tsx', '/index.ts'].map((ext) => base + ext).find((candidate) => fs.existsSync(path.join(SRC, candidate)));
 			if (file) visit(file);
 		}
