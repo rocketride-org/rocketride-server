@@ -229,7 +229,8 @@ let gateResult: boolean | undefined;
  * Even when the hooks are on, every inbound `rrdev:*` message is still
  * vetted by isTrustedEmbedderMessage(), and the credential-persisting dev
  * conveniences (`#rrtoken`, the sign-in relay) additionally require a
- * loopback-served shell (isLoopbackShell()).
+ * loopback-served shell (isLoopbackShell(); the relay a still narrower one,
+ * isRelayBounceTarget()).
  *
  * Read once at first call and cached.
  *
@@ -325,23 +326,42 @@ export function isSameOriginEmbed(): boolean {
  * origin is a random dev port Zitadel cannot know; the engine's probe
  * cannot help either — through the dev proxy it resolves to the proxy
  * itself). It rides the tab session, so it survives the OAuth round trip.
- * Dev-gated, top-level and loopback-served only.
+ * Dev-gated, top-level and only on a shell the relay bounce can return to
+ * (isRelayBounceTarget).
  *
- * @returns The relay origin, or '' (production, framed, not on a loopback
- *          shell, or never given).
+ * @returns The relay origin, or '' (production, framed, a shell the bounce
+ *          cannot return to, or never given).
  */
 export function devRelayOrigin(): string {
-	// Loopback shells only: the relay exists for a dev server on a random
-	// localhost port (the bounce that completes it only ever targets
-	// loopback), so a shell served from anywhere else — the production
-	// origin, reached by a bare `?rrdev=1&rrauthorigin=` link — has no use
-	// for it and must not let a URL steer its sign-in redirect.
-	if (!isDevHooksEnabled() || isFramedShell() || !isLoopbackShell()) return '';
+	// Only where the bounce that completes the relay can land: the relay
+	// exists for a dev server on a random localhost port, so a shell served
+	// from anywhere else — the production origin, reached by a bare
+	// `?rrdev=1&rrauthorigin=` link — has no use for it and must not let a URL
+	// steer its sign-in redirect. (Framed shells sign in via rrdev:auth.)
+	if (!isDevHooksEnabled() || isFramedShell()) return '';
 	try {
-		return tabSession().authOrigin;
+		return isRelayBounceTarget(window.location.origin) ? tabSession().authOrigin : '';
 	} catch {
 		return '';
 	}
+}
+
+/**
+ * Whether `origin` is a dev origin the sign-in relay's BOUNCE will send an
+ * OAuth code back to: exactly `http://localhost[:port]` or
+ * `http://127.0.0.1[:port]`. The bounce (ConnectionManager.bootstrap and the
+ * flavor picker in scripts/stitch-flavors.mjs, which keeps its own inline copy
+ * of this pattern because it runs before the bundle loads) accepts only these
+ * targets so the registered web origin never becomes an open redirector.
+ * devRelayOrigin() arms the relay only on such shells; a wider loopback shell
+ * (`https://localhost`, `[::1]`, `*.localhost`, 127/8) would start a sign-in
+ * whose code the bounce then refuses to deliver.
+ *
+ * @param origin - A shell origin, or the `rrdev:<origin>` state payload.
+ * @returns True when the relay bounce accepts it as a target.
+ */
+export function isRelayBounceTarget(origin: string): boolean {
+	return /^http:\/\/(localhost|127\.0\.0\.1)(:\d{1,5})?$/.test(origin);
 }
 
 // =============================================================================
@@ -420,17 +440,19 @@ function parseHttpOrigin(origin: unknown): URL | null {
  * @param origin - An origin string such as `location.origin`.
  * @returns True for `http(s)://localhost|127.x.x.x|[::1]` (with optional port).
  */
-export function isLoopbackOrigin(origin: string): boolean {
+function isLoopbackOrigin(origin: string): boolean {
 	const url = parseHttpOrigin(origin);
 	return url !== null && isLoopbackHostname(url.hostname);
 }
 
 /**
  * Whether THIS shell is served from a loopback origin — the only place the
- * credential-persisting dev conveniences (`#rrtoken` seeding, the sign-in
- * relay) make sense: they exist for `rocketride app dev` / `pnpm start`, whose
- * shell is a dev server on localhost. A shell served from anywhere else (the
- * production origin included) never honours them, whatever its URL says.
+ * credential-persisting dev conveniences (`#rrtoken` seeding; the sign-in
+ * relay on the narrower isRelayBounceTarget set) make sense: they exist for
+ * `rocketride app dev` / `pnpm start`, whose shell is a dev server on
+ * localhost. A shell served from anywhere else (the production origin
+ * included, and a dev server reached by LAN IP or a forwarded hostname) never
+ * honours them, whatever its URL says.
  *
  * @returns True when `window.location.origin` is a loopback http(s) origin.
  */
@@ -561,16 +583,6 @@ export function normalizeDevRemoteEntry(entry: unknown): string | null {
 	if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
 	if (url.username || url.password) return null;
 	return isLoopbackHostname(url.hostname) ? url.href : null;
-}
-
-/**
- * Whether a dev-remote entry URL may be loaded (see normalizeDevRemoteEntry).
- *
- * @param entry - The remoteEntry.js URL as received.
- * @returns True when the shell may register it as a Module Federation remote.
- */
-export function isAllowedDevRemoteEntry(entry: string): boolean {
-	return normalizeDevRemoteEntry(entry) !== null;
 }
 
 // =============================================================================

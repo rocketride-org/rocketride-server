@@ -59,7 +59,7 @@ import { CLIENT_EVENT_OP } from '../ops/clientOps';
 import type { IOpBus, IBusRequestOptions, BusOpHandler } from '../ops/busOps';
 import { createRetainedRegistry, localRetainedPort } from '../ops/retained';
 import type { IRetainedPort, RetainedSubscriber } from '../ops/retained';
-import { isEmbeddedDevShell, isSameOriginEmbed, isDevHooksEnabled, isFramedShell, isLoopbackShell, tokenStore, tabSession, updateTabSession } from '../util/devGate';
+import { isEmbeddedDevShell, isSameOriginEmbed, isDevHooksEnabled, isFramedShell, isLoopbackShell, isRelayBounceTarget, tokenStore, tabSession, updateTabSession } from '../util/devGate';
 import { TelemetryChannel, type TelemetryFact } from '../util/telemetryChannel';
 import { AUTH_START_STAMP_KEY, getStoredVerifier, clearStoredVerifier, getStoredRedirectUri, clearStoredRedirectUri } from '../util/pkce';
 import { getAuthPhase, setAuthPhase } from './authPhase';
@@ -860,7 +860,8 @@ export class ConnectionManager implements IConnectionManager {
 			const relayCode = relayParams.get('code') ?? '';
 			if (relayCode && relayState.startsWith('rrdev:')) {
 				const target = relayState.slice('rrdev:'.length).replace(/\/+$/, '');
-				const isLoopback = /^http:\/\/(localhost|127\.0\.0\.1)(:\d{1,5})?$/.test(target);
+				// One definition with devRelayOrigin(), which arms the relay only where this accepts.
+					const isLoopback = isRelayBounceTarget(target);
 				if (isLoopback && target !== window.location.origin) {
 					// replace(), not assign(): the bounce must not linger in
 					// history — Back should land before the sign-in, not here.
@@ -896,6 +897,10 @@ export class ConnectionManager implements IConnectionManager {
 		const tokenSeedDirective = isDevHooksEnabled() && !isFramedShell() && bootHash.startsWith('#rrtoken=');
 		if (tokenSeedDirective && !isLoopbackShell()) {
 			console.warn('[shell] ignoring #rrtoken: dev token seeding is honoured only by a shell served from a loopback dev server');
+			// Ignored is not the same as harmless to leave: strip the fragment
+			// so a credential a launcher handed to a non-loopback dev tab (a
+			// LAN-IP dev server) does not linger in the URL bar and history.
+			window.history.replaceState({ ...(window.history.state ?? {}) }, '', window.location.pathname + window.location.search);
 		}
 		if (tokenSeedDirective && isLoopbackShell()) {
 			const seeded = decodeURIComponent(bootHash.slice('#rrtoken='.length));

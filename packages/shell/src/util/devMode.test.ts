@@ -38,7 +38,7 @@ import assert from 'node:assert/strict';
 import test, { afterEach, mock } from 'node:test';
 import { handleEmbedderMessage, installDevHooks } from './devMode';
 import type { EmbedderMessageDeps } from './devMode';
-import { isAllowedDevRemoteEntry, isAllowedEmbedderOrigin, isDevHooksEnabled, isEmbeddedDevShell, isTrustedEmbedderMessage, normalizeDevRemoteEntry, resetDevGateForTests, tabSession, tokenStore, trustedParentOrigin } from './devGate';
+import { isAllowedEmbedderOrigin, isDevHooksEnabled, isEmbeddedDevShell, isTrustedEmbedderMessage, normalizeDevRemoteEntry, resetDevGateForTests, tabSession, tokenStore, trustedParentOrigin } from './devGate';
 import { isDevPreviewPage } from './appLoader';
 
 const SHELL_ORIGIN = 'https://cloud.example.test';
@@ -576,14 +576,14 @@ test('trustedParentOrigin of a same-origin parent (the web App Builder preview) 
 	assert.equal(trustedParentOrigin(), '');
 });
 
-test('normalizeDevRemoteEntry / isAllowedDevRemoteEntry accept only absolute http(s) loopback URLs without credentials, and return the canonical URL', () => {
+test('normalizeDevRemoteEntry accepts only absolute http(s) loopback URLs without credentials, and return the canonical URL', () => {
 	for (const e of ['http://localhost:3001/remoteEntry.js?t=1', 'http://127.0.0.1:5173/remoteEntry.js', 'http://[::1]:3000/remoteEntry.js', 'https://app.localhost/remoteEntry.js']) {
-		assert.equal(isAllowedDevRemoteEntry(e), true, e);
+		assert.notEqual(normalizeDevRemoteEntry(e), null, e);
 		assert.equal(normalizeDevRemoteEntry(e), new URL(e).href, e);
 	}
 	// What was vetted is what is returned: tabs/newlines the URL parser strips never reach the loader.
 	assert.equal(normalizeDevRemoteEntry('http://loc\talhost:3001/re\nmoteEntry.js'), 'http://localhost:3001/remoteEntry.js');
-	for (const e of ['https://attacker.example/x.js', '//attacker.example/x.js', 'javascript:alert(1)', 'data:text/javascript,1', '', '/x.js', 'http://localhost.evil.test/x.js', 'http://localhost:1@evil.test/x.js', 'http://u:p@localhost/x.js', 'http://evillocalhost:3000/x.js', 'http://notlocalhost/x.js', 'https://xlocalhost/remoteEntry.js', 'http://evil-localhost:3000/x.js']) assert.equal(isAllowedDevRemoteEntry(e), false, e);
+	for (const e of ['https://attacker.example/x.js', '//attacker.example/x.js', 'javascript:alert(1)', 'data:text/javascript,1', '', '/x.js', 'http://localhost.evil.test/x.js', 'http://localhost:1@evil.test/x.js', 'http://u:p@localhost/x.js', 'http://evillocalhost:3000/x.js', 'http://notlocalhost/x.js', 'https://xlocalhost/remoteEntry.js', 'http://evil-localhost:3000/x.js']) assert.equal(normalizeDevRemoteEntry(e), null, e);
 	// WHATWG parsing makes `\` a path separator: this host really IS localhost, and the canonical URL says so.
 	assert.equal(normalizeDevRemoteEntry('http://localhost\\@evil.test/x.js'), 'http://localhost/@evil.test/x.js');
 	for (const e of [undefined, null, 42, {}, ['http://localhost/x.js']]) assert.equal(normalizeDevRemoteEntry(e), null, String(e));

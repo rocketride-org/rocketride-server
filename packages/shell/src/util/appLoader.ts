@@ -428,13 +428,16 @@ export function unregisterLocalApp(id: string): void {
  *               in dev the workspace is the truth, not the server registry.
  */
 export function registerDevRemote(appId: string, moduleId: string, name: string, entry: string, meta?: LocalAppMeta): void {
-	// The one choke point for dev-remote entries: a remote entry is SCRIPT the
-	// shell executes with the user's session, so only a loopback dev server may
-	// supply one (the embedder's own rsbuild server), whoever the caller is —
-	// the rrdev:registerRemote handler vets it too, but this is the guard that
-	// holds for every caller (the window API, the URL-convention
-	// self-registration, a future one). What was vetted is what gets
-	// registered: the canonical URL, never the raw input.
+	// The one choke point for dev-remote ENTRIES: a remote entry is a URL of
+	// SCRIPT the shell executes with the user's session, so only a loopback dev
+	// server may supply one (the embedder's own rsbuild server), whoever the
+	// caller is — the rrdev:registerRemote handler vets it too, but this is the
+	// guard that holds for every caller of this function (the message handler,
+	// the URL-convention self-registration, a future one). It does not cover
+	// `registerLocalApp` (also on window.__rrShellDev): that takes a
+	// caller-supplied loader FUNCTION, which cannot arrive by message or URL —
+	// only script already running on this origin can supply one. What was
+	// vetted is what gets registered: the canonical URL, never the raw input.
 	const vetted = normalizeDevRemoteEntry(entry);
 	if (vetted === null) {
 		console.error(`[appLoader] refusing dev remote "${moduleId}": entry ${JSON.stringify(entry)} is not a loopback dev-server URL`);

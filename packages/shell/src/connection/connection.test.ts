@@ -2324,7 +2324,7 @@ test('#rrtoken is IGNORED on a dev flavor served from a real origin: a bare link
 		const seeded = await bootWithFragment({ origin, hash: '#rrtoken=attacker_credential' });
 		assert.deepEqual(seeded.saved, [], `${origin}: no token was saved`);
 		assert.equal(seeded.cleared, 0, `${origin}: nothing was cleared`);
-		assert.deepEqual(seeded.stripped, [], `${origin}: the fragment is left alone (nothing here consumes it)`);
+		assert.deepEqual(seeded.stripped, ['/?appid=local.alarm&rrdev=1'], `${origin}: the fragment is stripped even though it is ignored (no credential lingers in the URL bar or history)`);
 		assert.ok(seeded.warned.some((w) => w.includes('#rrtoken')), `${origin}: the refusal is logged for the developer`);
 		const signedOut = await bootWithFragment({ origin, hash: '#rrtoken=' });
 		assert.equal(signedOut.cleared, 0, `${origin}: an empty fragment cannot clear the victim's session either`);
@@ -2335,6 +2335,7 @@ test('#rrtoken is ignored by a PRODUCTION build, even on a loopback origin', asy
 	const seeded = await bootWithFragment({ origin: 'http://localhost:3925', hash: '#rrtoken=attacker_credential', nodeEnv: 'production' });
 	assert.deepEqual(seeded.saved, []);
 	assert.equal(seeded.cleared, 0);
+	assert.deepEqual(seeded.stripped, [], 'a production build does not consume the fragment at all');
 	const signedOut = await bootWithFragment({ origin: 'http://localhost:3925', hash: '#rrtoken=', nodeEnv: 'production' });
 	assert.equal(signedOut.cleared, 0);
 });
@@ -2343,6 +2344,7 @@ test('#rrtoken is ignored by a FRAMED shell (previews inherit their embedder\'s 
 	const seeded = await bootWithFragment({ origin: 'http://localhost:3925', hash: '#rrtoken=attacker_credential', framed: true });
 	assert.deepEqual(seeded.saved, []);
 	assert.equal(seeded.cleared, 0);
+	assert.deepEqual(seeded.stripped, [], 'a framed shell does not consume the fragment either');
 });
 
 test('the CloudAuthProvider relay redirects through the relay origin only in a top-level dev shell, never in a framed one', async () => {

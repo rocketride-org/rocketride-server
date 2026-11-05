@@ -33,7 +33,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { tabSession, updateTabSession, devRelayOrigin, isLoopbackShell, resetDevGateForTests } from './devGate';
+import { tabSession, updateTabSession, devRelayOrigin, isLoopbackShell, isRelayBounceTarget, resetDevGateForTests } from './devGate';
 
 /** A sessionStorage double over a Map. */
 function fakeSession(initial: Array<[string, string]> = []) {
@@ -167,16 +167,18 @@ test('a production build is never a dev tab: neither the URL nor the persisted c
 	}, { nodeEnv: 'production' });
 });
 
-test('the dev relay is honoured only by a top-level shell served from a loopback origin', async () => {
+test('the dev relay is honoured only by a top-level shell the relay bounce can return to (http://localhost, http://127.0.0.1)', async () => {
 	const url = '?appid=local.alarm&rrdev=1&rrauthorigin=https%3A%2F%2Frocketride.ai';
-	for (const origin of ['http://localhost:3013', 'http://127.0.0.1:3013', 'http://[::1]:3013']) {
+	for (const origin of ['http://localhost:3013', 'http://127.0.0.1:3013', 'http://localhost']) {
 		await withBoot(url, fakeSession(), () => {
 			assert.equal(devRelayOrigin(), 'https://rocketride.ai', origin);
 		}, { origin });
 	}
 	// A dev flavor served from a real origin (the production origin behind `?rrdev=1`) must not
 	// let a link steer its sign-in redirect; lookalikes and an opaque origin are not loopback.
-	for (const origin of ['https://cloud.rocketride.example', 'http://cloud.rocketride.example', 'http://localhost.evil.test:3013', 'https://127.0.0.1.evil.test', 'null', '']) {
+	// Wider loopback shells (https, [::1], *.localhost, 127/8) are loopback for `#rrtoken` but the
+	// bounce refuses them, so the relay stays off there instead of starting a sign-in it cannot finish.
+	for (const origin of ['https://cloud.rocketride.example', 'http://cloud.rocketride.example', 'http://localhost.evil.test:3013', 'https://127.0.0.1.evil.test', 'http://evillocalhost:3013', 'https://localhost:3000', 'http://[::1]:3013', 'http://app.localhost:3013', 'http://127.1.2.3:3013', 'null', '']) {
 		await withBoot(url, fakeSession(), () => {
 			assert.equal(devRelayOrigin(), '', JSON.stringify(origin));
 		}, { origin });
@@ -202,4 +204,9 @@ test('the dev relay is ignored by a FRAMED shell, loopback-served or not (framed
 			assert.equal(devRelayOrigin(), '', `...but a framed shell never relays (${origin})`);
 		}, { origin, framed: true });
 	}
+});
+
+test('isRelayBounceTarget is the bounce\'s own target set: http://localhost and http://127.0.0.1 with an optional port, nothing else', () => {
+	for (const ok of ['http://localhost', 'http://localhost:3013', 'http://127.0.0.1', 'http://127.0.0.1:65535']) assert.equal(isRelayBounceTarget(ok), true, ok);
+	for (const bad of ['https://localhost:3013', 'http://[::1]:3013', 'http://app.localhost:3013', 'http://127.1.2.3', 'http://localhost.evil.test', 'http://evillocalhost', 'http://localhost:3013/', 'http://localhost:123456', 'http://localhost@evil.test', '']) assert.equal(isRelayBounceTarget(bad), false, bad);
 });
