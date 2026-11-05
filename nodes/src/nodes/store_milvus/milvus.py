@@ -503,7 +503,8 @@ class Store(DocumentStoreBase):
                 'id': np.int64(((uuid.uuid1().time & 0x1FFFFFFFF) << 27) | random.getrandbits(27)),
                 'vector': embedding,
                 'content': chunk.page_content,
-                'meta': chunk.metadata,
+                # pymilvus 3 serializes a JSON field itself and rejects a pydantic model
+                'meta': chunk.metadata.model_dump(),
             }
 
             batch.append(tmp_struct)

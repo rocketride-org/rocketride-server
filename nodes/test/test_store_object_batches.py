@@ -161,7 +161,7 @@ def _milvus(monkeypatch: pytest.MonkeyPatch) -> tuple[object, _Log]:
         json.loads(re.search(r'in (\[.*\])$', filter).group(1))
     )
     store.client.upsert.side_effect = lambda collection_name, data: log.stored.extend(
-        (row['meta'].objectId, row['meta'].chunkId) for row in data
+        (row['meta']['objectId'], row['meta']['chunkId']) for row in data
     )
     return store, log
 
@@ -362,3 +362,11 @@ def test_pinecone_never_deletes_the_control_row(monkeypatch):
     store, log = _pinecone(monkeypatch)
     store.addChunks(_chunks(CONTROL_OBJECT_ID, [0]) + _chunks('a', [0]), checkCollection=False)
     assert log.deleted == [['a']]
+
+
+def test_milvus_rows_carry_json_serializable_meta(monkeypatch):
+    """Milvus rows are plain JSON: pymilvus 3 rejects a pydantic ``DocMetadata`` in the JSON ``meta`` field (#3014)."""
+    store, _ = _milvus(monkeypatch)
+    store.addChunks(_chunks('a', [0, 1]), checkCollection=False)
+    rows = [row for call in store.client.upsert.call_args_list for row in call.kwargs['data']]
+    assert [json.loads(json.dumps(row['meta']))['chunkId'] for row in rows] == [0, 1]
