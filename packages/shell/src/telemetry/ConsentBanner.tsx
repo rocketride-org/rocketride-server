@@ -52,10 +52,10 @@ const TOKENS: Record<Theme, { textPri: string; textSec: string; navBorder: strin
 };
 import { PHONE_MARGIN, compactCopy, nextPlacement, onScreen, placementLabel, positionFor, samePlacement, variantFor, type Obstacles, type Placement, type Rect, type Variant } from './placement';
 
-/** The privacy policy the banner links to. */
+/** The Privacy Policy, which Privacy settings links to. */
 export const PRIVACY_POLICY_PATH = '/legal/privacy-policy';
 
-/** The cookie policy the privacy settings link to. */
+/** The Cookie Policy, which the banner and Privacy settings link to: it describes the banner, Privacy settings and the opt-in capture. */
 export const COOKIE_POLICY_PATH = '/legal/cookie-policy';
 
 /** The approved copy (2026-10-10), verbatim. */
@@ -63,7 +63,7 @@ export const COPY = {
 	heading: 'Help us craft a better RocketRide',
 	body: "Opt in and we'll use cookies and session recordings to see how people move through the site, what lands and what doesn't, so we can keep refining it. We never record what you type, and you can change your mind anytime in Privacy settings.",
 	phone: 'Help us craft a better RocketRide. Opt in to cookies and session recordings (we never record what you type).',
-	link: 'Privacy policy',
+	link: 'Cookie policy',
 	decline: 'No thanks',
 	accept: 'Opt in',
 };
@@ -429,7 +429,7 @@ export const ConsentBanner: React.FC<Props> = ({ signedOut, theme = 'light' }) =
 			onAccept = close; // already opted in: the button just closes the banner
 		}
 	}
-	const link = <a href={PRIVACY_POLICY_PATH} style={{ color: t.textPri, textDecoration: 'underline', textUnderlineOffset: 2, whiteSpace: 'nowrap' }}>{COPY.link}</a>;
+	const link = <a href={COOKIE_POLICY_PATH} style={{ color: t.textPri, textDecoration: 'underline', textUnderlineOffset: 2, whiteSpace: 'nowrap' }}>{COPY.link}</a>;
 	return (
 		<section
 			ref={ref}
