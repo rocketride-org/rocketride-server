@@ -181,14 +181,16 @@ The `EXPLAIN` and the query are sent with the settings `readonly=1` and
 `max_execution_time=60`: ClickHouse refuses writes, DDL, setting changes inside
 the query and table functions such as `url()` and `file()`, and stops a query
 that runs longer. ClickHouse refuses a query that carries a setting the user
-may not change, so the node reads the user's settings once and sends only what
-the user may change. A profile with `readonly=1` or `readonly=2` already refuses
+may not change, so the node reads the user's settings before each query, which
+also picks up a profile changed while the node runs, and sends only what the
+user may change. A profile with `readonly=1` or `readonly=2` already refuses
 writes, and the node does not send `readonly`. It keeps the time limit within the
 setting's `MIN`/`MAX` constraint, and keeps a stricter `max_execution_time` from
 the profile. `readonly=1` locks every setting, so the profile's own
 `max_execution_time` applies unless a `CHANGEABLE_IN_READONLY` constraint lets
-the user change it. When the profile allows longer queries than the node's limit
-and the user may not change it, the node writes a warning to the log.
+the user change it. When a query would run with no limit or a longer one than
+the node's (the user may not change it, or a `MIN` constraint is higher), the
+node writes a warning to the log that says what to change in the profile.
 
 A user who may change `max_execution_time` (a `readonly=2` profile, or a
 `CHANGEABLE_IN_READONLY` constraint) could also lift the limit from a

@@ -172,14 +172,15 @@ def test_an_unknown_dialect_runs_nothing():
 class _RecordingConnection:
     """A connection that records what the block runs on it, and whose session reads ``session``."""
 
-    def __init__(self, is_mariadb=False, session=(0, 0)):
+    def __init__(self, is_mariadb=False, session=(0, 0), version=(8, 0, 46)):
         """Nothing run yet.
 
         Args:
             is_mariadb: What the connection's dialect says about the server.
             session: What a read of the session's settings returns before the block.
+            version: The server version the dialect reports.
         """
-        self.dialect = SimpleNamespace(is_mariadb=is_mariadb)
+        self.dialect = SimpleNamespace(is_mariadb=is_mariadb, server_version_info=version)
         self.session = session
         self.statements = []
         self.invalidated = False
@@ -224,15 +225,16 @@ def _engine_with(dialect, conn):
 
 
 @pytest.mark.parametrize(
-    ('dialect', 'is_mariadb', 'read_only', 'setting', 'value'),
+    ('dialect', 'is_mariadb', 'version', 'read_only', 'setting', 'value'),
     [
-        ('mysql', False, 'transaction_read_only', 'max_execution_time', 2000),
-        ('mariadb', True, 'tx_read_only', 'max_statement_time', 2),
+        ('mysql', False, (8, 0, 46), 'transaction_read_only', 'max_execution_time', 2000),
+        ('mariadb', True, (11, 4, 13), 'transaction_read_only', 'max_statement_time', 2),
+        ('mariadb', True, (10, 11, 19), 'tx_read_only', 'max_statement_time', 2),
     ],
 )
-def test_a_mariadb_url_gets_the_mysql_read_only_session(dialect, is_mariadb, read_only, setting, value):
-    """A ``mariadb+`` URL names the dialect ``mariadb``: it gets the MySQL read-only session with MariaDB's limit."""
-    conn = _RecordingConnection(is_mariadb)
+def test_a_mariadb_url_gets_the_mysql_read_only_session(dialect, is_mariadb, version, read_only, setting, value):
+    """A ``mariadb+`` URL names the dialect ``mariadb``: it gets the MySQL read-only session, with MariaDB's names."""
+    conn = _RecordingConnection(is_mariadb, version=version)
     with _global(_engine_with(dialect, conn)).read_only_connection():
         pass
 
@@ -297,20 +299,20 @@ def test_a_connection_whose_reset_fails_is_discarded(monkeypatch):
 # Live servers: run when the DSN is set
 # ---------------------------------------------------------------------------
 
-# Per dialect: table DDL, statements the database must refuse inside the block, a query that runs past the
-# time limit, one whose EXPLAIN would (None where planning does not run it), and a query that reads the
-# session settings the block changed (None where they live per query)
+# Per dialect: table DDL, statements the database must refuse inside the block with the server's own error, a
+# query that runs past the time limit and the error that stops it, one whose EXPLAIN would (None where planning
+# does not run it), and a query that reads the session settings the block changed (None where they live per query)
 _LIVE = {
     'postgresql': {
         'env': 'RR_TEST_PG_DSN',
         'create': 'CREATE TABLE {t} (id int)',
         'refused': [
-            'INSERT INTO {t} VALUES (9)',
-            'CREATE TABLE {t}_new (id int)',
-            'SELECT * INTO {t}_copy FROM {t}',
-            "SELECT nextval('{t}_seq')",
-            "SELECT setval('{t}_seq', 5)",
-            'SELECT * FROM {t} FOR UPDATE',
+            ('INSERT INTO {t} VALUES (9)', 'read-only transaction'),
+            ('CREATE TABLE {t}_new (id int)', 'read-only transaction'),
+            ('SELECT * INTO {t}_copy FROM {t}', 'read-only transaction'),
+            ("SELECT nextval('{t}_seq')", 'read-only transaction'),
+            ("SELECT setval('{t}_seq', 5)", 'read-only transaction'),
+            ('SELECT * FROM {t} FOR UPDATE', 'read-only transaction'),
         ],
         'extra': ['CREATE SEQUENCE {t}_seq'],
         'drop': [
@@ -320,6 +322,7 @@ _LIVE = {
             'DROP SEQUENCE IF EXISTS {t}_seq',
         ],
         'slow': 'SELECT pg_sleep(30)',
+        'slow_error': 'statement timeout',
         'slow_explain': None,
         'session': "SELECT current_setting('statement_timeout'), current_setting('transaction_read_only')",
         'session_default': ('0', 'off'),
@@ -328,35 +331,37 @@ _LIVE = {
         'env': 'RR_TEST_MYSQL_DSN',
         'create': 'CREATE TABLE {t} (id int)',
         'refused': [
-            'INSERT INTO {t} VALUES (9)',
-            'CREATE TABLE {t}_new (id int)',
-            'CREATE TABLE {t}_copy AS SELECT * FROM {t}',
-            'SELECT * FROM {t} FOR UPDATE',
+            ('INSERT INTO {t} VALUES (9)', 'READ ONLY transaction'),
+            ('CREATE TABLE {t}_new (id int)', 'READ ONLY transaction'),
+            ('CREATE TABLE {t}_copy AS SELECT * FROM {t}', 'READ ONLY transaction'),
+            ('SELECT * FROM {t} FOR UPDATE', 'READ ONLY transaction'),
             # pymysql connects without multi-statements, so a chain cannot switch the session back to read-write first
-            'SET SESSION TRANSACTION READ WRITE; INSERT INTO {t} VALUES (9)',
+            ('SET SESSION TRANSACTION READ WRITE; INSERT INTO {t} VALUES (9)', 'SQL syntax'),
         ],
         'extra': [],
         'drop': ['DROP TABLE IF EXISTS {t}', 'DROP TABLE IF EXISTS {t}_new', 'DROP TABLE IF EXISTS {t}_copy'],
         'slow': 'SELECT count(*) FROM information_schema.columns a, information_schema.columns b, information_schema.columns c',
+        'slow_error': 'Query execution was interrupted',
         # MySQL runs a constant subquery while it plans, so this EXPLAIN sleeps; MariaDB's does not
         'slow_explain': 'SELECT * FROM (SELECT 1 a) x WHERE a = (SELECT SLEEP(30))',
-        'session': 'SELECT @@SESSION.transaction_read_only',
+        'session': 'SELECT @@SESSION.{read_only}',
         'session_default': (0,),
     },
     'clickhouse': {
         'env': 'RR_TEST_CLICKHOUSE_DSN',
         'create': 'CREATE TABLE {t} (id Int32) ENGINE = MergeTree ORDER BY id',
         'refused': [
-            'INSERT INTO {t} VALUES (9)',
-            'CREATE TABLE {t}_new (id Int32) ENGINE = Memory',
-            'SELECT 1 SETTINGS readonly = 0',
-            'SELECT 1 SETTINGS max_execution_time = 0',
-            "SELECT * FROM url('http://127.0.0.1:8123/?query=SELECT+1', CSV)",
-            'SELECT 1; INSERT INTO {t} VALUES (9)',
+            ('INSERT INTO {t} VALUES (9)', 'readonly mode'),
+            ('CREATE TABLE {t}_new (id Int32) ENGINE = Memory', 'readonly mode'),
+            ('SELECT 1 SETTINGS readonly = 0', 'readonly mode'),
+            ('SELECT 1 SETTINGS max_execution_time = 0', 'readonly mode'),
+            ("SELECT * FROM url('http://127.0.0.1:8123/?query=SELECT+1', CSV)", 'readonly mode'),
+            ('SELECT 1; INSERT INTO {t} VALUES (9)', 'Multi-statements are not allowed'),
         ],
         'extra': [],
         'drop': ['DROP TABLE IF EXISTS {t}', 'DROP TABLE IF EXISTS {t}_new'],
         'slow': 'SELECT count() FROM numbers(1000000000000)',
+        'slow_error': 'Timeout exceeded',
         'slow_explain': None,
         'session': None,
         'session_default': None,
@@ -395,11 +400,23 @@ def test_live_server_reads_inside_the_block(live):
         assert conn.execute(text(f'SELECT count(*) FROM {table}')).scalar() == 0
 
 
+def _mysql_read_only(engine):
+    """Return the name of the session variable that holds the read-only flag.
+
+    Args:
+        engine: The engine of the server.
+
+    Returns:
+        ``tx_read_only``, which every MariaDB knows, or MySQL's ``transaction_read_only``.
+    """
+    return 'tx_read_only' if getattr(engine.dialect, 'is_mariadb', False) else 'transaction_read_only'
+
+
 def test_live_server_refuses_every_write(live):
     """Each write, lock and DDL statement is refused by the server inside the block, and the table stays empty."""
     glb, table, case = live
-    for statement in case['refused']:
-        with pytest.raises(Exception):  # noqa: B017 - each driver raises its own class
+    for statement, refusal in case['refused']:
+        with pytest.raises(Exception, match=refusal):
             with glb.read_only_connection() as conn:
                 conn.execute(text(statement.format(t=table))).fetchall()
     with glb.engine.connect() as conn:
@@ -435,37 +452,47 @@ def test_live_postgres_chain_of_reads_lifts_the_time_limit(live):
 
 
 def test_live_server_stops_a_long_query(live):
-    """A query that would run long is stopped near the time limit."""
+    """A query that would run long is stopped by the server's time limit, when it is reached."""
     glb, _table, case = live
     start = time.monotonic()
-    with pytest.raises(Exception):  # noqa: B017 - each driver raises its own class
+    with pytest.raises(Exception, match=case['slow_error']):
         with glb.read_only_connection() as conn:
             conn.execute(text(case['slow'])).fetchall()
-    assert time.monotonic() - start < glb.READ_QUERY_TIMEOUT + 10
+    assert glb.READ_QUERY_TIMEOUT - 1 < time.monotonic() - start < glb.READ_QUERY_TIMEOUT + 10
 
 
 def test_live_connection_is_ordinary_again_after_the_block(live):
     """After refused writes, the pooled connection writes again and its session settings are back."""
     glb, table, case = live
-    with pytest.raises(Exception):  # noqa: B017 - each driver raises its own class
+    statement, refusal = case['refused'][0]
+    with pytest.raises(Exception, match=refusal):
         with glb.read_only_connection() as conn:
-            conn.execute(text(case['refused'][0].format(t=table)))
+            conn.execute(text(statement.format(t=table)))
     with glb.engine.begin() as conn:
         conn.exec_driver_sql(f'INSERT INTO {table} VALUES (1)')
     with glb.engine.connect() as conn:
         assert conn.exec_driver_sql(f'SELECT count(*) FROM {table}').scalar() == 1
         if case['session']:
-            assert tuple(conn.exec_driver_sql(case['session']).one()) == case['session_default']
+            session = case['session'].format(read_only=_mysql_read_only(glb.engine))
+            assert tuple(conn.exec_driver_sql(session).one()) == case['session_default']
 
 
 def test_live_explain_check_stops_near_the_limit(live):
-    """The EXPLAIN check is time-limited too, also where planning runs part of the query."""
+    """The EXPLAIN check is time-limited too: on MySQL, whose planner runs a constant subquery, the limit stops it."""
     glb, _table, case = live
     if not case['slow_explain']:
         pytest.skip('this server plans the slow query without running it')
     start = time.monotonic()
-    glb._validateQuery(case['slow_explain'])
-    assert time.monotonic() - start < glb.READ_QUERY_TIMEOUT + 10
+    ok, message = glb._validateQuery(case['slow_explain'])
+    elapsed = time.monotonic() - start
+    if glb.engine.dialect.is_mariadb:
+        # MariaDB plans it without running the subquery
+        assert ok
+        assert elapsed < glb.READ_QUERY_TIMEOUT
+    else:
+        assert not ok
+        assert case['slow_error'] in message
+        assert glb.READ_QUERY_TIMEOUT - 1 < elapsed < glb.READ_QUERY_TIMEOUT + 10
 
 
 # Per server: statements that make a session read-only with a stricter limit (what a role default, the server's
@@ -485,6 +512,7 @@ _STRICT_SESSION = {
     ),
     'mariadb': (
         ['SET SESSION TRANSACTION READ ONLY', 'SET SESSION max_statement_time = 5'],
+        # Every MariaDB knows tx_read_only; 10.x does not know transaction_read_only
         'SELECT @@SESSION.tx_read_only, @@SESSION.max_statement_time',
         (1, 5.0),
         ['SET SESSION TRANSACTION READ WRITE', 'SET SESSION max_statement_time = DEFAULT'],
@@ -561,7 +589,8 @@ _READONLY_1 = ('1', 1, None, None)
         pytest.param(
             _WRITABLE, ('0', 0, None, '1.5'), {'readonly': 1, 'max_execution_time': 1.5}, False, id='max-fraction'
         ),
-        pytest.param(_WRITABLE, ('0', 0, '5', None), {'readonly': 1, 'max_execution_time': 5}, False, id='min-above'),
+        pytest.param(_WRITABLE, ('0', 0, '5', None), {'readonly': 1, 'max_execution_time': 5}, True, id='min-above'),
+        pytest.param(_WRITABLE, ('5', 0, '5', None), {'readonly': 1}, True, id='min-above-is-the-profile-limit'),
         pytest.param(_WRITABLE, ('1.5', 0, None, None), {'readonly': 1}, False, id='stricter-profile-limit'),
         pytest.param(_WRITABLE, ('0', 1, None, None), {'readonly': 1}, True, id='const-limit'),
     ],
@@ -569,7 +598,10 @@ _READONLY_1 = ('1', 1, None, None)
 def test_clickhouse_sends_only_the_settings_the_profile_allows(
     monkeypatch, readonly, max_execution_time, settings, warns
 ):
-    """A setting the user may not change fails every query, a looser limit would replace the profile's: neither is sent."""
+    """A setting the user may not change fails every query, a looser limit would replace the profile's: neither is sent.
+
+    A query that runs with no limit or a longer one than the node's gets one warning, also over several blocks.
+    """
     warnings = []
     monkeypatch.setattr('ai.common.database.db_global_base.warning', warnings.append)
     glb = _global(None)
@@ -577,10 +609,36 @@ def test_clickhouse_sends_only_the_settings_the_profile_allows(
 
     assert glb._clickhouse_read_settings(conn, 2) == settings
     assert glb._clickhouse_read_settings(conn, 2) == settings
-    assert conn.lookups == 1
+    assert conn.lookups == 2
     assert len(warnings) == (1 if warns else 0)
     if warns:
         assert 'max_execution_time' in warnings[0] and 'CHANGEABLE_IN_READONLY' in warnings[0]
+
+
+def test_clickhouse_settings_follow_a_profile_changed_while_the_node_runs(monkeypatch):
+    """A profile changed from readonly=1 to writable gets readonly=1 sent from the next block on."""
+    monkeypatch.setattr('ai.common.database.db_global_base.warning', lambda message: None)
+    glb = _global(None)
+    conn = _ProfileConnection(_READONLY_1, ('1', 1, None, None))
+    assert glb._clickhouse_read_settings(conn, 2) == {}
+
+    conn.rows = [('readonly', *_WRITABLE), ('max_execution_time', '1', 0, None, None)]
+    assert glb._clickhouse_read_settings(conn, 2) == {'readonly': 1}
+
+
+def test_clickhouse_writes_each_new_warning(monkeypatch):
+    """The warning is written again when the limit the query runs under changes, not for every block."""
+    warnings = []
+    monkeypatch.setattr('ai.common.database.db_global_base.warning', warnings.append)
+    glb = _global(None)
+    conn = _ProfileConnection(_READONLY_1, ('0', 1, None, None))
+    glb._clickhouse_read_settings(conn, 2)
+    glb._clickhouse_read_settings(conn, 2)
+    conn.rows = [('readonly', *_READONLY_1), ('max_execution_time', '300', 1, None, None)]
+    glb._clickhouse_read_settings(conn, 2)
+
+    assert len(warnings) == 2
+    assert 'unlimited' in warnings[0] and '300 s' in warnings[1]
 
 
 # Profiles of the live users: (SETTINGS clause, the time limit a query runs under, whether the node warns)
@@ -591,6 +649,7 @@ _LIVE_PROFILES = [
     pytest.param('max_execution_time MAX 1', 1, False, id='max-below'),
     pytest.param('max_execution_time = 1', 1, False, id='stricter-profile-limit'),
     pytest.param('max_execution_time = 0 CONST', 0, True, id='const-limit'),
+    pytest.param('max_execution_time MIN 5', 5, True, id='min-above'),
 ]
 
 
@@ -609,6 +668,8 @@ def test_live_clickhouse_profiles_run_read_only(monkeypatch, profile, limit, war
             conn.exec_driver_sql(
                 f"CREATE USER {user} IDENTIFIED WITH sha256_password BY '{password}' SETTINGS {profile}"
             )
+            # The user may write, so a refused write below is the read-only setting, not a missing grant
+            conn.exec_driver_sql(f'GRANT CREATE TABLE, INSERT ON {make_url(dsn).database}.* TO {user}')
     except Exception as e:  # noqa: BLE001 - each server says no in its own way
         admin.dispose()
         pytest.skip(f'The DSN user cannot create users: {e}')
@@ -620,7 +681,7 @@ def test_live_clickhouse_profiles_run_read_only(monkeypatch, profile, limit, war
         assert int(row[0]) >= 1
         assert float(row[1]) == limit
         assert len(warnings) == (1 if warns else 0)
-        with pytest.raises(Exception):  # noqa: B017 - the driver raises its own class
+        with pytest.raises(Exception, match='readonly mode'):
             with glb.read_only_connection() as conn:
                 conn.exec_driver_sql(f'CREATE TABLE {user}_t (id Int32) ENGINE = Memory')
     finally:

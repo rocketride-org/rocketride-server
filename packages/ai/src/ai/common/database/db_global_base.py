@@ -166,8 +166,8 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
     # product the LLM wrote must not hold a worker and a pooled connection indefinitely.
     READ_QUERY_TIMEOUT: int = 60
 
-    # ClickHouse only: the settings sent with each generated query, worked out from the user's profile on first use
-    _clickhouse_settings: Optional[Dict[str, float]] = None
+    # ClickHouse only: the last warning about the time limit, so the same one is not written for every query
+    _clickhouse_warning: Optional[str] = None
 
     # Serialises this node's schema re-reflection: `refresh_schema`'s full
     # table walk against `_insertData`'s lazy rebuild of `schema`, and either
@@ -712,7 +712,9 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
                 # The session, not one transaction: DDL commits implicitly and would start a read-write one
                 mariadb = conn.dialect.is_mariadb
                 setting, value = ('max_statement_time', timeout) if mariadb else ('max_execution_time', timeout * 1000)
-                read_only = 'tx_read_only' if mariadb else 'transaction_read_only'
+                # MariaDB before 11.1 knows only the old name; 11.1 deprecated it
+                old_mariadb = mariadb and conn.dialect.server_version_info < (11, 1)
+                read_only = 'tx_read_only' if old_mariadb else 'transaction_read_only'
                 was_read_only, was_limit = conn.exec_driver_sql(
                     f'SELECT @@SESSION.{read_only}, @@SESSION.{setting}'
                 ).one()
@@ -743,47 +745,51 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
         """Return the per-query settings that make a ClickHouse query read-only and time-limited.
 
         ClickHouse refuses the whole query when it carries a setting the user may not change, so the user's
-        settings are read once from ``system.settings`` (every user may read it) and only these are sent:
+        settings are read from ``system.settings`` (every user may read it) before each block, which keeps up
+        with a profile changed while the node runs, and only these are sent:
 
         - ``readonly=1`` when the profile allows writes. A profile with readonly 1 or 2 already refuses them,
           and readonly=2 refuses a change of ``readonly`` itself.
         - ``max_execution_time`` = ``timeout``, kept within the setting's MIN/MAX constraint (code 452
           otherwise), when the user may change it and the profile has no stricter limit. ``readonly=1``
           locks every setting (code 164) unless a ``CHANGEABLE_IN_READONLY`` constraint frees this one.
-          When the user may not change it and the profile allows longer queries, the profile's limit
-          applies and a warning says what to set.
+
+        When the limit the query runs under is none or longer than ``timeout`` (a locked setting, a MIN above
+        ``timeout``), a warning says what to change in the profile; the same warning is written once.
 
         Args:
-            conn: An open connection, used for the one lookup.
+            conn: An open connection, used for the lookup.
             timeout: The time limit in seconds.
 
         Returns:
-            The settings to send with each query.
+            The settings to send with the block's queries.
         """
-        if self._clickhouse_settings is None:
-            profile = {
-                row[0]: row[1:]
-                for row in conn.exec_driver_sql(
-                    "SELECT name, value, readonly, min, max FROM system.settings WHERE name IN ('readonly', 'max_execution_time')"
-                )
-            }
-            settings: Dict[str, float] = {} if float(profile['readonly'][0]) else {'readonly': 1}
-            value, locked, low, high = profile['max_execution_time']
-            current = float(value)
-            limit = min(max(float(timeout), float(low or 0)), float(high or 'inf'))
-            # A stricter limit in the profile stays: ours would loosen it
-            if not current or current > limit:
-                if int(locked):
-                    allowed = f'{value} s' if current else 'no limit'
-                    warning(
-                        f'This ClickHouse user may not change max_execution_time and its profile allows {allowed}, '
-                        f'so a generated query is not stopped after {timeout} s. Set max_execution_time in the '
-                        'profile, or allow changing it with a CHANGEABLE_IN_READONLY constraint.'
-                    )
-                else:
-                    settings['max_execution_time'] = int(limit) if limit.is_integer() else limit
-            self._clickhouse_settings = settings
-        return self._clickhouse_settings
+        profile = {
+            row[0]: row[1:]
+            for row in conn.exec_driver_sql(
+                "SELECT name, value, readonly, min, max FROM system.settings WHERE name IN ('readonly', 'max_execution_time')"
+            )
+        }
+        settings: Dict[str, float] = {} if float(profile['readonly'][0]) else {'readonly': 1}
+        value, locked, low, high = profile['max_execution_time']
+        current = float(value)
+        limit = min(max(float(timeout), float(low or 0)), float(high or 'inf'))
+        # A stricter limit in the profile stays: ours would loosen it
+        if (not current or current > limit) and not int(locked):
+            settings['max_execution_time'] = int(limit) if limit.is_integer() else limit
+        applied = settings.get('max_execution_time', current)
+        if not applied or applied > timeout:
+            runs_under = f'{applied:g} s' if applied else 'unlimited'
+            message = (
+                f'ClickHouse runs generated queries with max_execution_time {runs_under}, not {timeout} s: '
+                "this user's settings profile does not let the node set a lower limit. Lower "
+                'max_execution_time in the profile, and any MIN constraint on it, or let the user change it (a '
+                'CHANGEABLE_IN_READONLY constraint when the profile has readonly=1).'
+            )
+            if message != self._clickhouse_warning:
+                self._clickhouse_warning = message
+                warning(message)
+        return settings
 
     def _validateQuery(self, query: str) -> tuple[bool, str]:
         """Validate a SQL query using EXPLAIN without executing it.
