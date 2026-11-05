@@ -62,6 +62,7 @@ jobs:
     outputs:
       code: ${{ steps.filter.outputs.code }}
       container: ${{ steps.filter.outputs.container }}
+      tests: ${{ steps.scope.outputs.tests }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3
@@ -89,6 +90,32 @@ jobs:
               - 'packages/server/engine-lib/rocketlib-python/lib/depends.py'
               - 'packages/server/scripts/tasks.js'
               - '.github/workflows/_build.yaml'
+      # A file counts as `outside` unless it sits in a TypeScript-only area:
+      # with predicate-quantifier 'every' it must match all patterns, so it
+      # must match '**' and none of the exclusions. No Python or C++ suite
+      # reads these trees: the ai shell and app-build tests use their own fixtures.
+      - uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3
+        id: typescript
+        with:
+          predicate-quantifier: 'every'
+          filters: |
+            outside:
+              - '**'
+              - '!packages/shell/**'
+              - '!packages/client-typescript/**'
+              - '!apps/**'
+      - name: Pick the test suites
+        id: scope
+        env:
+          CODE: ${{ steps.filter.outputs.code }}
+          OUTSIDE: ${{ steps.typescript.outputs.outside }}
+        run: |
+          if [ "$CODE" = "true" ] && [ "$OUTSIDE" = "false" ]; then
+            echo "tests=shell:test shared:test client-typescript:test" >> "$GITHUB_OUTPUT"
+            echo "Only TypeScript areas changed: running the shell, shared and client-typescript suites. Pushes to develop still run every suite." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "tests=test" >> "$GITHUB_OUTPUT"
+          fi
 
   # ---------------------------------------------------------------------------
   #  Helm lint + schema validation (only on PRs touching deploy/helm/**)
@@ -161,6 +188,8 @@ jobs:
                 || startsWith(github.event.pull_request.base.ref, 'release/')
                 || contains(github.event.pull_request.labels.*.name, 'ci:test') }}
       container_test: ${{ github.event_name != 'pull_request' || needs.changes.outputs.container == 'true' }}
+      # `changes` only runs on pull requests; everything else gets every suite.
+      test_targets: ${{ needs.changes.outputs.tests || 'test' }}
     secrets: inherit
 
   # ---------------------------------------------------------------------------
