@@ -5,6 +5,9 @@
   ],
   "success": true,
   "deleted_count": 1,
+  "object_ids": [
+    "dcfda41e-afa5-5f8d-b1c7-860cc0e03189"
+  ],
   "removed_chunks": 4,
   "not_found": [],
   "kept_live": [],

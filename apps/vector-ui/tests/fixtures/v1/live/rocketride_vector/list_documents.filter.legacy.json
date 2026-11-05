@@ -25,6 +25,15 @@
   "counts_exact": true,
   "distinct": true,
   "sorted": true,
+  "documents": [
+    {
+      "object_id": "75b89d86-a64e-5143-bf50-55d4a7fd8cd2",
+      "parent": "C:/demo/handbooks/falcon_handbook.md",
+      "chunk_count": 6
+    }
+  ],
+  "offset": 0,
+  "has_more": false,
   "filter_applied": "server",
   "filter_ignored": [],
   "caveats": []

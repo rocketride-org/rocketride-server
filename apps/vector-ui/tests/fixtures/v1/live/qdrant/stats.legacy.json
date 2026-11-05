@@ -19,5 +19,6 @@
   "dimension": 384,
   "metric": "cosine",
   "computed_at": "<scrubbed>",
-  "counts_as_of": "<scrubbed>"
+  "counts_as_of": "<scrubbed>",
+  "document_count": 8
 }

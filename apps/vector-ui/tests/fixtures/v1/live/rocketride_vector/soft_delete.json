@@ -8,6 +8,7 @@
     "91ae15d4-3f6e-589f-bb81-72301f2ca1b6"
   ],
   "matched_chunks": 5,
+  "moved_chunks": 5,
   "not_found": [],
   "audit": {
     "action": "vector.soft_delete",
