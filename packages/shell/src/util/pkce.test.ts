@@ -44,10 +44,15 @@ async function staged(win: Record<string, unknown>, run: (data: Map<string, stri
 	const originals = ['window', 'sessionStorage'].map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)] as const);
 	Object.defineProperty(globalThis, 'window', { configurable: true, value: win });
 	Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, value: storage });
+	// The dev gate is a build-time constant: stage the dev build so this suite
+	// does not depend on the runner's NODE_ENV.
+	const originalNodeEnv = process.env.NODE_ENV;
+	process.env.NODE_ENV = 'development';
 	resetDevGateForTests();
 	try {
 		await run(data);
 	} finally {
+		process.env.NODE_ENV = originalNodeEnv;
 		resetDevGateForTests();
 		for (const [key, original] of originals) {
 			if (original) Object.defineProperty(globalThis, key, original);

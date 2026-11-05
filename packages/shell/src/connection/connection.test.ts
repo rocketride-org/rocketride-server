@@ -365,13 +365,19 @@ test('handleStoredTokenFailure keeps the network latch when the probe answers 20
 });
 
 /** Stage browser globals for one test and restore them afterwards; the dev gate recomputes from the staged window. */
-async function withGlobals(globals: Record<string, unknown>, run: () => void | Promise<void>): Promise<void> {
+async function withGlobals(globals: Record<string, unknown>, run: () => void | Promise<void>, opts: { nodeEnv?: string } = {}): Promise<void> {
 	const originals = Object.keys(globals).map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)] as const);
 	for (const [key, value] of Object.entries(globals)) Object.defineProperty(globalThis, key, { configurable: true, value });
+	// The dev gate is a BUILD-TIME constant (NODE_ENV), not something a URL can
+	// switch on: stage the build under test instead of inheriting the runner's
+	// NODE_ENV, so the suite means the same under `NODE_ENV=production`.
+	const originalNodeEnv = process.env.NODE_ENV;
+	process.env.NODE_ENV = opts.nodeEnv ?? 'development';
 	resetDevGateForTests();
 	try {
 		await run();
 	} finally {
+		process.env.NODE_ENV = originalNodeEnv;
 		resetDevGateForTests();
 		for (const [key, original] of originals) {
 			if (original) Object.defineProperty(globalThis, key, original);
@@ -838,6 +844,7 @@ test('auth providers sign out by removing the stored token from localStorage onl
 });
 
 test('token methods use frame-local memory in embedded dev shells', () => {
+	const originalNodeEnv = process.env.NODE_ENV;
 	const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
 	const originalLocalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
 	const originalSessionStorage = Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage');
@@ -852,13 +859,14 @@ test('token methods use frame-local memory in embedded dev shells', () => {
 	// top-level browsing context, so it cannot isolate panels either). The
 	// parent shares this page's origin — the web App Builder flavor — which
 	// is the case where the /apps cookie prime must be suppressed. The gate
-	// cache is reset so it recomputes from this staged environment (the test
-	// runner builds with NODE_ENV=production, so the URL flag is the live
-	// path).
+	// cache is reset so it recomputes from this staged environment (the dev
+	// build is staged explicitly: the gate is a build-time constant).
 	Object.defineProperty(globalThis, 'window', {
 		configurable: true,
 		value: { self: {}, top: {}, parent: { location: { origin: 'https://cloud.test' } }, location: { search: '?rrdev=1', origin: 'https://cloud.test' } },
 	});
+	// The gate is a build-time constant: stage the dev build, whatever the runner's NODE_ENV.
+	process.env.NODE_ENV = 'development';
 	resetDevGateForTests();
 	Object.defineProperty(globalThis, 'localStorage', {
 		configurable: true,
@@ -900,6 +908,7 @@ test('token methods use frame-local memory in embedded dev shells', () => {
 		// injected session must not replace their bundle credentials.
 		assert.deepEqual(fetchCalls, []);
 	} finally {
+		process.env.NODE_ENV = originalNodeEnv;
 		resetDevGateForTests();
 		if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
 		else delete (globalThis as { window?: Window }).window;
@@ -913,6 +922,7 @@ test('token methods use frame-local memory in embedded dev shells', () => {
 });
 
 test('saveToken primes the /apps cookie in a CROSS-origin embedded preview', () => {
+	const originalNodeEnv = process.env.NODE_ENV;
 	const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
 	const originalFetch = Object.getOwnPropertyDescriptor(globalThis, 'fetch');
 	const fetchCalls: string[] = [];
@@ -930,6 +940,8 @@ test('saveToken primes the /apps cookie in a CROSS-origin embedded preview', () 
 		configurable: true,
 		value: { self: {}, top: {}, parent: hostileParent, location: { search: '?rrdev=1', origin: 'http://localhost:3013' } },
 	});
+	// The gate is a build-time constant: stage the dev build, whatever the runner's NODE_ENV.
+	process.env.NODE_ENV = 'development';
 	resetDevGateForTests();
 	Object.defineProperty(globalThis, 'fetch', {
 		configurable: true,
@@ -943,6 +955,7 @@ test('saveToken primes the /apps cookie in a CROSS-origin embedded preview', () 
 		assert.equal(manager.loadToken(), 'rr_proxy-token');
 		assert.deepEqual(fetchCalls, ['/apps/session']);
 	} finally {
+		process.env.NODE_ENV = originalNodeEnv;
 		resetDevGateForTests();
 		if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
 		else delete (globalThis as { window?: Window }).window;
@@ -987,6 +1000,7 @@ test('saveToken primes the /apps cookie for real tabs', () => {
 });
 
 test('initialize ignores cross-context token churn in embedded dev shells', () => {
+	const originalNodeEnv = process.env.NODE_ENV;
 	const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
 	const originalAttach = RocketRideClient.prototype.attach;
 	const listeners = new Map<string, (event: StorageEvent) => void>();
@@ -1008,6 +1022,8 @@ test('initialize ignores cross-context token churn in embedded dev shells', () =
 			addEventListener: (type: string, listener: (event: StorageEvent) => void) => listeners.set(type, listener),
 		},
 	});
+	// The gate is a build-time constant: stage the dev build, whatever the runner's NODE_ENV.
+	process.env.NODE_ENV = 'development';
 	resetDevGateForTests();
 	RocketRideClient.prototype.attach = async () => {};
 
@@ -1026,6 +1042,7 @@ test('initialize ignores cross-context token churn in embedded dev shells', () =
 		assert.equal(tokenCleared, false);
 		assert.equal(reloaded, false);
 	} finally {
+		process.env.NODE_ENV = originalNodeEnv;
 		resetDevGateForTests();
 		RocketRideClient.prototype.attach = originalAttach;
 		if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
@@ -2261,8 +2278,6 @@ test('an EMPTY #rrtoken fragment (--no-auth) clears the remembered session, rese
  * `#rrtoken=` fragment and reports what the seeding step did.
  */
 async function bootWithFragment(opts: { origin: string; hash: string; nodeEnv?: string; framed?: boolean }): Promise<{ saved: string[]; cleared: number; stripped: string[]; warned: string[] }> {
-	const original = process.env.NODE_ENV;
-	process.env.NODE_ENV = opts.nodeEnv ?? 'development';
 	const stripped: string[] = [];
 	const warned: string[] = [];
 	const warn = console.warn;
@@ -2285,11 +2300,9 @@ async function bootWithFragment(opts: { origin: string; hash: string; nodeEnv?: 
 			manager.loadToken = () => saved[0] ?? '';
 			manager.connectForBootstrap = async () => ({ result: authenticatedResult, appId: '' });
 			await manager.bootstrap();
-		});
+		}, { nodeEnv: opts.nodeEnv });
 	} finally {
 		console.warn = warn;
-		process.env.NODE_ENV = original;
-		resetDevGateForTests();
 	}
 	return { saved, cleared, stripped, warned };
 }
@@ -2333,9 +2346,7 @@ test('#rrtoken is ignored by a FRAMED shell (previews inherit their embedder\'s 
 });
 
 test('the CloudAuthProvider relay redirects through the relay origin only in a top-level dev shell, never in a framed one', async () => {
-	const original = process.env.NODE_ENV;
-	process.env.NODE_ENV = 'development';
-	try {
+	{
 		for (const framed of [false, true]) {
 			const redirects: string[] = [];
 			const win: Record<string, unknown> = { location: { search: '?rrdev=1', pathname: '/', origin: 'http://localhost:3013', assign: (url: string) => redirects.push(url) } };
@@ -2355,8 +2366,5 @@ test('the CloudAuthProvider relay redirects through the relay origin only in a t
 				provider.dispose();
 			});
 		}
-	} finally {
-		process.env.NODE_ENV = original;
-		resetDevGateForTests();
 	}
 });

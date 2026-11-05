@@ -53,7 +53,9 @@ async function withBoot(search: string, session: ReturnType<typeof fakeSession>,
 	// The dev relay serves loopback dev servers: stage one unless a test says otherwise.
 	const win: Record<string, unknown> = { location: { search, pathname: '/', origin: opts.origin ?? 'http://localhost:5565' } };
 	const originalNodeEnv = process.env.NODE_ENV;
-	if (opts.nodeEnv) process.env.NODE_ENV = opts.nodeEnv;
+	// The gate is a build-time constant: stage the dev build unless a test says otherwise
+	// (so the suite is independent of the runner's NODE_ENV).
+	process.env.NODE_ENV = opts.nodeEnv ?? 'development';
 	win.self = win;
 	win.top = opts.framed ? {} : win;
 	const originals = (['window', 'sessionStorage'] as const).map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)] as const);
