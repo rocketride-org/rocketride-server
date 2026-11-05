@@ -158,7 +158,15 @@ def _providers_of(components: Iterable[Dict[str, Any]]) -> Set[str]:
 
 def place(pipeline: Dict[str, Any]) -> List[str]:
     """Unpack into nodes/ each node the pipeline names that the server does not carry; the nodes placed."""
-    names = sorted({_providers[p] for p in _providers_of(pipeline.get('components', [])) if p in _providers})
+    names = {_providers[p] for p in _providers_of(pipeline.get('components', [])) if p in _providers}
+    # With the served nodes they import (the index's `requires`), and those nodes' own
+    pending = list(names)
+    while pending:
+        for other in _nodes[pending.pop()].get('requires', []):
+            if other in _nodes and other not in names:
+                names.add(other)
+                pending.append(other)
+    names = sorted(names)
     with _unpacking:
         for name in names:
             sha256 = _nodes[name]['sha256']

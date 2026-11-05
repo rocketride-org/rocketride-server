@@ -8,6 +8,7 @@
 import hashlib
 import io
 import os
+import pathlib
 import time
 import zipfile
 
@@ -135,3 +136,8 @@ def test_a_package_unpacks_when_only_nodes_is_writable(nodes, monkeypatch):
 
     assert node_packages.digest_of(node_dir) == sha256
     assert os.listdir(nodes) == ['railnode']
+
+
+def test_depends_leaves_out_the_nodes_this_marks_as_unpacked():
+    depends = pathlib.Path(__file__).parents[5] / 'packages/server/engine-lib/rocketlib-python/lib/depends.py'
+    assert f"_UNPACKED_MARKER = '{node_packages.DIGEST_FILE}'" in depends.read_text(encoding='utf-8')

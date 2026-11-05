@@ -157,6 +157,23 @@ def test_a_served_node_the_index_names_in_capitals_is_found_in_lower_case(server
     assert node_store.place({'components': [{'provider': 'provider_x'}]}) == ['llm_x']
 
 
+def test_a_served_node_comes_with_the_served_nodes_it_imports(server, monkeypatch):
+    index = _index()
+    index['nodes']['llm_x']['requires'] = ['embed_y']
+    for name, requires in (('embed_y', ['embed_z']), ('embed_z', ['webhook'])):
+        protocol = f'{name}_p://'
+        index['nodes'][name] = {
+            'sha256': name,
+            'services': {'services.json': json.dumps({'protocol': protocol})},
+            'icons': {},
+            'requires': requires,
+        }
+    monkeypatch.setattr(node_store.account, 'node_index', lambda: index)
+    node_store.start()
+
+    assert node_store.place({'components': [{'provider': 'provider_x'}]}) == ['embed_y', 'embed_z', 'llm_x']
+
+
 def test_a_pipeline_that_names_no_served_node_unpacks_nothing(server):
     node_store.start()
 
