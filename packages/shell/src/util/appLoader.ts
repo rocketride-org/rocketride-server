@@ -35,7 +35,7 @@ import type { AppManifestEntry, AppDescriptor, AppConfiguration } from '../compo
 // modules reference each other strictly through function calls at runtime,
 // so the import cycle carries no module-evaluation (TDZ) risk.
 import { getAppVersionOverrides, versionedEntryUrl } from './versionOverride';
-import { devBootConfig, isAllowedDevRemoteEntry, isDevHooksEnabled, tabSession } from './devGate';
+import { devBootConfig, isDevHooksEnabled, normalizeDevRemoteEntry, tabSession } from './devGate';
 
 /**
  * Shape of an app entry from the server (rrext_public_probe or ConnectResult).
@@ -430,11 +430,17 @@ export function unregisterLocalApp(id: string): void {
 export function registerDevRemote(appId: string, moduleId: string, name: string, entry: string, meta?: LocalAppMeta): void {
 	// The one choke point for dev-remote entries: a remote entry is SCRIPT the
 	// shell executes with the user's session, so only a loopback dev server may
-	// supply one (the embedder's own rsbuild server), whoever the caller is.
-	if (!isAllowedDevRemoteEntry(entry)) {
+	// supply one (the embedder's own rsbuild server), whoever the caller is —
+	// the rrdev:registerRemote handler vets it too, but this is the guard that
+	// holds for every caller (the window API, the URL-convention
+	// self-registration, a future one). What was vetted is what gets
+	// registered: the canonical URL, never the raw input.
+	const vetted = normalizeDevRemoteEntry(entry);
+	if (vetted === null) {
 		console.error(`[appLoader] refusing dev remote "${moduleId}": entry ${JSON.stringify(entry)} is not a loopback dev-server URL`);
 		return;
 	}
+	entry = vetted;
 
 	// The wrong-id signal: an embedded preview receives ONE registration, for
 	// the app its URL is locked to. A registration for any other id means the
@@ -557,7 +563,8 @@ export function fallbackSkippedRemote(appId: string): boolean {
  */
 export function isDevPreviewPage(): boolean {
 	try {
-		// A production build is never a dev preview, whatever the URL says.
+		// A production build is never a dev preview, whatever the URL or the
+		// persisted tab session says.
 		if (!isDevHooksEnabled()) return false;
 		return tabSession().dev;
 	} catch {

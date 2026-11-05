@@ -24,9 +24,11 @@
 // The shell tsconfig deliberately keeps the browser surface node-free
 
 // Security regression suite for the dev-hook surface (rocketride-saas#1020):
-// a production build must never enable dev hooks from the URL or
-// sessionStorage, and the `rrdev:*` postMessage channel (session token,
-// remote entry) must answer only to the embedding App Builder.
+// a production build must never enable dev hooks from the URL, sessionStorage
+// or an injected boot config, and the `rrdev:*` postMessage channel (session
+// token, remote entry) must answer only to its two legitimate embedders: the
+// VS Code App Builder webview and the web App Builder (same-origin parent of
+// its preview iframe, same-origin opener of its debug tab).
 
 // The shell tsconfig deliberately keeps the browser surface node-free
 // ("types": []); this co-located node:test suite opts back in explicitly.
@@ -36,7 +38,7 @@ import assert from 'node:assert/strict';
 import test, { afterEach, mock } from 'node:test';
 import { handleEmbedderMessage, installDevHooks } from './devMode';
 import type { EmbedderMessageDeps } from './devMode';
-import { isAllowedDevRemoteEntry, isAllowedEmbedderOrigin, isDevHooksEnabled, isEmbeddedDevShell, resetDevGateForTests, tokenStore, trustedParentOrigin } from './devGate';
+import { isAllowedDevRemoteEntry, isAllowedEmbedderOrigin, isDevHooksEnabled, isEmbeddedDevShell, isTrustedEmbedderMessage, normalizeDevRemoteEntry, resetDevGateForTests, tokenStore, trustedParentOrigin } from './devGate';
 import { isDevPreviewPage } from './appLoader';
 
 const SHELL_ORIGIN = 'https://cloud.example.test';
@@ -45,43 +47,54 @@ const ORIGINAL_NODE_ENV = process.env.NODE_ENV;
 interface Page {
 	/** Messages the page registered listeners for. */
 	listeners: Array<(e: unknown) => void>;
-	/** The window the shell believes is its parent embedder. */
+	/** The window the shell believes is its parent embedder (the page itself when top-level). */
 	parent: object;
 	/** The window that opened this one (an attacker's page, in the hostile cases). */
 	opener: object;
+	/** A window that is NEITHER the parent nor the opener (a sibling/child frame). */
+	stranger: object;
+	/** The shell's own window. */
+	self: object;
 }
 
 /**
- * Stages a shell page: build mode, URL, sessionStorage flag and whether the
- * page is framed (self !== top) or a top-level tab.
+ * Stages a shell page: build mode, URL, sessionStorage flag, whether the
+ * page is framed (self !== top) or a top-level tab, its own origin, and — for
+ * a framed page — whether the parent shares that origin (a cross-origin
+ * parent's `location` is unreadable, which is how the browser reports it).
  */
-function stagePage(opts: { nodeEnv: 'production' | 'development'; search?: string; sessionDev?: boolean; framed: boolean; shellOrigin?: string }): Page {
+function stagePage(opts: { nodeEnv: 'production' | 'development'; search?: string; sessionDev?: boolean; framed: boolean; shellOrigin?: string; parentSameOrigin?: boolean }): Page {
 	process.env.NODE_ENV = opts.nodeEnv;
 	resetDevGateForTests();
 	const listeners: Array<(e: unknown) => void> = [];
+	const shellOrigin = opts.shellOrigin ?? SHELL_ORIGIN;
 	const self = {};
-	const parent = {};
+	const parent: Record<string, unknown> = {};
+	if (opts.framed) {
+		if (opts.parentSameOrigin) parent.location = { origin: shellOrigin };
+		else Object.defineProperty(parent, 'location', { get: () => { throw new Error('SecurityError: cross-origin parent'); } });
+	}
 	const opener = {};
 	const win = {
 		self,
 		top: opts.framed ? parent : self,
 		parent: opts.framed ? parent : self,
 		opener,
-		location: { search: opts.search ?? '', origin: opts.shellOrigin ?? SHELL_ORIGIN, pathname: '/' },
+		location: { search: opts.search ?? '', origin: shellOrigin, pathname: '/' },
 		addEventListener: (type: string, listener: (e: unknown) => void) => {
 			if (type === 'message') listeners.push(listener);
 		},
 	};
 	Reflect.set(globalThis, 'window', win);
 	Reflect.set(globalThis, 'document', { referrer: '' });
-	const store = new Map<string, string>(opts.sessionDev ? [['rr:dev', '1']] : []);
+	const store = new Map<string, string>(opts.sessionDev ? [['rr:dev', '1'], ['rr:tab', JSON.stringify({ dev: true, appId: 'org.victim', authOrigin: '' })]] : []);
 	Reflect.set(globalThis, 'sessionStorage', {
 		getItem: (k: string) => store.get(k) ?? null,
 		setItem: (k: string, v: string) => void store.set(k, v),
 		removeItem: (k: string) => void store.delete(k),
 	});
 	Reflect.set(globalThis, 'localStorage', { __marker: 'localStorage' });
-	return { listeners, parent: parent === win.self ? {} : parent, opener };
+	return { listeners, parent: opts.framed ? parent : {}, opener, stranger: {}, self };
 }
 
 /** Recording collaborators for handleEmbedderMessage. */
@@ -122,7 +135,7 @@ test('a production build ignores ?rrdev=1: the gate is closed and no hooks are i
 	assert.equal(tokenStore(), localStorage, 'the token still lives in the shared localStorage slot');
 });
 
-test('a production build ignores the sessionStorage rr:dev flag (what the flavor picker persists)', async () => {
+test('a production build ignores the persisted tab session and rr:dev flag (what the flavor picker persists)', async () => {
 	const page = stagePage({ nodeEnv: 'production', sessionDev: true, framed: true });
 	assert.equal(isDevHooksEnabled(), false);
 	assert.equal(isEmbeddedDevShell(), false);
@@ -132,12 +145,39 @@ test('a production build ignores the sessionStorage rr:dev flag (what the flavor
 	assert.equal(Reflect.get(window, '__rrShellDev'), undefined);
 });
 
+test('a production build ignores an injected __rrDevBoot (the web App Builder\'s authored-page signal)', async () => {
+	const page = stagePage({ nodeEnv: 'production', framed: true });
+	Reflect.set(window, '__rrDevBoot', { appId: 'org.victim' });
+	assert.equal(isDevHooksEnabled(), false, 'an injected boot config is a page-supplied fact, not a capability');
+	assert.equal(isEmbeddedDevShell(), false);
+	await installDevHooks();
+	assert.equal(page.listeners.length, 0);
+	assert.equal(Reflect.get(window, '__rrShellDev'), undefined);
+});
+
+test('the production gate is constant: every URL / storage / boot-config combination leaves it closed', () => {
+	for (const search of ['', '?rrdev=1', '?rrdev=1&appid=org.victim&rrauthorigin=https%3A%2F%2Fattacker.example', '?RRDEV=1', '?rrdev=true']) {
+		for (const sessionDev of [false, true]) {
+			for (const framed of [false, true]) {
+				for (const bootConfig of [false, true]) {
+					stagePage({ nodeEnv: 'production', search, sessionDev, framed });
+					if (bootConfig) Reflect.set(window, '__rrDevBoot', { appId: 'org.victim' });
+					const label = JSON.stringify({ search, sessionDev, framed, bootConfig });
+					assert.equal(isDevHooksEnabled(), false, label);
+				}
+			}
+		}
+	}
+});
+
 test('a production build refuses rrdev messages even from a well-formed embedder', () => {
-	const page = stagePage({ nodeEnv: 'production', search: '?rrdev=1', sessionDev: true, framed: true });
+	const page = stagePage({ nodeEnv: 'production', search: '?rrdev=1', sessionDev: true, framed: true, parentSameOrigin: true });
 	const { deps, calls } = recordingDeps();
 	mock.method(console, 'warn', () => {});
-	handleEmbedderMessage({ data: { type: 'rrdev:auth', token: 'attacker-token' }, origin: 'vscode-webview://abc', source: page.parent as MessageEventSource }, deps);
-	handleEmbedderMessage({ data: { type: 'rrdev:registerRemote', appId: 'a.b', moduleId: 'a_b', entry: 'http://localhost:3001/remoteEntry.js' }, origin: 'vscode-webview://abc', source: page.parent as MessageEventSource }, deps);
+	for (const origin of ['vscode-webview://abc', SHELL_ORIGIN]) {
+		handleEmbedderMessage({ data: { type: 'rrdev:auth', token: 'attacker-token' }, origin, source: page.parent as MessageEventSource }, deps);
+		handleEmbedderMessage({ data: { type: 'rrdev:registerRemote', appId: 'a.b', moduleId: 'a_b', entry: 'http://localhost:3001/remoteEntry.js' }, origin, source: page.parent as MessageEventSource }, deps);
+	}
 	assert.deepEqual(calls, { register: [], saved: [], cleared: 0, reloads: 0 });
 });
 
@@ -148,89 +188,170 @@ test('a development build keeps the gate open without any URL flag', () => {
 });
 
 // ---------------------------------------------------------------------------
-// The message channel: only the embedding App Builder may drive it
+// The message channel: only the two real embedders may drive it
 // ---------------------------------------------------------------------------
 
 const AUTH = { type: 'rrdev:auth', token: 'attacker-token' };
 const REGISTER = { type: 'rrdev:registerRemote', appId: 'org.app', moduleId: 'org_app', name: 'App', entry: 'http://localhost:3001/remoteEntry.js' };
+const NOTHING = { register: [], saved: [], cleared: 0, reloads: 0 };
+
+/** Delivers `data` as if the browser had dispatched it with this origin/source. */
+const send = (deps: EmbedderMessageDeps, data: unknown, origin: string, source: unknown): void => handleEmbedderMessage({ data, origin, source: source as MessageEventSource | null }, deps);
 
 test('messages from an unexpected origin are ignored, even from the parent window', () => {
 	const page = stagePage({ nodeEnv: 'development', framed: true });
 	const { deps, calls } = recordingDeps('user-token');
 	mock.method(console, 'warn', () => {});
 	for (const origin of ['https://attacker.example', 'https://evil.test', 'null', '', 'http://localhost.attacker.example', 'http://127.0.0.1.attacker.example', 'file://', 'https://cloud.example.test.attacker.example']) {
-		handleEmbedderMessage({ data: AUTH, origin, source: page.parent as MessageEventSource }, deps);
-		handleEmbedderMessage({ data: REGISTER, origin, source: page.parent as MessageEventSource }, deps);
+		send(deps, AUTH, origin, page.parent);
+		send(deps, REGISTER, origin, page.parent);
 	}
-	assert.deepEqual(calls, { register: [], saved: [], cleared: 0, reloads: 0 });
+	assert.deepEqual(calls, NOTHING);
 });
 
-test('a hostile window.opener is ignored even when it claims an allowed origin', () => {
+test('a hostile window.opener is ignored (the attacker window.open()s the shell)', () => {
 	const page = stagePage({ nodeEnv: 'development', framed: false });
 	const { deps, calls } = recordingDeps('user-token');
 	mock.method(console, 'warn', () => {});
-	// The attacker opened this tab (window.open): it is the opener, never the parent.
-	handleEmbedderMessage({ data: AUTH, origin: 'https://attacker.example', source: page.opener as MessageEventSource }, deps);
-	handleEmbedderMessage({ data: REGISTER, origin: 'https://attacker.example', source: page.opener as MessageEventSource }, deps);
-	// Spoofing an allowed origin string does not help: the source is not the parent.
-	handleEmbedderMessage({ data: AUTH, origin: SHELL_ORIGIN, source: page.opener as MessageEventSource }, deps);
-	assert.deepEqual(calls, { register: [], saved: [], cleared: 0, reloads: 0 });
+	// The attacker opened this tab (window.open): it is the opener, and its origin is its own.
+	for (const origin of ['https://attacker.example', 'null', '', 'http://localhost:5173', 'vscode-webview://abc']) {
+		send(deps, AUTH, origin, page.opener);
+		send(deps, { type: 'rrdev:auth', token: '' }, origin, page.opener);
+		send(deps, REGISTER, origin, page.opener);
+	}
+	assert.deepEqual(calls, NOTHING);
 });
 
 test('a hostile framing parent (foreign origin) is ignored', () => {
 	const page = stagePage({ nodeEnv: 'development', framed: true });
 	const { deps, calls } = recordingDeps('user-token');
 	mock.method(console, 'warn', () => {});
-	handleEmbedderMessage({ data: AUTH, origin: 'https://attacker.example', source: page.parent as MessageEventSource }, deps);
-	handleEmbedderMessage({ data: REGISTER, origin: 'https://attacker.example', source: page.parent as MessageEventSource }, deps);
-	assert.deepEqual(calls, { register: [], saved: [], cleared: 0, reloads: 0 });
+	send(deps, AUTH, 'https://attacker.example', page.parent);
+	send(deps, REGISTER, 'https://attacker.example', page.parent);
+	assert.deepEqual(calls, NOTHING);
 });
 
 test('a sibling or child frame (not the parent) is ignored even from an allowed origin', () => {
-	stagePage({ nodeEnv: 'development', framed: true });
+	const page = stagePage({ nodeEnv: 'development', framed: true, parentSameOrigin: true });
 	const { deps, calls } = recordingDeps('user-token');
 	mock.method(console, 'warn', () => {});
-	handleEmbedderMessage({ data: AUTH, origin: SHELL_ORIGIN, source: {} as MessageEventSource }, deps);
-	handleEmbedderMessage({ data: AUTH, origin: SHELL_ORIGIN, source: null }, deps);
-	assert.deepEqual(calls, { register: [], saved: [], cleared: 0, reloads: 0 });
+	for (const origin of [SHELL_ORIGIN, 'vscode-webview://abc']) {
+		send(deps, AUTH, origin, page.stranger);
+		send(deps, AUTH, origin, null);
+	}
+	// Framed shells have no opener relation at all.
+	send(deps, AUTH, SHELL_ORIGIN, page.opener);
+	assert.deepEqual(calls, NOTHING);
 });
 
-test('rrdev:auth and rrdev:registerRemote are ignored by a top-level (not embedded) shell', () => {
+test('a top-level shell has no parent: self-posts and strangers are ignored', () => {
 	const page = stagePage({ nodeEnv: 'development', framed: false });
 	const { deps, calls } = recordingDeps('user-token');
 	mock.method(console, 'warn', () => {});
-	// Top level: window.parent === window itself; a same-origin sender is still no embedder.
-	const self = Reflect.get(window, 'self');
-	handleEmbedderMessage({ data: AUTH, origin: SHELL_ORIGIN, source: self }, deps);
-	handleEmbedderMessage({ data: REGISTER, origin: SHELL_ORIGIN, source: self }, deps);
-	handleEmbedderMessage({ data: AUTH, origin: 'http://localhost:5173', source: page.opener as MessageEventSource }, deps);
-	assert.deepEqual(calls, { register: [], saved: [], cleared: 0, reloads: 0 });
+	// Top level: window.parent === window itself; a same-origin self-post is still no embedder.
+	send(deps, AUTH, SHELL_ORIGIN, page.self);
+	send(deps, REGISTER, SHELL_ORIGIN, page.self);
+	send(deps, AUTH, SHELL_ORIGIN, page.stranger);
+	send(deps, AUTH, SHELL_ORIGIN, null);
+	assert.deepEqual(calls, NOTHING);
 });
 
 test('registerRemote entries outside the loopback dev servers are rejected', () => {
 	const page = stagePage({ nodeEnv: 'development', framed: true });
 	const { deps, calls } = recordingDeps();
 	mock.method(console, 'warn', () => {});
-	for (const entry of ['https://attacker.example/remoteEntry.js', '//attacker.example/remoteEntry.js', 'javascript:alert(1)', 'data:text/javascript,alert(1)', 'http://localhost.attacker.example/remoteEntry.js', 'http://localhost@attacker.example/remoteEntry.js', 'http://user:pw@localhost:3001/remoteEntry.js', '/remoteEntry.js', 'remoteEntry.js', 'ws://localhost:3001/x', 'http://10.0.0.5:3001/remoteEntry.js']) {
-		handleEmbedderMessage({ data: { ...REGISTER, entry }, origin: 'vscode-webview://abc', source: page.parent as MessageEventSource }, deps);
+	for (const entry of ['https://attacker.example/remoteEntry.js', '//attacker.example/remoteEntry.js', 'javascript:alert(1)', 'data:text/javascript,alert(1)', 'http://localhost.attacker.example/remoteEntry.js', 'http://localhost@attacker.example/remoteEntry.js', 'http://user:pw@localhost:3001/remoteEntry.js', '/remoteEntry.js', 'remoteEntry.js', 'ws://localhost:3001/x', 'http://10.0.0.5:3001/remoteEntry.js', 'blob:http://localhost:3001/0000', 'file:///etc/passwd']) {
+		send(deps, { ...REGISTER, entry }, 'vscode-webview://abc', page.parent);
 	}
 	assert.deepEqual(calls.register, [], 'the embedder-trusted channel still refuses non-dev-server entries');
 });
 
-test('the legitimate preview still works: the VS Code webview embeds a cloud-served shell', () => {
-	const page = stagePage({ nodeEnv: 'development', framed: true });
-	const { deps, calls } = recordingDeps();
-	handleEmbedderMessage({ data: REGISTER, origin: 'vscode-webview://0123abcd-ef01', source: page.parent as MessageEventSource }, deps);
-	assert.deepEqual(calls.register, [['org.app', 'org_app', 'App', 'http://localhost:3001/remoteEntry.js']]);
+test('the VS Code preview works: a vscode-webview parent drives a loopback dev-proxy shell and a cloud-served one', () => {
+	for (const shellOrigin of ['http://localhost:3013', SHELL_ORIGIN]) {
+		const page = stagePage({ nodeEnv: 'development', framed: true, shellOrigin });
+		const { deps, calls } = recordingDeps();
+		const entry = 'http://localhost:3013/apps/org.app/dev/remoteEntry.js?t=1730000000000';
+		send(deps, { ...REGISTER, entry }, 'vscode-webview://0123abcd-ef01', page.parent);
+		assert.deepEqual(calls.register, [['org.app', 'org_app', 'App', entry]], shellOrigin);
 
-	// rrdev:auth: adopt a token, then clear it (post-boot changes reboot the page once).
-	handleEmbedderMessage({ data: { type: 'rrdev:auth', token: 'host-token' }, origin: 'vscode-webview://0123abcd-ef01', source: page.parent as MessageEventSource }, deps);
-	assert.deepEqual(calls.saved, ['host-token']);
-	assert.equal(calls.reloads, 1);
-	handleEmbedderMessage({ data: { type: 'rrdev:auth', token: 'host-token' }, origin: 'vscode-webview://0123abcd-ef01', source: page.parent as MessageEventSource }, deps);
+		// rrdev:auth: adopt a token, then clear it (post-boot changes reboot the page once).
+		send(deps, { type: 'rrdev:auth', token: 'host-token' }, 'vscode-webview://0123abcd-ef01', page.parent);
+		assert.deepEqual(calls.saved, ['host-token']);
+		assert.equal(calls.reloads, 1);
+		send(deps, { type: 'rrdev:auth', token: 'host-token' }, 'vscode-webview://0123abcd-ef01', page.parent);
+		assert.equal(calls.reloads, 1, 're-answering the same state is a no-op');
+		send(deps, { type: 'rrdev:auth', token: '' }, 'vscode-webview://0123abcd-ef01', page.parent);
+		assert.equal(calls.cleared, 1);
+	}
+});
+
+test('the web App Builder preview works: the same-origin parent answers rrdev:auth (grant, no-op re-answer, revoke)', () => {
+	// The preview is a blob: page minted by the builder, so it shares the builder's origin.
+	const page = stagePage({ nodeEnv: 'development', framed: true, parentSameOrigin: true });
+	const { deps, calls } = recordingDeps();
+	send(deps, { type: 'rrdev:auth', token: 'builder-token' }, SHELL_ORIGIN, page.parent);
+	assert.deepEqual(calls.saved, ['builder-token']);
+	assert.equal(calls.reloads, 1, 'a post-boot answer reboots into the new state once');
+	send(deps, { type: 'rrdev:auth', token: 'builder-token' }, SHELL_ORIGIN, page.parent);
 	assert.equal(calls.reloads, 1, 're-answering the same state is a no-op');
-	handleEmbedderMessage({ data: { type: 'rrdev:auth', token: '' }, origin: 'vscode-webview://0123abcd-ef01', source: page.parent as MessageEventSource }, deps);
+	send(deps, { type: 'rrdev:auth', token: '' }, SHELL_ORIGIN, page.parent);
+	assert.equal(calls.cleared, 1, 'Inherit Auth off: the empty answer revokes');
+});
+
+test('the web App Builder debug tab works: the same-origin OPENER of a top-level shell answers rrdev:auth', () => {
+	const page = stagePage({ nodeEnv: 'development', framed: false });
+	assert.equal(isEmbeddedDevShell(), false, 'the debug tab is a top-level window');
+	const { deps, calls } = recordingDeps();
+	send(deps, { type: 'rrdev:auth', token: 'builder-token' }, SHELL_ORIGIN, page.opener);
+	assert.deepEqual(calls.saved, ['builder-token']);
+	send(deps, { type: 'rrdev:auth', token: '' }, SHELL_ORIGIN, page.opener);
 	assert.equal(calls.cleared, 1);
+});
+
+test('the same-origin allowance is exactly the shell\'s own origin: lookalikes, other schemes/ports and paths are refused', () => {
+	for (const framed of [true, false]) {
+		const page = stagePage({ nodeEnv: 'development', framed, parentSameOrigin: true });
+		const { deps, calls } = recordingDeps('user-token');
+		mock.method(console, 'warn', () => {});
+		const source = framed ? page.parent : page.opener;
+		for (const origin of ['https://cloud.example.test.evil.test', 'https://evil-cloud.example.test', 'https://sub.cloud.example.test', 'http://cloud.example.test', 'https://cloud.example.test:8443', 'https://cloud.example.test/', 'https://cloud.example.test/path', 'https://cloud.example.test@evil.test', 'HTTPS://CLOUD.EXAMPLE.TEST.evil.test', 'null', '', 'blob:https://cloud.example.test/uuid', 'about:blank', 'data:text/html,x']) {
+			send(deps, AUTH, origin, source);
+			send(deps, REGISTER, origin, source);
+		}
+		assert.deepEqual(calls, NOTHING, `framed=${framed}`);
+		mock.restoreAll();
+	}
+});
+
+test('an opaque shell origin never reads as "same origin" with an opaque sender', () => {
+	// A sandboxed / data: shell reports location.origin === 'null', and so does
+	// every sandboxed sender: 'null' === 'null' must not authorise anything.
+	for (const framed of [true, false]) {
+		const page = stagePage({ nodeEnv: 'development', framed, shellOrigin: 'null' });
+		const { deps, calls } = recordingDeps('user-token');
+		mock.method(console, 'warn', () => {});
+		send(deps, AUTH, 'null', framed ? page.parent : page.opener);
+		send(deps, REGISTER, 'null', framed ? page.parent : page.opener);
+		assert.deepEqual(calls, NOTHING, `framed=${framed}`);
+		mock.restoreAll();
+	}
+});
+
+test('the OPENER relation accepts only the shell\'s own origin, never the other embedder origins', () => {
+	const cloud = stagePage({ nodeEnv: 'development', framed: false });
+	const a = recordingDeps('user-token');
+	mock.method(console, 'warn', () => {});
+	send(a.deps, AUTH, 'vscode-webview://abc', cloud.opener);
+	send(a.deps, AUTH, 'http://localhost:5173', cloud.opener);
+	assert.deepEqual(a.calls, NOTHING);
+	mock.restoreAll();
+	// Even a loopback-served shell: a loopback opener on another port is not its debug window.
+	const local = stagePage({ nodeEnv: 'development', framed: false, shellOrigin: 'http://localhost:5565' });
+	const b = recordingDeps('user-token');
+	mock.method(console, 'warn', () => {});
+	send(b.deps, AUTH, 'http://localhost:5173', local.opener);
+	send(b.deps, AUTH, 'http://127.0.0.1:5565', local.opener);
+	assert.deepEqual(b.calls, NOTHING);
 });
 
 test('a loopback embedder is accepted only by a loopback-served shell', () => {
@@ -238,7 +359,7 @@ test('a loopback embedder is accepted only by a loopback-served shell', () => {
 	const local = stagePage({ nodeEnv: 'development', framed: true, shellOrigin: 'http://localhost:5565' });
 	const a = recordingDeps();
 	for (const origin of ['http://localhost:5173', 'http://127.0.0.1:8080', 'http://[::1]:3000']) {
-		handleEmbedderMessage({ data: REGISTER, origin, source: local.parent as MessageEventSource }, a.deps);
+		send(a.deps, REGISTER, origin, local.parent);
 	}
 	assert.equal(a.calls.register.length, 3);
 
@@ -246,39 +367,103 @@ test('a loopback embedder is accepted only by a loopback-served shell', () => {
 	const cloud = stagePage({ nodeEnv: 'development', framed: true });
 	const b = recordingDeps('user-token');
 	mock.method(console, 'warn', () => {});
-	handleEmbedderMessage({ data: AUTH, origin: 'http://localhost:5173', source: cloud.parent as MessageEventSource }, b.deps);
-	handleEmbedderMessage({ data: REGISTER, origin: 'http://localhost:5173', source: cloud.parent as MessageEventSource }, b.deps);
-	assert.deepEqual(b.calls, { register: [], saved: [], cleared: 0, reloads: 0 });
-});
+	send(b.deps, AUTH, 'http://localhost:5173', cloud.parent);
+	send(b.deps, REGISTER, 'http://localhost:5173', cloud.parent);
+	assert.deepEqual(b.calls, NOTHING);
 
-test('the shell\'s own origin is not an embedder (no same-origin sender exists)', () => {
-	const page = stagePage({ nodeEnv: 'development', framed: true });
-	const { deps, calls } = recordingDeps('user-token');
-	mock.method(console, 'warn', () => {});
-	handleEmbedderMessage({ data: AUTH, origin: SHELL_ORIGIN, source: page.parent as MessageEventSource }, deps);
-	assert.deepEqual(calls, { register: [], saved: [], cleared: 0, reloads: 0 });
+	// A loopback shell is still not trusting lookalike hosts.
+	const local2 = stagePage({ nodeEnv: 'development', framed: true, shellOrigin: 'http://localhost:5565' });
+	const c = recordingDeps('user-token');
+	for (const origin of ['http://localhost.evil.test:5173', 'http://127.0.0.1.evil.test', 'https://evil.test']) {
+		send(c.deps, AUTH, origin, local2.parent);
+	}
+	assert.deepEqual(c.calls, NOTHING);
 });
 
 test('unrelated window messages are ignored silently', () => {
 	stagePage({ nodeEnv: 'development', framed: true });
 	const { deps, calls } = recordingDeps();
 	const warn = mock.method(console, 'warn', () => {});
-	handleEmbedderMessage({ data: { type: 'something-else' }, origin: 'https://attacker.example', source: null }, deps);
-	handleEmbedderMessage({ data: 'text', origin: 'https://attacker.example', source: null }, deps);
-	handleEmbedderMessage({ data: undefined, origin: 'https://attacker.example', source: null }, deps);
+	send(deps, { type: 'something-else' }, 'https://attacker.example', null);
+	send(deps, 'text', 'https://attacker.example', null);
+	send(deps, undefined, 'https://attacker.example', null);
 	assert.equal(warn.mock.callCount(), 0);
-	assert.deepEqual(calls, { register: [], saved: [], cleared: 0, reloads: 0 });
+	assert.deepEqual(calls, NOTHING);
 });
+
+// ---------------------------------------------------------------------------
+// The policy table — one row per (shell served from, window relation, sender
+// origin). Each row is ONE named test so a failure names the row.
+// ---------------------------------------------------------------------------
+
+interface PolicyRow {
+	id: string;
+	/** What the row is. */
+	what: string;
+	shell: string;
+	/** 'parent' (framed shell), 'opener' (top-level shell), or a non-embedder window. */
+	relation: 'parent' | 'opener' | 'stranger' | 'self';
+	sender: string;
+	allow: boolean;
+	nodeEnv?: 'production' | 'development';
+}
+
+const CLOUD = SHELL_ORIGIN;
+const LOCAL = 'http://localhost:5565';
+const POLICY: PolicyRow[] = [
+	{ id: 'P1', what: 'VS Code App Builder -> cloud-served shell iframe', shell: CLOUD, relation: 'parent', sender: 'vscode-webview://abc-123', allow: true },
+	{ id: 'P2', what: 'VS Code App Builder -> loopback dev-proxy shell iframe', shell: 'http://localhost:3013', relation: 'parent', sender: 'vscode-webview://abc-123', allow: true },
+	{ id: 'P3', what: 'web App Builder -> same-origin blob preview iframe', shell: CLOUD, relation: 'parent', sender: CLOUD, allow: true },
+	{ id: 'P4', what: 'web App Builder -> same-origin debug tab (opener)', shell: CLOUD, relation: 'opener', sender: CLOUD, allow: true },
+	{ id: 'P5', what: 'foreign page frames the shell', shell: CLOUD, relation: 'parent', sender: 'https://attacker.example', allow: false },
+	{ id: 'P6', what: 'foreign page window.open()s the shell', shell: CLOUD, relation: 'opener', sender: 'https://attacker.example', allow: false },
+	{ id: 'P7', what: 'a vscode-webview opener (only a PARENT may be one)', shell: CLOUD, relation: 'opener', sender: 'vscode-webview://abc-123', allow: false },
+	{ id: 'P8', what: 'loopback page frames a CLOUD-served shell', shell: CLOUD, relation: 'parent', sender: 'http://localhost:5173', allow: false },
+	{ id: 'P9', what: 'loopback page window.open()s a CLOUD-served shell', shell: CLOUD, relation: 'opener', sender: 'http://localhost:5173', allow: false },
+	{ id: 'P10', what: 'loopback page frames a loopback-served shell (no sender in this repo; retained for third-party dev embedders)', shell: LOCAL, relation: 'parent', sender: 'http://localhost:5173', allow: true },
+	{ id: 'P11', what: 'loopback page window.open()s a loopback-served shell', shell: LOCAL, relation: 'opener', sender: 'http://localhost:5173', allow: false },
+	{ id: 'P12', what: 'sandboxed / opaque sender frames the shell', shell: CLOUD, relation: 'parent', sender: 'null', allow: false },
+	{ id: 'P13', what: 'sandboxed / opaque sender opens the shell', shell: CLOUD, relation: 'opener', sender: 'null', allow: false },
+	{ id: 'P14', what: 'same-origin sibling/child frame (not the parent)', shell: CLOUD, relation: 'stranger', sender: CLOUD, allow: false },
+	{ id: 'P15', what: 'the shell posting to itself (top level)', shell: CLOUD, relation: 'self', sender: CLOUD, allow: false },
+	{ id: 'P16', what: 'origin lookalike of the shell frames it', shell: CLOUD, relation: 'parent', sender: 'https://cloud.example.test.evil.test', allow: false },
+	{ id: 'P17', what: 'origin lookalike of loopback frames a loopback shell', shell: LOCAL, relation: 'parent', sender: 'http://localhost.evil.test:5173', allow: false },
+	{ id: 'P18', what: 'lookalike of the vscode-webview scheme frames the shell', shell: CLOUD, relation: 'parent', sender: 'https://vscode-webview.evil.test', allow: false },
+	{ id: 'P19', what: 'vscode-webview opener-style origin with a path', shell: CLOUD, relation: 'parent', sender: 'vscode-webview://abc-123/index.html', allow: false },
+	{ id: 'P20', what: 'production build: the VS Code parent', shell: CLOUD, relation: 'parent', sender: 'vscode-webview://abc-123', allow: false, nodeEnv: 'production' },
+	{ id: 'P21', what: 'production build: the same-origin parent', shell: CLOUD, relation: 'parent', sender: CLOUD, allow: false, nodeEnv: 'production' },
+	{ id: 'P22', what: 'production build: the same-origin opener', shell: CLOUD, relation: 'opener', sender: CLOUD, allow: false, nodeEnv: 'production' },
+];
+
+for (const row of POLICY) {
+	test(`policy ${row.id}: ${row.what} -> ${row.allow ? 'ACCEPTED' : 'DENIED'}`, () => {
+		const framed = row.relation === 'parent' || row.relation === 'stranger';
+		const page = stagePage({ nodeEnv: row.nodeEnv ?? 'development', framed, shellOrigin: row.shell, parentSameOrigin: row.sender === row.shell });
+		const source = { parent: page.parent, opener: page.opener, stranger: page.stranger, self: page.self }[row.relation];
+		assert.equal(isTrustedEmbedderMessage({ origin: row.sender, source }), row.allow, `${row.id} ${row.what}`);
+	});
+}
 
 // ---------------------------------------------------------------------------
 // The predicates
 // ---------------------------------------------------------------------------
 
-test('isAllowedEmbedderOrigin accepts vscode-webview anywhere and loopback only for a loopback shell', () => {
+test('isAllowedEmbedderOrigin: vscode-webview anywhere, the shell\'s own origin, loopback only for a loopback shell', () => {
 	const LOCAL_SHELL = 'http://localhost:5565';
-	const bad = ['', 'null', 'https://attacker.example', 'http://localhost.attacker.example', 'http://127.0.0.1.attacker.example', 'vscode-webview://', 'vscode-webview://abc/extra', 'http://localhost:5173/path', 'ftp://localhost', 'javascript:alert(1)', 'not a url', 'http://10.0.0.1', SHELL_ORIGIN];
+	const bad = ['', 'null', 'https://attacker.example', 'http://localhost.attacker.example', 'http://127.0.0.1.attacker.example', 'vscode-webview://', 'vscode-webview://abc/extra', 'vscode-webviewx://abc', 'vscode-webview.evil.test', 'http://localhost:5173/path', 'ftp://localhost', 'javascript:alert(1)', 'not a url', 'http://10.0.0.1', 'https://cloud.example.test.evil.test', 'http://cloud.example.test', 'https://cloud.example.test:8443', 'https://cloud.example.test/'];
 	for (const shell of [SHELL_ORIGIN, LOCAL_SHELL]) assert.equal(isAllowedEmbedderOrigin('vscode-webview://abc-123', shell), true, shell);
-	for (const shell of [SHELL_ORIGIN, LOCAL_SHELL]) for (const o of bad) assert.equal(isAllowedEmbedderOrigin(o, shell), false, `${JSON.stringify(o)} vs ${shell}`);
+	for (const o of bad) assert.equal(isAllowedEmbedderOrigin(o, SHELL_ORIGIN), false, `${JSON.stringify(o)} vs cloud shell`);
+	for (const o of bad) assert.equal(isAllowedEmbedderOrigin(o, LOCAL_SHELL), false, `${JSON.stringify(o)} vs local shell`);
+	// The shell's own origin (the web App Builder), exactly.
+	assert.equal(isAllowedEmbedderOrigin(SHELL_ORIGIN, SHELL_ORIGIN), true);
+	assert.equal(isAllowedEmbedderOrigin(LOCAL_SHELL, LOCAL_SHELL), true);
+	assert.equal(isAllowedEmbedderOrigin(SHELL_ORIGIN, LOCAL_SHELL), false);
+	assert.equal(isAllowedEmbedderOrigin(LOCAL_SHELL, SHELL_ORIGIN), false);
+	// An opaque or malformed shell origin authorises nothing but vscode-webview.
+	for (const shell of ['null', '', 'not a url']) {
+		assert.equal(isAllowedEmbedderOrigin('null', shell), false, `null vs ${JSON.stringify(shell)}`);
+		assert.equal(isAllowedEmbedderOrigin(shell, shell), false, `${JSON.stringify(shell)} vs itself`);
+	}
 	for (const o of ['http://localhost:5173', 'https://localhost', 'http://127.0.0.1:3000', 'http://127.1.2.3:3000', 'http://[::1]:3000', 'http://app.localhost:3000']) {
 		assert.equal(isAllowedEmbedderOrigin(o, LOCAL_SHELL), true, o);
 		assert.equal(isAllowedEmbedderOrigin(o, SHELL_ORIGIN), false, `${o} vs cloud shell`);
@@ -294,6 +479,9 @@ test('trustedParentOrigin names only a trusted embedder, so console rows are nev
 	assert.equal(trustedParentOrigin(), '', 'loopback parent of a cloud-served shell');
 	win.location.ancestorOrigins = ['vscode-webview://abc'];
 	assert.equal(trustedParentOrigin(), 'vscode-webview://abc');
+	// A look-alike ancestor of the shell's own origin is not the shell.
+	win.location.ancestorOrigins = ['https://cloud.example.test.evil.test'];
+	assert.equal(trustedParentOrigin(), '');
 	// No ancestorOrigins (Firefox): fall back to the referrer.
 	win.location.ancestorOrigins = undefined;
 	Reflect.set(globalThis, 'document', { referrer: 'vscode-webview://abc/index.html?id=1' });
@@ -306,11 +494,31 @@ test('trustedParentOrigin names only a trusted embedder, so console rows are nev
 	void page;
 	stagePage({ nodeEnv: 'development', framed: false });
 	assert.equal(trustedParentOrigin(), '');
-	stagePage({ nodeEnv: 'production', framed: true });
+	stagePage({ nodeEnv: 'production', framed: true, parentSameOrigin: true });
 	assert.equal(trustedParentOrigin(), '');
 });
 
-test('isAllowedDevRemoteEntry accepts only absolute http(s) loopback URLs without credentials', () => {
-	for (const e of ['http://localhost:3001/remoteEntry.js?t=1', 'http://127.0.0.1:5173/remoteEntry.js', 'http://[::1]:3000/remoteEntry.js', 'https://app.localhost/remoteEntry.js']) assert.equal(isAllowedDevRemoteEntry(e), true, e);
+test('trustedParentOrigin of a same-origin parent (the web App Builder preview) is the shell\'s own origin, with or without ancestorOrigins', () => {
+	stagePage({ nodeEnv: 'development', framed: true, parentSameOrigin: true });
+	const win = window as unknown as { location: { ancestorOrigins?: string[] } };
+	win.location.ancestorOrigins = [SHELL_ORIGIN];
+	assert.equal(trustedParentOrigin(), SHELL_ORIGIN);
+	win.location.ancestorOrigins = undefined;
+	assert.equal(trustedParentOrigin(), SHELL_ORIGIN, 'the parent\'s readable location is ground truth (Firefox / stripped referrer)');
+	// An opaque shell origin never becomes a posting target.
+	stagePage({ nodeEnv: 'development', framed: true, parentSameOrigin: true, shellOrigin: 'null' });
+	assert.equal(trustedParentOrigin(), '');
+});
+
+test('normalizeDevRemoteEntry / isAllowedDevRemoteEntry accept only absolute http(s) loopback URLs without credentials, and return the canonical URL', () => {
+	for (const e of ['http://localhost:3001/remoteEntry.js?t=1', 'http://127.0.0.1:5173/remoteEntry.js', 'http://[::1]:3000/remoteEntry.js', 'https://app.localhost/remoteEntry.js']) {
+		assert.equal(isAllowedDevRemoteEntry(e), true, e);
+		assert.equal(normalizeDevRemoteEntry(e), new URL(e).href, e);
+	}
+	// What was vetted is what is returned: tabs/newlines the URL parser strips never reach the loader.
+	assert.equal(normalizeDevRemoteEntry('http://loc\talhost:3001/re\nmoteEntry.js'), 'http://localhost:3001/remoteEntry.js');
 	for (const e of ['https://attacker.example/x.js', '//attacker.example/x.js', 'javascript:alert(1)', 'data:text/javascript,1', '', '/x.js', 'http://localhost.evil.test/x.js', 'http://localhost:1@evil.test/x.js', 'http://u:p@localhost/x.js']) assert.equal(isAllowedDevRemoteEntry(e), false, e);
+	// WHATWG parsing makes `\` a path separator: this host really IS localhost, and the canonical URL says so.
+	assert.equal(normalizeDevRemoteEntry('http://localhost\\@evil.test/x.js'), 'http://localhost/@evil.test/x.js');
+	for (const e of [undefined, null, 42, {}, ['http://localhost/x.js']]) assert.equal(normalizeDevRemoteEntry(e), null, String(e));
 });

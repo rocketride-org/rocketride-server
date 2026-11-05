@@ -319,14 +319,35 @@ export function devRelayOrigin(): string {
 //
 // The `rrdev:*` protocol (rrdev:auth hands the shell a SESSION TOKEN,
 // rrdev:registerRemote makes it load and run a script) is a privileged
-// channel. The one legitimate sender in this repo is the VS Code extension's
-// App Builder webview (apps/vscode, AppWebview.tsx → PreviewFrame): the shell
-// is an iframe inside a `vscode-webview://<id>` document, and the shell may
-// be served by ANY engine, including the production cloud one. A loopback
-// embedder is trusted only when the shell itself is served from loopback
-// (`pnpm start` / a local engine). Anything else — any website that opened
-// this page (window.opener), framed it from another origin, or merely knows
-// the URL — is hostile.
+// channel, and `postMessage` reaches ANY window that holds a reference to the
+// shell: a page that opened it (window.opener) or framed it (window.parent)
+// is the sender, and the browser — not the sender — fills in `e.origin`.
+// So a message is trusted only when BOTH facts hold: its SOURCE has the right
+// relation to this window AND its ORIGIN is in a closed set.
+//
+// The legitimate senders (the complete list in this repo):
+//
+//   1. VS Code App Builder preview (apps/vscode AppWebview.tsx PreviewFrame):
+//      the shell is an iframe inside the `vscode-webview://<id>` App Builder
+//      page, so the sender is the PARENT and e.origin is `vscode-webview://<id>`.
+//      The shell itself is served from the extension's loopback dev proxy
+//      (`http://localhost:<port>`) or any engine.
+//   2. Web App Builder preview (apps/rocket-ui AppBuilderProvider.tsx): the
+//      builder is a page of the shell's OWN origin and posts `rrdev:auth` to
+//      (a) its preview iframe — the sender is the PARENT, e.origin is the
+//      shell's own origin (the preview is a blob: page, which inherits its
+//      creator's origin) — and (b) the debug tab it opened with window.open —
+//      the sender is the OPENER, e.origin again the shell's own origin.
+//
+// Nobody else is a sender. A SAME-ORIGIN sender is safe to trust because the
+// attacker's page cannot be same-origin: e.origin is the origin of the
+// sender's document as the browser knows it, an attacker page on another
+// site has a different one, and one that can run script ON the shell's origin
+// has already won (it can read the session token from localStorage itself).
+//
+// The opener relation is accepted ONLY from the shell's own origin (flow 2b):
+// a page that merely window.open()s the shell is its opener, so "is the
+// opener" alone proves nothing.
 
 /**
  * Whether a hostname is loopback: `localhost`, `*.localhost`, 127.0.0.0/8 or
@@ -339,43 +360,90 @@ function isLoopbackHostname(hostname: string): boolean {
 }
 
 /**
- * Whether `origin` (a `MessageEvent.origin`) is an expected dev embedder for
- * a shell served from `shellOrigin`:
+ * Parses a `MessageEvent.origin` / `location.origin` style value that must BE
+ * an http(s) tuple origin — not a URL that merely starts like one, not an
+ * opaque 'null', not another scheme.
+ *
+ * @param origin - The origin string as reported by the browser.
+ * @returns The parsed URL, or null when it is not an http(s) origin.
+ */
+function parseHttpOrigin(origin: unknown): URL | null {
+	if (typeof origin !== 'string' || !origin || origin === 'null') return null;
+	let url: URL;
+	try { url = new URL(origin); } catch { return null; }
+	if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+	return url.origin === origin ? url : null;
+}
+
+/**
+ * Whether `origin` is a loopback http(s) origin (any port).
+ *
+ * @param origin - An origin string such as `location.origin`.
+ * @returns True for `http(s)://localhost|127.x.x.x|[::1]` (with optional port).
+ */
+export function isLoopbackOrigin(origin: string): boolean {
+	const url = parseHttpOrigin(origin);
+	return url !== null && isLoopbackHostname(url.hostname);
+}
+
+/**
+ * Whether `origin` (a `MessageEvent.origin`) belongs to the closed set of
+ * expected dev embedders of a shell served from `shellOrigin`:
  *   - `vscode-webview://<id>` (the VS Code extension's webview), whichever
  *     engine serves the shell;
+ *   - the shell's OWN origin (the web App Builder; see the section comment);
  *   - a loopback http(s) origin on any port, but ONLY when the shell is itself
  *     served from a loopback origin — a page on localhost must not be able to
  *     drive a shell served from a real (cloud) origin.
- * Opaque origins ('null'), unparsable values and everything else are refused.
+ * Opaque origins ('null'), an opaque/unparsable shell origin (so `'null' ===
+ * 'null'` can never read as "same origin"), unparsable values and everything
+ * else are refused.
  *
  * @param origin - The sender's origin as reported by the browser.
  * @param shellOrigin - This shell's own origin (`window.location.origin`).
  * @returns True when the origin may drive the dev hooks.
  */
 export function isAllowedEmbedderOrigin(origin: string, shellOrigin: string): boolean {
-	if (!origin || origin === 'null') return false;
+	if (typeof origin !== 'string' || !origin || origin === 'null') return false;
 	let url: URL;
 	try { url = new URL(origin); } catch { return false; }
 	// Non-special scheme: the URL parser reports origin 'null', so compare the
 	// string itself — it must be exactly `vscode-webview://<host>`, no path.
 	if (url.protocol === 'vscode-webview:') return url.host.length > 0 && origin === `vscode-webview://${url.host}`;
-	if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
-	// `origin` must BE an origin, not a URL that merely starts like one.
-	if (url.origin !== origin) return false;
-	if (!isLoopbackHostname(url.hostname)) return false;
+	const sender = parseHttpOrigin(origin);
+	const shell = parseHttpOrigin(shellOrigin);
+	if (!sender || !shell) return false;
+	if (sender.origin === shell.origin) return true;
 	// Loopback embedder: only for a loopback-served shell.
-	try { return isLoopbackHostname(new URL(shellOrigin).hostname); } catch { return false; }
+	return isLoopbackHostname(sender.hostname) && isLoopbackHostname(shell.hostname);
+}
+
+/**
+ * How a message sender relates to this window, or null when it is neither.
+ *   - 'parent': this shell is framed (`self !== top`) and the sender is the
+ *     frame that embeds it (not a sibling, not a child, not an ancestor above
+ *     the parent);
+ *   - 'opener': this shell is a top-level tab and the sender is the window
+ *     that opened it with window.open().
+ * A top-level window's `window.parent` is itself, so a self-post is neither.
+ *
+ * @param source - `MessageEvent.source`.
+ * @returns The relation, or null.
+ */
+function senderRelation(source: unknown): 'parent' | 'opener' | null {
+	if (!source) return null;
+	if (window.self !== window.top) return source === window.parent ? 'parent' : null;
+	return window.opener != null && source === window.opener ? 'opener' : null;
 }
 
 /**
  * Whether a postMessage may drive the dev hooks (`rrdev:*`). All of:
  *   1. dev hooks are enabled in this build (never true in production);
- *   2. this shell is EMBEDDED (`window.self !== window.top`) — a top-level tab
- *      has no embedder, so a message there can only come from an opener or a
- *      frame the page itself created;
- *   3. the sender is this shell's PARENT window — not window.opener, not a
- *      sibling, not a child frame;
- *   4. the sender's origin is an expected embedder (isAllowedEmbedderOrigin).
+ *   2. the sender is this shell's PARENT (framed shell) or its OPENER (a
+ *      top-level tab) — never a sibling, a child frame or a stranger;
+ *   3. its origin is an expected embedder (isAllowedEmbedderOrigin) — and for
+ *      the OPENER relation, specifically the shell's OWN origin (the web App
+ *      Builder's debug tab): no cross-origin opener is ever an embedder.
  *
  * @param e - The message event (only `origin` and `source` are read).
  * @returns True when the message came from the trusted embedder.
@@ -383,23 +451,34 @@ export function isAllowedEmbedderOrigin(origin: string, shellOrigin: string): bo
 export function isTrustedEmbedderMessage(e: { origin: string; source: unknown }): boolean {
 	try {
 		if (!isDevHooksEnabled()) return false;
-		if (window.self === window.top) return false;
-		if (!e.source || e.source !== window.parent) return false;
-		return isAllowedEmbedderOrigin(e.origin, window.location.origin);
+		const relation = senderRelation(e.source);
+		if (!relation) return false;
+		const shellOrigin = window.location.origin;
+		if (relation === 'opener') {
+			const sender = parseHttpOrigin(e.origin);
+			const shell = parseHttpOrigin(shellOrigin);
+			return sender !== null && shell !== null && sender.origin === shell.origin;
+		}
+		return isAllowedEmbedderOrigin(e.origin, shellOrigin);
 	} catch { return false; }
 }
 
 /**
- * The embedder's origin as far as the browser reveals it (`ancestorOrigins`
- * where supported, else the referrer), or '' when unknown. Used to AIM
- * outbound dev traffic (console forwarding) at the embedder instead of
+ * The embedder's origin as far as it can be VERIFIED, or '' when unknown. Used
+ * to AIM outbound dev traffic (console forwarding, whose rows carry hrefs —
+ * an OAuth `?code=` after a redirect included) at the embedder instead of
  * broadcasting it to whoever happens to be the parent.
+ *   - same-origin parent: its location is readable (a cross-origin parent's
+ *     throws), so the shell's own origin is ground truth;
+ *   - otherwise `ancestorOrigins` where supported, else the referrer, and
+ *     only if that origin is in the allowed set.
  *
  * @returns The parent frame's origin when it is an allowed embedder, else ''.
  */
 export function trustedParentOrigin(): string {
 	try {
 		if (!isDevHooksEnabled() || window.self === window.top) return '';
+		if (isSameOriginEmbed()) return parseHttpOrigin(window.location.origin) ? window.location.origin : '';
 		const ancestors = (window.location as { ancestorOrigins?: ArrayLike<string> }).ancestorOrigins;
 		let origin = ancestors && ancestors.length > 0 ? ancestors[0] : '';
 		if (!origin && document.referrer) {
@@ -412,21 +491,34 @@ export function trustedParentOrigin(): string {
 }
 
 /**
- * Whether a dev-remote entry URL (`rrdev:registerRemote`) may be loaded: an
- * ABSOLUTE http(s) URL, no credentials, on a loopback host — the embedder's
- * own rsbuild dev server. Protocol-relative (`//host/x.js`), `javascript:`,
- * `data:`, relative and non-loopback hosts are refused.
+ * Canonicalises a dev-remote entry URL (`rrdev:registerRemote`, or the
+ * URL-convention self-registration) if — and only if — the shell may load it:
+ * an ABSOLUTE http(s) URL, no credentials, on a loopback host — the
+ * embedder's own rsbuild dev server. Protocol-relative (`//host/x.js`),
+ * `javascript:`, `data:`, relative and non-loopback hosts are refused. Callers
+ * register the RETURNED string, not the input, so what was vetted is exactly
+ * what the loader fetches (no parser differential).
+ *
+ * @param entry - The remoteEntry.js URL as received.
+ * @returns The canonical URL, or null when the shell must not load it.
+ */
+export function normalizeDevRemoteEntry(entry: unknown): string | null {
+	if (typeof entry !== 'string') return null;
+	let url: URL;
+	try { url = new URL(entry); } catch { return null; }
+	if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+	if (url.username || url.password) return null;
+	return isLoopbackHostname(url.hostname) ? url.href : null;
+}
+
+/**
+ * Whether a dev-remote entry URL may be loaded (see normalizeDevRemoteEntry).
  *
  * @param entry - The remoteEntry.js URL as received.
  * @returns True when the shell may register it as a Module Federation remote.
  */
 export function isAllowedDevRemoteEntry(entry: string): boolean {
-	if (typeof entry !== 'string') return false;
-	let url: URL;
-	try { url = new URL(entry); } catch { return false; }
-	if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
-	if (url.username || url.password) return false;
-	return isLoopbackHostname(url.hostname);
+	return normalizeDevRemoteEntry(entry) !== null;
 }
 
 // =============================================================================

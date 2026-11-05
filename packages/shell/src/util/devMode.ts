@@ -35,17 +35,22 @@
  * Everything here is inert unless dev hooks are enabled, and they are a
  * BUILD-TIME capability only: a development build (NODE_ENV !== 'production'
  * — `rsbuild dev`, or the dev flavor stitched beside the production assets,
- * which the App Builder previews select with `?rrdev=1` in index.html's flavor
- * picker). A production build never enables them from the URL or from
- * sessionStorage (see devGate.ts).
+ * which the App Builder previews select with `?rrdev=1` or an injected
+ * `__rrDevBoot` in index.html's flavor picker). A production build never
+ * enables them from the URL, sessionStorage or an injected boot config (see
+ * devGate.ts).
  *
  * Who sends `rrdev:*` messages (the only trusted senders; see
- * isTrustedEmbedderMessage): the VS Code extension's App Builder webview
- * (apps/vscode AppWebview.tsx PreviewFrame, origin `vscode-webview://<id>`),
- * which is the shell's PARENT window. A loopback embedder is trusted only for
- * a loopback-served shell. Messages from anyone else — a window.opener, a foreign
- * framing page, any other origin, or a top-level shell with no embedder — are
- * ignored, and registerRemote entries must be loopback dev-server URLs.
+ * isTrustedEmbedderMessage in devGate.ts, which documents each flow):
+ *   - the VS Code extension's App Builder webview (apps/vscode AppWebview.tsx
+ *     PreviewFrame, origin `vscode-webview://<id>`) — the shell's PARENT;
+ *   - the web App Builder (apps/rocket-ui AppBuilderProvider.tsx), a page of
+ *     the shell's OWN origin — the PARENT of its preview iframe and the OPENER
+ *     of its debug tab (it posts `rrdev:auth`; same-origin only).
+ * A loopback embedder is trusted only for a loopback-served shell. Messages
+ * from anyone else — a cross-origin window.opener, a foreign framing page,
+ * any other origin, or an unrelated window — are ignored, and registerRemote
+ * entries must be loopback dev-server URLs.
  */
 
 import React from 'react';
@@ -54,7 +59,7 @@ import * as ReactJsxRuntime from 'react/jsx-runtime';
 import * as ReactJsxDevRuntime from 'react/jsx-dev-runtime';
 import * as rocketride from 'rocketride';
 import { ConnectionManager } from '../connection/connection';
-import { isDevHooksEnabled, isEmbeddedDevShell, isTrustedEmbedderMessage, isAllowedDevRemoteEntry, trustedParentOrigin } from './devGate';
+import { isDevHooksEnabled, isEmbeddedDevShell, isTrustedEmbedderMessage, normalizeDevRemoteEntry, trustedParentOrigin } from './devGate';
 import { registerLocalApp, unregisterLocalApp, invalidateAppDescriptor, registerDevRemote, failDevRemoteWait, isDevPreviewPage, previewLockedAppId } from './appLoader';
 import type { LocalAppMeta } from './appLoader';
 
@@ -225,8 +230,9 @@ const defaultEmbedderDeps: EmbedderMessageDeps = {
 
 /**
  * Handles one window `message` event. ONLY the trusted embedder may drive it
- * (isTrustedEmbedderMessage: dev build, embedded, sender is window.parent and
- * its origin is an expected embedder) — everything else, including every
+ * (isTrustedEmbedderMessage: dev build; the sender is this window's parent or
+ * — for the web App Builder's debug tab — its same-origin opener; and its
+ * origin is in the closed embedder set) — everything else, including every
  * message that carries a token or a remote entry, is dropped without effect.
  *
  * The protocol (unchanged):
@@ -256,14 +262,15 @@ export function handleEmbedderMessage(e: Pick<MessageEvent, 'data' | 'origin' | 
 			console.warn(`[devMode] ignoring rrdev:registerRemote without appId/moduleId/entry: ${JSON.stringify({ appId: data.appId, moduleId: data.moduleId, entry: data.entry })}`);
 			return;
 		}
-		if (!isAllowedDevRemoteEntry(data.entry)) {
+		const entry = normalizeDevRemoteEntry(data.entry);
+		if (entry === null) {
 			console.warn(`[devMode] ignoring rrdev:registerRemote: entry ${JSON.stringify(data.entry)} is not a loopback dev-server URL`);
 			return;
 		}
 		// step: the optional manifest is the WORKSPACE package.json's
 		// appManifest — in dev the workspace is the truth for metadata
 		// (name, icon path, configuration), not the server registry
-		deps.registerRemote(data.appId, data.moduleId, data.name || data.appId, data.entry, metaFromManifest(data.manifest));
+		deps.registerRemote(data.appId, data.moduleId, data.name || data.appId, entry, metaFromManifest(data.manifest));
 	} else if (data.type === 'rrdev:auth' && typeof data.token === 'string') {
 		const cm = deps.connection();
 		// loadToken() yields '' when absent, so '' compares as "no session"
@@ -399,8 +406,8 @@ export async function installDevHooks(): Promise<void> {
 			// Absolute, vetted entry: the dev-proxy origin is this page's own
 			// origin. A non-loopback shell yields null — fail the hold now
 			// instead of probing an origin that can never register.
-			const entry = `${window.location.origin}${prefix}/remoteEntry.js`;
-			if (!isAllowedDevRemoteEntry(entry)) {
+			const entry = normalizeDevRemoteEntry(`${window.location.origin}${prefix}/remoteEntry.js`);
+			if (entry === null) {
 				failHold(`Dev apps load only from a loopback dev server; this shell is served from ${window.location.origin}`);
 				return;
 			}
