@@ -475,17 +475,15 @@ async def test_engine_request_completes_while_a_transfer_is_running(task_side, c
 
     transfer = asyncio.ensure_future(ask('big', sink=io.BytesIO()))
     await until(flowing.is_set)
-    started = time.monotonic()
-    response = await client.dap_request('rrext_whoami', {})
+    # The transfer holds until the gate opens below, so a request it blocked would never complete
+    response = await asyncio.wait_for(client.dap_request('rrext_whoami', {}), 5)
     assert response['success'] is True
-    assert time.monotonic() - started < 0.3
     assert not transfer.done()
     gate.set()
     await transfer
     await client.disconnect()
 
 
-@pytest.mark.skip(reason='flaky: 40 ms chunks against a 100 ms timeout miss it on a loaded runner')
 async def test_a_transfer_longer_than_one_timeout_completes_when_each_chunk_is_on_time(
     task_side, commands, monkeypatch
 ):
@@ -493,7 +491,7 @@ async def test_a_transfer_longer_than_one_timeout_completes_when_each_chunk_is_o
 
     async def trickle():
         for _ in range(4):
-            await asyncio.sleep(0.04)
+            await asyncio.sleep(0.3)
             yield b'z' * CHUNK
 
     async def handler(task, arguments, data):
@@ -503,7 +501,8 @@ async def test_a_transfer_longer_than_one_timeout_completes_when_each_chunk_is_o
     task, client = await _connect(task_side)
 
     sink = io.BytesIO()
-    await ask('big', sink=sink, timeout=0.1)  # 0.16 s in all, past the old 0.15 s bound
+    # 1.2 s in all, past one timeout and the connect wait (1.05 s); each chunk has 0.7 s to spare
+    await ask('big', sink=sink, timeout=1.0)
     assert len(sink.getvalue()) == 4 * CHUNK
     await client.disconnect()
 
