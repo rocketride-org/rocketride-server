@@ -39,7 +39,6 @@ MESSAGE_CALLS = {
     'GitHubAPIError',
     'RateLimitExhausted',
     'RateLimitError',
-    '_WalkStopped',
     'failure_result',
     'shape_failure',
     'warning',
@@ -62,6 +61,12 @@ def _messages_in_source():
                     for part in [*node.args, *(keyword.value for keyword in node.keywords)]:
                         for text in _literals(part):
                             yield path.name, node.lineno, text
+            elif isinstance(node, ast.ClassDef) and node.name == '_TreeWalk':
+                # The walk's steps return their stop reason instead of raising it.
+                for sub in ast.walk(node):
+                    if isinstance(sub, ast.Return) and sub.value is not None:
+                        for text in _literals(sub.value):
+                            yield path.name, sub.lineno, text
             elif isinstance(node, (ast.Assign, ast.AugAssign)):
                 # result['message'] = ... and result['message'] += ...
                 targets = node.targets if isinstance(node, ast.Assign) else [node.target]
