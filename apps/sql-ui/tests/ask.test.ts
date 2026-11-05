@@ -38,6 +38,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { ExplorerToolError } from 'shared/explorer/errors';
+import { manualNow } from 'shared/explorer/devtool/testing';
 import type { IExplorerClient, IExplorerEndpoint } from 'shared/explorer/types';
 import type { SqlExecuteResult, SqlSession } from '../src/connect';
 import { createSqlSession } from '../src/connect/session';
@@ -197,7 +198,10 @@ describe('Ask never executes anything', () => {
 	});
 
 	it('over the dev tool\'s wire: sql.getSql reaches get_sql once and the engine sees no execute', async () => {
-		const r = await rig({ tool: (params) => (params.tool === 'get_sql' ? { sql: 'DROP TABLE orders', valid: true } : postgres(params)) });
+		// A clock that stands still: the frame sends what is left of a call's timeout after its
+		// readiness wait, which a running clock (a slow runner) shaves by milliseconds.
+		const clock = manualNow(Date.now());
+		const r = await rig({ now: clock.now, tool: (params) => (params.tool === 'get_sql' ? { sql: 'DROP TABLE orders', valid: true } : postgres(params)) });
 		try {
 			const session = r.env.getSession(await r.env.resolveEndpoint(PIPELINE));
 			assert.deepEqual(await session.getSql('drop the orders table'), { sql: 'DROP TABLE orders', valid: true });
