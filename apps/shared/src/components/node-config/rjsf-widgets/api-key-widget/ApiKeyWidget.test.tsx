@@ -62,6 +62,7 @@ const createHarness = (initialValue: string) => {
 	let currentValue = initialValue;
 	let state = createInitialApiKeyState(initialValue);
 	let latestTextField: ReactElement<Record<string, unknown>> | null = null;
+	let inputFocused = false;
 	const changes: string[] = [];
 
 	const dispatch = (action: ApiKeyWidgetAction) => {
@@ -83,6 +84,14 @@ const createHarness = (initialValue: string) => {
 		} as unknown as ApiKeyWidgetViewProps;
 		const tree = ApiKeyWidgetView(viewProps) as ReactElement<{ children: React.ReactNode }>;
 		latestTextField = Children.toArray(tree.props.children)[0] as ReactElement<Record<string, unknown>>;
+		const inputRef = latestTextField.props.inputRef as { current: { focus: () => void } | null } | undefined;
+		if (inputRef) {
+			inputRef.current = {
+				focus: () => {
+					inputFocused = true;
+				},
+			};
+		}
 		return tree;
 	};
 
@@ -116,7 +125,14 @@ const createHarness = (initialValue: string) => {
 		return render();
 	};
 
-	return { render, clickToggle, clickDelete, changeInput, changes };
+	return {
+		render,
+		clickToggle,
+		clickDelete,
+		changeInput,
+		changes,
+		wasInputFocused: () => inputFocused,
+	};
 };
 
 test('new API key input renders as password by default with autocomplete off and a show toggle button', () => {
@@ -152,6 +168,7 @@ test('saved API key show/hide toggle reveals and re-masks the key, and delete re
 	harness.clickToggle();
 	markup = harness.clickDelete();
 	assert.deepEqual(harness.changes, ['']);
+	assert.equal(harness.wasInputFocused(), true);
 	assert.match(markup, /<input[^>]*type="password"[^>]*value=""/);
 	assert.doesNotMatch(markup, /readonly=""/);
 	assert.match(markup, /<button[^>]*aria-label="Show API key"[^>]*aria-pressed="false"/);

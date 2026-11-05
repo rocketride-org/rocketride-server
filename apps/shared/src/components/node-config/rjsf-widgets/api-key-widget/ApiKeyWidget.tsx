@@ -114,6 +114,7 @@ export const ApiKeyWidgetView: FC<ApiKeyWidgetViewProps> = ({ id, value, label, 
 	const displayedValue = maskApiKey && showApiKey ? String(value ?? '') : tempValue;
 
 	const inputRef = useRef<HTMLInputElement>(null);
+	const focusAfterClearRef = useRef(false);
 
 	// --- Env var autocomplete ------------------------------------------------
 	const envKeys: string[] = Array.isArray(formContext?.envKeys) ? formContext.envKeys : [];
@@ -155,6 +156,14 @@ export const ApiKeyWidgetView: FC<ApiKeyWidgetViewProps> = ({ id, value, label, 
 			inputRef.current.scrollLeft = inputRef.current.scrollWidth;
 		}
 	}, [maskApiKey, showApiKey]);
+
+	// Move focus to the editable input after a saved key is deleted and its delete button is removed
+	useEffect(() => {
+		if (!maskApiKey && focusAfterClearRef.current) {
+			focusAfterClearRef.current = false;
+			inputRef.current?.focus();
+		}
+	}, [maskApiKey]);
 
 	return (
 		<>
@@ -224,9 +233,11 @@ export const ApiKeyWidgetView: FC<ApiKeyWidgetViewProps> = ({ id, value, label, 
 												},
 											}}
 											onClick={() => {
-												// Clear the stored key and exit masked mode so user can type a new one
+												// Clear the stored key, exit masked mode, and move focus to the input
+												focusAfterClearRef.current = true;
 												dispatch({ type: 'clearSaved' });
 												onChange('');
+												inputRef.current?.focus();
 											}}
 										>
 											<Delete fontSize="small" />
