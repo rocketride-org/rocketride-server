@@ -8,13 +8,22 @@ in use, minus what the calls already inside may still claim, minus a margin. The
 call always enters, so an image too large for the card still runs alone. Calls enter in
 arrival order, so a large one is not overtaken forever by small ones. Waiters re-check
 when a call leaves and every ``RECHECK_S`` seconds, which sees memory freed by the
-desktop or another process. Other devices (CPU) admit up to ``CPU_SLOTS`` calls.
+desktop or another process. What the calls inside already hold is measured from the
+allocation seen when the device was last idle, so a lasting allocation made meanwhile
+(a lazily loaded model, cuBLAS workspaces) counts as their progress until it drains
+again. Other devices (CPU) admit up to ``CPU_SLOTS`` calls.
 
 Another engine process on the same GPU reads the same free memory, so two budgets would
 over-commit the card. While NVML lists one there (or a process it cannot name), calls run
 one at a time, as with the old lock; for ``SHARED_WAIT_S`` after a neighbour appears, a
 lone call also waits until its cost fits, while the calls the neighbour admitted alone
-drain. Desktop processes (dwm, browsers) are told apart by name and do not count.
+drain. Only processes named like this one, or not named, count: the desktop, browsers
+and other servers are ignored.
+
+Torch keeps the memory a call frees cached for this process; the driver, and so another
+process, sees it as used. The guard hands that cache back once the device has been idle
+for ``IDLE_RELEASE_S``, and before each call while a neighbour is listed, so neither an
+idle process nor one that ran several calls alone holds memory the other one needs.
 
 With ``--modelserver`` inference runs in the server, which has its own dispatcher, and
 the guard is a no-op.
@@ -22,6 +31,7 @@ the guard is a no-op.
 
 import collections
 import contextlib
+import logging
 import os
 import threading
 import time
@@ -29,6 +39,8 @@ from typing import Any, Callable, Dict, Iterator, List, Optional, Set, Tuple
 
 from ai.common.utils.hardware import _process_name
 from .base import is_model_server_enabled
+
+logger = logging.getLogger('rocketlib.models.device_budget')
 
 # Calls inside one GPU at once, whatever memory is left
 MAX_CONCURRENT = 4
@@ -48,6 +60,9 @@ NEIGHBOURS_TTL_S = 1.0
 # After a neighbour appears, how long a lone call waits for its cost to fit
 SHARED_WAIT_S = 30.0
 
+# How long the device stays idle before this process hands its torch cache back
+IDLE_RELEASE_S = 2.0
+
 _MB = float(1 << 20)
 
 # (driver free MB, own torch cache not in use MB, own torch allocated MB)
@@ -55,6 +70,9 @@ Probe = Callable[[], Tuple[float, float, float]]
 
 # Whether another engine process may hold the device
 Neighbours = Callable[[], bool]
+
+# Hands this process's unused torch cache on the device back to the driver
+Release = Callable[[], None]
 
 
 def _cuda_probe(device: str) -> Probe:
@@ -69,6 +87,18 @@ def _cuda_probe(device: str) -> Probe:
         return free / _MB, (reserved - allocated) / _MB, allocated / _MB
 
     return probe
+
+
+def _cuda_release(device: str) -> Release:
+    index = int(device.split(':')[1])
+
+    def release() -> None:
+        from ai.common.torch import torch
+
+        with torch.cuda.device(index):
+            torch.cuda.empty_cache()
+
+    return release
 
 
 def _has_neighbour(pids: Set[int], own_pid: int, own_name: str, name_of: Callable[[int], str]) -> bool:
@@ -98,16 +128,20 @@ def _nvml_neighbours(device: str) -> Neighbours:
             if 'handle' not in nvml:
                 from ai.common.torch import torch
 
+                name = psutil.Process().name().lower()
                 pynvml.nvmlInit()
+                nvml['name'] = name
                 nvml['handle'] = pynvml.nvmlDeviceGetHandleByUUID(f'GPU-{torch.cuda.get_device_properties(index).uuid}')
-                nvml['name'] = psutil.Process().name().lower()
             pids = set()
             for listing in (pynvml.nvmlDeviceGetComputeRunningProcesses, pynvml.nvmlDeviceGetGraphicsRunningProcesses):
                 pids.update(proc.pid for proc in listing(nvml['handle']))
-        except Exception:
+            return _has_neighbour(pids, os.getpid(), nvml['name'], _process_name)
+        except Exception as e:
             # no NVML, or a device it cannot resolve (e.g. a MIG slice): assume a neighbour
+            if not nvml.get('warned'):
+                nvml['warned'] = True
+                logger.warning('%s: cannot list GPU processes (%s); calls run one at a time', device, e)
             return True
-        return _has_neighbour(pids, os.getpid(), nvml['name'], _process_name)
 
     return neighbours
 
@@ -115,12 +149,19 @@ def _nvml_neighbours(device: str) -> Neighbours:
 class DeviceBudget:
     """Admission guard of one device; see the module docstring."""
 
-    def __init__(self, device: str, probe: Optional[Probe] = None, neighbours: Optional[Neighbours] = None):
-        """Guard ``device`` ('cuda:N' or another device); ``probe`` reads its memory, ``neighbours`` its other engines."""
+    def __init__(
+        self,
+        device: str,
+        probe: Optional[Probe] = None,
+        neighbours: Optional[Neighbours] = None,
+        release: Optional[Release] = None,
+    ):
+        """Guard ``device`` ('cuda:N' or another device); ``probe`` reads its memory, ``neighbours`` its other engines, ``release`` frees its cache."""
         self.device = device
         self._gpu = device.startswith('cuda')
         self._probe = probe if probe or not self._gpu else _cuda_probe(device)
         self._neighbours = neighbours if neighbours or not self._gpu else _nvml_neighbours(device)
+        self._release = release if release or not self._gpu else _cuda_release(device)
         self._cond = threading.Condition()
         self._queue: collections.deque = collections.deque()
         self._inside: List[Optional[float]] = []
@@ -128,6 +169,8 @@ class DeviceBudget:
         self._shared = False
         self._shared_since = 0.0
         self._neighbours_read = -float('inf')
+        self._drains = 0
+        self._release_warned = False
 
     @contextlib.contextmanager
     def reserve(self, cost_mb: Optional[float]) -> Iterator[None]:
@@ -147,7 +190,30 @@ class DeviceBudget:
         finally:
             with self._cond:
                 self._inside.remove(cost_mb)
+                if self._gpu and not self._inside and not self._queue:
+                    self._release_when_idle()
                 self._cond.notify_all()
+
+    def _release_when_idle(self) -> None:
+        # calls that come back to back keep the cache; re-allocating it costs each of them
+        self._drains += 1
+        timer = threading.Timer(IDLE_RELEASE_S, self._release_if_still_idle, args=(self._drains,))
+        timer.daemon = True
+        timer.start()
+
+    def _release_if_still_idle(self, drain: int) -> None:
+        with self._cond:
+            if drain == self._drains and not self._inside and not self._queue:
+                self._free_cache()
+
+    def _free_cache(self) -> None:
+        try:
+            self._release()
+        except Exception as e:
+            # the call itself succeeded; a broken device shows on the next one
+            if not self._release_warned:
+                self._release_warned = True
+                logger.warning('%s: cannot release the torch cache (%s)', self.device, e)
 
     def _sharing(self) -> bool:
         now = time.monotonic()
@@ -168,6 +234,8 @@ class DeviceBudget:
             return len(self._inside) < CPU_SLOTS
         shared = self._sharing()
         if not self._inside:
+            if shared:
+                self._free_cache()
             free, cache_free, self._idle_allocated = self._probe()
             if shared and cost_mb is not None and time.monotonic() - self._shared_since < SHARED_WAIT_S:
                 # the neighbour may still be draining the calls it admitted alone
