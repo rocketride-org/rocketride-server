@@ -55,41 +55,48 @@ class _FakeDocumentStoreBase:
         return True
 
 
-# Prefer the installed client: the round-trip regression below runs on its local backend, and the
-# lightweight unit tests work with it too. Without it, stub the client (and numpy) only while
-# qdrant.py executes, then restore sys.modules: a stub left behind would shadow the real modules
-# for every later test in the same process.
+_CLIENT_STUBS = (
+    'qdrant_client',
+    'qdrant_client.models',
+    'qdrant_client.http',
+    'qdrant_client.http.models',
+    'qdrant_client.conversions',
+    'qdrant_client.conversions.common_types',
+)
+
+
+def _load_qdrant_module(stubs):
+    """Execute qdrant.py with ``stubs`` as MagicMocks, then restore ``sys.modules``.
+
+    A stub left behind would shadow the real modules for every later test in the same process.
+    """
+    saved = {name: sys.modules.get(name) for name in stubs}
+    try:
+        for name in stubs:
+            sys.modules[name] = MagicMock()
+
+        # -------------------------------------------------------------------
+        # Import qdrant.py DIRECTLY (bypassing __init__.py which pulls IEndpoint etc.)
+        # -------------------------------------------------------------------
+        spec = importlib.util.spec_from_file_location('_qdrant_store', str(NODES_SRC / 'store_qdrant' / 'qdrant.py'))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    finally:
+        for name, previous in saved.items():
+            if previous is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = previous
+
+
+# Prefer the installed client: the lightweight unit tests work with it. Without it (a test process where it is
+# installed only later, as a node's depends() does), stub the client and numpy while qdrant.py executes.
 try:
     importlib.import_module('qdrant_client')
-    _STUBS = ('numpy',)
+    _qdrant_mod = _load_qdrant_module(('numpy',))
 except ImportError:
-    _STUBS = (
-        'numpy',
-        'qdrant_client',
-        'qdrant_client.models',
-        'qdrant_client.http',
-        'qdrant_client.http.models',
-        'qdrant_client.conversions',
-        'qdrant_client.conversions.common_types',
-    )
-_saved = {name: sys.modules.get(name) for name in _STUBS}
-try:
-    for name in _STUBS:
-        sys.modules[name] = MagicMock()
-
-    # -----------------------------------------------------------------------
-    # Import qdrant.py DIRECTLY (bypassing __init__.py which pulls IEndpoint etc.)
-    # -----------------------------------------------------------------------
-    _qdrant_path = NODES_SRC / 'store_qdrant' / 'qdrant.py'
-    _spec = importlib.util.spec_from_file_location('_qdrant_store', str(_qdrant_path))
-    _qdrant_mod = importlib.util.module_from_spec(_spec)
-    _spec.loader.exec_module(_qdrant_mod)
-finally:
-    for name, module in _saved.items():
-        if module is None:
-            sys.modules.pop(name, None)
-        else:
-            sys.modules[name] = module
+    _qdrant_mod = _load_qdrant_module(('numpy',) + _CLIENT_STUBS)
 
 Store = _qdrant_mod.Store
 
@@ -99,9 +106,23 @@ Store = _qdrant_mod.Store
 # ---------------------------------------------------------------------------
 
 
-def _make_store() -> Store:
+def _real_store_class():
+    """The driver's Store bound to the installed qdrant-client, or skip when only the protocol mock is there.
+
+    The module-level import may have run before the client was installed and bound the driver to stubs:
+    the tests that drive the real client's in-process backend load their own copy at run time.
+    """
+    import pytest
+    from qdrant_client import QdrantClient
+
+    if QdrantClient.__module__ != 'qdrant_client.qdrant_client':
+        pytest.skip('requires the real qdrant-client, not the protocol mock')
+    return _load_qdrant_module(('numpy',)).Store
+
+
+def _make_store(store_class=None) -> Store:
     """Create a Store instance with a mocked QdrantClient (bypasses __init__)."""
-    store = object.__new__(Store)
+    store = object.__new__(store_class or Store)
     store.client = MagicMock()
     store.collection = 'test-collection'
     store.vectorSize = 384
@@ -195,7 +216,7 @@ def test_trash_round_trip_preserves_metadata_with_real_qdrant(monkeypatch):
                 for i, payload in original.items()
             ],
         )
-        store = _make_store()
+        store = _make_store(_real_store_class())
         store.client = client
         tools = VectorStoreToolMixin()
         tools.IGlobal = SimpleNamespace(store=store, expose_tools=True, allow_write=True)
@@ -247,7 +268,7 @@ def _in_process_store(payloads: dict):
         'test-collection',
         points=[models.PointStruct(id=pid, vector=[1.0, 0.0], payload=payload) for pid, payload in payloads.items()],
     )
-    store = _make_store()
+    store = _make_store(_real_store_class())
     store.client = client
     return store, client
 
