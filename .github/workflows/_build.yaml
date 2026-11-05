@@ -356,8 +356,9 @@ jobs:
       # rocketride_graph applies different Cypher rules on AGE 1.5.0 and 1.6.0,
       # so its suite runs on both: the Test step above covers 1.5.0, this step
       # runs the same file against the 1.6.0 database with the engine's Python.
+      # It runs only when test_targets includes the node suites.
       - name: Test rocketride_graph on AGE 1.6.0 / Linux
-        if: matrix.platform == 'ubuntu' && inputs.codeql == false && inputs.test
+        if: matrix.platform == 'ubuntu' && inputs.codeql == false && inputs.test && (inputs.test_targets == 'test' || contains(inputs.test_targets, 'nodes:test'))
         run: RR_TEST_AGE_DSN="$RR_TEST_AGE_1_6_DSN" ./dist/server/engine -m pytest nodes/test/test_rocketride_graph_live.py -v
 
       # The test servers' side of a failure. Printed rather than uploaded:
