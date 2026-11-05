@@ -56,6 +56,18 @@ class TestFindRequirementFiles:
     def test_empty_when_nothing_matches(self, exe_dir):
         assert depends._find_requirement_files() == []
 
+    def test_a_node_unpacked_at_run_time_leaves_the_lock_hash_as_it_was(self, exe_dir):
+        _write(exe_dir / 'nodes' / 'node-requirements' / 'llm_x' / 'requirements.txt')
+        _write(exe_dir / 'nodes' / 'node-requirements' / 'llm_x' / 'overrides.txt')
+        before = depends._compute_hash(depends._find_requirement_files() + depends._find_override_files())
+
+        _write(exe_dir / 'nodes' / 'llm_x' / '.rrnode.sha256', 'abc')
+        _write(exe_dir / 'nodes' / 'llm_x' / 'requirements.txt')
+        _write(exe_dir / 'nodes' / 'llm_x' / 'overrides.txt')
+        _write(exe_dir / 'nodes' / 'llm_x' / 'sub' / 'requirements_gpu.txt')
+
+        assert depends._compute_hash(depends._find_requirement_files() + depends._find_override_files()) == before
+
 
 class TestComputeHash:
     def test_stable_for_same_inputs_and_order_independent(self, tmp_path):

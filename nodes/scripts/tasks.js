@@ -125,60 +125,95 @@ function makeSyncNodesAction() {
 	return {
 		run: async (ctx, task) => {
 			task.output = 'Scanning for changes...';
-
 			const stats = {};
-			const packages = {};
-
-			for (const [name, srcDir] of SRC_NODE_DIRS) {
-				const src = path.join(srcDir, name);
-
-				if (!(await isDirectory(src))) {
-					await syncFile(src, path.join(DIST_DIR, name), { package: true }, stats);
-					continue;
-				}
-
-				const lib = await nodeLibrary(name, src);
-				if (lib || SERVER_NODES.has(name)) {
-					await syncNode(name, src, stats);
-					continue;
-				}
-
-				const { data, entry } = await packageNode(name, src);
-				await fs.promises.mkdir(PACKAGES_DIR, { recursive: true });
-				await fs.promises.writeFile(path.join(PACKAGES_DIR, `${name}.rrnode`), data);
-				packages[name] = entry;
-
-				// It no longer ships inside the server archive, but its requirements do
-				await removeDir(path.join(DIST_DIR, name));
-				await setState(['package', src], null);
-				for (const file of await readDirSafe(src)) {
-					if (!/^(requirement.*\.txt|overrides\.txt)$/.test(file)) continue;
-					const dest = path.join(REQUIREMENTS_DIR, name, file);
-					await syncFile(path.join(src, file), dest, { package: true }, stats);
-				}
-			}
-
-			// Drop what an older build left behind, such as a nodes/__init__.py
-			for (const name of await readDirSafe(DIST_DIR)) {
-				if (SRC_NODE_DIRS.has(name) || name === path.basename(REQUIREMENTS_DIR)) continue;
-				await fs.promises.rm(path.join(DIST_DIR, name), { recursive: true, force: true });
-				await setState(['package', path.join(PACKAGE_DIR, 'src', 'nodes', name)], null);
-			}
-
-			const index = { contract: NODES_CONTRACT, nodes: packages };
-			await fs.promises.mkdir(PACKAGES_DIR, { recursive: true });
-			await fs.promises.writeFile(path.join(PACKAGES_DIR, 'index.json'), JSON.stringify(index));
-			// The server archive carries its own copy, so an engine reads the index of the build that made it
-			await syncFile(
-				path.join(PACKAGES_DIR, 'index.json'),
-				path.join(DIST_DIR, 'index.json'),
-				{ package: true },
-				stats
-			);
-
+			const packages = await syncNodes(stats);
 			task.output = `${formatSyncStats(stats)}, ${Object.keys(packages).length} packages`;
 		},
 	};
+}
+
+// Where the build puts each node, and the helpers that copy and record it; a test passes its own
+const SYNC = {
+	srcNodeDirs: SRC_NODE_DIRS,
+	distDir: DIST_DIR,
+	packagesDir: PACKAGES_DIR,
+	libraryOf: nodeLibrary,
+	copyFile: (src, dest, stats) => syncFile(src, dest, { package: true }, stats),
+	copyNode: (name, src, stats) => syncNode(name, src, stats),
+	forget: (src) => setState(['package', src], null),
+};
+
+// The server keeps core, autopipe and the C++ nodes; every other node becomes <name>.rrnode beside
+// index.json, and only its requirement files stay in the server. Returns the index's nodes
+async function syncNodes(stats, sync = SYNC) {
+	const { srcNodeDirs, distDir, packagesDir, libraryOf, copyFile, copyNode, forget } = { ...SYNC, ...sync };
+	const requirementsDir = path.join(distDir, path.basename(REQUIREMENTS_DIR));
+	const packages = {};
+	const sources = {};
+
+	for (const [name, srcDir] of srcNodeDirs) {
+		const src = path.join(srcDir, name);
+
+		if (!(await isDirectory(src))) {
+			await copyFile(src, path.join(distDir, name), stats);
+			continue;
+		}
+
+		const lib = await libraryOf(name, src);
+		if (lib || SERVER_NODES.has(name)) {
+			await copyNode(name, src, stats);
+			continue;
+		}
+
+		const { data, entry } = await packageNode(name, src);
+		await fs.promises.mkdir(packagesDir, { recursive: true });
+		await fs.promises.writeFile(path.join(packagesDir, `${name}.rrnode`), data);
+		packages[name] = entry;
+		sources[name] = src;
+
+		// It no longer ships inside the server archive, but its requirements do
+		await removeDir(path.join(distDir, name));
+		await forget(src);
+		for (const file of await readDirSafe(src)) {
+			if (!/^(requirement.*\.txt|overrides\.txt)$/.test(file)) continue;
+			await copyFile(path.join(src, file), path.join(requirementsDir, name, file), stats);
+		}
+	}
+
+	// A node it needs that the server keeps is on disk already; only packaged ones are listed
+	for (const entry of Object.values(packages)) {
+		entry.requires = entry.requires.filter((other) => other in packages);
+	}
+
+	// Drop what an older build left behind, such as a nodes/__init__.py
+	for (const name of await readDirSafe(distDir)) {
+		if (srcNodeDirs.has(name) || name === path.basename(requirementsDir)) continue;
+		await fs.promises.rm(path.join(distDir, name), { recursive: true, force: true });
+		await forget(path.join(PACKAGE_DIR, 'src', 'nodes', name));
+	}
+
+	// And the package or requirement file of a node that is gone, so it is not published again
+	for (const file of await readDirSafe(packagesDir)) {
+		if (file.endsWith('.rrnode') && !(path.basename(file, '.rrnode') in packages)) {
+			await fs.promises.rm(path.join(packagesDir, file), { force: true });
+		}
+	}
+	for (const name of await readDirSafe(requirementsDir)) {
+		for (const file of await readDirSafe(path.join(requirementsDir, name))) {
+			if (name in packages && fs.existsSync(path.join(sources[name], file))) continue;
+			await fs.promises.rm(path.join(requirementsDir, name, file), { force: true });
+		}
+		if (!(name in packages)) {
+			await fs.promises.rm(path.join(requirementsDir, name), { recursive: true, force: true });
+		}
+	}
+
+	const index = { contract: NODES_CONTRACT, nodes: packages };
+	await fs.promises.mkdir(packagesDir, { recursive: true });
+	await fs.promises.writeFile(path.join(packagesDir, 'index.json'), JSON.stringify(index));
+	// The server archive carries its own copy, so an engine reads the index of the build that made it
+	await copyFile(path.join(packagesDir, 'index.json'), path.join(distDir, 'index.json'), stats);
+	return packages;
 }
 
 // Zip a node as <name>/... with its .rrnode marker; return the zip and its index entry
@@ -194,9 +229,19 @@ async function packageNode(name, srcDir) {
 	// Definitions travel as text so Python reads 1.0 as a float; JSON.parse checks they are plain JSON
 	const services = {};
 	const icons = {};
-	for (const file of (await glob('**', { cwd: srcDir, nodir: true, ignore: IGNORE })).sort()) {
+	const requires = new Set();
+	// Sorted with '/' on every OS: the entry order is part of the digest
+	const found = await glob('**', { cwd: srcDir, nodir: true, ignore: IGNORE });
+	const files = found.map((file) => file.replace(/\\/g, '/'));
+	for (const file of files.sort()) {
 		const data = await fs.promises.readFile(path.join(srcDir, file));
-		add(`${name}/${file.split(path.sep).join('/')}`, data);
+		add(`${name}/${file}`, data);
+		// Another node it imports must be on disk beside it
+		if (file.endsWith('.py')) {
+			for (const [, other] of data.toString('utf8').matchAll(/^\s*(?:from|import)\s+nodes\.(\w+)/gm)) {
+				if (other !== name) requires.add(other);
+			}
+		}
 		if (!/^services.*\.json$/.test(file)) continue;
 
 		const text = stripComments(data.toString('utf8'));
@@ -208,7 +253,7 @@ async function packageNode(name, srcDir) {
 
 	const data = zip.toBuffer();
 	const sha256 = crypto.createHash('sha256').update(data).digest('hex');
-	return { data, entry: { sha256, services, icons } };
+	return { data, entry: { sha256, services, icons, requires: [...requires].sort() } };
 }
 
 function makeStartTestServerAction(options = {}) {
@@ -655,3 +700,5 @@ module.exports = [module.exports, ...CPP_NODES.map(makeNodeModule)];
 module.exports.DIST_DIR = DIST_DIR;
 module.exports.TEST_DIR = TEST_DIR;
 module.exports.packageNode = packageNode;
+module.exports.syncNodes = syncNodes;
+module.exports.NODES_CONTRACT = NODES_CONTRACT;
