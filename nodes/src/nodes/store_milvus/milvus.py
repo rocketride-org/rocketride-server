@@ -54,6 +54,10 @@ DEFAULT_BULK_INSERT_BATCH_SIZE = 50
 # Default connection timeout in seconds
 DEFAULT_TIMEOUT = 60
 
+# Every read sees this process's own writes. A collection's default level (Bounded) reads a
+# view up to 5 s old, so a control row or chunk written a moment ago is not found yet.
+READ_CONSISTENCY = 'Session'
+
 
 def _escape_milvus_str(value: object) -> str:
     """Escape a value for safe interpolation into a Milvus filter expression."""
@@ -199,18 +203,19 @@ class Store(DocumentStoreBase):
         if docFilter.nodeId is not None:
             must_conditions.append(f"meta['nodeId'] == '{_escape_milvus_str(docFilter.nodeId)}'")
 
+        # meta holds isTable as a bool and tableId/permissionId as ints: a quoted value never matches
         if docFilter.isTable is not None:
-            (must_conditions.append(f"meta['isTable'] == '{_escape_milvus_str(docFilter.isTable)}'"),)
+            must_conditions.append(f"meta['isTable'] == {bool(docFilter.isTable)}")
 
         if docFilter.tableIds is not None:
-            table_ids = ', '.join(f"'{_escape_milvus_str(t)}'" for t in docFilter.tableIds)
+            table_ids = ', '.join(str(int(t)) for t in docFilter.tableIds)
             must_conditions.append(f"meta['tableId'] in [{table_ids}]")
 
         if docFilter.parent is not None:
             must_conditions.append(f"meta['parent'] == '{_escape_milvus_str(docFilter.parent)}'")
 
         if docFilter.permissions is not None:
-            permission_ids = ', '.join(f"'{_escape_milvus_str(p)}'" for p in docFilter.permissions)
+            permission_ids = ', '.join(str(int(p)) for p in docFilter.permissions)
             must_conditions.append(f"meta['permissionId'] in [{permission_ids}]")
 
         if docFilter.objectIds is not None:
@@ -298,7 +303,9 @@ class Store(DocumentStoreBase):
             return 0
 
         # Get cound documents using query
-        res = self.client.query(collection_name=self.collection, output_fields=['count(*)'])
+        res = self.client.query(
+            collection_name=self.collection, output_fields=['count(*)'], consistency_level=READ_CONSISTENCY
+        )
 
         # Parse query result
         return res[0]['count(*)']
@@ -319,7 +326,7 @@ class Store(DocumentStoreBase):
         must_conditions = self._convertFilter(docFilter=docFilter)
 
         # Append it
-        must_conditions.append(f"content like '%{_escape_milvus_str(query)}%'")
+        must_conditions.append(f"content like '%{_escape_milvus_str(query.text)}%'")
 
         # Combine all conditions into a single filter expression
         filter_expression = ' and '.join(must_conditions) if must_conditions else None
@@ -330,6 +337,7 @@ class Store(DocumentStoreBase):
             filter=filter_expression,
             limit=docFilter.limit,
             output_fields=['meta', 'content'],
+            consistency_level=READ_CONSISTENCY,
         )
 
         docs = self._convertToDocs(points)
@@ -374,6 +382,7 @@ class Store(DocumentStoreBase):
             filter=filter_expression,
             limit=25 if docFilter.limit <= 10 else docFilter.limit,
             output_fields=['meta', 'content'],
+            consistency_level=READ_CONSISTENCY,
         )
 
         docs = self._convertToDocs(points[0])
@@ -406,6 +415,7 @@ class Store(DocumentStoreBase):
             output_fields=['meta', 'content'],
             offset=docFilter.offset,
             limit=docFilter.limit,
+            consistency_level=READ_CONSISTENCY,
         )
 
         # Convert results to Docs
@@ -429,7 +439,12 @@ class Store(DocumentStoreBase):
 
         # Perform the query
         results = self.client.query(
-            collection_name=self.collection, filter=filter_expr, output_fields=['meta'], offset=offset, limit=limit
+            collection_name=self.collection,
+            filter=filter_expr,
+            output_fields=['meta'],
+            offset=offset,
+            limit=limit,
+            consistency_level=READ_CONSISTENCY,
         )
 
         # Build paths dictionary
@@ -503,7 +518,9 @@ class Store(DocumentStoreBase):
                 'id': np.int64(((uuid.uuid1().time & 0x1FFFFFFFF) << 27) | random.getrandbits(27)),
                 'vector': embedding,
                 'content': chunk.page_content,
-                'meta': chunk.metadata,
+                # A plain dict without the None fields: pymilvus encodes the JSON field itself, and Doc
+                # rejects a None it reads back for a field such as nodeId (the control row has many)
+                'meta': chunk.metadata.toDict(),
             }
 
             batch.append(tmp_struct)
@@ -587,7 +604,10 @@ class Store(DocumentStoreBase):
             return
 
         results = self.client.query(
-            collection_name=self.collection, filter=filter_expression, output_fields=['id', 'vector', 'content', 'meta']
+            collection_name=self.collection,
+            filter=filter_expression,
+            output_fields=['id', 'vector', 'content', 'meta'],
+            consistency_level=READ_CONSISTENCY,
         )
 
         # Batch-update instead of one-at-a-time to avoid performance bottleneck
@@ -617,7 +637,10 @@ class Store(DocumentStoreBase):
             return
 
         results = self.client.query(
-            collection_name=self.collection, filter=filter_expression, output_fields=['id', 'vector', 'content', 'meta']
+            collection_name=self.collection,
+            filter=filter_expression,
+            output_fields=['id', 'vector', 'content', 'meta'],
+            consistency_level=READ_CONSISTENCY,
         )
 
         # Batch-update instead of one-at-a-time to avoid performance bottleneck
@@ -647,7 +670,10 @@ class Store(DocumentStoreBase):
             must_condition = f"(meta['objectId'] == '{_escape_milvus_str(objectId)}') && ({offset - 1} < meta['chunkId'] < {offset + self.renderChunkSize})"
 
             results = self.client.query(
-                collection_name=self.collection, filter=must_condition, output_fields=['meta', 'content']
+                collection_name=self.collection,
+                filter=must_condition,
+                output_fields=['meta', 'content'],
+                consistency_level=READ_CONSISTENCY,
             )
 
             # Create a renderChunkSize array with empty
@@ -659,7 +685,7 @@ class Store(DocumentStoreBase):
 
             for point in results:
                 content = point['content']
-                chunk = point['chunkId']
+                chunk = point['meta']['chunkId']
                 index = chunk - offset
 
                 # Should never happen since we gave it an offset

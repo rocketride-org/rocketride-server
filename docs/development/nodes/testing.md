@@ -616,6 +616,21 @@ RR_TEST_AGE_DSN=postgresql://rruser:rrpass@localhost:55433/rrtenant \
 For AGE 1.6.0, start `apache/age:release_PG16_1.6.0` the same way on another
 port and point `RR_TEST_AGE_DSN` at it.
 
+The `store_milvus` node has a suite against a real Milvus,
+`nodes/test/store_milvus/test_store_milvus_live.py`, which reads the server
+address from `RR_TEST_MILVUS_URI`. CI starts no Milvus, so without the variable
+the suite skips even with `RR_REQUIRE_DB_TESTS=1`; with both set, a server that
+does not answer fails the test. Each test writes to its own collection. To run
+it locally:
+
+```bash
+docker run -d --rm --name rr-test-milvus -p 59530:19530 \
+  -e ETCD_USE_EMBED=true -e ETCD_DATA_DIR=/var/lib/milvus/etcd -e COMMON_STORAGETYPE=local \
+  milvusdb/milvus:v2.5.14 milvus run standalone
+
+RR_TEST_MILVUS_URI=http://127.0.0.1:59530 ./builder nodes:test
+```
+
 A suite that reuses fixed table or graph names marks its module with
 `pytest.mark.xdist_group`, so one worker runs all of its tests (see
 [Parallel runs](#parallel-runs)). Every suite that creates tables in the
