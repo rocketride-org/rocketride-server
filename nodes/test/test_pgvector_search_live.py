@@ -336,7 +336,8 @@ def test_failed_iterative_query_releases_transaction_and_local_setting(indexed_s
     from ai.common.schema import DocFilter, QuestionText
 
     store, _, _, query, _ = indexed_store
-    with pytest.raises(psycopg2.DataError, match='different vector dimensions'):
+    # pgvector 0.8.0 says 'different vector dimensions'; later releases say 'expected N dimensions, not M'.
+    with pytest.raises(psycopg2.DataError, match=r'different vector dimensions|expected \d+ dimensions'):
         store.searchSemantic(QuestionText(text='bad dimensions', embedding=[1.0, 0.0]), DocFilter(limit=5))
     assert store.client.autocommit is True
     assert store.client.get_transaction_status() == 0
