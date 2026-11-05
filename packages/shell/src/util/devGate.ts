@@ -405,8 +405,12 @@ export function isRelayBounceTarget(origin: string): boolean {
 //
 // Known compatibility cost of a closed set (each is refused, by design):
 // browser-hosted VS Code / Codespaces (webview origins `*.vscode-cdn.net`),
-// code-server (a webview origin on its own host), and any other embedder that
-// is neither `vscode-webview://` nor the shell's own origin.
+// code-server (a webview origin on its own host, loopback or not), and any
+// other embedder that is neither `vscode-webview://` nor the shell's own
+// origin. A dev server reached by LAN IP or a forwarded hostname (not
+// loopback) likewise loses self-registration, remote entries, `#rrtoken`
+// seeding and the sign-in relay. Supporting one of them means adding its exact
+// origin to isAllowedEmbedderOrigin, deliberately.
 
 /**
  * Whether a hostname is loopback: `localhost`, `*.localhost`, 127.0.0.0/8 or
