@@ -22,6 +22,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import type { IRoleChannel } from 'shared/explorer';
 import type { ConsoleActions, ConsoleModel, IDialectResult, IDocumentItem, IExportItem, IScopeState, VectorChannels } from '../src/contract/types';
 import { fixture } from './support/fixtures';
+import { bestOf } from './support/timing';
 
 // The shell's building blocks exist only inside a running shell: plain stand-ins that render their text.
 const shellStandIn = {
@@ -185,9 +186,7 @@ test("the strip's one-second clock re-renders only the 'counts as of' words; the
 
 test('the ingest chart with one far-off ingest time: a few dozen bars, not ninety thousand', () => {
 	const rows: IDocumentItem[] = [...readDocumentsPage(fixture('list_documents_page1')).items, { ...(readDocumentsPage(fixture('list_documents_page1')).items[0] as IDocumentItem), objectId: 'sentinel', ingestedAt: '9999-12-31T23:59:59Z' }];
-	const started = performance.now();
-	const html = renderToStaticMarkup(<StatsCharts rows={rows} total={null} dialect={dialect} onScope={noop} />);
-	const took = performance.now() - started;
+	const { ms: took, out: html } = bestOf(() => renderToStaticMarkup(<StatsCharts rows={rows} total={null} dialect={dialect} onScope={noop} />));
 	const ingest = html.slice(html.indexOf('data-chart="ingest"'));
 	assert.ok((ingest.match(/<rect /g) ?? []).length <= 62, `${(ingest.match(/<rect /g) ?? []).length} bars`);
 	assert.match(ingest, /<tr><td>after \d{4}-\d{2}-\d{2}<\/td><td>1<\/td><\/tr>/);

@@ -14,6 +14,7 @@ import { MAX_PERIOD_BINS, binCounts, byFileType, byIngestPeriod, chunksPerDocume
 import { validateFilter } from '../src/vector/filters';
 import { readDialect, readDocumentsPage } from '../src/vector/results';
 import { fixture } from './support/fixtures';
+import { bestOf } from './support/timing';
 
 /** A synthetic document row. */
 function doc(objectId: string, path: string, over: Partial<IDocumentItem> = {}): IDocumentItem {
@@ -285,8 +286,9 @@ test('binning 5,000 rows for all four charts stays inside 10 ms', () => {
 	const rows = Array.from({ length: 5_000 }, (_, i) => doc(`d${i}`, `C:/demo/f${i % 40}/doc_${i}.${['md', 'pdf', 'txt', 'docx'][i % 4]}`, { chunks: 1 + (i % 300), ingestedAt: `2026-10-0${1 + (i % 8)}T10:00:00Z` }));
 	const sample = fixture<ISampleResult>('sample_light_5000');
 	collectionCharts({ rows, total: 5_000, sample: model(sample), dialect: null, loading: false });
-	const started = performance.now();
-	for (let i = 0; i < 5; i += 1) collectionCharts({ rows, total: 5_000, sample: model(sample), dialect: null, loading: false });
-	const each = (performance.now() - started) / 5;
+	const each =
+		bestOf(() => {
+			for (let i = 0; i < 5; i += 1) collectionCharts({ rows, total: 5_000, sample: model(sample), dialect: null, loading: false });
+		}).ms / 5;
 	assert.ok(each <= 10 * 3, `binning took ${each.toFixed(1)} ms (budget 10 ms, asserted ≤ 3×)`);
 });

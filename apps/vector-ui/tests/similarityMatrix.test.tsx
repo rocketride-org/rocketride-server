@@ -29,6 +29,7 @@ import { chainOrder, heatCellAt, matrixInput, matrixRange, matrixRows, reorder }
 import { matrixFailure, matrixSourceLine } from '../src/map/reviewWording';
 import { fixture } from './support/fixtures';
 import { loadSample, modelOf } from './support/map.samples';
+import { bestOf } from './support/timing';
 
 const LIMITS = fixture<{ limits: IVectorLimits }>('dialect_enriched').limits;
 const OLD_LIMITS: IVectorLimits = (({ recommend_examples_max: _r, matrix_keys_max: _m, max_components: _c, ...rest }) => rest)(LIMITS);
@@ -105,10 +106,13 @@ test('budget: ordering 100 × 100 (10,000 cells) well within 50 ms', () => {
 	const n = 100;
 	const m = Array.from({ length: n }, (_, i) => Array.from({ length: n }, (_, j) => (i === j ? 1 : Math.round((0.3 + 0.6 * Math.abs(Math.sin(i * 7 + j * 7))) * 100) / 100)));
 	for (let i = 0; i < n; i += 1) for (let j = 0; j < i; j += 1) m[i]![j] = m[j]![i]!;
-	const started = performance.now();
-	const order = chainOrder(m);
-	reorder({ keys: m.map((_, i) => [`o${i}`, i] as VectorKey), matrix: m }, order);
-	assert.ok(performance.now() - started < 50);
+	const keys = m.map((_, i) => [`o${i}`, i] as VectorKey);
+	const { ms, out: order } = bestOf(() => {
+		const o = chainOrder(m);
+		reorder({ keys, matrix: m }, o);
+		return o;
+	});
+	assert.ok(ms < 50, `ordered in ${ms.toFixed(1)} ms`);
 	assert.equal(new Set(order).size, n);
 });
 
@@ -310,14 +314,7 @@ const bigLabel = (key: VectorKey): string => `C:/demo/handbooks/falcon_handbook_
  * @returns The fastest time and the markup.
  */
 function timed(make: () => React.ReactElement): { ms: number; out: string } {
-	let ms = Infinity;
-	let out = '';
-	for (let run = 0; run < 3; run += 1) {
-		const started = performance.now();
-		out = renderToStaticMarkup(make());
-		ms = Math.min(ms, performance.now() - started);
-	}
-	return { ms, out };
+	return bestOf(() => renderToStaticMarkup(make()));
 }
 
 test('budget: the heatmap at the cap is one canvas, a bounded handful of elements within 50 ms, a picked pair outlined without re-drawing the cells', () => {
@@ -338,9 +335,7 @@ test('budget: the heatmap at the cap is one canvas, a bounded handful of element
 test('budget: the table alternative at the cap shows 20 rows at a time, every row reachable through Previous and Next', () => {
 	const pages: number[] = [];
 	const make = (page: number): React.ReactElement => body({ state: bigState(), labelOf: bigLabel, showTable: true, tablePage: page, onTablePage: (p) => pages.push(p) });
-	// One throwaway render first: the budget is the steady-state cost of a page, not the module's cold start (the first
-	// render of a process pays for compiling the component on a slow runner).
-	make(0);
+	// `timed` warms up first and keeps the best of three: the budget is the steady-state cost of a page.
 	const { ms, out } = timed(() => make(1));
 	assert.ok(ms < 50, `rendered in ${ms.toFixed(1)} ms`);
 	assert.equal((out.match(/<th scope="row"/g) ?? []).length, 20);

@@ -17,6 +17,7 @@ import { EMPTY_FILTER, FILE_TYPE_RE, FILTER_TEXT_MAX, NO_MATCH_SCOPE, SCOPE_FAIL
 import type { IFilter } from '../src/vector/filters';
 import { readDocumentsPage, readStats } from '../src/vector/results';
 import { fixture } from './support/fixtures';
+import { bestOf } from './support/timing';
 
 /** A synthetic document row. */
 function doc(objectId: string, path: string, over: Partial<IDocumentItem> = {}): IDocumentItem {
@@ -307,9 +308,10 @@ test('matching 5,000 rows against every condition stays inside a keystroke (16 m
 	const rows = Array.from({ length: 5_000 }, (_, i) => doc(`d${i}`, `C:/demo/f${i % 40}/doc_${i}.${i % 3 === 0 ? 'pdf' : 'md'}`, { chunks: i % 90, ingestedAt: `2026-10-0${1 + (i % 8)}T10:00:00Z`, tables: i % 5 }));
 	const filter: IDocumentsFilter = { path_prefix: 'C:/demo/f1', file_types: ['md'], ingested_after: '2026-10-03T00:00:00Z', min_chunks: 2, max_chunks: 60, has_tables: true, has_first_chunk: true, path_contains: 'doc_1' };
 	scopeObjectIds(rows, filter, 2_000);
-	const started = performance.now();
-	for (let i = 0; i < 5; i += 1) scopeObjectIds(rows, filter, 2_000);
-	const each = (performance.now() - started) / 5;
+	const each =
+		bestOf(() => {
+			for (let i = 0; i < 5; i += 1) scopeObjectIds(rows, filter, 2_000);
+		}).ms / 5;
 	assert.ok(each <= 16 * 3, `matching took ${each.toFixed(1)} ms (budget 16 ms, asserted ≤ 3×)`);
 });
 
