@@ -147,12 +147,20 @@ async function vscodeRig(files: Record<string, unknown> = {}) {
 	await settle();
 	const read = (owner: string | null) => frame.caller.callReply('sql.savedQueries', { connId: 'c-pipe', owner }, { timeoutMs: SQL_OP_TIMEOUT_MS['sql.savedQueries'] });
 	const save = (owner: string | null, query: SavedQuery) => frame.caller.callReply('sql.savedQueryEdit', { connId: 'c-pipe', edit: { action: 'add', query }, owner }, { timeoutMs: SQL_OP_TIMEOUT_MS['sql.savedQueryEdit'] });
+	/** A frame opened later, after another account signed in: it belongs to the account it first sees. */
+	const extra: Array<ReturnType<typeof attachSqlFrame>> = [];
+	const newFrame = () => {
+		const later = attachSqlFrame({ channel: shellProtocol.createToolChannel(h.newFramePeer()), docKey: 'c-pipe', documents: { open: () => undefined, close: () => undefined }, protocol: shellProtocol });
+		extra.push(later);
+		return { frame: later, read: (owner: string | null) => later.caller.callReply('sql.savedQueries', { connId: 'c-pipe', owner }, { timeoutMs: SQL_OP_TIMEOUT_MS['sql.savedQueries'] }) };
+	};
 	return {
-		h, engine, frame, read, save,
+		h, engine, frame, read, save, newFrame,
 		get view() { return view!; },
 		get controller() { return controller; },
 		remount() { controller = mountController(); return controller; },
 		dispose() {
+			for (const later of extra) later.dispose();
 			view?.dispose();
 			frame.dispose();
 			controller.dispose();
@@ -427,7 +435,11 @@ describe('T7 — saved queries: nothing of one account is served to, kept for, o
 			await until(() => slow.held() > 0, 'B\'s file to be asked for');
 			// A frame of B asks while B's file is still being read: it waits, and is
 			// never answered from A's bag.
-			const reading = r.read(FP_B);
+			// (It is a frame that belongs to B: the first frame is A's, and the identity fence refuses
+			// what it asks once the account has changed.)
+			const frameB = r.newFrame();
+			await until(() => frameB.frame.owner() === FP_B, 'a frame that belongs to B');
+			const reading = frameB.read(FP_B);
 			await settle();
 			await assert.rejects(r.read(FP_A), (error: unknown) => error instanceof ExplorerToolError && error.kind === 'stale', 'A\'s frame is refused');
 			slow.release();

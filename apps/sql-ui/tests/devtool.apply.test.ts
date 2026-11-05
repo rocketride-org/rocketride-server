@@ -131,7 +131,10 @@ describe('M-7: an apply writes, so a frame of another account is refused', () =>
 					(error: unknown) => error instanceof ExplorerToolError && error.kind === 'stale' && /nothing was changed/.test(error.message),
 				);
 			}
-			assert.deepEqual(r.engine.requests.slice(before).map((q) => q.op), [], 'nothing reached the engine');
+			// Nothing the refused applies could cause: the controller's own background discovery and
+			// dialect probe (which a slow runner lets land inside this loop) are not.
+			const background = (q: { op: string; params: unknown }): boolean => q.op === 'client.getTasks' || q.op === 'client.listTasks' || (q.op === 'client.tool' && (q.params as { tool?: string }).tool === 'dialect');
+			assert.deepEqual(r.engine.requests.slice(before).filter((q) => !background(q)).map((q) => q.op), [], 'nothing reached the engine');
 		} finally {
 			r.dispose();
 		}
