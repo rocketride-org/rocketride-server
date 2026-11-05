@@ -12,8 +12,10 @@ import of ``tool_github.*`` bound to the given node config, and on exit restores
 every module it touched, including the ``tool_github.*`` modules another test file
 imported earlier, so file order does not matter.
 
-``ai.common.utils.decode_data_url`` is the real helper loaded from source: the
-node's PEM handling must match what the engine does, not a copy of it.
+``ai.common.utils.decode_data_url`` and the tool-argument validators the node uses
+(``normalize_tool_input``, ``require_str``, ``require_int``, ``optional_int``,
+``int_arg``) are the real helpers loaded from source: the node's PEM handling and input validation must match
+what the engine does, not a copy of it.
 """
 
 from __future__ import annotations
@@ -29,6 +31,14 @@ from unittest.mock import Mock
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _NODES_SRC = _REPO_ROOT / 'nodes' / 'src' / 'nodes'
 _FILE_UTILS = _REPO_ROOT / 'packages' / 'ai' / 'src' / 'ai' / 'common' / 'utils' / 'file_utils.py'
+_TOOL_ARGS = _REPO_ROOT / 'packages' / 'ai' / 'src' / 'ai' / 'common' / 'utils' / 'tool_args.py'
+_TOOL_ARG_HELPERS = (
+    'normalize_tool_input',
+    'require_str',
+    'require_int',
+    'optional_int',
+    'int_arg',
+)
 
 STUB_MODULE_NAMES = ('rocketlib', 'ai', 'ai.common', 'ai.common.config', 'ai.common.utils')
 
@@ -53,6 +63,14 @@ def _load_real_decode_data_url():
 
 
 decode_data_url = _load_real_decode_data_url()
+
+
+def _load_real_tool_args():
+    """Load the engine's validators from source; ``rocketlib`` must already be stubbed."""
+    spec = importlib.util.spec_from_file_location('_tool_github_test_tool_args', _TOOL_ARGS)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def install_stubs(node_config: dict | None = None) -> None:
@@ -89,9 +107,9 @@ def install_stubs(node_config: dict | None = None) -> None:
     sys.modules['ai.common.config'] = mod_ai_common_config
 
     mod_ai_common_utils = types.ModuleType('ai.common.utils')
-    mod_ai_common_utils.normalize_tool_input = lambda x, **kwargs: x
-    mod_ai_common_utils.require_str = lambda x, k, **kwargs: x.get(k)
-    mod_ai_common_utils.require_int = lambda x, k, **kwargs: x.get(k)
+    tool_args = _load_real_tool_args()
+    for name in _TOOL_ARG_HELPERS:
+        setattr(mod_ai_common_utils, name, getattr(tool_args, name))
     mod_ai_common_utils.decode_data_url = decode_data_url
     sys.modules['ai.common.utils'] = mod_ai_common_utils
 
