@@ -861,7 +861,7 @@ export class ConnectionManager implements IConnectionManager {
 			if (relayCode && relayState.startsWith('rrdev:')) {
 				const target = relayState.slice('rrdev:'.length).replace(/\/+$/, '');
 				// One definition with devRelayOrigin(), which arms the relay only where this accepts.
-					const isLoopback = isRelayBounceTarget(target);
+				const isLoopback = isRelayBounceTarget(target);
 				if (isLoopback && target !== window.location.origin) {
 					// replace(), not assign(): the bounce must not linger in
 					// history — Back should land before the sign-in, not here.

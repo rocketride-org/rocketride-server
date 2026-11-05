@@ -2066,27 +2066,30 @@ for (const delivery of ['live', 'held'] as const) {
 // =============================================================================
 
 test('bootstrap bounces a rrdev-state code to a loopback target via replace() and stops', async () => {
-	const replaced: string[] = [];
-	const win = topLevelWindow({
-		location: {
-			search: '?code=abc&state=rrdev%3Ahttp%3A%2F%2Flocalhost%3A3925',
-			pathname: '/',
-			origin: 'https://shell.example.test',
-			replace: (url: string) => { replaced.push(url); },
-		},
-		history: { state: null, replaceState: () => {} },
-	});
-	await withGlobals({ window: win, sessionStorage: recordingSession().storage }, async () => {
-		const { manager } = createTestManager();
-		manager.client = testClient();
-		// The bounce must fire BEFORE the transport attach — a rejecting
-		// attach here proves the order (a post-attach bounce would throw).
-		manager._attachPromise = Promise.reject(new Error('attach must not be awaited before the bounce'));
-		manager._attachPromise.catch(() => {});
+	// The bounce's whole target set: http://localhost and http://127.0.0.1 (optional port).
+	for (const target of ['http://localhost:3925', 'http://127.0.0.1:3925', 'http://localhost']) {
+		const replaced: string[] = [];
+		const win = topLevelWindow({
+			location: {
+				search: `?code=abc&state=${encodeURIComponent(`rrdev:${target}`)}`,
+				pathname: '/',
+				origin: 'https://shell.example.test',
+				replace: (url: string) => { replaced.push(url); },
+			},
+			history: { state: null, replaceState: () => {} },
+		});
+		await withGlobals({ window: win, sessionStorage: recordingSession().storage }, async () => {
+			const { manager } = createTestManager();
+			manager.client = testClient();
+			// The bounce must fire BEFORE the transport attach — a rejecting
+			// attach here proves the order (a post-attach bounce would throw).
+			manager._attachPromise = Promise.reject(new Error('attach must not be awaited before the bounce'));
+			manager._attachPromise.catch(() => {});
 
-		assert.equal(await manager.bootstrap(), null);
-		assert.deepEqual(replaced, ['http://localhost:3925/?code=abc']);
-	});
+			assert.equal(await manager.bootstrap(), null);
+			assert.deepEqual(replaced, [`${target}/?code=abc`], target);
+		});
+	}
 });
 
 test('bootstrap refuses to bounce to non-loopback or same-origin targets', async () => {
@@ -2096,6 +2099,15 @@ test('bootstrap refuses to bounce to non-loopback or same-origin targets', async
 		['https://shell.example.test', 'rrdev:https://evil.example.test'],
 		// A loopback target that IS this origin: no bounce loops.
 		['http://localhost:3925', 'rrdev:http://localhost:3925'],
+		// Loopback-ish targets OUTSIDE the bounce's set (http://localhost and
+		// http://127.0.0.1 only): https, [::1], *.localhost and look-alike hosts
+		// are refused even though other dev conveniences treat some as loopback.
+		['https://shell.example.test', 'rrdev:https://localhost:3000'],
+		['https://shell.example.test', 'rrdev:http://[::1]:3013'],
+		['https://shell.example.test', 'rrdev:http://evil.localhost:3013'],
+		['https://shell.example.test', 'rrdev:http://localhost.evil.test'],
+		['https://shell.example.test', 'rrdev:http://127.0.0.1.evil.test'],
+		['https://shell.example.test', 'rrdev:http://127.1.2.3:3013'],
 	] as const) {
 		const replaced: string[] = [];
 		const win = topLevelWindow({

@@ -89,20 +89,27 @@ A loopback origin is **never** a sender, not even for a loopback-served shell,
 and a page that merely `window.open()`s or frames the shell is not trusted by
 that fact. `rrdev:registerRemote` entries must be absolute `http(s)` loopback
 URLs; console rows are posted only to the verified embedder origin. `#rrtoken=`
-seeding works only on a shell served from loopback (`localhost`, `*.localhost`,
-`127.0.0.0/8`, `[::1]`), and the fragment is stripped even when ignored. The
-`rrauthorigin` sign-in relay works only on `http://localhost` and
-`http://127.0.0.1`, the shells its OAuth bounce can return to (the HTTPS
-`pnpm start` server and `[::1]` sign in normally instead).
+seeding is honoured only in a dev build, on a top-level shell served from
+loopback (`localhost`, `*.localhost`, `127.0.0.0/8`, `[::1]`). In a dev build on
+a top-level shell that is NOT loopback-served the fragment is ignored and
+stripped from the URL; a framed shell, or a production build, never reads or
+strips it. The `rrauthorigin` sign-in relay is armed only on `http://localhost`
+and `http://127.0.0.1`, the shells its OAuth bounce can return to; on any other
+shell (the HTTPS `pnpm start` server, `[::1]`, `*.localhost`) it is not armed.
 
 Deliberate compatibility costs of a closed set, so nobody is surprised:
 browser-hosted VS Code and Codespaces (webview origins on `*.vscode-cdn.net`)
 are refused; code-server is refused whether it is served from a loopback or a
 non-loopback host; and a dev server reached by LAN IP or a forwarded hostname
 (not loopback) loses URL-convention self-registration, remote entries,
-`#rrtoken` seeding and the sign-in relay. Add an exact origin to
-`isAllowedEmbedderOrigin` (devGate.ts) if one of those surfaces must be
-supported.
+`#rrtoken` seeding and the sign-in relay. Those dev servers are intentionally
+unsupported: dev remotes, token seeding and the relay are bound to loopback so
+that a dev flavor served from a real origin (the production origin included)
+cannot be steered by a link, and the loopback predicate (`isLoopbackHostname`,
+devGate.ts) cannot tell a LAN dev server from an attacker's host. Only the
+embedder cases (`*.vscode-cdn.net`, code-server) are governed by the allow-list
+`isAllowedEmbedderOrigin`; supporting one of them is a deliberate change there,
+with its own review.
 
 The extension manages the dev servers through a serialized per-app operation
 chain (start/stop/restart run one at a time). Closing a preview **lingers**

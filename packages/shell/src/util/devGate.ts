@@ -407,10 +407,13 @@ export function isRelayBounceTarget(origin: string): boolean {
 // browser-hosted VS Code / Codespaces (webview origins `*.vscode-cdn.net`),
 // code-server (a webview origin on its own host, loopback or not), and any
 // other embedder that is neither `vscode-webview://` nor the shell's own
-// origin. A dev server reached by LAN IP or a forwarded hostname (not
-// loopback) likewise loses self-registration, remote entries, `#rrtoken`
-// seeding and the sign-in relay. Supporting one of them means adding its exact
-// origin to isAllowedEmbedderOrigin, deliberately.
+// origin. Supporting one of those embedders means adding its exact origin to
+// isAllowedEmbedderOrigin, deliberately. A dev server reached by LAN IP or a
+// forwarded hostname (not loopback) likewise loses self-registration, remote
+// entries, `#rrtoken` seeding and the sign-in relay — but that is the loopback
+// predicate (isLoopbackHostname), not the embedder allow-list, and it is
+// intentionally unsupported: loopback is what keeps a link from steering a dev
+// flavor served from a real origin.
 
 /**
  * Whether a hostname is loopback: `localhost`, `*.localhost`, 127.0.0.0/8 or
@@ -442,7 +445,7 @@ function parseHttpOrigin(origin: unknown): URL | null {
  * Whether `origin` is a loopback http(s) origin (any port).
  *
  * @param origin - An origin string such as `location.origin`.
- * @returns True for `http(s)://localhost|127.x.x.x|[::1]` (with optional port).
+ * @returns True for `http(s)://localhost|*.localhost|127.x.x.x|[::1]` (with optional port).
  */
 function isLoopbackOrigin(origin: string): boolean {
 	const url = parseHttpOrigin(origin);
