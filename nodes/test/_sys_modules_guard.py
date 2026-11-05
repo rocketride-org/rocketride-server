@@ -35,6 +35,7 @@ _GUARDED_CORE_MODULES = (
     'requests',
     'requests.exceptions',
     'tenacity',
+    'numpy',
 )
 
 # nodeid -> {module name: object present before the module was imported}

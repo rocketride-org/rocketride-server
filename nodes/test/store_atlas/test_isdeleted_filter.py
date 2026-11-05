@@ -23,19 +23,17 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 # ---------------------------------------------------------------------------
-# Mock heavy dependencies BEFORE importing the atlas module
+# Mock heavy dependencies only while the atlas module is imported
 # ---------------------------------------------------------------------------
 
-for mod_name in (
+_STUB_MODULE_NAMES = (
     'pymongo',
     'pymongo.collection',
     'pymongo.database',
     'pymongo.errors',
     'pymongo.operations',
-):
-    sys.modules.setdefault(mod_name, MagicMock())
-
-sys.modules.setdefault('numpy', MagicMock())
+    'numpy',
+)
 
 
 # ---------------------------------------------------------------------------
@@ -68,10 +66,22 @@ class DocFilter:
 
 # Do NOT stub pydantic: atlas.py imports ai.common.store -> rocketlib, and
 # rocketlib.types needs the real pydantic (BaseModel, ConfigDict, Field).
+# Restore the stubbed modules afterwards: a MagicMock left in sys.modules['numpy']
+# breaks every later test in the run that imports the real numpy (#3019).
 _atlas_path = Path(__file__).parent.parent.parent / 'src' / 'nodes' / 'store_atlas' / 'atlas.py'
-_spec = importlib.util.spec_from_file_location('_atlas_direct', _atlas_path)
-atlas_mod = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(atlas_mod)
+_original = {name: sys.modules.get(name) for name in _STUB_MODULE_NAMES}
+for _name in _STUB_MODULE_NAMES:
+    sys.modules.setdefault(_name, MagicMock())
+try:
+    _spec = importlib.util.spec_from_file_location('_atlas_direct', _atlas_path)
+    atlas_mod = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(atlas_mod)
+finally:
+    for _name in _STUB_MODULE_NAMES:
+        if _original[_name] is None:
+            sys.modules.pop(_name, None)
+        else:
+            sys.modules[_name] = _original[_name]
 
 Store = atlas_mod.Store
 
