@@ -64,6 +64,26 @@ def _escape_milvus_str(value: object) -> str:
     return str(value).replace('\\', '\\\\').replace("'", "\\'")
 
 
+def _like_contains(text: str) -> str:
+    """Build a Milvus LIKE pattern that matches content containing text.
+
+    A backslash makes ``%`` and ``_`` literal. Milvus trims the trailing ``%`` of a
+    pattern before it reads escapes, so an escaped ``%`` at the end would match nothing:
+    for text that ends with ``%``, every ``%``, ``_`` and backslash becomes the
+    one-character wildcard ``_``, and the search can also return content that has
+    another character in those places.
+
+    Args:
+        text: The text to look for.
+
+    Returns:
+        The pattern, still to be escaped as a string literal.
+    """
+    if text.endswith('%'):
+        return '%' + re.sub(r'[\\%_]', '_', text) + '%'
+    return '%' + text.replace('%', '\\%').replace('_', '\\_') + '%'
+
+
 class Store(DocumentStoreBase):
     apikey: str = ''
     collection: str = ''
@@ -326,7 +346,7 @@ class Store(DocumentStoreBase):
         must_conditions = self._convertFilter(docFilter=docFilter)
 
         # Append it
-        must_conditions.append(f"content like '%{_escape_milvus_str(query.text)}%'")
+        must_conditions.append(f"content like '{_escape_milvus_str(_like_contains(query.text))}'")
 
         # Combine all conditions into a single filter expression
         filter_expression = ' and '.join(must_conditions) if must_conditions else None

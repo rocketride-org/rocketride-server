@@ -5,12 +5,13 @@
 
 """Real Milvus tests for the store_milvus driver.
 
-Run with the built engine and RR_TEST_MILVUS_URI pointing to a Milvus server, for
-example http://127.0.0.1:19530. Without the variable every test skips, even with
-RR_REQUIRE_DB_TESTS=1, which CI sets for its Postgres suites and starts no Milvus;
-with both set, a server that does not answer or a missing pymilvus fails instead
-of skipping. Each test writes to its own collection and drops it afterwards. The
-driver, pymilvus, the Doc models and DocumentStoreBase are real.
+Run with the built engine and RR_TEST_MILVUS_URI set to a Milvus server's http://
+address, for example http://127.0.0.1:19530. Without the variable every test
+skips, even with RR_REQUIRE_DB_TESTS=1, which CI sets for its Postgres suites and
+starts no Milvus; with both set, an address that is not http://, a server that
+does not answer or a missing pymilvus fails instead of skipping. Each test writes
+to its own collection and drops it afterwards. The driver, pymilvus, the Doc
+models and DocumentStoreBase are real.
 """
 
 import importlib
@@ -43,6 +44,13 @@ def open_store(monkeypatch):
     """
     if not _URI:
         pytest.skip('Set RR_TEST_MILVUS_URI to a Milvus test server')
+    url = urlsplit(_URI)
+    if url.scheme != 'http' or not url.hostname:
+        # The store opens in local mode, which connects to http://<host>:<port>
+        message = 'RR_TEST_MILVUS_URI must be an http://<host>:<port> address'
+        if _REQUIRED:
+            pytest.fail(message)
+        pytest.skip(message)
     if _REQUIRED:
         import rocketlib  # noqa: F401
 
@@ -72,7 +80,6 @@ def open_store(monkeypatch):
         monkeypatch.setitem(sys.modules, spec.name, module)
         spec.loader.exec_module(module)
 
-    url = urlsplit(_URI)
     config = {
         'collection': 'rr_test_' + uuid4().hex,
         'host': url.hostname,
@@ -207,6 +214,36 @@ def test_keyword_search_matches_the_question_text(open_store):
     store.addChunks([_doc('a', 0, 'the quick fox'), _doc('b', 0, 'a slow turtle')])
     docs = store.searchKeyword(QuestionText(text='quick'), _filter())
     assert _chunks(docs) == [('a', 0, 'the quick fox')]
+
+
+def test_keyword_search_takes_percent_and_underscore_literally(open_store):
+    """A % or _ in the question matches only itself; text that ends with % still finds every row that has it."""
+    from ai.common.schema import QuestionText
+
+    store = open_store()
+    store.addChunks(
+        [
+            _doc('a', 0, 'growth 50% now'),
+            _doc('b', 0, 'growth 500 now'),
+            _doc('c', 0, 'key a_b'),
+            _doc('d', 0, 'key axb'),
+        ]
+    )
+
+    def found(text):
+        """Return the object ids that a keyword search for text finds, sorted.
+
+        Args:
+            text: The question's text.
+
+        Returns:
+            The sorted object ids.
+        """
+        return [object_id for object_id, _, _ in _chunks(store.searchKeyword(QuestionText(text=text), _filter()))]
+
+    assert found('50% now') == ['a']
+    assert found('a_b') == ['c']
+    assert 'a' in found('50%')
 
 
 def test_render_joins_the_chunks_in_order(open_store):

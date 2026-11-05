@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
 from ai.common.schema import Doc, DocFilter, DocMetadata, QuestionText
 
 _NODE_DIR = Path(__file__).resolve().parents[2] / 'src/nodes/store_milvus'
@@ -80,6 +81,28 @@ def test_keyword_search_looks_for_the_question_text(monkeypatch):
     kwargs = store.client.query.call_args.kwargs
     assert kwargs['filter'].endswith("content like '%it\\'s%'")
     assert kwargs['consistency_level'] == 'Session'
+
+
+@pytest.mark.parametrize(
+    ('text', 'condition'),
+    [
+        ('a_b', r"content like '%a\\_b%'"),
+        ('50% up', r"content like '%50\\% up%'"),
+        ('c:\\dir', r"content like '%c:\\dir%'"),
+        ('50%', r"content like '%50_%'"),
+        ('a_b 50%', r"content like '%a_b 50_%'"),
+    ],
+    ids=['underscore', 'percent', 'backslash', 'trailing-percent', 'trailing-percent-and-underscore'],
+)
+def test_keyword_search_takes_wildcards_in_the_text_literally(monkeypatch, text, condition):
+    """A % or _ in the question is escaped; text ending with % turns them into the wildcard _ instead.
+
+    Milvus trims the trailing % of a pattern before it reads escapes, so an escaped % at
+    the end would match nothing.
+    """
+    store = _store(monkeypatch)
+    store.searchKeyword(QuestionText(text=text), DocFilter())
+    assert store.client.query.call_args.kwargs['filter'].endswith(condition)
 
 
 def test_render_orders_chunks_by_the_chunk_id_in_meta(monkeypatch):
