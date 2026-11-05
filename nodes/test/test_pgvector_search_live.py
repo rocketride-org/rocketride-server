@@ -6,8 +6,6 @@
 """Filtered HNSW regressions for both PostgreSQL vector stores and their tools.
 
 Uses the same RR_TEST_PG_DSN / RR_REQUIRE_DB_TESTS setup as the write suite.
-Deliberately not named *_full.py: Linux CI provisions pgvector but the normal
-nodes:test runner excludes that suffix. Other platforms skip without a DB.
 The fixture deliberately puts more excluded neighbours ahead of the eligible
 documents than HNSW's default candidate budget. EXPLAIN checks the executed
 query, so a sequential scan cannot accidentally make the regression pass.
@@ -17,12 +15,17 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from .test_vector_store_listing_full import _tools
-from .test_vector_store_writes_full import _doc
-from .test_vector_store_writes_full import store_env as _shared_store_env
+from .test_vector_store_listing_live import _tools
+from .test_vector_store_writes_live import _doc
+from .test_vector_store_writes_live import store_env as _shared_store_env
 
 store_env = _shared_store_env
-pytestmark = pytest.mark.parametrize('store_env', ['rocketride_vector', 'store_postgres'], indirect=True)
+# One xdist worker runs every module that creates tables in the RR_TEST_PG_DSN
+# database (see the group in test_rocketride_db_live.py).
+pytestmark = [
+    pytest.mark.parametrize('store_env', ['rocketride_vector', 'store_postgres'], indirect=True),
+    pytest.mark.xdist_group('rocketride_pg_live'),
+]
 
 
 @pytest.fixture(params=['cosine', 'l2', 'inner_product'])

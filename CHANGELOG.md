@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **server**: a seeded app version records the sha256 of the bundle it was copied from (`metadata.build.bundleSha256`), and `bundle_changed()` tells an orchestrator whether the pod's build differs from the app's newest seed, so a deploy can re-seed only the apps whose build changed. An app whose public version is a direct deploy, not a seed, counts as unchanged, so a release never replaces it
+- **tool_github**: four reads for apps that work on repositories with credentials held in the node configuration: `repo_contributors`, `repo_languages`, `label_list` and `user_get` (the PAT user, or the App itself under App auth). They return `{status, data, rate_limit, next_page}`: rate-limit counters from the response headers, the next page number from the `Link` header, and a non-2xx answer as a result with `status`, `message` and `documentation_url` rather than an exception; tokens, private keys and bearer headers never appear in a result or an error message. Existing tools keep their return shapes (#2592)
 
 ### Changed
 - **server**: on Linux and macOS a task run no longer takes the crash dumps that other engine processes left unreported in the crash database, and no longer names them in its output; they stay in the database, where an operator can take them by hand (#2918)

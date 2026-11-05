@@ -24,6 +24,10 @@ import pytest
 _REPO = Path(__file__).resolve().parents[2]
 _REQUIRED = bool(os.environ.get('RR_REQUIRE_DB_TESTS'))
 
+# One xdist worker runs every module that creates tables in the RR_TEST_PG_DSN
+# database (see the group in test_rocketride_db_live.py).
+pytestmark = pytest.mark.xdist_group('rocketride_pg_live')
+
 
 @pytest.fixture(params=['rocketride_vector', 'store_postgres'])
 def store_env(monkeypatch, request):
