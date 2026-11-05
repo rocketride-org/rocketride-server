@@ -12,14 +12,16 @@ run-name: Prerelease ${{ github.event_name == 'workflow_dispatch' && '(manual)' 
 # publishes the prerelease slot (develop, and any manual dispatch) stays
 # in the one `prerelease` group, so two of those never race.
 #
-# A run `init` turns away (a pull request's CI, see there) gets a group
-# of its own too: the group is joined before any job's `if:` is read, so
-# in a shared one it would cancel the real run in progress.
+# A run `init` turns away (a pull request's CI, or a CI run that did not
+# succeed, see there) gets a group of its own too: the group is joined
+# before any job's `if:` is read, so in a shared one it would cancel the
+# real run in progress.
 concurrency:
   group: >-
     ${{ github.event_name == 'workflow_run' &&
         (github.event.workflow_run.event != 'push' ||
-         github.event.workflow_run.head_repository.full_name != github.repository) &&
+         github.event.workflow_run.head_repository.full_name != github.repository ||
+         github.event.workflow_run.conclusion != 'success') &&
         format('prerelease-ignored-{0}', github.run_id) ||
         github.event_name == 'workflow_run' && github.event.workflow_run.head_branch == 'stage' &&
         'prerelease-stage' ||
@@ -258,6 +260,10 @@ jobs:
         with:
           app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
           private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          # Only what the publisher needs: contents for the release, its
+          # assets and their labels; workflows for the tag (see above).
+          permission-contents: write
+          permission-workflows: write
 
       - name: Publish to the engine cache
         env:
