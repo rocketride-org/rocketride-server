@@ -303,7 +303,9 @@ def _gemini_sent_limit(chat) -> int | None:
     """The max_output_tokens the node sent to Google on one request, or None when it sent none."""
     chat._chat('hi')
     config = chat._client.calls[-1]['config']
-    return config['max_output_tokens'] if config else None
+    if not config:
+        return None
+    return config['max_output_tokens']
 
 
 _GEMINI_CUSTOM = {'model': 'models/my-model', 'apikey': 'k', 'modelTotalTokens': 1000000}
