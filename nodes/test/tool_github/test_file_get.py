@@ -310,7 +310,11 @@ def test_malformed_blob_base64_keeps_metadata(node, encoded):
     assert request.call_count == 2
 
 
-@pytest.mark.parametrize('body', [[], None, {'encoding': 'base64', 'content': 7}], ids=['list', 'null', 'content-int'])
+@pytest.mark.parametrize(
+    'body',
+    [[], None, {'encoding': 'base64', 'content': 7}, {'encoding': 'base64'}],
+    ids=['list', 'null', 'content-int', 'content-missing'],
+)
 def test_blob_body_of_another_shape_keeps_metadata_without_raising(node, body):
     """A blob body that is not an object, or whose content is not text, is an invalid body: no exception."""
     inst, request, _ = node
@@ -320,6 +324,17 @@ def test_blob_body_of_another_shape_keeps_metadata_without_raising(node, body):
     assert result['content'] is None
     assert result['sha'] == 'blob-sha'
     assert result['size'] == 2_000_000
+    assert 'Git blob read failed' in result['message']
+    assert request.call_count == 2
+
+
+def test_null_blob_content_for_an_empty_large_file_is_an_invalid_body_not_an_empty_file(node):
+    """With size 0 a null content would pass the byte count as empty text; it is an invalid body instead."""
+    inst, request, _ = node
+    request.side_effect = [contents(0, encoding='none'), response({'encoding': 'base64', 'content': None})]
+    result = inst.file_get({'path': 'src/app.py', **BIG})
+    assert result['content'] is None
+    assert result['size'] == 0
     assert 'Git blob read failed' in result['message']
     assert request.call_count == 2
 
