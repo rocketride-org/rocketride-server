@@ -47,6 +47,7 @@ async def run_store(args) -> int:
     """
 
     async def action(out: Output) -> int:
+        """Connect to the server and dispatch the requested store subcommand."""
         client = await connect_client(args.uri, args.apikey)
         subcommand = args.store_subcommand
 

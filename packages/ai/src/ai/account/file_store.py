@@ -948,14 +948,18 @@ class FileStore:
         if not rest:
             raise StorageError('rmdir cannot target a scope root')
 
-        full_prefix = _full.rstrip('/') + '/'
+        full_target = _full.rstrip('/')
+        full_prefix = full_target + '/'
 
         # Refuse if any open handle or write-lock lives under this prefix;
         # otherwise the writer's next write_chunk/close would reference a
         # deleted backend path with undefined behavior.
         self._assert_no_active_handles_under(full_prefix)
 
-        all_files = [f for f in await self._store.list_files(full_prefix) if f.startswith(full_prefix)]
+        listed = await self._store.list_files(full_prefix)
+        if full_target in listed:
+            raise StorageError(f'Not a directory: {path}')
+        all_files = [f for f in listed if f.startswith(full_prefix)]
 
         # Ignore the target directory's own dirmarker sentinel when checking emptiness
         own_marker = full_prefix + DIR_MARKER

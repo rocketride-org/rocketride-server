@@ -273,7 +273,13 @@ class TestDelete:
         orig_list_files = fs._store.list_files
 
         async def prefix_stripped_list_files(prefix=''):
-            return await orig_list_files(prefix.rstrip('/'))
+            """Return both foo/.dirmarker and foobar/.dirmarker when listing foo."""
+            entries = await orig_list_files(prefix)
+            foo_prefix = fs._full_path('foo').rstrip('/')
+            if prefix.rstrip('/') == foo_prefix:
+                sibling_entries = await orig_list_files(fs._full_path('foobar/'))
+                return list(dict.fromkeys(entries + sibling_entries))
+            return entries
 
         fs._store.list_files = prefix_stripped_list_files
         try:
@@ -283,6 +289,16 @@ class TestDelete:
 
         assert (await fs.stat('foo'))['exists'] is False
         assert (await fs.stat('foobar'))['exists'] is True
+
+    @pytest.mark.asyncio
+    async def test_rmdir_rejects_file_target(self, fs):
+        """Calling rmdir on a regular file raises StorageError instead of silently succeeding."""
+        await fs.write('regular.txt', b'hello')
+
+        with pytest.raises(StorageError, match='Not a directory'):
+            await fs.rmdir('regular.txt')
+
+        assert await fs.read('regular.txt') == b'hello'
 
 
 # ============================================================================

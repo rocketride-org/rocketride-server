@@ -678,7 +678,7 @@ async def _dispatch(args) -> int:
         return await run_profile(args)
     if args.command == 'store':
         if not getattr(args, 'store_subcommand', None):
-            print('Error: Store subcommand is required (dir, type, write, rm, mkdir, stat)', file=sys.stderr)
+            print('Error: Store subcommand is required (dir, type, write, rm, mkdir, stat, rmdir)', file=sys.stderr)
             return 1
         return await run_store(args)
     if args.command == 'app':

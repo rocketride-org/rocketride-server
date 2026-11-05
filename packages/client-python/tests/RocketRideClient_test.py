@@ -1373,6 +1373,7 @@ class TestValidationOperations:
 
     @pytest.mark.asyncio
     async def test_should_validate_echo_pipeline_with_source_in_config(self):
+        """Validate an echo pipeline with its source component declared in config."""
         client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
         try:
             await client.connect()
@@ -1389,6 +1390,7 @@ class TestValidationOperations:
 
     @pytest.mark.asyncio
     async def test_should_validate_echo_pipeline_with_explicit_source(self):
+        """Validate an echo pipeline when passing an explicit source parameter."""
         client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
         try:
             await client.connect()
@@ -1405,6 +1407,7 @@ class TestValidationOperations:
 
     @pytest.mark.asyncio
     async def test_should_validate_pipeline_with_implied_source(self):
+        """Validate a pipeline where the source component is inferred from mode='Source'."""
         client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
         try:
             await client.connect()
@@ -1438,6 +1441,7 @@ class TestValidationOperations:
 
     @pytest.mark.asyncio
     async def test_should_return_errors_for_invalid_pipeline_configuration(self):
+        """Return validation errors when a pipeline references a nonexistent input component."""
         client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
         try:
             await client.connect()
