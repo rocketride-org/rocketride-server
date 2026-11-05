@@ -111,9 +111,10 @@ _ERROR_SIGNATURES = (
     # optionally labelled by an exception name (``RateLimitError:``), never by
     # an arbitrary word (``Note:``).
     re.compile(r'^\s*(?:\w*(?:Error|Exception)\s*:\s*)?Error code:\s*\d{3}\s*-\s*[{\[<]', re.IGNORECASE),
-    # The engine's LLM layer reports a provider failure as the answer itself:
+    # Older engines wrote a provider failure as the answer
     # ``**LLM error** — ValueError: An error occurred with the API.``
-    # (llm_base.py), and the RocketRide agent as ``LLM error: <exception>``.
+    # The engine no longer does; the matcher stays so that shape is still
+    # suppressed. The RocketRide agent still opens with ``LLM error: <exception>``.
     # Prose that opens ``LLM error — this means...`` has no exception name.
     re.compile(r'^\s*\*\*LLM error\*\*\s*[—–-]\s*\w+:'),
     re.compile(r'^\s*(?:\*\*)?LLM error(?:\*\*)?:'),

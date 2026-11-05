@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, List
 
+import pytest
 from rocketride import Answer
 
 import ai.common.llm_adapter as _adapter
@@ -47,12 +48,13 @@ class _FakeInner:
 
     def __init__(self) -> None:
         self.written: List[Any] = []
+        self.sse: List[tuple] = []
 
     def writeAnswers(self, answer: Any) -> None:
         self.written.append(answer)
 
     def sendSSE(self, *args: Any, **kwargs: Any) -> None:
-        pass
+        self.sse.append((args, kwargs))
 
 
 class _FakeQuestion:
@@ -126,28 +128,71 @@ def test_write_questions_has_no_tokens_when_no_model_was_called():
     assert node.instance.written[0].tokens is None
 
 
-def test_write_questions_error_answer_still_carries_the_burnt_tokens():
-    """A turn that failed after burning tokens is the one a user opens the Trace on.
-
-    The adapters report from their own ``finally``, so the scope holds what was billed;
-    the except branch has to read it before returning or the grid renders empty.
-    """
+def test_write_questions_failure_raises_and_writes_no_answer(monkeypatch):
+    """A provider failure is an error, not an answer the caller can treat as success."""
+    logged = []
+    monkeypatch.setattr('ai.common.llm_base.error', lambda message: logged.append(message))
     node = _make_node(_fails_after_one_call)
 
-    node.writeQuestions(_FakeQuestion())
+    with pytest.raises(RuntimeError, match='provider stream died'):
+        node.writeQuestions(_FakeQuestion())
 
-    written = node.instance.written[0]
-    assert 'RuntimeError' in written.getText()
-    assert written.tokens == {'input': 10, 'output': 4, 'cache_read': 0, 'cache_creation': 0, 'model': 'm1'}
+    assert node.instance.written == []
+    assert logged == ['writeQuestions failed: RuntimeError: provider stream died']
+    # The Trace grid never sees this: it reads answer.tokens, and no answer was written.
+    assert node.instance.sse == [
+        (
+            ('error',),
+            {
+                'message': 'RuntimeError: provider stream died',
+                'tokens': {'input': 10, 'output': 4, 'cache_read': 0, 'cache_creation': 0, 'model': 'm1'},
+            },
+        )
+    ]
 
 
-def test_write_questions_error_answer_has_no_tokens_when_nothing_was_called():
-    """A failure before any request must leave tokens unset, not set it to an empty grid."""
+def test_write_questions_failure_before_any_call_also_raises(monkeypatch):
+    logged = []
+    monkeypatch.setattr('ai.common.llm_base.error', lambda message: logged.append(message))
     node = _make_node(_fails_before_any_call)
 
+    with pytest.raises(RuntimeError, match='connect timeout'):
+        node.writeQuestions(_FakeQuestion())
+
+    assert node.instance.written == []
+    assert logged == ['writeQuestions failed: RuntimeError: connect timeout']
+    assert node.instance.sse == [(('error',), {'message': 'RuntimeError: connect timeout'})]
+
+
+def test_write_questions_write_failure_emits_error(monkeypatch):
+    """A failed answer write is still one terminal error event, and is not logged as an LLM failure."""
+    logged = []
+    monkeypatch.setattr('ai.common.llm_base.error', lambda message: logged.append(message))
+    node = _make_node(_two_calls)
+
+    def boom(_answer):
+        raise OSError('lane closed')
+
+    node.instance.writeAnswers = boom
+
+    with pytest.raises(OSError, match='lane closed'):
+        node.writeQuestions(_FakeQuestion())
+
+    assert logged == ['writeQuestions failed: OSError: lane closed']
+    assert len(node.instance.sse) == 1
+    args, payload = node.instance.sse[0]
+    assert args == ('error',)
+    assert payload['message'] == 'OSError: lane closed'
+    assert payload['tokens']['calls'] == 2
+    assert payload['tokens']['input'] == 30 and payload['tokens']['output'] == 12
+
+
+def test_write_questions_sends_done_after_a_normal_answer():
+    node = _make_node(_no_call)
+
     node.writeQuestions(_FakeQuestion())
 
-    assert node.instance.written[0].tokens is None
+    assert node.instance.sse == [(('done',), {})]
 
 
 # ---------------------------------------------------------------------------

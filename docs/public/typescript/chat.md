@@ -46,6 +46,13 @@ const response = await client.chat({ token, question });
 server-sent events (token-by-token output) as they arrive. The final answer is in
 the result body.
 
+Every chat emits one terminal event: `done` after the answer is written, or
+`error` when the call fails. On `error`, `data.message` is
+`<ExceptionName>: <text>`, and `data.tokens` is the turn's usage when a model
+call completed. A failure rejects with `PipeException`. The provider text is
+that exception's message, not an entry in `answers`. The Trace Tokens grid reads
+tokens from the written answer, so a failed turn leaves it empty.
+
 ## Parse the response with Answer
 
 `Answer` extracts structure from AI text, which often arrives wrapped in markdown

@@ -498,15 +498,22 @@ async def handle_sse(type: str, data: dict) -> None:
 response = await client.chat(token=token, question=question, on_sse=handle_sse)
 ```
 
+An LLM chat emits one terminal event, including a question with `expectJson` (which does not stream tokens):
+
+- `done` — the answer was written. The payload is empty.
+- `error` — the model call or the answer write failed. `data['message']` is `<ExceptionName>: <text>`. When the turn reached the model, `data['tokens']` is that turn's usage (`input`, `output`, `cache_read`, `cache_creation`, `model`, plus `calls` and `breakdown` when there was more than one call).
+
+The Trace Tokens grid reads `answer.tokens` on a written answer, so a failed turn leaves that grid empty. The usage for that turn is on the `error` event.
+
 ## 5. Chat & Question
 
 ### `async chat(*, token: str, question: Question, on_sse=None) -> Dict[str, Any]`
 
 Ask a question to RocketRide's AI and get an intelligent response. All arguments are keyword-only: `token` (the chat pipeline's task token), `question` (a Question object), and optional `on_sse` for streamed SSE events (see [Streaming Callback](#streaming-callback-on_sse)).
 
-**Returns:** Response dictionary containing answers (typically `response['answers']`, a list; for `expectJson=True` questions each answer is already parsed into a dict/list).
+**Returns:** Response dictionary containing answers (typically `response['answers']`, a list; for `expectJson=True` questions each answer is already parsed into a dict/list). A failed LLM call is not an answer: the provider text is not in `answers`.
 
-**Raises:** `RuntimeError` if the question is empty or the chat operation fails; `PipeException` on transfer failure.
+**Raises:** `RuntimeError` if the question is empty. A failed LLM call fails the pipe, so `chat()` raises `PipeException` (also a `RuntimeError`; see [What Actually Raises What](#what-actually-raises-what)). Code that used to read the error text from the answer now catches that exception. The same call emits an `error` SSE event first (see [Streaming Callback](#streaming-callback-on_sse)).
 
 **Important:** Use this method with pipelines that have `chat` as the source component. This is for ALL conversational interfaces (web, console, API, mobile), not just web-based UIs. For document processing/uploads, use `send()` or `send_files()` with a `webhook` source instead.
 

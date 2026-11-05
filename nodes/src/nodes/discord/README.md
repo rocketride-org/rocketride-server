@@ -100,7 +100,7 @@ With `emitNoReply` on, a message that ends without a posted answer produces a `n
 - `paused`: the message arrived in a thread paused by **Pause After Escalation**;
 - `aimed_elsewhere`: **Ignore Messages Aimed At Others** skipped the message;
 - `non_answer`: **Sanitize Replies** left nothing postable in the answer, on every retry;
-- `model_error`: the answer (or a retry's) was recognised as an engine or model error (see **Error answers**);
+- `model_error`: an answer (or a retry's) was recognised as an engine or model error (see **Error answers**). A failed LLM call is not this reason: the pipeline fails, and the reason is the exception text;
 - `timeout`: a pipeline run passed **Pipeline Timeout (seconds)**;
 - any other value: the error message of the first pipeline or download error, or of an unexpected failure, clipped to 200 characters (a reason built from an exception message would otherwise be unbounded).
 
@@ -196,9 +196,11 @@ With `sanitizeReplies` enabled, an answer wrapped in a `{"type": "final", "conte
 
 ### Error answers
 
-Whatever `sanitizeReplies` says, the node never relays an engine or provider failure as an answer: a raw provider exception can carry account details, key fragments, or internal URLs. A reply is always treated as an error when it:
+A failed LLM call does not arrive as an answer. The node raises, the pipeline fails, and with `emitNoReply` on the `no_reply` reason is that exception's text, clipped to 200 characters, rather than `model_error`. The node logs no suppressed-answer warning for it.
 
-- opens with the engine's `**LLM error** — <ExceptionName>:` or the agent's `LLM error:` (so `LLM error — this means...` and `LLM error-handling` are posted);
+Whatever `sanitizeReplies` says, the node still never relays an engine or provider failure that did come back as an answer: a raw provider exception can carry account details, key fragments, or internal URLs. A reply is always treated as an error when it:
+
+- opens with the agent's `LLM error:` (so `LLM error — this means...` and `LLM error-handling` are posted);
 - is only the sentence `An error occurred with the <provider> API.` (`the API`, `the OpenAI API`, `the Baidu Qianfan API`; optionally after an exception name such as `ValueError:`), so an answer that opens with it and goes on to explain it is posted;
 - opens with a provider error an agent wrapped in its own text: `Deep agent <stage> failed: <ExceptionName>:`, `LangChain agent <stage> failed: <ExceptionName>:`, `Unable to produce final answer: ...`, or AWS's `An error occurred (<Code>) when calling the <Operation> operation:`;
 - opens with a `chat.py:NN` / `agent.py:NN` engine frame, or a Python traceback (`Traceback (most recent call last):` with a `File "...` line under it);

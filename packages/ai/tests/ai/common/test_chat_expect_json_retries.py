@@ -80,9 +80,9 @@ class TestTruncatedThinkBlock:
         """The whole point of the diagnosis: it is still readable at the top.
 
         Swallowed into the retry loop, it became ``Failed to get valid JSON response
-        after N attempts``, which names nothing. ``LLMBase.writeQuestions`` renders
-        whatever escapes here as ``**LLM error** — {type}: {message}``, so this is the
-        text a user ends up seeing.
+        after N attempts``, which names nothing. ``LLMBase.writeQuestions`` records
+        whatever escapes here on the task errors list and re-raises, so this is the
+        text the caller sees.
         """
         chat, _ = _chat_returning(TRUNCATED)
 

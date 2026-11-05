@@ -3,7 +3,7 @@
 import inspect
 from typing import Callable, List, Optional
 
-from rocketlib import IInstanceBase, invoke_function, warning
+from rocketlib import IInstanceBase, error, invoke_function
 from ai.common.schema import Question, Answer
 from ai.common.llm_native_stream import STOP_SEQUENCES_VAR
 from ai.common.llm_adapter import turn_usage
@@ -55,12 +55,15 @@ class LLMBase(IInstanceBase):
         def _noop(_text: str) -> None:
             pass
 
+        def _emit_sse(event: str, **data) -> None:
+            try:
+                self.instance.sendSSE(event, **data)
+            except Exception:
+                pass
+
         def _emit_thinking(message: str) -> None:
             if message:
-                try:
-                    self.instance.sendSSE('thinking', message=message)
-                except Exception:
-                    pass
+                _emit_sse('thinking', message=message)
 
         def _flush_reasoning(force: bool = False) -> None:
             # Emit complete lines; keep the trailing partial in buf so the next
@@ -91,26 +94,27 @@ class LLMBase(IInstanceBase):
                     on_chunk=_noop,
                     on_reasoning_chunk=on_reasoning_chunk,
                 )
-            except Exception as e:
-                err_msg = f'**LLM error** — {type(e).__name__}: {e}'
-                warning(f'writeQuestions: LLM call failed: {type(e).__name__}: {e}')
-                answer = Answer()
-                answer.setAnswer(err_msg)
-                # A turn that failed after burning tokens still spent them: the adapters
-                # report from their own finally, so the scope holds what was billed —
-                # hang it on the error answer or the Trace shows nothing for exactly the
-                # turn the user opens.
-                failed_usage = read_usage()
-                if failed_usage:
-                    answer.tokens = failed_usage
+                _flush_reasoning(force=True)  # emit any trailing partial line
+                usage = read_usage()  # turn total: summed across every model call this turn
+                if usage:
+                    answer.tokens = usage  # shown in the Trace "Tokens" grid on the answers lane
                 self.instance.writeAnswers(answer)
-                return
-
-            _flush_reasoning(force=True)  # emit any trailing partial line
-            usage = read_usage()  # turn total: summed across every model call this turn
-            if usage:
-                answer.tokens = usage  # shown in the Trace "Tokens" grid on the answers lane
-            self.instance.writeAnswers(answer)
+                # One terminal event on every chat, including expectJson, which does not stream.
+                _emit_sse('done')
+            except Exception as e:
+                # A failure must not look like an answer. error() is what the engine
+                # turns into apaevt_status_error, which fills the task errors list.
+                # Re-raising fails the pipe, so chat() raises instead of returning.
+                # The Trace Tokens grid reads answer.tokens on a written answer, so a
+                # failed turn leaves that grid empty; the usage rides on this event.
+                message = f'{type(e).__name__}: {e}'
+                error(f'writeQuestions failed: {message}')
+                usage = read_usage()
+                if usage:
+                    _emit_sse('error', message=message, tokens=usage)
+                else:
+                    _emit_sse('error', message=message)
+                raise
 
     @invoke_function
     def getContextLength(self, _param):
