@@ -1173,43 +1173,17 @@ def _count_scanned_chars(executor, monkeypatch) -> _ScanCounter:
 
 def test_a_wide_flat_dict_costs_a_bounded_walk(monkeypatch):
     """Finding 15: a regex per short field over the whole summary took 0.8 s for 5,000 fields."""
-    import time
-
     executor = _load_executor()
 
-    def best_time(width: int, repeats: int):
-        """Fastest of several runs of `_describe` on a flat dict of `width` fields.
-
-        Args:
-            width (int): Number of fields in the dict.
-            repeats (int): How many runs to time.
-
-        Returns:
-            tuple[float, str]: The fastest run in seconds, and its summary.
-        """
-        result = {f'k{i:06d}': i for i in range(width)}
-        best = float('inf')
-        summary = ''
-        for _ in range(repeats):
-            start = time.perf_counter()
-            summary = executor._describe(result)
-            best = min(best, time.perf_counter() - start)
-        return best, summary
-
-    narrow, _ = best_time(500, 7)
-    wide, summary = best_time(5000, 3)
-
-    assert len(summary) <= executor._SUMMARY_HARD_CAP
-    assert 'k000000: 0' in summary
-    # A linear walk grows about 10x for 10x the fields; a walk that rescans the summary per field grows about 100x.
-    assert wide < narrow * 40, f'{wide:.4f}s for 5,000 fields vs {narrow:.4f}s for 500'
-
-    # The summary is capped, so 500 fields already fill it and timing alone cannot see a per-field rescan of it.
+    # The summary is capped, so 500 fields already fill it and a run time cannot see a per-field rescan of it.
     # Count what the regexes scan instead: a regex per short field over the whole summary is about
     # 5,000 x _SUMMARY_HARD_CAP characters; a bounded walk scans only the field names.
     fields = 5000
     counter = _count_scanned_chars(executor, monkeypatch)
-    executor._describe({f'k{i:06d}': i for i in range(fields)})
+    summary = executor._describe({f'k{i:06d}': i for i in range(fields)})
+
+    assert len(summary) <= executor._SUMMARY_HARD_CAP
+    assert 'k000000: 0' in summary
     assert counter.chars <= fields * _SCANNED_CHARS_PER_FIELD, (
         f'regexes scanned {counter.chars} characters for {fields} fields'
     )
