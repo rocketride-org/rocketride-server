@@ -64,6 +64,87 @@ def test_map_precedence_exact_then_owner_then_default(github, form):
     assert github.calls == []
 
 
+ROWS = [{'credentialRepository': key, 'credentialValue': value} for key, value in MAP.items()]
+
+
+@pytest.mark.parametrize('form', ['rows', 'rows-json-text'])
+def test_map_rows_from_the_canvas_form_match_like_the_object(github, form):
+    raw = ROWS if form == 'rows' else json.dumps(ROWS)
+    with real_node({'credentialMap': raw}) as inst:
+        glb = inst.IGlobal
+        assert glb.get_token('acme/payments') == 'tok-exact'
+        assert glb.get_token('acme/web') == 'tok-owner'
+        assert glb.get_token('other/repo') == 'tok-default'
+        assert glb.get_token(owner='acme') == 'tok-owner'
+    assert github.calls == []
+
+
+def test_blank_rows_from_the_canvas_form_are_ignored(github):
+    rows = [
+        {'credentialRepository': '', 'credentialValue': ''},
+        {'credentialRepository': 'acme/*', 'credentialValue': 'tok-owner'},
+        {},
+    ]
+    with real_node({'credentialMap': rows, 'token': 'ghp_node'}) as inst:
+        assert inst.IGlobal.get_token('acme/web') == 'tok-owner'
+        assert inst.IGlobal.get_token('zeta/x') == 'ghp_node'
+
+
+def test_an_app_credential_row_may_hold_the_object_or_its_text(github, rsa_private_key_pem):
+    entry = {'appId': '111', 'privateKey': rsa_private_key_pem, 'installationId': '456'}
+    for value in (entry, json.dumps(entry)):
+        with real_node({'credentialMap': [{'credentialRepository': 'acme/*', 'credentialValue': value}]}) as inst:
+            assert inst.IGlobal.auth_type_for('acme/api') == 'app'
+
+
+@pytest.mark.parametrize(
+    ('rows', 'expected'),
+    [
+        ([{'credentialRepository': 'acme/*'}], 'credentialMap row 1 has no credential'),
+        ([{'credentialRepository': 'acme/*', 'credentialValue': '  '}], 'credentialMap row 1 has no credential'),
+        ([{'credentialValue': SENTINEL}], 'credentialMap row 1 has a credential but no repository'),
+        (
+            [{'credentialRepository': 'a/b', 'credentialValue': 'tok'}, 'not a row'],
+            'credentialMap row 2 must be an object',
+        ),
+        (
+            [{'credentialRepository': SENTINEL, 'credentialValue': 'tok'}],
+            'credentialMap row 1: credentialRepository is not a repository',
+        ),
+        (
+            [{'credentialRepository': 'a/b', 'credentialValue': 'tok', 'extra': SENTINEL}],
+            'credentialMap row 1 has 1 unknown field',
+        ),
+        (
+            [
+                {'credentialRepository': 'a/b', 'credentialValue': 'tok'},
+                {'credentialRepository': 'a/b', 'credentialValue': 'tok2'},
+            ],
+            'credentialMap row 2 repeats the repository of an earlier row',
+        ),
+        (
+            [{'credentialRepository': ['a/b'], 'credentialValue': 'tok'}],
+            'credentialMap row 1: credentialRepository must be text',
+        ),
+        (
+            [{'credentialRepository': 'a/b', 'credentialValue': 7}],
+            'credentialMap row 1: credentialValue must be text or an App credential object',
+        ),
+        (
+            [
+                {'credentialRepository': 'A/B', 'credentialValue': 'tok'},
+                {'credentialRepository': 'a/b', 'credentialValue': 'tok2'},
+            ],
+            'appears twice (keys are not case sensitive)',
+        ),
+    ],
+)
+def test_bad_rows_fail_at_start_by_position_without_echoing_values(rows, expected):
+    message = _begin_error({'credentialMap': rows})
+    assert expected in message
+    assert SENTINEL not in message
+
+
 def test_map_matching_ignores_case_like_github(github):
     with real_node({'credentialMap': {'Acme/Payments': 'tok-exact', 'ACME/*': 'tok-owner'}}) as inst:
         assert inst.IGlobal.get_token('acme/PAYMENTS') == 'tok-exact'
@@ -182,7 +263,8 @@ def test_map_json_text_that_does_not_parse_fails_without_echoing_it():
 @pytest.mark.parametrize('raw', [[SENTINEL], '["acme/*"]', 7])
 def test_map_that_is_not_an_object_fails_at_start(raw):
     message = _begin_error({'credentialMap': raw})
-    assert 'credentialMap must be a JSON object' in message
+    # A scalar is refused outright; a list is read as rows, so its first non-row is named by position.
+    assert 'credentialMap must be a list of rows' in message or 'credentialMap row 1 must be an object' in message
     assert SENTINEL not in message
 
 
@@ -545,8 +627,12 @@ def test_a_bad_app_entry_given_as_json_text_fails_at_start_without_echoing_it(va
     assert SENTINEL not in message
 
 
-def test_services_json_lets_the_canvas_edit_the_map_as_entries_of_masked_text():
-    # RJSF picks the first member of a type list; ["object", "string"] rendered no controls at all.
+def test_services_json_lets_the_canvas_edit_the_map_as_rows_with_a_masked_credential():
+    # A free-form map of strings renders in the canvas with the form library's bare defaults
+    # (a "newKey Key" label, an unlabeled value, an icon-less remove button): the canvas has
+    # templates for lists but none for additional properties. Rows of two named columns use
+    # the canvas's list templates and its masked API key widget, like tool_http_request's
+    # default headers.
     from pathlib import Path
 
     text = (Path(__file__).resolve().parents[2] / 'src' / 'nodes' / 'tool_github' / 'services.json').read_text(
@@ -554,12 +640,16 @@ def test_services_json_lets_the_canvas_edit_the_map_as_entries_of_masked_text():
     )
     services = json.loads('\n'.join(line for line in text.splitlines() if not line.lstrip().startswith('//')))
     field = services['fields']['github.credentialMap']
-    assert field['type'] == 'object'
-    assert field['additionalProperties'] == {'type': 'string'}
-    assert field['default'] == {}
+    assert field['type'] == 'array'
+    assert field['items'] == {'type': 'object', 'properties': ['github.credentialRepository', 'github.credentialValue']}
+    assert field['default'] == []
     assert field['secure'] is True
-    assert field['ui'] == {'additionalProperties': {'ui:widget': 'ApiKeyWidget'}}
-    assert services['preconfig']['profiles']['default']['credentialMap'] == {}
+    assert services['fields']['github.credentialRepository']['type'] == 'string'
+    value = services['fields']['github.credentialValue']
+    assert value['type'] == 'string'
+    assert value['secure'] is True
+    assert value['ui'] == {'ui:widget': 'ApiKeyWidget'}
+    assert services['preconfig']['profiles']['default']['credentialMap'] == []
 
 
 # ---------------------------------------------------------------------------

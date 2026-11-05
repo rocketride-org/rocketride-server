@@ -619,11 +619,18 @@ it does not break a token call that needs no repository.
 
 ### Credential map (`credentialMap`)
 
-For an app that needs a different credential per repository or organization. The map is
-a set of entries, each a key and a text value. In the canvas form, **Add** an entry, type
-its key, and type its value in the masked field, which, like the token field, offers your
-`${ROCKETRIDE_...}` variables. In a pipeline file it is a JSON object of strings, with a
-variable per credential:
+For an app that needs a different credential per repository or organization. In the canvas
+form the map is a list of rows: **Add** a row, type the repository or owner in **Repository
+or owner** and the credential in **Credential**, a masked field that, like the token field,
+offers your `${ROCKETRIDE_...}` variables; the delete icon removes a row. In a pipeline file
+it is the same list of rows, or a JSON object of strings, with a variable per credential:
+
+```json
+[
+  {"credentialRepository": "acme/payments", "credentialValue": "${ROCKETRIDE_GITHUB_PAYMENTS_TOKEN}"},
+  {"credentialRepository": "*", "credentialValue": "${ROCKETRIDE_GITHUB_TOKEN}"}
+]
+```
 
 ```json
 {
@@ -634,7 +641,8 @@ variable per credential:
 }
 ```
 
-- **Keys** are an exact `owner/repo`, an owner wildcard `owner/*`, or the default `*`.
+- **Keys** (a row's repository, or an object's key) are an exact `owner/repo`, an owner
+  wildcard `owner/*`, or the default `*`.
   They are not case sensitive, like GitHub names.
 - **Values** are a token, a placeholder for one, or the JSON text of a GitHub App
   credential: `appId`, `privateKey` (PEM text or a data URL, decoded like the node's own
@@ -642,11 +650,11 @@ variable per credential:
   repository as above. A PEM's line breaks may be written as `\n` or left as they are.
 - **Placeholders** resolve in one pass over the pipeline's own text, so they work in every
   value, inside an App entry's JSON text too.
-- **Hand-written pipelines** may also write an App entry as a JSON object instead of its
-  text, or set the whole field to one `${ROCKETRIDE_...}` variable that holds the map's
-  JSON text. The node accepts both, but the canvas form edits only entries with text
-  values: it marks an object value ("must be string") or a whole-map variable ("must be
-  object") as an error until the field is rewritten as entries. A variable that holds the
+- **Hand-written pipelines** may write the map as the JSON object above, write an App
+  credential as a JSON object instead of its text, or set the whole field to one
+  `${ROCKETRIDE_...}` variable that holds the JSON text of either form. The node accepts
+  all of these, but the canvas form edits rows only: it shows an object or a whole-map
+  variable as an error ("must be array") until the field is rewritten as rows. A variable that holds the
   whole map must hold literal values: its text is not scanned again, so a placeholder
   inside it stays as written, and the run stops at start saying so.
 - **Matching:** each call uses the most specific entry for its repository: the exact
@@ -658,6 +666,8 @@ variable per credential:
 - **Checked at pipeline start:** these all stop the pipeline with a message that names the
   entry (by its key, or a key by its position) and never prints a value:
   - a key that is none of the three forms;
+  - a row without a repository or without a credential (a row with neither is ignored), a
+    row with other fields, or a repository repeated in two rows;
   - a value that is neither form, or a token with spaces or line breaks;
   - unknown fields in an App object (counted, not named);
   - a malformed or non-RSA private key;
@@ -805,7 +815,9 @@ pytest nodes/test/tool_github/test_app_auth_live.py -v
 |---|---|---|---|
 | `github.appId` | `string` | **App ID**<br/>The numeric App ID from your GitHub App's settings page. | `""` |
 | `github.authType` | `string` | **Authentication method**<br/>Personal Access Token is simplest for individual/dev use. GitHub App auth mints short-lived, auto-rotating installation tokens — recommended for unattended pipelines against an org's repos. | `"pat"` |
-| `github.credentialMap` | `object` | **Credential map**<br/>Optional: a credential per repository or organization, as entries whose key is owner/repo, owner/* or * and whose value is a token, a ${ROCKETRIDE_...} placeholder, or the JSON text of a GitHub App credential {"appId", "privateKey", optional "installationId"}. Each call uses the most specific match for its repository: the exact owner/repo, then owner/*, then the * default; with no match and no default the call fails naming the repository. Keys are not case sensitive. The node's own credential serves the repositories no entry matches when the map has no * entry; a map with a * entry and a node credential together stop the pipeline at start. The whole map is checked at pipeline start. A hand-written pipeline may instead set the field to one ${ROCKETRIDE_...} placeholder holding the map's JSON text with literal values. | `{}` |
+| `github.credentialMap` | `array` | **Credential map**<br/>Optional. One row per repository or organization that needs its own credential. Repository or owner: owner/repo, owner/* for all of an owner's repositories, or * for the default. Credential: a personal access token, a ${ROCKETRIDE_...} placeholder, or a GitHub App credential as JSON. A call uses the most specific row for its repository; repositories no row matches use the node's own token, and a * row replaces that token (the node may not have both). Rows are checked when the pipeline starts. | `[]` |
+| `github.credentialRepository` | `string` | **Repository or owner**<br/>owner/repo for one repository, owner/* for every repository of that owner, or * for the default used when no other row matches. Not case sensitive. | `""` |
+| `github.credentialValue` | `string` | **Credential**<br/>A personal access token, a ${ROCKETRIDE_...} placeholder for one, or the JSON text of a GitHub App credential: {"appId": ..., "privateKey": ..., "installationId": optional}. | `""` |
 | `github.defaultRepo` | `string` | **Default Repository**<br/>Default repo in owner/repo format (e.g. acme/myapp). Tool calls that omit the repo parameter will use this value. | `""` |
 | `github.graphqlAllowMutations` | `boolean` | **GraphQL mutations**<br/>With read-only mode off, lets graphql run a document that contains a mutation operation. Off by default: a mutation can do anything the credential allows, such as merging a pull request, deleting a branch or changing branch protection, far more than the write tools. Read-only mode refuses mutations whatever this says. | `false` |
 | `github.graphqlMaxResponseBytes` | `integer` | **GraphQL response cap (bytes)**<br/>Largest graphql response body the node reads, in bytes after decompression. A larger response returns an error naming this cap instead of the data. Default 4194304 (4 MiB). | `4194304` |

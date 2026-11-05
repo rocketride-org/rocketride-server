@@ -22,7 +22,7 @@
 				"appId": "",
 				"privateKey": "",
 				"installationId": "",
-				"credentialMap": {},
+				"credentialMap": [],
 				"defaultRepo": "",
 				"readOnly": false,
 				"tools": [],
@@ -83,18 +83,33 @@
 			"default": "",
 			"optional": true
 		},
-		"github.credentialMap": {
-			"type": "object",
-			"additionalProperties": { "type": "string" },
-			"title": "Credential map",
-			"description": "Optional: a credential per repository or organization, as entries whose key is owner/repo, owner/* or * and whose value is a token, a ${ROCKETRIDE_...} placeholder, or the JSON text of a GitHub App credential {\"appId\", \"privateKey\", optional \"installationId\"}. Each call uses the most specific match for its repository: the exact owner/repo, then owner/*, then the * default; with no match and no default the call fails naming the repository. Keys are not case sensitive. The node's own credential serves the repositories no entry matches when the map has no * entry; a map with a * entry and a node credential together stop the pipeline at start. The whole map is checked at pipeline start. A hand-written pipeline may instead set the field to one ${ROCKETRIDE_...} placeholder holding the map's JSON text with literal values.",
-			"default": {},
-			"optional": true,
+		"github.credentialRepository": {
+			"type": "string",
+			"title": "Repository or owner",
+			"description": "owner/repo for one repository, owner/* for every repository of that owner, or * for the default used when no other row matches. Not case sensitive.",
+			"default": ""
+		},
+		"github.credentialValue": {
+			"type": "string",
+			"title": "Credential",
+			"description": "A personal access token, a ${ROCKETRIDE_...} placeholder for one, or the JSON text of a GitHub App credential: {\"appId\": ..., \"privateKey\": ..., \"installationId\": optional}.",
+			"default": "",
 			"secure": true,
 			"ui": {
-				"additionalProperties": {
-					"ui:widget": "ApiKeyWidget"
-				}
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"github.credentialMap": {
+			"title": "Credential map",
+			"description": "Optional. One row per repository or organization that needs its own credential. Repository or owner: owner/repo, owner/* for all of an owner's repositories, or * for the default. Credential: a personal access token, a ${ROCKETRIDE_...} placeholder, or a GitHub App credential as JSON. A call uses the most specific row for its repository; repositories no row matches use the node's own token, and a * row replaces that token (the node may not have both). Rows are checked when the pipeline starts.",
+			"type": "array",
+			"optional": true,
+			"secure": true,
+			"minItems": 0,
+			"default": [],
+			"items": {
+				"type": "object",
+				"properties": ["github.credentialRepository", "github.credentialValue"]
 			}
 		},
 		"github.defaultRepo": {

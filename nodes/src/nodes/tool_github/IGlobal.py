@@ -186,9 +186,11 @@ def _check_filled(where: str, value: str, *, in_text: bool = False) -> None:
 
 
 def _read_credential_map(raw):
-    """Parse and validate ``credentialMap`` (an object, or JSON text from a placeholder); ``None`` when unset.
+    """Parse and validate ``credentialMap``; ``None`` when unset.
 
-    The canvas edits it as an object of strings. Every key must be an exact ``owner/repo``,
+    The canvas form edits it as rows of ``credentialRepository`` and ``credentialValue``; a
+    hand-written pipeline may write a JSON object of repository to credential instead, or
+    JSON text of either form from a placeholder. Every key must be an exact ``owner/repo``,
     an owner entry or the default entry, and every value a token, the JSON text of an App
     credential (``appId``, ``privateKey``, optional ``installationId``) or, in a hand-written
     pipeline, that App credential as an object. Messages name a bad key by its position and
@@ -211,10 +213,12 @@ def _read_credential_map(raw):
             raise ValueError(
                 f'tool_github: credentialMap is not valid JSON (line {exc.lineno}, column {exc.colno})'
             ) from None
+    if isinstance(raw, list):
+        raw = _rows_to_map(raw)
     if not isinstance(raw, dict):
         raise ValueError(
-            'tool_github: credentialMap must be a JSON object that maps repositories, owners or the default '
-            'entry to credentials'
+            'tool_github: credentialMap must be a list of rows (credentialRepository and credentialValue) or a '
+            'JSON object that maps repositories, owners or the default entry to credentials'
         )
     entries: dict = {}
     for position, (key, value) in enumerate(raw.items(), 1):
@@ -229,6 +233,51 @@ def _read_credential_map(raw):
             raise ValueError(f'tool_github: {_entry_name(pattern)} appears twice (keys are not case sensitive)')
         entries[pattern] = _map_credential(_entry_name(pattern), value, in_text=in_text)
     return credentials.CredentialMap(entries) if entries else None
+
+
+_ROW_FIELDS = ('credentialRepository', 'credentialValue')
+
+
+def _rows_to_map(rows: list) -> dict:
+    """The canvas form's rows as the map; messages name a row by its position, never a value."""
+    entries: dict = {}
+    for position, row in enumerate(rows, 1):
+        if not isinstance(row, dict):
+            raise ValueError(
+                f'tool_github: credentialMap row {position} must be an object with credentialRepository and credentialValue'
+            )
+        unknown = sum(1 for name in row if name not in _ROW_FIELDS)
+        if unknown:
+            # Counted, not named: a token pasted as a field name must not be printed.
+            raise ValueError(
+                f'tool_github: credentialMap row {position} has {unknown} unknown field(s); only credentialRepository '
+                'and credentialValue are allowed'
+            )
+        key = row.get('credentialRepository')
+        value = row.get('credentialValue')
+        if key is not None and not isinstance(key, str):
+            raise ValueError(f'tool_github: credentialMap row {position}: credentialRepository must be text')
+        if value is not None and not isinstance(value, (str, dict)):
+            raise ValueError(
+                f'tool_github: credentialMap row {position}: credentialValue must be text or an App credential object'
+            )
+        key = (key or '').strip()
+        blank = value is None or (isinstance(value, str) and not value.strip())
+        if not key and blank:
+            continue  # a row the form added and nobody filled
+        if not key:
+            raise ValueError(f'tool_github: credentialMap row {position} has a credential but no repository')
+        if blank:
+            raise ValueError(f'tool_github: credentialMap row {position} has no credential')
+        if credentials.map_key(key) is None:
+            raise ValueError(
+                f'tool_github: credentialMap row {position}: credentialRepository is not a repository (owner/repo), '
+                'an owner entry (the owner, a slash and an asterisk) or the default entry (a single asterisk)'
+            )
+        if key in entries:
+            raise ValueError(f'tool_github: credentialMap row {position} repeats the repository of an earlier row')
+        entries[key] = value
+    return entries
 
 
 def _map_credential(where: str, value, *, in_text: bool = False):

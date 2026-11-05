@@ -160,6 +160,32 @@ def test_an_object_map_through_the_real_get_node_config(node):
     assert 'gamma/x' in output['message']
 
 
+def test_a_rows_map_through_the_real_get_node_config(node):
+    # build() is not used, so getNodeConfig is the engine's own: it reads the profile block
+    # through IJson.toDict and merges the service's profile defaults.
+    glb = sys.modules[_PACKAGE].IGlobal()
+    glb.IEndpoint = SimpleNamespace(endpoint=SimpleNamespace(openMode='open'))
+    rows = [
+        {'credentialRepository': 'acme/*', 'credentialValue': TOKEN},
+        {'credentialRepository': 'beta/web', 'credentialValue': 'ghp_beta'},
+    ]
+    conn = {'profile': 'default', 'default': {'credentialMap': rows}}
+    glb.glb = SimpleNamespace(logicalType='tool_github', connConfig=conn)
+    glb.beginGlobal()
+    inst = sys.modules[_PACKAGE].IInstance()
+    inst.IGlobal = glb
+    node.github.routes[('GET', '/repos/acme/api/labels')] = response([])
+    node.github.routes[('GET', '/repos/beta/web/labels')] = response([])
+    assert _invoke(inst, 'label_list', {'repo': 'acme/api'})['status'] == 200
+    assert _invoke(inst, 'label_list', {'repo': 'beta/web'})['status'] == 200
+    assert node.github.bearer_for('/repos/acme/api/labels') == TOKEN
+    assert node.github.bearer_for('/repos/beta/web/labels') == 'ghp_beta'
+    # Unmatched, and the map has no default entry and the node no token: a result naming it.
+    output = _invoke(inst, 'label_list', {'repo': 'gamma/x'})
+    assert output['status'] is None
+    assert 'gamma/x' in output['message']
+
+
 def test_an_encoded_slash_cannot_hide_dot_segments_through_dispatch(node):
     inst = node.build({'credentialMap': {'acme/*': TOKEN}})
     path = 'x%2F..%2F..%2F..%2F..%2Fevil%2Fx%2Fcontents%2Ff'
