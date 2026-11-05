@@ -369,10 +369,8 @@ export async function installDevHooks(): Promise<void> {
 
 	// Embedded previews: accept dev-remote registrations and session state
 	// from the TRUSTED embedder only: handleEmbedderMessage checks the sender's
-	// window relation AND its origin before any message can touch the session
-	// token or register a remote. (The previous listener claimed "no origin
-	// allowlist is possible"; the closed set in devGate.ts is exactly that
-	// allowlist.)
+	// window relation AND its origin (the closed set in devGate.ts) before any
+	// message can touch the session token or register a remote.
 	window.addEventListener('message', (e: MessageEvent) => handleEmbedderMessage(e));
 
 	// URL-CONVENTION SELF-REGISTRATION (local-first dev): a tab opened with

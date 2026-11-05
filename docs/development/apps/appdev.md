@@ -70,6 +70,19 @@ instead **self-registers by URL convention**, fetching
 `/apps/<appId>/dev/package.json` from its own origin. A locally registered
 app id REPLACES the server's manifest row wholesale.
 
+**Trust boundary.** The dev hooks (`window.__rrShellDev`, the `rrdev:*` message
+listener) exist only in the DEV flavor of the shell; a production build can
+never enable them from the URL, `sessionStorage` or an injected boot config.
+`?rrdev=1` merely selects the dev flavor's assets, and that flavor is reachable
+from the production origin, so what it does for a caller is restricted in code:
+a `rrdev:*` message is honoured only from the shell's parent (framed) or opener
+(top-level tab) whose origin is `vscode-webview://<id>`, the shell's own origin
+(the web App Builder's blob preview and debug tab), or — for a loopback-served
+shell only — another loopback origin; `rrdev:registerRemote` entries must be
+absolute `http(s)` loopback URLs; console rows are posted only to the verified
+embedder origin; and `#rrtoken=` seeding and the `rrauthorigin` sign-in relay
+work only on a shell served from loopback (your own dev server).
+
 The extension manages the dev servers through a serialized per-app operation
 chain (start/stop/restart run one at a time). Closing a preview **lingers**
 the server for 60 s so a quick reopen revives it instantly; a Reload or
