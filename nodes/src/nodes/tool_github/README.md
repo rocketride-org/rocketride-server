@@ -10,10 +10,10 @@ via GitHub Actions.
 
 ## What it does
 
-Gives an agent full access to the GitHub REST API: files, issues, pull requests,
-reviews, releases, workflows, organizations, users, search, and commit history. Useful
-for agents that manage codebases, triage issues, automate releases, or operate CI/CD
-pipelines.
+Exposes selected GitHub REST operations: files, issues, pull requests, reviews,
+repository metadata, releases, workflows, organizations, users, search,
+and commit history. Useful for agents that manage codebases, triage issues,
+automate releases, or operate CI/CD pipelines.
 
 Uses the **requests** library to call the GitHub REST API v3 (`https://api.github.com`,
 API version `2022-11-28`) with Bearer-token auth and a 30-second request timeout. API
@@ -111,9 +111,46 @@ GitHub's issues endpoint includes pull requests; `issue_list` filters them out, 
 
 ### Repository
 
-| Tool       | Description                                                            |
-|------------|------------------------------------------------------------------------|
-| `repo_get` | Repository metadata (stars, forks, language, default branch, etc.)     |
+| Tool                | Description                                                                              |
+|---------------------|------------------------------------------------------------------------------------------|
+| `repo_get`          | Repository metadata (stars, forks, language, default branch, etc.)                       |
+| `repo_contributors` | One page of contributors: `login`, `contributions`, `type`                               |
+| `repo_languages`    | Language names mapped to byte counts                                                     |
+| `label_list`        | One page of repository labels: `name`, `color`, `description`                            |
+
+`repo_contributors`, `repo_languages`, `label_list` and `user_get` return an explicit
+response envelope:
+
+```json
+{
+  "status": 200,
+  "data": [{ "name": "bug", "color": "d73a4a", "description": "Something is broken" }],
+  "rate_limit": { "remaining": 4999, "limit": 5000, "reset": 1790000000, "resource": "core" },
+  "next_page": null
+}
+```
+
+`data` contains the tool-specific result. `repo_contributors` and `label_list` accept
+`page` and `per_page` and return the next page number from GitHub's `Link` header;
+`null` means no next page was advertised. Rate-limit values are `null` when GitHub
+omits their headers. The existing tools keep their original return formats.
+
+HTTP failures from these tools return `status`, `message`, `documentation_url` (null
+when GitHub sends none), `rate_limit`, and `next_page`, without `data`: a result is a
+success exactly when it has `data`. `message` is GitHub's message with any `errors`
+details appended, capped at 2,000 characters, or `GitHub returned HTTP <status> without
+a JSON error body.` when the body is not JSON or has no string `message`. A 2xx body of
+an unexpected shape is a failure too: it keeps its 2xx `status` and its counters, and
+its message reads `GitHub returned an unexpected response body; expected a list.` (or
+`an object.`). Authentication, transport, or JSON decoding failures have `status: null`
+and a fixed message without exception details. Invalid tool inputs raise validation
+errors before any request, naming the tool: `page` must be an integer of at least 1,
+`per_page` must be an integer and is clamped to 1 to 100 (default 30), and `repo` must
+be `owner/repo`; `null` for an optional input means its default. Rate-limit
+responses share the existing retry policy: at most three attempts, waits capped at 30
+seconds each; a longer server-requested wait fails immediately, with the rate-limit
+counters in the result. This is not a configurable retry budget. Credentials stay in
+node configuration and are not tool arguments.
 
 ### Releases
 
@@ -142,6 +179,7 @@ GitHub's issues endpoint includes pull requests; `issue_list` filters them out, 
 |------------------|------------------------------------------------------------------------|
 | `org_list_repos` | List repos in an organization (filter by type)                         |
 | `user_get_repos` | List repos for a user; omit `username` for the token's own repos      |
+| `user_get`       | The PAT user, or the GitHub App itself: `data: {login, type}`          |
 | `user_invite`    | Invite a user to an organization by email (role: `admin` · `direct_member` · `billing_manager`) |
 
 ### Search & commits
@@ -179,7 +217,8 @@ Blocked tools: `file_create`, `file_edit`, `file_delete`, `issue_create`,
 Always allowed: `file_get`, `file_list`, `issue_get`, `issue_list`, `pr_get`, `pr_list`,
 `review_list`, `review_get`, `repo_get`, `release_list`, `release_get`, `workflow_list`,
 `workflow_get`, `workflow_get_usage`, `org_list_repos`, `user_get_repos`, `search_code`,
-`search_issues`, `commit_list`, `commit_get`.
+`search_issues`, `commit_list`, `commit_get`, `repo_contributors`,
+`repo_languages`, `label_list`, `user_get`.
 
 Note the default is `false`, a freshly added node can write. Turn read-only mode on
 explicitly for inspect-only agents.
@@ -216,6 +255,14 @@ first tool that needs them. An installation token has no user behind it:
 access instead of a user's repositories. The MCP credentials catalog auto-wires the PAT
 only; App auth is configured on the node.
 
+`user_get` uses `GET /user` with a PAT. In App mode it signs an App JWT for
+`GET /app` and returns the App's slug as `login` and `"App"` as `type`; this is the
+App identity, not the installation owner or a human user. Repository reads keep
+using the configured installation token and its existing refresh mechanism. A 200
+whose body names no user (no `login`) or no App (no `slug`) is a shape failure like any
+other unexpected body: it keeps the status and the counters, has no `data`, and says
+what was expected.
+
 The node signs a short-lived JWT with the private key, exchanges it for an installation
 access token (`POST /app/installations/{id}/access_tokens`), and caches the result.
 Installation tokens live about an hour and are refreshed automatically shortly before
@@ -224,13 +271,26 @@ organization, not to a person. The private key is never sent to GitHub. A malfor
 non-RSA key fails at pipeline start, not on the first tool call.
 
 API errors are surfaced to the agent as readable messages including the HTTP status and
-GitHub's error details.
+GitHub's error details. The repository reads with the response envelope return them as
+results instead, and report an authentication failure as a fixed message with
+`status: null`.
 
 ## Notes
 
 ### Running the tests
 
 ```bash
+# Offline client, auth, search and new repository-read tests
+python -m pytest --confcutdir=nodes/test/tool_github \
+  nodes/test/tool_github/test_github_client.py \
+  nodes/test/tool_github/test_iglobal_auth.py \
+  nodes/test/tool_github/test_search_relax.py \
+  nodes/test/tool_github/test_repository_reads.py
+
+# Native discovery and dispatch (mock HTTP; uses this checkout's node source)
+dist/server/engine -m pytest --confcutdir=nodes/test/tool_github \
+  nodes/test/tool_github/test_repository_reads_engine.py
+
 # Integration tests against a real repository (skipped unless both vars are set)
 export GITHUB_TOKEN=<your token>
 export GITHUB_TEST_REPO=owner/repo
@@ -248,6 +308,7 @@ pytest nodes/test/tool_github/test_app_auth_live.py -v
 
 - [GitHub REST API documentation](https://docs.github.com/en/rest)
 - [Authenticating as a GitHub App installation](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/authenticating-as-a-github-app-installation)
+- [Get the authenticated GitHub App](https://docs.github.com/en/rest/apps/apps#get-the-authenticated-app)
 
 ---
 

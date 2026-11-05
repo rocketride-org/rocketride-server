@@ -9,18 +9,24 @@ Covers what the unit tests cannot: the listing and counting SQL, the matched
 row counts of markDeleted and markActive, objdir pages that count paths, and
 the tools (list_documents, soft_delete, restore, get, upsert, stats) on a real
 store. Runs with the built engine and RR_TEST_PG_DSN like
-test_vector_store_writes_full.py, whose fixture it shares; set
+test_vector_store_writes_live.py, whose fixture it shares; set
 RR_REQUIRE_DB_TESTS=1 to fail instead of skip. Each test uses a unique table.
 """
 
 import types
 
-from .test_vector_store_writes_full import _doc
-from .test_vector_store_writes_full import store_env as _shared_store_env
+import pytest
+
+from .test_vector_store_writes_live import _doc
+from .test_vector_store_writes_live import store_env as _shared_store_env
 
 # pytest registers a fixture under the name it is bound to in the module, so the
 # shared two-driver fixture serves this file as store_env too.
 store_env = _shared_store_env
+
+# One xdist worker runs every module that creates tables in the RR_TEST_PG_DSN
+# database (see the group in test_rocketride_db_live.py).
+pytestmark = pytest.mark.xdist_group('rocketride_pg_live')
 
 _EMBEDDING = [1.0, 0.0, 0.0]
 
