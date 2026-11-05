@@ -1070,7 +1070,9 @@ await client.database.query(
 
 The package installs a `rocketride` command-line tool (`pip install
 rocketride`, then `rocketride --help`). The TypeScript client installs the
-IDENTICAL command — same verbs, same flags, same output. The full reference
+same command with more `app` verbs and `deploy source-config`, but without
+`diff` and `otel`, which only this package has. ROCKETRIDE_CLI.md has the
+table of which package ships which command. The full reference
 (workspace, validate, task, store, app, and deploy verbs, the `--json`
 contract, and when to prefer it over SDK code) is ROCKETRIDE_CLI.md; every
 deploy and app verb there fronts a `client.deploy.*` method from §Deploy.

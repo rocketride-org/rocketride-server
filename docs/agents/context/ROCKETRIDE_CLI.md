@@ -2,9 +2,21 @@
 
 The `rocketride` command is installed with the SDK in either language
 (`pip install rocketride` or `npm install rocketride`; use `pnpm exec
-rocketride` / `npx rocketride` for local installs). The Python and
-TypeScript packages install the IDENTICAL command — same verbs, same flags,
-same output — so recipes port between languages unchanged.
+rocketride` / `npx rocketride` for local installs). The two packages do not
+ship the same set of commands:
+
+| Command | TypeScript (`npm`) | Python (`pip`) |
+|---|---|---|
+| `init`, `login`, `validate`, `start`, `upload`, `list`, `stop`, `store …`, `profile …` | Yes | Yes |
+| `app create`, `app verify`, `app deploy` | Yes | Yes, without `app verify --store` and `app deploy --publish` |
+| `app dev`, `publish`, `unpublish`, `disable`, `versions`, `where`, `log`, `submit`, `withdraw`, `reply`, `developer` | Yes | No |
+| `deploy …` | Yes | Yes, except `deploy source-config` |
+| `diff`, `otel` | No | Yes |
+
+A command that both packages ship takes the flags this document lists for
+it in either package, so a recipe that uses only shared commands ports
+between languages unchanged. With only the Python package installed, run
+the TypeScript-only commands through `npx rocketride`.
 
 **When to use it.** You have a shell. Prefer the command for every one-shot
 lifecycle operation — validate, run, upload, store, deploy, publish,
@@ -12,7 +24,8 @@ schedule, scaffold — and write SDK code only for what the command cannot
 do. It reads the workspace `.env`, works against a local engine with no
 network, and needs no client configuration of any kind.
 
-**Common options** (every command): `--uri <uri>` (default:
+**Common options** (every command except `diff` and `otel`, which are
+described under [Python-only commands](#python-only-commands)): `--uri <uri>` (default:
 `ROCKETRIDE_URI` or `http://localhost:5565`), `--apikey <key>` (default:
 `ROCKETRIDE_APIKEY`), and `--json [file]` — the command's entire result
 as one JSON value on stdout (or written to `file`), built for scripts and
@@ -32,7 +45,8 @@ a non-zero exit. Deploy verbs (`deploy *`, `app deploy`) use the
 | Read run logs and traces | No CLI verb — use the SDK (`client.log`, API doc §Templates & Run Logs) or ROCKETRIDE_OBSERVABILITY.md |
 | Files in the account store | `rocketride store dir|type|write|rm|mkdir|stat` |
 | Deploy, publish, schedule | `rocketride deploy …` (deployment target) |
-| Apps | `rocketride app create|dev|verify|deploy|publish|versions|where|…` (`dev` uses the development connection; lifecycle verbs use the deployment target) |
+| Apps | `rocketride app create|dev|verify|deploy|publish|versions|where|…` (`dev` uses the development connection; lifecycle verbs use the deployment target; the Python package has only `create`, `verify`, and `deploy`) |
+| Review what changed in a pipeline | `rocketride diff old.pipe new.pipe` (Python package only) |
 | Find what is slow | `rocketride profile run --token TOKEN --duration 30`, then `rocketride profile tree --token TOKEN` |
 
 Two things the table cannot hide: component discovery is file-based, and
@@ -58,7 +72,9 @@ loop is a command.
   notice there, and a failed sign-in (including a failed key exchange)
   shows the reason there and in the terminal. Run it whenever a command
   reports rejected credentials. `--deploy` targets the
-  `ROCKETRIDE_DEPLOY_*` pair.
+  `ROCKETRIDE_DEPLOY_*` pair. `--apikey <key>` saves that key without
+  opening a browser, on either kind of server, which is how to sign in
+  from CI or an agent.
 
 ## Validate
 
@@ -116,6 +132,11 @@ defaults to the `ROCKETRIDE_DEPLOY_URI` / `ROCKETRIDE_DEPLOY_APIKEY` pair
 is configured. `app create` reads the development connection
 (`ROCKETRIDE_URI` / `ROCKETRIDE_APIKEY`) for vendoring and for the
 developer id; `app verify` needs no connection.
+
+The Python package has only `app create`, `app verify`, and `app deploy`,
+and its `app verify` has no `--store` and its `app deploy` has no
+`--publish`. Every other command in this section needs the TypeScript
+package.
 
 `[app]` takes an app folder, an app id (`personal.clock`), its name part
 (`clock`), its folder name (`clock-ui`), or nothing — the current
@@ -227,7 +248,7 @@ rocketride deploy schedule set <projectId> <sourceId> "0 9 * * 1-5" --team <team
 rocketride deploy schedule pause <projectId> <sourceId> --team <teamId>
 rocketride deploy schedule resume <projectId> <sourceId> --team <teamId>
 rocketride deploy schedule preview "0 9 * * 1-5"                    # validate a cron + next firings
-rocketride deploy source-config <projectId> <sourceId> --team <teamId> --trace-level summary --debug-out   # per-source run settings (none|metadata|summary|full); a flag left out keeps its current value
+rocketride deploy source-config <projectId> <sourceId> --team <teamId> --trace-level summary --debug-out   # per-source run settings (none|metadata|summary|full); a flag left out keeps its current value; TypeScript package only
 rocketride deploy log <appId> <version>                             # read an app version's build log (or: rocketride app log)
 rocketride deploy enable|disable|remove <projectId> --team <teamId>
 ```
@@ -282,6 +303,32 @@ rocketride profile tree [--token TOKEN] [--thread ID] [--min-pct 0.1] [--max-dep
   usual and only then fails with `No active profiling session`, exit 1.
   Ctrl+C in `run` stops the session first; killing the command instead
   leaves it profiling until `profile stop --token TOKEN` or the task ends.
+
+## Python-only commands
+
+`diff` and `otel` ship with the Python package only.
+
+```bash
+rocketride diff old.pipe new.pipe                # semantic diff: nodes, edges, config; canvas moves collapse to one line
+rocketride diff --git HEAD pipelines/rag.pipe    # working-tree file against a git ref
+rocketride diff old.pipe new.pipe --markdown     # PR-comment form (or --json)
+rocketride otel --endpoint https://collector.example.com --no-metrics   # stream traces to an OTLP collector until Ctrl+C
+```
+
+- `diff` runs locally. It never connects to a server, takes no `--uri` or
+  `--apikey`, and does not read the workspace `.env`. Exit 0 when nothing
+  changed, 1 when something did, 2 on a usage error or an unreadable file.
+  `--exit-zero` makes a run that finds changes exit 0, and
+  `--include-layout` counts canvas moves as changes.
+- `otel` needs `pip install 'rocketride[otel]'`. It subscribes to every
+  task your API key owns and exports spans and metrics over OTLP until you
+  stop it. It has no `--json`. Pass collector secrets through
+  `OTEL_EXPORTER_OTLP_HEADERS`, not `--headers`, so they stay out of shell
+  history. Per-component spans appear only for runs started with a
+  `pipelineTraceLevel`.
+
+The site's Python SDK guides, Pipeline Diff and OpenTelemetry Bridge,
+cover every flag.
 
 ## MCP, if your harness has a client for it
 

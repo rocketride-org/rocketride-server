@@ -1063,7 +1063,10 @@ Methods: `getState()`, `getDocument(uri)`, `useStore()`, `openDocument(uri, grou
 
 The package installs a `rocketride` command (use `pnpm exec rocketride` /
 `npx rocketride` for local installs). The Python client installs the
-IDENTICAL command — same verbs, same flags, same output. The full reference
+same command with fewer verbs: of the `app` commands it has only `create`,
+`verify`, and `deploy`, and it has no `deploy source-config`. It adds
+`diff` and `otel`, which this package lacks. ROCKETRIDE_CLI.md has the
+table of which package ships which command. The full reference
 (workspace, validate, task, store, app, and deploy verbs, the `--json`
 contract, and when to prefer it over SDK code) is ROCKETRIDE_CLI.md; every
 deploy and app verb there fronts a `client.deploy.*` method from §Deploy.
