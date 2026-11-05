@@ -106,7 +106,10 @@ def test_every_request_of_a_large_file_read_and_a_tree_walk_uses_the_repository_
         {'sha': 'src-sha', 'tree': [{'path': 'a.py', 'type': 'blob'}], 'truncated': False}
     )
     with real_node(app_config(rsa_private_key_pem)) as inst:
-        assert dispatch(inst, 'file_get', {'repo': 'beta/web', 'path': 'big.txt'})['content'] == text
+        assert (
+            dispatch(inst, 'file_get', {'repo': 'beta/web', 'path': 'big.txt', 'max_bytes': 8 * 1024 * 1024})['content']
+            == text
+        )
         tree = dispatch(inst, 'repo_tree', {'repo': 'beta/web', 'walk': True})
     assert [entry['path'] for entry in tree['data']['tree']] == ['src', 'src/a.py']
     assert tree['data']['complete'] is True
@@ -392,6 +395,11 @@ def test_sentinel_credentials_never_reach_a_legacy_tool_error(github, rsa_privat
     # Raised fresh: nothing that held the secret is chained to it.
     assert error.value.__cause__ is None
     assert error.value.__context__ is None
+    # The class and the status survive the redaction; the headers and the body, which
+    # echoed the secret, do not.
+    assert type(error.value).__name__ == 'GitHubAPIError'
+    assert error.value.status_code == 422
+    assert error.value.headers == {} and error.value.body is None
 
 
 def test_the_app_jwt_never_reaches_an_envelope_result(github, rsa_private_key_pem):
@@ -511,7 +519,7 @@ def test_a_failed_blob_read_that_echoes_credentials_is_a_result_without_them(git
         {'message': f'nope {call.bearer} {SEAM_BETA}'}, 403
     )
     with real_node(SEAM_MAP) as inst:
-        result = dispatch(inst, 'file_get', {'repo': 'acme/app', 'path': 'big.bin'})
+        result = dispatch(inst, 'file_get', {'repo': 'acme/app', 'path': 'big.bin', 'max_bytes': 8 * 1024 * 1024})
     assert result['content'] is None
     assert 'Git blob read failed (GitHub API 403: nope [REDACTED] [REDACTED]' in result['message']
     dumped = json.dumps(result)
@@ -573,7 +581,7 @@ def test_blob_401_refreshes_app_token_once_and_retains_metadata_on_failure(
 
     github.routes[('GET', blob_path)] = read_blob
     with real_node(app_config(rsa_private_key_pem, readOnly=True)) as inst:
-        result = dispatch(inst, 'file_get', {'repo': 'acme/api', 'path': 'big.txt'})
+        result = dispatch(inst, 'file_get', {'repo': 'acme/api', 'path': 'big.txt', 'max_bytes': 8 * 1024 * 1024})
     assert result['found'] is True
     assert result['sha'] == 'b1'
     if keeps_rejecting:
@@ -595,7 +603,7 @@ def test_blob_401_with_a_pat_keeps_metadata_without_retrying(github):
     )
     github.routes[('GET', '/repos/acme/api/git/blobs/b1')] = response({'message': 'Bad credentials'}, 401)
     with real_node({'token': SENTINEL_PAT, 'readOnly': True}) as inst:
-        result = dispatch(inst, 'file_get', {'repo': 'acme/api', 'path': 'big.txt'})
+        result = dispatch(inst, 'file_get', {'repo': 'acme/api', 'path': 'big.txt', 'max_bytes': 8 * 1024 * 1024})
     assert result['found'] is True
     assert result['content'] is None
     assert result['status'] == 401

@@ -294,7 +294,11 @@ class IInstance(IInstanceBase):
         return (*self.IGlobal.secrets(), *(token for _repo, _owner, token in used))
 
     def _safe_error(self, exc: Exception, used: list = ()) -> Exception:
-        """``exc`` when no secret is in it or what it chains to; otherwise a ValueError with it redacted."""
+        """``exc`` when no secret is in it or what it chains to; otherwise a copy with the secret redacted.
+
+        A GitHubAPIError keeps its class and status, without the headers and body, which may
+        hold the secret; any other error becomes a ValueError.
+        """
         secrets = self._secrets(list(used))
         seen = set()
         link = exc
@@ -302,6 +306,10 @@ class IInstance(IInstanceBase):
             seen.add(id(link))
             text = str(link)
             if any(secret in text for secret in secrets):
+                if isinstance(exc, github_client.GitHubAPIError):
+                    return github_client.GitHubAPIError(
+                        exc.status_code, github_client.redact_result(exc.message, secrets)
+                    )
                 return ValueError(github_client.redact_result(str(exc), secrets))
             link = link.__cause__ or link.__context__
         return exc

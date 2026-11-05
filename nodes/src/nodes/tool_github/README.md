@@ -719,7 +719,10 @@ No tool result or error message holds a token, private key, App JWT, installatio
 each credential the node holds (configured tokens and keys, `credentialMap` ones included,
 and every installation token minted so far, the last 64 per installation, including ones
 replaced or dropped, since a request sent with one may still be answered) and every token
-the call used with `[REDACTED]` in its result and in any error it raises. It is the one
+the call used with `[REDACTED]` in its result and in any error it raises. An error that held
+a credential is raised again with the text redacted and nothing chained to it; a GitHub API
+error keeps its class and status, without the headers and body, and any other error becomes
+a `ValueError`. It is the one
 redaction pass over results. The App JWT is redacted where it is used, and
 installation-lookup errors are written by the node, never copied from GitHub's answer. On
 every envelope path (the repository reads, `installation_repos`, `graphql` and the
