@@ -101,8 +101,13 @@ function stubBrowser(opts: { framed: boolean; origin: string; ancestorOrigin?: s
 	const self = {};
 	const parent = { postMessage: (message: { type?: string }, target: string): void => { posted.push({ message, target }); } };
 	const opener = { postMessage: () => {} };
+	// localStorage (the SHARED token slot) and sessionStorage (the tab session —
+	// the shell writes its `rr:tab` boot identity there) are separate areas, as
+	// in a browser: the "nothing touched the token slot" assertions below must
+	// not be confused by the tab-session write.
 	const mem = new Map<string, string>();
-	const storage = { getItem: (k: string) => mem.get(k) ?? null, setItem: (k: string, v: string) => void mem.set(k, v), removeItem: (k: string) => void mem.delete(k), clear: () => mem.clear(), key: (i: number) => [...mem.keys()][i] ?? null, get length() { return mem.size; } };
+	const sessionMem = new Map<string, string>();
+	const storageOver = (m: Map<string, string>) => ({ getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), removeItem: (k: string) => void m.delete(k), clear: () => m.clear(), key: (i: number) => [...m.keys()][i] ?? null, get length() { return m.size; } });
 	Reflect.set(globalThis, 'window', {
 		self,
 		top: opts.framed ? parent : self,
@@ -117,8 +122,8 @@ function stubBrowser(opts: { framed: boolean; origin: string; ancestorOrigin?: s
 		navigator: { userAgent: 'node' },
 	});
 	Reflect.set(globalThis, 'document', stubDocument());
-	Reflect.set(globalThis, 'sessionStorage', storage);
-	Reflect.set(globalThis, 'localStorage', storage);
+	Reflect.set(globalThis, 'sessionStorage', storageOver(sessionMem));
+	Reflect.set(globalThis, 'localStorage', storageOver(mem));
 	return { parent, opener, posted, reloads: () => reloads, mem };
 }
 
