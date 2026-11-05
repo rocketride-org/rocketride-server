@@ -1,0 +1,88 @@
+{
+  "components": [
+    {
+      "id": "tools_1",
+      "provider": "tools",
+      "name": "Tools",
+      "config": {
+        "hideForm": true,
+        "mode": "Source",
+        "parameters": {},
+        "type": "tools",
+        "name": "Tools"
+      },
+      "ui": {
+        "position": {
+          "x": 100,
+          "y": 120
+        },
+        "measured": {
+          "width": 150,
+          "height": 87
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "rocketride_graph_1",
+      "provider": "rocketride_graph",
+      "name": "RocketRide Graph (Apache AGE)",
+      "config": {
+        "profile": "default",
+        "default": {
+          "graph": "rocketride",
+          "allow_execute": false
+        },
+        "name": "RocketRide Graph (Apache AGE)"
+      },
+      "ui": {
+        "position": {
+          "x": 260,
+          "y": 280
+        },
+        "measured": {
+          "width": 150,
+          "height": 123
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "control": [
+        {
+          "classType": "tool",
+          "from": "tools_1"
+        }
+      ]
+    },
+    {
+      "id": "annotation_1",
+      "provider": "annotation",
+      "name": "Read this first",
+      "config": {
+        "content": "**Apache AGE graph**\n\nGraph Explorer opens this pipeline's graph node as a connection. Start the pipeline, then open Graph Explorer and choose the connection.\n\n**Nothing here can write.** `allow_execute` is off, so Graph Explorer browses read-only and has no write console for this node. Turn it on only for a node you trust people to change data through.\n\nTo ask questions in words, add an LLM node and connect it to this graph node. Browsing with Cypher needs no model.\n\nOn RocketRide's managed database the graph `rocketride` comes with every database (organization, team or personal), so leave `graph` as it is there. To browse another AGE graph, change `graph` to its name. The node does not create graphs: a name that does not exist stops the pipeline from starting, and the error is in the pipeline's log.\n\nAGE has no `date()` or `duration()`; store temporal values as text.",
+        "bgColor": "var(--rr-annotation-bg-default)",
+        "fgColor": "var(--rr-text-primary)"
+      },
+      "ui": {
+        "position": {
+          "x": 480,
+          "y": 100
+        },
+        "measured": {
+          "width": 340,
+          "height": 300
+        },
+        "nodeType": "annotation"
+      }
+    }
+  ],
+  "version": 1,
+  "docRevision": 1,
+  "isLocked": false,
+  "snapToGrid": true,
+  "snapGridSize": [
+    10,
+    10
+  ]
+}

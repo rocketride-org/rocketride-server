@@ -33,14 +33,20 @@ from the base class.
 
 from __future__ import annotations
 
+import time
+
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
+import redis
 from redis.exceptions import RedisError
 
 from rocketlib import OPEN_MODE, debug, warning
 
 from ai.common.graph import GraphGlobalBase
+from ai.common.graph.adapters import falkordb_adapter
+from ai.common.graph.graph_global_base import READ_QUERY_HARD_CAP
+from ai.common.graph.schema import SCHEMA_LABEL_LIMIT, SCHEMA_REL_TYPE_LIMIT, SCHEMA_SAMPLE_SIZE
 from ai.common.utils import config_int, parse_bool
 
 from falkordb import FalkorDB
@@ -55,14 +61,6 @@ DEFAULT_ROW_CAP = 250
 # FalkorDB 6 adds "Graph version" to every reply, reads included.
 RUN_STATS = ('cached execution', 'internal execution time', 'graph version')
 
-# FalkorDB has no db.schema.nodeTypeProperties(), so property names are read
-# off one live node per label.
-SCHEMA_SAMPLE_SIZE = 1
-# Cap on distinct relationship patterns pulled during reflection.
-SCHEMA_REL_LIMIT = 100
-# Cap on labels sampled during reflection — one query per label, so bound the fan-out.
-SCHEMA_LABEL_LIMIT = 200
-
 
 class IGlobal(GraphGlobalBase):
     """FalkorDB-specific global connection state."""
@@ -75,6 +73,15 @@ class IGlobal(GraphGlobalBase):
     allow_writes: bool = False
     max_rows: int = 250
     query_timeout_ms: int = DEFAULT_TIMEOUT_MS
+    # Server limits read at start (None = unknown, e.g. GRAPH.CONFIG not permitted).
+    # RESULTSET_SIZE truncates replies silently; TIMEOUT_MAX rejects larger
+    # per-query timeouts. Every query the node runs honours both (see
+    # statement_timeout_ms and _below_server_cap). GRAPH.EXPLAIN (the
+    # generated-query check) and the start-up MODULE LIST / GRAPH.CONFIG GET
+    # calls carry no per-query timeout: they run no query.
+    server_result_cap: Optional[int] = None
+    server_timeout_max_ms: Optional[int] = None
+    server_version: Optional[str] = None
 
     def beginGlobal(self) -> None:
         # Config-mode opens the node for editing only; no server round-trip.
@@ -96,6 +103,7 @@ class IGlobal(GraphGlobalBase):
         )
 
         self.client = self._connect(config)
+        self._read_server_limits()
         # Round-trip now so a wrong host or password fails at pipeline start
         # rather than on the first tool call. FalkorDB has no per-database
         # session open to piggyback a "does this graph exist" check on (unlike
@@ -122,7 +130,7 @@ class IGlobal(GraphGlobalBase):
     def _close_driver(self) -> None:
         if self.client is not None:
             try:
-                self.client.close()
+                _close_client(self.client)
             finally:
                 self.client = None
 
@@ -169,14 +177,14 @@ class IGlobal(GraphGlobalBase):
         finally:
             if client is not None:
                 try:
-                    client.close()
+                    _close_client(client)
                 except Exception:
                     pass
 
     @property
     def read_row_cap(self) -> int:
-        """Node-owner ceiling on rows a natural-language read query returns."""
-        return self.max_rows
+        """Node-owner ceiling on rows a read returns (get_data, the lane, query), kept below RESULTSET_SIZE."""
+        return self._below_server_cap(self.max_rows)
 
     def _run_query(self, query: str, params: Optional[Dict] = None, limit: Optional[int] = None) -> List[Dict]:
         """Execute a read-only Cypher query through GRAPH.RO_QUERY.
@@ -185,11 +193,11 @@ class IGlobal(GraphGlobalBase):
         write clauses even when a caller skips the client-side check.
 
         With ``limit`` set the caller wants truncation detection, so return one
-        row past it (still bounded by ``max_rows``); with no limit (the lane
-        path) fall back to the node's ``max_rows`` cap.
+        row past it (still bounded by ``read_row_cap``); with no limit (the lane
+        path) fall back to the ``read_row_cap`` ceiling.
         """
-        cap = self.max_rows if limit is None else min(int(limit), self.max_rows) + 1
-        result = self.select_graph().ro_query(query, params=params or None, timeout=self.query_timeout_ms)
+        cap = self.read_row_cap if limit is None else min(int(limit), self.read_row_cap) + 1
+        result = self.select_graph().ro_query(query, params=params or None, timeout=self.statement_timeout_ms)
         return self._rows_as_dicts(result, cap=cap)
 
     def _run_query_raw(self, query: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -218,7 +226,7 @@ class IGlobal(GraphGlobalBase):
         """
         max_rows = self.max_execute_rows
         server_cap = self._server_reply_cap()
-        result = self.select_graph().query(query, params=params or None, timeout=self.query_timeout_ms)
+        result = self.select_graph().query(query, params=params or None, timeout=self.statement_timeout_ms)
 
         rows = self._rows_as_dicts(result, cap=max_rows + 1)
         # Count writes unconditionally: unlike SQL, a Cypher write commonly also
@@ -244,6 +252,96 @@ class IGlobal(GraphGlobalBase):
         warning(write_note)
         return {'rows': rows[:max_rows], 'affected_rows': affected, 'truncated': True}
 
+    # ------------------------------------------------------------------
+    # read_query / execute(shape='graph')
+    # ------------------------------------------------------------------
+
+    def _read_server_limits(self) -> None:
+        """Best effort: learn RESULTSET_SIZE and TIMEOUT_MAX so limits stay honest, and the module version."""
+        self.server_result_cap = self._config_value('RESULTSET_SIZE')
+        self.server_timeout_max_ms = self._config_value('TIMEOUT_MAX')
+        self.server_version = None
+        try:
+            for module in self.client.connection.execute_command('MODULE', 'LIST') or []:
+                fields = dict(zip(module[0::2], module[1::2]))
+                name = fields.get('name', fields.get(b'name'))
+                if name in ('graph', b'graph'):
+                    ver = int(fields.get('ver', fields.get(b'ver')))
+                    self.server_version = f'{ver // 10000}.{ver // 100 % 100}.{ver % 100}'
+        except Exception:  # descriptive only; MODULE LIST may be disabled on managed services
+            self.server_version = None
+
+    def _config_value(self, name: str) -> Optional[int]:
+        try:
+            reply = self.client.connection.execute_command('GRAPH.CONFIG', 'GET', name)
+        except Exception as e:  # managed services may refuse GRAPH.CONFIG
+            warning(f'FalkorDB: could not read {name} ({e}); assuming no server limit')
+            return None
+        try:
+            value = int(reply[1])
+        except (TypeError, ValueError, IndexError):
+            return None
+        # FalkorDB uses 0 (TIMEOUT_MAX) or a negative number (RESULTSET_SIZE) for "unlimited".
+        return value if value > 0 else None
+
+    @property
+    def statement_timeout_ms(self) -> int:
+        """Per-query timeout actually sent: the node's, clamped to the server's TIMEOUT_MAX."""
+        if self.server_timeout_max_ms:
+            return max(1, min(self.query_timeout_ms, self.server_timeout_max_ms))
+        return self.query_timeout_ms
+
+    def _below_server_cap(self, cap: int) -> int:
+        """``cap``, kept below the server's RESULTSET_SIZE so the +1 sentinel row can arrive.
+
+        The server cuts every reply (GRAPH.QUERY and GRAPH.RO_QUERY alike) at
+        RESULTSET_SIZE without any marker; one row under it, a reply the
+        server cut reads as truncated (or, for legacy execute, as over the cap).
+        """
+        if self.server_result_cap:
+            cap = min(int(cap), self.server_result_cap - 1)
+        return max(1, int(cap))
+
+    @property
+    def read_query_cap(self) -> int:
+        """Node cap (at most 25,000), kept below the server's RESULTSET_SIZE."""
+        return self._below_server_cap(min(self.max_rows, READ_QUERY_HARD_CAP))
+
+    @property
+    def execute_graph_cap(self) -> int:
+        """max_execute_rows, kept below RESULTSET_SIZE (execute in either shape)."""
+        return self._below_server_cap(self.max_execute_rows)
+
+    def _graph_adapter(self):
+        return falkordb_adapter()
+
+    def _read_query_rows(self, cypher, params, fetch_limit, consume):
+        """Always GRAPH.RO_QUERY, whatever allow_writes says; the server refuses writes.
+
+        The client buffers the whole reply before returning, so the row bound
+        that limits server work and memory is the server's RESULTSET_SIZE and
+        the timeout; slicing below only limits what is serialized.
+        """
+        result = self.select_graph().ro_query(cypher, params=params or None, timeout=self.statement_timeout_ms)
+        columns = _header_names(getattr(result, 'header', None))
+        return consume(columns, iter((result.result_set or [])[:fetch_limit]))
+
+    def _raw_query_rows(self, cypher, fetch_limit, consume, params=None):
+        result = self.select_graph().query(cypher, params=params or None, timeout=self.statement_timeout_ms)
+        columns = _header_names(getattr(result, 'header', None))
+        return consume(columns, iter((result.result_set or [])[:fetch_limit])), _affected_rows(result)
+
+    def _describe_error(self, exc):
+        if not isinstance(exc, RedisError):
+            return None
+        detail = str(exc).strip()
+        lowered = detail.lower()
+        if 'timed out' in lowered:
+            return f'Query timed out after {self.statement_timeout_ms} ms', detail
+        if 'read-only queries' in lowered or 'ro_query' in lowered:
+            return 'Refused: read_query is read-only; this statement writes', detail
+        return 'Query failed', detail
+
     def _validate_query(self, query: str) -> Tuple[bool, str]:
         """Check syntax with EXPLAIN without running the query."""
         try:
@@ -254,33 +352,71 @@ class IGlobal(GraphGlobalBase):
         except Exception as e:
             return False, str(e)
 
-    def _reflect_schema(self) -> Dict[str, Any]:
-        """Reflect labels with their properties, plus the relationship patterns in use."""
-        schema: Dict[str, Any] = {'nodes': {}, 'relationships': []}
+    def _reflect_schema_v2(self, builder, deadline):
+        """Labels and relationship types, exact counts, sampled properties and endpoints.
 
-        try:
-            graph = self.select_graph()
+        Every query is a GRAPH.RO_QUERY whose timeout is the smaller of the
+        statement timeout and what is left of the refresh budget; a timeout or
+        any error fails the whole refresh (never a silently empty list).
+        """
+        graph = self.select_graph()
 
-            # One sampling query per label, so bound the fan-out on a wide schema.
-            for label in self._column(graph, 'CALL db.labels()')[:SCHEMA_LABEL_LIMIT]:
-                schema['nodes'][label] = self._sample_properties(graph, label)
+        def run(cypher: str):
+            remaining_ms = int((deadline - time.monotonic()) * 1000)
+            if remaining_ms <= 0:
+                raise TimeoutError('schema refresh budget exhausted')
+            return graph.ro_query(cypher, timeout=max(1, min(self.statement_timeout_ms, remaining_ms))).result_set or []
 
-            result = graph.ro_query(
-                'MATCH (a)-[r]->(b) '
-                'RETURN DISTINCT labels(a)[0] AS start, type(r) AS type, labels(b)[0] AS end '
-                f'LIMIT {SCHEMA_REL_LIMIT}',
-                timeout=self.query_timeout_ms,
-            )
-            schema['relationships'] = [
-                {'type': str(row[1] or ''), 'start': str(row[0] or ''), 'end': str(row[2] or '')}
-                for row in (result.result_set or [])
-                if row and len(row) >= 3 and row[1]
-            ]
+        labels = sorted(str(row[0]) for row in run('CALL db.labels()') if row)
+        if len(labels) > SCHEMA_LABEL_LIMIT:
+            builder.truncated = True
+            labels = labels[:SCHEMA_LABEL_LIMIT]
+        for label in labels:
+            if '`' in label:
+                # FalkorDB cannot quote a back-quote inside an identifier.
+                builder.label(label)
+                builder.truncated = True
+                continue
+            builder.label(label, count=run(f'MATCH (n:`{label}`) RETURN count(n)')[0][0])
+            for row in run(f'MATCH (n:`{label}`) WITH n LIMIT {SCHEMA_SAMPLE_SIZE} RETURN properties(n)'):
+                builder.sample_label_properties(label, row[0])
 
-        except Exception as e:
-            warning(f'FalkorDB schema reflection failed: {e}')
+        rels = sorted(str(row[0]) for row in run('CALL db.relationshipTypes()') if row)
+        if len(rels) > SCHEMA_REL_TYPE_LIMIT:
+            builder.truncated = True
+            rels = rels[:SCHEMA_REL_TYPE_LIMIT]
+        for rel in rels:
+            if '`' in rel:
+                builder.rel_type(rel)
+                builder.truncated = True
+                continue
+            builder.rel_type(rel, count=run(f'MATCH ()-[r:`{rel}`]->() RETURN count(r)')[0][0])
+            for start_labels, end_labels, props in run(
+                f'MATCH (a)-[r:`{rel}`]->(b) WITH a, r, b LIMIT {SCHEMA_SAMPLE_SIZE} '
+                'RETURN labels(a), labels(b), properties(r)'
+            ):
+                for start in start_labels or ['']:
+                    for end in end_labels or ['']:
+                        builder.endpoint(rel, start, end, observed=True)
+                builder.sample_rel_properties(rel, props)
 
-        return schema
+    def _engine_identity(self):
+        return {
+            'engine': {'name': 'FalkorDB', 'version': self.server_version, 'edition': None},
+            'database': None,
+            'graph': self.graph_name,
+            'read_boundary': 'ro_command',
+            'read_boundary_verified': False,
+            'shortest_path': True,
+            'server_result_cap': self.server_result_cap,
+        }
+
+    def _prompt_rules(self):
+        return [
+            f'The database is FalkorDB{" " + self.server_version if self.server_version else ""}; write OpenCypher.',
+            'Queries run as GRAPH.RO_QUERY: only read clauses (MATCH, OPTIONAL MATCH, WITH, UNWIND, RETURN).',
+            'Refer to nodes by id(n); compare with toInteger($id) when the id is a string.',
+        ]
 
     # ------------------------------------------------------------------
     # FalkorDB helpers
@@ -317,28 +453,6 @@ class IGlobal(GraphGlobalBase):
             return None
         return size if size > 0 else None
 
-    def _sample_properties(self, graph, label: str) -> List[Tuple[str, str]]:
-        """Read property names off one node of ``label``; FalkorDB has no schema catalog."""
-        try:
-            # The label is interpolated because Cypher has no parameter slot for
-            # labels — it comes from db.labels(), never from user input.
-            result = graph.ro_query(
-                f'MATCH (n:`{label}`) RETURN properties(n) LIMIT {SCHEMA_SAMPLE_SIZE}',
-                timeout=self.query_timeout_ms,
-            )
-            rows = result.result_set or []
-            if not rows or not rows[0]:
-                return []
-            props = rows[0][0] or {}
-            return [(str(key), _type_name(value)) for key, value in props.items()]
-        except (RedisError, ValueError, TypeError):
-            return []
-
-    def _column(self, graph, cypher: str) -> List[str]:
-        """Run a single-column procedure call and return its values as strings."""
-        result = graph.ro_query(cypher, timeout=self.query_timeout_ms)
-        return [str(row[0]) for row in (result.result_set or []) if row]
-
     @classmethod
     def _connect(cls, config: Dict[str, Any]) -> FalkorDB:
         """Open a client from whichever profile is configured: URL or host/port."""
@@ -349,11 +463,11 @@ class IGlobal(GraphGlobalBase):
         # Do NOT strip the password — whitespace is valid in passwords.
         password = str(config.get('password') or '')
         if not password:
-            return FalkorDB.from_url(url)
+            return _client_from_url(url)
 
         # A filled-in password field is the one that counts, so drop whatever the
         # URL embeds: redis-py would otherwise prefer the URL and ignore the field.
-        return FalkorDB.from_url(_url_without_password(url), password=password)
+        return _client_from_url(_url_without_password(url), password=password)
 
     @staticmethod
     def _client_kwargs(config: Dict[str, Any]) -> Dict[str, Any]:
@@ -469,21 +583,6 @@ def _redact(target: str) -> str:
     return f'{scheme}://{authority}{question}{query}'
 
 
-def _type_name(value: Any) -> str:
-    """Map a sampled property value to a schema type name for the LLM prompt."""
-    if isinstance(value, bool):
-        return 'BOOLEAN'
-    if isinstance(value, int):
-        return 'INTEGER'
-    if isinstance(value, float):
-        return 'FLOAT'
-    if isinstance(value, str):
-        return 'STRING'
-    if isinstance(value, (list, tuple)):
-        return 'LIST'
-    return 'ANY'
-
-
 def _header_names(header) -> List[str]:
     """Extract column names from a QueryResult header ([type, name] pairs or strings)."""
     names = []
@@ -493,6 +592,48 @@ def _header_names(header) -> List[str]:
         else:
             names.append(str(entry))
     return names
+
+
+def _client_from_url(url: str, **kwargs: Any) -> FalkorDB:
+    """Open a client from a URL without ``FalkorDB.from_url``'s temporary client.
+
+    ``FalkorDB.from_url`` builds a throwaway ``redis.Redis`` that owns the
+    connection pool, then gives the same pool to the client it returns. The
+    throwaway is garbage collected soon after (a reference cycle can keep it for
+    a while), and its ``__del__`` disconnects the pool, which is now the live
+    client's: a reply being read at that moment dies with
+    ``'NoneType' object has no attribute 'readline'``. The collector runs most
+    readily while a large reply is being parsed, because parsing allocates a lot.
+    Here the owner is kept, on the client, until ``_close_client`` closes it.
+
+    Args:
+        url (str): The connection URL (``falkor://``, ``redis://`` and the TLS forms).
+        **kwargs (Any): Passed to ``redis.Redis.from_url`` (for example ``password``).
+
+    Returns:
+        FalkorDB: The client; close it with ``_close_client``.
+    """
+    if url.startswith('falkor://'):
+        url = 'redis://' + url[len('falkor://') :]
+    elif url.startswith('falkors://'):
+        url = 'rediss://' + url[len('falkors://') :]
+    owner = redis.Redis.from_url(url, decode_responses=True, **kwargs)
+    client = FalkorDB(connection_pool=owner.connection_pool)
+    client._rr_pool_owner = owner
+    return client
+
+
+def _close_client(client: FalkorDB) -> None:
+    """Close a client and the pool its URL-built owner holds (best effort, as the client's own close is)."""
+    try:
+        client.close()
+    finally:
+        owner = getattr(client, '_rr_pool_owner', None)
+        if owner is not None:
+            try:
+                owner.close()
+            except RedisError:
+                pass
 
 
 def _wrote(result) -> bool:

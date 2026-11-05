@@ -1,0 +1,31 @@
+{
+  "columns": [
+    "n",
+    "raw_id"
+  ],
+  "rows": [
+    [
+      {
+        "@kind": "node",
+        "id": "11821949021847553",
+        "labels": [
+          "L35"
+        ],
+        "properties": {
+          "k": 35
+        }
+      },
+      {
+        "@kind": "number",
+        "value": "11821949021847553"
+      }
+    ]
+  ],
+  "row_limit": 1000,
+  "truncated": false,
+  "truncated_by": null,
+  "element_limit": 10000,
+  "elements": 1,
+  "value_limit": 500000,
+  "values": 4
+}

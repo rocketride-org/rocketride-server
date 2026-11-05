@@ -47,7 +47,7 @@
 	// Optional:
 	//		Description of this driver
 	//
-	"description": ["A RocketRide-managed graph database backed by PostgreSQL + Apache AGE. ", "Answers natural-language questions over your own provisioned RocketRide cloud ", "graph with zero setup — no host, user, or password to enter; the connection is ", "resolved automatically from your signed-in RocketRide identity. Cypher queries ", "are translated to AGE with a resource firewall, and safe reads run in read-only ", "transactions server-side."],
+	"description": ["A RocketRide-managed graph database backed by PostgreSQL + Apache AGE. ", "Answers natural-language questions over your own provisioned RocketRide cloud ", "graph with zero setup — no host, user, or password to enter; the engine delivers ", "the connection to the database you choose automatically. Cypher queries ", "are translated to AGE with a resource firewall, and safe reads run in read-only ", "transactions server-side."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
@@ -116,7 +116,7 @@
 			"title": "Max validation attempts",
 			"default": 5,
 			"minimum": 1,
-			"maximum": 20,
+			"maximum": 10,
 			"description": "Maximum number of times to re-ask the LLM if validation rejects the generated Cypher"
 		},
 		"rocketridegraph.max_rows": {
@@ -125,7 +125,7 @@
 			"default": 1000,
 			"minimum": 1,
 			"maximum": 25000,
-			"description": "Row ceiling for read queries on the questions lane and get_data tool"
+			"description": "Row ceiling for read queries: the questions lane, get_data and read_query (Graph Explorer's All asks for this cap). Results beyond it are cut; get_data and read_query report them as truncated (the questions lane does not)."
 		},
 		"rocketridegraph.query_timeout_ms": {
 			"type": "integer",

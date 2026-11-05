@@ -1,0 +1,775 @@
+{
+  "labels": [
+    "Company",
+    "L0",
+    "L1",
+    "L10",
+    "L11",
+    "L12",
+    "L13",
+    "L14",
+    "L15",
+    "L16",
+    "L17",
+    "L18",
+    "L19",
+    "L2",
+    "L20",
+    "L21",
+    "L22",
+    "L23",
+    "L24",
+    "L25",
+    "L26",
+    "L27",
+    "L28",
+    "L29",
+    "L3",
+    "L30",
+    "L31",
+    "L32",
+    "L33",
+    "L34",
+    "L35",
+    "L4",
+    "L5",
+    "L6",
+    "L7",
+    "L8",
+    "L9",
+    "Person"
+  ],
+  "nodes": {
+    "Company": [
+      {
+        "property": "name",
+        "type": "string"
+      }
+    ],
+    "L0": [
+      {
+        "property": "k",
+        "type": "integer"
+      }
+    ],
+    "L1": [
+      {
+        "property": "k",
+        "type": "integer"
+      }
+    ],
+    "L10": [
+      {
+        "property": "k",
+        "type": "integer"
+      }
+    ],
+    "L11": [
+      {
+        "property": "k",
+        "type": "integer"
+      }
+    ],
+    "L12": [
+      {
+        "property": "k",
+        "type": "integer"
+      }
+    ],
+    "L13": [
+      {
+        "property": "k",
+        "type": "integer"
+      }
+    ],
+    "L14": [
+      {
+        "property": "k",
+        "type": "integer"
+      }
+    ],
+    "L15": [
+      {
+        "property": "k",
+        "type": "integer"
+      }
+    ],
+    "L16": [
+      {
+        "property": "k",
+        "type": "integer"
+      }
+    ],
+    "L17": [
+      {
+        "property": "k",
+        "type": "integer"
+      }
+    ],
+    "L18": [
+      {
+        "property": "k",
+        "type": "integer"
+      }
+    ],
+    "L19": [
+      {
+        "property": "k",
+        "type": "integer"
+      }
+    ],
+    "L2": [
+      {
+        "property": "k",
+        "type": "integer"
+      }
+    ],
+    "L20": [
+      {
+        "property": "k",
+        "type": "integer"
+      }
+    ],
+    "L21": [
+      {
+        "property": "k",
+        "type": "integer"
+      }
+    ],
+    "L22": [
+      {
+        "property": "k",
+        "type": "integer"
+      }
+    ],
+    "L23": [
+      {
+        "property": "k",
+        "type": "integer"
+      }
+    ],
+    "L24": [
+      {
+        "property": "k",
+        "type": "integer"
+      }
+    ],
+    "L25": [
+      {
+        "property": "k",
+        "type": "integer"
+      }
+    ],
+    "L26": [
+      {
+        "property": "k",
+        "type": "integer"
+      }
+    ],
+    "L27": [
+      {
+        "property": "k",
+        "type": "integer"
+      }
+    ],
+    "L28": [
+      {
+        "property": "k",
+        "type": "integer"
+      }
+    ],
+    "L29": [
+      {
+        "property": "k",
+        "type": "integer"
+      }
+    ],
+    "L3": [
+      {
+        "property": "k",
+        "type": "integer"
+      }
+    ],
+    "L30": [
+      {
+        "property": "k",
+        "type": "integer"
+      }
+    ],
+    "L31": [
+      {
+        "property": "k",
+        "type": "integer"
+      }
+    ],
+    "L32": [
+      {
+        "property": "k",
+        "type": "integer"
+      }
+    ],
+    "L33": [
+      {
+        "property": "k",
+        "type": "integer"
+      }
+    ],
+    "L34": [
+      {
+        "property": "k",
+        "type": "integer"
+      }
+    ],
+    "L35": [
+      {
+        "property": "k",
+        "type": "integer"
+      }
+    ],
+    "L4": [
+      {
+        "property": "k",
+        "type": "integer"
+      }
+    ],
+    "L5": [
+      {
+        "property": "k",
+        "type": "integer"
+      }
+    ],
+    "L6": [
+      {
+        "property": "k",
+        "type": "integer"
+      }
+    ],
+    "L7": [
+      {
+        "property": "k",
+        "type": "integer"
+      }
+    ],
+    "L8": [
+      {
+        "property": "k",
+        "type": "integer"
+      }
+    ],
+    "L9": [
+      {
+        "property": "k",
+        "type": "integer"
+      }
+    ],
+    "Person": [
+      {
+        "property": "age",
+        "type": "integer"
+      },
+      {
+        "property": "big",
+        "type": "integer"
+      },
+      {
+        "property": "name",
+        "type": "string"
+      },
+      {
+        "property": "precise",
+        "type": "float"
+      }
+    ]
+  },
+  "relationships": [
+    {
+      "type": "KNOWS",
+      "start": "Person",
+      "end": "Person"
+    },
+    {
+      "type": "WORKS_AT",
+      "start": "Person",
+      "end": "Company"
+    }
+  ],
+  "schema": {
+    "version": 2,
+    "labels": [
+      {
+        "name": "Company",
+        "properties": [
+          {
+            "name": "name",
+            "types": [
+              "string"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "L0",
+        "properties": [
+          {
+            "name": "k",
+            "types": [
+              "integer"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "L1",
+        "properties": [
+          {
+            "name": "k",
+            "types": [
+              "integer"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "L10",
+        "properties": [
+          {
+            "name": "k",
+            "types": [
+              "integer"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "L11",
+        "properties": [
+          {
+            "name": "k",
+            "types": [
+              "integer"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "L12",
+        "properties": [
+          {
+            "name": "k",
+            "types": [
+              "integer"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "L13",
+        "properties": [
+          {
+            "name": "k",
+            "types": [
+              "integer"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "L14",
+        "properties": [
+          {
+            "name": "k",
+            "types": [
+              "integer"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "L15",
+        "properties": [
+          {
+            "name": "k",
+            "types": [
+              "integer"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "L16",
+        "properties": [
+          {
+            "name": "k",
+            "types": [
+              "integer"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "L17",
+        "properties": [
+          {
+            "name": "k",
+            "types": [
+              "integer"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "L18",
+        "properties": [
+          {
+            "name": "k",
+            "types": [
+              "integer"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "L19",
+        "properties": [
+          {
+            "name": "k",
+            "types": [
+              "integer"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "L2",
+        "properties": [
+          {
+            "name": "k",
+            "types": [
+              "integer"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "L20",
+        "properties": [
+          {
+            "name": "k",
+            "types": [
+              "integer"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "L21",
+        "properties": [
+          {
+            "name": "k",
+            "types": [
+              "integer"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "L22",
+        "properties": [
+          {
+            "name": "k",
+            "types": [
+              "integer"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "L23",
+        "properties": [
+          {
+            "name": "k",
+            "types": [
+              "integer"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "L24",
+        "properties": [
+          {
+            "name": "k",
+            "types": [
+              "integer"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "L25",
+        "properties": [
+          {
+            "name": "k",
+            "types": [
+              "integer"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "L26",
+        "properties": [
+          {
+            "name": "k",
+            "types": [
+              "integer"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "L27",
+        "properties": [
+          {
+            "name": "k",
+            "types": [
+              "integer"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "L28",
+        "properties": [
+          {
+            "name": "k",
+            "types": [
+              "integer"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "L29",
+        "properties": [
+          {
+            "name": "k",
+            "types": [
+              "integer"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "L3",
+        "properties": [
+          {
+            "name": "k",
+            "types": [
+              "integer"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "L30",
+        "properties": [
+          {
+            "name": "k",
+            "types": [
+              "integer"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "L31",
+        "properties": [
+          {
+            "name": "k",
+            "types": [
+              "integer"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "L32",
+        "properties": [
+          {
+            "name": "k",
+            "types": [
+              "integer"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "L33",
+        "properties": [
+          {
+            "name": "k",
+            "types": [
+              "integer"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "L34",
+        "properties": [
+          {
+            "name": "k",
+            "types": [
+              "integer"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "L35",
+        "properties": [
+          {
+            "name": "k",
+            "types": [
+              "integer"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "L4",
+        "properties": [
+          {
+            "name": "k",
+            "types": [
+              "integer"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "L5",
+        "properties": [
+          {
+            "name": "k",
+            "types": [
+              "integer"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "L6",
+        "properties": [
+          {
+            "name": "k",
+            "types": [
+              "integer"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "L7",
+        "properties": [
+          {
+            "name": "k",
+            "types": [
+              "integer"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "L8",
+        "properties": [
+          {
+            "name": "k",
+            "types": [
+              "integer"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "L9",
+        "properties": [
+          {
+            "name": "k",
+            "types": [
+              "integer"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Person",
+        "properties": [
+          {
+            "name": "age",
+            "types": [
+              "integer"
+            ]
+          },
+          {
+            "name": "big",
+            "types": [
+              "integer"
+            ]
+          },
+          {
+            "name": "name",
+            "types": [
+              "string"
+            ]
+          },
+          {
+            "name": "precise",
+            "types": [
+              "float"
+            ]
+          }
+        ]
+      }
+    ],
+    "relationship_types": [
+      {
+        "type": "KNOWS",
+        "endpoints": [
+          {
+            "start": "Person",
+            "end": "Person",
+            "observed": true
+          }
+        ],
+        "properties": [
+          {
+            "name": "since",
+            "types": [
+              "integer"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "WORKS_AT",
+        "endpoints": [
+          {
+            "start": "Person",
+            "end": "Company",
+            "observed": true
+          }
+        ],
+        "properties": []
+      }
+    ],
+    "sampled": true,
+    "truncated": false,
+    "refreshed_at": "2026-10-04T13:22:06.786Z",
+    "source": "startup",
+    "stale": false,
+    "error": null,
+    "capable": true
+  }
+}

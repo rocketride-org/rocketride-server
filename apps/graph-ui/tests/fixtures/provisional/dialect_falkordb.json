@@ -1,0 +1,28 @@
+{
+  "dialect": "falkordb",
+  "engine": {
+    "name": "FalkorDB",
+    "version": "6.0.1",
+    "edition": null
+  },
+  "database": null,
+  "graph": "agent",
+  "allow_execute": false,
+  "capabilities": {
+    "read_query": true,
+    "refresh_schema": true,
+    "execute_shape_graph": true,
+    "params": true,
+    "shortest_path": true
+  },
+  "limits": {
+    "default_rows": 250,
+    "max_rows": 250,
+    "max_elements": 10000,
+    "max_values": 500000,
+    "statement_timeout_ms": 30000,
+    "server_result_cap": 10000
+  },
+  "read_boundary": "ro_command",
+  "read_boundary_verified": false
+}

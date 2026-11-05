@@ -41,6 +41,11 @@ This configures the environment, resolves dependencies, and builds all modules. 
 | `<module>:test` | Run tests |
 
 Not all modules support all commands. Run `./builder --help` for the full list.
+`nodes:test-db` runs only the live-database suites and requires their
+databases (an unreachable server fails it; `RR_REQUIRE_DB_TESTS=0` makes them
+optional), while `nodes:test` runs them after the mocked pass and requires
+them only with `RR_REQUIRE_DB_TESTS` set. See
+[Testing nodes](../nodes/testing.md#live-database-tests).
 
 ### Modules reference
 
@@ -58,6 +63,7 @@ Not all modules support all commands. Run `./builder --help` for the full list.
 | `dropper-ui` | File drop web interface | build, clean, dev |
 | `events-ui` | Event monitor application | build, clean, dev |
 | `explorer-ui` | File explorer application | build, clean |
+| `graph-ui` | Graph Explorer application | build, clean, dev, test |
 | `hash` | C++ filter fingerprinting document content, for deduplication | build |
 | `hello-ui` | RocketRide Hello — OSS landing application | build, clean, dev |
 | `indexer` | C++ filter building the inverted word index for full-text search | build |
@@ -65,7 +71,7 @@ Not all modules support all commands. Run `./builder --help` for the full list.
 | `mcp-widgets` | MCP Apps widgets (embedded UI served by the ai MCP module) | build, clean, test |
 | `models` | LLM model sync | stamp-locals, update |
 | `monitor-ui` | Server monitor web interface | build, clean |
-| `nodes` | Pipeline nodes | build, clean, test, test-contracts, test-full |
+| `nodes` | Pipeline nodes | build, clean, test, test-contracts, test-db, test-full |
 | `parse` | C++ and Java filter extracting content from documents (Tika) | build |
 | `profiler-ui` | cProfile process profiler | build, clean |
 | `rocket-ui` | Data toolchain interface application | build, clean, dev |

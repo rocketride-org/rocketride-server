@@ -1,0 +1,664 @@
+{
+  "columns": [
+    "a",
+    "r",
+    "m",
+    "friends",
+    "p",
+    "name",
+    "name"
+  ],
+  "rows": [
+    [
+      {
+        "@kind": "node",
+        "id": "844424930131969",
+        "labels": [
+          "Person"
+        ],
+        "properties": {
+          "name": "Alice",
+          "age": 37,
+          "score": 0.5,
+          "big": {
+            "@kind": "number",
+            "value": "9007199254740993"
+          },
+          "meta": {
+            "@@kind": "node",
+            "@@@kind": "already",
+            "_labels": [
+              "not",
+              "metadata"
+            ],
+            "_type": "user value",
+            "": "empty key"
+          }
+        }
+      },
+      {
+        "@kind": "relationship",
+        "id": "1125899906842625",
+        "type": "KNOWS",
+        "start": "844424930131969",
+        "end": "844424930131970",
+        "properties": {
+          "since": 2019
+        }
+      },
+      {
+        "@kind": "node",
+        "id": "844424930131970",
+        "labels": [
+          "Person"
+        ],
+        "properties": {
+          "name": "Bob",
+          "age": 41
+        }
+      },
+      [
+        {
+          "@kind": "node",
+          "id": "844424930131970",
+          "labels": [
+            "Person"
+          ],
+          "properties": {
+            "name": "Bob",
+            "age": 41
+          }
+        }
+      ],
+      {
+        "@kind": "path",
+        "nodes": [
+          {
+            "@kind": "node",
+            "id": "844424930131970",
+            "labels": [
+              "Person"
+            ],
+            "properties": {
+              "name": "Bob",
+              "age": 41
+            }
+          },
+          {
+            "@kind": "node",
+            "id": "844424930131969",
+            "labels": [
+              "Person"
+            ],
+            "properties": {
+              "name": "Alice",
+              "age": 37,
+              "score": 0.5,
+              "big": {
+                "@kind": "number",
+                "value": "9007199254740993"
+              },
+              "meta": {
+                "@@kind": "node",
+                "@@@kind": "already",
+                "_labels": [
+                  "not",
+                  "metadata"
+                ],
+                "_type": "user value",
+                "": "empty key"
+              }
+            }
+          },
+          {
+            "@kind": "node",
+            "id": "11821949021847553",
+            "labels": [
+              "Company"
+            ],
+            "properties": {
+              "name": "Acme"
+            }
+          }
+        ],
+        "relationships": [
+          {
+            "@kind": "relationship",
+            "id": "1125899906842625",
+            "type": "KNOWS",
+            "start": "844424930131969",
+            "end": "844424930131970",
+            "properties": {
+              "since": 2019
+            }
+          },
+          {
+            "@kind": "relationship",
+            "id": "11540474045136897",
+            "type": "WORKS_AT",
+            "start": "844424930131969",
+            "end": "11821949021847553",
+            "properties": {
+              "role": "eng"
+            }
+          }
+        ]
+      },
+      "Alice",
+      "Alice"
+    ],
+    [
+      {
+        "@kind": "node",
+        "id": "844424930131969",
+        "labels": [
+          "Person"
+        ],
+        "properties": {
+          "name": "Alice",
+          "age": 37,
+          "score": 0.5,
+          "big": {
+            "@kind": "number",
+            "value": "9007199254740993"
+          },
+          "meta": {
+            "@@kind": "node",
+            "@@@kind": "already",
+            "_labels": [
+              "not",
+              "metadata"
+            ],
+            "_type": "user value",
+            "": "empty key"
+          }
+        }
+      },
+      {
+        "@kind": "relationship",
+        "id": "1125899906842626",
+        "type": "KNOWS",
+        "start": "844424930131969",
+        "end": "844424930131970",
+        "properties": {
+          "since": 2021
+        }
+      },
+      {
+        "@kind": "node",
+        "id": "844424930131970",
+        "labels": [
+          "Person"
+        ],
+        "properties": {
+          "name": "Bob",
+          "age": 41
+        }
+      },
+      [
+        {
+          "@kind": "node",
+          "id": "844424930131970",
+          "labels": [
+            "Person"
+          ],
+          "properties": {
+            "name": "Bob",
+            "age": 41
+          }
+        }
+      ],
+      {
+        "@kind": "path",
+        "nodes": [
+          {
+            "@kind": "node",
+            "id": "844424930131970",
+            "labels": [
+              "Person"
+            ],
+            "properties": {
+              "name": "Bob",
+              "age": 41
+            }
+          },
+          {
+            "@kind": "node",
+            "id": "844424930131969",
+            "labels": [
+              "Person"
+            ],
+            "properties": {
+              "name": "Alice",
+              "age": 37,
+              "score": 0.5,
+              "big": {
+                "@kind": "number",
+                "value": "9007199254740993"
+              },
+              "meta": {
+                "@@kind": "node",
+                "@@@kind": "already",
+                "_labels": [
+                  "not",
+                  "metadata"
+                ],
+                "_type": "user value",
+                "": "empty key"
+              }
+            }
+          },
+          {
+            "@kind": "node",
+            "id": "11821949021847553",
+            "labels": [
+              "Company"
+            ],
+            "properties": {
+              "name": "Acme"
+            }
+          }
+        ],
+        "relationships": [
+          {
+            "@kind": "relationship",
+            "id": "1125899906842625",
+            "type": "KNOWS",
+            "start": "844424930131969",
+            "end": "844424930131970",
+            "properties": {
+              "since": 2019
+            }
+          },
+          {
+            "@kind": "relationship",
+            "id": "11540474045136897",
+            "type": "WORKS_AT",
+            "start": "844424930131969",
+            "end": "11821949021847553",
+            "properties": {
+              "role": "eng"
+            }
+          }
+        ]
+      },
+      "Alice",
+      "Alice"
+    ],
+    [
+      {
+        "@kind": "node",
+        "id": "844424930131969",
+        "labels": [
+          "Person"
+        ],
+        "properties": {
+          "name": "Alice",
+          "age": 37,
+          "score": 0.5,
+          "big": {
+            "@kind": "number",
+            "value": "9007199254740993"
+          },
+          "meta": {
+            "@@kind": "node",
+            "@@@kind": "already",
+            "_labels": [
+              "not",
+              "metadata"
+            ],
+            "_type": "user value",
+            "": "empty key"
+          }
+        }
+      },
+      {
+        "@kind": "relationship",
+        "id": "1407374883553281",
+        "type": "LIKES",
+        "start": "844424930131969",
+        "end": "844424930131969",
+        "properties": {}
+      },
+      {
+        "@kind": "node",
+        "id": "844424930131969",
+        "labels": [
+          "Person"
+        ],
+        "properties": {
+          "name": "Alice",
+          "age": 37,
+          "score": 0.5,
+          "big": {
+            "@kind": "number",
+            "value": "9007199254740993"
+          },
+          "meta": {
+            "@@kind": "node",
+            "@@@kind": "already",
+            "_labels": [
+              "not",
+              "metadata"
+            ],
+            "_type": "user value",
+            "": "empty key"
+          }
+        }
+      },
+      [
+        {
+          "@kind": "node",
+          "id": "844424930131970",
+          "labels": [
+            "Person"
+          ],
+          "properties": {
+            "name": "Bob",
+            "age": 41
+          }
+        }
+      ],
+      {
+        "@kind": "path",
+        "nodes": [
+          {
+            "@kind": "node",
+            "id": "844424930131970",
+            "labels": [
+              "Person"
+            ],
+            "properties": {
+              "name": "Bob",
+              "age": 41
+            }
+          },
+          {
+            "@kind": "node",
+            "id": "844424930131969",
+            "labels": [
+              "Person"
+            ],
+            "properties": {
+              "name": "Alice",
+              "age": 37,
+              "score": 0.5,
+              "big": {
+                "@kind": "number",
+                "value": "9007199254740993"
+              },
+              "meta": {
+                "@@kind": "node",
+                "@@@kind": "already",
+                "_labels": [
+                  "not",
+                  "metadata"
+                ],
+                "_type": "user value",
+                "": "empty key"
+              }
+            }
+          },
+          {
+            "@kind": "node",
+            "id": "11821949021847553",
+            "labels": [
+              "Company"
+            ],
+            "properties": {
+              "name": "Acme"
+            }
+          }
+        ],
+        "relationships": [
+          {
+            "@kind": "relationship",
+            "id": "1125899906842625",
+            "type": "KNOWS",
+            "start": "844424930131969",
+            "end": "844424930131970",
+            "properties": {
+              "since": 2019
+            }
+          },
+          {
+            "@kind": "relationship",
+            "id": "11540474045136897",
+            "type": "WORKS_AT",
+            "start": "844424930131969",
+            "end": "11821949021847553",
+            "properties": {
+              "role": "eng"
+            }
+          }
+        ]
+      },
+      "Alice",
+      "Alice"
+    ],
+    [
+      {
+        "@kind": "node",
+        "id": "844424930131969",
+        "labels": [
+          "Person"
+        ],
+        "properties": {
+          "name": "Alice",
+          "age": 37,
+          "score": 0.5,
+          "big": {
+            "@kind": "number",
+            "value": "9007199254740993"
+          },
+          "meta": {
+            "@@kind": "node",
+            "@@@kind": "already",
+            "_labels": [
+              "not",
+              "metadata"
+            ],
+            "_type": "user value",
+            "": "empty key"
+          }
+        }
+      },
+      {
+        "@kind": "relationship",
+        "id": "11540474045136897",
+        "type": "WORKS_AT",
+        "start": "844424930131969",
+        "end": "11821949021847553",
+        "properties": {
+          "role": "eng"
+        }
+      },
+      {
+        "@kind": "node",
+        "id": "11821949021847553",
+        "labels": [
+          "Company"
+        ],
+        "properties": {
+          "name": "Acme"
+        }
+      },
+      [
+        {
+          "@kind": "node",
+          "id": "844424930131970",
+          "labels": [
+            "Person"
+          ],
+          "properties": {
+            "name": "Bob",
+            "age": 41
+          }
+        }
+      ],
+      {
+        "@kind": "path",
+        "nodes": [
+          {
+            "@kind": "node",
+            "id": "844424930131970",
+            "labels": [
+              "Person"
+            ],
+            "properties": {
+              "name": "Bob",
+              "age": 41
+            }
+          },
+          {
+            "@kind": "node",
+            "id": "844424930131969",
+            "labels": [
+              "Person"
+            ],
+            "properties": {
+              "name": "Alice",
+              "age": 37,
+              "score": 0.5,
+              "big": {
+                "@kind": "number",
+                "value": "9007199254740993"
+              },
+              "meta": {
+                "@@kind": "node",
+                "@@@kind": "already",
+                "_labels": [
+                  "not",
+                  "metadata"
+                ],
+                "_type": "user value",
+                "": "empty key"
+              }
+            }
+          },
+          {
+            "@kind": "node",
+            "id": "11821949021847553",
+            "labels": [
+              "Company"
+            ],
+            "properties": {
+              "name": "Acme"
+            }
+          }
+        ],
+        "relationships": [
+          {
+            "@kind": "relationship",
+            "id": "1125899906842625",
+            "type": "KNOWS",
+            "start": "844424930131969",
+            "end": "844424930131970",
+            "properties": {
+              "since": 2019
+            }
+          },
+          {
+            "@kind": "relationship",
+            "id": "11540474045136897",
+            "type": "WORKS_AT",
+            "start": "844424930131969",
+            "end": "11821949021847553",
+            "properties": {
+              "role": "eng"
+            }
+          }
+        ]
+      },
+      "Alice",
+      "Alice"
+    ],
+    [
+      {
+        "@kind": "node",
+        "id": "844424930131970",
+        "labels": [
+          "Person"
+        ],
+        "properties": {
+          "name": "Bob",
+          "age": 41
+        }
+      },
+      {
+        "@kind": "relationship",
+        "id": "1125899906842627",
+        "type": "KNOWS",
+        "start": "844424930131970",
+        "end": "844424930131969",
+        "properties": {
+          "since": 2020
+        }
+      },
+      {
+        "@kind": "node",
+        "id": "844424930131969",
+        "labels": [
+          "Person"
+        ],
+        "properties": {
+          "name": "Alice",
+          "age": 37,
+          "score": 0.5,
+          "big": {
+            "@kind": "number",
+            "value": "9007199254740993"
+          },
+          "meta": {
+            "@@kind": "node",
+            "@@@kind": "already",
+            "_labels": [
+              "not",
+              "metadata"
+            ],
+            "_type": "user value",
+            "": "empty key"
+          }
+        }
+      },
+      [
+        {
+          "@kind": "node",
+          "id": "844424930131969",
+          "labels": [
+            "Person"
+          ],
+          "properties": {
+            "name": "Alice",
+            "age": 37,
+            "score": 0.5,
+            "big": {
+              "@kind": "number",
+              "value": "9007199254740993"
+            },
+            "meta": {
+              "@@kind": "node",
+              "@@@kind": "already",
+              "_labels": [
+                "not",
+                "metadata"
+              ],
+              "_type": "user value",
+              "": "empty key"
+            }
+          }
+        }
+      ],
+      null,
+      "Bob",
+      "Bob"
+    ]
+  ],
+  "row_limit": 1000,
+  "truncated": false,
+  "truncated_by": null,
+  "element_limit": 10000,
+  "elements": 40,
+  "value_limit": 500000,
+  "values": 271
+}

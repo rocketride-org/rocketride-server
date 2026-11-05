@@ -1,0 +1,23 @@
+{
+  "columns": [
+    "n"
+  ],
+  "rows": [
+    [
+      0
+    ],
+    [
+      1
+    ],
+    [
+      2
+    ]
+  ],
+  "row_limit": 3,
+  "truncated": false,
+  "truncated_by": null,
+  "element_limit": 10000,
+  "elements": 0,
+  "value_limit": 500000,
+  "values": 3
+}

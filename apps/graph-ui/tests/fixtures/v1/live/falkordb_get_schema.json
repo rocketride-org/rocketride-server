@@ -1,0 +1,330 @@
+{
+  "labels": [
+    "Company",
+    "Employee",
+    "Person"
+  ],
+  "nodes": {
+    "Company": [
+      {
+        "property": "name",
+        "type": "string"
+      }
+    ],
+    "Employee": [
+      {
+        "property": "age",
+        "type": "integer"
+      },
+      {
+        "property": "big",
+        "type": "integer"
+      },
+      {
+        "property": "born",
+        "type": "temporal"
+      },
+      {
+        "property": "home",
+        "type": "point"
+      },
+      {
+        "property": "name",
+        "type": "string"
+      },
+      {
+        "property": "seen",
+        "type": "temporal"
+      },
+      {
+        "property": "tenure",
+        "type": "temporal"
+      }
+    ],
+    "Person": [
+      {
+        "property": "age",
+        "type": "integer"
+      },
+      {
+        "property": "big",
+        "type": "integer"
+      },
+      {
+        "property": "born",
+        "type": "temporal"
+      },
+      {
+        "property": "home",
+        "type": "point"
+      },
+      {
+        "property": "name",
+        "type": "string"
+      },
+      {
+        "property": "seen",
+        "type": "temporal"
+      },
+      {
+        "property": "tenure",
+        "type": "temporal"
+      }
+    ]
+  },
+  "relationships": [
+    {
+      "type": "KNOWS",
+      "start": "Employee",
+      "end": "Person"
+    },
+    {
+      "type": "KNOWS",
+      "start": "Person",
+      "end": "Employee"
+    },
+    {
+      "type": "KNOWS",
+      "start": "Person",
+      "end": "Person"
+    },
+    {
+      "type": "LIKES",
+      "start": "Employee",
+      "end": "Employee"
+    },
+    {
+      "type": "LIKES",
+      "start": "Employee",
+      "end": "Person"
+    },
+    {
+      "type": "LIKES",
+      "start": "Person",
+      "end": "Employee"
+    },
+    {
+      "type": "LIKES",
+      "start": "Person",
+      "end": "Person"
+    },
+    {
+      "type": "WORKS_AT",
+      "start": "Employee",
+      "end": "Company"
+    },
+    {
+      "type": "WORKS_AT",
+      "start": "Person",
+      "end": "Company"
+    }
+  ],
+  "schema": {
+    "version": 2,
+    "labels": [
+      {
+        "name": "Company",
+        "properties": [
+          {
+            "name": "name",
+            "types": [
+              "string"
+            ]
+          }
+        ],
+        "count": 1,
+        "count_estimated": false
+      },
+      {
+        "name": "Employee",
+        "properties": [
+          {
+            "name": "age",
+            "types": [
+              "integer"
+            ]
+          },
+          {
+            "name": "big",
+            "types": [
+              "integer"
+            ]
+          },
+          {
+            "name": "born",
+            "types": [
+              "temporal"
+            ]
+          },
+          {
+            "name": "home",
+            "types": [
+              "point"
+            ]
+          },
+          {
+            "name": "name",
+            "types": [
+              "string"
+            ]
+          },
+          {
+            "name": "seen",
+            "types": [
+              "temporal"
+            ]
+          },
+          {
+            "name": "tenure",
+            "types": [
+              "temporal"
+            ]
+          }
+        ],
+        "count": 1,
+        "count_estimated": false
+      },
+      {
+        "name": "Person",
+        "properties": [
+          {
+            "name": "age",
+            "types": [
+              "integer"
+            ]
+          },
+          {
+            "name": "big",
+            "types": [
+              "integer"
+            ]
+          },
+          {
+            "name": "born",
+            "types": [
+              "temporal"
+            ]
+          },
+          {
+            "name": "home",
+            "types": [
+              "point"
+            ]
+          },
+          {
+            "name": "name",
+            "types": [
+              "string"
+            ]
+          },
+          {
+            "name": "seen",
+            "types": [
+              "temporal"
+            ]
+          },
+          {
+            "name": "tenure",
+            "types": [
+              "temporal"
+            ]
+          }
+        ],
+        "count": 2,
+        "count_estimated": false
+      }
+    ],
+    "relationship_types": [
+      {
+        "type": "KNOWS",
+        "endpoints": [
+          {
+            "start": "Employee",
+            "end": "Person",
+            "observed": true
+          },
+          {
+            "start": "Person",
+            "end": "Employee",
+            "observed": true
+          },
+          {
+            "start": "Person",
+            "end": "Person",
+            "observed": true
+          }
+        ],
+        "properties": [
+          {
+            "name": "since",
+            "types": [
+              "integer"
+            ]
+          }
+        ],
+        "count": 3,
+        "count_estimated": false
+      },
+      {
+        "type": "LIKES",
+        "endpoints": [
+          {
+            "start": "Employee",
+            "end": "Employee",
+            "observed": true
+          },
+          {
+            "start": "Employee",
+            "end": "Person",
+            "observed": true
+          },
+          {
+            "start": "Person",
+            "end": "Employee",
+            "observed": true
+          },
+          {
+            "start": "Person",
+            "end": "Person",
+            "observed": true
+          }
+        ],
+        "properties": [],
+        "count": 1,
+        "count_estimated": false
+      },
+      {
+        "type": "WORKS_AT",
+        "endpoints": [
+          {
+            "start": "Employee",
+            "end": "Company",
+            "observed": true
+          },
+          {
+            "start": "Person",
+            "end": "Company",
+            "observed": true
+          }
+        ],
+        "properties": [
+          {
+            "name": "role",
+            "types": [
+              "string"
+            ]
+          }
+        ],
+        "count": 1,
+        "count_estimated": false
+      }
+    ],
+    "sampled": true,
+    "truncated": false,
+    "refreshed_at": "2026-10-04T13:22:03.476Z",
+    "source": "startup",
+    "stale": false,
+    "error": null,
+    "capable": true
+  }
+}

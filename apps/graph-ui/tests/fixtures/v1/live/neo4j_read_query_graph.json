@@ -1,0 +1,299 @@
+{
+  "columns": [
+    "a",
+    "r",
+    "m"
+  ],
+  "rows": [
+    [
+      {
+        "@kind": "node",
+        "id": "4:3a464e8e-a231-4c13-8eac-564055772a5e:26",
+        "labels": [
+          "GxEmployee",
+          "GxPerson"
+        ],
+        "properties": {
+          "big": {
+            "@kind": "number",
+            "value": "9007199254740993"
+          },
+          "meta": "{\"@kind\": \"node\"}",
+          "born": {
+            "@kind": "temporal",
+            "type": "date",
+            "value": "1989-02-28"
+          },
+          "name": "Alice",
+          "tenure": {
+            "@kind": "temporal",
+            "type": "duration",
+            "value": "P1Y2M3DT4.5S"
+          },
+          "seen": {
+            "@kind": "temporal",
+            "type": "datetime",
+            "value": "2026-10-04T12:00:00.000000000+02:00",
+            "zone": "Europe/Berlin"
+          },
+          "age": 37,
+          "home": {
+            "@kind": "point",
+            "srid": 4326,
+            "coordinates": [
+              13.405,
+              52.52
+            ]
+          }
+        }
+      },
+      {
+        "@kind": "relationship",
+        "id": "5:3a464e8e-a231-4c13-8eac-564055772a5e:163",
+        "type": "GX_KNOWS",
+        "start": "4:3a464e8e-a231-4c13-8eac-564055772a5e:26",
+        "end": "4:3a464e8e-a231-4c13-8eac-564055772a5e:27",
+        "properties": {
+          "since": 2019
+        }
+      },
+      {
+        "@kind": "node",
+        "id": "4:3a464e8e-a231-4c13-8eac-564055772a5e:27",
+        "labels": [
+          "GxPerson"
+        ],
+        "properties": {
+          "name": "Bob",
+          "age": 41
+        }
+      }
+    ],
+    [
+      {
+        "@kind": "node",
+        "id": "4:3a464e8e-a231-4c13-8eac-564055772a5e:26",
+        "labels": [
+          "GxEmployee",
+          "GxPerson"
+        ],
+        "properties": {
+          "big": {
+            "@kind": "number",
+            "value": "9007199254740993"
+          },
+          "meta": "{\"@kind\": \"node\"}",
+          "born": {
+            "@kind": "temporal",
+            "type": "date",
+            "value": "1989-02-28"
+          },
+          "name": "Alice",
+          "tenure": {
+            "@kind": "temporal",
+            "type": "duration",
+            "value": "P1Y2M3DT4.5S"
+          },
+          "seen": {
+            "@kind": "temporal",
+            "type": "datetime",
+            "value": "2026-10-04T12:00:00.000000000+02:00",
+            "zone": "Europe/Berlin"
+          },
+          "age": 37,
+          "home": {
+            "@kind": "point",
+            "srid": 4326,
+            "coordinates": [
+              13.405,
+              52.52
+            ]
+          }
+        }
+      },
+      {
+        "@kind": "relationship",
+        "id": "5:3a464e8e-a231-4c13-8eac-564055772a5e:164",
+        "type": "GX_KNOWS",
+        "start": "4:3a464e8e-a231-4c13-8eac-564055772a5e:26",
+        "end": "4:3a464e8e-a231-4c13-8eac-564055772a5e:27",
+        "properties": {
+          "since": 2021
+        }
+      },
+      {
+        "@kind": "node",
+        "id": "4:3a464e8e-a231-4c13-8eac-564055772a5e:27",
+        "labels": [
+          "GxPerson"
+        ],
+        "properties": {
+          "name": "Bob",
+          "age": 41
+        }
+      }
+    ],
+    [
+      {
+        "@kind": "node",
+        "id": "4:3a464e8e-a231-4c13-8eac-564055772a5e:26",
+        "labels": [
+          "GxEmployee",
+          "GxPerson"
+        ],
+        "properties": {
+          "big": {
+            "@kind": "number",
+            "value": "9007199254740993"
+          },
+          "meta": "{\"@kind\": \"node\"}",
+          "born": {
+            "@kind": "temporal",
+            "type": "date",
+            "value": "1989-02-28"
+          },
+          "name": "Alice",
+          "tenure": {
+            "@kind": "temporal",
+            "type": "duration",
+            "value": "P1Y2M3DT4.5S"
+          },
+          "seen": {
+            "@kind": "temporal",
+            "type": "datetime",
+            "value": "2026-10-04T12:00:00.000000000+02:00",
+            "zone": "Europe/Berlin"
+          },
+          "age": 37,
+          "home": {
+            "@kind": "point",
+            "srid": 4326,
+            "coordinates": [
+              13.405,
+              52.52
+            ]
+          }
+        }
+      },
+      {
+        "@kind": "relationship",
+        "id": "5:3a464e8e-a231-4c13-8eac-564055772a5e:166",
+        "type": "GX_LIKES",
+        "start": "4:3a464e8e-a231-4c13-8eac-564055772a5e:26",
+        "end": "4:3a464e8e-a231-4c13-8eac-564055772a5e:26",
+        "properties": {}
+      },
+      {
+        "@kind": "node",
+        "id": "4:3a464e8e-a231-4c13-8eac-564055772a5e:26",
+        "labels": [
+          "GxEmployee",
+          "GxPerson"
+        ],
+        "properties": {
+          "big": {
+            "@kind": "number",
+            "value": "9007199254740993"
+          },
+          "meta": "{\"@kind\": \"node\"}",
+          "born": {
+            "@kind": "temporal",
+            "type": "date",
+            "value": "1989-02-28"
+          },
+          "name": "Alice",
+          "tenure": {
+            "@kind": "temporal",
+            "type": "duration",
+            "value": "P1Y2M3DT4.5S"
+          },
+          "seen": {
+            "@kind": "temporal",
+            "type": "datetime",
+            "value": "2026-10-04T12:00:00.000000000+02:00",
+            "zone": "Europe/Berlin"
+          },
+          "age": 37,
+          "home": {
+            "@kind": "point",
+            "srid": 4326,
+            "coordinates": [
+              13.405,
+              52.52
+            ]
+          }
+        }
+      }
+    ],
+    [
+      {
+        "@kind": "node",
+        "id": "4:3a464e8e-a231-4c13-8eac-564055772a5e:26",
+        "labels": [
+          "GxEmployee",
+          "GxPerson"
+        ],
+        "properties": {
+          "big": {
+            "@kind": "number",
+            "value": "9007199254740993"
+          },
+          "meta": "{\"@kind\": \"node\"}",
+          "born": {
+            "@kind": "temporal",
+            "type": "date",
+            "value": "1989-02-28"
+          },
+          "name": "Alice",
+          "tenure": {
+            "@kind": "temporal",
+            "type": "duration",
+            "value": "P1Y2M3DT4.5S"
+          },
+          "seen": {
+            "@kind": "temporal",
+            "type": "datetime",
+            "value": "2026-10-04T12:00:00.000000000+02:00",
+            "zone": "Europe/Berlin"
+          },
+          "age": 37,
+          "home": {
+            "@kind": "point",
+            "srid": 4326,
+            "coordinates": [
+              13.405,
+              52.52
+            ]
+          }
+        }
+      },
+      {
+        "@kind": "relationship",
+        "id": "5:3a464e8e-a231-4c13-8eac-564055772a5e:167",
+        "type": "GX_WORKS_AT",
+        "start": "4:3a464e8e-a231-4c13-8eac-564055772a5e:26",
+        "end": "4:3a464e8e-a231-4c13-8eac-564055772a5e:28",
+        "properties": {
+          "role": "eng"
+        }
+      },
+      {
+        "@kind": "node",
+        "id": "4:3a464e8e-a231-4c13-8eac-564055772a5e:28",
+        "labels": [
+          "GxCompany"
+        ],
+        "properties": {
+          "name": "Acme"
+        }
+      }
+    ]
+  ],
+  "row_limit": 10,
+  "truncated": false,
+  "truncated_by": null,
+  "element_limit": 10000,
+  "elements": 12,
+  "value_limit": 500000,
+  "values": 72
+}

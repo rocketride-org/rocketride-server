@@ -1,0 +1,21 @@
+{
+  "columns": [
+    "blob"
+  ],
+  "rows": [
+    [
+      {
+        "@kind": "bytes",
+        "size": 5,
+        "base64": "AP9yYXc="
+      }
+    ]
+  ],
+  "row_limit": 1000,
+  "truncated": false,
+  "truncated_by": null,
+  "element_limit": 10000,
+  "elements": 0,
+  "value_limit": 500000,
+  "values": 1
+}

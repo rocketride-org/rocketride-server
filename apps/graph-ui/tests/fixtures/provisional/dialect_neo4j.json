@@ -1,0 +1,28 @@
+{
+  "dialect": "neo4j",
+  "engine": {
+    "name": "Neo4j",
+    "version": "5.26.31",
+    "edition": "community"
+  },
+  "database": "neo4j",
+  "graph": null,
+  "allow_execute": false,
+  "capabilities": {
+    "read_query": true,
+    "refresh_schema": true,
+    "execute_shape_graph": true,
+    "params": true,
+    "shortest_path": true
+  },
+  "limits": {
+    "default_rows": 1000,
+    "max_rows": 25000,
+    "max_elements": 10000,
+    "max_values": 500000,
+    "statement_timeout_ms": 30000,
+    "server_result_cap": null
+  },
+  "read_boundary": "read_session",
+  "read_boundary_verified": false
+}

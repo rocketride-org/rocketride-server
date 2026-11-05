@@ -85,13 +85,21 @@ class TranslatedQuery:
 
 
 def _dollar_quote(body: str) -> str:
-    """Wrap ``body`` in a dollar-quote tag guaranteed absent from it."""
-    tag = '$rr_cypher$'
+    """Wrap ``body`` in a dollar-quote tag that cannot end the string early.
+
+    A dollar-quoted string ends at the FIRST occurrence of its tag after the
+    opening one. So the tag must not occur inside the body, and it must not be
+    completed across the body's end either: a body ending in ``$rr_cypher``
+    followed by the closing ``$rr_cypher$`` contains ``$rr_cypher$`` one
+    character early. Requiring the first match in ``body + tag`` to be the
+    closing tag itself rules out both.
+    """
     counter = 0
-    while tag in body:
+    while True:
+        tag = '$rr_cypher$' if counter == 0 else f'$rr_cypher{counter}$'
+        if (body + tag).find(tag) == len(body):
+            return f'{tag}{body}{tag}'
         counter += 1
-        tag = f'$rr_cypher{counter}$'
-    return f'{tag}{body}{tag}'
 
 
 def _params_to_agtype_json(params: Dict[str, Any]) -> str:

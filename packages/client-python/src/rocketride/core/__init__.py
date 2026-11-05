@@ -41,6 +41,7 @@ Components:
     RocketRideException: Base exception class for all RocketRide operations
     ConnectionException: Raised for connection-related errors
     PipeException: Raised for data pipe operation errors
+    CommandException: Raised when the server answers a command with a failure
     ExecutionException: Raised for pipeline execution errors
     ValidationException: Raised for input validation failures
 
@@ -69,6 +70,7 @@ from .exceptions import (
     ConnectionException,
     AuthenticationException,
     PipeException,
+    CommandException,
     ExecutionException,
     ValidationException,
 )
@@ -86,6 +88,7 @@ __all__ = [
     'AuthenticationException',
     'ConnectionException',
     'PipeException',
+    'CommandException',
     'ExecutionException',
     'ValidationException',
     'DAPBase',
