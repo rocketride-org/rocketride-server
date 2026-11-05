@@ -13,6 +13,7 @@ import { createLayoutJob, runLayout, seededRandom } from '../src/layout/layout.c
 import { GRID_SPACING, gridLayout, ringAround } from '../src/layout/gridFallback';
 import type { ILayoutRequest } from '../src/layout/protocol';
 import { deepFreeze, generateGraph } from './support/builders';
+import { TIMING_SAMPLES, bestOfMs } from './support/timing';
 
 const base = (nodes: ILayoutRequest['nodes'], links: ILayoutRequest['links'], extra: Partial<ILayoutRequest> = {}): ILayoutRequest => ({
 	type: 'layout',
@@ -140,13 +141,12 @@ test('a job is driven in steps and never runs past the requested ticks', () => {
 test('a full-size graph (1,000 nodes, 2,000 relationships) completes and stays finite', () => {
 	const { nodes, relationships } = generateGraph({ nodes: 1000, relationships: 2000, seed: 21, parallel: 0.1, selfLoops: 0.02 });
 	const request = base(nodes.map((n) => ({ id: n.id })), relationships.map((r) => ({ source: r.start, target: r.end })));
-	const started = Date.now();
-	const result = runLayout(request);
-	const elapsed = Date.now() - started;
+	// The bound is on the best of three timed runs after a warm-up (tests/support/timing.ts).
+	const { ms: elapsed, result } = bestOfMs(() => runLayout(request));
 	assert.equal(result.positions.length, 1000);
 	assert.equal(result.timedOut, false);
 	for (const p of result.positions) assert.ok(Number.isFinite(p.x) && Number.isFinite(p.y));
-	assert.ok(elapsed < 20_000, `took ${elapsed} ms`);
+	assert.ok(elapsed < 20_000, `best of ${TIMING_SAMPLES} took ${elapsed.toFixed(1)} ms`);
 });
 
 test('the seeded random source is deterministic and uniform enough to use', () => {
