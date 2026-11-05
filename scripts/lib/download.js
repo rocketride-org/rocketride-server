@@ -29,6 +29,13 @@ const TODAY = new Date().toISOString().slice(0, 10).replace(/-/g, '.'); // yyyy.
 /** How long a force-pushed tag's assets are reused before being re-fetched */
 const PRERELEASE_TTL_MS = 60 * 60 * 1000;
 
+/**
+ * Read the version and repository from the root package.json
+ *
+ * The file is read once; later calls reuse the values.
+ *
+ * @returns {Promise<{version: string, repo: string}>} Project version and GitHub `owner/name`
+ */
 async function loadPackageJson() {
 	if (!packageJsonLoaded) {
 		const packageJson = await readJson(path.join(PROJECT_ROOT, 'package.json'));
@@ -136,6 +143,18 @@ async function downloadFileFrom(urls, filename, task) {
 	throw new Error(`Download failed from every source:\n  ${failures.join('\n  ')}`);
 }
 
+/**
+ * Download an asset of a GitHub release of this repository (with caching)
+ *
+ * A missing asset (HTTP 404) is remembered for the rest of the day and yields null instead of
+ * an error. Assets of a prerelease tag are re-fetched once they are older than
+ * PRERELEASE_TTL_MS, because such a tag may be force-pushed.
+ *
+ * @param {string} releaseTag - Release tag that holds the asset
+ * @param {string} filename - Asset name on the release
+ * @param {Object} task - Optional Listr2 task for progress output
+ * @returns {Promise<string|null>} Full path to the downloaded file, or null if the asset does not exist
+ */
 async function downloadGitHubFile(releaseTag, filename, task) {
 	const { repo } = await loadPackageJson();
 	const fileUrl = `https://github.com/${repo}/releases/download/${releaseTag}/${filename}`;
@@ -180,8 +199,26 @@ async function downloadGitHubFile(releaseTag, filename, task) {
 
 /**
  * Internal: Perform the actual HTTP download
+ *
+ * Follows up to 5 redirects, retries 503/504 responses, retries a few connection failures
+ * with a growing pause, and streams the body to destPath. A partial file is deleted when
+ * the transfer fails.
+ *
+ * @param {string} url - URL to download from
+ * @param {string} destPath - Full path of the file to write
+ * @param {Object} task - Optional Listr2 task for progress output
+ * @returns {Promise<void>} Resolves once the file is fully written
  */
 async function _download(url, destPath, task) {
+	/**
+	 * Send one GET request
+	 *
+	 * A socket that stays silent for REQUEST_IDLE_TIMEOUT_MS is destroyed with an ETIMEDOUT
+	 * error, since a socket timeout does not abort the request by itself.
+	 *
+	 * @param {string} currentUrl - URL to request
+	 * @returns {Promise<import('http').IncomingMessage>} The response, whatever its status
+	 */
 	const makeRequest = (currentUrl) => {
 		return new Promise((resolve, reject) => {
 			const protocol = currentUrl.startsWith('https') ? https : require('http');
@@ -202,6 +239,12 @@ async function _download(url, destPath, task) {
 		});
 	};
 
+	/**
+	 * Wait for a while
+	 *
+	 * @param {number} ms - Time to wait, in milliseconds
+	 * @returns {Promise<void>} Resolves after the wait
+	 */
 	const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 	// Retry settings for 503/504 errors
@@ -321,6 +364,15 @@ async function _download(url, destPath, task) {
 	}
 }
 
+/**
+ * Create an archive (zip or tar.gz, chosen by the file extension) from files and directories
+ *
+ * @param {string} archivePath - Path of the archive to write
+ * @param {string} cwd - Directory the entries are relative to
+ * @param {string[]} files - Files and directories, relative to cwd, to put in the archive
+ * @returns {Promise<void>} Resolves once the archive is written
+ * @throws {Error} If the extension is not .zip or .tar.gz, or a zip entry does not exist
+ */
 async function createArchive(archivePath, cwd, files) {
 	if (archivePath.endsWith('.tar.gz')) {
 		await tar.create({ file: archivePath, cwd: cwd, gzip: true }, files);
@@ -349,6 +401,9 @@ async function createArchive(archivePath, cwd, files) {
  * @param {string} destDir - Destination directory
  * @param {Object} options - Options
  * @param {number} options.stripLevels - Number of leading path components to strip
+ * @param {boolean} options.resetDestDir - Delete destDir first, so no file of an earlier extraction is left
+ * @returns {Promise<void>} Resolves once the archive is extracted
+ * @throws {Error} If the archive is not a .zip, .tar.gz or .tgz
  */
 async function extractArchive(archivePath, destDir, options = {}) {
 	const { stripLevels = 0, resetDestDir = false } = options;

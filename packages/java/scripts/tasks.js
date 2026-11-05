@@ -76,6 +76,14 @@ let MAVEN_VERSION = '3.9.6';
 let JDK_VERSION = '17';
 let packageJsonLoaded = false;
 
+/**
+ * Read the Maven and JDK versions from the root package.json
+ *
+ * The file is read once; later calls reuse the values. Without a `java` section the
+ * defaults (Maven 3.9.6, JDK 17) stay in effect.
+ *
+ * @returns {Promise<{mavenVersion: string, jdkVersion: string}>} Versions to install
+ */
 async function loadPackageJson() {
 	if (!packageJsonLoaded) {
 		const packageJson = await readJson(path.join(PROJECT_ROOT, 'package.json'));
@@ -90,8 +98,14 @@ async function loadPackageJson() {
 // Helpers
 // =============================================================================
 
-// The same file is on Maven Central (served by a CDN) and in the Apache archive;
-// Central is tried first.
+/**
+ * URLs of the Maven binary archive
+ *
+ * The same file is on Maven Central (served by a CDN) and in the Apache archive;
+ * Central is listed first.
+ *
+ * @returns {string[]} Download URLs, in order of preference
+ */
 function getMavenUrls() {
 	const file = `apache-maven-${MAVEN_VERSION}-bin.tar.gz`;
 	return [
@@ -100,16 +114,36 @@ function getMavenUrls() {
 	];
 }
 
+/**
+ * Adoptium URL of the latest JDK build for this platform
+ *
+ * @returns {string} Download URL
+ */
 function getJdkUrl() {
 	const { os: osName, arch } = getPlatform();
 	return `https://api.adoptium.net/v3/binary/latest/${JDK_VERSION}/ga/${osName}/${arch}/jdk/hotspot/normal/eclipse`;
 }
 
+/**
+ * Adoptium URL of the latest JRE build for this platform
+ *
+ * @returns {string} Download URL
+ */
 function getJreUrl() {
 	const { os: osName, arch } = getPlatform();
 	return `https://api.adoptium.net/v3/binary/latest/${JDK_VERSION}/ga/${osName}/${arch}/jre/hotspot/normal/eclipse`;
 }
 
+/**
+ * Run the downloaded Maven in batch mode
+ *
+ * Maven uses the shared repository in M2_DIR and runs on the downloaded JDK, not on
+ * any JDK installed on the machine.
+ *
+ * @param {string[]} args - Maven arguments (goals and options)
+ * @param {Object} options - Options passed to execCommand (e.g. task, cwd)
+ * @returns {Promise<*>} Result of execCommand
+ */
 async function execMaven(args, options = {}) {
 	return execCommand(MAVEN, ['-B', `-Dmaven.repo.local=${M2_DIR}`, ...args], {
 		...options,
@@ -126,6 +160,13 @@ async function execMaven(args, options = {}) {
 // Action Factories
 // =============================================================================
 
+/**
+ * Build the action that downloads and extracts the JDK
+ *
+ * @param {Object} options - Options
+ * @param {boolean} options.force - Install again even if the JDK is already installed
+ * @returns {Object} Action definition
+ */
 function makeSetupJdkAction(options = {}) {
 	return {
 		locks: ['java-jdk'],
@@ -156,6 +197,13 @@ function makeSetupJdkAction(options = {}) {
 	};
 }
 
+/**
+ * Build the action that downloads and extracts Maven
+ *
+ * @param {Object} options - Options
+ * @param {boolean} options.force - Install again even if Maven is already installed
+ * @returns {Object} Action definition
+ */
 function makeSetupMavenAction(options = {}) {
 	return {
 		locks: ['java-maven'],
@@ -183,6 +231,13 @@ function makeSetupMavenAction(options = {}) {
 	};
 }
 
+/**
+ * Build the action that downloads and extracts the JRE shipped in the dist
+ *
+ * @param {Object} options - Options
+ * @param {boolean} options.force - Install again even if the JRE is already installed
+ * @returns {Object} Action definition
+ */
 function makeSetupJreAction(options = {}) {
 	return {
 		locks: ['java-jre'],
@@ -212,6 +267,13 @@ function makeSetupJreAction(options = {}) {
 	};
 }
 
+/**
+ * Build the action that checks whether the java sources changed since the last build
+ *
+ * The result is stored in ctx.javaSourceChanged and ctx.javaSourceHash for the later steps.
+ *
+ * @returns {Object} Action definition
+ */
 function makeCheckSourceAction() {
 	return {
 		locks: ['java-src'],
@@ -225,6 +287,16 @@ function makeCheckSourceAction() {
 	};
 }
 
+/**
+ * Build the action that compiles and packages rocketride-core
+ *
+ * The jar is also installed into the shared Maven repository so the other java modules
+ * can resolve it.
+ *
+ * @param {Object} options - Options
+ * @param {boolean} options.force - Build even if the sources are unchanged and the jar exists
+ * @returns {Object} Action definition
+ */
 function makeBuildCoreAction(options = {}) {
 	const buildCoreDir = path.join(BUILD_DIR, 'core');
 	const distCoreJar = path.join(DIST_DIR, 'lib', 'rocketride-core.jar');
@@ -257,6 +329,13 @@ function makeBuildCoreAction(options = {}) {
 	};
 }
 
+/**
+ * Build the action that compiles and packages rocketride-dbgconn
+ *
+ * @param {Object} options - Options
+ * @param {boolean} options.force - Build even if the sources are unchanged and the jar exists
+ * @returns {Object} Action definition
+ */
 function makeBuildDbgconnAction(options = {}) {
 	const srcDbgconnDir = path.join(LIB_DIR, 'dbgconn');
 	const buildDbgconnDir = path.join(BUILD_DIR, 'dbgconn');
@@ -281,6 +360,11 @@ function makeBuildDbgconnAction(options = {}) {
 	};
 }
 
+/**
+ * Build the action that runs the rocketride-dbgconn unit tests
+ *
+ * @returns {Object} Action definition
+ */
 function makeTestDbgconnAction() {
 	const srcDbgconnDir = path.join(LIB_DIR, 'dbgconn');
 	const buildDbgconnDir = path.join(BUILD_DIR, 'dbgconn');
@@ -293,6 +377,15 @@ function makeTestDbgconnAction() {
 	};
 }
 
+/**
+ * Build the action that copies the JRE and the built jars into the server dist
+ *
+ * The source hash is saved only after the copy, so a failed copy is retried on the next run.
+ *
+ * @param {Object} options - Options
+ * @param {boolean} options.force - Copy even if the sources are unchanged and the jars exist
+ * @returns {Object} Action definition
+ */
 function makeSyncOutputsAction(options = {}) {
 	const buildCoreDir = path.join(BUILD_DIR, 'core');
 	const buildDbgconnDir = path.join(BUILD_DIR, 'dbgconn');
