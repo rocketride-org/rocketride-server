@@ -354,6 +354,20 @@ def test_ambiguous_mutation_outcome_does_not_advise_blind_retry(node, query, fai
         assert 'mutation may already have been applied' not in result['message']
 
 
+@pytest.mark.parametrize('query', [VIEWER, MUTATION])
+@pytest.mark.parametrize('status', [500, 502, 504])
+def test_server_error_preserves_status_and_warns_only_for_mutations(node, query, status):
+    node.inst.IGlobal.read_only = False
+    node.inst.IGlobal.graphql_allow_mutations = True
+    node.request.return_value = gql_response({'message': f'Upstream failure {TOKEN}'}, status=status)
+    result = node.inst.graphql({'query': query})
+    assert result['status'] == status
+    assert TOKEN not in json.dumps(result)
+    assert ('mutation may already have been applied' in result['message']) is (query == MUTATION)
+    node.request.assert_called_once()
+    node.sleep.assert_not_called()
+
+
 def test_oversized_response_is_an_error_naming_the_cap_and_is_not_read_in_full(node):
     node.inst.IGlobal.graphql_max_bytes = 1024
     body = json.dumps({'data': {'blob': 'x' * (640 * 1024)}}).encode()

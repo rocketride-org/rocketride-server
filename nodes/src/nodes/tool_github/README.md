@@ -450,7 +450,7 @@ apply it twice: the node retries only answers GitHub rejected before running any
 returned, not retried, and transport failures, where a request may have reached GitHub,
 are never retried.
 
-When a mutation's response is lost, invalid JSON, or over the response cap, its result
+When a mutation's response is lost, invalid JSON, over the response cap, or an HTTP 5xx error, its result
 warns that the mutation may already have been applied. Check the affected resource's
 current state before retrying; a missing response does not mean the write failed.
 

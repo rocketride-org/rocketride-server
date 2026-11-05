@@ -800,6 +800,8 @@ def graphql_result(
             )
         elif not resp.ok:
             result = _graphql_error(resp.status_code, resp.headers, body, (*handed.tokens, *secrets))
+            if may_write and resp.status_code >= 500:
+                result['message'] = f'{result["message"].rstrip()} {_GRAPHQL_UNKNOWN_OUTCOME}'
         elif isinstance(body, dict) and ('data' in body or 'errors' in body):
             result = envelope(resp.status_code, resp.headers, {'data': body.get('data'), 'errors': body.get('errors')})
             result['next_page'] = None

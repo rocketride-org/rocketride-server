@@ -55,7 +55,8 @@ _CLOSE = '})]'
 
 MUTATION_REFUSED = (
     'graphql refused by readOnly: the document contains a mutation operation, and read-only '
-    'mode runs queries only. Turn readOnly off in the node configuration to run mutations.'
+    'mode runs queries only. Turn readOnly off and graphqlAllowMutations on in the node '
+    'configuration to run mutations.'
 )
 UNCHECKABLE_REFUSED = (
     'graphql refused by readOnly: the document has an unterminated string or unbalanced '
