@@ -3,7 +3,7 @@ client.log.streams() against a live server.
 
 A dev run and a team deploy run of the same source log into two different
 places; one streams() call must name both, and chapters() alone must not.
-Needs a running server (ROCKETRIDE_URI, default localhost:5565) like test_deploy.
+Needs a running server (ROCKETRIDE_URI, default 127.0.0.1:5565) like test_deploy.
 """
 
 import asyncio

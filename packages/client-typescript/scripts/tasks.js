@@ -292,7 +292,7 @@ function makeStartTestServerAction(options = {}) {
 			ctx.port = result.port;
 			task.output = `Server ready on port ${ctx.port}`;
 			taskComplete = true;
-			return { port: result.port, server: result.server, apikey };
+			return { port: result.port, server: result.server, serverUri: result.uri, apikey };
 		},
 	};
 }
@@ -319,8 +319,8 @@ function makeRunJestAction(options = {}) {
 			require('dotenv').config({ path: path.join(PROJECT_ROOT, '.env') });
 
 			const bracket = ctx.brackets?.['ts-test-server'];
-			if (!bracket?.port) throw new Error('ts-test-server bracket missing — server did not start');
-			const serverUri = bracket.serverUri || `http://localhost:${bracket.port}`;
+			if (!bracket?.serverUri) throw new Error('ts-test-server bracket missing — server did not start');
+			const serverUri = bracket.serverUri;
 
 			const testEnv = {
 				...process.env,
