@@ -34,9 +34,11 @@ Note:
 """
 
 import asyncio
+import contextlib
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -81,6 +83,12 @@ CLI_ENTRY = (
 # whoever runs the suite must not reach the subprocess
 CLI_ENV_VARS = ('ROCKETRIDE_URI', 'ROCKETRIDE_APIKEY', 'ROCKETRIDE_TOKEN', 'ROCKETRIDE_PIPELINE')
 
+# Under the engine's embedded interpreter (how CI runs this suite) the engine
+# writes its own log to stdout, status lines included: "Waiting for another
+# installation to complete..." while another engine holds install.lock. The
+# CLI's stdout is the command's output, so the engine log goes to a file.
+UNDER_ENGINE = Path(sys.executable).stem.lower() == 'engine'
+
 
 async def ensure_clean_pipeline(client: RocketRideClient, token: str) -> None:
     """Clean up pipeline if it exists, ignoring errors."""
@@ -91,7 +99,9 @@ async def ensure_clean_pipeline(client: RocketRideClient, token: str) -> None:
         pass
 
 
-async def run_cli(*args: str, cwd: Optional[str] = None, pipeline: Optional[str] = None) -> Tuple[int, str]:
+async def run_cli_streams(
+    *args: str, cwd: Optional[str] = None, pipeline: Optional[str] = None
+) -> Tuple[int, str, str]:
     """
     Run the CLI as a separate process and collect its output.
 
@@ -106,7 +116,8 @@ async def run_cli(*args: str, cwd: Optional[str] = None, pipeline: Optional[str]
             stray positional. Both spellings feed the same argparse dest.
 
     Returns:
-        Tuple of (exit code, combined stdout and stderr)
+        Tuple of (exit code, stdout, stderr). Under the engine, a failing or
+        timed-out command prints the engine log to stderr (see UNDER_ENGINE).
     """
     env = dict(os.environ)
 
@@ -119,27 +130,72 @@ async def run_cli(*args: str, cwd: Optional[str] = None, pipeline: Optional[str]
     if pipeline is not None:
         env['ROCKETRIDE_PIPELINE'] = pipeline
 
-    process = await asyncio.create_subprocess_exec(
-        sys.executable,
-        '-c',
-        CLI_ENTRY,
-        *args,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        env=env,
-        cwd=cwd,
-    )
+    engine_log = None
+    engine_args: List[str] = []
+    if UNDER_ENGINE:
+        fd, engine_log = tempfile.mkstemp(prefix='rr-cli-engine-', suffix='.log')
+        os.close(fd)
+        engine_args = [f'--log.file={engine_log}']
 
+    failed = True
     try:
-        stdout, stderr = await asyncio.wait_for(process.communicate(), TEST_CONFIG['timeout'])
-    except asyncio.TimeoutError:
-        process.kill()
-        await process.communicate()
-        raise
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            *engine_args,
+            '-c',
+            CLI_ENTRY,
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env,
+            cwd=cwd,
+        )
 
-    output = stdout.decode('utf-8', errors='replace') + stderr.decode('utf-8', errors='replace')
+        try:
+            stdout, stderr = await asyncio.wait_for(process.communicate(), TEST_CONFIG['timeout'])
+        except asyncio.TimeoutError:
+            process.kill()
+            await process.communicate()
+            raise
 
-    return process.returncode, output
+        out = stdout.decode('utf-8', errors='replace')
+        err = stderr.decode('utf-8', errors='replace')
+        failed = process.returncode != 0
+        return process.returncode, out, err
+    finally:
+        if engine_log:
+            with contextlib.suppress(OSError):
+                if failed:
+                    log_text = Path(engine_log).read_text(encoding='utf-8', errors='replace')
+                    if log_text:
+                        print(f'--- engine log ---\n{log_text}', file=sys.stderr)
+                os.unlink(engine_log)
+
+
+async def run_cli(*args: str, cwd: Optional[str] = None, pipeline: Optional[str] = None) -> Tuple[int, str]:
+    """
+    Run the CLI (see run_cli_streams).
+
+    Returns:
+        Tuple of (exit code, combined stdout and stderr)
+    """
+    code, stdout, stderr = await run_cli_streams(*args, cwd=cwd, pipeline=pipeline)
+    return code, stdout + stderr
+
+
+async def run_cli_json(*args: str) -> Dict[str, Any]:
+    """
+    Run a --json command that must succeed, and return the document it printed.
+
+    The document is all of stdout: anything else there breaks --json consumers,
+    so it fails the test rather than being skipped.
+    """
+    code, stdout, stderr = await run_cli_streams(*args)
+    assert code == 0, stdout + stderr
+    try:
+        return json.loads(stdout)
+    except json.JSONDecodeError as e:
+        pytest.fail(f'stdout is not a JSON document ({e}):\n{stdout}\n--- stderr ---\n{stderr}')
 
 
 def server_args() -> List[str]:
@@ -292,14 +348,10 @@ class TestCliList:
 
             await client.use(pipeline=get_echo_pipeline(self.PROJECT_ID), token=self.PIPELINE_TOKEN)
 
-            code, output = await run_cli('list', '--json', *server_args())
-
-            assert code == 0, output
-
             # The unified CLI's --json payload is an envelope object, not a
             # bare array: list emits {'tasks': [...]} (see run_list's
             # out.result call).
-            tasks = json.loads(output)['tasks']
+            tasks = (await run_cli_json('list', '--json', *server_args()))['tasks']
             assert self.PIPELINE_TOKEN in [task.get('token') for task in tasks]
         finally:
             await ensure_clean_pipeline(client, self.PIPELINE_TOKEN)
@@ -471,9 +523,7 @@ class TestCliProfile:
             await client.send(self.PIPELINE_TOKEN, 'profile me', {}, 'text/plain')
             assert (await client.cprofile_stop(target=self.PIPELINE_TOKEN)).get('status') == 'completed'
 
-            code, output = await run_cli('profile', 'threads', *self.TOKEN_ARGS, '--json', *server_args())
-            assert code == 0, output
-            threads = json.loads(output)['threads']
+            threads = (await run_cli_json('profile', 'threads', *self.TOKEN_ARGS, '--json', *server_args()))['threads']
             busiest = threads[0]
 
             code, output = await run_cli('profile', 'threads', *self.TOKEN_ARGS, *server_args())
@@ -482,10 +532,9 @@ class TestCliProfile:
             assert f'{len(threads)} thread(s)' in output
 
             thread = ('--thread', str(busiest['id']), '--min-pct', '0')
-            code, output = await run_cli('profile', 'tree', *self.TOKEN_ARGS, *thread, '--json', *server_args())
-            assert code == 0, output
+            tree = await run_cli_json('profile', 'tree', *self.TOKEN_ARGS, *thread, '--json', *server_args())
             # Only that thread's calls, so the total is the one listed for it
-            assert json.loads(output)['total_calls'] == busiest['calls']
+            assert tree['total_calls'] == busiest['calls']
 
             code, output = await run_cli('profile', 'tree', *self.TOKEN_ARGS, *thread, *server_args())
             assert code == 0, output
@@ -538,9 +587,8 @@ class TestCliProfile:
             await client.use(pipeline=get_echo_pipeline('8a3f1c52-6d7e-4b90-9c1a-2e4d6f8b0a13'), token=other)
             assert (await client.cprofile_start(target=self.PIPELINE_TOKEN)).get('status') == 'started'
 
-            code, output = await run_cli('profile', 'list', '--json', *server_args())
-            assert code == 0, output
-            processes = {process['token']: process for process in json.loads(output)['processes']}
+            listed = await run_cli_json('profile', 'list', '--json', *server_args())
+            processes = {process['token']: process for process in listed['processes']}
             # The server process, listed under a null token
             assert None in processes, processes
             assert processes[self.PIPELINE_TOKEN]['status']['active'] is True, processes
