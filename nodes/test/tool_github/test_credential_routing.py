@@ -215,6 +215,16 @@ def test_user_get_identifies_the_credential_that_serves_the_repository(github, r
     assert not github.requests_to('/app/installations/')
 
 
+def test_user_get_needs_no_repository_or_installation_under_the_node_app(github, rsa_private_key_pem):
+    # GET /app takes the App JWT, not an installation token: no defaultRepo and no lookup needed.
+    github.routes[('GET', '/app')] = response({'slug': 'node-app'})
+    with real_node(app_config(rsa_private_key_pem)) as inst:
+        assert dispatch(inst, 'user_get', {})['data'] == {'login': 'node-app', 'type': 'App'}
+    assert claims(github.bearer_for('/app'), rsa_private_key_pem)['iss'] == '111'
+    assert not github.requests_to('/repos/')
+    assert not github.requests_to('/app/installations/')
+
+
 def test_repositories_the_map_does_not_match_use_the_node_credential(github):
     github.routes[('GET', '/repos/other/x/labels')] = response([])
     github.routes[('GET', '/repos/acme/x/issues/1')] = _issue

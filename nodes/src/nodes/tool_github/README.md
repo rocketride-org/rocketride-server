@@ -607,9 +607,13 @@ it does not break a token call that needs no repository.
   token, the node drops that token and runs the call once more with a freshly minted one
   (the 404 rule above then finds a new installation); a second 401 is returned or raised as
   GitHub sent it.
-- **The call has no repository:** `graphql`, `user_get` and `installation_repos` take an
-  optional `repo` for this, and they, `user_get_repos` and the two searches fall back to
-  `defaultRepo`; with neither, the call fails with a message saying so.
+- **The call has no repository:** `graphql` and `installation_repos` take an optional
+  `repo` for this, and they, `user_get_repos` and the two searches fall back to
+  `defaultRepo`; with neither, the call fails with a message saying so. `user_get` also
+  takes `repo`, but needs no installation: it signs an App JWT for `GET /app`, so under
+  the node's App credential it works without a repository, and it fails without one only
+  when no credential serves such a call (a `credentialMap` with no default row and no
+  node credential).
 - **Organization tools under GitHub App auth need `installationId`:** `org_list_repos` and
   `user_invite` name an organization, not a repository, and the node does not look
   installations up by organization, so they need an `installationId` on the node or on the
