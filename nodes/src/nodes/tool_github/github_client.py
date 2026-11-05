@@ -623,7 +623,9 @@ def _graphql_rate_limited(resp: requests.Response, content: bytes, exhausted: bo
     names a rate limit (the top-level ``message`` of a secondary limit, or an error
     without ``locations``), or, while ``X-RateLimit-Remaining`` is 0, an error without
     ``locations``. Parse and validation errors carry ``locations`` and may quote the
-    document or its variables, so their text is never read as a rate limit.
+    document or its variables, so their text is never read as a rate limit. An error
+    with ``path`` came from field execution, so GitHub ran the document: it never counts,
+    whatever its text, since retrying could run a mutation twice.
     """
     hinted = b'RATE_LIMITED' in content or b'rate limit' in content.lower()
     if not ('Retry-After' in resp.headers or exhausted or hinted):
@@ -634,7 +636,7 @@ def _graphql_rate_limited(resp: requests.Response, content: bytes, exhausted: bo
         return False
     raw_errors = body.get('errors')
     errors = [error for error in raw_errors if isinstance(error, dict)] if isinstance(raw_errors, list) else []
-    unlocated = [error for error in errors if not error.get('locations')]
+    unlocated = [error for error in errors if not error.get('locations') and not error.get('path')]
     own_words = [body.get('message')] + [error.get('message') for error in unlocated]
     return (
         'Retry-After' in resp.headers

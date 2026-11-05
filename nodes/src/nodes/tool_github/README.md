@@ -412,9 +412,11 @@ pass 1 MiB.
   `RATE_LIMITED` (GitHub's answer to an exhausted GraphQL primary limit), a message of
   GitHub's own naming a rate limit (a secondary limit: the top-level `message`, or an
   error without `locations`), or, while `X-RateLimit-Remaining` is 0, an error without
-  `locations`. Parse and validation errors carry `locations` and can quote the document
+  `locations` and without `path`. Parse and validation errors carry `locations` and can quote the document
   or its variables, so their text never counts. An answer with partial `data` ran part
-  of the document, so it is returned as it is, never retried.
+  of the document, so it is returned as it is, never retried. An error with `path` came from
+  field execution, so GitHub ran the document: that answer is returned, never retried,
+  whatever the error says, since a retry could run a mutation twice.
 
 How long it waits:
 

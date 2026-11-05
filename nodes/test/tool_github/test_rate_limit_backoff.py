@@ -342,6 +342,22 @@ def test_graphql_200_errors_with_remaining_zero_wait_until_reset(node):
     assert result['status'] == 200
 
 
+def test_graphql_execution_error_with_path_on_the_last_point_is_not_retried(node):
+    # A mutation spends the last point and then fails in execution: data is null and the
+    # error has no locations, but its path shows GitHub ran the document. Never retried.
+    limited = graphql_limited(reset_in=5)
+    body = {
+        'data': None,
+        'errors': [{'message': 'Something went wrong while executing your query.', 'path': ['addStar']}],
+    }
+    node.request.return_value = response(body, 200, limited.headers)
+    result, _ = run(node, 'graphql')
+    assert node.slept == []
+    assert node.request.call_count == 1
+    assert result['status'] == 200
+    assert result['data'] == {'data': None, 'errors': body['errors']}
+
+
 def test_graphql_errors_of_other_types_are_not_retried(node):
     body = {'data': None, 'errors': [{'type': 'NOT_FOUND', 'message': 'RATE_LIMITED is not this error'}]}
     node.request.return_value = response(body, 200, dict(OK_HEADERS))
