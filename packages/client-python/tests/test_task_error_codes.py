@@ -28,6 +28,8 @@ and ``DAPException`` exposes ``code`` / ``hint`` so a caller classifies a
 failure without matching the English message.
 """
 
+import pytest
+
 from rocketride.core.dap_base import DAPBase
 from rocketride.core.exceptions import DAPException, PipeException
 
@@ -89,3 +91,54 @@ def test_exception_code_and_hint_default_to_none():
 
     assert e.code is None
     assert e.hint is None
+
+
+def _client_answering(response):
+    """A real client whose transport answers every request with ``response``."""
+    from rocketride import RocketRideClient
+
+    client = RocketRideClient(uri='http://127.0.0.1:1', auth='unused')
+
+    async def fake_request(message, timeout=None):
+        return response
+
+    client.request = fake_request
+    return client
+
+
+def test_tool_failure_keeps_the_server_code():
+    """client.tool() raises a CommandException carrying the server's code and message."""
+    import asyncio
+
+    from rocketride import CommandException
+
+    client = _client_answering(
+        {'type': 'response', 'success': False, 'message': 'Task is stopped', 'code': 'TASK_STOPPED'}
+    )
+    with pytest.raises(CommandException) as caught:
+        asyncio.run(client.tool(token='tk_task', tool='read_query', node_id='graph_1', input={}))
+
+    assert str(caught.value) == 'Task is stopped'
+    assert caught.value.code == 'TASK_STOPPED'
+    assert isinstance(caught.value, DAPException)
+
+
+def test_command_failure_is_still_a_runtime_error():
+    """Callers that caught RuntimeError from client.call() keep working."""
+    import asyncio
+
+    client = _client_answering({'type': 'response', 'success': False, 'message': 'execute tool is disabled'})
+    with pytest.raises(RuntimeError) as caught:
+        asyncio.run(client.call('rrext_process'))
+
+    assert str(caught.value) == 'execute tool is disabled'
+    assert caught.value.code is None
+
+
+def test_command_failure_keeps_the_fallback_message():
+    """With no server message the text stays '<command> failed'."""
+    import asyncio
+
+    client = _client_answering({'type': 'response', 'success': False})
+    with pytest.raises(RuntimeError, match='^rrext_get_tasks failed$'):
+        asyncio.run(client.call('rrext_get_tasks'))
