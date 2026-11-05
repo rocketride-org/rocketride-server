@@ -33,7 +33,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { tabSession, updateTabSession, devRelayOrigin, resetDevGateForTests } from './devGate';
+import { tabSession, updateTabSession, devRelayOrigin, isLoopbackShell, resetDevGateForTests } from './devGate';
 
 /** A sessionStorage double over a Map. */
 function fakeSession(initial: Array<[string, string]> = []) {
@@ -178,5 +178,26 @@ test('the dev relay is honoured only by a top-level shell served from a loopback
 		await withBoot(url, fakeSession(), () => {
 			assert.equal(devRelayOrigin(), '', JSON.stringify(origin));
 		}, { origin });
+	}
+});
+
+test('isLoopbackShell: loopback hosts only — a host that merely ENDS WITH "localhost" (no dot) or embeds it is not loopback', async () => {
+	for (const origin of ['http://localhost:3013', 'https://localhost', 'http://127.0.0.1:3013', 'http://127.1.2.3', 'http://[::1]:3013', 'http://app.localhost:3013']) {
+		await withBoot('', fakeSession(), () => { assert.equal(isLoopbackShell(), true, origin); }, { origin });
+	}
+	for (const origin of ['http://evillocalhost:3013', 'http://notlocalhost:3013', 'https://xlocalhost', 'http://evil-localhost', 'http://localhost.evil.test:3013', 'http://127.0.0.1.evil.test', 'https://cloud.rocketride.example', 'null', '']) {
+		await withBoot('', fakeSession(), () => { assert.equal(isLoopbackShell(), false, JSON.stringify(origin)); }, { origin });
+	}
+});
+
+test('the dev relay is ignored by a FRAMED shell, loopback-served or not (framed previews sign in via rrdev:auth)', async () => {
+	const url = '?appid=local.alarm&rrdev=1&rrauthorigin=https%3A%2F%2Frocketride.ai';
+	// the same page, top-level: the relay is armed (control)
+	await withBoot(url, fakeSession(), () => { assert.equal(devRelayOrigin(), 'https://rocketride.ai'); }, { origin: 'http://localhost:3013' });
+	for (const origin of ['http://localhost:3013', 'http://127.0.0.1:3013']) {
+		await withBoot(url, fakeSession(), () => {
+			assert.equal(tabSession().authOrigin, 'https://rocketride.ai', 'the URL fact is read...');
+			assert.equal(devRelayOrigin(), '', `...but a framed shell never relays (${origin})`);
+		}, { origin, framed: true });
 	}
 });

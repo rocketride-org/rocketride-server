@@ -55,6 +55,8 @@ interface Page {
 	stranger: object;
 	/** The shell's own window. */
 	self: object;
+	/** `window.top` (the grandparent of a nested frame; the parent / the shell itself otherwise). */
+	top: object;
 }
 
 /**
@@ -63,7 +65,7 @@ interface Page {
  * a framed page — whether the parent shares that origin (a cross-origin
  * parent's `location` is unreadable, which is how the browser reports it).
  */
-function stagePage(opts: { nodeEnv: 'production' | 'development'; search?: string; sessionDev?: boolean; framed: boolean; shellOrigin?: string; parentSameOrigin?: boolean }): Page {
+function stagePage(opts: { nodeEnv: 'production' | 'development'; search?: string; sessionDev?: boolean; framed: boolean; shellOrigin?: string; parentSameOrigin?: boolean; noOpener?: boolean; nested?: boolean }): Page {
 	process.env.NODE_ENV = opts.nodeEnv;
 	resetDevGateForTests();
 	const listeners: Array<(e: unknown) => void> = [];
@@ -75,11 +77,13 @@ function stagePage(opts: { nodeEnv: 'production' | 'development'; search?: strin
 		else Object.defineProperty(parent, 'location', { get: () => { throw new Error('SecurityError: cross-origin parent'); } });
 	}
 	const opener = {};
+	// A nested frame has a top that is NOT its parent (shell -> middle frame -> top page).
+	const top: object = opts.framed ? (opts.nested ? {} : parent) : self;
 	const win = {
 		self,
-		top: opts.framed ? parent : self,
+		top,
 		parent: opts.framed ? parent : self,
-		opener,
+		opener: opts.noOpener ? null : opener,
 		location: { search: opts.search ?? '', origin: shellOrigin, pathname: '/' },
 		addEventListener: (type: string, listener: (e: unknown) => void) => {
 			if (type === 'message') listeners.push(listener);
@@ -94,7 +98,7 @@ function stagePage(opts: { nodeEnv: 'production' | 'development'; search?: strin
 		removeItem: (k: string) => void store.delete(k),
 	});
 	Reflect.set(globalThis, 'localStorage', { __marker: 'localStorage' });
-	return { listeners, parent: opts.framed ? parent : {}, opener, stranger: {}, self };
+	return { listeners, parent: opts.framed ? parent : {}, opener, stranger: {}, self, top };
 }
 
 /** Recording collaborators for handleEmbedderMessage. */
@@ -391,6 +395,50 @@ test('unrelated window messages are ignored silently', () => {
 	assert.deepEqual(calls, NOTHING);
 });
 
+test('a top-level tab with NO opener trusts no window: a null/undefined/other source is never "the opener" (opener == null confusion)', () => {
+	const page = stagePage({ nodeEnv: 'development', framed: false, noOpener: true });
+	assert.equal(Reflect.get(window, 'opener'), null);
+	const { deps, calls } = recordingDeps('user-token');
+	mock.method(console, 'warn', () => {});
+	// `null === window.opener` would be true for a null source: it must not read as a relation.
+	for (const source of [null, undefined, page.stranger, page.self, page.parent, page.opener]) {
+		send(deps, AUTH, SHELL_ORIGIN, source);
+		send(deps, REGISTER, SHELL_ORIGIN, source);
+		assert.equal(isTrustedEmbedderMessage({ origin: SHELL_ORIGIN, source }), false, String(source));
+	}
+	assert.deepEqual(calls, NOTHING);
+});
+
+test('a top-level tab WITH an opener refuses a different same-origin window; only the real opener passes', () => {
+	const page = stagePage({ nodeEnv: 'development', framed: false });
+	const { deps, calls } = recordingDeps('user-token');
+	mock.method(console, 'warn', () => {});
+	for (const source of [page.stranger, page.self, null, undefined]) {
+		send(deps, AUTH, SHELL_ORIGIN, source);
+		send(deps, REGISTER, SHELL_ORIGIN, source);
+	}
+	assert.deepEqual(calls, NOTHING, 'another same-origin window is not the opener');
+	// control: the opener itself is accepted
+	send(deps, { type: 'rrdev:auth', token: 'builder-session' }, SHELL_ORIGIN, page.opener);
+	assert.deepEqual(calls.saved, ['builder-session']);
+});
+
+test('a nested framed shell does not accept window.top: only the PARENT, and only from an allowed origin', () => {
+	const page = stagePage({ nodeEnv: 'development', framed: true, nested: true, parentSameOrigin: true });
+	assert.notEqual(page.top, page.parent, 'the fixture is a nested frame');
+	const { deps, calls } = recordingDeps('user-token');
+	mock.method(console, 'warn', () => {});
+	for (const origin of [SHELL_ORIGIN, 'vscode-webview://abc', 'https://attacker.example']) {
+		send(deps, AUTH, origin, page.top);
+		send(deps, REGISTER, origin, page.top);
+		assert.equal(isTrustedEmbedderMessage({ origin, source: page.top }), false, `top from ${origin}`);
+	}
+	assert.deepEqual(calls, NOTHING, 'the top page is neither parent nor opener');
+	// control: the real parent is accepted
+	send(deps, { type: 'rrdev:auth', token: 'builder-session' }, SHELL_ORIGIN, page.parent);
+	assert.deepEqual(calls.saved, ['builder-session']);
+});
+
 // ---------------------------------------------------------------------------
 // The policy table — one row per (shell served from, window relation, sender
 // origin). Each row is ONE named test so a failure names the row.
@@ -535,7 +583,7 @@ test('normalizeDevRemoteEntry / isAllowedDevRemoteEntry accept only absolute htt
 	}
 	// What was vetted is what is returned: tabs/newlines the URL parser strips never reach the loader.
 	assert.equal(normalizeDevRemoteEntry('http://loc\talhost:3001/re\nmoteEntry.js'), 'http://localhost:3001/remoteEntry.js');
-	for (const e of ['https://attacker.example/x.js', '//attacker.example/x.js', 'javascript:alert(1)', 'data:text/javascript,1', '', '/x.js', 'http://localhost.evil.test/x.js', 'http://localhost:1@evil.test/x.js', 'http://u:p@localhost/x.js']) assert.equal(isAllowedDevRemoteEntry(e), false, e);
+	for (const e of ['https://attacker.example/x.js', '//attacker.example/x.js', 'javascript:alert(1)', 'data:text/javascript,1', '', '/x.js', 'http://localhost.evil.test/x.js', 'http://localhost:1@evil.test/x.js', 'http://u:p@localhost/x.js', 'http://evillocalhost:3000/x.js', 'http://notlocalhost/x.js', 'https://xlocalhost/remoteEntry.js', 'http://evil-localhost:3000/x.js']) assert.equal(isAllowedDevRemoteEntry(e), false, e);
 	// WHATWG parsing makes `\` a path separator: this host really IS localhost, and the canonical URL says so.
 	assert.equal(normalizeDevRemoteEntry('http://localhost\\@evil.test/x.js'), 'http://localhost/@evil.test/x.js');
 	for (const e of [undefined, null, 42, {}, ['http://localhost/x.js']]) assert.equal(normalizeDevRemoteEntry(e), null, String(e));

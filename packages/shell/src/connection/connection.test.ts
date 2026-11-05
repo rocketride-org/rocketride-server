@@ -2307,7 +2307,7 @@ test('#rrtoken seeding is honoured by a top-level dev shell on a loopback origin
 test('#rrtoken is IGNORED on a dev flavor served from a real origin: a bare link cannot sign the tab in or out', async () => {
 	// The production origin serves the dev flavor behind `?rrdev=1`: this is
 	// the "needs no opener or frame" vector of the issue's 5 Nov update.
-	for (const origin of ['https://cloud.rocketride.example', 'http://cloud.rocketride.example', 'https://localhost.evil.test', 'http://localhost.evil.test:3925', 'https://127.0.0.1.evil.test']) {
+	for (const origin of ['https://cloud.rocketride.example', 'http://cloud.rocketride.example', 'https://localhost.evil.test', 'http://localhost.evil.test:3925', 'https://127.0.0.1.evil.test', 'http://evillocalhost:3925', 'http://notlocalhost:3925']) {
 		const seeded = await bootWithFragment({ origin, hash: '#rrtoken=attacker_credential' });
 		assert.deepEqual(seeded.saved, [], `${origin}: no token was saved`);
 		assert.equal(seeded.cleared, 0, `${origin}: nothing was cleared`);
@@ -2330,4 +2330,33 @@ test('#rrtoken is ignored by a FRAMED shell (previews inherit their embedder\'s 
 	const seeded = await bootWithFragment({ origin: 'http://localhost:3925', hash: '#rrtoken=attacker_credential', framed: true });
 	assert.deepEqual(seeded.saved, []);
 	assert.equal(seeded.cleared, 0);
+});
+
+test('the CloudAuthProvider relay redirects through the relay origin only in a top-level dev shell, never in a framed one', async () => {
+	const original = process.env.NODE_ENV;
+	process.env.NODE_ENV = 'development';
+	try {
+		for (const framed of [false, true]) {
+			const redirects: string[] = [];
+			const win: Record<string, unknown> = { location: { search: '?rrdev=1', pathname: '/', origin: 'http://localhost:3013', assign: (url: string) => redirects.push(url) } };
+			win.self = win;
+			win.top = framed ? {} : win;
+			await withGlobals({ window: win, sessionStorage: recordingSession().storage, localStorage: recordingSession().storage, navigator: {} }, async () => {
+				const provider = CloudAuthProvider.getInstance();
+				provider.initialize({ zitadelUrl: 'https://idp.example.test', clientId: 'test-client', relayOrigin: 'https://rocketride.example' });
+				const { manager } = createTestManager();
+				manager.authProvider = provider;
+				await provider.signIn();
+				assert.equal(redirects.length, 1);
+				const url = new URL(redirects[0]);
+				const relayed = url.searchParams.get('redirect_uri') === 'https://rocketride.example';
+				assert.equal(relayed, !framed, framed ? 'a framed shell keeps its own redirect_uri' : 'a top-level dev shell relays');
+				assert.equal(url.searchParams.get('state')?.startsWith('rrdev:') ?? false, !framed);
+				provider.dispose();
+			});
+		}
+	} finally {
+		process.env.NODE_ENV = original;
+		resetDevGateForTests();
+	}
 });
