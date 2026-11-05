@@ -320,15 +320,20 @@ describe('platform behavior (documented, so a shell fix shows up here) — held 
 		const h = createDevToolHarness();
 		const frame = shellProtocol.createToolChannel(h.newFramePeer());
 		await settle();
-		const lost = frame.call('t.echo', { x: 1, deadlineAt: Date.now() + 60_000 }, { timeoutMs: 150 });
+		// Observed from the start: settle() takes ~12 timer ticks, which on a slow (Windows) runner can outlast a short timeout.
+		const lost = frame.call('t.echo', { x: 1, deadlineAt: Date.now() + 60_000 }, { timeoutMs: 600 }).then(() => null, (error: unknown) => error);
 		await settle();
 		assert.deepEqual(h.emitted.map((e) => e.op), ['host.mountToolSidebar'], 'the peer held it and asked the host to mount the controller');
 		// The host's render builds the channel: the held call is flushed into a channel with no handler yet.
 		const channel = shellProtocol.createToolChannel(h.sidebarPeer);
 		await settle();
 		// The controller's effect then serves; the call is already gone.
-		const attached = attachController<TestOps>({ channel, createToolOpServer: shellProtocol.createToolOpServer, handlers: { 't.echo': ({ x }) => x } });
-		await assert.rejects(lost, /did not answer/);
+		const ran: number[] = [];
+		const attached = attachController<TestOps>({ channel, createToolOpServer: shellProtocol.createToolOpServer, handlers: { 't.echo': ({ x }) => { ran.push(x); return x; } } });
+		await settle();
+		assert.deepEqual(ran, [], 'the held call never reached the handler');
+		const error = await lost;
+		assert.ok(error instanceof Error && /did not answer/.test(error.message), 'and its caller was never answered');
 		attached.dispose();
 	});
 });
