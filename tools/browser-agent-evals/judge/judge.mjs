@@ -3,10 +3,10 @@
 // Copyright (c) 2026 Aparavi Software AG
 // =============================================================================
 
-import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { parseEvents, runClaude, scrub, sessionEnv } from './session.mjs';
 
 /**
  * @typedef {'pass' | 'fail' | 'inconclusive'} Verdict
@@ -17,7 +17,6 @@ import path from 'node:path';
  */
 
 const PLAYWRIGHT_MCP = '@playwright/mcp@0.0.84';
-const INHERITED_ENV = ['PATH', 'HOME', 'USER', 'LOGNAME', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL', 'CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_CONFIG_DIR', 'PLAYWRIGHT_BROWSERS_PATH'];
 
 const SYSTEM = `You review web apps by using them in a browser, the way a careful person would.
 
@@ -71,51 +70,10 @@ function findRejection(events, result, lineCount) {
 }
 
 function parseTranscript(text, lineCount) {
-	const events = text.split('\n').flatMap((line) => {
-		try {
-			return [JSON.parse(line)];
-		} catch {
-			return [];
-		}
-	});
+	const events = parseEvents(text);
 	const result = events.findLast((event) => event.type === 'result');
 	const invalidReason = findRejection(events, result, lineCount);
 	return { invalidReason, lines: invalidReason ? [] : result.structured_output.lines, overall: invalidReason ? null : result.structured_output.overall, costUsd: result?.total_cost_usd ?? null };
-}
-
-/** A page can show or log a seeded value, and it would land in the transcript. */
-function scrub(files, localStorage) {
-	// Short values such as 'dark' are settings, and replacing them would garble the evidence.
-	const secrets = Object.values(localStorage)
-		.filter((value) => value.length >= 8)
-		.map((value) => JSON.stringify(value).slice(1, -1));
-	for (const file of files) {
-		fs.writeFileSync(
-			file,
-			secrets.reduce((text, secret) => text.replaceAll(secret, '[redacted]'), fs.readFileSync(file, 'utf8'))
-		);
-	}
-}
-
-function runClaude(args, { env, transcript, stderr, timeoutMs }) {
-	const out = fs.openSync(transcript, 'w');
-	const err = fs.openSync(stderr, 'w');
-	return new Promise((resolve) => {
-		let failure = null;
-		// The session is told its working directory and whether that's a git repo, so point it at neither the results nor a repo.
-		const child = spawn('claude', args, { cwd: '/', env, stdio: ['ignore', out, err] });
-		// Not spawn's timeout option, whose timer survives a failed start and holds the process open.
-		const timer = setTimeout(() => child.kill(), timeoutMs);
-		child.on('error', (error) => {
-			failure = `could not start claude: ${error.message}`;
-		});
-		child.on('close', (exit) => {
-			clearTimeout(timer);
-			fs.closeSync(out);
-			fs.closeSync(err);
-			resolve({ exit, failure: child.killed ? `timed out after ${timeoutMs} ms` : failure });
-		});
-	});
 }
 
 async function judgeOnce(run, { url, checklist, model, budgetUsd, timeoutMs, outDir, localStorage }) {
@@ -131,8 +89,7 @@ async function judgeOnce(run, { url, checklist, model, budgetUsd, timeoutMs, out
 
 	const prompt = `URL: ${url}\nCurrent local date and time: ${new Date().toString()}\n\nChecklist:\n${checklist.map((line, index) => `${index + 1}. ${line}`).join('\n')}`;
 	const args = ['-p', prompt, '--model', model, '--system-prompt', SYSTEM, '--tools', '', '--mcp-config', mcpConfig, '--strict-mcp-config', '--allowedTools', ALLOWED.join(','), '--disallowedTools', BLOCKED.join(','), '--setting-sources', '', '--disable-slash-commands', '--no-chrome', '--no-session-persistence', '--permission-mode', 'dontAsk', '--output-format', 'stream-json', '--verbose', '--json-schema', JSON.stringify(SCHEMA), '--max-budget-usd', String(budgetUsd)];
-	const inherited = INHERITED_ENV.filter((name) => process.env[name]).map((name) => [name, process.env[name]]);
-	const env = { ...Object.fromEntries(inherited), TMPDIR: tmp, PWTEST_SOCKETS_DIR: sockets, LANG: 'en_US.UTF-8', TERM: 'dumb', ENABLE_TOOL_SEARCH: 'false', CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', DISABLE_AUTOUPDATER: '1', DISABLE_TELEMETRY: '1', DISABLE_ERROR_REPORTING: '1' };
+	const env = sessionEnv({ TMPDIR: tmp, PWTEST_SOCKETS_DIR: sockets });
 
 	const started = Date.now();
 	let finished;
@@ -140,13 +97,15 @@ async function judgeOnce(run, { url, checklist, model, budgetUsd, timeoutMs, out
 		fs.mkdirSync(tmp, { recursive: true });
 		fs.writeFileSync(state, JSON.stringify({ cookies: [], origins: [{ origin, localStorage: Object.entries(localStorage).map(([name, value]) => ({ name, value })) }] }), { mode: 0o600 });
 		fs.writeFileSync(mcpConfig, JSON.stringify({ mcpServers: { playwright: { command: 'npx', args: ['-y', PLAYWRIGHT_MCP, '--headless', '--isolated', '--browser', 'chromium', '--allowed-origins', origin, '--storage-state', state, '--output-dir', path.join(scratch, 'browser'), '--no-webmcp', '--timeout-action', '5000', '--viewport-size', '1440x900'] } } }));
-		finished = await runClaude(args, { env, transcript, stderr, timeoutMs });
+		// The session is told its working directory and whether that's a git repo, so point it at neither the results nor a repo.
+		finished = await runClaude(args, { cwd: '/', env, transcript, stderr, timeoutMs });
 	} finally {
 		for (const dir of [scratch, sockets]) fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
 	}
 	const durationMs = Date.now() - started;
 
-	scrub([transcript, stderr], localStorage);
+	// A page can show or log a seeded value, and it would land in the transcript.
+	scrub([transcript, stderr], Object.values(localStorage));
 	const parsed = parseTranscript(fs.readFileSync(transcript, 'utf8'), checklist.length);
 	const invalidReason = parsed.invalidReason && (finished.failure ?? parsed.invalidReason);
 	return { run, verdict: invalidReason ? 'inconclusive' : runVerdict(parsed.lines, parsed.overall), ...parsed, invalidReason, durationMs, exit: finished.exit, transcript };

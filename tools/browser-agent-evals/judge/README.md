@@ -1,6 +1,6 @@
 # Browser agent eval judge
 
-`judgeApp` grades a running app against a checklist a person wrote. Each run is a fresh `claude -p` session that uses the app through a browser and gives every line `pass`, `fail` or `not_tested`, with what it did and what it saw. The verdict is advisory. The report shows it beside the checks, and it doesn't change the result.
+`judgeApp` grades a running app against a checklist a person approved. Each run is a fresh `claude -p` session that uses the app through a browser and gives every line `pass`, `fail` or `not_tested`, with what it did and what it saw. The verdict is advisory. The report shows it beside the checks, and it doesn't change the result.
 
 The runner serves the app and passes the URL. This folder doesn't deploy anything.
 
@@ -66,7 +66,7 @@ A run is invalid when any of these is true, and its claims don't count:
 
 ## What it needs
 
-- `claude` on `PATH`, logged in or with `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` or `CLAUDE_CODE_OAUTH_TOKEN` set. The session gets a minimal environment, and `INHERITED_ENV` in `judge.mjs` lists what passes through.
+- `claude` on `PATH`, logged in or with `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` or `CLAUDE_CODE_OAUTH_TOKEN` set. The session gets a minimal environment, and `INHERITED_ENV` in `session.mjs` lists what passes through.
 - `npx` with access to the npm registry. Each session starts `@playwright/mcp@0.0.84` through it, so this folder adds no workspace package.
 - The browser from the command above. Set `PLAYWRIGHT_BROWSERS_PATH` if you installed it somewhere else.
 
@@ -83,6 +83,33 @@ Scratch files live in `outDir/run-N.scratch` during a run. `judgeApp` deletes th
 - The judge sees the `outDir` path in its tool results, so don't name it after the expected verdict.
 - The browser stays on the URL's origin, but it can open anything on that origin, including the app's own bundle.
 - A run killed at its time limit reports no cost, so `costUsd` can undercount.
+
+## Leads on failed trials
+
+`explainFailure` says where the agent went wrong in a failed trial, as a lead for the person reading the report and not a verdict. It runs one `claude -p` session with the trial folder as its working directory and only `Read`, `Grep` and `Glob`. `--restricted` keeps those tools inside the folder. The session names the step, explains it in up to three sentences and quotes the files that show it.
+
+```js
+import { explainFailure } from './judge/explain.mjs';
+
+const { text, step, evidence, verified, invalid } = await explainFailure({
+	trialDir,
+	failed: [{ id: 'runs_and_returns_both', detail: 'Both answers were a 404' }],
+	outDir,
+	redact: [token],
+});
+```
+
+`checkEvidence` looks for each quote verbatim in its file, and `verified` means it found at least one. A file that resolves outside the trial folder, whether through `..`, an absolute path or a symlink, counts as not found. Show "unverified" beside a lead with no quote found.
+
+A lead is `invalid` when the session hit its time or budget limit, gave no structured output or an empty lead, or was offered a tool beyond the three. Its claims are dropped.
+
+`outDir` keeps `explain.jsonl` and `explain.stderr`, with `redact` values of 8 characters or more replaced. It has to be outside the trial folder, or the session could read its own transcript and quote it. To run one by hand, put the failed checks in a JSON file:
+
+```bash
+node tools/browser-agent-evals/judge/cli.mjs --explain <trial dir> --failed failed.json --out ~/judge-results/lead-1
+```
+
+It prints the lead, writes `lead.json` to `--out`, and exits 0, or 2 for an invalid lead. `--model`, `--budget-usd` (default 0.5) and `--timeout-ms` (default 300000) work as for the judge.
 
 ## Tests
 
