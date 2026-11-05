@@ -308,6 +308,20 @@ test('a model call abandoned by Stop does not restart the pipeline when it fails
 	assert.equal(restarts, 1, 'the late failure restarted nothing');
 });
 
+test('a model call with no answer inside the limit is asked again on a fresh pipeline', async () => {
+	const sends: boolean[] = [];
+	const model = createChatModel({
+		ask: (_q, o) => {
+			sends.push(o?.fresh === true);
+			return o?.fresh ? Promise.resolve(done('built')) : new Promise<string>(() => undefined);
+		},
+		limitMs: 20,
+	});
+	const result = await loop(model);
+	assert.equal(result.answer, 'built');
+	assert.deepEqual(sends, [false, true], 'the hung send was retried once, on a fresh pipeline');
+});
+
 test('a message sent before done is read before the run finishes', async () => {
 	const inbox: string[] = [];
 	const replies = scriptedModel([done('too soon'), done('final')]);

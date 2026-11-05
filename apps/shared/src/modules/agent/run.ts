@@ -494,20 +494,56 @@ export interface ChatModelOptions {
 	meter?: UsageMeter;
 	/** Hears a request's final failure when a key is the cause. The loop swallows failures once it has gathered something, so it cannot tell the run. */
 	onKeyTrouble?: (trouble: KeyTrouble) => void;
+	/** How long one send waits for an answer (default MODEL_CALL_LIMIT_MS). */
+	limitMs?: number;
+}
+
+/**
+ * How long one model call waits for an answer. A provider sometimes holds the connection
+ * and never answers, and nothing below the agent gives up. The slowest real answer seen
+ * was 65 s, and slower models write big files more slowly.
+ */
+export const MODEL_CALL_LIMIT_MS = 180_000;
+
+/**
+ * Settles as `asking` does, or fails retryable once `ms` pass with no answer. The fresh
+ * retry ends the stuck task, so a late answer is dropped. After Stop it never fails, so
+ * it logs nothing.
+ */
+function answerWithin(asking: Promise<string>, ms: number, signal?: AbortSignal): Promise<string> {
+	return new Promise((resolve, reject) => {
+		const timer = setTimeout(() => {
+			if (signal?.aborted) return;
+			// step: the eval runs count this line
+			console.log(`[agent] model call had no answer in ${Math.round(ms / 1000)} s`);
+			reject(new ModelFailure(`The model did not answer in ${Math.round(ms / 1000)} s.`, { retryable: true, billed: true }));
+		}, ms);
+		asking.then(
+			(text) => {
+				clearTimeout(timer);
+				resolve(text);
+			},
+			(error: unknown) => {
+				clearTimeout(timer);
+				reject(error);
+			}
+		);
+	});
 }
 
 /**
  * Builds the model call the Wave loop uses. It resolves with the model's text or
- * rejects. A retryable ModelFailure gets one fresh try, none after Stop. Each send
- * is reserved just before it goes: a failure the provider cannot have billed releases
- * its reservation, any other keeps it. A CostLimitError comes from reserve, before
- * anything is sent, and passes through untouched.
+ * rejects. A retryable ModelFailure gets one fresh try, none after Stop, and a send
+ * with no answer inside the limit is one. Each send is reserved just before it goes:
+ * a failure the provider cannot have billed releases its reservation, any other keeps
+ * it. A CostLimitError comes from reserve, before anything is sent, and passes through
+ * untouched.
  */
 export function createChatModel(o: ChatModelOptions): ModelCall {
 	const send = async (q: QuestionSpec, fresh: boolean): Promise<string> => {
 		const held = o.meter?.reserve(q);
 		try {
-			const text = await o.ask(q, fresh ? { fresh } : undefined);
+			const text = await answerWithin(o.ask(q, fresh ? { fresh } : undefined), o.limitMs ?? MODEL_CALL_LIMIT_MS, o.signal);
 			held?.settle(text.length);
 			return text;
 		} catch (error) {
