@@ -116,6 +116,8 @@ function source(rel: string): string {
 function importGraph(entry: string): string[] {
 	const seen = new Set<string>();
 	const visit = (rel: string): void => {
+		// Module paths are POSIX-style whatever the host's separator is (Windows joins with `\\`).
+		rel = rel.split(path.sep).join('/');
 		if (seen.has(rel)) return;
 		seen.add(rel);
 		const text = source(rel);
@@ -919,7 +921,10 @@ describe('T10 — write gates hold in the controller even when a frame calls the
 			for (const [op, params] of bad) {
 				await assert.rejects(call(op, params), (error: unknown) => error instanceof ExplorerToolError && error.kind === 'invalid', JSON.stringify(params));
 			}
-			assert.deepEqual(r.engine.requests.slice(before).map((q) => q.op), [], 'nothing reached the engine');
+			// Nothing a bad call could cause: the controller's own background work (a discovery
+			// round and its dialect probe, which a slow runner lets land inside this loop) is not.
+			const background = (q: { op: string; params: unknown }): boolean => q.op === 'client.getTasks' || q.op === 'client.listTasks' || (q.op === 'client.tool' && (q.params as { tool?: string }).tool === 'dialect');
+			assert.deepEqual(r.engine.requests.slice(before).filter((q) => !background(q)).map((q) => q.op), [], 'nothing reached the engine');
 			assert.deepEqual(await call('sql.execute', { sql: 'SELECT ?', params: [null, 1, 'a', true, { k: [1] }] }), { rows: [{ id: 1, name: 'a' }, { id: 2, name: null }], affected_rows: 0 }, 'control');
 			// What only a same-realm frame (no JSON wire) could send.
 			for (const params of [[Number.NaN], [() => 1], [new Date(0)], [Infinity]]) {
