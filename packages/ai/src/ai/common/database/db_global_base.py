@@ -669,13 +669,17 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
           ``set_config()`` in it lifts the time limit for the statements after it. ``is_sql_safe`` rejects
           any chain; on PostgreSQL that rule is part of the guarantee. MySQL and MariaDB (pymysql connects
           without multi-statements), ClickHouse and SQLite refuse a ``;``-chain outright.
-        - MySQL and MariaDB: a read-only session (``SET SESSION TRANSACTION READ ONLY``, which also refuses
-          DDL) with ``max_execution_time`` (``max_statement_time`` on MariaDB). ``SELECT ... INTO OUTFILE``
-          is not a table change and still runs here: ``is_sql_safe`` refuses it, and a role without the FILE
-          privilege cannot run it.
+        - MySQL and MariaDB (dialect ``mysql``, or ``mariadb`` for a ``mariadb+`` URL): a read-only session
+          (``SET SESSION TRANSACTION READ ONLY``, which also refuses DDL) with ``max_execution_time``
+          (``max_statement_time`` on MariaDB). ``SELECT ... INTO OUTFILE`` is not a table change and still
+          runs here: ``is_sql_safe`` refuses it, and a role without the FILE privilege cannot run it.
         - ClickHouse: ``readonly=1`` and ``max_execution_time`` sent with each query; readonly=1 also refuses
           table functions such as ``url()`` and ``file()`` and stops the query from changing either setting.
-          Only the settings the user's profile lets it change are sent (``_clickhouse_read_settings``).
+          Only the settings the user's profile lets it change are sent (``_clickhouse_read_settings``). A
+          profile with readonly=2, or a ``CHANGEABLE_IN_READONLY`` constraint, lets the query change the
+          time limit itself; ``is_sql_safe`` refuses a ``SETTINGS`` clause, and only a MIN/MAX constraint
+          in the profile makes the server refuse it. With readonly=2 the node may not send readonly=1, so
+          table functions run when the user holds their grants.
         - SQLite: ``PRAGMA query_only``.
 
         Nothing outlives the block: the transaction is rolled back, and what was set on the session is reset
@@ -687,7 +691,7 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
             RuntimeError: The engine's dialect has no read-only mode here, so no query is run.
         """
         dialect = self.engine.dialect.name
-        if dialect not in ('postgresql', 'mysql', 'clickhouse', 'sqlite'):
+        if dialect not in ('postgresql', 'mysql', 'mariadb', 'clickhouse', 'sqlite'):
             raise RuntimeError(f'No read-only mode for the {dialect} dialect; the query was not run')
         timeout = int(self.READ_QUERY_TIMEOUT)
         with self.engine.connect() as conn:
@@ -700,7 +704,7 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
             if dialect == 'clickhouse':
                 yield conn.execution_options(settings=self._clickhouse_read_settings(conn, timeout))
                 return
-            if dialect == 'mysql':
+            if dialect in ('mysql', 'mariadb'):
                 # The session, not one transaction: DDL commits implicitly and would start a read-write one
                 setting, value = (
                     ('max_statement_time', timeout)

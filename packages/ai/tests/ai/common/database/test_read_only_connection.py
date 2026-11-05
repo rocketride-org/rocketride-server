@@ -22,6 +22,7 @@ and drops its own users, and skips when the role may not.
 """
 
 import os
+import sqlite3
 import time
 from contextlib import contextmanager
 from types import SimpleNamespace
@@ -118,7 +119,8 @@ def test_sqlite_reads_and_refuses_writes(sqlite_global):
 
 def test_sqlite_refuses_a_chain(sqlite_global):
     """sqlite3 runs one statement per call, so a ;-chain cannot switch query_only off and then write."""
-    with pytest.raises(ProgrammingError, match='one statement'):
+    # Python 3.10 raises sqlite3.Warning, which SQLAlchemy does not wrap; 3.11 and later raise ProgrammingError
+    with pytest.raises((ProgrammingError, sqlite3.Warning), match='one statement'):
         with sqlite_global.read_only_connection() as conn:
             conn.exec_driver_sql('PRAGMA query_only = OFF; DELETE FROM t')
     assert _count(sqlite_global.engine) == 2
@@ -156,25 +158,26 @@ def test_an_unknown_dialect_runs_nothing():
     assert connected == []
 
 
-class _ResetFailingConnection:
-    """A connection whose session reset fails, recording what the block did to it."""
+class _RecordingConnection:
+    """A connection that records what the block runs on it."""
 
-    dialect = SimpleNamespace(is_mariadb=False)
+    def __init__(self, is_mariadb=False):
+        """Nothing run yet.
 
-    def __init__(self):
-        """Nothing run yet."""
+        Args:
+            is_mariadb: What the connection's dialect says about the server.
+        """
+        self.dialect = SimpleNamespace(is_mariadb=is_mariadb)
         self.statements = []
         self.invalidated = False
 
     def exec_driver_sql(self, statement):
-        """Record ``statement``; fail the reset.
+        """Record ``statement``.
 
         Args:
             statement: The SQL.
         """
         self.statements.append(statement)
-        if statement == 'PRAGMA query_only = OFF':
-            raise OperationalError(statement, {}, Exception('connection lost'))
 
     def rollback(self):
         """Roll back (nothing to do)."""
@@ -184,19 +187,64 @@ class _ResetFailingConnection:
         self.invalidated = True
 
 
-def test_a_connection_whose_reset_fails_is_discarded(monkeypatch):
-    """If the session cannot be made read-write again, it must not go back to the pool."""
-    conn = _ResetFailingConnection()
+def _engine_with(dialect, conn):
+    """Return an engine stand-in of ``dialect`` that hands out ``conn``.
+
+    Args:
+        dialect: The dialect name the engine reports.
+        conn: The one connection.
+
+    Returns:
+        The engine.
+    """
 
     @contextmanager
     def connect():
         """Hand out the one connection."""
         yield conn
 
+    return SimpleNamespace(dialect=SimpleNamespace(name=dialect), connect=connect)
+
+
+@pytest.mark.parametrize(
+    ('dialect', 'is_mariadb', 'setting', 'value'),
+    [('mysql', False, 'max_execution_time', 2000), ('mariadb', True, 'max_statement_time', 2)],
+)
+def test_a_mariadb_url_gets_the_mysql_read_only_session(dialect, is_mariadb, setting, value):
+    """A ``mariadb+`` URL names the dialect ``mariadb``: it gets the MySQL read-only session with MariaDB's limit."""
+    conn = _RecordingConnection(is_mariadb)
+    with _global(_engine_with(dialect, conn)).read_only_connection():
+        pass
+
+    assert conn.statements == [
+        'SET SESSION TRANSACTION READ ONLY',
+        f'SET SESSION {setting} = {value}',
+        'SET SESSION TRANSACTION READ WRITE',
+        f'SET SESSION {setting} = DEFAULT',
+    ]
+    assert not conn.invalidated
+
+
+class _ResetFailingConnection(_RecordingConnection):
+    """A connection whose session reset fails, recording what the block did to it."""
+
+    def exec_driver_sql(self, statement):
+        """Record ``statement``; fail the reset.
+
+        Args:
+            statement: The SQL.
+        """
+        super().exec_driver_sql(statement)
+        if statement == 'PRAGMA query_only = OFF':
+            raise OperationalError(statement, {}, Exception('connection lost'))
+
+
+def test_a_connection_whose_reset_fails_is_discarded(monkeypatch):
+    """If the session cannot be made read-write again, it must not go back to the pool."""
+    conn = _ResetFailingConnection()
     warnings = []
     monkeypatch.setattr('ai.common.database.db_global_base.warning', warnings.append)
-    engine = SimpleNamespace(dialect=SimpleNamespace(name='sqlite'), connect=connect)
-    with _global(engine).read_only_connection():
+    with _global(_engine_with('sqlite', conn)).read_only_connection():
         pass
 
     assert conn.statements == ['PRAGMA query_only = ON', 'PRAGMA query_only = OFF']
@@ -294,6 +342,13 @@ def live(request):
         engine.dispose()
 
 
+def test_live_server_reads_inside_the_block(live):
+    """A read runs inside the block, so the refusals below come from the server, not from a block that runs nothing."""
+    glb, table, _case = live
+    with glb.read_only_connection() as conn:
+        assert conn.execute(text(f'SELECT count(*) FROM {table}')).scalar() == 0
+
+
 def test_live_server_refuses_every_write(live):
     """Each write, lock and DDL statement is refused by the server inside the block, and the table stays empty."""
     glb, table, case = live
@@ -329,7 +384,8 @@ def test_live_postgres_chain_of_reads_lifts_the_time_limit(live):
     start = time.monotonic()
     with glb.read_only_connection() as conn:
         conn.execute(text(chain))
-    assert time.monotonic() - start >= sleep
+    # Well past the limit, which would have stopped the sleep; not >= sleep, as the clocks tick in ~16 ms steps
+    assert time.monotonic() - start > glb.READ_QUERY_TIMEOUT + 1
 
 
 def test_live_server_stops_a_long_query(live):

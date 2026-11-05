@@ -240,6 +240,42 @@ def test_select_that_writes_or_locks_is_rejected(sql):
 @pytest.mark.parametrize(
     'sql',
     [
+        'SELECT 1 SETTINGS max_execution_time = 0',
+        'select count() from t settings max_threads=1, max_execution_time=0',
+        'SELECT * FROM (SELECT 1 SETTINGS max_execution_time = 0)',
+        'SELECT 1 SETTINGS\n  max_execution_time\n  = 0',
+        'SELECT 1 SETTINGS/* x */max_execution_time = 0',
+        'SELECT 1 SETTINGS `max_execution_time` = 0',
+        'SELECT 1 SETTINGS "max_execution_time" = 0',
+        'EXPLAIN SELECT 1 SETTINGS max_execution_time = 0',
+    ],
+)
+def test_a_clickhouse_settings_clause_is_rejected(sql):
+    """ClickHouse's SETTINGS clause lets a readonly=2 user lift the time limit the node sets."""
+    assert is_sql_safe(sql) is False
+
+
+@pytest.mark.parametrize(
+    'sql',
+    [
+        'SELECT settings FROM t',
+        "SELECT * FROM settings WHERE name = 'x'",
+        'SELECT * FROM settings s WHERE s.id = 1',
+        'SELECT a FROM t JOIN settings ON t.id = settings.id',
+        'SELECT a FROM t WHERE settings = 1',
+        "SELECT 'SETTINGS max_execution_time = 0' AS q",
+        'SELECT 1 -- SETTINGS max_execution_time = 0',
+        'SELECT my_settings x FROM t',
+    ],
+)
+def test_the_word_settings_alone_is_not_a_settings_clause(sql):
+    """A table, column or text named settings is not the clause."""
+    assert is_sql_safe(sql) is True
+
+
+@pytest.mark.parametrize(
+    'sql',
+    [
         "SELECT 'it''s' AS q",
         "SELECT E'it's' AS q",
         "SELECT $$'$$ AS q",

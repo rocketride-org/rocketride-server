@@ -37,7 +37,10 @@ reads and other sessions the control is a database role without those
 privileges. One exception: on PostgreSQL psycopg2 sends a ``;``-chain as
 one string, and a later statement of it can end that transaction (``COMMIT``)
 or lift the time limit (``set_config()``), so there this check's refusal of
-more than one statement is part of the guarantee. Keep it.
+more than one statement is part of the guarantee. Keep it. The same holds
+for ClickHouse's ``SETTINGS`` clause: a user whose profile has
+``readonly=2`` may change settings, and the node cannot stop that, so
+this check's refusal of the clause is what keeps the time limit.
 
 Literals and comments are masked before any check, so a keyword inside a
 string cannot trip a check and a comment cannot hide a clause from one. How
@@ -67,6 +70,9 @@ _WRITING_CLAUSE = re.compile(
     r'\binto\b|\bfor\s+(?:no\s+key\s+)?update\b|\bfor\s+(?:key\s+)?share\b|\block\s+in\s+share\s+mode\b',
     re.IGNORECASE,
 )
+
+# ClickHouse's SETTINGS clause (SETTINGS name = value), which changes settings for the query, such as its time limit
+_SETTINGS_CLAUSE = re.compile(r'\bsettings\s+(?:[a-z_][a-z0-9_]*|`[^`]*`|"[^"]*")\s*=', re.IGNORECASE)
 
 
 def _mask_quoted(sql: str, i: int, quote: str, backslash: bool, out: list[str]) -> int:
@@ -221,7 +227,7 @@ def _mask_mysql(sql: str) -> str | None:
 
 
 def _is_read_shaped(masked: str | None) -> bool:
-    """Return True if the masked text holds at most one statement, a SELECT that does not write or lock.
+    """Return True if the masked text holds at most one statement, a SELECT that does not write, lock or change settings.
 
     Args:
         masked: The statement text with literals and comments blanked, or None if masking refused it.
@@ -236,7 +242,10 @@ def _is_read_shaped(masked: str | None) -> bool:
     if len(statements) > 1:
         return False
     return all(
-        _ALLOWED_STATEMENT.match(statement) and not _WRITING_CLAUSE.search(statement) for statement in statements
+        _ALLOWED_STATEMENT.match(statement)
+        and not _WRITING_CLAUSE.search(statement)
+        and not _SETTINGS_CLAUSE.search(statement)
+        for statement in statements
     )
 
 
@@ -244,7 +253,8 @@ def is_sql_safe(sql: str) -> bool:
     """Return False unless the SQL is one statement shaped like a read: ``SELECT``, optionally behind ``EXPLAIN``.
 
     A whitelist: anything else (SET, COPY, PREPARE / EXECUTE, DO, HANDLER, WITH, ...) is rejected, and so
-    is a SELECT with ``INTO`` or a row lock (``FOR UPDATE``, ``FOR SHARE``, ``LOCK IN SHARE MODE``). So is
+    is a SELECT with ``INTO``, a row lock (``FOR UPDATE``, ``FOR SHARE``, ``LOCK IN SHARE MODE``) or a
+    ClickHouse ``SETTINGS`` clause, which can lift the time limit. So is
     a ``;``-chain of more than one statement, reads included: on PostgreSQL a later statement could end
     the read-only transaction or lift its time limit, and a generated query is one statement. A trailing
     ``;`` is fine. The text is read under PostgreSQL and under MySQL rules (see the module docstring) and
