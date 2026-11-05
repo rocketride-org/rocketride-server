@@ -5,6 +5,7 @@
 
 """The tools allowlist and the integer options, parsed at pipeline start."""
 
+import json
 import re
 import types
 from pathlib import Path
@@ -190,6 +191,27 @@ def test_end_global_resets_the_options():
     assert glb.graphql_allow_mutations is False
     assert glb.graphql_max_bytes == 4 * 1024 * 1024
     assert glb.retry_policy.budget_seconds == 60
+
+
+def test_services_json_offers_exactly_the_registered_tools_as_choices():
+    # The canvas renders the allowlist as checkboxes from this list, so it must not drift.
+    with scoped_stubs():
+        from tool_github.IInstance import tool_names
+
+        registered = tool_names()
+    text = (Path(__file__).resolve().parents[2] / 'src' / 'nodes' / 'tool_github' / 'services.json').read_text(
+        encoding='utf-8'
+    )
+    services = json.loads('\n'.join(line for line in text.splitlines() if not line.lstrip().startswith('//')))
+    field = services['fields']['github.tools']
+    choices = field['items']['enum']
+    assert field['uniqueItems'] is True and field['default'] == []
+    assert 'ui' not in field  # the same select the canvas draws for tool_pipedrive's tool groups
+    values = [value for value, _label in choices]
+    assert len(values) == len(set(values))
+    assert set(values) == registered
+    for value, label in choices:
+        assert value in label and label.split(':')[0].strip()
 
 
 def test_readme_tool_tables_list_exactly_the_registered_tools():

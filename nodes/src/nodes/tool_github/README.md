@@ -372,8 +372,10 @@ explicitly for inspect-only agents.
 
 ### Tools
 
-`tools` lists the tool names the node registers, for example
-`["graphql", "repo_tree", "label_list"]`. Only these appear in the schema the agent sees,
+`tools` lists the tools the node registers. In the canvas form it is a list of checkboxes,
+one per tool, in the order of the tool tables above; in a pipeline file it is the tool
+names, for example `["graphql", "repo_tree", "label_list"]`.
+Only these appear in the schema the agent sees,
 which keeps it small (#648), and only these can be called: a call to any other tool is
 not handled by this node. A comma-separated string, as a `${ROCKETRIDE_*}` placeholder
 may resolve to, works too. Empty or absent registers every tool. An unknown name stops
@@ -575,7 +577,7 @@ pytest nodes/test/tool_github/test_app_auth_live.py -v
 | `github.rateLimitMaxRetries` | `integer` | **Rate-limit retries**<br/>Retries of each request after its first attempt when GitHub answers it with a rate limit, within the call's wait budget: 3 retries means up to 4 attempts. 0 never retries. | `3` |
 | `github.readOnly` | `boolean` | **Read-only mode**<br/>When enabled, all write operations (file create/edit/delete, issue create, PR create, etc.) are blocked. Safe for agents that should only read. | `false` |
 | `github.token` | `string` | **Personal Access Token**<br/>GitHub PAT with repo, issues, pull_requests, and workflows scopes. Use a fine-grained token scoped to only the repos you need. | `""` |
-| `github.tools` | `array` | **Tools**<br/>Tool names to register, for example graphql, repo_tree, label_list. Only these appear in the schema the agent sees and only these can be called. Leave empty to register every tool. An unknown name stops the pipeline at start with the list of valid names. | `[]` |
+| `github.tools` | `array` | **Tools**<br/>Which tools this node publishes to the agent and accepts calls for: pick them from the list, one checkbox per tool, in the order of the README's tool tables. With none picked every tool is published. Fewer tools keep the agent's prompt small. Read-only mode still blocks the write tools whatever is picked. | `[]` |
 
 ## Dependencies
 
