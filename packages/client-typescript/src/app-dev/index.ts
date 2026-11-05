@@ -314,6 +314,8 @@ export class DevSession {
 	private stopping = false;
 	private pkgWatcher: fs.FSWatcher | null = null;
 	private pkgTimer: NodeJS.Timeout | undefined;
+	private pkgPollFile: string | null = null;
+	private pkgPollListener: ((cur: fs.Stats, prev: fs.Stats) => void) | null = null;
 	private restarts: Promise<void> = Promise.resolve();
 	private restartQueued = false;
 	private readiness: { resolve: (origin: string) => void; reject: (err: Error) => void } | null = null;
@@ -361,6 +363,10 @@ export class DevSession {
 		if (this.pkgTimer) clearTimeout(this.pkgTimer);
 		this.pkgWatcher?.close();
 		this.pkgWatcher = null;
+		// remove only this session's listener; another session may poll the same file
+		if (this.pkgPollFile && this.pkgPollListener) fs.unwatchFile(this.pkgPollFile, this.pkgPollListener);
+		this.pkgPollFile = null;
+		this.pkgPollListener = null;
 		// a restart in flight may be stopping the old server; let it finish
 		// (it will not spawn again once `stopping` is set)
 		await this.restarts;
@@ -476,16 +482,65 @@ export class DevSession {
 	 * Restarts (reinstall + respawn) when the app's package.json changes.
 	 * Watches the folder, not the file: an editor's atomic save renames a new
 	 * file over package.json, and a file watch stays on the replaced inode.
+	 * On Windows, watches the folder's real path: a folder named through an
+	 * 8.3 short name (C:\Users\JOHNSM~1\...) makes libuv abort the whole
+	 * process on the first change event. If the real path cannot be resolved
+	 * (e.g. an SMB share that denies querying an ancestor), polls package.json
+	 * instead, which never touches the unsafe watch path.
 	 */
 	private watchPackageJson(): void {
+		const folder = this.options.app.folder;
+		const schedule = (): void => {
+			if (this.pkgTimer) clearTimeout(this.pkgTimer);
+			this.pkgTimer = setTimeout(() => this.requestRestart(), 800);
+		};
+		const pkgFile = path.join(folder, 'package.json');
+		// mtime, ctime and size: a write that restores the mtime still moves the
+		// ctime. '' for a missing file (fs.watchFile reports it with zeroed stats).
+		const stampOf = (stats: fs.Stats): string => (stats.nlink > 0 ? `${stats.mtimeMs}:${stats.ctimeMs}:${stats.size}` : '');
+		const stamp = (): string => {
+			try {
+				return stampOf(fs.statSync(pkgFile));
+			} catch {
+				return '';
+			}
+		};
+		// poll the file's stats (no folder watcher, or the folder watcher failed)
+		const poll = (): void => {
+			this.pkgPollFile = pkgFile;
+			let missing = false;
+			this.pkgPollListener = (cur, prev) => {
+				const now = stampOf(cur);
+				// a file that comes back always restarts: when it returns, fs.watchFile
+				// compares it with the stats from before it went, and a restart made
+				// while it was missing could not install
+				if (now !== stampOf(prev) || (missing && now)) schedule();
+				missing = !now;
+			};
+			fs.watchFile(this.pkgPollFile, { interval: 1000 }, this.pkgPollListener);
+		};
 		try {
-			this.pkgWatcher = fs.watch(this.options.app.folder, (_event, filename) => {
+			const watched = process.platform === 'win32' ? fs.realpathSync.native(folder) : folder;
+			// package.json's stamp as of the last change the watcher reported
+			let seen = stamp();
+			const watcher = fs.watch(watched, (_event, filename) => {
 				if (filename?.toString() !== 'package.json') return;
-				if (this.pkgTimer) clearTimeout(this.pkgTimer);
-				this.pkgTimer = setTimeout(() => this.requestRestart(), 800);
+				seen = stamp();
+				schedule();
 			});
+			// a watcher error (folder removed, permissions changed) falls back to polling;
+			// polling takes the current stats as its baseline, so a change the watcher
+			// missed before failing is queued here
+			watcher.on('error', () => {
+				watcher.close();
+				if (this.pkgWatcher === watcher) this.pkgWatcher = null;
+				if (this.stopping || this.pkgPollFile) return;
+				if (stamp() !== seen) schedule();
+				poll();
+			});
+			this.pkgWatcher = watcher;
 		} catch {
-			// no watcher on this platform/filesystem — edits need a manual restart
+			poll();
 		}
 	}
 
