@@ -37,7 +37,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const source = fs.readFileSync(path.resolve(__dirname, 'react.tsx'), 'utf8');
+// Line endings normalised: a Windows checkout is CRLF (.gitattributes `* text=auto`), and the patterns below match LF.
+const source = fs.readFileSync(path.resolve(__dirname, 'react.tsx'), 'utf8').replace(/\r\n/g, '\n');
 
 /**
  * The body of createHistoryPrefsBridge.
