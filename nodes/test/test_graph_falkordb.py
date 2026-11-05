@@ -801,11 +801,103 @@ def test_execute_return_star_is_refused():
     assert graph.calls == []
 
 
-def _execution_plan(lines):
-    """Parse GRAPH.EXPLAIN lines with the real falkordb-py ExecutionPlan."""
-    from falkordb.execution_plan import ExecutionPlan
+class _ExplainOp:
+    """One GRAPH.EXPLAIN operation: a name, optional arguments, and children."""
 
-    return ExecutionPlan(lines)
+    def __init__(self, name, args=None):
+        self.name = name
+        self.args = args
+        self.children = []
+
+    def append_child(self, child):
+        self.children.append(child)
+        return self
+
+
+class _IndentExecutionPlan:
+    """Tree built the way falkordb-py's ExecutionPlan reads a GRAPH.EXPLAIN reply.
+
+    The engine test run does not install the falkordb client. Four spaces are
+    one level, and the operation name is the text before the first ``|``.
+    """
+
+    def __init__(self, plan):
+        if isinstance(plan[0], bytes):
+            plan = [line.decode() for line in plan]
+        self.plan = plan
+        self.structured_plan = self._operation_tree()
+
+    def _operation_tree(self):
+        index = 0
+        level = 0
+        stack = []
+        current = None
+
+        def create_operation(parts):
+            name = parts[0].strip()
+            parts.pop(0)
+            if parts and 'Records produced' in parts[-1]:
+                parts.pop(-1)
+            return _ExplainOp(name, None if not parts else parts[0].strip())
+
+        while index < len(self.plan):
+            line = self.plan[index]
+            op_level = line.count('    ')
+            if op_level == level:
+                child = create_operation(line.split('|'))
+                if current:
+                    parent = stack.pop()
+                    parent.append_child(child)
+                    stack.append(parent)
+                else:
+                    stack.append(child)
+                current = child
+                index += 1
+            elif op_level == level + 1:
+                child = create_operation(line.split('|'))
+                current.append_child(child)
+                stack.append(current)
+                current = child
+                level += 1
+                index += 1
+            elif op_level < level:
+                levels_back = level - op_level + 1
+                for _ in range(levels_back):
+                    current = stack.pop()
+                level -= levels_back
+            else:
+                raise ValueError(f'corrupted plan: {line!r}')
+        return stack[0]
+
+
+def _falkordb_execution_plan_class():
+    """The installed client's parser, or the indent parser when it is absent.
+
+    Node unit tests stub ``falkordb`` and the engine image does not install the
+    client, so ``import falkordb`` fails in CI.
+    """
+    saved = sys.modules.get('falkordb')
+    stub = saved is not None and 'mocks' in (getattr(saved, '__file__', '') or '').replace('\\', '/')
+    if stub or (saved is not None and not getattr(saved, '__file__', None)):
+        sys.modules.pop('falkordb', None)
+        sys.modules.pop('falkordb.execution_plan', None)
+    try:
+        from falkordb.execution_plan import ExecutionPlan
+
+        source = (getattr(sys.modules.get('falkordb'), '__file__', '') or '').replace('\\', '/')
+        if 'mocks' in source:
+            return _IndentExecutionPlan
+        return ExecutionPlan
+    except ImportError:
+        return _IndentExecutionPlan
+    finally:
+        if saved is not None:
+            sys.modules['falkordb'] = saved
+
+
+def _execution_plan(lines):
+    """Parse GRAPH.EXPLAIN lines into the tree execute reads."""
+    return _falkordb_execution_plan_class()(lines)
 
 
 # Captured from FalkorDB graph module 60002 (Redis 8.10.2, image
@@ -852,6 +944,24 @@ _CALL_SUBQUERY_PLAN = [
     '                    Project',
     '                        Argument',
 ]
+
+
+def test_indent_parser_matches_the_installed_client():
+    """The CI fallback must name the same root the falkordb client would."""
+    parser = _falkordb_execution_plan_class()
+    if parser is _IndentExecutionPlan:
+        pytest.skip('falkordb client is not installed')
+    plans = (
+        _INDEX_PLAN,
+        _FOREACH_PLAN,
+        _LOAD_CSV_PLAN,
+        _WITH_FOREACH_PLAN,
+        _LABEL_SCAN_PLAN,
+        _RESULTS_PLAN,
+        _CALL_SUBQUERY_PLAN,
+    )
+    for lines in plans:
+        assert _IndentExecutionPlan(lines).structured_plan.name == parser(lines).structured_plan.name
 
 
 def test_execute_grammar_miss_without_rows_is_sent_unchanged():
