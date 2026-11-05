@@ -339,8 +339,9 @@ class IInstance(IInstanceBase):
             return result
         try:
             blob = call(token, 'GET', f'/repos/{repo}/git/blobs/{result["sha"]}')
+            raw = _decoded_bytes(blob.get('content') or '', blob.get('encoding'))
         except ValueError as e:
-            # GitHubAPIError (an HTTP refusal), a transport failure or an invalid JSON body:
+            # GitHubAPIError (an HTTP refusal), a transport failure or an invalid JSON/base64 body:
             # the metadata is still worth returning, so none of them raises. Transport
             # exception text is not echoed, as in the repository reads.
             reason = str(e) if isinstance(e, GitHubAPIError) else 'GitHub request failed or returned invalid JSON'
@@ -350,7 +351,6 @@ class IInstance(IInstanceBase):
                 'with tool_git.'
             )
             return result
-        raw = _decoded_bytes(blob.get('content') or '', blob.get('encoding'))
         if isinstance(result['size'], int) and len(raw) != result['size']:
             result['message'] = (
                 f'GitHub returned {len(raw)} bytes for a {result["size"]}-byte file; the content is withheld '

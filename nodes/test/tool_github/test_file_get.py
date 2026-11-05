@@ -281,6 +281,22 @@ def test_large_file_without_a_blob_sha_is_reported_without_a_request(node):
     assert request.call_count == 1
 
 
+@pytest.mark.parametrize('encoded', ['a', '\u00e9'])
+def test_malformed_blob_base64_keeps_metadata(node, encoded):
+    inst, request, _ = node
+    request.side_effect = [
+        contents(2_000_000, encoding='none'),
+        response({'encoding': 'base64', 'content': encoded}),
+    ]
+    result = inst.file_get({'path': 'src/app.py', **BIG})
+    assert result['found'] is True
+    assert result['content'] is None
+    assert result['sha'] == 'blob-sha'
+    assert result['size'] == 2_000_000
+    assert 'Git blob read failed' in result['message']
+    assert request.call_count == 2
+
+
 def test_file_the_contents_api_refuses_as_too_large_is_a_result_not_an_exception(node):
     inst, request, _ = node
     request.return_value = response(
