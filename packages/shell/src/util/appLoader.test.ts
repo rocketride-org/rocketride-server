@@ -225,6 +225,9 @@ test('a dev registration for the locked app is not reported as a mismatch', () =
 
 test('a dev registration whose entry is not a loopback dev server is refused (no remote, no local app)', () => {
 	stubPage('?appid=org.evil&rrdev=1', true);
+	// isDevPreviewPending() below is measured against the page clock: pin it,
+	// or the assertion holds only while the process is under 30 s old.
+	stubClock(1_000);
 	setDescriptorInvalidator(() => {});
 	mock.method(console, 'error', () => {});
 	const registerRemotes = mock.method(federation, 'registerRemotes', () => {});
