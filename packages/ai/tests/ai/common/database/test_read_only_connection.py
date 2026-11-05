@@ -381,10 +381,10 @@ def live(request):
         pytest.skip(f'Set {case["env"]} to run against a live {request.param} server')
     engine = create_engine(dsn, pool_size=1, max_overflow=0)
     table = f'rr_read_only_{uuid4().hex[:12]}'
-    with engine.begin() as conn:
-        for statement in [case['create'], *case['extra']]:
-            conn.exec_driver_sql(statement.format(t=table))
     try:
+        with engine.begin() as conn:
+            for statement in [case['create'], *case['extra']]:
+                conn.exec_driver_sql(statement.format(t=table))
         yield _global(engine), table, case
     finally:
         with engine.begin() as conn:
@@ -528,11 +528,11 @@ def test_live_a_strict_session_comes_back_as_it_was(live):
     if server not in _STRICT_SESSION:
         pytest.skip('ClickHouse sends its settings with each query: there is no session to restore')
     strict, read, expected, undo = _STRICT_SESSION[server]
-    with glb.engine.connect() as conn:
-        for statement in strict:
-            conn.exec_driver_sql(statement)
-        conn.commit()
     try:
+        with glb.engine.connect() as conn:
+            for statement in strict:
+                conn.exec_driver_sql(statement)
+            conn.commit()
         with glb.read_only_connection() as conn:
             conn.execute(text('SELECT 1')).fetchall()
         with glb.engine.connect() as conn:
@@ -663,18 +663,19 @@ def test_live_clickhouse_profiles_run_read_only(monkeypatch, profile, limit, war
     monkeypatch.setattr('ai.common.database.db_global_base.warning', warnings.append)
     admin = create_engine(dsn)
     user, password = f'rr_profile_{uuid4().hex[:12]}', uuid4().hex
+    created, engine = False, None
     try:
-        with admin.connect() as conn:
-            conn.exec_driver_sql(
-                f"CREATE USER {user} IDENTIFIED WITH sha256_password BY '{password}' SETTINGS {profile}"
-            )
-            # The user may write, so a refused write below is the read-only setting, not a missing grant
-            conn.exec_driver_sql(f'GRANT CREATE TABLE, INSERT ON {make_url(dsn).database}.* TO {user}')
-    except Exception as e:  # noqa: BLE001 - each server says no in its own way
-        admin.dispose()
-        pytest.skip(f'The DSN user cannot create users: {e}')
-    engine = create_engine(make_url(dsn).set(username=user, password=password))
-    try:
+        try:
+            with admin.connect() as conn:
+                conn.exec_driver_sql(
+                    f"CREATE USER {user} IDENTIFIED WITH sha256_password BY '{password}' SETTINGS {profile}"
+                )
+                created = True
+                # The user may write, so a refused write below is the read-only setting, not a missing grant
+                conn.exec_driver_sql(f'GRANT CREATE TABLE, INSERT ON {make_url(dsn).database}.* TO {user}')
+        except Exception as e:  # noqa: BLE001 - each server says no in its own way
+            pytest.skip(f'The DSN user cannot create a user and let it write: {e}')
+        engine = create_engine(make_url(dsn).set(username=user, password=password))
         glb = _global(engine)
         with glb.read_only_connection() as conn:
             row = conn.exec_driver_sql("SELECT getSetting('readonly'), getSetting('max_execution_time')").one()
@@ -685,9 +686,13 @@ def test_live_clickhouse_profiles_run_read_only(monkeypatch, profile, limit, war
             with glb.read_only_connection() as conn:
                 conn.exec_driver_sql(f'CREATE TABLE {user}_t (id Int32) ENGINE = Memory')
     finally:
-        engine.dispose()
-        with admin.connect() as conn:
-            conn.exec_driver_sql(f'DROP USER IF EXISTS {user}')
+        if engine is not None:
+            engine.dispose()
+        if created:
+            with admin.connect() as conn:
+                # Only there if the read-only setting failed to refuse it
+                conn.exec_driver_sql(f'DROP TABLE IF EXISTS {make_url(dsn).database}.{user}_t')
+                conn.exec_driver_sql(f'DROP USER IF EXISTS {user}')
         admin.dispose()
 
 
