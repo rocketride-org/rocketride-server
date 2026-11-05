@@ -187,6 +187,34 @@ export function outboundReferences(graph: RelationGraph, table: string): Relatio
 }
 
 /**
+ * The foreign keys a column takes part in, outbound from its own table. A
+ * composite key is returned for each of its columns.
+ *
+ * @param graph - The relation graph.
+ * @param table - The table that owns the column.
+ * @param column - The column.
+ * @returns The keys the column belongs to (empty when it is no key).
+ */
+export function fkTargetFor(graph: RelationGraph, table: string, column: string): RelationEdge[] {
+	return outboundReferences(graph, table).filter((edge) => edge.columns.includes(column));
+}
+
+/**
+ * The marker for a foreign-key column, e.g. `→ customers.id`: the column of
+ * the referenced table that THIS column pairs with. Several keys on one
+ * column list every target.
+ *
+ * @param graph - The relation graph.
+ * @param table - The table that owns the column.
+ * @param column - The column.
+ * @returns The marker, or null when the column is no foreign key.
+ */
+export function fkMarker(graph: RelationGraph, table: string, column: string): string | null {
+	const targets = fkTargetFor(graph, table, column).map((edge) => `${edge.refTable}.${edge.refColumns[edge.columns.indexOf(column)]}`);
+	return targets.length > 0 ? `\u2192 ${targets.join(', ')}` : null;
+}
+
+/**
  * Classify every table by its declared relationships: hubs (referenced by
  * others, most first), leaves (reference others but are referenced by none),
  * isolated (neither). Self-references do not make a table its own hub.

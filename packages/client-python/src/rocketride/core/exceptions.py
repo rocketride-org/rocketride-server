@@ -217,6 +217,34 @@ class PipeException(RocketRideException, RuntimeError):
     pass
 
 
+class CommandException(RocketRideException, RuntimeError):
+    """
+    Exception raised when the server answers a command with a failure.
+
+    Raised by ``client.call()`` and therefore by every method built on it,
+    including ``client.tool()``, ``client.get_tasks()`` and
+    ``client.get_task_pipeline()``. ``str(e)`` is the server's message and
+    ``e.code`` its machine-readable code, when the failure has one (task
+    failures carry ``TASK_NOT_REGISTERED``, ``TASK_AMBIGUOUS``,
+    ``TASK_COMPLETED`` or ``TASK_STOPPED``).
+
+    Note:
+        Also inherits from :class:`RuntimeError`, which ``client.call()``
+        raised before, so existing ``except RuntimeError`` handlers still
+        catch it.
+
+    Example:
+        try:
+            rows = await client.tool(token=token, tool='read_query', input=args)
+        except CommandException as e:
+            if e.code == 'TASK_STOPPED':
+                ...  # the task stopped before the call reached the node
+            raise
+    """
+
+    pass
+
+
 class ExecutionException(RocketRideException):
     """
     Exception raised for pipeline execution issues.

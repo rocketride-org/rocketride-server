@@ -31,6 +31,8 @@
 
 import type { IDataGridPageRequest } from 'shell';
 import type { SqlSchemaTable, SqlDialect } from '../connect';
+import { chipPredicate, escapeLike, isCompleteChip, likePredicate } from './filters';
+import type { FilterChip } from './filters';
 
 // =============================================================================
 // QUOTING
@@ -40,6 +42,12 @@ import type { SqlSchemaTable, SqlDialect } from '../connect';
  * Quote an identifier (table/column name) for the dialect: backticks for
  * MySQL/ClickHouse, double quotes elsewhere (Postgres and ANSI engines).
  *
+ * The quote character is doubled. ClickHouse also reads backslash escapes
+ * inside a backtick identifier, so there a backslash is doubled too, first:
+ * otherwise a name ending in `\` escapes the closing backtick and the rest
+ * of the statement becomes part of the name. MySQL and PostgreSQL read a
+ * backslash in an identifier as itself, so it is left alone there.
+ *
  * Identifiers are the ONLY thing this module renders into SQL text. Values
  * are bound (see {@link buildPageStatements}).
  *
@@ -48,7 +56,10 @@ import type { SqlSchemaTable, SqlDialect } from '../connect';
  * @returns The quoted identifier.
  */
 export function quoteIdent(dialect: SqlDialect, name: string): string {
-	if (dialect === 'mysql' || dialect === 'clickhouse') {
+	if (dialect === 'clickhouse') {
+		return '`' + name.replace(/\\/g, '\\\\').replace(/`/g, '``') + '`';
+	}
+	if (dialect === 'mysql') {
 		return '`' + name.replace(/`/g, '``') + '`';
 	}
 	return '"' + name.replace(/"/g, '""') + '"';
@@ -72,7 +83,9 @@ interface WhereClause {
 /**
  * Build the WHERE clause for a page request: the title-bar search term ORed
  * across the table's text columns, ANDed with the committed per-column
- * filters (string = contains, array = IN, __gte/__lte = range bounds).
+ * filters (string = contains, array = IN, __gte/__lte = range bounds) and
+ * then the filter chips. Search and contains are case-insensitive per
+ * dialect, with `%`, `_` and `\` in the typed text matching themselves.
  *
  * Every value the user typed is bound as `$n`, never rendered into the
  * statement. The search term binds ONCE and its placeholder repeats across
@@ -81,9 +94,10 @@ interface WhereClause {
  * @param dialect - The engine dialect.
  * @param table - The table's reflected schema (drives the search columns).
  * @param req - The grid's page request.
+ * @param chips - The filter chips above the grid.
  * @returns The clause and its bind values.
  */
-function buildWhere(dialect: SqlDialect, table: SqlSchemaTable, req: IDataGridPageRequest): WhereClause {
+function buildWhere(dialect: SqlDialect, table: SqlSchemaTable, req: IDataGridPageRequest, chips: readonly FilterChip[]): WhereClause {
 	const clauses: string[] = [];
 	const params: unknown[] = [];
 
@@ -103,8 +117,8 @@ function buildWhere(dialect: SqlDialect, table: SqlSchemaTable, req: IDataGridPa
 		const targets = table.columns.filter((c) => TEXT_TYPE.test(c.type));
 		if (targets.length > 0) {
 			// One placeholder, reused: the same pattern for every column.
-			const term = bind(`%${req.search}%`);
-			clauses.push('(' + targets.map((c) => `${quoteIdent(dialect, c.column)} LIKE ${term}`).join(' OR ') + ')');
+			const term = bind(`%${escapeLike(req.search)}%`);
+			clauses.push('(' + targets.map((c) => likePredicate(dialect, quoteIdent(dialect, c.column), term)).join(' OR ') + ')');
 		}
 	}
 
@@ -125,7 +139,14 @@ function buildWhere(dialect: SqlDialect, table: SqlSchemaTable, req: IDataGridPa
 		}
 		// String value = contains. The wrapping `%` belongs to the VALUE, not
 		// to the statement (see the placeholder caveat on buildPageStatements).
-		clauses.push(`${quoteIdent(dialect, key)} LIKE ${bind(`%${value}%`)}`);
+		clauses.push(likePredicate(dialect, quoteIdent(dialect, key), bind(`%${escapeLike(value)}%`)));
+	}
+
+	// Filter chips, ANDed with everything above.
+	for (const chip of chips) {
+		if (!isCompleteChip(chip)) continue;
+		const type = table.columns.find((c) => c.column === chip.column)?.type ?? '';
+		clauses.push(chipPredicate(dialect, quoteIdent(dialect, chip.column), chip, bind, type));
 	}
 
 	return { clause: clauses.length > 0 ? ` WHERE ${clauses.join(' AND ')}` : '', params };
@@ -135,8 +156,18 @@ function buildWhere(dialect: SqlDialect, table: SqlSchemaTable, req: IDataGridPa
 // PAGE STATEMENTS
 // =============================================================================
 
+/** Extras for one page request beyond what the grid sends. */
+export interface PageOptions {
+	/** The filter chips above the grid. */
+	chips?: readonly FilterChip[];
+	/** Select one row past the page, so the caller can tell more rows exist. */
+	overfetch?: boolean;
+}
+
 /** The page SELECT and its matching COUNT for one grid page request. */
 export interface PageStatements {
+	/** The WHERE clause (with leading ' WHERE ') or '' — what a count depends on. */
+	where: string;
 	/** The page SELECT (LIMIT/OFFSET applied). */
 	select: string;
 	/** The COUNT(*) over the same WHERE (drives the pager total). */
@@ -160,10 +191,16 @@ export interface PageStatements {
  * literal — which is precisely why LIKE patterns are assembled as bind
  * VALUES (`%term%`) instead of as `'%' || $1 || '%'` or an inlined pattern.
  *
+ * Paging is OFFSET-based: the shell pager jumps to any page number, which a
+ * keyset cursor cannot do, and OFFSET is correct on every engine. It gets
+ * slower the deeper the page on a large table; the data browser therefore
+ * does not count big filtered tables (see `estimate.ts`).
+ *
  * @param dialect - The engine dialect.
  * @param tableName - The table to page over.
  * @param table - The table's reflected schema.
  * @param req - The grid's page request.
+ * @param opts - The filter chips and the overfetch switch.
  * @returns The page statements and their bind values.
  */
 export function buildPageStatements(
@@ -171,9 +208,10 @@ export function buildPageStatements(
 	tableName: string,
 	table: SqlSchemaTable,
 	req: IDataGridPageRequest,
+	opts: PageOptions = {},
 ): PageStatements {
 	const target = quoteIdent(dialect, tableName);
-	const { clause: where, params } = buildWhere(dialect, table, req);
+	const { clause: where, params } = buildWhere(dialect, table, req, opts.chips ?? []);
 
 	// ORDER BY from the grid's sorters; fall back to the primary key so
 	// paging is deterministic even without a user sort. A table with neither
@@ -188,9 +226,24 @@ export function buildPageStatements(
 	// LIMIT/OFFSET stay inline: they are the grid's own numbers, never user
 	// text, and several engines reject a bind parameter in those positions.
 	const offset = (req.page - 1) * req.size;
+	const limit = req.size + (opts.overfetch ? 1 : 0);
 	return {
-		select: `SELECT * FROM ${target}${where}${orderBy} LIMIT ${req.size} OFFSET ${offset}`,
+		where,
+		select: `SELECT * FROM ${target}${where}${orderBy} LIMIT ${limit} OFFSET ${offset}`,
 		count: `SELECT COUNT(*) AS total FROM ${target}${where}`,
 		params,
 	};
+}
+
+/**
+ * The key a total is cached under: the table, the WHERE clause and its bound
+ * values. Paging, sorting and the page size do not change it, so another
+ * page of the same filter finds the count already known.
+ *
+ * @param tableName - The table.
+ * @param statements - The statements built for one of the filter's pages.
+ * @returns The cache key.
+ */
+export function countKey(tableName: string, statements: Pick<PageStatements, 'where' | 'params'>): string {
+	return JSON.stringify([tableName, statements.where, statements.params]);
 }

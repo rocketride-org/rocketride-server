@@ -3511,7 +3511,9 @@ export class RocketRideClient extends DAPClient {
 	 * @param args    - Key/value arguments forwarded in the request.
 	 * @param options - Optional token (for task-scoped calls) and timeout in ms.
 	 * @returns The `body` field of a successful DAP response.
-	 * @throws Error if the server signals failure.
+	 * @throws DAPException if the server signals failure: an `Error` whose
+	 *         `message` is the server's message and whose `code` is the
+	 *         server's machine-readable code, when the failure has one.
 	 */
 	async call<T = any>(command: string, args?: Record<string, unknown>, options?: { token?: string; timeout?: number }): Promise<T> {
 		// Build the raw DAP request
@@ -3525,10 +3527,12 @@ export class RocketRideClient extends DAPClient {
 
 		const response = await this.request(message, options?.timeout);
 
-		// Throw on server-reported failure
+		// Throw on server-reported failure. DAPException keeps the server's
+		// machine-readable code (TASK_STOPPED, ...) next to the unchanged
+		// message, so callers classify on the code instead of the prose.
 		if (response.success === false) {
 			this._onTrace?.(TraceType.Error, redactProtocolMessage(response));
-			throw new Error(response.message ?? `${command} failed`);
+			throw new DAPException({ ...response, message: response.message ?? `${command} failed` });
 		}
 
 		// Trace: success response
@@ -3553,7 +3557,9 @@ export class RocketRideClient extends DAPClient {
 	 * @param options.input - Arguments forwarded to the tool function
 	 * @param options.timeout - Optional per-request timeout in ms
 	 * @returns The tool's return value (typically a record/object)
-	 * @throws Error if the server signals failure or no node handles the requested tool
+	 * @throws DAPException if the server signals failure or no node handles the
+	 *         requested tool; `code` carries the server's code when there is one
+	 *         (e.g. `TASK_STOPPED` when the task stopped before the call reached it)
 	 */
 	async tool<T = any>(options: { token: string; tool: string; nodeId?: string; input?: Record<string, unknown>; timeout?: number }): Promise<T> {
 		const result = await this.call<{ result: T }>(

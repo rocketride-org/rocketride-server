@@ -47,7 +47,7 @@
 	// Optional:
 	//		Description of this driver
 	//
-	"description": ["A RocketRide-managed relational database. Stores structured table data ", "in your own provisioned RocketRide cloud database with zero setup — no host, ", "user, or password to enter. The connection is resolved automatically from ", "your signed-in RocketRide identity. Supports the same natural-language query, ", "schema reflection, and direct-execute surface as the generic PostgreSQL node."],
+	"description": ["A RocketRide-managed relational database. Stores structured table data ", "in your own provisioned RocketRide cloud database with zero setup — no host, ", "user, or password to enter; the engine delivers the connection to the ", "database you choose automatically. Supports the same natural-language query, ", "schema reflection, and direct-execute surface as the generic PostgreSQL node."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node

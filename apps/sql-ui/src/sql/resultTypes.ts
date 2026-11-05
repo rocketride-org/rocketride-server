@@ -46,10 +46,15 @@
 // (db_instance_base._sanitize_value): `Decimal` becomes a float, `datetime`
 // becomes an ISO string, `bytes` becomes a lossy string. An ISO-8601 string is
 // therefore a date, not a string — that is where most of the win is.
+//
+// Two notes under the grid are decided here too, and both only when they
+// apply: the PRECISION note (a value that could have lost digits on the way),
+// and the SAME-NAME note (rows arrive as objects, so two columns with one
+// name merge into one; the node does not return column names any other way).
 // =============================================================================
 
 import type { SqlSchemaResponse, SqlDialect } from '../connect';
-import { stripSqlComments } from './split';
+import { codeOnly, keywordSites, stripSqlComments } from './split';
 
 // =============================================================================
 // TYPES
@@ -66,6 +71,8 @@ export interface ColumnTypeInfo {
 	source: 'schema' | 'inferred';
 	/** Tooltip text naming the basis, e.g. `BIGINT (schema)`. */
 	description: string;
+	/** The engine-reported type, when the type came from the schema. */
+	sqlType?: string;
 }
 
 // =============================================================================
@@ -94,9 +101,59 @@ const NUMBER_TOKENS = /^(tinyint|smallint|mediumint|int|int2|int4|int8|integer|b
 /** Quoted runs inside a type name (`ENUM('int','x')`) — removed before tokenising. */
 const TYPE_LITERAL = /'[^']*'|"[^"]*"/g;
 
+/**
+ * Whole type-name tokens of binary types, whose values the node sends as
+ * text it decoded (`bytes.decode('utf-8', errors='replace')`; PostgreSQL's
+ * bytea as '<memory at 0x…>'). MySQL's `CHAR(n) CHARACTER SET binary` is
+ * BINARY(n) under another name, and carries the token too.
+ */
+const BINARY_TOKENS = /^(binary|varbinary|tinyblob|blob|mediumblob|longblob|bytea|bit|varbit)$/i;
+
+/** Whole type-name tokens of exact decimal types, which the node sends as floats. */
+const DECIMAL_TOKENS = /^(decimal|dec|numeric|fixed|decimal(32|64|128|256))$/i;
+
 // =============================================================================
 // SQL TYPE NAMES
 // =============================================================================
+
+/**
+ * The whole-word tokens of a type string: quoted runs removed, purely
+ * numeric tokens (the `10` and `2` of `DECIMAL(10,2)`) dropped.
+ *
+ * @param sqlType - The type string from `get_schema`.
+ * @returns The tokens.
+ */
+function typeTokens(sqlType: string): string[] {
+	return sqlType
+		.replace(TYPE_LITERAL, ' ')
+		.split(/[^A-Za-z0-9]+/)
+		.filter((token) => token.length > 0 && !/^\d+$/.test(token));
+}
+
+/**
+ * Whether a type is an exact decimal (DECIMAL, NUMERIC and their spellings,
+ * ClickHouse's `Decimal(P, S)` and `Decimal64(S)`). The node sends those
+ * values as floats, so the digits shown may not be the digits stored.
+ *
+ * @param sqlType - The type string from `get_schema`.
+ * @returns True for a decimal type.
+ */
+export function isDecimalSqlType(sqlType: string): boolean {
+	return typeTokens(sqlType).some((token) => DECIMAL_TOKENS.test(token));
+}
+
+/**
+ * Whether a type holds bytes (BINARY, VARBINARY, the BLOBs, bytea, BIT and
+ * BIT VARYING). The node sends such a value as text that is not the value
+ * stored, so it can be shown but never matched against the database. Read by
+ * whole token, so ORBIT or a `_bin` collation is not one.
+ *
+ * @param sqlType - The type string from `get_schema`.
+ * @returns True for a binary type.
+ */
+export function isBinarySqlType(sqlType: string): boolean {
+	return typeTokens(sqlType).some((token) => BINARY_TOKENS.test(token));
+}
 
 /**
  * Map an engine-reported type string onto a grid type.
@@ -121,10 +178,7 @@ const TYPE_LITERAL = /'[^']*'|"[^"]*"/g;
 export function rrTypeFromSqlType(sqlType: string, dialect: SqlDialect = 'unknown'): RrType {
 	void dialect;
 	if (!sqlType) return 'string';
-	const tokens = sqlType
-		.replace(TYPE_LITERAL, ' ')
-		.split(/[^A-Za-z0-9]+/)
-		.filter((token) => token.length > 0 && !/^\d+$/.test(token));
+	const tokens = typeTokens(sqlType);
 	if (tokens.some((token) => JSON_TOKENS.test(token))) return 'json';
 	if (tokens.some((token) => DATE_TOKENS.test(token))) return 'date';
 	if (tokens.some((token) => BOOL_TOKENS.test(token))) return 'boolean';
@@ -233,11 +287,15 @@ function singleSourceTable(sql: string, dialect: SqlDialect): string | null {
 /**
  * Decide a grid type for every column of a result.
  *
- * @param rows - The result rows (column set taken from every row, so a column
- *               that is absent from the first row is still typed).
+ * @param rows - The result rows.
  * @param schema - The connection's schema snapshot, when one is loaded.
  * @param sql - The statement that produced the rows, when it is known.
  * @param dialect - The engine dialect.
+ * @param resultColumns - The result's columns as captured when it settled.
+ *                        Without them the set is read off every row, so a
+ *                        column absent from the first row is still typed; a
+ *                        row the grid has rendered carries the grid's keys
+ *                        too, which is why the query view passes its list.
  * @returns One {@link ColumnTypeInfo} per column, keyed by column name.
  */
 export function inferColumnTypes(
@@ -245,15 +303,18 @@ export function inferColumnTypes(
 	schema?: SqlSchemaResponse | null,
 	sql?: string,
 	dialect: SqlDialect = 'unknown',
+	resultColumns?: readonly string[],
 ): Record<string, ColumnTypeInfo> {
 	const out: Record<string, ColumnTypeInfo> = {};
 	if (rows.length === 0) return out;
 
 	// Column set, in first-seen order.
-	const columns: string[] = [];
-	for (const row of rows) {
-		for (const key of Object.keys(row)) {
-			if (!columns.includes(key)) columns.push(key);
+	const columns: string[] = resultColumns ? [...resultColumns] : [];
+	if (!resultColumns) {
+		for (const row of rows) {
+			for (const key of Object.keys(row)) {
+				if (!columns.includes(key)) columns.push(key);
+			}
 		}
 	}
 
@@ -271,6 +332,7 @@ export function inferColumnTypes(
 					rrType: rrTypeFromSqlType(sqlType, dialect),
 					source: 'schema',
 					description: `${sqlType} (schema)`,
+					sqlType,
 				};
 			}
 			return out;
@@ -291,4 +353,184 @@ export function inferColumnTypes(
 		};
 	}
 	return out;
+}
+
+// =============================================================================
+// NOTES UNDER THE GRID
+// =============================================================================
+
+/** The same-name note, word for word. */
+export const MERGED_COLUMNS_NOTE = 'Columns with the same name are merged; alias them';
+
+/** Significant digits a float shows before its last digits may be noise. */
+const FLOAT_DIGITS = 15;
+
+/**
+ * The significant digits of a finite number as JavaScript prints it (the
+ * shortest text that reads back as the same double).
+ *
+ * @param value - The number.
+ * @returns The digit count.
+ */
+function significantDigits(value: number): number {
+	const mantissa = Math.abs(value).toExponential().split('e')[0] as string;
+	return mantissa.replace('.', '').length;
+}
+
+/**
+ * Whether a value may not be the number the database holds: an integer beyond
+ * ±2^53 (JSON cannot carry it exactly), or a float with more than 15
+ * significant digits (a `Decimal` the node turned into a float shows this).
+ *
+ * @param value - A cell value.
+ * @returns True when the value may have lost precision.
+ */
+function mayHaveLostPrecision(value: unknown): boolean {
+	if (typeof value !== 'number' || !Number.isFinite(value)) return false;
+	if (Number.isInteger(value)) return !Number.isSafeInteger(value);
+	return significantDigits(value) > FLOAT_DIGITS;
+}
+
+/**
+ * Whether the precision note applies to a result: a column the schema types
+ * as DECIMAL/NUMERIC, or a value that may have lost precision on the way.
+ *
+ * @param columns - The result's captured columns.
+ * @param rows - The rows.
+ * @param types - The columns' types (from {@link inferColumnTypes}).
+ * @returns True when the note should show.
+ */
+export function precisionNoteApplies(columns: readonly string[], rows: readonly Record<string, unknown>[], types: Record<string, ColumnTypeInfo>): boolean {
+	if (columns.some((column) => isDecimalSqlType(types[column]?.sqlType ?? ''))) return true;
+	return rows.some((row) => columns.some((column) => mayHaveLostPrecision(row[column])));
+}
+
+/** A name: double-quoted, backquoted, or bare. */
+const NAME = '(?:"(?:[^"]|"")*"|`(?:[^`]|``)*`|[A-Za-z_\\u0080-\\uffff][A-Za-z0-9_$\\u0080-\\uffff]*)';
+
+/** A column reference, possibly qualified: `c.name`, `"s"."t"."c"`. */
+const COLUMN_REF = new RegExp(`^${NAME}(?:\\s*\\.\\s*${NAME})*$`);
+
+/** A reference followed by an alias without AS: `c.name customer`. */
+const REF_ALIAS = new RegExp(`^${NAME}(?:\\s*\\.\\s*${NAME})*\\s+(${NAME})$`);
+
+/** A star, bare or table-qualified: `*`, `o.*`. */
+const STAR = new RegExp(`^(?:${NAME}\\s*\\.\\s*)*\\*$`);
+
+/** The clauses that end a FROM list. */
+const AFTER_FROM = ['where', 'group', 'having', 'order', 'limit', 'window', 'union', 'intersect', 'except', 'offset', 'fetch', 'for', 'qualify', 'settings', 'format'];
+
+/**
+ * The output name of a name token as the server labels the column: a quoted
+ * name as written inside its quotes; a bare one folded to lower case on
+ * PostgreSQL, as written elsewhere.
+ *
+ * @param token - The name as written.
+ * @param dialect - The engine dialect.
+ * @returns The output name.
+ */
+function outputName(token: string, dialect: SqlDialect): string {
+	const quote = token[0];
+	if (quote === '"' || quote === '`') return token.slice(1, -1).split(`${quote}${quote}`).join(quote);
+	return dialect === 'postgres' ? token.toLowerCase() : token;
+}
+
+/**
+ * The output name of one select-list item, or null when it is not certain
+ * (an expression with no alias). Only `ref`, `ref AS alias`, `ref alias` and
+ * `expr AS alias` are read.
+ *
+ * @param item - The item's text (comments removed).
+ * @param masked - The same text with literals and quoted names blanked.
+ * @param dialect - The engine dialect.
+ * @returns The name, or null.
+ */
+function itemName(item: string, masked: string, dialect: SqlDialect): string | null {
+	const text = item.trim();
+	const sites = keywordSites(masked, ['as'], dialect).filter((site) => site.depth === 0);
+	const lastAs = sites[sites.length - 1];
+	if (lastAs) {
+		const alias = item.slice(lastAs.index + 2).trim();
+		return new RegExp(`^${NAME}$`).test(alias) ? outputName(alias, dialect) : null;
+	}
+	if (COLUMN_REF.test(text)) {
+		const parts = text.match(new RegExp(NAME, 'g')) ?? [];
+		const last = parts[parts.length - 1];
+		return last ? outputName(last, dialect) : null;
+	}
+	const aliased = REF_ALIAS.exec(text);
+	return aliased?.[1] ? outputName(aliased[1], dialect) : null;
+}
+
+/**
+ * Split masked text at its depth-0 commas.
+ *
+ * @param masked - Masked text.
+ * @returns The [start, end) offsets of each part.
+ */
+function splitTopLevel(masked: string): Array<[number, number]> {
+	const parts: Array<[number, number]> = [];
+	let depth = 0;
+	let start = 0;
+	for (let at = 0; at < masked.length; at++) {
+		const ch = masked[at];
+		if (ch === '(') depth += 1;
+		else if (ch === ')') depth -= 1;
+		else if (ch === ',' && depth === 0) {
+			parts.push([start, at]);
+			start = at + 1;
+		}
+	}
+	parts.push([start, masked.length]);
+	return parts;
+}
+
+/**
+ * Whether a statement may return two columns with one name, which merge into
+ * one because rows arrive as objects. Deliberately conservative: it reads the
+ * outermost SELECT and says yes only for a `*` over a join (JOIN or a comma
+ * list), two table stars over a join, or an output name the select list
+ * spells twice. An unaliased expression is never counted.
+ *
+ * @param sql - The statement.
+ * @param dialect - The engine dialect.
+ * @returns True when the same-name note should show.
+ */
+export function mayMergeColumns(sql: string, dialect: SqlDialect = 'unknown'): boolean {
+	const text = stripSqlComments(sql, dialect);
+	const masked = codeOnly(text, dialect);
+	const sites = keywordSites(text, ['select', 'from', 'join', ...AFTER_FROM], dialect).filter((site) => site.depth === 0);
+	const select = sites.find((site) => site.keyword === 'select');
+	if (!select) return false;
+	// The SELECT must lead the statement, or follow a WITH chain.
+	const lead = masked.slice(0, select.index).trim();
+	if (lead !== '' && !/^with\b/i.test(lead)) return false;
+	const from = sites.find((site) => site.keyword === 'from' && site.index > select.index);
+	const listEnd = from?.index ?? masked.length;
+	let listStart = select.index + 'select'.length;
+	const modifier = /^\s*(?:distinct\s+on\s*\([^)]*\)|distinct|all)(?![A-Za-z0-9_$])/i.exec(masked.slice(listStart, listEnd));
+	if (modifier) listStart += modifier[0].length;
+
+	let joined = false;
+	if (from) {
+		const fromEnd = sites.find((site) => site.index > from.index && AFTER_FROM.includes(site.keyword))?.index ?? masked.length;
+		joined = sites.some((site) => site.keyword === 'join' && site.index > from.index && site.index < fromEnd)
+			|| splitTopLevel(masked.slice(from.index, fromEnd)).length > 1;
+	}
+
+	const names = new Set<string>();
+	let stars = 0;
+	for (const [start, end] of splitTopLevel(masked.slice(listStart, listEnd))) {
+		const item = text.slice(listStart + start, listStart + end);
+		if (STAR.test(item.trim())) {
+			stars += 1;
+			if (joined && (item.trim() === '*' || stars > 1)) return true;
+			continue;
+		}
+		const name = itemName(item, masked.slice(listStart + start, listStart + end), dialect);
+		if (name === null) continue;
+		if (names.has(name)) return true;
+		names.add(name);
+	}
+	return false;
 }

@@ -31,6 +31,8 @@
 // changes, never the views, panels, or canvas.
 // =============================================================================
 
+import type { IGenerationTicket } from 'shared/explorer/generation';
+
 // =============================================================================
 // DIALECT
 // =============================================================================
@@ -48,11 +50,25 @@ export type SqlDialect = 'mysql' | 'postgres' | 'clickhouse' | 'neo4j' | 'unknow
 
 /**
  * One reachable database tool node inside a running pipeline task — the unit
- * a "connection" binds to. Purely descriptive: holds no token or client state.
+ * a "connection" binds to. Purely descriptive and JSON-safe: it holds NO task
+ * token and no client state (tokens live only in the endpoint store's vault,
+ * in the realm that owns the engine connection), so it may travel to a
+ * dev-tool frame.
  */
 export interface SqlEndpoint {
-	/** Stable identity for lists/maps: `${projectId}:${source}:${nodeId}`. */
+	/**
+	 * Stable identity for lists, maps, history and document URIs:
+	 * `${projectId}:${source}:${nodeId}` (for a direct connection
+	 * `sqlconn-<id>:tools_1:<provider>_1`). It is the endpoint store's
+	 * `legacyKey`, never its owner-aware `k1|…` key.
+	 */
 	key: string;
+	/**
+	 * The saved connection this endpoint was resolved from. Every engine call
+	 * names the connection by this id (never by the endpoint itself). Absent
+	 * only on a New Connection picker entry, which is not opened directly.
+	 */
+	connId?: string;
 	/** Project (pipeline) identifier the task was started from. */
 	projectId: string;
 	/** Task display name (pipeline filename or config name). */
@@ -79,6 +95,67 @@ export interface SqlExecuteResult {
 	rows: Record<string, unknown>[];
 	/** Rows affected by INSERT/UPDATE/DELETE (0 for SELECT). */
 	affected_rows: number;
+}
+
+/**
+ * One statement of an Apply (staged row edits, a designer plan). The app
+ * writes it, the user never types it: one statement, its values bound as
+ * `$1..$n`, never inlined.
+ */
+export interface SqlApplyStatement {
+	/** One statement (no terminator needed). */
+	sql: string;
+	/** Positional bind values for `$1..$n`. */
+	params?: unknown[];
+	/**
+	 * The exact number of rows the statement must change (1 for a row edit).
+	 * Any other count stops the apply: inside a transaction it is rolled back.
+	 */
+	expect?: number;
+}
+
+/** Why an Apply stopped. */
+export interface SqlApplyFailure {
+	/** The statement that failed (its index), or the statement count when the commit failed. */
+	index: number;
+	/** What failed: the statement, its row count (`expect`), or the commit. */
+	stage: 'statement' | 'expect' | 'commit';
+	/** The database's or node's message, verbatim (the app's own sentence for a row count). */
+	message: string;
+	/** The server's machine-readable code, when the failure carried one. */
+	code?: string;
+	/**
+	 * How many statements are saved for certain: none after a rollback; the
+	 * ones before the failure when each statement commits on its own (plus the
+	 * failing one when it ran but changed the wrong number of rows).
+	 */
+	committed: number;
+	/**
+	 * True when the failing step's outcome is not known, so it may have taken
+	 * effect too: the statement, when each statement commits on its own, or
+	 * the commit itself. Known only from an answer that says nothing ran (a
+	 * refusal the session lists); a dropped connection or a stopped wait is
+	 * unknown.
+	 */
+	unknown: boolean;
+	/**
+	 * False when a rollback was needed and its answer did not confirm it (it
+	 * timed out, or never got through): the database undoes the transaction
+	 * once the rollback runs or the node's idle reaper takes the session
+	 * (300 s), and until then its locks stay. Always true without a
+	 * transaction.
+	 */
+	rollbackConfirmed: boolean;
+}
+
+/** What an Apply did. */
+export interface SqlApplyResult {
+	/** Whether the statements ran inside one database transaction (the node's `begin` … `commit`). */
+	transactional: boolean;
+	/** The rows each statement that ran changed, in order (on a rolled-back apply, undone again). */
+	results: Array<{ affected_rows: number }>;
+	/** Null when every statement ran and, in a transaction, the commit succeeded. */
+	failure: SqlApplyFailure | null;
 }
 
 /**
@@ -131,6 +208,23 @@ export interface SqlSchemaResponse {
 	stale?: boolean;
 }
 
+/**
+ * What the node's `get_sql` tool answers (db_instance_base.get_sql): SQL its
+ * LLM wrote for a question, NOT executed. `valid: true` carries `sql`; a
+ * `valid: false` answer carries the node's `error` (unsafe SQL, with that
+ * `sql`, or the database's EXPLAIN error) or the model's prose `answer`.
+ */
+export interface SqlGetSqlResult {
+	/** Whether `sql` is a query the node accepted (a SELECT the database could EXPLAIN). */
+	valid: boolean;
+	/** The SQL, when the node wrote one. */
+	sql?: string;
+	/** Why the node did not accept it, in the node's words. */
+	error?: string;
+	/** The model's answer in words, when the question was not one for the database. */
+	answer?: string;
+}
+
 // =============================================================================
 // SESSION
 // =============================================================================
@@ -149,21 +243,65 @@ export interface SqlSession {
 	 * them through the driver, so nothing the user typed is ever parsed as
 	 * SQL. Reference them positionally as `$1..$n`.
 	 *
-	 * A session's cached task token goes stale whenever the owning task
-	 * restarts, and a stale token fails INDISTINGUISHABLY from a statement
-	 * the database refused. Retrying is therefore only safe when re-running
-	 * the statement is harmless: pass `idempotent` for reads, and leave it
-	 * unset for anything that writes. A non-idempotent failure surfaces as-is
-	 * — a silently re-sent INSERT is worse than an error the caller can see.
+	 * A statement is sent again in one case only: the engine refused it with
+	 * `TASK_STOPPED` (its task is stopping or restarting), which it raises
+	 * BEFORE the statement reaches the node, and re-discovery then finds the
+	 * same endpoint running again within the call's budget. Even so the retry
+	 * is opt-in: pass `idempotent` for reads, and leave it unset for anything
+	 * that writes. Any other failure, and every failure of a non-idempotent
+	 * call, surfaces as-is — a silently re-sent INSERT is worse than an error
+	 * the caller can see.
 	 *
 	 * @param sql - The statement to execute.
 	 * @param opts - Optional execution options.
 	 * @param opts.params - Positional bind values for `$1..$n`.
-	 * @param opts.idempotent - Allow ONE retry with a re-resolved task token.
-	 *                          Only for statements that are safe to re-run.
+	 * @param opts.idempotent - Allow the ONE retry after a pre-dispatch
+	 *                          `TASK_STOPPED` refusal. Only for statements the
+	 *                          caller classifies as reads.
+	 * @param opts.generation - The caller's ticket for this request. Once it
+	 *                          expires (Stop waiting, a newer request, the view
+	 *                          closing, a change of account) nothing more is
+	 *                          sent for the call and its answer or failure is
+	 *                          dropped as `stale`. It never leaves the realm
+	 *                          that made it: in a dev-tool frame it is checked
+	 *                          by the frame's remote session (a function cannot
+	 *                          cross the op channel), so there it stops the
+	 *                          frame's own send and drops the answer, while the
+	 *                          controller's one retry cannot see it.
 	 * @returns Rows and affected-row count.
 	 */
-	execute(sql: string, opts?: { params?: unknown[]; idempotent?: boolean }): Promise<SqlExecuteResult>;
+	execute(sql: string, opts?: { params?: unknown[]; idempotent?: boolean; generation?: IGenerationTicket; confirmed?: boolean }): Promise<SqlExecuteResult>;
+	/**
+	 * Apply app-written statements in order: staged row edits, or a designer
+	 * plan. Nothing is ever sent twice.
+	 *
+	 * With `atomic`, they run inside ONE transaction through the node's
+	 * `begin` / `execute{session_id}` / `commit` tools: any failure, or a
+	 * statement that changes another number of rows than its `expect`, rolls
+	 * everything back, and a refused commit is a failure too. Where there is
+	 * no transaction to have (a ClickHouse session undoes nothing; a node
+	 * without the transaction tools), NOTHING is sent: the call throws
+	 * `transactions-unavailable` (connect/tools.ts), and the caller asks the
+	 * user before sending again with `atomic: false`. Then each statement
+	 * commits on its own, the first failure stops the rest, and the result
+	 * says `transactional: false`.
+	 *
+	 * Every caller a view can reach goes through the engine core
+	 * (sqlCore.ts `applyBatch`), which first checks the whole list with
+	 * the node's dialect (sql/gate.ts `gateApplyStatements`) and runs
+	 * ClickHouse without a transaction. The session id never leaves the realm
+	 * that holds the engine connection.
+	 *
+	 * @param statements - The statements, in the order they must run.
+	 * @param opts - Apply options.
+	 * @param opts.atomic - Run them as one transaction where the engine has one.
+	 * @returns What ran; a failure once statements are being sent is data
+	 *          (`failure`), never thrown.
+	 * @throws ExplorerToolError when nothing was applied: the list was
+	 *         refused, the connection is not running, `begin` was refused,
+	 *         or there are no transactions (`transactions-unavailable`).
+	 */
+	applyBatch(statements: SqlApplyStatement[], opts: { atomic: boolean; confirmed?: boolean }): Promise<SqlApplyResult>;
 	/**
 	 * Reflect the schema of the attached database (or a single table).
 	 *
@@ -196,22 +334,14 @@ export interface SqlSession {
 	 * @returns The dialect identifier.
 	 */
 	dialect(): Promise<SqlDialect>;
-}
-
-// =============================================================================
-// PROBE
-// =============================================================================
-
-/** Result of probing an endpoint before binding a session to it. */
-export interface SqlProbeResult {
-	/** Whether the endpoint answered both probe calls. */
-	ok: boolean;
-	/** Reported dialect ('unknown' when the probe failed). */
-	dialect: SqlDialect;
-	/** Database name, when schema reflection succeeded. */
-	database?: string;
-	/** Number of tables reported by schema reflection. */
-	tableCount?: number;
-	/** Failure detail when ok is false. */
-	error?: string;
+	/**
+	 * Ask the node to write SQL for a question (`get_sql`). Nothing is
+	 * executed: the node's LLM writes the query and the node checks it with
+	 * EXPLAIN. Needs an LLM connected to the node; without one the call fails
+	 * with the node's MissingLlmError text.
+	 *
+	 * @param question - The question, in plain words.
+	 * @returns The node's answer (every `valid: false` shape is data).
+	 */
+	getSql(question: string): Promise<SqlGetSqlResult>;
 }

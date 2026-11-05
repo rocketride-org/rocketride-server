@@ -28,11 +28,16 @@
 // about being guesses:
 //
 //   `classifyStatement` — what kind of statement this is. The runner uses it
-//   to decide whether a failed call may be retried with a fresh token
-//   (`idempotent`), so the rule is conservative: anything that is not clearly
+//   to decide whether a call may take the session's one retry (`idempotent`),
+//   which follows only a `TASK_STOPPED` refusal the engine raises before the
+//   statement reaches the node (a dev tool's controller classifies again);
+//   the rule is conservative all the same: anything that is not clearly
 //   read-only is not a read. `EXPLAIN ANALYZE` really executes its inner
 //   statement, so it is classified by that statement, not as a read — and
-//   `patternCheck` peels the same prefix for the same reason.
+//   `patternCheck` peels the same prefix for the same reason. So do its
+//   other spellings: PostgreSQL's `ANALYSE` and option list (`EXPLAIN
+//   (ANALYZE true, BUFFERS)`), and MySQL's synonyms `DESCRIBE ANALYZE` and
+//   `DESC ANALYZE`.
 //
 //   `patternCheck` — whether the statement matches one of the shapes the
 //   confirmation dialog asks about. This is a TEXT CHECK, not a database
@@ -61,7 +66,8 @@ import type { KeywordSite } from './split';
  * What a statement does, by text pattern.
  *
  * - `read` — returns rows and changes nothing (SELECT, SHOW, EXPLAIN, DESCRIBE).
- * - `write` — changes rows (INSERT, UPDATE, DELETE, REPLACE, MERGE, TRUNCATE).
+ * - `write` — changes rows (INSERT, UPDATE, DELETE, REPLACE, MERGE, TRUNCATE),
+ *   or sends a SELECT's rows into a table, a file or variables (`SELECT ... INTO`).
  * - `ddl` — changes the schema (CREATE, ALTER, DROP, RENAME).
  * - `tx` — transaction control, which has no effect through this app's
  *   per-call autocommit execution path.
@@ -98,10 +104,34 @@ const TX_LEADERS = /^(begin|start\s+transaction|commit|rollback|savepoint|releas
 const TX_SET = /^set\s+(?:session\s+|global\s+|local\s+)?(?:autocommit|transaction)\b/i;
 
 /**
- * The `EXPLAIN` prefix: the keyword, an optional parenthesised option list, and
- * any bare option words before the statement being explained.
+ * PostgreSQL's other transaction spellings that no other dialect uses:
+ * `ABORT` (ROLLBACK) and `PREPARE TRANSACTION` (two-phase commit;
+ * `COMMIT PREPARED` / `ROLLBACK PREPARED` already lead with COMMIT/ROLLBACK).
  */
-const EXPLAIN_PREFIX = /^explain\s*(?:\([^)]*\)\s*)?(?:(?:analyz[se]|verbose|extended|partitions|costs|buffers|settings|summary|timing|wal|format\s*=?\s*\w+)\s+)*/i;
+const TX_POSTGRES = /^(?:abort|prepare\s+transaction)\b/i;
+
+/**
+ * PostgreSQL's `END [WORK | TRANSACTION]` (COMMIT). Only under 'postgres': in
+ * MySQL, and in a body split without its dollar quotes, a lone END closes a
+ * compound statement.
+ */
+const TX_POSTGRES_END = /^end(?:\s+(?:work|transaction))?$/i;
+
+/**
+ * MySQL's: XA (distributed) transactions, and autocommit set through a
+ * system-variable reference (`SET @@autocommit`, `SET @@session.autocommit`).
+ */
+const TX_MYSQL = /^(?:xa\s+(?:start|begin|end|prepare|commit|rollback|recover)\b|set\s+@@(?:(?:session|global|local)\.)?autocommit\b)/i;
+
+/** `EXPLAIN`, and MySQL's synonyms for it, which also take ANALYZE. */
+const EXPLAIN_LEADER = /^(?:explain|describe|desc)\b/i;
+
+/**
+ * The `EXPLAIN` prefix: the keyword (or `DESCRIBE` / `DESC`), an optional
+ * parenthesised option list, and any bare option words before the statement
+ * being explained. `ANALYZE` and `ANALYSE` are both PostgreSQL spellings.
+ */
+const EXPLAIN_PREFIX = /^(?:explain|describe|desc)\s*(?:\([^)]*\)\s*)?(?:(?:analy[sz]e|verbose|extended|partitions|costs|buffers|settings|summary|timing|wal|format\s*=?\s*\w+)\s+)*/i;
 
 /**
  * Data-modifying keywords that can appear inside a CTE chain.
@@ -111,6 +141,35 @@ const EXPLAIN_PREFIX = /^explain\s*(?:\([^)]*\)\s*)?(?:(?:analyz[se]|verbose|ext
  * unbounded under a meta line that says otherwise.
  */
 export const CTE_WRITE_WORDS = ['insert', 'update', 'delete', 'merge', 'replace'];
+
+/**
+ * Whether a statement that leads like a read sends its rows somewhere else
+ * instead of back to the caller: an `INTO` in its CODE.
+ *
+ * PostgreSQL's `SELECT ... INTO [TEMP | UNLOGGED] [TABLE] name` creates and
+ * fills a table; MySQL's `INTO OUTFILE` and `INTO DUMPFILE` write a file on
+ * the server and `INTO @var` sets variables, before `FROM` or at the end;
+ * ClickHouse's `INTO OUTFILE` writes a file. None of them returns rows, so
+ * none is a read, and a row limit appended to one would silently truncate
+ * what it writes (or, after MySQL's trailing INTO, be a syntax error naming
+ * a clause the user never typed).
+ *
+ * Read on MASKED text, so `into` in a literal, a comment or a quoted
+ * identifier is not one, and at ANY depth: no read-only SELECT carries an
+ * INTO anywhere, and the one way a data-modifying CTE does (`INSERT INTO`) is
+ * a write already. Only ever asked about a statement led by SELECT, a
+ * parenthesised set expression or a WITH chain.
+ *
+ * Exported for the same reason as {@link CTE_WRITE_WORDS}: the row-limit rule
+ * in `batch.ts` must give the same answer as the classification.
+ *
+ * @param sql - The statement.
+ * @param dialect - The engine dialect.
+ * @returns True when the statement carries an INTO in code.
+ */
+export function selectsInto(sql: string, dialect: SqlDialect = 'unknown'): boolean {
+	return keywordSites(sql, ['into'], dialect).length > 0;
+}
 
 /**
  * Keywords that can lead a statement, whether it is the one a `WITH` chain
@@ -197,6 +256,40 @@ function namesCte(masked: string, site: KeywordSite): boolean {
 }
 
 // =============================================================================
+// EXPLAIN
+// =============================================================================
+
+/**
+ * Read an `EXPLAIN` form: whether it ANALYZEs, which RUNS the statement it
+ * describes, and that statement. A `DESCRIBE` or `DESC` without ANALYZE
+ * describes a table and is not one (the read leaders cover it).
+ *
+ * @param head - The normalized statement.
+ * @returns The form, or null when the statement is not one.
+ */
+function explainForm(head: string): { analyze: boolean; inner: string } | null {
+	if (!EXPLAIN_LEADER.test(head)) return null;
+	const prefix = EXPLAIN_PREFIX.exec(head)?.[0] ?? '';
+	const analyze = /\banaly[sz]e\b/i.test(prefix);
+	if (!analyze && !/^explain\b/i.test(head)) return null;
+	return { analyze, inner: head.slice(prefix.length).trim() };
+}
+
+/**
+ * The statement an `EXPLAIN ANALYZE` form would run, or null when the text
+ * runs nothing: a plain EXPLAIN plans only, and an ANALYZE with nothing (or
+ * another EXPLAIN) behind it is not a statement this reads further.
+ *
+ * @param head - The normalized statement.
+ * @returns The statement it runs, or null.
+ */
+function analyzedStatement(head: string): string | null {
+	const form = explainForm(head);
+	if (form === null || !form.analyze || !form.inner || EXPLAIN_LEADER.test(form.inner)) return null;
+	return form.inner;
+}
+
+// =============================================================================
 // CLASSIFICATION
 // =============================================================================
 
@@ -229,20 +322,21 @@ export function classifyStatement(sql: string, dialect: SqlDialect = 'unknown'):
 	if (!head) return 'other';
 
 	// EXPLAIN: read, UNLESS it is an ANALYZE form, which runs the statement.
-	if (/^explain\b/i.test(head)) {
-		const prefix = EXPLAIN_PREFIX.exec(head)?.[0] ?? 'explain';
-		const inner = head.slice(prefix.length).trim();
-		if (!/\banaly[sz]e\b/i.test(prefix)) return 'read';
-		if (!inner || /^explain\b/i.test(inner)) return 'read';
-		return classifyStatement(inner, dialect);
+	if (explainForm(head) !== null) {
+		const runs = analyzedStatement(head);
+		return runs === null ? 'read' : classifyStatement(runs, dialect);
 	}
 
 	if (TX_SET.test(head)) return 'tx';
 	if (TX_LEADERS.test(head)) return 'tx';
-	if (READ_LEADERS.test(head)) return 'read';
+	if ((dialect === 'postgres' || dialect === 'unknown') && TX_POSTGRES.test(head)) return 'tx';
+	if (dialect === 'postgres' && TX_POSTGRES_END.test(head)) return 'tx';
+	if ((dialect === 'mysql' || dialect === 'unknown') && TX_MYSQL.test(head)) return 'tx';
+	// A SELECT ... INTO fills a table, a file or variables: a write.
+	if (READ_LEADERS.test(head)) return /^select\b/i.test(head) && selectsInto(head, dialect) ? 'write' : 'read';
 	if (WRITE_LEADERS.test(head)) return 'write';
 	if (DDL_LEADERS.test(head)) return 'ddl';
-	if (/^with\b/i.test(head)) return keywordSites(head, CTE_WRITE_WORDS, dialect).length > 0 ? 'write' : 'read';
+	if (/^with\b/i.test(head)) return keywordSites(head, CTE_WRITE_WORDS, dialect).length > 0 || selectsInto(head, dialect) ? 'write' : 'read';
 	return 'other';
 }
 
@@ -253,12 +347,14 @@ export function classifyStatement(sql: string, dialect: SqlDialect = 'unknown'):
 /**
  * Look for the statement shapes the confirmation dialog asks about: UPDATE or
  * DELETE with no top-level WHERE, an UPDATE or DELETE inside a WITH clause,
- * TRUNCATE, DROP, ALTER.
+ * TRUNCATE, DROP, ALTER, and an `EXPLAIN ANALYZE` of anything but a read.
  *
  * `EXPLAIN ANALYZE` is checked as the statement it would run, because it runs
  * it: the prefix is peeled here the same way {@link classifyStatement} peels
  * it, which is what keeps the two judgements from disagreeing about a form
- * that empties a table. A plain `EXPLAIN` runs nothing and is never a finding.
+ * that empties a table. When that statement has no finding of its own and is
+ * not a read, the finding is `EXPLAIN ANALYZE` itself. A plain `EXPLAIN` runs
+ * nothing and is never a finding.
  *
  * A `WITH` chain is read group by group, because PostgreSQL lets the statement
  * and any CTE body carry a write. Each parenthesised group has a VERB — its
@@ -308,13 +404,15 @@ export function patternCheck(sql: string, dialect: SqlDialect = 'unknown'): Patt
 	// EXPLAIN ANALYZE RUNS the statement it describes, and every call here
 	// commits on its own, so the prefix is peeled exactly as
 	// `classifyStatement` peels it and the check is made on what would really
-	// run. A plain EXPLAIN runs nothing and is never a finding.
-	if (/^explain\b/i.test(head)) {
-		const prefix = EXPLAIN_PREFIX.exec(head)?.[0] ?? 'explain';
-		if (!/\banaly[sz]e\b/i.test(prefix)) return null;
-		const inner = head.slice(prefix.length).trim();
-		if (!inner || /^explain\b/i.test(inner)) return null;
-		return patternCheck(inner, dialect);
+	// run. That statement's own finding is the more specific one. Without
+	// one, anything but a read is still a finding: an EXPLAIN reads as a
+	// plan, so a bounded DELETE behind ANALYZE would otherwise run unasked
+	// where its reader expected nothing to change. A plain EXPLAIN runs
+	// nothing and is never a finding.
+	if (explainForm(head) !== null) {
+		const runs = analyzedStatement(head);
+		if (runs === null) return null;
+		return patternCheck(runs, dialect) ?? (classifyStatement(runs, dialect) === 'read' ? null : { kind: 'EXPLAIN ANALYZE' });
 	}
 
 	if (/^truncate\b/i.test(head)) return { kind: 'TRUNCATE' };
