@@ -52,13 +52,103 @@ from ai.common.config import Config
 from ai.common.dap import DAPConn, TransportBase
 from ai.common.list_rows import paginate_rows
 from ai.account.models import resolve_run_permissions
-from ..pipeline import resolve_implied_source, resolve_pipeline_env
+from ..pipeline import resolve_implied_source, resolve_pipeline_env, substituted_env
 from .. import services_catalog
 from .cmd_monitor import owner_key, owner_wildcard_key
 
 # Only import for type checking to avoid circular import errors
 if TYPE_CHECKING:
     from ..task_server import TaskServer
+
+
+# Root keys where the validator writes its own diagnostics
+_DIAGNOSTICS = ('errors', 'warnings')
+
+
+def _submitted_ids(resolved: Any, submitted: Any) -> Dict[str, Any]:
+    """Map validated component ids to the ids the caller sent.
+
+    ``resolved`` and ``submitted`` are the same list of components after and
+    before :func:`resolve_pipeline_env`, which keeps their order.
+    """
+    if not isinstance(resolved, list) or not isinstance(submitted, list):
+        return {}
+    ids = {}
+    for after, before in zip(resolved, submitted):
+        if isinstance(after, dict) and isinstance(before, dict) and isinstance(after.get('id'), str):
+            ids[after['id']] = before.get('id')
+    return ids
+
+
+def _template_message(substituted: Dict[str, str], kind: str) -> str:
+    """Describe validation using submitted references, independent of value formatting."""
+    references = ', '.join('${' + name + '}' for name in sorted(substituted))
+    return f'Pipeline validation {kind} for config with template references: {references}'
+
+
+def _restored_diagnostics(data: Dict[str, Any], substituted: Dict[str, str], ids: Dict[str, Any]) -> Dict[str, Any]:
+    """Keep diagnostic counts, numeric codes and submitted component ids.
+
+    Node messages may transform or quote only part of a configured value.
+    Use fixed text when substitution occurred so every format follows the
+    same template-reference contract.
+    """
+    restored = {}
+    for kind in _DIAGNOSTICS:
+        if kind not in data:
+            continue
+        restored[kind] = []
+        for entry in data[kind]:
+            diagnostic = {'message': _template_message(substituted, 'error' if kind == 'errors' else 'warning')}
+            if type(entry.get('ccode')) is int:
+                diagnostic['ccode'] = entry['ccode']
+            if isinstance(entry.get('id'), str) and entry['id'] in ids:
+                diagnostic['id'] = ids[entry['id']]
+            restored[kind].append(diagnostic)
+    return restored
+
+
+def _can_validate_echo(pipeline: Dict[str, Any]) -> bool:
+    """Check structural types before sending a submitted config through the native pass."""
+    if type(pipeline.get('version', 1)) is not int or not isinstance(pipeline.get('components'), list):
+        return False
+    if 'source' in pipeline and not isinstance(pipeline['source'], str):
+        return False
+    for component in pipeline['components']:
+        if not isinstance(component, dict):
+            return False
+        if not all(isinstance(component.get(key), str) for key in ('id', 'provider')):
+            return False
+        config = component.get('config')
+        if not isinstance(config, dict):
+            return False
+        if any(key in config and not isinstance(config[key], str) for key in ('profile', 'type')):
+            return False
+        sections = []
+        if 'parameters' in config:
+            sections.append(config['parameters'])
+        profile = config.get('profile')
+        if profile in config:
+            sections.append(config[profile])
+        for section in sections:
+            if not isinstance(section, dict):
+                return False
+            if 'secureParameters' in section:
+                parameters = section['secureParameters']
+                if not isinstance(parameters, dict) or not isinstance(parameters.get('token'), str):
+                    return False
+                fields = parameters.get('secure')
+                if not isinstance(fields, list) or not all(isinstance(field, str) for field in fields):
+                    return False
+        for key, fields in (('input', ('lane', 'from')), ('control', ('classType', 'from'))):
+            if key not in component:
+                continue
+            if not isinstance(component[key], list):
+                return False
+            for link in component[key]:
+                if not isinstance(link, dict) or not all(isinstance(link.get(field), str) for field in fields):
+                    return False
+    return True
 
 
 # Component-level keys that are not node configuration. The engine validates and
@@ -191,6 +281,11 @@ class MiscCommands(DAPConn):
         Before validation, ``${ROCKETRIDE_*}`` environment variable references
         are resolved using the same merged environment as pipeline execution,
         so that fields containing variable references validate correctly.
+        The reply returns the config as submitted: when anything was
+        substituted, its config comes from a second pass over the caller's
+        own config when its structural types permit it. Diagnostics use fixed
+        messages listing the submitted references, with numeric codes and
+        submitted component ids retained.
 
         Source resolution follows the same logic as execute:
         1. Explicit ``source`` argument (if provided)
@@ -222,6 +317,7 @@ class MiscCommands(DAPConn):
         Usage Example:
         { "command": "rrext_validate", "arguments": { "pipeline": { "components": [], ... }, "source": "chat_1" } }
         """
+        substituted: Dict[str, str] = {}
         try:
             from ai.account import account
 
@@ -262,6 +358,8 @@ class MiscCommands(DAPConn):
                 )
 
             # Resolve ${ROCKETRIDE_*} variables before validation
+            substituted = substituted_env(pipeline, merged_env)
+            submitted = pipeline
             pipeline = resolve_pipeline_env(pipeline, merged_env)
 
             # The node config panel validates one component at a time and sends
@@ -274,7 +372,24 @@ class MiscCommands(DAPConn):
             # can produce, so `components` wins and the stray `component` is
             # wrapped as a full pipeline rather than passed through.
             if 'component' in pipeline and 'components' not in pipeline:
-                data = validatePipeline(pipeline)
+                # This payload is the validator's root, where it writes its own
+                # errors and warnings, so ones the caller sent are not passed in.
+                data = validatePipeline({k: v for k, v in pipeline.items() if k not in _DIAGNOSTICS})
+                # When anything was substituted, the reply is rebuilt from the
+                # caller's own input so it returns the config as submitted: the
+                # echoed component comes from a second pass over it (the
+                # full-pipeline form is structural and runs no node code), and
+                # only the errors and warnings come from the resolved pass,
+                # with fixed messages listing the submitted references.
+                if substituted:
+                    original = submitted['component']
+                    echo = {'version': submitted.get('version', 1), 'components': [original]}
+                    echoed = original
+                    if _can_validate_echo(echo):
+                        echoed = validatePipeline({'pipeline': echo})['pipeline']['components'][0]
+                    ids = _submitted_ids([pipeline['component']], [original])
+                    root = {k: v for k, v in submitted.items() if k not in _DIAGNOSTICS}
+                    data = {**root, 'component': echoed, **_restored_diagnostics(data, substituted, ids)}
             else:
                 # Resolve source: explicit arg > pipeline field > implied from components
                 source = args.get('source', None) or pipeline.get('source', None)
@@ -294,12 +409,26 @@ class MiscCommands(DAPConn):
                 # Same envelope pipe_Validate (modules/pipe) builds — the version
                 # rides INSIDE the wrapped config (see the FILE-form note above).
                 data = validatePipeline({'pipeline': inner})
+                # Rebuilt from the caller's own input, as above
+                if substituted:
+                    echo = {**submitted, 'version': submitted.get('version', 1)}
+                    echo_source = args.get('source', None) or submitted.get('source', None)
+                    if not echo_source and _can_validate_echo(echo):
+                        echo_source = resolve_implied_source(submitted)
+                    if echo_source:
+                        echo['source'] = echo_source
+                    echoed = validatePipeline({'pipeline': echo})['pipeline'] if _can_validate_echo(echo) else echo
+                    ids = _submitted_ids(pipeline.get('components'), submitted.get('components'))
+                    data = {'pipeline': echoed, **_restored_diagnostics(data, substituted, ids)}
 
             # Return the results
             return self.build_response(request, body=data)
 
         except Exception as e:
-            self.debug_message(f'Pipeline validation failed: {str(e)}')
+            message = _template_message(substituted, 'failed') if substituted else str(e)
+            self.debug_message(f'Pipeline validation failed: {message}')
+            if substituted:
+                raise RuntimeError(message) from None
             raise
 
     async def on_rrext_resolve_config(self, request: Dict[str, Any]) -> Dict[str, Any]:
