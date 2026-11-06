@@ -132,8 +132,11 @@ The node uses **llama-index-core** for the ReAct scaffolding
 turn it formats the ReAct prompt, calls the host LLM with `Observation:` as a
 stop word, and parses the model's `Thought / Action / Action Input` or final
 `Answer`. Tool execution goes through the host's control-plane `call_tool`, not
-through LlamaIndex — connected tools are wrapped as metadata-only
-`FunctionTool`s whose descriptions carry each tool's input JSON schema.
+through LlamaIndex. Connected tools are wrapped as metadata-only `FunctionTool`s,
+and their host JSON Schemas populate the formatter's actual **Tool Args** field,
+including required arguments and nested constraints. The placeholder callable's
+empty signature must not replace that schema. Runtime execution and argument
+validation remain with the host tool.
 
 The loop runs up to **10 iterations**. If no final answer arrives within that
 budget the node returns `"Agent stopped after reaching the maximum number of

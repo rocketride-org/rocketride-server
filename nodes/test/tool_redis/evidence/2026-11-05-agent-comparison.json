@@ -1,0 +1,168 @@
+{
+  "ollama_version": "0.40.14",
+  "llama_index_core": "0.14.25",
+  "engine": "3.6.0.646 (9e661aae)",
+  "source_base": "bed7a87e5a26fa1c7bb2e08ca93200f130db89b5",
+  "experiments": [
+    {
+      "label": "Original 3B setup",
+      "model": "qwen2.5:3b",
+      "requested_key": "counter",
+      "requested_increment": "3",
+      "actual_counter_value": null,
+      "tool_calls": 2,
+      "trace": [
+        {
+          "action": "redis_1.redis_incr",
+          "action_input": {
+            "key": "counter_key"
+          },
+          "observation": "{\"success\": true, \"key\": \"counter_key\", \"value_decimal\": \"1\"}"
+        },
+        {
+          "action": "redis_1.redis_incr",
+          "action_input": {
+            "key": "counter_key",
+            "amount": "3"
+          },
+          "observation": "{\"success\": true, \"key\": \"counter_key\", \"value_decimal\": \"4\"}"
+        }
+      ],
+      "schema_bridge_fixed": false
+    },
+    {
+      "label": "3B with clearer guidance and 16K context",
+      "model": "rocketride-qwen2.5-3b-16k",
+      "requested_key": "counter",
+      "requested_increment": "3",
+      "actual_counter_value": null,
+      "tool_calls": 1,
+      "trace": [
+        {
+          "action": "redis_1.redis_incr",
+          "action_input": {
+            "key": "counter_key",
+            "amount": "3"
+          },
+          "observation": "{\"success\": true, \"key\": \"counter_key\", \"value_decimal\": \"3\"}"
+        }
+      ],
+      "schema_bridge_fixed": false
+    },
+    {
+      "label": "3B after schema fix, original request",
+      "model": "qwen2.5:3b",
+      "requested_key": "counter",
+      "requested_increment": "3",
+      "actual_counter_value": null,
+      "tool_calls": 2,
+      "trace": [
+        {
+          "action": "redis_1.redis_incr",
+          "action_input": {
+            "key": "counter_key",
+            "amount": "3"
+          },
+          "observation": "{\"success\": true, \"key\": \"counter_key\", \"value_decimal\": \"3\"}"
+        },
+        {
+          "action": "redis_1.redis_get",
+          "action_input": {
+            "key": "counter_key"
+          },
+          "observation": "{\"success\": true, \"key\": \"counter_key\", \"found\": true, \"value\": \"3\", \"ttl_seconds\": -1}"
+        }
+      ],
+      "schema_bridge_fixed": true
+    },
+    {
+      "label": "7B configured profile, original request",
+      "model": "rocketride-redis-qwen2.5-7b",
+      "requested_key": "counter",
+      "requested_increment": "3",
+      "actual_counter_value": "3",
+      "tool_calls": 1,
+      "trace": [
+        {
+          "action": "redis_1.redis_incr",
+          "action_input": {
+            "key": "counter",
+            "amount": "3"
+          },
+          "observation": "{\"success\": true, \"key\": \"counter\", \"value_decimal\": \"3\"}"
+        }
+      ],
+      "schema_bridge_fixed": false
+    }
+  ],
+  "model_manifests": [
+    {
+      "name": "rocketride-redis-qwen2.5-7b:latest",
+      "digest": "b47292c8bcdc78f49a9c3d2dbb6f9497b0059102f79ada72e43154593bb14ded",
+      "details": {
+        "parent_model": "qwen2.5:7b",
+        "format": "gguf",
+        "family": "qwen2",
+        "families": [
+          "qwen2"
+        ],
+        "parameter_size": "7.6B",
+        "quantization_level": "Q4_K_M",
+        "context_length": 32768,
+        "embedding_length": 3584,
+        "runner": "llamacpp"
+      }
+    },
+    {
+      "name": "qwen2.5:7b",
+      "digest": "845dbda0ea48ed749caafd9e6037047aa19acfcfd82e704d7ca97d631a0b697e",
+      "details": {
+        "parent_model": "",
+        "format": "gguf",
+        "family": "qwen2",
+        "families": [
+          "qwen2"
+        ],
+        "parameter_size": "7.6B",
+        "quantization_level": "Q4_K_M",
+        "context_length": 32768,
+        "embedding_length": 3584,
+        "runner": "ggml"
+      }
+    },
+    {
+      "name": "rocketride-qwen2.5-3b-16k:latest",
+      "digest": "b5097815f7e79c97ee6cb3b5118d80e59ebc3cf3d1e8e191a8414c037c34ce5d",
+      "details": {
+        "parent_model": "qwen2.5:3b",
+        "format": "gguf",
+        "family": "qwen2",
+        "families": [
+          "qwen2"
+        ],
+        "parameter_size": "3.1B",
+        "quantization_level": "Q4_K_M",
+        "context_length": 32768,
+        "embedding_length": 2048,
+        "runner": "llamacpp"
+      }
+    },
+    {
+      "name": "qwen2.5:3b",
+      "digest": "357c53fb659c5076de1d65ccb0b397446227b71a42be9d1603d46168015c9e4b",
+      "details": {
+        "parent_model": "",
+        "format": "gguf",
+        "family": "qwen2",
+        "families": [
+          "qwen2"
+        ],
+        "parameter_size": "3.1B",
+        "quantization_level": "Q4_K_M",
+        "context_length": 32768,
+        "embedding_length": 2048,
+        "runner": "ggml"
+      }
+    }
+  ]
+}

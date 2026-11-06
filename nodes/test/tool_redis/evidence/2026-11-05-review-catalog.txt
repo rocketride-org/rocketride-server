@@ -1,0 +1,15 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.13, pytest-9.1.1, pluggy-1.7.0
+hardware: mps Apple Silicon, 16.0 GB RAM [probe]; strict off
+rootdir: <repository>/nodes
+configfile: ../pyproject.toml
+plugins: timeout-2.4.0, anyio-4.16.0, asyncio-1.4.1.post1
+timeout: 600.0s
+timeout method: signal
+timeout func_only: False
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 78 items / 77 deselected / 1 selected
+
+test/test_dynamic.py .                                                   [100%]
+
+======================= 1 passed, 77 deselected in 4.34s =======================
