@@ -92,7 +92,7 @@ def open_store(monkeypatch):
         ``config`` attribute is the Store config.
     """
     if not _URI:
-        pytest.skip('Set RR_TEST_MILVUS_URI to a Milvus test server')
+        pytest.skip('Set RR_TEST_MILVUS_URI to a Milvus test server; CI starts none yet (#3094)')
     url = urlsplit(_URI)
     if url.scheme != 'http' or not url.hostname or ':' in url.hostname:
         # The store opens in local mode, which connects to http://<host>:<port>, and

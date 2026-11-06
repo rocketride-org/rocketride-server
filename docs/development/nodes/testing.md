@@ -619,7 +619,7 @@ port and point `RR_TEST_AGE_DSN` at it.
 The `store_milvus` node has a suite against a real Milvus,
 `nodes/test/store_milvus/test_store_milvus_live.py`, which reads the server's
 `http://` address from `RR_TEST_MILVUS_URI` (a host name or an IPv4 address:
-pymilvus does not connect to an IPv6 one). CI starts no Milvus, so without
+pymilvus does not connect to an IPv6 one). CI starts no Milvus yet (#3094), so without
 the variable the suite skips even with `RR_REQUIRE_DB_TESTS=1`; with both set,
 a server that does not answer fails the test. Each test writes to its own
 collection. To run it locally:
