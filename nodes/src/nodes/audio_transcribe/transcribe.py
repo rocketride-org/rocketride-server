@@ -182,9 +182,6 @@ class Transcribe(AudioReader):
     def start(self):
         """
         Begins audio decoding stream.
-
-        Args:
-            mime_type (str): MIME type of the incoming stream (e.g., 'audio/mp3').
         """
         # Initialize buffers
         self._audio_chunks = []  # List of byte chunks (efficient!)

@@ -945,7 +945,8 @@ class WebServer:
             routeHandler (Callable): The function that handles requests to this route.
             methods (List[str]): A list of allowed HTTP methods (e.g., ["GET", "POST"]).
             public (bool): If True, the route is considered public and does not require authorization.
-            recursive (bool): If public route, applies to all child routes as well.
+            private (bool): If True, the route requires authorization.
+            deprecated (bool): If True, the route is marked as deprecated in the OpenAPI schema.
 
         Behavior:
             - The function dynamically adds a new route to `app.router` at runtime.
@@ -1014,7 +1015,7 @@ class WebServer:
             path (str): The URL path for the new route (e.g., "/process").
             listener (Callable): The function that accepts the socket connection request.
             public (bool): If True, the route is considered public and does not require authorization.
-            recursive (bool): If public route, applies to all child routes as well.
+            private (bool): If True, the route requires authorization.
 
         Behavior:
             - The function dynamically adds a new route to `app.router` at runtime.
@@ -1046,10 +1047,8 @@ class WebServer:
         Dynamically loads a service module and enables its API endpoints.
 
         Args:
-            module (str): The name of the service module to load.
-
-        Returns:
-            module: The loaded module instance.
+            moduleName (str): The name of the service module to load.
+            config (Dict[str, Any], optional): Configuration passed to the module's initModule.
 
         Behavior:
             - Uses `importlib.import_module()` to dynamically import a module.
@@ -1058,7 +1057,6 @@ class WebServer:
 
         Example:
             >>> use('analytics')
-            <module 'ai.modules.analytics.endpoints' from 'path/to/module.py'>
         """
         # Clean it up
         moduleName = moduleName.lower().strip()

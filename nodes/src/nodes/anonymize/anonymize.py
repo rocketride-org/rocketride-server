@@ -81,7 +81,6 @@ def anonymize(text: str, matches, anonymize_char: str = '*') -> str:
         text (str): Input text to replace the segments.
         matches (any): A list of the matches (offset and length) to be replaced with anonymization characters.
         anonymize_char (str): A char to replace with.
-        anonymize_length (int): Optional. The fixed length of the sequence to replace.
 
     Note:
         Offsets are expected in ascending order, repetitions and overlaps are allowed.
