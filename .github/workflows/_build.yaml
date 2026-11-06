@@ -353,7 +353,10 @@ jobs:
           UV_LINK_MODE: copy
           # Every task child process of the test servers writes periodic Python
           # stack dumps here (scripts/lib/stackdumps.js), uploaded below on failure.
+          # One dump a minute keeps the hook light; on Windows scripts/lib/stackwatch.js
+          # also writes native_<pid>.txt for a child frozen in startup.
           ROCKETRIDE_TEST_STACK_DUMPS: ${{ github.workspace }}/dist/server/test-logs/stack-dumps
+          ROCKETRIDE_TEST_STACK_DUMPS_SECS: '60'
         run: ${{ matrix.builder_cmd }} ${{ inputs.test_targets }} --verbose ${{ vars.CI_TEST_SEQUENTIAL == 'true' && '--sequential' || '' }} --autoinstall ${{ matrix.platform == 'ubuntu' && '--system-compiler' || '' }}
 
       # rocketride_graph applies different Cypher rules on AGE 1.5.0 and 1.6.0,
