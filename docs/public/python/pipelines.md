@@ -40,9 +40,11 @@ The value you choose is the run's
 [private token](/operate/security#endpoint-authentication): full control of
 the run for anyone who presents it. So make it unguessable, and keep the `tk_`
 prefix (without it the token cannot authenticate on webhook or dropper
-endpoints). Tokens share one namespace across every user of the server: a
-predictable value collides with other people's tasks, and with `use_existing` a
-token that matches a running task attaches to it, whoever started it.
+endpoints). The server refuses a `tk_` token with fewer than 32 characters
+after the prefix (letters, digits, `-` and `_`). Tokens share one namespace across every user of the server: a
+predictable value collides with other people's tasks: a token that matches
+someone else's task is refused, with or without `use_existing`, and a token
+that matches your own running task attaches to it under `use_existing`.
 
 What two instances still share:
 

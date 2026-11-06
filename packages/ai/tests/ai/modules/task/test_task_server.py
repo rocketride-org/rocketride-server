@@ -571,10 +571,13 @@ def test_get_task_returns_underlying_task():
 
 
 def test_get_task_control_by_public_key_finds_match():
-    """The first control whose public_auth equals the argument is returned."""
+    """The first control whose public_auth equals the argument, on a public source, is returned."""
     ts = _make_server()
     ctrl_a = _make_control(token='tk_a', public_auth='pk_zzz')
     ctrl_b = _make_control(token='tk_b', public_auth='pk_xyz')
+    ctrl_a.source = ctrl_b.source = 'src'
+    ctrl_a.pipeline = ctrl_b.pipeline = {'components': [{'id': 'src', 'provider': 'chat'}]}
+    ctrl_a.task._pipeline = ctrl_b.task._pipeline = ctrl_a.pipeline
     ts._task_control = {'tk_a': ctrl_a, 'tk_b': ctrl_b}
     assert ts.get_task_control_by_public_key('pk_xyz') is ctrl_b
 
