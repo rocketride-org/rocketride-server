@@ -57,6 +57,9 @@ export interface INewAppWizardHost {
 	 * Rejection re-enables the form with the validation message.
 	 */
 	scaffold(appName: string, displayName: string, frame: FrameOptions): Promise<void>;
+	/** Claims the org's developer id; resolves with the fresh identity.
+	 *  Used only when the identity reports canRegisterDeveloper. */
+	registerDeveloper?(developerId: string): Promise<NewAppIdentity>;
 	/** Close the untitled document without creating anything. */
 	cancel(): void;
 	/** Scaffold location prefix for the identity summary (e.g. 'apps/'). */
@@ -139,6 +142,16 @@ export const NewAppWizard: React.FC<INewAppWizardProps> = ({ host }) => {
 		[host],
 	);
 
+	/** Claim a developer id from the form; the fresh identity replaces the
+	 *  'local' default. Rejections propagate so the form shows the reason. */
+	const handleRegister = useCallback(
+		async (developerId: string): Promise<void> => {
+			if (!host.registerDeveloper) return;
+			setIdentity(await host.registerDeveloper(developerId));
+		},
+		[host],
+	);
+
 	if (!identity) {
 		return (
 			<div style={styles.root}>
@@ -156,6 +169,7 @@ export const NewAppWizard: React.FC<INewAppWizardProps> = ({ host }) => {
 				{...(host.locationPrefix !== undefined ? { locationPrefix: host.locationPrefix } : {})}
 				{...(host.noWorkspaceNote !== undefined ? { noWorkspaceNote: host.noWorkspaceNote } : {})}
 				onCreate={handleCreate}
+				{...(host.registerDeveloper && identity.canRegisterDeveloper ? { onRegisterDeveloper: handleRegister } : {})}
 				onCancel={() => host.cancel()}
 			/>
 		</div>

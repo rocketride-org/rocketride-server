@@ -43,28 +43,44 @@ interface IAppDevOpsDeps {
 export function registerVscodeAppDevOps(bus: IOpBus, deps: IAppDevOpsDeps): void {
 	const { context, connectionManager, broadcast, closeWizard } = deps;
 
+	/** A developer id claimed from the wizard this session, keyed by org. The
+	 *  account info is captured at login, so it won't show the claim until a
+	 *  reconnect — this bridges the gap if the status lookup lags too. */
+	let claimed: { orgId: string | undefined; developerId: string } | null = null;
+
 	/**
-	 * Resolves the developer id from the connected server's account info.
-	 * Falls back to 'local' when there is no connection, no organization, or
-	 * no developer id set — the historical appManifest.publisher default.
+	 * Resolves the developer id: the login-time account info first, then a
+	 * live developer_status lookup (catches a claim made since login). Falls
+	 * back to 'local' when there is no connection, no organization, or no
+	 * developer id set — the historical appManifest.publisher default.
+	 * canRegisterDeveloper is true only when the server answered and the org
+	 * has no id yet (OSS servers always carry one; a failed lookup hides the form).
 	 */
-	const resolveDeveloperId = (): { developerId: string; source: 'organization' | 'default' } => {
+	const resolveDeveloperId = async (): Promise<{ developerId: string; source: 'organization' | 'default'; canRegisterDeveloper: boolean }> => {
+		const fallback = { developerId: DEFAULT_DEVELOPER_ID, source: 'default' as const, canRegisterDeveloper: false };
 		const client = connectionManager.getClient();
-		if (!client || !connectionManager.isConnected()) {
-			return { developerId: DEFAULT_DEVELOPER_ID, source: 'default' };
-		}
+		if (!client || !connectionManager.isConnected()) return fallback;
 		const accountInfo = client.getAccountInfo() as { organization?: { developerId?: string } } | null;
-		const developerId = accountInfo?.organization?.developerId;
-		return developerId ? { developerId, source: 'organization' } : { developerId: DEFAULT_DEVELOPER_ID, source: 'default' };
+		const fromLogin = accountInfo?.organization?.developerId;
+		if (fromLogin) return { developerId: fromLogin, source: 'organization', canRegisterDeveloper: false };
+		if (claimed && claimed.orgId === client.getOrgId()) return { developerId: claimed.developerId, source: 'organization', canRegisterDeveloper: false };
+		try {
+			const status = await client.developerStatus();
+			if (status?.developerId) return { developerId: status.developerId, source: 'organization', canRegisterDeveloper: false };
+			return { ...fallback, canRegisterDeveloper: true };
+		} catch {
+			return fallback;
+		}
 	};
 
 	const buildIdentity = async (): Promise<NewAppIdentity> => {
-		const { developerId, source } = resolveDeveloperId();
+		const { developerId, source, canRegisterDeveloper } = await resolveDeveloperId();
 		return {
 			developerId,
 			source,
 			workspaceOpen: (vscode.workspace.workspaceFolders?.length ?? 0) > 0,
 			existingFolders: await listAppFolders(),
+			canRegisterDeveloper,
 		};
 	};
 
@@ -74,7 +90,7 @@ export function registerVscodeAppDevOps(bus: IOpBus, deps: IAppDevOpsDeps): void
 			// Resolve the developer id NOW — the wizard is modeless, so the
 			// form may have been open across a login/logout. scaffoldApp
 			// re-validates the id + folder and opens the App Builder itself.
-			const developerId = resolveDeveloperId().developerId;
+			const developerId = (await resolveDeveloperId()).developerId;
 			await scaffoldApp({
 				appId: `${developerId}.${p.appName}`,
 				appName: p.displayName,
@@ -82,6 +98,18 @@ export function registerVscodeAppDevOps(bus: IOpBus, deps: IAppDevOpsDeps): void
 			});
 			// The real builder is open — retire the untitled document.
 			closeWizard();
+		},
+		'host.appdev.registerDeveloper': async (p) => {
+			const client = connectionManager.getClient();
+			if (!client || !connectionManager.isConnected()) throw new Error('Not connected to server');
+			const requested = p.developerId.trim();
+			if (!requested) throw new Error('Enter a developer id');
+			const res = (await client.registerDeveloper(requested)) as { developerId?: string } | undefined;
+			claimed = { orgId: client.getOrgId(), developerId: res?.developerId || requested };
+			// Every open wizard (and this caller) picks up the new linkage name.
+			const identity = await buildIdentity();
+			broadcast('host.appdev.identityChanged', identity);
+			return identity;
 		},
 		'host.appdev.closeWizard': async () => closeWizard(),
 	};

@@ -456,6 +456,9 @@ export interface NewAppIdentity {
 	workspaceOpen: boolean;
 	/** Folder names already in the scaffold target — used for live collision validation. */
 	existingFolders: string[];
+	/** True when the org has no developer id yet and this host can claim one
+	 *  from the wizard (host.appdev.registerDeveloper). Omitted = no form. */
+	canRegisterDeveloper?: boolean;
 }
 
 // =============================================================================
