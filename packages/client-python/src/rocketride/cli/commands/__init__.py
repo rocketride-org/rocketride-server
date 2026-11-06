@@ -34,6 +34,7 @@ Modules:
     app: ``app`` subcommands
     deploy: ``deploy`` subcommands
     validate: ``validate`` (pipeline files, CI-friendly exit codes)
+    eval: ``eval`` (golden-dataset eval specs, CI-friendly exit codes)
     otel: ``otel`` (OpenTelemetry bridge: pipeline traces + metrics over OTLP)
     diff: ``diff`` (semantic ``.pipe`` diff, entirely local — no server)
     profile: ``profile`` subcommands (server process or pipeline profiling)
@@ -43,6 +44,7 @@ from .app import run_app
 from .auth import run_init, run_login
 from .deploy import run_deploy
 from .diff import run_diff
+from .eval import run_eval
 from .otel import run_otel
 from .profile import run_profile
 from .store import run_store
@@ -53,6 +55,7 @@ __all__ = [
     'run_app',
     'run_deploy',
     'run_diff',
+    'run_eval',
     'run_init',
     'run_list',
     'run_login',
