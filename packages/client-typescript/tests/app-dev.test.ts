@@ -48,12 +48,34 @@ beforeEach(() => {
 	ws = fs.mkdtempSync(path.join(os.tmpdir(), 'rr-app-dev-'));
 });
 
-afterEach(() => {
+/**
+ * Removes the workspace, retrying while the OS reports it in use.
+ *
+ * Windows refuses to remove a folder a just-stopped dev server still holds until that
+ * process tree is fully gone, which takes longer on a busy machine than a fixed retry
+ * count of `rmSync` covers. Any other error is thrown at once.
+ *
+ * @param folder - The folder to remove.
+ * @param deadlineMs - How long to keep retrying a busy folder.
+ */
+async function removeWorkspace(folder: string, deadlineMs = 30000): Promise<void> {
+	const busy = new Set(['EBUSY', 'EPERM', 'ENOTEMPTY']);
+	const deadline = Date.now() + deadlineMs;
+	for (;;) {
+		try {
+			fs.rmSync(folder, { recursive: true, force: true });
+			return;
+		} catch (error) {
+			if (!busy.has((error as NodeJS.ErrnoException).code ?? '') || Date.now() >= deadline) throw error;
+			await new Promise((resolve) => setTimeout(resolve, 200));
+		}
+	}
+}
+
+afterEach(async () => {
 	jest.restoreAllMocks();
-	// Windows refuses to remove a folder a just-stopped dev server still holds
-	// until that process is fully gone, which takes longer on a busy machine
-	fs.rmSync(ws, { recursive: true, force: true, maxRetries: 10 });
-});
+	await removeWorkspace(ws);
+}, 60000);
 
 /** A connectClient stand-in for executeAppDev (validated once, then dropped). */
 function fakeClient() {
@@ -173,20 +195,26 @@ describe('DevSession', () => {
 		const session = new DevSession({ app, workspaceRoot: ws, engineOrigin: 'http://localhost:5565', install: false, watchPackageJson: false, onState: (s) => states.push(s) });
 
 		const origin = await session.start();
-		await new Promise((resolve) => setTimeout(resolve, 200));
-
-		// the per-session wrapper is the preview's front door
 		const rocketrideDir = path.join(app.folder, '.rocketride');
-		const wrapperNames = fs.readdirSync(rocketrideDir).filter((name) => name.startsWith('dev-proxy.'));
-		expect(wrapperNames).toHaveLength(1);
-		const wrapper = fs.readFileSync(path.join(rocketrideDir, wrapperNames[0]), 'utf8');
-		await session.stop();
+		let wrapperName = '';
+		let wrapper = '';
+		try {
+			await waitFor(() => states.includes('ok'));
+
+			// the per-session wrapper is the preview's front door
+			const wrapperNames = fs.readdirSync(rocketrideDir).filter((name) => name.startsWith('dev-proxy.'));
+			expect(wrapperNames).toHaveLength(1);
+			wrapperName = wrapperNames[0];
+			wrapper = fs.readFileSync(path.join(rocketrideDir, wrapperName), 'utf8');
+		} finally {
+			await session.stop();
+		}
 
 		expect(origin).toBe('http://localhost:3999');
 		expect(wrapper).toContain('"http://localhost:5565"');
 		expect(wrapper).toContain('"/apps/acme.clock/dev"');
 		// stop() removes the session's own wrapper
-		expect(fs.existsSync(path.join(rocketrideDir, wrapperNames[0]))).toBe(false);
+		expect(fs.existsSync(path.join(rocketrideDir, wrapperName))).toBe(false);
 		expect(states).toContain('ok');
 		expect(states[states.length - 1]).toBe('stopped');
 	});
@@ -242,7 +270,8 @@ describe('DevSession', () => {
 		atomicSave('0.1.2');
 		await waitFor(() => restarts() === 2);
 		await session.stop();
-	}, 15000);
+		// two restarts, each a stop, a debounced file event and a respawn: real work a loaded runner stretches
+	}, 60000);
 
 	it('restarts on a package.json change when the app folder is named through its 8.3 short path', async () => {
 		const { folder, app } = writeServedApp(3995);

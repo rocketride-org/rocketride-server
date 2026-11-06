@@ -78,13 +78,28 @@ def _load_real_tool_args():
 def install_stubs(node_config: dict | None = None) -> None:
     mod_rl = types.ModuleType('rocketlib')
 
-    def mock_tool_function(*args, **kwargs):
-        return lambda f: f
+    def mock_tool_function(*, input_schema=None, description=None, output_schema=None):
+        # Stamp the metadata like rocketlib does, so the node's tool list is the real one.
+        def decorator(fn):
+            fn.__tool_meta__ = {
+                'input_schema': input_schema,
+                'description': description,
+                'output_schema': output_schema,
+            }
+            return fn
+
+        return decorator
 
     mod_rl.tool_function = mock_tool_function
 
     class IInstanceBase:
-        pass
+        def _collect_tool_methods(self):
+            # Same walk as rocketlib's IInstanceBase: every @tool_function method by name.
+            return {
+                name: getattr(self, name)
+                for name in dir(type(self))
+                if hasattr(getattr(type(self), name, None), '__tool_meta__')
+            }
 
     class IGlobalBase:
         pass

@@ -33,7 +33,11 @@ requests, reviews, releases, workflows, orgs, users, and code search.
 from __future__ import annotations
 
 import base64
+import functools
+import itertools
 import re
+from collections.abc import Iterable
+from typing import TYPE_CHECKING, Callable
 
 from rocketlib import IInstanceBase, tool_function, warning
 
@@ -52,8 +56,10 @@ from .github_client import (
     clean_workflow,
     is_too_large,
 )
-from .IGlobal import IGlobal
-from . import github_client, repository_reads
+from . import github_client, graphql_guard, repository_reads
+
+if TYPE_CHECKING:
+    from .IGlobal import IGlobal
 
 # ---------------------------------------------------------------------------
 # Shared parameter descriptions
@@ -185,6 +191,22 @@ class IInstance(IInstanceBase):
     IGlobal: IGlobal
 
     # -----------------------------------------------------------------------
+    # Tool publication
+    # -----------------------------------------------------------------------
+
+    def _collect_tool_methods(self) -> dict[str, Callable]:
+        """Publish only the tools named in the ``tools`` allowlist; none named means all.
+
+        The engine builds ``tool.query`` and dispatches ``tool.invoke`` from this map,
+        so a tool left out is neither in the schema the agent sees (#648) nor callable.
+        """
+        methods = super()._collect_tool_methods()
+        allowed = self.IGlobal.tools
+        if not allowed:
+            return methods
+        return {name: method for name, method in methods.items() if name in allowed}
+
+    # -----------------------------------------------------------------------
     # Helpers
     # -----------------------------------------------------------------------
 
@@ -206,30 +228,70 @@ class IInstance(IInstanceBase):
         if self.IGlobal.read_only:
             raise ValueError('This operation is not permitted: the node is configured in read-only mode')
 
-    def _get(self, path: str, *, params: dict | None = None, app_identity: bool = False) -> dict:
-        """GET with server-held credentials and the result envelope; credentials never reach the result."""
-        try:
+    def _get(
+        self,
+        path: str,
+        *,
+        params: dict | None = None,
+        app_identity: bool = False,
+        budget: github_client.CallBudget | None = None,
+    ) -> dict:
+        """GET with server-held credentials and the result envelope; credentials never reach the result.
+
+        ``budget`` is the tool call's shared rate-limit budget; without it this request
+        has its own.
+        """
+        return self._with_credentials(
+            lambda credential, secrets: github_client.get_result(
+                credential, path, params=params, retry=self.IGlobal.retry_policy, secrets=secrets, budget=budget
+            ),
+            app_identity=app_identity,
+        )
+
+    def _with_credentials(
+        self, send: Callable[[github_client.Handed, tuple[str, ...]], dict], *, app_identity: bool = False
+    ) -> dict:
+        """Call ``send`` with a credential provider and the node's secrets; no credential reaches the result.
+
+        The provider is a ``github_client.Handed``: it returns the token minted here for
+        the first attempt and mints again for each retry (``IGlobal.get_token`` refreshes
+        an installation token near its expiry; an App JWT is signed again), so a retry
+        after a long wait does not send an expired credential. The client records every
+        token it hands out in ``handed.tokens``, the one list the result is redacted with.
+        """
+        mint = (
             # GET /app wants the App JWT, not an installation access token.
-            token = (
-                github_client.sign_app_jwt(self.IGlobal.app_id, self.IGlobal.private_key_pem)
-                if app_identity
-                else self._token()
-            )
+            (lambda: github_client.sign_app_jwt(self.IGlobal.app_id, self.IGlobal.private_key_pem))
+            if app_identity
+            else self._token
+        )
+        try:
+            first = mint()
         except Exception as exc:
             # Auth errors can carry the token endpoint's response or PEM parser details;
-            # neither belongs in a result an agent or a browser can see. Leave the
-            # operator a trace with the exception class only.
-            warning(
-                f'tool_github: GitHub authentication failed ({type(exc).__name__}); the read returned a generic error'
-            )
-            return github_client.failure_result(
-                'GitHub authentication failed. Check the node credentials and installation access.'
-            )
-        # The call token, the configured PAT and the App private key: redacted from the
-        # whole result, and from an error message before its cap.
-        return github_client.get_result(
-            token, path, params=params, secrets=(self.IGlobal.token, self.IGlobal.private_key_pem)
-        )
+            # neither belongs in a result an agent or a browser can see.
+            self._auth_failed(exc)
+            return github_client.failure_result(github_client.AUTH_FAILURE)
+        attempts = itertools.count()
+
+        def credential() -> str:
+            if next(attempts) == 0:
+                return first
+            try:
+                return mint()
+            except Exception as exc:
+                self._auth_failed(exc)
+                raise github_client.AuthenticationFailed() from None
+
+        handed = github_client.Handed(credential)
+        secrets = (self.IGlobal.token, self.IGlobal.private_key_pem)
+        result = send(handed, secrets)
+        return github_client.redact_result(result, (first, *handed.tokens, *secrets))
+
+    @staticmethod
+    def _auth_failed(exc: Exception) -> None:
+        """Leave the operator a trace of an authentication failure, with the exception class only."""
+        warning(f'tool_github: GitHub authentication failed ({type(exc).__name__}); the call returned a generic error')
 
     # =======================================================================
     # FILES
@@ -931,9 +993,9 @@ class IInstance(IInstanceBase):
     def repo_tree(self, args):
         """Read a repository snapshot, optionally completing a truncated tree."""
         args = normalize_tool_input(args, tool_name='repo_tree')
-        return repository_reads.repo_tree(
-            self._get, self._repo(args, 'repo_tree'), **repository_reads.tree_options(args)
-        )
+        # One rate-limit budget for the whole call, shared by every subtree read of a walk.
+        read = functools.partial(self._get, budget=github_client.CallBudget())
+        return repository_reads.repo_tree(read, self._repo(args, 'repo_tree'), **repository_reads.tree_options(args))
 
     @tool_function(
         input_schema={
@@ -1012,6 +1074,73 @@ class IInstance(IInstanceBase):
             return github_client.shape_failure(result, 'an object naming the user')
         result['data'] = {'login': identity, 'type': result['data'].get('type')}
         return result
+
+    # =======================================================================
+    # GRAPHQL
+    # =======================================================================
+
+    @tool_function(
+        input_schema={
+            'type': 'object',
+            'required': ['query'],
+            'properties': {
+                'query': {
+                    'type': 'string',
+                    'description': (
+                        'GraphQL document for https://api.github.com/graphql. Page with first/after and '
+                        'pageInfo { hasNextPage endCursor }. Select rateLimit { cost remaining resetAt } '
+                        'to see what the query spends.'
+                    ),
+                },
+                'variables': {
+                    'type': 'object',
+                    'description': 'Values for the variables the document declares, e.g. {"owner": "acme", "after": null}.',
+                },
+                'operationName': {
+                    'type': 'string',
+                    'description': 'Which operation to run when the document defines more than one.',
+                },
+            },
+        },
+        description=(
+            'Run a GitHub GraphQL document (POST /graphql). Returns data.data and data.errors as GitHub sent '
+            'them, with rate_limit; GraphQL errors are returned, not raised. In read-only mode a document '
+            'with a mutation operation is refused before it is sent; with read-only mode off, mutations run '
+            'only when graphqlAllowMutations is on.'
+        ),
+    )
+    def graphql(self, args):
+        """Run a GraphQL document; mutations are refused in read-only mode, and otherwise unless graphqlAllowMutations is on."""
+        args = normalize_tool_input(args, tool_name='graphql')
+        query = args.get('query')
+        if not isinstance(query, str) or not query.strip():
+            raise ValueError('graphql: query must be a non-empty GraphQL document')
+        variables = args.get('variables')
+        if variables is not None and not isinstance(variables, dict):
+            raise ValueError('graphql: variables must be an object')
+        operation_name = args.get('operationName')
+        if operation_name is not None and (not isinstance(operation_name, str) or not operation_name.strip()):
+            raise ValueError('graphql: operationName must be a non-empty string')
+        # Checked before a token is minted, so nothing reaches GitHub. The whole
+        # document is checked: operationName does not exempt a mutation in it.
+        refusal = graphql_guard.mutation_refusal(query)
+        if refusal and self.IGlobal.read_only:
+            return github_client.failure_result(refusal)
+        if refusal and not self.IGlobal.graphql_allow_mutations:
+            # Off by default: a mutation can do anything the credential allows, far more
+            # than the write tools, so existing settings do not enable GraphQL mutations.
+            return github_client.failure_result(graphql_guard.not_allowed(refusal))
+        return self._with_credentials(
+            lambda credential, secrets: github_client.graphql_result(
+                credential,
+                query,
+                variables,
+                operation_name,
+                retry=self.IGlobal.retry_policy,
+                max_bytes=self.IGlobal.graphql_max_bytes,
+                secrets=secrets,
+            )
+        )
 
     # =======================================================================
     # RELEASES
@@ -1528,3 +1657,24 @@ class IInstance(IInstanceBase):
             for f in (data.get('files') or [])
         ]
         return result
+
+
+def tool_names() -> frozenset[str]:
+    """Every tool this node implements, read from the ``@tool_function`` stamps."""
+    return frozenset(name for name in dir(IInstance) if hasattr(getattr(IInstance, name, None), '__tool_meta__'))
+
+
+def validate_tool_names(names: Iterable[str]) -> frozenset[str]:
+    """``names`` as a set when each is a tool this node implements; unknown names fail, listing the valid ones.
+
+    ``IGlobal`` parses the ``tools`` allowlist and checks it here, next to the tool
+    definitions, at pipeline start (``beginGlobal``) and in the canvas (``validateConfig``).
+    """
+    names = frozenset(names)
+    valid = tool_names()
+    unknown = sorted(names - valid)
+    if unknown:
+        raise ValueError(
+            f'tool_github: unknown tool name(s) in tools: {", ".join(unknown)}. Valid names: {", ".join(sorted(valid))}'
+        )
+    return names

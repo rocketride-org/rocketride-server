@@ -1495,8 +1495,11 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 					await new Promise((resolve) => setTimeout(resolve, 100));
 				}
 
-				// Wait for events to be received
-				await new Promise((resolve) => setTimeout(resolve, 500));
+				// Wait for the status events to arrive
+				const eventsDeadline = Date.now() + 10_000;
+				while (Date.now() < eventsDeadline && !receivedEvents.some((e) => e.event === 'apaevt_status_update' || e.event === 'apaevt_task')) {
+					await new Promise((resolve) => setTimeout(resolve, 50));
+				}
 
 				// Validate results
 				expect(results).toHaveLength(3);

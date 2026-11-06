@@ -12,6 +12,10 @@ pytest<9.2
 pytest-asyncio
 pytest-timeout
 pytest-xdist
+# The sys.modules guard (_sys_modules_guard.py) uses @pytest.hookimpl(wrapper=True),
+# which pluggy supports from 1.2; pytest<9.2 alone would also allow an older pluggy.
+# Same floor in packages/server/build-requirements.txt.
+pluggy>=1.2
 
 # Packages the tests import directly. At runtime they come from the node that
 # declares them, which installs them only when a pipeline first loads it, so

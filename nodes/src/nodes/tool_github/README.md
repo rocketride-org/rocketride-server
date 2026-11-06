@@ -12,8 +12,9 @@ via GitHub Actions.
 
 Exposes selected GitHub REST operations: files, issues, pull requests, reviews,
 repository trees and metadata, releases, workflows, organizations, users, search,
-and commit history. Useful for agents that manage codebases, triage issues,
-automate releases, or operate CI/CD pipelines.
+and commit history, plus GitHub's GraphQL API through the `graphql` tool. Useful for
+agents that manage codebases, triage issues, automate releases, or operate CI/CD
+pipelines, and for apps that read repositories with credentials held on the server.
 
 Uses the **requests** library to call the GitHub REST API v3 (`https://api.github.com`,
 API version `2022-11-28`) with Bearer-token auth and a 30-second request timeout. API
@@ -145,8 +146,8 @@ GitHub's issues endpoint includes pull requests; `issue_list` filters them out, 
 | `repo_languages`    | Language names mapped to byte counts                                                     |
 | `label_list`        | One page of repository labels: `name`, `color`, `description`                            |
 
-`repo_tree`, `repo_contributors`, `repo_languages`, `label_list` and `user_get` return an
-explicit response envelope:
+`repo_tree`, `repo_contributors`, `repo_languages`, `label_list`, `user_get` and
+`graphql` return an explicit response envelope:
 
 ```json
 {
@@ -173,15 +174,17 @@ details appended, capped at 2,000 characters, or `GitHub returned HTTP <status> 
 a JSON error body.` when the body is not JSON or has no string `message`. A 2xx body of
 an unexpected shape is a failure too: it keeps its 2xx `status` and its counters, and
 its message reads `GitHub returned an unexpected response body; expected a list.` (or
-`an object.`). Authentication, transport, or JSON decoding failures have `status: null`
-and a fixed message without exception details. Invalid tool inputs raise validation
-errors before any request, naming the tool: `page` must be an integer of at least 1,
-`per_page` must be an integer and is clamped to 1 to 100 (default 30), and `repo` must
-be `owner/repo`; `null` for an optional input means its default. Rate-limit
-responses share the existing retry policy: at most three attempts, waits capped at 30
-seconds each; a longer server-requested wait fails immediately, with the rate-limit
-counters in the result. This is not a configurable retry budget. Credentials stay in
-node configuration and are not tool arguments.
+`an object.`; for `graphql`, GitHub's own `message` when the body has one).
+Authentication, transport, or JSON decoding failures have `status: null` and a fixed
+message without exception details. When a failure's `status` is not null, it is GitHub's
+HTTP status, so a rate limit GitHub answered with HTTP 200 keeps status 200. Invalid
+tool inputs raise validation errors before any request, naming the tool: `page` must be
+an integer of at least 1, `per_page` must be an integer and is clamped to 1 to 100
+(default 30), and `repo` must be `owner/repo`; `null` for an optional input means its
+default. Rate limits are waited out within a configurable budget (see [Rate-limit
+retries](#rate-limit-retries)); when the budget or the retry count runs out, the failure
+also carries `retry_after`. Credentials stay in node configuration and are not tool
+arguments.
 
 `repo_tree` reads `ref` (a branch, tag or SHA; default `HEAD`, the default branch). Its
 `data` contains `sha`, `tree`, `truncated`, `complete`, and `walked`. `sha` is the SHA the
@@ -217,6 +220,79 @@ named, so `walk: true` never returns less than `walk: false`. To list one part o
 repository, call `repo_tree` with a subtree's `sha` as `ref`; its paths are relative to
 that subtree. Large walks return large payloads; leave `walk` off unless you need the
 complete tree.
+
+### GraphQL
+
+| Tool | Description |
+|---|---|
+| `graphql` | Run a GraphQL document (`POST /graphql`) with optional `variables` and `operationName`; returns GitHub's `data` and `errors` |
+
+`query` is the GraphQL document and `variables` an object of values for the variables
+it declares. `operationName` picks the operation to run when the document defines more
+than one; it is passed to GitHub as given. The result uses the envelope above, with
+GitHub's answer in `data` as sent:
+
+```json
+{
+  "status": 200,
+  "data": {
+    "data": {
+      "viewer": { "login": "octocat" },
+      "rateLimit": { "cost": 1, "remaining": 4990, "resetAt": "2026-10-30T08:00:00Z" }
+    },
+    "errors": null
+  },
+  "rate_limit": { "remaining": 4990, "limit": 5000, "reset": 1793347200, "resource": "graphql" },
+  "next_page": null
+}
+```
+
+GraphQL errors arrive with HTTP 200 in `data.errors`, next to any partial `data.data`;
+they are returned, never raised. The one 200 the node retries is a rate limit GitHub
+answered without running anything (no `data`); see
+[Rate-limit retries](#rate-limit-retries). Select `rateLimit { cost remaining resetAt }`
+to get GitHub's GraphQL rate-limit block, which comes back inside `data.data` exactly
+as GitHub sent it; `rate_limit` carries the header counters (`resource: "graphql"`).
+Page with `first`/`after` and `pageInfo { hasNextPage endCursor }`; `next_page` is
+always `null`.
+A non-2xx answer (for example 401 for a bad credential) is a structured error like the
+REST reads and keeps any GraphQL `errors` GitHub sent with it. A 2xx answer that is JSON
+but has neither `data` nor `errors` keeps its status and counters, as above.
+
+The response body is streamed, and reading stops once it passes `graphqlMaxResponseBytes`
+(default 4 MiB, counted after decompression). Such an answer returns `status: null`, a
+message naming the cap and the rate-limit counters, without `data`; an unencoded answer
+whose `Content-Length` is already over the cap is refused without reading.
+
+With `readOnly` on, a document that contains a `mutation` operation is refused before
+anything is sent: no token is minted and no request is made. The whole document is
+checked, so `operationName` naming a query does not let a mutation elsewhere in it
+through. The result has `status: null` and a message naming `readOnly`; unlike the
+legacy write tools, which raise an error in read-only mode, `graphql` returns the
+refusal as a result, as it returns its other failures. The check does not parse GraphQL. It
+skips comments (`# ...`) and string literals (`"..."` and `"""..."""`, with their
+escapes), tracks braces, parentheses and brackets, and refuses when the name `mutation`
+appears outside all of them, where operation keywords live.
+
+- **Caught:** every mutation operation in any syntactically valid GraphQL document,
+  anonymous (`mutation { ... }`) or named, with or without variables, defaults or
+  directives, including one after a query in the same document, or behind braces
+  hidden in a comment or a string.
+- **Not triggered by:** the word in a comment, a string or block string, an alias, a
+  field, an argument or a variable, or a name that only starts with it
+  (`query mutationAudit { ... }`).
+- **Also refused, to err on the safe side:** an operation or fragment named `mutation`,
+  a type condition `on mutation`, a top-level directive `@mutation`, and a document the
+  check cannot lex (an unterminated string, a line break inside a plain string,
+  unbalanced brackets), which the GraphQL grammar does not allow.
+- **Not checked:** `subscription` operations, which are sent as written.
+
+With `readOnly` off, a document that contains a mutation operation is still refused, with a
+message naming `graphqlAllowMutations`, until that setting is on; it is off by default, so a
+pipeline that adds nothing does not gain GraphQL mutations. A mutation can do anything the
+credential allows, such as merging a pull request or deleting a branch, far more than the
+write tools. With `readOnly` off and `graphqlAllowMutations` on, every document is sent as
+written (see [GraphQL mutations](#graphql-mutations)).
 
 ### Releases
 
@@ -260,7 +336,8 @@ complete tree.
 ## Configuration
 
 An authentication method with its credentials (see Authentication), a default
-repository, and a read-only switch. The two behavioral ones are detailed below.
+repository, a read-only switch, a tool allowlist, a GraphQL mutation switch, a GraphQL
+response cap and a rate-limit retry budget. The behavioral ones are detailed below.
 
 ### Default Repository
 
@@ -286,8 +363,105 @@ Always allowed: `file_get`, `file_list`, `issue_get`, `issue_list`, `pr_get`, `p
 `search_issues`, `commit_list`, `commit_get`, `repo_tree`, `repo_contributors`,
 `repo_languages`, `label_list`, `user_get`.
 
+Checked per document: `graphql` runs queries in read-only mode and refuses any document
+that contains a `mutation` operation (see [GraphQL](#graphql)). With read-only mode off, a
+mutation also needs `graphqlAllowMutations` (see [GraphQL mutations](#graphql-mutations)).
+
 Note the default is `false`, a freshly added node can write. Turn read-only mode on
 explicitly for inspect-only agents.
+
+### Tools
+
+`tools` lists the tools the node registers. In the canvas form it is a list of checkboxes,
+one per tool, in the order of the tool tables above; in a pipeline file it is the tool
+names, for example `["graphql", "repo_tree", "label_list"]`.
+Only these appear in the schema the agent sees,
+which keeps it small (#648), and only these can be called: a call to any other tool is
+not handled by this node. A comma-separated string, as a `${ROCKETRIDE_*}` placeholder
+may resolve to, works too. Empty or absent registers every tool. An unknown name stops
+the pipeline at start with an error listing the unknown names and every valid one. The
+allowlist does not lift read-only mode: a write tool on the list is still refused while
+`readOnly` is on.
+
+### GraphQL mutations
+
+`graphqlAllowMutations` (default `false`) lets `graphql` run a document that contains a
+mutation operation while `readOnly` is off. It is off by default because a mutation can do
+anything the credential allows, such as merging a pull request, deleting a branch or
+changing branch protection, far more than this node's write tools, and because a pipeline
+written before `graphql` existed should not gain GraphQL mutations. With it off, such a
+document returns `status: null` and a message naming the setting, before anything is sent;
+a document the check cannot lex is refused the same way (see [GraphQL](#graphql)). Read-only
+mode refuses mutations whatever this setting says.
+
+### GraphQL response cap
+
+`graphqlMaxResponseBytes` (default 4194304, that is 4 MiB; 1024 to 104857600) bounds a
+`graphql` response body; see [GraphQL](#graphql). The default leaves room for a review
+query over 40 pull requests with their files, reviews, threads and checks, which can
+pass 1 MiB.
+
+### Rate-limit retries
+
+`graphql` and the repository reads (`repo_tree`, `repo_contributors`, `repo_languages`,
+`label_list`, `user_get`) wait out GitHub rate limits and retry. A rate limit is:
+
+- a 429, or a 403 with `X-RateLimit-Remaining: 0`, `Retry-After` or a body that names a
+  rate limit;
+- for `graphql`, an HTTP 200 without `data` that carries `Retry-After`, an error of type
+  `RATE_LIMITED` (GitHub's answer to an exhausted GraphQL primary limit), a message of
+  GitHub's own naming a rate limit (a secondary limit: the top-level `message`, or an
+  error without `locations`), or, while `X-RateLimit-Remaining` is 0, an error without
+  `locations` and without `path`. Parse and validation errors carry `locations` and can quote the document
+  or its variables, so their text never counts. An answer with partial `data` ran part
+  of the document, so it is returned as it is, never retried. An error with `path` came from
+  field execution, so GitHub ran the document: that answer is returned, never retried,
+  whatever the error says, since a retry could run a mutation twice.
+
+How long it waits:
+
+- `Retry-After` waits that many seconds; an HTTP date is read too. An exhausted
+  `X-RateLimit-Remaining` waits until `X-RateLimit-Reset`. When both apply, the longer
+  wait wins. Every wait is at least one second.
+- With neither a `Retry-After` nor a usable `X-RateLimit-Reset`, the first wait is 60
+  seconds, as GitHub asks ("wait for at least one minute"), and each later one doubles:
+  60, 120, 240.
+
+`rateLimitBudgetSeconds` (default 60, 0 to 600) caps the total time one tool call
+spends waiting, across every request it makes (the call blocks for the whole wait, so
+the cap is ten minutes), and `rateLimitMaxRetries` (default 3, 0
+to 10) the retries of each request after its first attempt, so 3 retries means up to 4
+attempts. A wait that does not fit the budget left
+is never started. So the default budget allows one retry after a rate limit that names
+no wait; raise `rateLimitBudgetSeconds` to allow more (60 + 120 + 240 = 420 seconds for
+three). When the budget or the retries run out, the call returns GitHub's `status`,
+`message` (with the reason the node stopped), `documentation_url` and `rate_limit`,
+plus `retry_after`: the wait the next attempt needs, rounded up, which is at least 60
+seconds when GitHub named none. For a rate limit GitHub answered with HTTP 200, the
+status is 200 and the failure keeps GitHub's `errors`; a GraphQL 403 or 429 keeps its
+status. A primary limit usually resets minutes away, so with the default budget it
+returns at once with `retry_after`. Each request keeps the node's 30-second timeout,
+which the budget does not count. A retry mints its credential again, so an installation
+token refreshed or an App JWT signed during a long wait is the one sent. A `repo_tree`
+walk shares one budget among all its subtree reads; a walk a rate limit stops returns
+its partial `data` with `complete: false` and `retry_after`. A walk's `max_requests`
+counts subtree reads, not the retries inside each read, so a walk can send up to
+`rateLimitMaxRetries + 1` times `max_requests` requests, and its stop message's "after
+N requests" counts reads.
+
+A rate-limited request was not run by GitHub, so retrying it, a mutation included, cannot
+apply it twice: the node retries only answers GitHub rejected before running anything (a
+403 or 429, or a GraphQL 200 without `data`). A GraphQL answer with partial data is
+returned, not retried, and transport failures, where a request may have reached GitHub,
+are never retried.
+
+When a mutation's response is lost, invalid JSON, a 2xx JSON body of another shape, over the response cap, or an HTTP 5xx error, its result
+warns that the mutation may already have been applied. Check the affected resource's
+current state before retrying; a missing response does not mean the write failed.
+
+The other tools, `file_get` (both its reads) included, keep their original policy:
+three attempts, waits capped at 30 seconds, a longer requested wait fails at once, and
+failures raise.
 
 ## Authentication
 
@@ -337,24 +511,27 @@ organization, not to a person. The private key is never sent to GitHub. A malfor
 non-RSA key fails at pipeline start, not on the first tool call.
 
 API errors are surfaced to the agent as readable messages including the HTTP status and
-GitHub's error details. The repository reads with the response envelope return them as
-results instead, and report an authentication failure as a fixed message with
-`status: null`.
+GitHub's error details. The repository reads and `graphql`, which use the response
+envelope, return them as results instead, and report an authentication failure as a
+fixed message with `status: null`.
 
 ## Notes
 
 ### Running the tests
 
 ```bash
-# Offline client, auth, search, repository-read and file_get tests
+# Offline client, auth, search, repository-read, file_get, graphql, backoff and option tests
 python -m pytest --confcutdir=nodes/test/tool_github \
   nodes/test/tool_github/test_github_client.py \
   nodes/test/tool_github/test_iglobal_auth.py \
   nodes/test/tool_github/test_search_relax.py \
   nodes/test/tool_github/test_repository_reads.py \
-  nodes/test/tool_github/test_file_get.py
+  nodes/test/tool_github/test_file_get.py \
+  nodes/test/tool_github/test_graphql.py \
+  nodes/test/tool_github/test_rate_limit_backoff.py \
+  nodes/test/tool_github/test_node_options.py
 
-# Native discovery and dispatch (mock HTTP; uses this checkout's node source)
+# Native discovery, dispatch and the tools allowlist (mock HTTP; this checkout's node source)
 dist/server/engine -m pytest --confcutdir=nodes/test/tool_github \
   nodes/test/tool_github/test_repository_reads_engine.py
 
@@ -379,6 +556,9 @@ pytest nodes/test/tool_github/test_app_auth_live.py -v
 - [Repository content size limits](https://docs.github.com/en/rest/repos/contents#get-repository-content)
 - [Get a blob](https://docs.github.com/en/rest/git/blobs#get-a-blob)
 - [Get the authenticated GitHub App](https://docs.github.com/en/rest/apps/apps#get-the-authenticated-app)
+- [GitHub GraphQL API](https://docs.github.com/en/graphql)
+- [GraphQL rate limits](https://docs.github.com/en/graphql/overview/rate-limits-and-query-limits-for-the-graphql-api)
+- [REST rate limits](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api)
 
 ---
 
@@ -392,10 +572,15 @@ pytest nodes/test/tool_github/test_app_auth_live.py -v
 | `github.appId` | `string` | **App ID**<br/>The numeric App ID from your GitHub App's settings page. | `""` |
 | `github.authType` | `string` | **Authentication method**<br/>Personal Access Token is simplest for individual/dev use. GitHub App auth mints short-lived, auto-rotating installation tokens — recommended for unattended pipelines against an org's repos. | `"pat"` |
 | `github.defaultRepo` | `string` | **Default Repository**<br/>Default repo in owner/repo format (e.g. acme/myapp). Tool calls that omit the repo parameter will use this value. | `""` |
+| `github.graphqlAllowMutations` | `boolean` | **GraphQL mutations**<br/>With read-only mode off, lets graphql run a document that contains a mutation operation. Off by default: a mutation can do anything the credential allows, such as merging a pull request, deleting a branch or changing branch protection, far more than the write tools. Read-only mode refuses mutations whatever this says. | `false` |
+| `github.graphqlMaxResponseBytes` | `integer` | **GraphQL response cap (bytes)**<br/>Largest graphql response body the node reads, in bytes after decompression. A larger response returns an error naming this cap instead of the data. Default 4194304 (4 MiB). | `4194304` |
 | `github.installationId` | `string` | **Installation ID**<br/>The installation ID for the org/account where the App is installed (found in the installation's settings URL). | `""` |
 | `github.privateKey` | `string` | **App Private Key (.pem)**<br/>Upload the PEM private key generated for your GitHub App. Used to sign short-lived JWTs; never sent to GitHub directly. | `""` |
+| `github.rateLimitBudgetSeconds` | `integer` | **Rate-limit wait budget (seconds)**<br/>Total time one call of graphql or a repository read (repo_tree, repo_contributors, repo_languages, label_list, user_get) may spend waiting out GitHub rate limits, across every request it makes: a repo_tree walk shares it among its subtree reads. A wait that does not fit is not started, and the call returns the rate-limit error with retry_after. When GitHub names no wait the waits are 60, 120, then 240 seconds, so the default allows one such retry; raise it to allow more. 0 never retries after a rate limit. The call blocks for the whole wait, so the maximum is 600 (ten minutes). | `60` |
+| `github.rateLimitMaxRetries` | `integer` | **Rate-limit retries**<br/>Retries of each request after its first attempt when GitHub answers it with a rate limit, within the call's wait budget: 3 retries means up to 4 attempts. 0 never retries. | `3` |
 | `github.readOnly` | `boolean` | **Read-only mode**<br/>When enabled, all write operations (file create/edit/delete, issue create, PR create, etc.) are blocked. Safe for agents that should only read. | `false` |
 | `github.token` | `string` | **Personal Access Token**<br/>GitHub PAT with repo, issues, pull_requests, and workflows scopes. Use a fine-grained token scoped to only the repos you need. | `""` |
+| `github.tools` | `array` | **Tools**<br/>Which tools this node publishes to the agent and accepts calls for: pick them from the list, one checkbox per tool, in the order of the README's tool tables. With none picked every tool is published. Fewer tools keep the agent's prompt small. Read-only mode still blocks the write tools whatever is picked. | `[]` |
 
 ## Dependencies
 
