@@ -23,7 +23,6 @@
 
 """Tests for the cwd handle probe logic (scripts/lib/rr_test_cwd_probe.py); no engine or Windows needed."""
 
-import errno
 import importlib.util
 import os
 from pathlib import Path
@@ -35,13 +34,25 @@ SPEC.loader.exec_module(probe_mod)
 
 
 class FakeBackend:
-    """A backend with fixed answers; the probe must not call it after start."""
+    """A backend whose file identities the test controls; the probe must not touch the handle after start."""
+
+    def __init__(self):
+        self.relative = None  # None: same file as the absolute path; or a callable name -> (identity, error)
+        self.calls = []
 
     def cwd_handle(self):
         return 0x60
 
     def final_path(self, handle):
         return 'C:/fake', None
+
+    def file_identity(self, path):
+        self.calls.append(path)
+        if os.path.isabs(path):
+            return (1, 0, hash(path) & 0xFFFF), None
+        if self.relative is not None:
+            return self.relative(path)
+        return (1, 0, hash(os.path.join(os.getcwd(), path)) & 0xFFFF), None
 
     def handle_count(self):
         return 42
@@ -51,33 +62,19 @@ class FakeBackend:
 
 
 def make_probe(tmp_path, monkeypatch):
-    """Create a probe whose cwd is a directory with one file."""
+    """Create a probe whose cwd is a directory with one old file."""
     work = tmp_path / 'work'
     work.mkdir()
     (work / 'entry.txt').write_text('x')
+    os.utime(work / 'entry.txt', (1_000_000, 1_000_000))
     monkeypatch.chdir(work)
     out = tmp_path / 'reports'
     out.mkdir()
     return probe_mod.CwdProbe(str(out), FakeBackend()), out
 
 
-def patch_relative_open(monkeypatch, behaviour):
-    """Replace os.open so that relative names go through ``behaviour(name, real_open)``."""
-    real = os.open
-
-    def fake(path, *args, **kwargs):
-        if isinstance(path, str) and not os.path.isabs(path):
-            return behaviour(path, real)
-        return real(path, *args, **kwargs)
-
-    monkeypatch.setattr(os, 'open', fake)
-
-
-def raise_oserror(code):
-    def behaviour(name, real):
-        raise OSError(code, os.strerror(code))
-
-    return behaviour
+def fail_with(code):
+    return lambda name: (None, code)
 
 
 def test_healthy_cwd_writes_nothing(tmp_path, monkeypatch):
@@ -88,11 +85,11 @@ def test_healthy_cwd_writes_nothing(tmp_path, monkeypatch):
     assert list(out.iterdir()) == []
 
 
-def test_ebadf_is_dead_and_writes_one_report(tmp_path, monkeypatch):
+def test_dead_handle_writes_one_report(tmp_path, monkeypatch):
     probe, out = make_probe(tmp_path, monkeypatch)
     probe.enter('tests/test_x.py::test_a', 'call')
     probe.start()
-    patch_relative_open(monkeypatch, raise_oserror(errno.EBADF))
+    probe.backend.relative = fail_with(6)
 
     assert probe.check('before call') is True
     probe.stop()
@@ -112,36 +109,42 @@ def test_ebadf_is_dead_and_writes_one_report(tmp_path, monkeypatch):
 def test_winerror_6_is_dead(tmp_path, monkeypatch):
     probe, _ = make_probe(tmp_path, monkeypatch)
 
-    def behaviour(name, real):
-        raise OSError(0, 'The handle is invalid', None, 6)
-
-    patch_relative_open(monkeypatch, behaviour)
+    probe.backend.relative = fail_with(6)
     assert probe.check('thread') is True
 
 
 def test_handle_now_pointing_at_another_directory_is_dead(tmp_path, monkeypatch):
     probe, _ = make_probe(tmp_path, monkeypatch)
-    other = tmp_path / 'other'
-    other.mkdir()
-    (other / 'entry.txt').write_text('y')
-    patch_relative_open(
-        monkeypatch, lambda name, real: real(str(other / name), os.O_RDONLY | getattr(os, 'O_BINARY', 0))
-    )
+    probe.backend.relative = lambda name: ((1, 0, 999_999), None)
     assert probe.check('thread') is True
 
 
-def test_enoent_while_absolute_exists_is_dead(tmp_path, monkeypatch):
+def test_path_not_found_while_absolute_exists_is_dead(tmp_path, monkeypatch):
     probe, _ = make_probe(tmp_path, monkeypatch)
-    patch_relative_open(monkeypatch, raise_oserror(errno.ENOENT))
+    probe.backend.relative = fail_with(2)
     assert probe.check('thread') is True
+    probe.backend.relative = fail_with(3)
+    probe.dead = False
+    assert probe.check('thread') is True
+
+
+def test_sharing_violation_and_other_errors_cannot_be_judged(tmp_path, monkeypatch):
+    probe, out = make_probe(tmp_path, monkeypatch)
+    probe.backend.relative = fail_with(32)
+    assert probe.check('thread') is False
+    assert list(out.iterdir()) == []
 
 
 def test_removed_entry_is_not_dead_and_is_picked_again(tmp_path, monkeypatch):
     probe, out = make_probe(tmp_path, monkeypatch)
     assert probe.check('thread') is False
     os.remove('entry.txt')
+    probe.backend.file_identity = lambda path: (None, 2)
     assert probe.check('thread') is False
+    assert probe._entry is None
     Path('second.txt').write_text('z')
+    os.utime('second.txt', (1_000_001, 1_000_001))
+    del probe.backend.file_identity
     assert probe.check('thread') is False
     assert probe._entry == 'second.txt'
     assert list(out.iterdir()) == []
@@ -153,16 +156,31 @@ def test_entry_is_picked_again_when_cwd_changes(tmp_path, monkeypatch):
     elsewhere = tmp_path / 'elsewhere'
     elsewhere.mkdir()
     (elsewhere / 'only.txt').write_text('1')
+    os.utime(elsewhere / 'only.txt', (1_000_000, 1_000_000))
     monkeypatch.chdir(elsewhere)
     assert probe.check('thread') is False
     assert probe._entry == 'only.txt'
 
 
-def test_relative_stat_is_not_the_test(tmp_path, monkeypatch):
+def test_picks_the_oldest_regular_file_not_newer_than_the_start(tmp_path, monkeypatch):
     probe, _ = make_probe(tmp_path, monkeypatch)
-    (tmp_path / 'work' / 'subdir').mkdir()
-    assert probe.check('thread') is False
-    assert probe._entry == 'entry.txt'
+    work = tmp_path / 'work'
+    (work / 'subdir').mkdir()
+    for name, mtime in (('older.txt', 500_000), ('new.txt', probe._started + 100)):
+        (work / name).write_text('x')
+        os.utime(work / name, (mtime, mtime))
+    probe.check('thread')
+    assert probe._entry == 'older.txt'
+
+
+def test_does_not_use_a_relative_stat_or_open_of_the_os(tmp_path, monkeypatch):
+    probe, _ = make_probe(tmp_path, monkeypatch)
+    calls = []
+    real_open = os.open
+    monkeypatch.setattr(os, 'open', lambda *a, **k: calls.append(a) or real_open(*a, **k))
+    probe.check('thread')
+    assert calls == []
+    assert [c for c in probe.backend.calls if not os.path.isabs(c)] == ['entry.txt']
 
 
 def test_empty_cwd_cannot_be_judged(tmp_path, monkeypatch):
@@ -170,11 +188,12 @@ def test_empty_cwd_cannot_be_judged(tmp_path, monkeypatch):
     os.remove('entry.txt')
     assert probe.check('thread') is False
     assert probe.dead is False
+    assert probe.backend.calls == []
 
 
 def test_no_checks_after_detection(tmp_path, monkeypatch):
     probe, out = make_probe(tmp_path, monkeypatch)
-    patch_relative_open(monkeypatch, raise_oserror(errno.EBADF))
+    probe.backend.relative = fail_with(6)
     assert probe.check('thread') is True
     assert probe.check('thread') is False
     assert probe.checks == 1

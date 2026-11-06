@@ -11,14 +11,18 @@ site-packages for a test run (see cwdprobe.js), so pytest loads it in every pyte
 process, xdist workers included. It acts only when ROCKETRIDE_TEST_CWD_PROBE names a
 directory and the platform is Windows. It then:
 
-- picks a regular file of the cwd with an absolute ``os.listdir`` (an absolute path does
-  not use the cwd handle), opens it by its relative name, which goes through the cwd
-  handle, and compares it with the absolute stat. The handle is dead when the relative
-  open raises EBADF or winerror 6, when it succeeds but names another file than the
-  absolute stat (the handle value now belongs to another directory), or when it raises
-  ENOENT while the absolute stat succeeds. A relative ``os.stat`` is no test: it resolves
-  the full path and works with a closed handle. The file is picked again when
-  ``os.getcwd()`` changes or the file disappears;
+- picks a stable regular file of the cwd with an absolute ``os.listdir`` (an absolute
+  path does not use the cwd handle): the oldest one that is not newer than the probe's
+  start. It reads the file's identity (volume serial and file index, from
+  ``GetFileInformationByHandle``) through a handle opened by its relative name, which goes
+  through the cwd handle, and through one opened by its absolute path. Both opens ask only
+  for FILE_READ_ATTRIBUTES and share read, write and delete, so they conflict with no other
+  opener, and both handles are closed at once. The handle is dead when the relative open
+  fails with winerror 6 (ERROR_INVALID_HANDLE), when it yields another identity (the handle
+  value now belongs to another directory), or when it reports file or path not found while
+  the absolute open succeeds. A relative ``os.stat`` is no test: it resolves the full path
+  and works with a closed handle. The file is picked again when ``os.getcwd()`` changes or
+  the file disappears;
 - checks before and after every test phase (setup, call, teardown) and once a second
   from a background thread, which also covers closes between tests;
 - on a dead handle writes one ``cwd_probe_<utc>_<pid>.txt`` into that directory: time,
@@ -37,20 +41,18 @@ Nothing is ever written into the cwd.
 import collections
 import ctypes
 import datetime
-import errno
 import faulthandler
 import os
 import stat
 import sys
 import threading
+import time
 
 import pytest
 
 _DIR_VAR = 'ROCKETRIDE_TEST_CWD_PROBE'
 _INTERVAL_SECS = 1.0
 _HISTORY_LEN = 30
-_ERROR_INVALID_HANDLE = 6
-
 _probe = None
 
 
@@ -64,17 +66,10 @@ def _utc_now() -> str:
     return datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
 
 
-def _is_invalid_handle(err: OSError) -> bool:
-    """
-    Tell whether an error says the cwd handle is closed.
-
-    Parameters:
-        err (OSError): The error of a relative open.
-
-    Returns:
-        bool: True for EBADF or winerror 6 (ERROR_INVALID_HANDLE).
-    """
-    return err.errno == errno.EBADF or getattr(err, 'winerror', None) == _ERROR_INVALID_HANDLE
+# Win32 error codes
+_ERROR_FILE_NOT_FOUND = 2
+_ERROR_PATH_NOT_FOUND = 3
+_ERROR_INVALID_HANDLE = 6
 
 
 class WindowsBackend:
@@ -98,6 +93,38 @@ class WindowsBackend:
             ctypes.POINTER(wintypes.DWORD),
         ]
         k32.K32EnumProcessModules.restype = wintypes.BOOL
+        k32.CreateFileW.argtypes = [
+            ctypes.c_wchar_p,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            ctypes.c_void_p,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            ctypes.c_void_p,
+        ]
+        k32.CreateFileW.restype = ctypes.c_void_p
+        k32.CloseHandle.argtypes = [ctypes.c_void_p]
+        k32.CloseHandle.restype = wintypes.BOOL
+
+        class ByHandleFileInformation(ctypes.Structure):
+            """BY_HANDLE_FILE_INFORMATION, as filled by GetFileInformationByHandle."""
+
+            _fields_ = [
+                ('attributes', wintypes.DWORD),
+                ('created', wintypes.FILETIME),
+                ('accessed', wintypes.FILETIME),
+                ('written', wintypes.FILETIME),
+                ('volume_serial', wintypes.DWORD),
+                ('size_high', wintypes.DWORD),
+                ('size_low', wintypes.DWORD),
+                ('links', wintypes.DWORD),
+                ('index_high', wintypes.DWORD),
+                ('index_low', wintypes.DWORD),
+            ]
+
+        self._info_type = ByHandleFileInformation
+        k32.GetFileInformationByHandle.argtypes = [ctypes.c_void_p, ctypes.POINTER(ByHandleFileInformation)]
+        k32.GetFileInformationByHandle.restype = wintypes.BOOL
         k32.GetModuleFileNameW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, wintypes.DWORD]
         k32.GetModuleFileNameW.restype = wintypes.DWORD
 
@@ -159,6 +186,31 @@ class WindowsBackend:
             size = n + 1
         return None, 'path too long'
 
+    def file_identity(self, path: str) -> tuple:
+        """
+        Read the identity of a file through a fresh handle that conflicts with no other opener.
+
+        A relative path is resolved through the process's cwd handle.
+
+        Parameters:
+            path (str): Relative or absolute path of a file.
+
+        Returns:
+            tuple: ``((volume serial, index high, index low), None)`` on success,
+                ``(None, win32 error code)`` on failure.
+        """
+        # FILE_READ_ATTRIBUTES; share read, write and delete; OPEN_EXISTING; FILE_FLAG_BACKUP_SEMANTICS.
+        handle = self._k32.CreateFileW(path, 0x80, 7, None, 3, 0x02000000, None)
+        if handle is None or handle == ctypes.c_void_p(-1).value:
+            return None, ctypes.get_last_error()
+        try:
+            info = self._info_type()
+            if not self._k32.GetFileInformationByHandle(handle, ctypes.byref(info)):
+                return None, ctypes.get_last_error()
+            return (info.volume_serial, info.index_high, info.index_low), None
+        finally:
+            self._k32.CloseHandle(handle)
+
     def handle_count(self) -> int:
         """
         Count the handles the process holds.
@@ -204,7 +256,7 @@ class CwdProbe:
 
         Parameters:
             out_dir (str): Directory for the report files.
-            backend: Object with cwd_handle, final_path, handle_count and modules.
+            backend: Object with cwd_handle, final_path, file_identity, handle_count and modules.
             interval (float): Seconds between background checks.
         """
         self.out_dir = out_dir
@@ -220,7 +272,7 @@ class CwdProbe:
         self._start_info = ''
         self._cwd = None
         self._entry = None
-        self._entry_id = None
+        self._started = time.time()
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread = None
@@ -234,6 +286,7 @@ class CwdProbe:
             self._start_info = f'handle=0x{handle:x} path={path} error={error}'
         except Exception as err:
             self._start_info = f'handle unreadable: {err!r}'
+        self._started = time.time()
         self.last_ok = _utc_now()
         self._write_armed('started')
         self._thread = threading.Thread(target=self._loop, name='rr-cwd-probe', daemon=True)
@@ -288,25 +341,24 @@ class CwdProbe:
 
     def _pick_entry(self, cwd: str) -> None:
         """
-        Choose a regular file of the cwd, by absolute paths only.
+        Choose the oldest regular file of the cwd that is not newer than the probe, by absolute paths only.
 
         Parameters:
             cwd (str): The current directory.
         """
-        self._cwd, self._entry, self._entry_id = cwd, None, None
+        self._cwd, self._entry = cwd, None
+        oldest = None
         for name in os.listdir(cwd):
             try:
                 st = os.stat(os.path.join(cwd, name))
             except OSError:
                 continue
-            if not stat.S_ISREG(st.st_mode):
-                continue
-            self._entry, self._entry_id = name, (st.st_dev, st.st_ino)
-            return
+            if stat.S_ISREG(st.st_mode) and st.st_mtime <= self._started and (oldest is None or st.st_mtime < oldest):
+                self._entry, oldest = name, st.st_mtime
 
     def _probe_once(self):
         """
-        Open one cwd file by its relative name and compare it with its absolute stat.
+        Compare the identity of one cwd file read by its relative and by its absolute name.
 
         Returns:
             str | None: Why the handle counts as dead, or None when it works or cannot be judged.
@@ -318,30 +370,20 @@ class CwdProbe:
                 return None
         name = self._entry
         absolute = os.path.join(cwd, name)
-        try:
-            fd = os.open(name, os.O_RDONLY | getattr(os, 'O_BINARY', 0))
-        except OSError as err:
-            if _is_invalid_handle(err):
-                return f'relative open of {name!r} failed: {err!r}'
-            if err.errno != errno.ENOENT:
-                return None
-            try:
-                os.stat(absolute)
-            except OSError:
-                self._entry = None
-                return None
-            return f'relative open of {name!r} gave ENOENT, the absolute stat succeeds'
-        try:
-            rel = os.fstat(fd)
-        finally:
-            os.close(fd)
-        try:
-            ab = os.stat(absolute)
-        except OSError:
+        abs_id, _ = self.backend.file_identity(absolute)
+        if abs_id is None:
+            # The file is gone or locked against attribute reads: pick again next time.
             self._entry = None
             return None
-        if (rel.st_dev, rel.st_ino) != (ab.st_dev, ab.st_ino):
-            return f'relative open of {name!r} names another file than {absolute!r}: {(rel.st_dev, rel.st_ino)} vs {(ab.st_dev, ab.st_ino)}'
+        rel_id, rel_err = self.backend.file_identity(name)
+        if rel_id is None:
+            if rel_err == _ERROR_INVALID_HANDLE:
+                return f'relative open of {name!r} failed with winerror 6 (invalid handle)'
+            if rel_err in (_ERROR_FILE_NOT_FOUND, _ERROR_PATH_NOT_FOUND):
+                return f'relative open of {name!r} gave winerror {rel_err}, the absolute open succeeds'
+            return None
+        if rel_id != abs_id:
+            return f'relative open of {name!r} names another file than {absolute!r}: {rel_id} vs {abs_id}'
         return None
 
     def _loop(self) -> None:
