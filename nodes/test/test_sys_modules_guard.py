@@ -7,7 +7,7 @@
 
 The guard has to name the module that actually leaked, undo the leak so it does
 not cascade, and not blame an innocent module that restores correctly. These
-exercise the collection-time helper directly.
+exercise the collection-time helper and the per-test teardown hook directly.
 """
 
 import importlib.util
@@ -15,6 +15,7 @@ import json
 import sys
 import types
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -27,6 +28,28 @@ class Module:
     def __init__(self, nodeid):
         """Record the collector nodeid."""
         self.nodeid = nodeid
+
+
+class Item:
+    """Stand-in for a pytest test item; the teardown hook reads only its nodeid."""
+
+    def __init__(self, nodeid):
+        """Record the item nodeid.
+
+        Args:
+            nodeid (str): the test's node id.
+        """
+        self.nodeid = nodeid
+
+
+@pytest.fixture
+def pinned_numpy():
+    """The numpy the guard pinned; whatever a test does, sys.modules ends with it."""
+    pytest.importorskip('numpy')
+    assert 'numpy' in guard._pinned, 'numpy is installed but the guard did not pin it'
+    real = guard._pinned['numpy']
+    yield real
+    sys.modules['numpy'] = real
 
 
 @pytest.fixture(autouse=True)
@@ -133,3 +156,87 @@ def test_is_stub_module_detects_stub_built_via_module_from_spec():
     # a real module loaded from disk (has __file__) is not a stub
     assert guard._is_stub_module(json) is False
     assert guard._is_stub_module(None) is False
+
+
+def test_numpy_is_pinned_to_the_real_module(pinned_numpy):
+    """The guard imports the real numpy once, and that is the numpy tests see.
+
+    Args:
+        pinned_numpy (module): the numpy the guard pinned.
+    """
+    assert not guard._is_stub_module(pinned_numpy)
+    assert sys.modules['numpy'] is pinned_numpy
+
+
+def test_setdefault_cannot_replace_the_pinned_numpy(pinned_numpy):
+    """A setdefault call finds the pinned numpy already present, so nothing changes.
+
+    Args:
+        pinned_numpy (module): the numpy the guard pinned.
+    """
+    sys.modules.setdefault('numpy', MagicMock())
+    assert sys.modules['numpy'] is pinned_numpy
+    assert guard.check_pinned() == []
+
+
+def test_collection_flags_and_undoes_a_numpy_stub(pinned_numpy):
+    """A module that replaces numpy at import time is flagged, and numpy is put back.
+
+    Args:
+        pinned_numpy (module): the numpy the guard pinned.
+    """
+    nodeid = 'nodes/test/fake_numpy_leaker.py'
+    guard.pytest_collectstart(Module(nodeid))
+    sys.modules['numpy'] = MagicMock()
+    assert guard.check_after_import(nodeid) == ['numpy']
+    assert guard._core_leaks == [(nodeid, ['numpy'])]
+    assert sys.modules['numpy'] is pinned_numpy
+
+
+@pytest.mark.parametrize(
+    'change',
+    [
+        pytest.param(lambda: sys.modules.__setitem__('numpy', MagicMock()), id='replaced-by-a-stub'),
+        pytest.param(lambda: sys.modules.pop('numpy'), id='removed'),
+    ],
+)
+def test_a_test_that_changes_numpy_fails_in_teardown(pinned_numpy, change):
+    """A test that leaves numpy replaced or removed fails in teardown; the next test gets the real numpy.
+
+    Args:
+        pinned_numpy (module): the numpy the guard pinned.
+        change (Callable[[], object]): replaces numpy with a stub or removes it.
+    """
+    teardown = guard.pytest_runtest_teardown(Item('nodes/test/test_leaker.py::test_it'), None)
+    next(teardown)
+    change()
+    with pytest.raises(pytest.fail.Exception, match=r"test_leaker\.py::test_it replaced or removed \['numpy'\]"):
+        teardown.send(None)
+    assert sys.modules['numpy'] is pinned_numpy
+
+
+def test_a_test_that_keeps_numpy_passes_teardown(pinned_numpy):
+    """A test that ends with the pinned numpy passes teardown untouched.
+
+    Args:
+        pinned_numpy (module): the numpy the guard pinned.
+    """
+    teardown = guard.pytest_runtest_teardown(Item('nodes/test/test_clean.py::test_it'), None)
+    next(teardown)
+    with pytest.raises(StopIteration):
+        teardown.send(None)
+    assert sys.modules['numpy'] is pinned_numpy
+
+
+def test_a_failing_teardown_keeps_its_error_and_numpy_is_put_back(pinned_numpy):
+    """When a fixture's teardown fails, that error stands, and numpy is still put back.
+
+    Args:
+        pinned_numpy (module): the numpy the guard pinned.
+    """
+    teardown = guard.pytest_runtest_teardown(Item('nodes/test/test_leaker.py::test_it'), None)
+    next(teardown)
+    sys.modules['numpy'] = MagicMock()
+    with pytest.raises(RuntimeError, match='fixture teardown failed'):
+        teardown.throw(RuntimeError('fixture teardown failed'))
+    assert sys.modules['numpy'] is pinned_numpy
