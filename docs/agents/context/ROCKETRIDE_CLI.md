@@ -3,8 +3,11 @@
 The `rocketride` command is installed with the SDK in either language
 (`pip install rocketride` or `npm install rocketride`; use `pnpm exec
 rocketride` / `npx rocketride` for local installs). The Python and
-TypeScript packages install the IDENTICAL command — same verbs, same flags,
-same output — so recipes port between languages unchanged.
+TypeScript packages install the same command (same verbs, same flags, same
+output), so recipes port between languages unchanged, with one exception so
+far: of the `app` verbs only `create`, `deploy` and `verify` exist in both;
+the rest, `app developer status` and `app developer register` among them,
+are in the npm `rocketride` only (see App commands).
 
 **When to use it.** You have a shell. Prefer the command for every one-shot
 lifecycle operation — validate, run, upload, store, deploy, publish,
