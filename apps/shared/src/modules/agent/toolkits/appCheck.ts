@@ -30,9 +30,10 @@
  * pipeline by running it.
  */
 
-import type { RocketRideClient } from 'rocketride';
+import type { RocketRideClient, ServiceSummary } from 'rocketride';
 
 import type { AppErrorRow, ConsoleRow, WatchStatus } from '../../../tools/appdev/types';
+import { getSourceComponents, type PipelineComponent } from '../../../tools/pipelines/utils/parse';
 import type { IWorkspaceFileSystem } from '../../vfs/vfsTypes';
 import type { AgentDevSession, AgentHost } from '../host';
 import { AgentTool, AgentToolkit } from '../tools';
@@ -443,15 +444,21 @@ export async function typesNote(vfs: IWorkspaceFileSystem, markers: () => Promis
  * Names the components whose provider the engine has no service for. The engine never looks a provider up,
  * so a misspelt one validates clean and fails at run time. The names come from the engine's own catalog.
  */
-async function unknownProviders(client: RocketRideClient, pipeline: JsonObject): Promise<string[]> {
-	const components = Array.isArray(pipeline.components) ? pipeline.components.filter(isJsonObject) : [];
-	if (components.length === 0) return [];
-
-	const { services } = await client.getServices();
-	const known = new Set(Object.keys(services ?? {}));
+function unknownProviders(components: JsonObject[], services: Record<string, unknown>): string[] {
+	const known = new Set(Object.keys(services));
 	if (known.size === 0) return [];
 
 	return components.filter((c) => typeof c.provider === 'string' && c.provider !== '' && !known.has(c.provider)).map((c) => `${typeof c.id === 'string' ? `${c.id}: ` : ''}unknown provider '${String(c.provider)}' — rocketride_client getServices lists the valid names`);
+}
+
+/**
+ * The ids of the pipeline's source components, in file order, by the rule the pipeline views use: the
+ * `mode: "Source"` flag, or a provider the catalog lists as a source (a file saved from the canvas has no
+ * flag). A component with no id is left out, and validate reports it.
+ */
+function sourceIds(components: JsonObject[], services: Record<string, ServiceSummary>): string[] {
+	const named = components.filter((c) => typeof c.id === 'string' && c.id !== '') as unknown as PipelineComponent[];
+	return [...new Set(getSourceComponents({ components: named }, services).map((c) => c.id))];
 }
 
 /** One engine error or warning as a line, led by the component id when the engine gave one. */
@@ -459,18 +466,52 @@ function entryText(entry: { message: string; id?: string }): string {
 	return entry.id ? `${entry.id}: ${entry.message}` : entry.message;
 }
 
+/** Each distinct line once, in the order the sources first gave it, followed by the sources that gave it. */
+function bySource(found: Array<{ source: string; lines: string[] }>): string[] {
+	const sources = new Map<string, string[]>();
+	for (const { source, lines } of found) {
+		for (const line of lines) {
+			const seen = sources.get(line) ?? [];
+			if (!seen.includes(source)) seen.push(source);
+			sources.set(line, seen);
+		}
+	}
+	return [...sources].map(([line, seen]) => `${line} (${seen.length === 1 ? 'source' : 'sources'} ${seen.join(', ')})`);
+}
+
 /**
  * Validates a pipeline against the engine's own rules. Unknown providers are reported first, without calling
  * the engine, because the engine would pass them. No errors means the pipeline is valid.
+ *
+ * The engine validates from one source and will not pick between two. A pipeline that names its source
+ * validates once, as it would run. Otherwise each source validates in turn, one call at a time, and each line
+ * names the sources it came from. A call that throws stops the validate, naming its source, so a validate
+ * that did not check every source never reports clean.
  */
 async function validatePipeline(client: RocketRideClient, pipeline: JsonObject): Promise<{ errors: string[]; warnings: string[] }> {
-	const unknown = await unknownProviders(client, pipeline);
+	const components = Array.isArray(pipeline.components) ? pipeline.components.filter(isJsonObject) : [];
+	const services = components.length > 0 ? ((await client.getServices()).services ?? {}) : {};
+	const unknown = unknownProviders(components, services);
 	if (unknown.length > 0) return { errors: unknown, warnings: [] };
 
 	// The engine's reply also echoes the pipeline with its secure values
 	// encrypted. That echo is the model's own input, so it is not passed on.
-	const result = await client.validate({ pipeline });
-	return { errors: result.errors.map(entryText), warnings: result.warnings.map(entryText) };
+	const sources = pipeline.source ? [] : sourceIds(components, services);
+	if (sources.length <= 1) {
+		const result = await client.validate(sources.length === 1 ? { pipeline, source: sources[0] } : { pipeline });
+		return { errors: result.errors.map(entryText), warnings: result.warnings.map(entryText) };
+	}
+
+	const errors: Array<{ source: string; lines: string[] }> = [];
+	const warnings: Array<{ source: string; lines: string[] }> = [];
+	for (const source of sources) {
+		const result = await client.validate({ pipeline, source }).catch((err: unknown) => {
+			throw new Error(`for source ${source}: ${messageOf(err)}`);
+		});
+		errors.push({ source, lines: result.errors.map(entryText) });
+		warnings.push({ source, lines: result.warnings.map(entryText) });
+	}
+	return { errors: bySource(errors), warnings: bySource(warnings) };
 }
 
 // =============================================================================
