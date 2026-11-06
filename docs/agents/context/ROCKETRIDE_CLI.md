@@ -5,9 +5,11 @@ The `rocketride` command is installed with the SDK in either language
 rocketride` / `npx rocketride` for local installs). The Python and
 TypeScript packages install the same command (same verbs, same flags, same
 output), so recipes port between languages unchanged, with one exception so
-far: of the `app` verbs only `create`, `deploy` and `verify` exist in both;
-the rest, `app developer status` and `app developer register` among them,
-are in the npm `rocketride` only (see App commands).
+far, the `app` verbs: only `create`, `deploy` and `verify` exist in both,
+and of those the pip CLI's `deploy` and `verify` take a required app
+folder and have no `--publish` or `--store` flag; the rest, `app developer
+status` and `app developer register` among them, are in the npm
+`rocketride` only (see App commands).
 
 **When to use it.** You have a shell. Prefer the command for every one-shot
 lifecycle operation — validate, run, upload, store, deploy, publish,
@@ -119,9 +121,12 @@ defaults to the `ROCKETRIDE_DEPLOY_URI` / `ROCKETRIDE_DEPLOY_APIKEY` pair
 is configured. `app create` reads the development connection
 (`ROCKETRIDE_URI` / `ROCKETRIDE_APIKEY`) for vendoring and for the
 developer id; `app verify` needs no connection. Only `create`, `deploy`
-and `verify` exist in both CLIs so far: the other app verbs, `app
-developer status` and `app developer register` among them, are in the npm
-`rocketride` only, so from a Python install use the SDK calls instead.
+and `verify` exist in both CLIs so far, and not with the same shape: the
+npm `deploy [app]` takes `--publish <target>` and `verify [app]` takes
+`--store`, while the pip CLI's `app deploy <folder>` and `app verify
+<folder>` require the folder and have neither flag. The other app verbs,
+`app developer status` and `app developer register` among them, are in the
+npm `rocketride` only, so from a Python install use the SDK calls instead.
 
 `[app]` takes an app folder, an app id (`personal.clock`), its name part
 (`clock`), its folder name (`clock-ui`), or nothing — the current
