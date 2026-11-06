@@ -40,7 +40,7 @@ a non-zero exit. Deploy verbs (`deploy *`, `app deploy`) use the
 
 | Step | Do this |
 |---|---|
-| Set up or refresh the workspace | `rocketride init` (first time and whenever the server changes); `rocketride login` when credentials are rejected |
+| Set up or refresh the workspace | `rocketride init` (first time and whenever the server changes); `rocketride login --apikey ""` when credentials are rejected (see `login` below) |
 | Find components and their config fields | Read `.rocketride/services-catalog.json` and `.rocketride/schema/` — synced by `init`; there is no lookup command (ROCKETRIDE_COMPONENT_REFERENCE.md explains the shapes) |
 | Validate a pipeline | `rocketride validate path/to/pipeline.pipe` (globs allowed) |
 | Run a pipeline | `rocketride start --pipeline file.pipe` prints the task token; `rocketride upload files/* --pipeline file.pipe` starts, uploads, and terminates in one go |
@@ -74,7 +74,10 @@ loop is a command.
   with a link to the web app. A waitlisted account sees its access-queue
   notice there, and a failed sign-in (including a failed key exchange)
   shows the reason there and in the terminal. Run it whenever a command
-  reports rejected credentials. `--deploy` targets the
+  reports rejected credentials. Without `--apikey`, `login` first tries the
+  key already in `.env`, so when that key is the rejected one, pass a new
+  key with `--apikey <key>`, or pass `--apikey ""` to sign in again (or be
+  prompted for a key on a self-hosted server). `--deploy` targets the
   `ROCKETRIDE_DEPLOY_*` pair. `--apikey <key>` saves that key without
   opening a browser, on either kind of server, which is how to sign in
   from CI or an agent.

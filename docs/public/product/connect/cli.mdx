@@ -118,6 +118,12 @@ deployment pair for a different server, which both commands leave alone.
 already in `.env` works, `init` reuses it and writes nothing. To set or change
 the deployment pair in either case, run `rocketride login --deploy --uri <uri>`.
 
+Without `--apikey`, `login` first tries the development key already in `.env`.
+If the server rejects that key, for example after a command reports rejected
+credentials, pass a valid key with `--apikey <key>`. Or pass `--apikey ""` to sign in
+through the browser instead, or to be prompted for a key on a self-hosted
+server.
+
 Key flags:
 
 | Flag | Description |
