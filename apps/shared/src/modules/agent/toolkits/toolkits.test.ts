@@ -47,10 +47,10 @@ import { BUILDER_PROMPTS } from '../prompts';
 import { runAgent } from '../run';
 import type { AgentTool } from '../tools';
 import type { ModelCall, QuestionSpec } from '../wave/plan';
-import { AppCheckToolkit, type CheckReport, type MarkerInfo } from './appCheck';
+import { AppCheckToolkit, validateNote, validateSaved, type CheckReport, type MarkerInfo } from './appCheck';
 import { Approvals } from './approval';
 import { AppToolkit } from './appTools';
-import { redactText, type ChoiceFn } from './common';
+import { isJsonObject, redactText, type ChoiceFn, type JsonObject } from './common';
 import { FilesystemTools } from './filesystem';
 import { RocketRideClientToolkit, RunLedger } from './rocketrideClient';
 
@@ -620,6 +620,128 @@ test('leak test: no canary reaches a question, a thinking chunk, an approval car
 	assert.ok(seen.questions.includes('Use this key for the model instead: [redacted]'), 'the mid-run message reached the model');
 	assert.ok(seen.questions.includes('the store refused the read: postgres://admin:[redacted]@'), 'the model read the prepare error');
 	assert.match(seen.answer, /like \[redacted\], has it redacted/);
+});
+
+// =============================================================================
+// PIPELINE SAVE VALIDATION
+// =============================================================================
+
+/** One engine error or warning. */
+type Entry = { message: string; id?: string };
+
+/** A webhook and a chat, each flagged as a source the way the engine writes them, feeding one model. */
+const TWO_SOURCES = [
+	{ id: 'webhook_1', provider: 'webhook', config: { mode: 'Source' } },
+	{ id: 'chat_1', provider: 'chat', config: { mode: 'Source' } },
+	{ id: 'llm_1', provider: 'llm_openai', config: {}, input: [{ lane: 'questions', from: 'chat_1' }] },
+];
+
+/** The catalog the engine lists for TWO_SOURCES' providers. */
+const CATALOG = { webhook: { classType: ['source'] }, chat: { classType: ['source'] }, llm_openai: { classType: ['llm'] } };
+
+/**
+ * A client whose validate picks its source as the engine does: the call's, else the pipeline's, else the one
+ * component flagged as a source. Like the engine, it refuses two flagged sources with none picked. `found`
+ * answers for the picked source (undefined: none).
+ */
+function engineClient(found: (source: string | undefined, pipeline: JsonObject) => { errors?: Entry[]; warnings?: Entry[] }, services: Record<string, unknown> = CATALOG): ReturnType<typeof scriptedClient> {
+	return scriptedClient({
+		getServices: { services },
+		validate: async ({ pipeline, source }: { pipeline: JsonObject; source?: string }) => {
+			const flagged = (pipeline.components as JsonObject[]).filter((c) => (c.config as JsonObject | undefined)?.mode === 'Source');
+			const picked = source || (pipeline.source as string | undefined);
+			if (!picked && flagged.length > 1) throw new Error('Pipeline validation failed: Pipeline has multiple source components, please specify one explicitly');
+			const { errors = [], warnings = [] } = found(picked ?? (flagged[0]?.id as string | undefined), pipeline);
+			return { errors, warnings, pipeline };
+		},
+	});
+}
+
+/** The source each validate call passed, in order; null for a call that passed none. */
+function validateSources(calls: Array<[method: string, params: unknown[]]>): Array<string | null> {
+	return calls.filter(([method]) => method === 'validate').map(([, [opts]]) => ('source' in (opts as JsonObject) ? ((opts as JsonObject).source as string) : null));
+}
+
+/** Saves `file` as a .pipe in a fresh workspace, runs the save validate over `client`, and returns its note. The file is unchanged and the pipeline never gains a source. */
+async function saveNote(file: JsonObject, client: RocketRideClient, calls: Array<[method: string, params: unknown[]]>): Promise<string> {
+	const text = JSON.stringify(file, null, 1);
+	const ws = new MemoryWorkspace({ 'pipelines/p.pipe': text });
+	const note = validateNote(await validateSaved(() => client, ws, 'pipelines/p.pipe'), (t) => t);
+	assert.equal(ws.files.get('pipelines/p.pipe'), text, 'the saved file is unchanged');
+	const inner = (isJsonObject(file.pipeline) ? file.pipeline : file) as JsonObject;
+	for (const [method, [opts]] of calls) if (method === 'validate') assert.equal(((opts as JsonObject).pipeline as JsonObject).source, inner.source, 'the pipeline sent keeps its own source field');
+	return note;
+}
+
+test('a pipeline save validates each source when the file picks none, one at a time, and names the sources each error came from', async () => {
+	const shared: Entry = { id: 'llm_1', message: "config is missing 'apikey'" };
+	const chatOnly: Entry = { id: 'llm_1', message: 'questions lane has no answer route' };
+	const unflagged = TWO_SOURCES.map((c) => ({ ...c, config: {} }));
+	const rows: Array<[name: string, file: JsonObject, found: Record<string, Entry[]>, sources: Array<string | null>, note: string, services?: Record<string, unknown>]> = [
+		['two flagged sources, both clean', { components: TWO_SOURCES }, {}, ['webhook_1', 'chat_1'], '\n\nvalidate: OK'],
+		['an error both find, and one only the second finds, twice', { components: TWO_SOURCES }, { webhook_1: [shared], chat_1: [shared, chatOnly, chatOnly] }, ['webhook_1', 'chat_1'], `\n\nvalidate: 2 errors:\n- llm_1: config is missing 'apikey' (sources webhook_1, chat_1)\n- llm_1: questions lane has no answer route (source chat_1)`],
+		['a clean first source does not hide the second', { components: TWO_SOURCES }, { chat_1: [chatOnly] }, ['webhook_1', 'chat_1'], '\n\nvalidate: 1 error:\n- llm_1: questions lane has no answer route (source chat_1)'],
+		['a picked source validates alone', { components: TWO_SOURCES, source: 'chat_1' }, { chat_1: [shared] }, [null], "\n\nvalidate: 1 error:\n- llm_1: config is missing 'apikey'"],
+		['a picked source that is no component is reported, not replaced', { components: TWO_SOURCES, source: 'chat_2' }, { chat_2: [{ message: "'pipeline.source' references unknown component id: chat_2" }] }, [null], "\n\nvalidate: 1 error:\n- 'pipeline.source' references unknown component id: chat_2"],
+		['sources only the catalog names', { components: unflagged }, { chat_1: [chatOnly] }, ['webhook_1', 'chat_1'], '\n\nvalidate: 1 error:\n- llm_1: questions lane has no answer route (source chat_1)'],
+		['one flagged and one only the catalog names, in file order', { components: [unflagged[0], TWO_SOURCES[1], TWO_SOURCES[2]] }, {}, ['webhook_1', 'chat_1'], '\n\nvalidate: OK'],
+		['with no catalog, only the flag counts', { components: [unflagged[0], TWO_SOURCES[1], TWO_SOURCES[2]] }, { chat_1: [shared] }, ['chat_1'], "\n\nvalidate: 1 error:\n- llm_1: config is missing 'apikey'", {}],
+		['one source is named, and its errors are not labelled', { components: TWO_SOURCES.slice(1) }, { chat_1: [shared] }, ['chat_1'], "\n\nvalidate: 1 error:\n- llm_1: config is missing 'apikey'"],
+		['one source only the catalog names', { components: unflagged.slice(1) }, {}, ['chat_1'], '\n\nvalidate: OK'],
+		['no source validates as before', { components: TWO_SOURCES.slice(2) }, { none: [shared] }, [null], "\n\nvalidate: 1 error:\n- llm_1: config is missing 'apikey'"],
+		['a wrapped file', { pipeline: { components: TWO_SOURCES }, version: 1 }, { webhook_1: [shared] }, ['webhook_1', 'chat_1'], "\n\nvalidate: 1 error:\n- llm_1: config is missing 'apikey' (source webhook_1)"],
+	];
+	for (const [name, file, found, sources, note, services] of rows) {
+		const { client, calls } = engineClient((source) => ({ errors: found[source ?? 'none'] ?? [], warnings: [{ message: 'a warning is not an error' }] }), services);
+		assert.equal(await saveNote(file, client, calls), note, name);
+		assert.deepEqual(validateSources(calls), sources, `${name}: the sources validated`);
+	}
+});
+
+test('a pipeline save that could not validate every source says which one, and never says OK', async () => {
+	const down = new Error('Pipeline validation failed: the engine went away');
+	const rows: Array<[name: string, client: ReturnType<typeof scriptedClient>, sources: Array<string | null>, note: string]> = [
+		[
+			'the second source fails after a clean first',
+			engineClient((source) => {
+				if (source === 'chat_1') throw down;
+				return {};
+			}),
+			['webhook_1', 'chat_1'],
+			'\n\nvalidate: could not run (for source chat_1: Pipeline validation failed: the engine went away)',
+		],
+		[
+			'the first source fails, and the second is not asked',
+			engineClient((source) => {
+				if (source === 'webhook_1') throw down;
+				return { errors: [{ message: 'never seen' }] };
+			}),
+			['webhook_1'],
+			'\n\nvalidate: could not run (for source webhook_1: Pipeline validation failed: the engine went away)',
+		],
+		['the catalog cannot be read', scriptedClient({ getServices: () => Promise.reject(new Error('services unavailable')), validate: { errors: [], warnings: [] } }), [], '\n\nvalidate: could not run (services unavailable)'],
+		['an unknown provider is reported without the engine', engineClient(() => ({}), { webhook: { classType: ['source'] }, chat: { classType: ['source'] } }), [], "\n\nvalidate: 1 error:\n- llm_1: unknown provider 'llm_openai' — rocketride_client getServices lists the valid names"],
+	];
+	for (const [name, { client, calls }, sources, note] of rows) {
+		assert.equal(await saveNote({ components: TWO_SOURCES }, client, calls), note, name);
+		assert.deepEqual(validateSources(calls), sources, `${name}: the sources validated`);
+	}
+});
+
+test('write_file and edit_file of a two-source pipeline return the validate of each source to the model', async () => {
+	const ws = new MemoryWorkspace({});
+	// the model has no key yet: each source finds it missing until the edit adds one
+	const { client, calls } = engineClient((_source, pipeline) => {
+		const llm = (pipeline.components as JsonObject[]).find((c) => c.id === 'llm_1');
+		return { errors: (llm?.config as JsonObject).apikey ? [] : [{ id: 'llm_1', message: "config is missing 'apikey'" }] };
+	});
+	const model = scriptedModel([plan(['write_file', { path: 'pipelines/two.pipe', content: JSON.stringify({ components: TWO_SOURCES }, null, 1) }]), plan(['edit_file', { path: 'pipelines/two.pipe', oldString: '"config": {},', newString: '"config": { "apikey": "${ROCKETRIDE_OPENAI_KEY}" },' }]), done('Built the pipeline.')]);
+	await agentTurn(ws, model, { client });
+	const [, afterWrite, afterEdit] = model.questions.map((q) => JSON.stringify(q));
+	// the tool results reach the question as text inside JSON, so each line is matched on its own
+	assert.ok(afterWrite.includes('validate: 1 error:') && afterWrite.includes("- llm_1: config is missing 'apikey' (sources webhook_1, chat_1)"), 'the write returned the error each source found');
+	assert.ok(!afterWrite.includes('validate: OK') && afterEdit.includes('validate: OK'), 'the edit returned a clean validate');
+	assert.deepEqual(validateSources(calls), ['webhook_1', 'chat_1', 'webhook_1', 'chat_1']);
 });
 
 // =============================================================================
