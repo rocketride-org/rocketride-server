@@ -31,7 +31,8 @@ is not offered (see its entry). This page is the full reference; the
   JSON itself (a `{"pipeline": {...}}` wrapper is auto-unwrapped). File paths
   are rejected — the client reads its own `.pipe` file and sends the contents.
 - **Every tool carries annotations.** `readOnlyHint`, `destructiveHint` and
-  `openWorldHint` are explicit on all 33 tools; the table under
+  `openWorldHint` are explicit on all 33 tools (32 on a deployed engine,
+  where `send_files` is not offered); the table under
   [Annotations](#annotations) gives each value and its reason. Five tools are
   open-world: the four execution tools, because a pipeline's nodes run whatever
   the pipeline defines, and `validate_pipeline`, because its single-component
@@ -255,7 +256,9 @@ always returns within the timeout.
   2 initializing, 3 running, 4 stopping, 5 completed, 6 cancelled);
   `state_label` is the readable form. Long-lived pipelines (webhook sources)
   legitimately sit at `running` forever — a timeout then returns the current
-  snapshot with `terminal: false`, which is not an error.
+  snapshot with `terminal: false`, which is not an error. Once `monitor`
+  reports a terminal state, the server drops the token from its own task
+  registry; that is in-memory bookkeeping, not a change to the task.
 
 ### list_running_pipelines
 
