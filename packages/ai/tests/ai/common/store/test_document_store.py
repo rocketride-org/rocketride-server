@@ -258,6 +258,8 @@ _NO_VECTOR_OR_MODEL_BATCHES = {
     # A document that never went through an embedding node: no vector, no model.
     'no-vector-no-model': ([_doc(None, None)], _assert_says_to_embed_documents),
     'model-no-vector': ([_doc(None, 'test-model')], _assert_says_to_embed_documents),
+    # An empty vector is as useless as a missing one, and a store must not size a collection by it.
+    'empty-vector': ([_doc([], 'test-model')], _assert_says_to_embed_documents),
     'vector-no-model': ([_doc([0.1, 0.2, 0.3], None)], _assert_says_the_documents_model_name_is_missing),
     # The first document is fine; a later one is not.
     'second-has-no-vector': (
@@ -303,6 +305,16 @@ def test_a_document_without_a_vector_is_refused_when_the_collection_exists():
     store.addChunks.assert_not_called()
 
 
+def test_a_document_with_an_empty_vector_is_refused_when_the_collection_exists():
+    store = _ExistingCollectionStore(control_docs=[_control_doc()])
+
+    with pytest.raises(Exception) as excinfo:
+        store.createCollection([_doc([], 'test-model')])
+
+    _assert_says_to_embed_documents(str(excinfo.value))
+    store.addChunks.assert_not_called()
+
+
 def _semantic_question(embedding, model):
     question = Question(type=QuestionType.SEMANTIC)
     question.addQuestion('what is in the documents?')
@@ -319,6 +331,20 @@ def test_a_question_with_a_model_name_but_no_vector_says_to_embed_it():
 
     with pytest.raises(Exception) as excinfo:
         store.dispatchSearch(MagicMock(), _semantic_question(None, 'test-model'))
+
+    assert str(excinfo.value) == (
+        'Question has no embedding vector. Embed questions with the same model as the stored documents.'
+    )
+    store.searchSemantic.assert_not_called()
+
+
+def test_a_question_with_an_empty_vector_says_to_embed_it():
+    # An empty vector reached the store's search, which found nothing instead of saying why.
+    store = _FakeStore(create_result=True)
+    store.searchSemantic = MagicMock(return_value=[])
+
+    with pytest.raises(Exception) as excinfo:
+        store.dispatchSearch(MagicMock(), _semantic_question([], 'test-model'))
 
     assert str(excinfo.value) == (
         'Question has no embedding vector. Embed questions with the same model as the stored documents.'

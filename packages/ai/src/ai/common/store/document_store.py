@@ -391,7 +391,7 @@ class DocumentStoreBase(ABC):
             # For each question
             for query in question.questions:
                 # Make sure we have the embeddings
-                if query.embedding is None:
+                if query.embedding is None or len(query.embedding) == 0:
                     raise Exception(
                         'Question has no embedding vector. Embed questions with the same model as the stored documents.'
                     )
@@ -543,8 +543,8 @@ class DocumentStoreBase(ABC):
 
     @classmethod
     def _checkDocumentEmbedding(cls, doc: Doc) -> None:
-        """Refuse a document that has no embedding vector, or a vector without its model name."""
-        if doc.embedding is None:
+        """Refuse a document whose embedding vector is missing or empty, or a vector without its model name."""
+        if doc.embedding is None or len(doc.embedding) == 0:
             raise Exception(cls._NO_DOC_EMBEDDING_MESSAGE)
         if not doc.embedding_model:
             raise Exception(cls._NO_DOC_MODEL_MESSAGE)
