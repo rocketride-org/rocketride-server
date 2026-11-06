@@ -169,8 +169,12 @@ def test_an_unknown_dialect_runs_nothing():
     assert connected == []
 
 
+# What _RecordingConnection records for a rollback, among the statements
+_ROLLBACK = 'rollback()'
+
+
 class _RecordingConnection:
-    """A connection that records what the block runs on it, and whose session reads ``session``."""
+    """A connection that records what the block runs on it, rollbacks included, and whose session reads ``session``."""
 
     def __init__(self, is_mariadb=False, session=(0, 0), version=(8, 0, 46)):
         """Nothing run yet.
@@ -198,7 +202,8 @@ class _RecordingConnection:
         return SimpleNamespace(one=lambda: self.session, scalar=lambda: self.session[0])
 
     def rollback(self):
-        """Roll back (nothing to do)."""
+        """Record the rollback."""
+        self.statements.append(_ROLLBACK)
 
     def invalidate(self):
         """Note that the connection was discarded."""
@@ -240,12 +245,41 @@ def test_a_mariadb_url_gets_the_mysql_read_only_session(dialect, is_mariadb, ver
 
     assert conn.statements == [
         f'SELECT @@SESSION.{read_only}, @@SESSION.{setting}',
+        _ROLLBACK,
         'SET SESSION TRANSACTION READ ONLY',
         f'SET SESSION {setting} = {value}',
+        _ROLLBACK,
         'SET SESSION TRANSACTION READ WRITE',
         f'SET SESSION {setting} = 0',
+        _ROLLBACK,
     ]
     assert not conn.invalidated
+
+
+@pytest.mark.parametrize(
+    ('dialect', 'lookup', 'begin', 'end'),
+    [
+        (
+            'mysql',
+            ['SELECT @@SESSION.transaction_read_only, @@SESSION.max_execution_time'],
+            ['SET SESSION TRANSACTION READ ONLY', 'SET SESSION max_execution_time = 2000'],
+            ['SET SESSION TRANSACTION READ WRITE', 'SET SESSION max_execution_time = 0'],
+        ),
+        ('sqlite', ['PRAGMA query_only'], ['PRAGMA query_only = ON'], ['PRAGMA query_only = OFF']),
+        ('postgresql', [], ['SET TRANSACTION READ ONLY', 'SET LOCAL statement_timeout = 2000'], []),
+    ],
+)
+def test_the_lookup_transaction_ends_before_the_read_only_statements(dialect, lookup, begin, end):
+    """A rollback comes between the session lookup and the read-only statements, and none between those and the query.
+
+    MySQL applies ``SET SESSION TRANSACTION READ ONLY`` from the next transaction on, so one the lookup opened must
+    end first; on PostgreSQL ``SET TRANSACTION READ ONLY`` opens the query's transaction, so nothing may end it.
+    """
+    conn = _RecordingConnection()
+    with _global(_engine_with(dialect, conn)).read_only_connection() as block:
+        block.exec_driver_sql('SELECT 1')
+
+    assert conn.statements == [*lookup, _ROLLBACK, *begin, 'SELECT 1', _ROLLBACK, *end, _ROLLBACK]
 
 
 @pytest.mark.parametrize(
@@ -261,14 +295,23 @@ def test_the_session_gets_back_what_it_had_not_the_defaults(dialect, session, en
     with _global(_engine_with(dialect, conn)).read_only_connection():
         pass
 
-    assert conn.statements[-len(end) :] == end
+    assert conn.statements[-len(end) - 1 :] == [*end, _ROLLBACK]
 
 
-class _ResetFailingConnection(_RecordingConnection):
-    """A connection whose session reset fails, recording what the block did to it."""
+class _FailingConnection(_RecordingConnection):
+    """A connection that fails one statement, recording what the block did to it."""
+
+    def __init__(self, fail_on):
+        """Fail ``fail_on``; record the rest.
+
+        Args:
+            fail_on: The statement that fails.
+        """
+        super().__init__()
+        self.fail_on = fail_on
 
     def exec_driver_sql(self, statement):
-        """Record ``statement``; fail the reset.
+        """Record ``statement``; fail it if it is ``fail_on``.
 
         Args:
             statement: The SQL.
@@ -277,20 +320,46 @@ class _ResetFailingConnection(_RecordingConnection):
             The recorded result.
         """
         result = super().exec_driver_sql(statement)
-        if statement == 'PRAGMA query_only = OFF':
+        if statement == self.fail_on:
             raise OperationalError(statement, {}, Exception('connection lost'))
         return result
 
 
+def test_a_session_changed_half_way_gets_its_settings_back():
+    """If the second read-only statement fails, the first is still undone before the connection goes back."""
+    conn = _FailingConnection('SET SESSION max_execution_time = 2000')
+    with pytest.raises(OperationalError, match='connection lost'):
+        with _global(_engine_with('mysql', conn)).read_only_connection():
+            pass
+
+    assert conn.statements == [
+        'SELECT @@SESSION.transaction_read_only, @@SESSION.max_execution_time',
+        _ROLLBACK,
+        'SET SESSION TRANSACTION READ ONLY',
+        'SET SESSION max_execution_time = 2000',
+        _ROLLBACK,
+        'SET SESSION TRANSACTION READ WRITE',
+        'SET SESSION max_execution_time = 0',
+        _ROLLBACK,
+    ]
+    assert not conn.invalidated
+
+
 def test_a_connection_whose_reset_fails_is_discarded(monkeypatch):
     """If the session cannot be made read-write again, it must not go back to the pool."""
-    conn = _ResetFailingConnection()
+    conn = _FailingConnection('PRAGMA query_only = OFF')
     warnings = []
     monkeypatch.setattr('ai.common.database.db_global_base.warning', warnings.append)
     with _global(_engine_with('sqlite', conn)).read_only_connection():
         pass
 
-    assert conn.statements == ['PRAGMA query_only', 'PRAGMA query_only = ON', 'PRAGMA query_only = OFF']
+    assert conn.statements == [
+        'PRAGMA query_only',
+        _ROLLBACK,
+        'PRAGMA query_only = ON',
+        _ROLLBACK,
+        'PRAGMA query_only = OFF',
+    ]
     assert conn.invalidated
     assert 'discarding it' in warnings[0]
 
@@ -421,6 +490,45 @@ def test_live_server_refuses_every_write(live):
                 conn.execute(text(statement.format(t=table))).fetchall()
     with glb.engine.connect() as conn:
         assert conn.exec_driver_sql(f'SELECT count(*) FROM {table}').scalar() == 0
+
+
+# The helper that looks up each dialect's session before the block
+_LOOKUP = {
+    'postgresql': '_postgres_read_only_statements',
+    'mysql': '_mysql_read_only_statements',
+    'mariadb': '_mysql_read_only_statements',
+    'clickhouse': '_clickhouse_read_only_statements',
+}
+
+
+def test_live_a_lookup_that_reads_a_table_leaves_the_write_refused(live, monkeypatch):
+    """Should the session lookup ever read a table, a write in the block is still refused.
+
+    MySQL and MariaDB open a transaction at the first table read and apply ``SET SESSION TRANSACTION READ ONLY``
+    from the next one on: the block ends the lookup's transaction first, or this write would run.
+    """
+    glb, table, case = live
+    name = _LOOKUP[glb.engine.dialect.name]
+    lookup = getattr(glb, name)
+
+    def lookup_reading_a_table(conn, timeout):
+        """Read the table, then look the session up as usual.
+
+        Args:
+            conn: The block's connection.
+            timeout: The time limit in seconds.
+
+        Returns:
+            What the real lookup returns.
+        """
+        conn.exec_driver_sql(f'SELECT count(*) FROM {table}').scalar()
+        return lookup(conn, timeout)
+
+    monkeypatch.setattr(glb, name, lookup_reading_a_table)
+    statement, refusal = case['refused'][0]
+    with pytest.raises(Exception, match=refusal):
+        with glb.read_only_connection() as conn:
+            conn.execute(text(statement.format(t=table)))
 
 
 def test_live_postgres_chain_needs_the_shape_check(live):

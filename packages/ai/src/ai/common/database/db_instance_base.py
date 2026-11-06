@@ -992,7 +992,18 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         return result.answer
 
     def _executeSQLQuery(self, query: str) -> list[dict] | None:
-        """Execute a generated SELECT on a read-only, time-limited connection and return rows as a list of dicts."""
+        """Execute a generated SELECT on a read-only, time-limited connection and return rows as a list of dicts.
+
+        Args:
+            query: The generated SQL.
+
+        Returns:
+            One dict per row, or None when the database refused or failed the query.
+
+        Raises:
+            Exception: Any error that is not a database failure, such as the RuntimeError of a dialect without a
+                read-only mode.
+        """
         try:
             with self.IGlobal.read_only_connection() as conn:
                 result = conn.execute(text(query))

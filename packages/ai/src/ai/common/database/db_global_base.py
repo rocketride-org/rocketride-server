@@ -42,7 +42,7 @@ import re
 import threading
 
 from abc import ABC, abstractmethod
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from datetime import datetime
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
@@ -685,61 +685,128 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
           table functions run when the user holds their grants.
         - SQLite: ``PRAGMA query_only``.
 
+        Each dialect's helper (``_mysql_read_only_statements`` and its siblings) reads what it needs from the
+        session and returns the statements to run before the query and after it. A rollback then ends any transaction that
+        read opened, and only after it do those statements run: MySQL and MariaDB apply a session's access mode
+        from the next transaction on, so a transaction already open would run the query read-write, and on
+        PostgreSQL the statements must open the query's transaction, so no rollback may follow them.
+
         Nothing outlives the block: the transaction is rolled back, and the session settings the block changed
         get back the values they had before it (which the server, ``init_connect`` or a role may have set, so
         not the defaults) before the connection goes back to the pool. A connection whose reset fails is
-        discarded. Reads of
-        server files and signals to other sessions (``pg_read_file``, ``pg_terminate_backend``, ``LOAD_FILE``)
-        are reads to the database: only a role without those privileges stops them.
+        discarded. Reads of server files and signals to other sessions (``pg_read_file``,
+        ``pg_terminate_backend``, ``LOAD_FILE``) are reads to the database: only a role without those
+        privileges stops them.
 
         Raises:
             RuntimeError: The engine's dialect has no read-only mode here, so no query is run.
         """
         dialect = self.engine.dialect.name
-        if dialect not in ('postgresql', 'mysql', 'mariadb', 'clickhouse', 'sqlite'):
+        read_only_statements = {
+            'postgresql': self._postgres_read_only_statements,
+            'mysql': self._mysql_read_only_statements,
+            'mariadb': self._mysql_read_only_statements,
+            'clickhouse': self._clickhouse_read_only_statements,
+            'sqlite': self._sqlite_read_only_statements,
+        }.get(dialect)
+        if read_only_statements is None:
             raise RuntimeError(f'No read-only mode for the {dialect} dialect; the query was not run')
-        timeout = int(self.READ_QUERY_TIMEOUT)
-        with self.engine.connect() as conn:
-            if dialect == 'postgresql':
-                conn.exec_driver_sql('SET TRANSACTION READ ONLY')
-                conn.exec_driver_sql(f'SET LOCAL statement_timeout = {timeout * 1000}')
-                yield conn
-                return
-            if dialect == 'clickhouse':
-                yield conn.execution_options(settings=self._clickhouse_read_settings(conn, timeout))
-                return
-            if dialect in ('mysql', 'mariadb'):
-                # The session, not one transaction: DDL commits implicitly and would start a read-write one
-                mariadb = conn.dialect.is_mariadb
-                setting, value = ('max_statement_time', timeout) if mariadb else ('max_execution_time', timeout * 1000)
-                # MariaDB before 11.1 knows only the old name; 11.1 deprecated it
-                old_mariadb = mariadb and conn.dialect.server_version_info < (11, 1)
-                read_only = 'tx_read_only' if old_mariadb else 'transaction_read_only'
-                was_read_only, was_limit = conn.exec_driver_sql(
-                    f'SELECT @@SESSION.{read_only}, @@SESSION.{setting}'
-                ).one()
-                begin = ['SET SESSION TRANSACTION READ ONLY', f'SET SESSION {setting} = {value}']
-                end = [
-                    f'SET SESSION TRANSACTION READ {"ONLY" if was_read_only else "WRITE"}',
-                    f'SET SESSION {setting} = {was_limit}',
-                ]
-            else:
-                was_query_only = conn.exec_driver_sql('PRAGMA query_only').scalar()
-                begin, end = ['PRAGMA query_only = ON'], [f'PRAGMA query_only = {"ON" if was_query_only else "OFF"}']
-            try:
-                for statement in begin:
-                    conn.exec_driver_sql(statement)
-                yield conn
-            finally:
-                try:
-                    conn.rollback()
-                    for statement in end:
-                        conn.exec_driver_sql(statement)
-                    conn.rollback()
-                except Exception as e:
-                    # The session may still be read-only or time-limited: never hand it to another caller
-                    warning(f'Could not reset a read-only database session, discarding it: {e}')
-                    conn.invalidate()
+        with self.engine.connect() as conn, ExitStack() as cleanup:
+            begin, end = read_only_statements(conn, int(self.READ_QUERY_TIMEOUT))
+            # The lookup above may have opened a transaction, which would not be read-only (see the docstring)
+            conn.rollback()
+            # Registered before the first change, so a block that fails half-way gets its session back too
+            cleanup.callback(self._restore_session, conn, end)
+            for statement in begin:
+                conn.exec_driver_sql(statement)
+            yield conn
+
+    def _postgres_read_only_statements(self, conn: Connection, timeout: int) -> Tuple[List[str], List[str]]:
+        """Return the statements that make the block's PostgreSQL transaction read-only and time-limited.
+
+        ``SET TRANSACTION READ ONLY`` must open the transaction, and both settings end with it, so nothing
+        needs undoing.
+
+        Args:
+            conn: The block's connection; nothing is read from it.
+            timeout: The time limit in seconds.
+
+        Returns:
+            The statements to run before the query, and an empty list for after it.
+        """
+        return ['SET TRANSACTION READ ONLY', f'SET LOCAL statement_timeout = {timeout * 1000}'], []
+
+    def _mysql_read_only_statements(self, conn: Connection, timeout: int) -> Tuple[List[str], List[str]]:
+        """Return the statements that make a MySQL or MariaDB session read-only and time-limited, and undo it.
+
+        The session, not one transaction: DDL commits implicitly and would start a read-write one. The undo
+        statements give back the values the session had, not the server defaults.
+
+        Args:
+            conn: The block's connection, whose session settings are read.
+            timeout: The time limit in seconds.
+
+        Returns:
+            The statements to run before the query, and those to run after it.
+        """
+        mariadb = conn.dialect.is_mariadb
+        setting, value = ('max_statement_time', timeout) if mariadb else ('max_execution_time', timeout * 1000)
+        # MariaDB before 11.1 knows only the old name; 11.1 deprecated it
+        old_mariadb = mariadb and conn.dialect.server_version_info < (11, 1)
+        read_only = 'tx_read_only' if old_mariadb else 'transaction_read_only'
+        was_read_only, was_limit = conn.exec_driver_sql(f'SELECT @@SESSION.{read_only}, @@SESSION.{setting}').one()
+        begin = ['SET SESSION TRANSACTION READ ONLY', f'SET SESSION {setting} = {value}']
+        end = [
+            f'SET SESSION TRANSACTION READ {"ONLY" if was_read_only else "WRITE"}',
+            f'SET SESSION {setting} = {was_limit}',
+        ]
+        return begin, end
+
+    def _clickhouse_read_only_statements(self, conn: Connection, timeout: int) -> Tuple[List[str], List[str]]:
+        """Send the read-only settings with each ClickHouse query of the block; no statements are needed.
+
+        The settings (``_clickhouse_read_settings``) go on the connection's execution options, which SQLAlchemy
+        changes in place, so the session itself is never changed.
+
+        Args:
+            conn: The block's connection.
+            timeout: The time limit in seconds.
+
+        Returns:
+            Two empty lists.
+        """
+        conn.execution_options(settings=self._clickhouse_read_settings(conn, timeout))
+        return [], []
+
+    def _sqlite_read_only_statements(self, conn: Connection, timeout: int) -> Tuple[List[str], List[str]]:
+        """Return the statements that make a SQLite connection query-only, and those that put it back as it was.
+
+        Args:
+            conn: The block's connection, whose ``query_only`` flag is read.
+            timeout: Not used: SQLite gets no time limit here.
+
+        Returns:
+            The statements to run before the query, and those to run after it.
+        """
+        was_query_only = conn.exec_driver_sql('PRAGMA query_only').scalar()
+        return ['PRAGMA query_only = ON'], [f'PRAGMA query_only = {"ON" if was_query_only else "OFF"}']
+
+    def _restore_session(self, conn: Connection, end: List[str]) -> None:
+        """End the block's transaction and run ``end``; discard the connection if that fails.
+
+        Args:
+            conn: The block's connection.
+            end: The statements that give the session back the settings it had before the block.
+        """
+        try:
+            conn.rollback()
+            for statement in end:
+                conn.exec_driver_sql(statement)
+            conn.rollback()
+        except Exception as e:
+            # The session may still be read-only or time-limited: never hand it to another caller
+            warning(f'Could not reset a read-only database session, discarding it: {e}')
+            conn.invalidate()
 
     def _clickhouse_read_settings(self, conn: Connection, timeout: int) -> Dict[str, float]:
         """Return the per-query settings that make a ClickHouse query read-only and time-limited.
@@ -810,6 +877,12 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
         ``StatementError`` appends ``[SQL: ...]`` / ``[parameters: ...]``, so
         the raw string handed the full ``EXPLAIN`` statement to a caller who
         was never granted raw SQL. The full exception still goes to the log.
+
+        Args:
+            query: The generated SQL.
+
+        Returns:
+            ``(True, '')`` when the database plans it, else ``(False, message)``.
         """
         if not self.engine:
             return False, 'Database engine not initialized'

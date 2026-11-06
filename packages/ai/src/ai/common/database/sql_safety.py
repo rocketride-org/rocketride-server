@@ -139,6 +139,49 @@ def _line_end(sql: str, i: int, terminators: str) -> int:
     return min(ends) if ends else len(sql)
 
 
+def _block_comment_end(sql: str, i: int) -> int:
+    """Return where a PostgreSQL block comment that starts at ``i`` ends; PostgreSQL nests ``/* */``.
+
+    Args:
+        sql: The statement text.
+        i: Index of the opening ``/*``.
+
+    Returns:
+        The index after the ``*/`` that closes it, or the end of ``sql`` when it is not closed.
+    """
+    depth, j = 1, i + 2
+    while j < len(sql) and depth:
+        if sql.startswith('/*', j):
+            depth, j = depth + 1, j + 2
+        elif sql.startswith('*/', j):
+            depth, j = depth - 1, j + 2
+        else:
+            j += 1
+    return j
+
+
+def _mask_dollar_quoted(sql: str, i: int, tag: str, out: list[str]) -> int:
+    """Copy a dollar-quoted string that starts at ``sql[i]`` to ``out``, its body blanked.
+
+    Args:
+        sql: The statement text.
+        i: Index of the opening tag.
+        tag: The tag, ``$$`` or ``$name$``; the same tag closes the string.
+        out: Receives the tags and a space for each character between them (line breaks kept).
+
+    Returns:
+        The index after the closing tag, or the end of ``sql`` when the string is not closed.
+    """
+    body = i + len(tag)
+    end = sql.find(tag, body)
+    out.append(tag)
+    if end == -1:
+        return _mask_to(sql, body, len(sql), out)
+    _mask_to(sql, body, end, out)
+    out.append(tag)
+    return end + len(tag)
+
+
 def _mask_postgres(sql: str) -> str:
     """Blank literals, quoted identifiers and comments as PostgreSQL reads them.
 
@@ -167,27 +210,11 @@ def _mask_postgres(sql: str) -> str:
             # PostgreSQL rejects a backtick outright, so masking a MySQL `identifier` here hides nothing it runs
             i = _mask_quoted(sql, i, ch, False, out)
         elif dollar:
-            tag = dollar.group(0)
-            end = sql.find(tag, dollar.end())
-            out.append(tag)
-            if end == -1:
-                i = _mask_to(sql, dollar.end(), n, out)
-            else:
-                _mask_to(sql, dollar.end(), end, out)
-                out.append(tag)
-                i = end + len(tag)
+            i = _mask_dollar_quoted(sql, i, dollar.group(0), out)
         elif sql.startswith('--', i):
             i = _mask_to(sql, i, _line_end(sql, i, '\r\n'), out)
         elif sql.startswith('/*', i):
-            depth, j = 1, i + 2
-            while j < n and depth:
-                if sql.startswith('/*', j):
-                    depth, j = depth + 1, j + 2
-                elif sql.startswith('*/', j):
-                    depth, j = depth - 1, j + 2
-                else:
-                    j += 1
-            i = _mask_to(sql, i, j, out)
+            i = _mask_to(sql, i, _block_comment_end(sql, i), out)
         else:
             out.append(ch)
             i += 1
@@ -215,9 +242,9 @@ def _mask_mysql(sql: str) -> str | None:
             i = _mask_quoted(sql, i, ch, ch != '`', out)
         elif ch == '#' or (sql.startswith('--', i) and (i + 2 == n or sql[i + 2].isspace() or sql[i + 2] < ' ')):
             i = _mask_to(sql, i, _line_end(sql, i, '\n'), out)
+        elif sql.startswith(_MYSQL_EXECUTED_COMMENTS, i):
+            return None
         elif sql.startswith('/*', i):
-            if sql.startswith(_MYSQL_EXECUTED_COMMENTS, i):
-                return None
             end = sql.find('*/', i + 2)
             i = _mask_to(sql, i, n if end == -1 else end + 2, out)
         else:
