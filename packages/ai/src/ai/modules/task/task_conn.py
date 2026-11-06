@@ -580,7 +580,10 @@ class TaskConn(
 
         Args:
             request (Dict[str, Any]): The command request; its token selects the task.
-            permissions (str): Requested permissions, validated against the task's team.
+            permissions (str): Permission to require. Resolved against the task's
+                effective permissions (owner-scoped or team membership) for API-key
+                auth; pk_/tk_ credentials are already scoped to their own task, and
+                sys.admin bypasses the check.
 
         Returns:
             TASK: The task instance corresponding to the token.
