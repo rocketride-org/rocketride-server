@@ -75,16 +75,14 @@ Error decryptParameters(json::Value &service) noexcept {
             case PARAM_TYPE::SECURE: {
                 // If this is already defined, we can skip it. This
                 // allows us to update passwords, etc
-                if (parameters.isMember(keyName)) continue;
+                if (findNested(parameters, keyName)) continue;
 
-                // If it not here either, skip it
+                // If it not here either, skip it. The token holds the
+                // values flat, keyed by the dotted path
                 if (!secureValues.isMember(keyName)) continue;
 
-                // Get the value
-                auto value = secureValues[keyName];
-
-                // Save it into the parameters
-                parameters[keyName] = value;
+                // Save it back at its nested position
+                setNested(parameters, keyName, secureValues[keyName]);
                 break;
             }
             default:
@@ -136,16 +134,17 @@ Error encryptParameters(IServiceConfig &config, json::Value &service) noexcept {
         const auto type = param.second;
 
         // If we do not have a value on the input, skip this
-        if (!parameters.isMember(keyName)) continue;
+        const auto *found = findNested(parameters, keyName);
+        if (!found) continue;
 
         // Get the value
-        auto value = parameters[keyName];
+        auto value = *found;
 
         // Based on the type
         switch (type) {
             case PARAM_TYPE::SECURE:
-                // Remove it from the parameters
-                parameters.removeMember(keyName);
+                // Remove it from the parameters (at its nested position)
+                removeNested(parameters, keyName);
 
                 // And add it to the secret names for the UI
                 secureNames.append(keyName);
@@ -156,7 +155,7 @@ Error encryptParameters(IServiceConfig &config, json::Value &service) noexcept {
                 continue;
         }
 
-        // Copy it over regard
+        // Copy it over regardless - flat, keyed by the dotted path
         secretValues[keyName] = value;
     }
 

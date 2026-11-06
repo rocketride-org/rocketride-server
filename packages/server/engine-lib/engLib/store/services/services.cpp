@@ -795,9 +795,19 @@ ErrorOr<json::Value> IServices::expandProperty(ServiceContext &context,
     // give a global definition a locally-unique name, e.g.
     // "qdrant.cloud.host": {"base": "vector.host", ...}). Keep following
     // "base" until we reach a real definition; each layer's own overrides
-    // win over the definition it points to.
+    // win over the definition it points to. An alias that leads back to
+    // one already followed (itself, or a longer cycle) is a load error
+    std::vector<Text> followed;
+    if (originalId) followed.push_back(originalId);
     while (field.isMember("base")) {
         auto aliasId = field.lookup<Text>("base");
+
+        for (const auto &earlier : followed)
+            if (earlier == aliasId)
+                return APERR(Ec::InvalidParam, "Property alias", aliasId,
+                             "refers back to itself in",
+                             context.def.definitionPath);
+        followed.push_back(aliasId);
 
         auto resolved = lookupField(context, aliasId);
         if (!resolved) return resolved.ccode();
@@ -839,6 +849,22 @@ ErrorOr<json::Value> IServices::expandProperty(ServiceContext &context,
                          !field.isMember("enum");
     if (!isGroup && field.isMember("name"))
         field["path"] = joinPath(context.pathPrefix, field.lookup<Text>("name"));
+
+    // A "secret" or "readonly" leaf is registered by its path, so the
+    // stored config's encrypt/decrypt (endpoint.config.cpp) knows which
+    // values to protect. A hoisted leaf is expanded once, so it lands once
+    // at its hoisted path; "secret" wins when both flags are set
+    if (field.isMember("path")) {
+        const auto isFlagged = [&field](const char *flag) noexcept {
+            return field.isMember(flag) && field[flag].isBool() &&
+                   field[flag].asBool();
+        };
+        const auto path = field.lookup<Text>("path");
+        if (isFlagged("readonly"))
+            context.def.secureParameters[path] = PARAM_TYPE::READONLY;
+        if (isFlagged("secret"))
+            context.def.secureParameters[path] = PARAM_TYPE::SECURE;
+    }
 
     // "param" is read, acted on and stripped
     if (field.isMember("param"))

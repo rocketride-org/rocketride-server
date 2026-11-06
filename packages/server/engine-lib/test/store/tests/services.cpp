@@ -62,15 +62,24 @@ TEST_CASE("store::Services") {
 //-----------------------------------------------------------------------------
 namespace {
 
-// Resolves a fixture service definition into its schema
-ErrorOr<json::Value> resolveFixture(const json::Value &definition,
-                                    uint32_t capabilities = 0) noexcept {
+// Resolves a fixture service definition, returning the whole definition
+// (schema plus the secure parameter registrations)
+ErrorOr<IServices::ServiceDefinition> resolveDefinition(
+    const json::Value &definition, uint32_t capabilities = 0) noexcept {
     IServices::ServiceDefinition def;
     def.definitionPath = file::Path{"fixture/services.json"};
     def.serviceDefinition = definition;
     def.capabilities = capabilities;
     if (auto ccode = IServices::buildSchema(def)) return ccode;
-    return def.serviceSchema;
+    return def;
+}
+
+// Resolves a fixture service definition into its schema
+ErrorOr<json::Value> resolveFixture(const json::Value &definition,
+                                    uint32_t capabilities = 0) noexcept {
+    auto def = resolveDefinition(definition, capabilities);
+    if (!def) return def.ccode();
+    return def->serviceSchema;
 }
 
 // Collects every "path" in a resolved properties tree, recursing into
@@ -439,6 +448,109 @@ TEST_CASE("store::Services::levelNamespace") {
         REQUIRE(hasPath(paths, "cloud.host"));
         REQUIRE(hasPath(paths, "local.host"));
         REQUIRE_FALSE(hasPath(paths, "host"));
+    }
+}
+
+//-----------------------------------------------------------------------------
+// Secret and readonly leaves are registered by path for the stored config's
+// encrypt/decrypt - a root leaf by its name, a branch leaf by parent.branch.leaf
+//-----------------------------------------------------------------------------
+TEST_CASE("store::Services::secureParameters") {
+    const auto definitions = R"({
+        "fx.mode": {
+            "type": "string",
+            "default": "cloud",
+            "enum": {
+                "cloud": { "title": "Cloud", "properties": ["fx.apikey", "fx.region"] },
+                "local": { "title": "Local", "properties": ["fx.region"] }
+            }
+        },
+        "fx.apikey": { "type": "string", "title": "API key", "secret": true },
+        "fx.region": { "type": "string", "title": "Region", "readonly": true },
+        "fx.token": { "type": "string", "title": "Token", "secret": true },
+        "fx.plain": { "type": "string", "title": "Plain" }
+    })"_json;
+
+    auto def = resolveDefinition(
+        fixture(definitions, R"(["fx.token", "fx.mode", "fx.plain"])"_json));
+    REQUIRE_NO_ERROR(def);
+    const auto &secure = def->secureParameters;
+
+    SECTION("a secret root leaf is registered under its name") {
+        REQUIRE(secure.count("token") == 1u);
+        REQUIRE(secure.at("token") == PARAM_TYPE::SECURE);
+    }
+
+    SECTION("a secret leaf inside a branch is registered under its path") {
+        REQUIRE(secure.count("cloud.apikey") == 1u);
+        REQUIRE(secure.at("cloud.apikey") == PARAM_TYPE::SECURE);
+        REQUIRE(secure.count("apikey") == 0u);
+    }
+
+    SECTION("a hoisted readonly leaf is registered once, at the hoisted path") {
+        REQUIRE(secure.count("region") == 1u);
+        REQUIRE(secure.at("region") == PARAM_TYPE::READONLY);
+        REQUIRE(secure.count("cloud.region") == 0u);
+        REQUIRE(secure.count("local.region") == 0u);
+    }
+
+    SECTION("plain leaves are not registered") {
+        REQUIRE(secure.count("plain") == 0u);
+        REQUIRE(secure.count("mode") == 0u);
+        REQUIRE(secure.size() == 3u);
+    }
+
+    SECTION("a {base, ...} override adding secret is registered") {
+        auto overridden = resolveDefinition(fixture(
+            definitions, R"([{ "base": "fx.plain", "secret": true }])"_json));
+        REQUIRE_NO_ERROR(overridden);
+        REQUIRE(overridden->secureParameters.at("plain") == PARAM_TYPE::SECURE);
+    }
+}
+
+//-----------------------------------------------------------------------------
+// Alias chains resolve; alias cycles are a load error naming the alias
+//-----------------------------------------------------------------------------
+TEST_CASE("store::Services::aliasCycles") {
+    SECTION("a self-referencing alias") {
+        auto schema = resolveFixture(fixture(
+            R"({ "fx.self": { "base": "fx.self", "title": "Self" } })"_json,
+            R"(["fx.self"])"_json));
+        REQUIRE_ERROR(schema, Ec::InvalidParam,
+                      "Property alias fx.self refers back to itself in");
+    }
+
+    SECTION("a mutual alias cycle") {
+        auto schema = resolveFixture(fixture(
+            R"({ "fx.a": { "base": "fx.b" }, "fx.b": { "base": "fx.a" } })"_json,
+            R"(["fx.a"])"_json));
+        REQUIRE_ERROR(schema, Ec::InvalidParam,
+                      "Property alias fx.a refers back to itself in");
+    }
+
+    SECTION("a cycle reached through an inline {base, ...} specifier") {
+        auto schema = resolveFixture(fixture(
+            R"({ "fx.a": { "base": "fx.b" }, "fx.b": { "base": "fx.a" } })"_json,
+            R"([{ "base": "fx.a", "title": "Inline" }])"_json));
+        REQUIRE_ERROR(schema, Ec::InvalidParam, "refers back to itself in");
+    }
+
+    SECTION("a non-cyclic three-deep chain expands, overrides layered") {
+        auto schema = resolveFixture(fixture(
+            R"({
+                "fx.a": { "base": "fx.b", "default": "from-a" },
+                "fx.b": { "base": "fx.c", "title": "From B" },
+                "fx.c": { "type": "string", "title": "From C", "default": "from-c" }
+            })"_json,
+            R"(["fx.a"])"_json));
+        REQUIRE_NO_ERROR(schema);
+        const auto &leaf = (*schema)["properties"][0];
+        REQUIRE(leaf["name"] == "a");
+        REQUIRE(leaf["path"] == "a");
+        REQUIRE(leaf["type"] == "string");
+        REQUIRE(leaf["title"] == "From B");
+        REQUIRE(leaf["default"] == "from-a");
+        REQUIRE_FALSE(leaf.isMember("base"));
     }
 }
 
