@@ -132,6 +132,10 @@ TEST_CASE("store::Services") {
 
         auto badLanes = customNode("custom_l");
         badLanes["lanes"] = customList({"x"});
+        auto badTitle = customNode("custom_p");
+        badTitle["title"] = R"({})"_json;
+        auto badPrefix = customNode("custom_q");
+        badPrefix["prefix"] = customList({"x"});
 
         // Two combos that each wait for the other never resolve
         auto waitsA = customNode("custom_n");
@@ -160,6 +164,8 @@ TEST_CASE("store::Services") {
             customList({loop}),
             customList({pingPong}),
             customList({badLanes}),
+            customList({badTitle}),
+            customList({badPrefix}),
             customList({waitsA, waitsB}),
         };
         for (const auto &custom : refused)

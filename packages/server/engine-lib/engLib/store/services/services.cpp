@@ -1723,6 +1723,14 @@ ErrorOr<std::optional<IServices::ServiceDefinition>> IServices::parseDefinition(
     // Declare our definition
     IServices::ServiceDefinition def;
 
+    // getServiceSchemas() reads these with asString(), which throws on an
+    // object or an array
+    for (const char *key : {"title", "prefix"})
+        if (serviceInfo.isMember(key) &&
+            (serviceInfo[key].isObject() || serviceInfo[key].isArray()))
+            return APERR(Ec::InvalidParam, "The", key, "of", protocol,
+                         "must be a string");
+
     // Show the title
     def.title = serviceInfo.lookup<iText>("title", def.logicalType);
     LOG(Services, "    Title         :", def.title);
