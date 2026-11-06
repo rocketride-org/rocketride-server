@@ -146,7 +146,6 @@ public:
         ///		transformed value of the service definition
         //---------------------------------------------------------
         json::Value serviceSchema;
-
     };
     using ServiceDefinitionPtr = ServiceDefinition *;
     using ServiceDefinitions = std::map<iText, ServiceDefinition>;
@@ -162,6 +161,27 @@ public:
     static ErrorOr<IServices::ServiceDefinitionPtr>
     getServiceDefinitionFromService(const json::Value &service) noexcept;
     static ErrorOr<json::Value> getServiceSchemas() noexcept;
+
+    //-----------------------------------------------------------------
+    ///	@details
+    ///		Rejects a parsed services.*json that is still in the old
+    ///		format ("fields"/"shape" instead of "propertyDefinitions"/
+    ///		"properties"). The error names the file. Public so a
+    ///		fixture can be checked without walking the nodes tree
+    //-----------------------------------------------------------------
+    static Error requireNewFormat(const json::Value &serviceInfo,
+                                  const Path &definitionPath) noexcept;
+
+    //-----------------------------------------------------------------
+    ///	@details
+    ///		Expands one service definition's "properties" into its
+    ///		fully-resolved schema (def.serviceSchema): every leaf
+    ///		carries its "path", "params" lists the flat descriptors of
+    ///		the "param"-flagged properties, and "capabilities" is the
+    ///		node's PROTOCOL_CAPS bitmask. Public so a
+    ///		fixture definition can be resolved without being loaded
+    //-----------------------------------------------------------------
+    static Error buildSchema(ServiceDefinition &def) noexcept;
 
 private:
     //-----------------------------------------------------------------
@@ -188,6 +208,27 @@ private:
 
         ServiceDefinition &def;
         ServiceFields privateFields;
+
+        // The flat descriptors of every "param"-flagged property seen so
+        // far, in schema order - becomes schema["params"]
+        json::Value params{json::arrayValue};
+
+        // The dotted "path" prefix of the level being expanded: a group
+        // pushes its name, a selector branch pushes the branch name, a
+        // hoisted leaf pushes nothing
+        std::vector<Text> pathPrefix;
+
+        // Empty at the top level or inside a plain group. Inside an enum
+        // branch or an array item it names that construct ("an enum
+        // branch" / "an array item") - "param" is a load error there,
+        // because such a property resolves branch- or item-dependently
+        Text nestedIn;
+
+        // The names recorded for the level currently being expanded.
+        // A selector registers its branch names and its hoisted leaves
+        // here, because they share the level's namespace with its
+        // sibling leaves
+        std::vector<Text> *levelNames{};
     };
 
     //-------------------------------------------------------------
@@ -201,6 +242,12 @@ private:
                                                json::Value &property) noexcept;
     static ErrorOr<json::Value> expandChildren(ServiceContext &context,
                                                json::Value property) noexcept;
+    static ErrorOr<json::Value> expandProperties(
+        ServiceContext &context, json::Value &specifiers) noexcept;
+    static ErrorOr<json::Value> expandBranches(ServiceContext &context,
+                                               json::Value branches) noexcept;
+    static Error applyParam(ServiceContext &context,
+                            json::Value &field) noexcept;
     static Error requireUniqueName(std::vector<Text> &seen, const Text &name,
                                    ServiceContext &context) noexcept;
     static Error updateDefinitions() noexcept;

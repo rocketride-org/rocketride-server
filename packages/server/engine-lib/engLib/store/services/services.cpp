@@ -68,6 +68,17 @@ static application::Opt NodePath{"--node_path"};
 //			through to the final schema as-is - the UI decides how to
 //			render them.
 //
+//			"param": true is the one flag the parser itself acts on: the
+//			property becomes a pipeline parameter (a caller may override
+//			its value per call), it is described in the resolved schema's
+//			"params" list, and the flag is stripped. It is legal on a plain
+//			field or an enum selector at the top level, inside a plain
+//			group, or hoisted above a selector (see "path" below). It is a
+//			load error inside an enum branch or an array item - such a
+//			property resolves branch- or item-dependently - and on a
+//			"constant", "oauth2" or "upload" property or one flagged
+//			"secret" or "env": a parameter is never credential-shaped.
+//
 //		An enum field:
 //			{
 //				"type": "string",
@@ -106,6 +117,43 @@ static application::Opt NodePath{"--node_path"};
 //		- {"base": "name", ...overrides}: same, with the listed members
 //		  merged/overridden on top of the referenced definition.
 //		- a fully inline object carrying its own "name".
+//
+//	Resolved schema
+//	-----------------------------------
+//	Every service's "properties" are expanded into a resolved schema
+//	(IServices::buildSchema) that carries what the raw file does not:
+//
+//		"path" on every leaf:
+//			The dotted key the leaf's value is stored under in a node's
+//			config. For each level's properties (root path = empty) a
+//			plain leaf is at parent + leaf; a grouped subsection's
+//			children are at parent + group + leaf; a selector (an enum
+//			with property sets) is itself a leaf at parent + selector,
+//			and each branch's properties resolve at parent + branch -
+//			EXCEPT a property referenced by the IDENTICAL specifier in
+//			EVERY branch, which is HOISTED to parent (shared across the
+//			branches). A nested selector is just a leaf of its level, so
+//			the same two rules apply recursively. Hoisting is by
+//			specifier identity: one definition referenced in every
+//			branch is shared; per-branch definitions (qdrant.cloud.host
+//			vs qdrant.local.host, both shortened to "host") are
+//			branch-specific. Branch names and leaf names share one
+//			namespace per level. An array item resolves per element, so
+//			its paths are relative to "<array path>[]".
+//
+//		"params":
+//			The flat, self-contained descriptors of the "param"-flagged
+//			properties - {field, type, title, description, default} plus
+//			"enum"/"minimum"/"maximum" when the leaf has them - copied
+//			from the resolved leaf so a consumer validates a parameter
+//			value from the descriptor alone, never re-walking the schema.
+//			"field" is the leaf's "path".
+//
+//		"capabilities":
+//			The node's PROTOCOL_CAPS bitmask - the same value the service
+//			summary carries - so a consumer of the resolved schema (the
+//			config resolver) applies the "multitenant" rule without a
+//			second lookup.
 //
 //	Property definition file
 //	-----------------------------------
@@ -148,6 +196,10 @@ static application::Opt NodePath{"--node_path"};
 //				The endpoint requires network access
 //			"datanet"
 //				The endpoint requires datanet protocol access
+//			"multitenant"
+//				The node is certified reentrant-safe across callers, so a
+//				pipe built only from such nodes may share one engine
+//				between users (PROTOCOL_CAPS::MULTITENANT)
 //
 //      "classType":
 //          The type of the node. The following types are currently
@@ -376,11 +428,182 @@ Error IServices::requireUniqueName(std::vector<Text> &seen, const Text &name,
 
 //-------------------------------------------------------------------------
 /// @details
+///		Joins a path prefix and a leaf name into the dotted "path" the
+///		leaf's value is stored under in a node's config
+///	@param[in] prefix
+///		The path segments of the level the leaf belongs to
+///	@param[in] leaf
+///		The leaf's (short) name
+//-------------------------------------------------------------------------
+static Text joinPath(const std::vector<Text> &prefix, TextView leaf) noexcept {
+    Text path;
+    for (const auto &segment : prefix) path = _ts(path, segment, ".");
+    return _ts(path, leaf);
+}
+
+//-------------------------------------------------------------------------
+/// @details
+///		Expands one level's property specifiers - the root "properties",
+///		a grouped subsection's "properties" - into the resolved array,
+///		requiring the names of the level to be unique. A selector in the
+///		level registers its branch names and its hoisted leaves into the
+///		same namespace (through context.levelNames)
+///	@param[in] context
+///		The context we are working in
+///	@param[in] specifiers
+///		The "properties" array of the level
+//-------------------------------------------------------------------------
+ErrorOr<json::Value> IServices::expandProperties(
+    ServiceContext &context, json::Value &specifiers) noexcept {
+    json::Value children(json::arrayValue);
+    std::vector<Text> seen;
+
+    // This level's namespace - restored once the level is done
+    auto *outerNames = context.levelNames;
+    context.levelNames = &seen;
+
+    for (auto &specifier : specifiers) {
+        auto res = expandProperty(context, specifier);
+        if (!res) return res.ccode();
+
+        if (auto ccode =
+                requireUniqueName(seen, res->lookup<Text>("name"), context))
+            return ccode;
+
+        children.append(*res);
+    }
+
+    context.levelNames = outerNames;
+    return children;
+}
+
+//-------------------------------------------------------------------------
+/// @details
+///		Expands the per-value property sets of a selector (an enum field
+///		whose "enum" is an object keyed by value). Hoisting is by
+///		specifier identity: a specifier listed (JSON-equal) in EVERY
+///		branch is branch-invariant, so it is expanded ONCE at the parent
+///		path, outside any branch, and that expansion is placed into each
+///		branch. Every other specifier resolves at parent + branch, inside
+///		the branch. Branch names and hoisted leaves share the parent
+///		level's namespace with its sibling leaves
+///	@param[in] context
+///		The context we are working in
+///	@param[in] branches
+///		The selector's "enum" object (taken by value, mutated and
+///		returned)
+//-------------------------------------------------------------------------
+ErrorOr<json::Value> IServices::expandBranches(ServiceContext &context,
+                                               json::Value branches) noexcept {
+    const auto branchNames = branches.getMemberNames();
+
+    // Branch names become path segments at the parent level, so they
+    // share its namespace
+    for (const auto &branchName : branchNames)
+        if (auto ccode = requireUniqueName(*context.levelNames,
+                                           Text{branchName}, context))
+            return ccode;
+
+    // Intersect the branches' specifier lists - a branch with no
+    // properties references nothing, so nothing hoists past it
+    std::vector<json::Value> hoisted;
+    bool firstBranch = true;
+    for (const auto &branchName : branchNames) {
+        const auto &branch = branches[branchName];
+
+        std::vector<json::Value> listed;
+        if (branch.isMember("properties") && branch["properties"].isArray())
+            for (const auto &specifier : branch["properties"])
+                listed.push_back(specifier);
+
+        if (firstBranch) {
+            hoisted = _mv(listed);
+            firstBranch = false;
+            continue;
+        }
+
+        std::vector<json::Value> kept;
+        for (auto &candidate : hoisted)
+            for (const auto &specifier : listed)
+                if (candidate == specifier) {
+                    kept.push_back(candidate);
+                    break;
+                }
+        hoisted = _mv(kept);
+    }
+
+    // Expand each hoisted specifier once, at the parent path and outside
+    // any branch (so it stays param-eligible); its name joins the parent
+    // level's namespace
+    std::vector<json::Value> hoistedExpanded;
+    for (auto &specifier : hoisted) {
+        auto res = expandProperty(context, specifier);
+        if (!res) return res.ccode();
+
+        if (auto ccode = requireUniqueName(*context.levelNames,
+                                           res->lookup<Text>("name"), context))
+            return ccode;
+
+        hoistedExpanded.push_back(*res);
+    }
+
+    // Expand every branch
+    for (const auto &branchName : branchNames) {
+        auto &branch = branches[branchName];
+        if (!branch.isMember("properties") || !branch["properties"].isArray())
+            continue;
+
+        json::Value children(json::arrayValue);
+        std::vector<Text> seen;
+        for (auto &specifier : branch["properties"]) {
+            // A hoisted specifier reuses its expansion
+            size_t index = 0;
+            while (index < hoisted.size() && !(hoisted[index] == specifier))
+                ++index;
+
+            json::Value child;
+            if (index < hoisted.size()) {
+                child = hoistedExpanded[index];
+            } else {
+                // Everything else resolves at parent + branch, inside the
+                // branch. A nested selector's branch names and hoists join
+                // this branch's namespace
+                const auto outerNestedIn = context.nestedIn;
+                auto *outerNames = context.levelNames;
+                context.pathPrefix.push_back(Text{branchName});
+                context.nestedIn = "an enum branch";
+                context.levelNames = &seen;
+
+                auto res = expandProperty(context, specifier);
+
+                context.levelNames = outerNames;
+                context.nestedIn = outerNestedIn;
+                context.pathPrefix.pop_back();
+                if (!res) return res.ccode();
+
+                child = _mv(*res);
+            }
+
+            if (auto ccode = requireUniqueName(
+                    seen, child.lookup<Text>("name"), context))
+                return ccode;
+
+            children.append(child);
+        }
+        branch["properties"] = _mv(children);
+    }
+
+    return branches;
+}
+
+//-------------------------------------------------------------------------
+/// @details
 ///		Expands the structural members of an already-resolved property -
 ///		a grouped subsection's "properties", an array field's "item", or
 ///		an enum field's per-value "properties" - by recursively expanding
-///		every property specifier they contain. Properties with none of
-///		these members (plain leaf fields) are returned unchanged.
+///		every property specifier they contain, each at its own path.
+///		Properties with none of these members (plain leaf fields) are
+///		returned unchanged.
 ///	@param[in] context
 ///		The context we are working in
 ///	@param[in] property
@@ -389,26 +612,21 @@ Error IServices::requireUniqueName(std::vector<Text> &seen, const Text &name,
 //-------------------------------------------------------------------------
 ErrorOr<json::Value> IServices::expandChildren(ServiceContext &context,
                                                json::Value property) noexcept {
-    // A grouped subsection - expand every property it lists
+    // A grouped subsection - its children resolve under the group's name
     if (property.isMember("properties") && property["properties"].isArray()) {
-        json::Value children(json::arrayValue);
-        std::vector<Text> seen;
-        for (auto &child : property["properties"]) {
-            auto res = expandProperty(context, child);
-            if (!res) return res.ccode();
+        context.pathPrefix.push_back(property.lookup<Text>("name"));
+        auto res = expandProperties(context, property["properties"]);
+        context.pathPrefix.pop_back();
+        if (!res) return res.ccode();
 
-            if (auto ccode = requireUniqueName(seen, res->lookup<Text>("name"),
-                                               context))
-                return ccode;
-
-            children.append(*res);
-        }
-        property["properties"] = _mv(children);
+        property["properties"] = _mv(*res);
     }
 
     // An array field - expand its single item specifier. "type": "array"
     // is required so an array field is unambiguous from a plain field that
-    // happens to carry an "item" member.
+    // happens to carry an "item" member. Items resolve per element, so the
+    // item's paths are relative to "<array path>[]" and it counts as
+    // nested for "param"
     if (property.isMember("item")) {
         if (property.lookup<Text>("type") != "array")
             return APERR(Ec::InvalidParam,
@@ -416,35 +634,112 @@ ErrorOr<json::Value> IServices::expandChildren(ServiceContext &context,
                          "must declare \"type\": \"array\" in",
                          context.def.definitionPath);
 
+        const auto outerPrefix = context.pathPrefix;
+        const auto outerNestedIn = context.nestedIn;
+        context.pathPrefix = {_ts(property.lookup<Text>("path"), "[]")};
+        context.nestedIn = "an array item";
+
         auto res = expandProperty(context, property["item"]);
+
+        context.pathPrefix = outerPrefix;
+        context.nestedIn = outerNestedIn;
         if (!res) return res.ccode();
+
         property["item"] = *res;
     }
 
     // An enum field with per-value property sets
     if (property.isMember("enum") && property["enum"].isObject()) {
-        for (const auto &branchName : property["enum"].getMemberNames()) {
-            auto &branch = property["enum"][branchName];
-            if (!branch.isMember("properties") || !branch["properties"].isArray())
-                continue;
+        auto res = expandBranches(context, property["enum"]);
+        if (!res) return res.ccode();
 
-            json::Value children(json::arrayValue);
-            std::vector<Text> seen;
-            for (auto &child : branch["properties"]) {
-                auto res = expandProperty(context, child);
-                if (!res) return res.ccode();
-
-                if (auto ccode = requireUniqueName(
-                        seen, res->lookup<Text>("name"), context))
-                    return ccode;
-
-                children.append(*res);
-            }
-            branch["properties"] = _mv(children);
-        }
+        property["enum"] = _mv(*res);
     }
 
     return property;
+}
+
+//-------------------------------------------------------------------------
+/// @details
+///		Acts on a resolved property's "param" flag: validates that the
+///		property may be a pipeline parameter, records its flat descriptor
+///		in context.params, and strips the flag from the schema. Called
+///		with the FINAL field - name shortened, every {base, ...} override
+///		merged in - so a reference that adds "secret" or "env" is seen
+///	@param[in] context
+///		The context we are working in
+///	@param[in,out] field
+///		The resolved property carrying "param"
+//-------------------------------------------------------------------------
+Error IServices::applyParam(ServiceContext &context,
+                            json::Value &field) noexcept {
+    const auto name = field.lookup<Text>("name");
+
+    // The flag itself is never part of the schema
+    const auto flag = field["param"];
+    field.removeMember("param");
+
+    if (!flag.isBool())
+        return APERR(Ec::InvalidParam, "\"param\" on property", name, "in",
+                     context.def.definitionPath, "must be a boolean");
+    if (!flag.asBool()) return {};
+
+    // A parameter resolves context-free: never branch- or item-dependent
+    if (context.nestedIn)
+        return APERR(Ec::InvalidParam, "\"param\" on property", name, "in",
+                     context.def.definitionPath, "is not allowed inside",
+                     context.nestedIn);
+
+    // ... and is a scalar: a plain field or an enum selector
+    const auto type = field.lookup<Text>("type");
+    if ((field.isMember("properties") && !field.isMember("enum")) ||
+        type == "array")
+        return APERR(Ec::InvalidParam, "\"param\" on property", name, "in",
+                     context.def.definitionPath,
+                     "is only allowed on a plain field or an enum selector");
+
+    // ... and is never fixed or credential-shaped
+    if (type == "constant" || type == "oauth2" || type == "upload")
+        return APERR(Ec::InvalidParam, "\"param\" on property", name, "in",
+                     context.def.definitionPath, "is not allowed on a", type,
+                     "property");
+    if (field.isMember("secret") && field["secret"].isBool() &&
+        field["secret"].asBool())
+        return APERR(Ec::InvalidParam, "\"param\" on property", name, "in",
+                     context.def.definitionPath,
+                     "is not allowed on a secret property");
+    if (field.isMember("env"))
+        return APERR(Ec::InvalidParam, "\"param\" on property", name, "in",
+                     context.def.definitionPath,
+                     "is not allowed on an env-backed property");
+
+    // The self-contained descriptor: copied from the resolved leaf so a
+    // consumer validates a value from it alone
+    json::Value descriptor;
+    descriptor["field"] = field["path"];
+    for (const auto *member : {"type", "title", "description", "default"})
+        descriptor[member] =
+            field.isMember(member) ? field[member] : json::Value{};
+    for (const auto *member : {"minimum", "maximum"})
+        if (field.isMember(member)) descriptor[member] = field[member];
+
+    // The enum's values - [["value", "Label"], ...] / ["value", ...] /
+    // {"value": {...}} all reduce to the list of values
+    if (field.isMember("enum")) {
+        json::Value values(json::arrayValue);
+        const auto &options = field["enum"];
+        if (options.isObject()) {
+            for (const auto &value : options.getMemberNames())
+                values.append(value);
+        } else {
+            for (const auto &option : options)
+                values.append(option.isArray() ? option[0] : option);
+        }
+        descriptor["enum"] = _mv(values);
+    }
+
+    context.params.append(descriptor);
+    return {};
 }
 
 //-------------------------------------------------------------------------
@@ -454,7 +749,8 @@ ErrorOr<json::Value> IServices::expandChildren(ServiceContext &context,
 ///		definition - into its fully expanded final form. Referenced
 ///		definitions are recursively expanded via expandChildren, so a
 ///		reference to a grouped subsection, array, or enum field resolves
-///		completely.
+///		completely. Every leaf gets its "path"; a "param" flag is acted
+///		on and stripped.
 ///	@param[in] context
 ///		The context we are working in
 ///	@param[in] property
@@ -535,7 +831,83 @@ ErrorOr<json::Value> IServices::expandProperty(ServiceContext &context,
     // are never run through that pass.
     if (field.isMember("description")) resolveString(field["description"]);
 
+    // The field is final from here on - every override merged, the name
+    // shortened. A leaf (anything but a grouped subsection) is addressed
+    // by its "path"; a group's children carry the dotted path instead
+    const bool isGroup = field.isMember("properties") &&
+                         field["properties"].isArray() &&
+                         !field.isMember("enum");
+    if (!isGroup && field.isMember("name"))
+        field["path"] = joinPath(context.pathPrefix, field.lookup<Text>("name"));
+
+    // "param" is read, acted on and stripped
+    if (field.isMember("param"))
+        if (auto ccode = applyParam(context, field)) return ccode;
+
     return expandChildren(context, _mv(field));
+}
+
+//-------------------------------------------------------------------------
+/// @details
+///		Expands one service definition's "properties" into its resolved
+///		schema - see "Resolved schema" at the top of this file
+///	@param[in,out] def
+///		The service definition; serviceSchema is written
+//-------------------------------------------------------------------------
+Error IServices::buildSchema(ServiceDefinition &def) noexcept {
+    // Create the context we pass around
+    ServiceContext context(def);
+
+    // Get the local propertyDefinitions
+    auto localDefs = def.serviceDefinition["propertyDefinitions"];
+    if (localDefs.type() == json::ValueType::objectValue) {
+        // Get the member names
+        auto members = localDefs.getMemberNames();
+
+        // For each property definition, add it to the private fields
+        for (auto &field : members) {
+            json::Value &fieldValue = localDefs[field];
+            context.privateFields[field] = fieldValue;
+        }
+    }
+
+    // Make a protocol out of it
+    Text protocol = def.serviceDefinition.lookup<Text>("protocol");
+    Url url = Url{protocol};
+
+    // Make sure we recognized it
+    if (!url.protocol())
+        return APERR(Ec::InvalidJson, "Protocol missing or invalid in",
+                     def.definitionPath);
+
+    // Build up the "type" field so it can be referenced. We put it in
+    // the local fields in case someone actually defined a global
+    // "type" field - which would be bad
+    json::Value typeField;
+    typeField["type"] = "constant";
+    typeField["default"] = url.protocol();
+
+    // And add it into our private field definitions so we can use it
+    context.privateFields["type"] = typeField;
+
+    // Expand the root level
+    auto expanded =
+        expandProperties(context, def.serviceDefinition["properties"]);
+    if (!expanded) return expanded.ccode();
+
+    // Save the schema
+    json::Value schema;
+    schema["properties"] = _mv(*expanded);
+    schema["params"] = _mv(context.params);
+
+    // The capabilities bitmask - the one carrier of the node's
+    // capabilities, so the resolved schema is self-contained for the
+    // config resolver (the multitenant rule reads it here)
+    schema["capabilities"] = def.capabilities;
+
+    def.serviceSchema = _mv(schema);
+
+    return {};
 }
 
 //-------------------------------------------------------------------------
@@ -545,67 +917,8 @@ ErrorOr<json::Value> IServices::expandProperty(ServiceContext &context,
 //-------------------------------------------------------------------------
 Error IServices::updateDefinitions() noexcept {
     // For each service
-    for (auto &item : m_services) {
-        // Get the definition
-        auto &def = item.second;
-
-        // Create the context we pass around
-        ServiceContext context(def);
-
-        // Get the local propertyDefinitions
-        auto localDefs = def.serviceDefinition["propertyDefinitions"];
-        if (localDefs.type() == json::ValueType::objectValue) {
-            // Get the member names
-            auto members = localDefs.getMemberNames();
-
-            // For each property definition, add it to the private fields
-            for (auto &field : members) {
-                json::Value &fieldValue = localDefs[field];
-                context.privateFields[field] = fieldValue;
-            }
-        }
-
-        // Make a protocol out of it
-        Text protocol = def.serviceDefinition.lookup<Text>("protocol");
-        Url url = Url{protocol};
-
-        // Make sure we recognized it
-        if (!url.protocol())
-            return APERR(Ec::InvalidJson, "Protocol missing or invalid in",
-                         def.definitionPath);
-
-        // Build up the "type" field so it can be referenced. We put it in
-        // the local fields in case someone actually defined a global
-        // "type" field - which would be bad
-        json::Value typeField;
-        typeField["type"] = "constant";
-        typeField["default"] = url.protocol();
-
-        // And add it into our private field definitions so we can use it
-        context.privateFields["type"] = typeField;
-
-        // Get the raw properties list
-        auto &properties = def.serviceDefinition["properties"];
-
-        // Expand every property specifier
-        json::Value expanded(json::arrayValue);
-        std::vector<Text> seen;
-        for (auto &property : properties) {
-            auto res = expandProperty(context, property);
-            if (!res) return res.ccode();
-
-            if (auto ccode =
-                    requireUniqueName(seen, res->lookup<Text>("name"), context))
-                return ccode;
-
-            expanded.append(*res);
-        }
-
-        // Save the schema
-        json::Value schema;
-        schema["properties"] = _mv(expanded);
-        def.serviceSchema = _mv(schema);
-    }
+    for (auto &item : m_services)
+        if (auto ccode = buildSchema(item.second)) return ccode;
 
     // And done
     return {};
@@ -715,6 +1028,41 @@ Error IServices::declareNode(const ServiceDefinition &def) noexcept {
 
 //-------------------------------------------------------------------------
 /// @details
+///		Rejects a parsed services.*json that is still in the old format.
+///		A property definition file declares "propertyDefinitions" (the old
+///		format used "fields"); a service definition declares "properties"
+///		(the old format used "shape"). Either omission is a hard load
+///		error naming the file - there is no runtime acceptance of the old
+///		format
+///	@param[in] serviceInfo
+///		The parsed file
+///	@param[in] definitionPath
+///		The file's path, for the error
+//-------------------------------------------------------------------------
+Error IServices::requireNewFormat(const json::Value &serviceInfo,
+                                  const Path &definitionPath) noexcept {
+    // No protocol: a property definition file
+    if (!serviceInfo.lookup<iText>("protocol")) {
+        if (!serviceInfo.isMember("propertyDefinitions"))
+            return APERR(Ec::InvalidJson,
+                         "Old-format property definitions (\"fields\") are "
+                         "not supported - declare \"propertyDefinitions\" in",
+                         definitionPath);
+        return {};
+    }
+
+    // A service definition
+    if (!serviceInfo.isMember("properties"))
+        return APERR(Ec::InvalidJson,
+                     "Old-format service definition (\"shape\") is not "
+                     "supported - declare \"properties\" in",
+                     definitionPath);
+
+    return {};
+}
+
+//-------------------------------------------------------------------------
+/// @details
 ///		Loads all the service definitions
 //-------------------------------------------------------------------------
 Error IServices::init() noexcept {
@@ -765,28 +1113,19 @@ Error IServices::init() noexcept {
             // Get
             auto serviceInfo = *serviceJson;
 
+            // requireNewFormat() makes an old-format file a hard load error.
+            // It is wired in here as the LAST act of the node conversion
+            // (plan Step 2 item 5): until every services.json in the tree
+            // is converted the engine must still start on the mixed tree.
+
             // Get the type
             iText protocol = serviceInfo.lookup<iText>("protocol");
             if (!protocol) {
-                // Old-format global field files declare "fields" instead of
-                // "propertyDefinitions" - skip them, they are not supported
-                if (!serviceInfo.isMember("propertyDefinitions")) {
-                    LOG(Services, "    Skip global fields in old format");
-                    continue;
-                }
-
                 LOG(Services, "    Define global fields");
 
                 // This is not a specific service, so load any
                 // global fields it defines
                 loadGlobalFields(serviceInfo);
-                continue;
-            }
-
-            // Old-format service definitions declare "shape" instead of
-            // "properties" - skip them, they are not supported
-            if (!serviceInfo.isMember("properties")) {
-                LOG(Services, "    Skip service config in old format");
                 continue;
             }
 
@@ -924,6 +1263,9 @@ Error IServices::init() noexcept {
                     def.capabilities |= url::UrlConfig::PROTOCOL_CAPS::DEPRECATED;
                 else if (cap == "experimental")
                     def.capabilities |= url::UrlConfig::PROTOCOL_CAPS::EXPERIMENTAL;
+                else if (cap == "multitenant")
+                    def.capabilities |=
+                        url::UrlConfig::PROTOCOL_CAPS::MULTITENANT;
                 else
                     return APERR(Ec::InvalidParam, "Invalid cap setting", cap,
                                  "in", definitionPath);
