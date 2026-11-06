@@ -127,7 +127,7 @@ for _name in _added:
 def make_live_inst(access_tier: str = 'modify'):
     """Return an IInstance backed by a real Gmail API service."""
     access = ga.resolve_google_access({'access': access_tier}, ga.GMAIL)
-    svc = gmail_client.build_service('user', {'userToken': TOKEN_JSON}, access.scopes)
+    svc = gmail_client.build_service('user', {'userAuth': TOKEN_JSON}, access.scopes)
     inst = IInstance.IInstance()
     inst.IGlobal = types.SimpleNamespace(service=svc, access=access)
     return inst

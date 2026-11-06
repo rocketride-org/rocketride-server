@@ -91,8 +91,14 @@ def test_validator_imports_without_the_global(package: str) -> None:
             # Step 2: ... otherwise the framework default, which validates the schema
             from rocketlib import IValidatorBase  # noqa: F401
 
-        # Step 3: the run-path modules must not have ridden along
-        heavy = [name for name in (f'{package}.IGlobal', f'{package}.IInstance') if name in sys.modules]
+        # Step 3: the run-path modules must not have ridden along. Only a module
+        # this import loaded counts: a node test module collected earlier in the
+        # session may hold its IGlobal/IInstance in sys.modules already.
+        heavy = [
+            name
+            for name in (f'{package}.IGlobal', f'{package}.IInstance')
+            if name in sys.modules and name not in before
+        ]
         assert not heavy, (
             f'{package}: importing the validator loaded {", ".join(heavy)}. '
             'Config mode imports <path>.IValidator only: keep __init__.py empty and the validator import-light.'

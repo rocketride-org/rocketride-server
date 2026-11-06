@@ -36,9 +36,8 @@ class IGlobal(GoogleToolGlobalBase):
     SPEC_NAME = 'DRIVE'
     account_domain = None
 
-    def _after_begin(self, cfg: dict) -> None:
-        auth_type = (cfg.get('authType') or 'service').strip()
-        self.account_domain = resolve_account_domain(auth_type, cfg)
+    def _after_begin(self, cfg) -> None:
+        self.account_domain = resolve_account_domain(cfg['authType'], cfg)
 
     def endGlobal(self) -> None:
         super().endGlobal()
