@@ -24,6 +24,7 @@ const { exists } = require('./fs');
 const { DIST_ROOT } = require('./paths');
 const { createLineStamper } = require('./linestamp');
 const { installStackDumps } = require('./stackdumps');
+const { startStackWatch } = require('./stackwatch');
 
 const SERVER_DIR = path.join(DIST_ROOT, 'server');
 const READY_MESSAGE = 'Application startup complete.';
@@ -272,6 +273,8 @@ async function startServer(options) {
 	const serverEnv = { ...process.env, ...env };
 	const stackDumps = installStackDumps(SERVER_DIR, serverEnv);
 	if (stackDumps) Object.assign(serverEnv, stackDumps.env);
+	// On Windows the watcher takes a native stack of a child frozen in startup (see stackwatch.js).
+	const stackWatch = stackDumps ? startStackWatch(serverEnv.ROCKETRIDE_TEST_STACK_DUMPS) : null;
 
 	return new Promise((resolve, reject) => {
 		const serverProcess = spawn(serverExe, serverArgs, {
@@ -403,11 +406,13 @@ async function startServer(options) {
 		// 'close' follows the last byte of both streams; 'exit' can come before it.
 		serverProcess.on('close', () => {
 			endLog();
+			stackWatch?.stop();
 			stackDumps?.release();
 		});
 
 		serverProcess.on('error', (err) => {
 			endLog();
+			stackWatch?.stop();
 			stackDumps?.release();
 			if (!resolved) {
 				resolved = true;
