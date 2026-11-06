@@ -365,3 +365,16 @@ def test_mint_installation_token_malformed_expires_at_is_github_error(mock_reque
         mint_installation_token('12345', rsa_private_key_pem, '67890')
 
     assert exc_info.value.status_code == 201
+
+
+def test_handed_of_reuses_the_provider_the_node_passes_in():
+    """One list of handed-out tokens: the client records into the provider the node passed."""
+    with scoped_stubs():
+        from tool_github.github_client import Handed
+
+        handed = Handed(lambda: 'ghs_minted')
+        assert Handed.of(handed) is handed
+        assert Handed.of('ghs_plain')() == 'ghs_plain'
+        handed()
+        handed()
+        assert handed.tokens == ['ghs_minted', 'ghs_minted']

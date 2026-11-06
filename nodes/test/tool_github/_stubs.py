@@ -13,8 +13,8 @@ every module it touched, including the ``tool_github.*`` modules another test fi
 imported earlier, so file order does not matter.
 
 ``ai.common.utils.decode_data_url`` and the tool-argument validators the node uses
-(``normalize_tool_input``, ``require_str``, ``require_int``, ``optional_int``,
-``int_arg``) are the real helpers loaded from source: the node's PEM handling and input validation must match
+(``normalize_tool_input``, ``require_str``, ``require_int``, ``optional_str``,
+``optional_int``, ``optional_bool``, ``int_arg``) are the real helpers loaded from source: the node's PEM handling and input validation must match
 what the engine does, not a copy of it.
 """
 
@@ -36,7 +36,9 @@ _TOOL_ARG_HELPERS = (
     'normalize_tool_input',
     'require_str',
     'require_int',
+    'optional_str',
     'optional_int',
+    'optional_bool',
     'int_arg',
 )
 
@@ -76,13 +78,28 @@ def _load_real_tool_args():
 def install_stubs(node_config: dict | None = None) -> None:
     mod_rl = types.ModuleType('rocketlib')
 
-    def mock_tool_function(*args, **kwargs):
-        return lambda f: f
+    def mock_tool_function(*, input_schema=None, description=None, output_schema=None):
+        # Stamp the metadata like rocketlib does, so the node's tool list is the real one.
+        def decorator(fn):
+            fn.__tool_meta__ = {
+                'input_schema': input_schema,
+                'description': description,
+                'output_schema': output_schema,
+            }
+            return fn
+
+        return decorator
 
     mod_rl.tool_function = mock_tool_function
 
     class IInstanceBase:
-        pass
+        def _collect_tool_methods(self):
+            # Same walk as rocketlib's IInstanceBase: every @tool_function method by name.
+            return {
+                name: getattr(self, name)
+                for name in dir(type(self))
+                if hasattr(getattr(type(self), name, None), '__tool_meta__')
+            }
 
     class IGlobalBase:
         pass

@@ -19,13 +19,16 @@ Requires a GitHub App with an installation on a test repo.
 from __future__ import annotations
 
 import os
-import sys
 from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'src' / 'nodes' / 'tool_github'))
-from github_client import call, mint_installation_token  # noqa: E402
+from ._stubs import scoped_stubs
+
+# Imported through the package, inside scoped_stubs like every test file here, so the
+# tool_github.* modules another file keeps in sys.modules are left as they were.
+with scoped_stubs():
+    from tool_github.github_client import call, mint_installation_token
 
 APP_ID = os.getenv('GITHUB_APP_ID', '')
 INSTALLATION_ID = os.getenv('GITHUB_APP_INSTALLATION_ID', '')
