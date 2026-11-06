@@ -1761,6 +1761,19 @@ banner. Claim a slug (letters and underscores, e.g. `acme_labs`); every app
 you deploy must be named `<developerId>.<name>` — the namespace guarantee:
 nobody outside your org can ever deploy into it.
 
+Registering is an org admin's step, happens once, and is permanent: the
+slug is the org's publisher identity, a different one later is refused, and
+`local` (the scaffold's fallback while the org has no id) is reserved. It
+exists on RocketRide Cloud only; a self-hosted server publishes under the
+fixed `rocketride` namespace. Without the App Builder, the npm CLI's
+`rocketride app developer status` shows whether it is done and `rocketride
+app developer register <id>` claims it (both use the deployment target,
+`ROCKETRIDE_DEPLOY_*`; the Python CLI does not have the `app developer`
+verbs yet, so use the SDK calls); in code, `client.developerStatus()` and
+`client.registerDeveloper(id)` (Python: `developer_status()` and
+`register_developer(id)`). Deploying from an org with no developer id fails
+with "requires a registered developer id" and names the same ways.
+
 ### Deploy — the "+ Deploy" card
 
 Clicking **Deploy** ("snapshot the current build to the server") asks for
