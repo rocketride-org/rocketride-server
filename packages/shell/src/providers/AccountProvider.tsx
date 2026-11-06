@@ -581,15 +581,17 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 		[client, orgId]
 	);
 
-	/** Creates a new API key and returns the raw key string. */
+	/** Creates a new API key and returns the raw key string and the expiry the server granted. */
 	const handleCreateKey = useCallback(
 		async (params: { name: string; permissions: string[]; expiresAt?: string; teamId?: string }) => {
 			if (!client) throw new Error('Not connected');
 			// Forward the full params (incl. teamId) so a team-scoped key is created
 			// team-scoped rather than silently falling back to org-wide.
-			const { key } = await client.account.createKey(params);
+			// The server may grant an earlier expiry than requested (a key made
+			// over a sign-in session expires with it); pass the granted one on.
+			const created = await client.account.createKey(params);
 			await loadKeys();
-			return { key };
+			return created;
 		},
 		[client, loadKeys]
 	);

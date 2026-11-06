@@ -32,7 +32,7 @@
 
 import type { RocketRideClient } from './client.js';
 import type { ConnectResult } from './types/client.js';
-import type { OrgDetail, DeleteOrgPrecheck, ApiKeyRecord, MemberRecord, TeamRecord, TeamDetail, ProfileUpdate, CreateKeyParams, InviteMemberParams, TeamMemberParams } from './types/account.js';
+import type { OrgDetail, DeleteOrgPrecheck, ApiKeyRecord, MemberRecord, TeamRecord, TeamDetail, ProfileUpdate, CreateKeyParams, CreateKeyResult, InviteMemberParams, TeamMemberParams } from './types/account.js';
 
 // =============================================================================
 // ACCOUNT API CLASS
@@ -194,13 +194,19 @@ export class AccountApi {
 	}
 
 	/**
-	 * Creates a new API key and returns the raw key string.
+	 * Creates a new API key and returns the raw key string and its real expiry.
 	 *
 	 * @param params - Key creation parameters (name, permissions, expiresAt).
-	 * @returns Object containing the raw key string.
+	 * @returns The raw key, and the expiry the server granted (`expiresAt`,
+	 *   which may be earlier than requested; absent when the server did not
+	 *   report it).
 	 */
-	async createKey(params: CreateKeyParams): Promise<{ key: string }> {
+	async createKey(params: CreateKeyParams): Promise<CreateKeyResult> {
 		const body = await this.client.call('rrext_account_keys', { subcommand: 'create', ...params });
+		const record = body.record;
+		if (record && typeof record === 'object' && 'expiresAt' in record) {
+			return { key: body.key, expiresAt: record.expiresAt ?? null };
+		}
 		return { key: body.key };
 	}
 
