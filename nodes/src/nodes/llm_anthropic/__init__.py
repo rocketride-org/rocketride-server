@@ -20,22 +20,3 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-
-from .IGlobal import IGlobal
-from .IInstance import IInstance
-
-
-def getChat():
-    """
-    Get the Chat class from the module.
-    """
-    from .anthropic import Chat
-
-    return Chat
-
-
-__all__ = [
-    'IGlobal',
-    'IInstance',
-    'getChat',
-]

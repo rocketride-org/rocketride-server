@@ -20,16 +20,3 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-
-"""
-Anomaly Detector node.
-
-This node monitors pipeline output values for anomalies using statistical
-methods (Z-Score, IQR, Rolling Average deviation) and classifies them
-by severity (normal, warning, critical).
-"""
-
-from .IGlobal import IGlobal
-from .IInstance import IInstance
-
-__all__ = ['IGlobal', 'IInstance']

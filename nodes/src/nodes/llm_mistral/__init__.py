@@ -20,15 +20,3 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-
-from .IGlobal import IGlobal as IGlobal
-from .IInstance import IInstance as IInstance
-
-
-def getChat():
-    """
-    Get the Chat class from the module.
-    """
-    from .mistral import Chat
-
-    return Chat
