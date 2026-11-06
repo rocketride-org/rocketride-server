@@ -62,7 +62,12 @@ from .utils.env import (
 )
 
 
-def _add_connection_args(parser: argparse.ArgumentParser, *, json_arg: bool = True) -> None:
+def _add_connection_args(
+    parser: argparse.ArgumentParser,
+    *,
+    json_arg: bool = True,
+    suppress_defaults: bool = False,
+) -> None:
     """
     Add the development-connection options (``--uri``, ``--apikey``,
     ``--json``) with defaults from the (already loaded) environment.
@@ -74,17 +79,20 @@ def _add_connection_args(parser: argparse.ArgumentParser, *, json_arg: bool = Tr
             format flag rather than the shared result envelope (argparse
             would otherwise reject the duplicate option string), or for one
             that produces no JSON result at all.
+        suppress_defaults: When True, omit defaults on the subparser so options
+            parsed on the parent command group are not overwritten when omitted
+            after the subcommand.
     """
     from ..core.constants import CONST_DEFAULT_WEB_LOCAL
 
     parser.add_argument(
         '--uri',
-        default=os.getenv(ENV_DEV_URI, CONST_DEFAULT_WEB_LOCAL),
+        default=argparse.SUPPRESS if suppress_defaults else os.getenv(ENV_DEV_URI, CONST_DEFAULT_WEB_LOCAL),
         help=f'RocketRide server URI (can use {ENV_DEV_URI} in .env or env var)',
     )
     parser.add_argument(
         '--apikey',
-        default=os.getenv(ENV_DEV_APIKEY),
+        default=argparse.SUPPRESS if suppress_defaults else os.getenv(ENV_DEV_APIKEY),
         help=f'API key for server authentication (can use {ENV_DEV_APIKEY} in .env or env var)',
     )
     if json_arg:
@@ -137,9 +145,17 @@ def setup_parser() -> argparse.ArgumentParser:
     Returns:
         The configured root parser.
     """
+    from .. import __version__
+
     parser = argparse.ArgumentParser(
         description='RocketRide Unified Pipeline and File Management CLI',
         epilog='Use "rocketride <command> --help" for command-specific help',
+    )
+    parser.add_argument(
+        '-V',
+        '--version',
+        action='version',
+        version=__version__ or 'unknown',
     )
     subparsers = parser.add_subparsers(dest='command', help='Available commands', metavar='COMMAND')
 
@@ -381,6 +397,7 @@ def setup_parser() -> argparse.ArgumentParser:
     # Number options stay strings here: profile.py validates them, with the
     # same messages and exit code as the TypeScript CLI (argparse would exit 2)
     profile_parser = subparsers.add_parser('profile', help='Profile the server process or a pipeline')
+    _add_connection_args(profile_parser, json_arg=False)
     profile_subparsers = profile_parser.add_subparsers(
         dest='profile_subcommand', help='Profile commands', metavar='COMMAND'
     )
@@ -392,42 +409,42 @@ def setup_parser() -> argparse.ArgumentParser:
     p_start = profile_subparsers.add_parser(
         'start', help='Start profiling a pipeline and return; stop it with profile stop'
     )
-    _add_connection_args(p_start)
+    _add_connection_args(p_start, suppress_defaults=True)
     p_start.add_argument('--token', help='Task token of the pipeline to profile (required)')
     p_start.add_argument('--session', help=session_help)
 
     p_stop = profile_subparsers.add_parser('stop', help='Stop profiling a pipeline')
-    _add_connection_args(p_stop)
+    _add_connection_args(p_stop, suppress_defaults=True)
     p_stop.add_argument('--token', help='Task token of the pipeline being profiled (required)')
 
     p_run = profile_subparsers.add_parser(
         'run', help='Profile until Ctrl+C or --duration, then stop; the way to profile the server process'
     )
-    _add_connection_args(p_run)
+    _add_connection_args(p_run, suppress_defaults=True)
     p_run.add_argument('--token', help=token_help)
     p_run.add_argument('--session', help=session_help)
     p_run.add_argument('--duration', help='Stop after this many seconds (default: at Ctrl+C)')
 
     p_status = profile_subparsers.add_parser('status', help='Show whether a profiling session is active')
-    _add_connection_args(p_status)
+    _add_connection_args(p_status, suppress_defaults=True)
     p_status.add_argument('--token', help=token_help)
 
     p_list = profile_subparsers.add_parser(
         'list', help='Show the profiling status of the server process and of every task'
     )
-    _add_connection_args(p_list)
+    _add_connection_args(p_list, suppress_defaults=True)
     p_list.add_argument('--active', action='store_true', help='Only the processes being profiled')
 
     p_report = profile_subparsers.add_parser('report', help='Print the text report of the last session')
-    _add_connection_args(p_report)
+    _add_connection_args(p_report, suppress_defaults=True)
     p_report.add_argument('--token', help=token_help)
 
     p_threads = profile_subparsers.add_parser('threads', help='List the threads of the last session, busiest first')
-    _add_connection_args(p_threads)
+    _add_connection_args(p_threads, suppress_defaults=True)
     p_threads.add_argument('--token', help=token_help)
 
     p_tree = profile_subparsers.add_parser('tree', help='Print the call tree of the last session')
-    _add_connection_args(p_tree)
+    _add_connection_args(p_tree, suppress_defaults=True)
     p_tree.add_argument('--token', help=token_help)
     p_tree.add_argument('--thread', help="Thread id from the ID column of 'profile threads' (default: all threads)")
     p_tree.add_argument(
@@ -447,33 +464,34 @@ def setup_parser() -> argparse.ArgumentParser:
 
     # ── store ────────────────────────────────────────────────────────────
     store_parser = subparsers.add_parser('store', help='File store operations')
+    _add_connection_args(store_parser, json_arg=False)
     store_subparsers = store_parser.add_subparsers(dest='store_subcommand', help='Store commands', metavar='COMMAND')
 
     dir_parser = store_subparsers.add_parser('dir', help='List directory contents')
-    _add_connection_args(dir_parser)
+    _add_connection_args(dir_parser, suppress_defaults=True)
     dir_parser.add_argument('path', nargs='?', default='', help='Directory path (default: root)')
 
     type_parser = store_subparsers.add_parser('type', help='Display file contents')
-    _add_connection_args(type_parser)
+    _add_connection_args(type_parser, suppress_defaults=True)
     type_parser.add_argument('path', help='File path')
 
     write_parser = store_subparsers.add_parser('write', help='Write a file')
-    _add_connection_args(write_parser)
+    _add_connection_args(write_parser, suppress_defaults=True)
     write_parser.add_argument('path', help='File path')
     write_group = write_parser.add_mutually_exclusive_group(required=True)
     write_group.add_argument('--file', help='Local file to upload')
     write_group.add_argument('--content', help='Inline text content')
 
     rm_parser = store_subparsers.add_parser('rm', help='Delete a file')
-    _add_connection_args(rm_parser)
+    _add_connection_args(rm_parser, suppress_defaults=True)
     rm_parser.add_argument('path', help='File path')
 
     mkdir_parser = store_subparsers.add_parser('mkdir', help='Create a directory')
-    _add_connection_args(mkdir_parser)
+    _add_connection_args(mkdir_parser, suppress_defaults=True)
     mkdir_parser.add_argument('path', help='Directory path')
 
     stat_parser = store_subparsers.add_parser('stat', help='Get file/directory metadata')
-    _add_connection_args(stat_parser)
+    _add_connection_args(stat_parser, suppress_defaults=True)
     stat_parser.add_argument('path', help='File or directory path')
 
     # ── app ──────────────────────────────────────────────────────────────
