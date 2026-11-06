@@ -487,6 +487,20 @@ TEST_CASE("store::Services::secureParameters") {
         REQUIRE(secure.count("apikey") == 0u);
     }
 
+    SECTION("a secret inside an array item is a load error") {
+        // The encrypt/decrypt walk has no "[]" semantics, so such a value
+        // could never be protected: refuse it at load, like "param"
+        const auto itemDefs = R"({
+            "fx.key": { "type": "string", "title": "Key", "secret": true }
+        })"_json;
+        auto schema = resolveFixture(fixture(
+            itemDefs,
+            R"([{ "name": "keys", "type": "array", "item": "fx.key" }])"_json));
+        REQUIRE_ERROR(schema, Ec::InvalidParam, "\"secret\" on property key in");
+        REQUIRE(schema.ccode().message().contains(
+            "is not allowed inside an array item"));
+    }
+
     SECTION("a hoisted readonly leaf is registered once, at the hoisted path") {
         REQUIRE(secure.count("region") == 1u);
         REQUIRE(secure.at("region") == PARAM_TYPE::READONLY);

@@ -32,6 +32,7 @@ from .engine import error
 from .engine import expand
 from .engine import getServiceDefinition
 from .engine import getServiceDefinitions
+from .engine import getServiceSchema
 from .engine import getTask
 from .engine import isCancelled
 from .engine import getVersion
@@ -117,6 +118,7 @@ __all__ = [
     'getObject',
     'getServiceDefinition',
     'getServiceDefinitions',
+    'getServiceSchema',
     'getTask',
     'isCancelled',
     'getVersion',

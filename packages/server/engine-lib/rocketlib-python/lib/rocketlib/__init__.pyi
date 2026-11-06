@@ -867,6 +867,10 @@ def validatePipeline(config: Dict[str, Any]) -> Dict[str, Any]:
     """Validate a pipeline configuration dict; returns it annotated with errors."""
     ...
 
+def getServiceSchema(logicalType: str) -> Dict[str, Any]:
+    """The RESOLVED schema (properties with `path`, `params`, `capabilities` bitmask); None for an unknown type."""
+    ...
+
 def getServiceDefinition(logicalType: str) -> Dict[str, Any]:
     """Return the service definition for the given logical type name."""
     ...

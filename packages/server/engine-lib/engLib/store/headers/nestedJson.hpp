@@ -49,6 +49,9 @@ namespace engine::store {
 //-------------------------------------------------------------------------
 inline const json::Value *findNested(const json::Value &root,
                                      TextView key) noexcept {
+    // An empty key names nothing - never the whole object
+    if (key.empty()) return nullptr;
+
     const auto *node = &root;
     for (const auto &segment : string::split(key, ".")) {
         if (!node->isObject() || !node->isMember(segment)) return nullptr;
@@ -69,8 +72,12 @@ inline const json::Value *findNested(const json::Value &root,
 //-------------------------------------------------------------------------
 inline void setNested(json::Value &root, TextView key,
                       const json::Value &value) noexcept {
+    // An empty key names nothing
+    if (key.empty()) return;
+
     auto *node = &root;
     const auto segments = string::split(key, ".");
+    if (segments.empty()) return;
     for (size_t index = 0; index + 1 < segments.size(); ++index) {
         auto &next = (*node)[segments[index]];
         if (!next.isObject()) next = json::Value(json::objectValue);
@@ -89,8 +96,12 @@ inline void setNested(json::Value &root, TextView key,
 ///		The dotted path of the leaf
 //-------------------------------------------------------------------------
 inline void removeNested(json::Value &root, TextView key) noexcept {
+    // An empty key names nothing
+    if (key.empty()) return;
+
     auto *node = &root;
     const auto segments = string::split(key, ".");
+    if (segments.empty()) return;
     for (size_t index = 0; index + 1 < segments.size(); ++index) {
         if (!node->isObject() || !node->isMember(segments[index])) return;
         node = &(*node)[segments[index]];

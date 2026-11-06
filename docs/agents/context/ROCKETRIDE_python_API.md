@@ -408,9 +408,9 @@ Validate a pipeline configuration server-side (structure, required fields, compo
 result = await client.validate(pipeline, source='webhook_1')
 ```
 
-### `async get_services() -> SERVICES_RESPONSE`
+### `async get_services(*, definitions: bool = False) -> SERVICES_RESPONSE`
 
-Retrieve all service (component/connector) summaries from the server. Returns a dict with `services` (logical type -> summary), `icons` (icon id -> raw SVG, deduplicated; each summary's `icon` field indexes into it), and `version`.
+Retrieve all service (component/connector) summaries from the server. Returns a dict with `services` (logical type -> summary), `icons` (icon id -> raw SVG, deduplicated; each summary's `icon` field indexes into it), and `version`. With `definitions=True` every entry is the FULL definition (configuration schema included) and there is no `icons` table: the bulk form of `get_service()`.
 
 ### `async get_service(service: str) -> SERVICE_DEFINITION`
 

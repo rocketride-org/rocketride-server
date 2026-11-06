@@ -589,7 +589,7 @@ def resolveConfig(schema: Dict[str, Any], connConfig: Any) -> ConfigView:
     Resolve a node's stored configuration against its engine-resolved schema.
 
     Args:
-        schema (dict): The resolved service schema (``engLib.getServiceDefinition``):
+        schema (dict): The resolved service schema (``engLib.getServiceSchema``):
             ``properties`` with a ``path`` on every leaf, ``params`` descriptors,
             and the node's ``capabilities`` bitmask.
         connConfig (dict): The node's config as the pipeline stores it, a tree

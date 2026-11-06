@@ -43,7 +43,7 @@ SCHEMAS = {'depth_estimate': DEPTH_ESTIMATE, 'depth_estimate_mt': multitenant(DE
 @pytest.fixture(autouse=True)
 def _engine_schemas(monkeypatch):
     """Serve the fixture schemas where the engine would serve the resolved one."""
-    monkeypatch.setattr(rocketlib.engine, 'getServiceDefinition', lambda logical_type: SCHEMAS.get(logical_type))
+    monkeypatch.setattr(rocketlib.engine, 'getServiceSchema', lambda logical_type: SCHEMAS.get(logical_type))
 
 
 class _Global(IGlobalBase):

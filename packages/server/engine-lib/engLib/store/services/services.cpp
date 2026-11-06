@@ -853,17 +853,27 @@ ErrorOr<json::Value> IServices::expandProperty(ServiceContext &context,
     // A "secret" or "readonly" leaf is registered by its path, so the
     // stored config's encrypt/decrypt (endpoint.config.cpp) knows which
     // values to protect. A hoisted leaf is expanded once, so it lands once
-    // at its hoisted path; "secret" wins when both flags are set
+    // at its hoisted path; "secret" wins when both flags are set. A leaf
+    // without a path (or an empty one) is never registered, and a secret
+    // inside an array item is a load error: the encrypt/decrypt walk has
+    // no "[]" semantics, so such a value could never be protected
     if (field.isMember("path")) {
         const auto isFlagged = [&field](const char *flag) noexcept {
             return field.isMember(flag) && field[flag].isBool() &&
                    field[flag].asBool();
         };
         const auto path = field.lookup<Text>("path");
-        if (isFlagged("readonly"))
-            context.def.secureParameters[path] = PARAM_TYPE::READONLY;
-        if (isFlagged("secret"))
-            context.def.secureParameters[path] = PARAM_TYPE::SECURE;
+        if (path) {
+            if (isFlagged("secret") && context.nestedIn == "an array item")
+                return APERR(Ec::InvalidParam, "\"secret\" on property",
+                             field.lookup<Text>("name"), "in",
+                             context.def.definitionPath,
+                             "is not allowed inside an array item");
+            if (isFlagged("readonly"))
+                context.def.secureParameters[path] = PARAM_TYPE::READONLY;
+            if (isFlagged("secret"))
+                context.def.secureParameters[path] = PARAM_TYPE::SECURE;
+        }
     }
 
     // "param" is read, acted on and stripped

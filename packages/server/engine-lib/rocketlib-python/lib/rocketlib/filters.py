@@ -325,7 +325,7 @@ class IGlobalBase:
         Return this node's resolved service schema from the engine.
 
         Returns:
-            dict: ``engLib.getServiceDefinition(self.glb.logicalType)`` as native dicts.
+            dict: ``engLib.getServiceSchema(self.glb.logicalType)`` as native dicts.
 
         Raises:
             ConfigError: The engine knows no service of that logical type.
@@ -333,7 +333,7 @@ class IGlobalBase:
         from . import engine
 
         logical_type = self.glb.logicalType
-        schema = engine.getServiceDefinition(logical_type)
+        schema = engine.getServiceSchema(logical_type)
         if schema is None:
             raise ConfigError(f'The service {logical_type} was not found')
         return IJson.toDict(schema)
