@@ -17,18 +17,19 @@ SOURCE = 'webhook_1'
 
 
 async def _streams_of(client, project, *, want):
-    """Poll until exactly ``want`` streams are listed and all are complete.
+    """Poll until exactly ``want`` streams are listed and all are complete; fail if that never happens.
 
     A terminated run closes its chapter asynchronously. Until its log writer is deregistered, the
     writer is also visible to the own-deploy reader (user id and team id are both ``local`` in the
     OSS build), so a transient extra stream can be listed; it disappears once the writer closes.
     """
+    streams = []
     for _ in range(50):
         streams = (await client.log.streams(project, SOURCE))['streams']
         if len(streams) == want and all(s['completed'] for s in streams):
             return streams
         await asyncio.sleep(0.2)
-    return streams
+    raise AssertionError(f'expected {want} completed streams for {project}/{SOURCE}, last listing: {streams}')
 
 
 class TestLogStreams:
