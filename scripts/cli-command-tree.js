@@ -43,6 +43,7 @@ const CLI_DIR = path.join(__dirname, '..', 'packages', 'client-typescript', 'src
 
 // The SDK sources import siblings as './x.js' (ESM style). Point those at the .ts file.
 const resolveFilename = Module._resolveFilename;
+/** Resolve a `./x.js` import from a .ts file to `./x.ts` when that file exists. */
 Module._resolveFilename = function (request, parent, ...rest) {
 	if (parent?.filename?.endsWith('.ts') && request.startsWith('.') && request.endsWith('.js')) {
 		const tsFile = path.resolve(path.dirname(parent.filename), request.slice(0, -3) + '.ts');
@@ -51,6 +52,7 @@ Module._resolveFilename = function (request, parent, ...rest) {
 	return resolveFilename.call(this, request, parent, ...rest);
 };
 
+/** Load a .ts file by transpiling it to CommonJS in memory. */
 Module._extensions['.ts'] = (module, filename) => {
 	const { outputText } = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
 		fileName: filename,
@@ -59,11 +61,17 @@ Module._extensions['.ts'] = (module, filename) => {
 	module._compile(outputText, filename);
 };
 
-// The register calls createProgram() makes, read from its source so a new command group cannot be missed.
+// The register calls createProgram() makes, read from its source. This script replays only plain
+// `registerXCommands(program);` calls, so fail if rocketride.ts registers commands any other way
+// (other arguments, a helper, an inline program.command()) rather than check a shorter list.
 const entry = fs.readFileSync(path.join(CLI_DIR, 'rocketride.ts'), 'utf8');
 const registerNames = [...entry.matchAll(/^\s*(register\w+Commands)\(program\);/gm)].map((m) => m[1]);
-if (registerNames.length === 0) {
-	throw new Error('cli-command-tree: found no register*Commands(program) calls in rocketride.ts');
+const registerCalls = [...entry.matchAll(/\bregister\w+Commands\s*\(/g)].length;
+if (registerNames.length === 0 || registerCalls !== registerNames.length || /\.command\s*\(/.test(entry)) {
+	throw new Error(
+		'cli-command-tree: rocketride.ts registers commands in a way this script does not replay. ' +
+			'Update scripts/cli-command-tree.js to match createProgram().',
+	);
 }
 
 const registers = {};
@@ -82,6 +90,12 @@ for (const name of registerNames) {
 }
 
 const tree = [];
+/**
+ * Add each sub-command of `command` to the tree, depth first.
+ *
+ * @param {import('commander').Command} command - The command whose sub-commands to add.
+ * @param {string[]} prefix - The words of `command`'s own path.
+ */
 const walk = (command, prefix) => {
 	for (const sub of command.commands) {
 		const words = [...prefix, sub.name()];

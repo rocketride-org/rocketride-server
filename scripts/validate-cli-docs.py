@@ -34,11 +34,16 @@ Checks:
 1. docs/agents/context/ROCKETRIDE_CLI.md shows every command in code.
 2. Its package table lists exactly the commands and flags that only one
    package has.
-3. The Commands table in docs/public/product/connect/cli.mdx lists every
-   top-level command.
+3. Every `rocketride <command> --flag` example in code, in that file and in
+   docs/public/product/connect/cli.mdx, uses a flag the command has.
+4. The Commands table in cli.mdx lists every top-level command.
+
+Not checked: flags named in prose or in cli.mdx's "Key flags" tables, and
+what any command or flag is said to do.
 
 Exit 0 when the docs match, 1 with one line per problem when they don't,
-2 when a command tree can't be read.
+2 when a command tree can't be read. tests/test_validate_cli_docs.py tests
+the checks with small fake trees.
 """
 
 from __future__ import annotations
@@ -62,6 +67,12 @@ PY_COMMON_SRC = ROOT / 'packages' / 'client-common' / 'python' / 'src'
 # Groups ('app', 'deploy schedule') are left out: their sub-commands cover them.
 Tree = dict[str, set[str]]
 
+PACKAGE_TABLE_HEADER = re.compile(r'\|\s*Command or flag\s*\|')
+WHERE = {
+    (True, False): 'only the TypeScript CLI has it',
+    (False, True): 'only the Python CLI has it',
+}
+
 
 def python_tree() -> Tree:
     """Return the Python CLI's leaf commands, read from its argparse parser."""
@@ -78,7 +89,8 @@ def python_tree() -> Tree:
 
     tree = {}
 
-    def walk(parser, prefix):
+    def walk(parser: argparse.ArgumentParser, prefix: list[str]) -> bool:
+        """Add the parser's leaf commands to the tree; say whether it has sub-commands."""
         for action in parser._actions:
             if isinstance(action, argparse._SubParsersAction):
                 for name, sub in action.choices.items():
@@ -107,12 +119,12 @@ def typescript_tree() -> Tree:
     )
     if result.returncode != 0:
         raise RuntimeError(
-            f'scripts/cli-command-tree.js failed (it needs node and pnpm install):\n{result.stderr.strip()}'
+            f'scripts/cli-command-tree.js failed:\n{result.stderr.strip()}\n(The script needs node and `pnpm install`.)'
         )
     return {node['path']: set(node['options']) for node in json.loads(result.stdout) if not node['group']}
 
 
-def one_package_only(ts: Tree, py: Tree) -> dict:
+def one_package_only(ts: Tree, py: Tree) -> dict[str, tuple[bool, bool]]:
     """Map each command or flag that only one package has to (in TypeScript, in Python)."""
     only = {path: (True, False) for path in ts.keys() - py.keys()}
     only.update({path: (False, True) for path in py.keys() - ts.keys()})
@@ -128,11 +140,12 @@ def exists(item: str, tree: Tree) -> bool:
     return path in tree and (not flag or f'--{flag}' in tree[path])
 
 
-def code_text(markdown: str) -> str:
-    """Return the text of every fenced code block and inline code span."""
+def code_units(markdown: str) -> list[str]:
+    """Return each fenced code line and each inline code span, with shell comments removed."""
     fenced = re.findall(r'^```[^\n]*\n(.*?)^```', markdown, re.M | re.S)
     prose = re.sub(r'^```[^\n]*\n.*?^```', '', markdown, flags=re.M | re.S)
-    return '\n'.join(fenced + re.findall(r'`([^`]+)`', prose))
+    lines = [re.split(r'(?:^|\s)#(?:\s|$)', line)[0] for block in fenced for line in block.splitlines()]
+    return lines + re.findall(r'`([^`]+)`', prose)
 
 
 def mentioned(path: str, code: str) -> bool:
@@ -143,69 +156,102 @@ def mentioned(path: str, code: str) -> bool:
     return re.search(prefix + r'\s+'.join(words) + r'(?![\w-])', code) is not None
 
 
-def package_table(markdown: str) -> dict | None:
-    """Parse ROCKETRIDE_CLI.md's 'Command or flag | TypeScript | Python' table."""
+def check_mentions(markdown: str, ts: Tree, py: Tree, rel: str) -> list[str]:
+    """Report each command the doc never shows in code."""
+    code = '\n'.join(code_units(markdown))
+    return [
+        f'{rel}: `rocketride {path}` is not documented'
+        for path in sorted(ts.keys() | py.keys())
+        if not mentioned(path, code)
+    ]
+
+
+def check_package_table(markdown: str, ts: Tree, py: Tree, rel: str) -> list[str]:
+    """Report each way the 'Command or flag | TypeScript | Python' table differs from the trees."""
     lines = markdown.splitlines()
-    start = next((i for i, line in enumerate(lines) if re.match(r'\|\s*Command or flag\s*\|', line)), None)
+    start = next((i for i, line in enumerate(lines) if PACKAGE_TABLE_HEADER.match(line)), None)
     if start is None:
-        return None
+        return [f"{rel}: no 'Command or flag | TypeScript | Python' table"]
+
+    problems = []
     table = {}
-    for line in lines[start + 2 :]:
+    for number, line in enumerate(lines[start + 2 :], start + 3):
         if not line.startswith('|'):
             break
-        cells = [cell.strip() for cell in line.strip('|').split('|')]
+        cells = [cell.strip() for cell in line.strip().strip('|').split('|')]
+        answers = [re.match(r'(Yes|No)\b', cell) for cell in cells[1:]]
+        if len(cells) != 3 or not all(answers):
+            problems.append(f'{rel}:{number}: package table row must be `items` | Yes or No | Yes or No')
+            continue
         for item in re.findall(r'`([^`]+)`', cells[0]):
-            table[item] = (cells[1].startswith('Yes'), cells[2].startswith('Yes'))
-    return table
+            table[item] = (answers[0].group(1) == 'Yes', answers[1].group(1) == 'Yes')
+
+    actual = one_package_only(ts, py)
+    for item in sorted(actual.keys() | table.keys()):
+        if item in actual and item not in table:
+            problems.append(f'{rel}: package table is missing `{item}`: {WHERE[actual[item]]}')
+        elif item in actual and table[item] != actual[item]:
+            problems.append(f'{rel}: package table is wrong about `{item}`: {WHERE[actual[item]]}')
+        elif item not in actual and exists(item, ts) and exists(item, py):
+            problems.append(f'{rel}: package table lists `{item}`, which both CLIs have')
+        elif item not in actual:
+            problems.append(f'{rel}: package table lists `{item}`, which neither CLI has')
+    return problems
 
 
-def commands_table(markdown: str) -> set:
-    """Return the commands named in cli.mdx's '## Commands' table."""
+def check_flags(markdown: str, ts: Tree, py: Tree, rel: str) -> list[str]:
+    """Report each `rocketride <command> --flag` example whose command has no such flag."""
+    leaves = ts.keys() | py.keys()
+    prefixes = {' '.join(path.split()[:n]) for path in leaves for n in range(1, len(path.split()) + 1)}
+    problems = []
+    for unit in code_units(markdown):
+        tokens = unit.split()
+        for start in (i for i, token in enumerate(tokens) if token == 'rocketride'):
+            # Read the command path, expanding 'enable|disable|remove' into one path each.
+            paths, rest = [''], tokens[start + 1 :]
+            while rest and not rest[0].startswith(('-', '<', '[')):
+                longer = [f'{path} {word}'.strip() for path in paths for word in rest[0].split('|')]
+                if not all(path in prefixes for path in longer):
+                    break
+                paths, rest = longer, rest[1:]
+            commands = [path for path in paths if path in leaves]
+            if not commands:
+                continue
+            end = rest.index('rocketride') if 'rocketride' in rest else len(rest)
+            for flag in re.findall(r'(?<![\w-])--[a-z][\w-]*', ' '.join(rest[:end])):
+                for command in commands:
+                    if flag not in ts.get(command, set()) | py.get(command, set()):
+                        problems.append(f'{rel}: `rocketride {command}` has no `{flag}` flag')
+    return sorted(set(problems))
+
+
+def check_commands_table(markdown: str, ts: Tree, py: Tree, rel: str) -> list[str]:
+    """Report top-level commands missing from, or unknown to, cli.mdx's '## Commands' table."""
     section = markdown.split('\n## Commands\n', 1)[-1].split('\n#', 1)[0]
-    return set(re.findall(r'^\|\s*`([\w-]+)`\s*\|', section, re.M))
+    listed = set(re.findall(r'^\|\s*`([\w-]+)`\s*\|', section, re.M))
+    top_level = {path.split()[0] for path in ts.keys() | py.keys()}
+    return [f'{rel}: `{name}` is missing from the Commands table' for name in sorted(top_level - listed)] + [
+        f'{rel}: Commands table lists `{name}`, which neither CLI has' for name in sorted(listed - top_level)
+    ]
 
 
 def main() -> int:
+    """Read both command trees, run every check, and print one line per problem."""
     try:
         ts, py = typescript_tree(), python_tree()
     except Exception as error:  # noqa: BLE001 - report any loader failure the same way
         print(f'error: could not read the CLI commands: {error}', file=sys.stderr)
         return 2
 
-    problems = []
-    cli_doc = CLI_DOC.read_text(encoding='utf-8')
-    rel = CLI_DOC.relative_to(ROOT)
-
-    code = code_text(cli_doc)
-    for path in sorted(ts.keys() | py.keys()):
-        if not mentioned(path, code):
-            problems.append(f'{rel}: `rocketride {path}` is not documented')
-
-    table = package_table(cli_doc)
-    if table is None:
-        problems.append(f"{rel}: no 'Command or flag | TypeScript | Python' table")
-    else:
-        actual = one_package_only(ts, py)
-        where = {
-            (True, False): 'only the TypeScript CLI has it',
-            (False, True): 'only the Python CLI has it',
-            (True, True): 'both CLIs have it',
-        }
-        for item in sorted(actual.keys() | table.keys()):
-            truth = actual.get(item, (True, True))
-            if not exists(item, ts) and not exists(item, py):
-                problems.append(f'{rel}: package table lists `{item}`, which neither CLI has')
-            elif table.get(item, (True, True)) != truth:
-                problems.append(f'{rel}: package table is wrong about `{item}`: {where[truth]}')
-
-    site_doc = SITE_DOC.read_text(encoding='utf-8')
-    top_level = {path.split()[0] for path in ts.keys() | py.keys()}
-    listed = commands_table(site_doc)
-    for name in sorted(top_level - listed):
-        problems.append(f'{SITE_DOC.relative_to(ROOT)}: `{name}` is missing from the Commands table')
-    for name in sorted(listed - top_level):
-        problems.append(f'{SITE_DOC.relative_to(ROOT)}: Commands table lists `{name}`, which neither CLI has')
-
+    cli_doc, cli_rel = CLI_DOC.read_text(encoding='utf-8'), str(CLI_DOC.relative_to(ROOT))
+    site_doc, site_rel = SITE_DOC.read_text(encoding='utf-8'), str(SITE_DOC.relative_to(ROOT))
+    problems = (
+        check_mentions(cli_doc, ts, py, cli_rel)
+        + check_package_table(cli_doc, ts, py, cli_rel)
+        + check_flags(cli_doc, ts, py, cli_rel)
+        + check_flags(site_doc, ts, py, site_rel)
+        + check_commands_table(site_doc, ts, py, site_rel)
+    )
     if problems:
         print('\n'.join(problems))
         print(f'{len(problems)} problem(s). The docs must match the commands both CLIs register.')

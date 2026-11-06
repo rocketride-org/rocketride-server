@@ -59,8 +59,11 @@ which also read from the environment so you can set them once:
 | ---------------- | ---------------------- | --------------------- | ---------------------------------------------------------------------- |
 | `--uri <uri>`    | `ROCKETRIDE_URI`       | `http://localhost:5565` (normalized to `ws://` at connect time) | Engine endpoint (see [Cloud](/operate/cloud) / [Self-hosting](/operate/self-hosting)). |
 | `--apikey <key>` | `ROCKETRIDE_APIKEY`    | -                     | API token for authentication.                                          |
-| `--pipeline <path>` | `ROCKETRIDE_PIPELINE` | -                  | Default pipeline path for `start`/`upload`.                            |
-| `--token <token>` | `ROCKETRIDE_TOKEN`    | -                     | Default task token for token-bearing commands.                         |
+
+Two task options read the environment the same way, on the commands that take
+them: `--pipeline <path>` (`start` and `upload`) defaults to
+`ROCKETRIDE_PIPELINE`, and `--token <token>` (`start`, `stop`, and `upload`)
+defaults to `ROCKETRIDE_TOKEN`.
 
 Against a [Cloud](/operate/cloud) endpoint use an `https://`/`wss://` URI so the
 connection is encrypted.
@@ -109,14 +112,17 @@ rocketride login --apikey <key>
 Against RocketRide Cloud, signing in opens your browser and mints a personal API
 key. A self-hosted server takes an API key, from `--apikey` or a
 prompt. The credentials go to `.env` as the development pair and, unless you
-pass `--no-deploy`, as the deployment pair too.
+pass `--no-deploy`, as the deployment pair too. `init` writes credentials only
+when it signs you in. If the development pair already in `.env` works, `init`
+reuses it and writes nothing, so run `rocketride login --deploy` to add the
+deployment pair.
 
 Key flags:
 
 | Flag | Description |
 | --- | --- |
 | `--apikey <key>` | Save this key instead of signing in through the browser. |
-| `--deploy` | `login` only. Sign in for the deployment pair (`ROCKETRIDE_DEPLOY_*`) instead of the development pair. |
+| `--deploy` | On `login`, sign in for the deployment pair (`ROCKETRIDE_DEPLOY_*`) instead of the development pair. On `init` (TypeScript CLI only), also use this server as the deployment target, which `init` does by default. |
 | `--no-deploy` | Do not write the deployment pair. |
 | `--no-install` | `init` only. Skip the workspace `pnpm install`. |
 
@@ -163,7 +169,7 @@ Key flags:
 | --- | --- |
 | `--pipeline <path>` | Path to the `.pipe` file. Required unless `--token` is given. |
 | `--token <token>` | Send files to an existing task instead of starting a new one. |
-| `--max-concurrent <n>` | Maximum number of files to upload in parallel. Default 5. |
+| `--max-concurrent <n>` | Maximum number of files to upload in parallel. Default 5. The Python CLI accepts this flag but ignores it. |
 
 ### stop
 
@@ -641,7 +647,8 @@ rocketride app versions clock
 ```
 
 `[app]` is an app folder, an app id, the app's name, or nothing for the
-current directory.
+current directory. In the Python CLI, `verify` and `deploy` take only an app
+folder, and it is required.
 
 Sub-commands:
 

@@ -173,10 +173,13 @@ task validates the nodes changed relative to the merge base with `develop`
 The CLI check reads the Python CLI's parser and the TypeScript CLI's sources
 directly, so it needs `pnpm install` but no client build. It fails when
 `ROCKETRIDE_CLI.md` leaves out a command, when its table of commands and flags
-that only one package has is wrong, or when the Commands table in
-`docs/public/product/connect/cli.mdx` misses a top-level command. The
-`Doc schemas` workflow also runs on changes to either CLI's source, so a new
-command fails CI until the docs list it. `docs:test` runs it first, so `./builder test` and the
+that only one package has is wrong, when a `rocketride <command> --flag`
+example in either CLI doc uses a flag the command lacks, or when the Commands
+table in `docs/public/product/connect/cli.mdx` misses a top-level command. It
+does not check flags named in prose or in `cli.mdx`'s "Key flags" tables. The
+`Doc schemas` workflow also runs on changes to either client SDK or to
+`client-common`, which the CLIs import, so a new command fails CI until the
+docs list it. `docs:test` runs it first, so `./builder test` and the
 `Docs site build` CI job both carry it. CodeRabbit reviews the *accuracy* of a
 node README; this task owns its *structure*.
 
@@ -186,9 +189,10 @@ Check a single node while you work:
 python3 scripts/validate-node-readme.py nodes/src/nodes/<node>
 ```
 
-The validator's own unit tests (`tests/test_validate_node_readme.py`) run inside
-`docs:validate` on every PR, alongside the checks above.
-`./builder nodes:test` also runs this same file as part of the node contract
+The validators' own unit tests (`tests/test_validate_node_readme.py` and
+`tests/test_validate_cli_docs.py`) run inside `docs:validate` on every PR,
+alongside the checks above.
+`./builder nodes:test` also runs the node README tests as part of the node contract
 suite; that invocation stays in place, but `docs:validate` is what gates it on
 every doc-path PR.
 

@@ -26,8 +26,9 @@ schedule, scaffold — and write SDK code only for what the command cannot
 do. It reads the workspace `.env`, works against a local engine with no
 network, and needs no client configuration of any kind.
 
-**Common options** (every command except `diff` and `otel`, which are
-described under [Python-only commands](#python-only-commands)): `--uri <uri>` (default:
+**Common options** (every command except `app verify`, `diff`, and `otel`;
+`app verify` needs no connection and takes only `--json` of these, and
+[Python-only commands](#python-only-commands) covers the other two): `--uri <uri>` (default:
 `ROCKETRIDE_URI` or `http://localhost:5565`), `--apikey <key>` (default:
 `ROCKETRIDE_APIKEY`), and `--json [file]` — the command's entire result
 as one JSON value on stdout (or written to `file`), built for scripts and
@@ -45,9 +46,9 @@ a non-zero exit. Deploy verbs (`deploy *`, `app deploy`) use the
 | Run a pipeline | `rocketride start --pipeline file.pipe` prints the task token; `rocketride upload files/* --pipeline file.pipe` starts, uploads, and terminates in one go |
 | See what is running, stop it | `rocketride list`, `rocketride stop --token TOKEN` |
 | Read run logs and traces | No CLI verb — use the SDK (`client.log`, API doc §Templates & Run Logs) or ROCKETRIDE_OBSERVABILITY.md |
-| Files in the account store | `rocketride store dir|type|write|rm|mkdir|stat` |
+| Files in the account store | `rocketride store` with `dir`, `type`, `write`, `rm`, `mkdir`, or `stat` |
 | Deploy, publish, schedule | `rocketride deploy …` (deployment target) |
-| Apps | `rocketride app create|dev|verify|deploy|publish|versions|where|…` (`dev` uses the development connection; lifecycle verbs use the deployment target; the Python package has only `create`, `verify`, and `deploy`) |
+| Apps | `rocketride app` with `create`, `dev`, `verify`, `deploy`, `publish`, `versions`, `where`, and more (`dev` uses the development connection; lifecycle verbs use the deployment target; the Python package has only `create`, `verify`, and `deploy`) |
 | Review what changed in a pipeline | `rocketride diff old.pipe new.pipe` (Python package only) |
 | Find what is slow | `rocketride profile run --token TOKEN --duration 30`, then `rocketride profile tree --token TOKEN` |
 
@@ -103,6 +104,10 @@ rocketride stop --token TASK_TOKEN                         # terminate a task
 
 - `start` options: `--pipeline <file>` (or `ROCKETRIDE_PIPELINE`; required), `--token <token>` (or `ROCKETRIDE_TOKEN`; your own unguessable `tk_` token also lets one pipe run twice at once), `--threads <num>` (default 4), `--args <args...>`
 - `upload` options: `--pipeline <file>` or `--token <token>` (one required), `--threads <num>` (default 4), `--max-concurrent <num>` (default 5), `--args <args...>`
+- In the Python package, `--args` takes every argument after it, flags
+  included, so put the other flags first:
+  `rocketride start --pipeline p.pipe --json --args a b`. Its `upload`
+  accepts `--max-concurrent` but ignores it.
 
 There is no live-monitor command: continuous monitoring belongs to the
 platform's event monitor and server monitor apps — the CLI is one-shot,
@@ -143,7 +148,9 @@ package.
 `[app]` takes an app folder, an app id (`personal.clock`), its name part
 (`clock`), its folder name (`clock-ui`), or nothing — the current
 directory is the app. A lone number is read as the version, so
-`rocketride app publish 3` works from inside an app folder.
+`rocketride app publish 3` works from inside an app folder. In the Python
+package, `app verify` and `app deploy` take only an app folder, and it is
+required.
 
 - `rocketride app create <slug> [--template Blank|Dashboard] [--name <text>]
   [--developer <id>] [--sidebar] [--no-status-footer] [--doc-tabs]
