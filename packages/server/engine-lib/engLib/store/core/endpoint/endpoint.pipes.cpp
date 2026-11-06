@@ -251,32 +251,13 @@ Error IServiceEndpoint::buildGlobalPipe() noexcept {
         // Set the self referential weak ptr
         global->global = global;
 
-        // We need to process autopipe first, as it adds new filters
-        if (filter.logicalType == "autopipe") {
-            // In pipeline mode, validate autopipe first
-            if (config.openMode == OPEN_MODE::PIPELINE) {
-                // If the filter is not valid, stop
-                if (auto ccode = global->validateConfig()) return ccode;
-            }
-
-            // Init and reset the pipeStackIndex
-            util::Guard pipeStackIndexGuard{[&] { pipeStackIndex = i; },
-                                            [&] { pipeStackIndex = -1; }};
-
-            // Begin the autopipe
-            if (auto ccode = global->beginFilterGlobal()) return ccode;
-        }
-
         // Save it in the pipe stack
         m_globalStack.push_back(global);
     }
 
-    // In pipeline mode, validate all the global filters first
+    // In pipeline mode, validate all the global filters first, in order
     if (config.openMode == OPEN_MODE::PIPELINE) {
         for (auto global : m_globalStack) {
-            if (global->pipeType.logicalType == "autopipe")
-                continue;  // Skip autopipe, it is already validated
-
             // If the filter is not valid, stop
             if (auto ccode = global->validateConfig()) return ccode;
         }
@@ -289,13 +270,10 @@ Error IServiceEndpoint::buildGlobalPipe() noexcept {
         util::Guard pipeStackIndexGuard{[this] { pipeStackIndex = 0; },
                                         [this] { pipeStackIndex = -1; }};
 
-        // And then begin the global filters
+        // And then begin the global filters, in order
         for (; _cast<size_t>(pipeStackIndex) < m_globalStack.size();
              ++pipeStackIndex) {
             auto global = m_globalStack[pipeStackIndex];
-
-            if (global->pipeType.logicalType == "autopipe")
-                continue;  // Skip autopipe, it is already begun
 
             // If the beginFilterGlobal has an error, stop
             if (auto ccode = global->beginFilterGlobal()) return ccode;

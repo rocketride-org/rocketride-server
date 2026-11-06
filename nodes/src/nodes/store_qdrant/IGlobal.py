@@ -46,13 +46,6 @@ class IGlobal(StoreGlobalBase):
 
         return Store(logical_type, conn_config, bag)
 
-    def _sub_key(self) -> str:
-        """Return the transform sub-key: host/port/collection."""
-        collection = self.store.collection
-        host = self.store.host
-        port = self.store.port
-        return f'{host}/{port}/{collection}'
-
     def _probe_connection(self, config: Dict[str, Any]) -> None:
         """
         Validate Qdrant config at save-time with a fast SDK probe.

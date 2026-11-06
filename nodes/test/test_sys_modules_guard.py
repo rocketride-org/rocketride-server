@@ -122,7 +122,7 @@ def test_test_root_is_not_on_sys_path():
     Its subdirectories are named after node packages (text_output/, response/,
     telegram/, tool_git/, ...). With nodes/test on sys.path ahead of src/nodes,
     `import text_output` resolves to the *test* package, whose __path__ holds no
-    node module — so every `from text_output.instance import ...` dies with
+    node module — so every `from text_output.IInstance import ...` dies with
     ModuleNotFoundError. Import test-root helpers package-relative instead.
     """
     test_root = str(Path(__file__).resolve().parent)

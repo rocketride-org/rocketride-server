@@ -75,14 +75,6 @@
 			"title": "API key",
 			"description": "Enter your API key",
 			"secret": true
-		},
-		"vectorizer.embedding": {
-			"title": "Embedding",
-			"combo": "embedding"
-		},
-		"vectorizer.store": {
-			"title": "Vector Store",
-			"combo": "store"
 		}
 	}
 }

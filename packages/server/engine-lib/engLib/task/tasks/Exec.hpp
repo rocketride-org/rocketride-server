@@ -307,7 +307,6 @@ public:
             updateService("service");
             updateService("source");
             updateService("target");
-            updateService("autopipe");
 
             // If this has a batches setting in it (classification)
             if (taskConfig().isMember("batches")) {

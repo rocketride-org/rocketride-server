@@ -44,7 +44,6 @@ Error IPipeTask<LvlT>::setThreadCount(uint32_t threadCount) {
 }
 
 template class IPipeTask<Lvl::JobAction>;
-template class IPipeTask<Lvl::JobClassify>;
 template class IPipeTask<Lvl::JobInstance>;
 template class IPipeTask<Lvl::JobPermissions>;
 template class IPipeTask<Lvl::JobPipeline>;

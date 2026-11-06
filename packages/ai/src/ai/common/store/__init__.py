@@ -28,7 +28,7 @@
 ``store_qdrant`` is the reference the IGlobal/IInstance abstraction was
 extracted from; the other ``store_*`` drivers still carry their own copies and
 migrate onto these bases one at a time. The store interface itself
-(``DocumentStoreBase``, ``getStore``) and the agent-tool mixin
+(``DocumentStoreBase``) and the agent-tool mixin
 (``VectorStoreToolMixin``) live in ``document_store`` and are re-exported here so
 ``from ai.common.store import ...`` keeps working after the module became a
 package.
@@ -38,7 +38,6 @@ from .document_store import (
     CONTROL_OBJECT_ID,
     DocumentStoreBase,
     VectorStoreToolMixin,
-    getStore,
 )
 from .store_global_base import StoreGlobalBase
 from .store_instance_base import StoreInstanceBase
@@ -49,5 +48,4 @@ __all__ = [
     'StoreGlobalBase',
     'StoreInstanceBase',
     'VectorStoreToolMixin',
-    'getStore',
 ]

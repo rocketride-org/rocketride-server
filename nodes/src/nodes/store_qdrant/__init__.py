@@ -20,26 +20,3 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-
-# Import the filters
-from .IEndpoint import IEndpoint
-from .IGlobal import IGlobal
-from .IInstance import IInstance
-
-
-# Allow direct access to the underlying store
-def getStore():
-    """
-    Get the store object for this node.
-    """
-    from .qdrant import Store
-
-    return Store
-
-
-__all__ = [
-    'IEndpoint',
-    'IGlobal',
-    'IInstance',
-    'getStore',
-]

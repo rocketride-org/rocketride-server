@@ -6,9 +6,8 @@ An internal RocketRide filter that builds an inverted word index from extracted 
 
 The indexer consumes the text lane, tokenizes it, and writes each word into a
 word database, stamping every object it indexes with the `wordBatchId` of the
-batch it was written to. It is an internal node: autopipe inserts it after the
-parser whenever an include entry sets `index` to true, so it is not added on
-the canvas. Objects that already carry a `wordBatchId` are skipped unless they
+batch it was written to. It is an internal node, placed after the parser, and
+is not added on the canvas. Objects that already carry a `wordBatchId` are skipped unless they
 are flagged for indexing again.
 
 ## Configuration

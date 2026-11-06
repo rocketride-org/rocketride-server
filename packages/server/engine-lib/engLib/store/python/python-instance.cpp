@@ -41,8 +41,11 @@ IPythonInstanceBase::IPythonInstanceBase(const FactoryArgs &args) noexcept
         // Get the base class - this will throw if not there
         py::object pyBaseClass = pyRocketRide.attr("IInstanceBase");
 
-        // Get the instance class - this will throw if not there
-        py::object pyInstanceClass = m_global.m_pyModule.attr("IInstance");
+        // Import the node's <path>.IInstance submodule and get the class -
+        // both will throw if not there
+        const Text moduleName = _ts(m_global.m_modulePath, ".IInstance");
+        py::object pyInstanceModule = python::loadModule(moduleName);
+        py::object pyInstanceClass = pyInstanceModule.attr("IInstance");
 
         // Create a new instance
         m_pyInstance = pyInstanceClass();
