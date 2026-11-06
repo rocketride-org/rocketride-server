@@ -55,6 +55,13 @@ export function explainUnbuiltApp(appId: string, rail: readonly RailRow[]): Unbu
 	const newest = rail[0];
 	if (!newest || rail.some((r) => !failed(r) && (r.buildStatus === 'ok' || r.buildStatus === ''))) return null;
 	const v = newest.registryVersion;
+	// A failed upload stops before the build is queued, so there is no log.
+	if (newest.state === 'failed' && newest.buildStatus !== 'failed') {
+		return {
+			title: `No working build of ${appId}`,
+			message: `This app has no working build yet, so there is nothing to open. Its latest version, v${v}, was not stored completely on the server, so it never built. Deploy a new version.`,
+		};
+	}
 	if (failed(newest)) {
 		return {
 			title: `No working build of ${appId}`,

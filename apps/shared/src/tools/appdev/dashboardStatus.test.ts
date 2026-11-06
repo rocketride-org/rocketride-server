@@ -28,3 +28,12 @@ test('a host that can read logs gets View build log on the failed-build line', (
 test('a host that cannot read logs keeps Open Deploy on the failed-build line', () => {
 	assert.deepEqual(statusActionOf(failedBuildLine(), false, true), { kind: 'stage', stage: 'deploy' });
 });
+
+test('a version whose upload failed never reads as still building and offers no build log', () => {
+	const lines = deriveStatus([{ ...failedV3, buildStatus: 'queued', state: 'failed' }], [], [], null, []);
+	assert.ok(lines.some((l) => l.text.includes('v3 was not stored completely on the server')));
+	for (const l of lines) {
+		assert.doesNotMatch(l.text, /still building|Hang tight/);
+		assert.equal(l.buildLog, undefined);
+	}
+});

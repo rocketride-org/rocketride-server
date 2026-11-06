@@ -115,16 +115,17 @@ export function deriveStatus(
 			submit: 'it is in review right now, and the verdict will land here and in the conversation below',
 			ready: 'it passed review and is approved',
 			rejected: 'it was rejected in review',
-			failed: 'its server build failed, so it never became servable',
+			failed: 'the server could not store it completely, so it never built',
 		};
 		// The build axis outranks the review state in the story: a draft
 		// whose server build broke is NOT "ready for internal use", and a
-		// still-running build is not anything yet.
+		// still-running build is not anything yet. A failed upload is the
+		// exception: its build stays 'queued' but never runs.
 		const build = buildStateOf(newest);
 		const story =
 			build === 'failed'
 				? 'its server build FAILED, so this version cannot serve'
-				: build === 'running'
+				: build === 'running' && newest.state !== 'failed'
 					? `the server is still building it (${newest.buildStatus})`
 					: (stateStory[newest.state ?? ''] ?? 'its state is unknown');
 		lines.push({
@@ -163,8 +164,8 @@ export function deriveStatus(
 	if (newest?.state === 'failed') {
 		lines.push({
 			tone: 'error',
-			text: 'Check the build output in the Console, fix the error, and deploy again. A failed version cannot be published or reviewed.',
-			stage: 'design',
+			text: `v${newest.registryVersion} was not stored completely on the server, so it never built. Deploy a new version. A failed version cannot be published or reviewed.`,
+			stage: 'deploy',
 		});
 	}
 	if (newest?.state === 'rejected') {
@@ -201,7 +202,7 @@ export function deriveStatus(
 	// build is green gets recommended anywhere — suggesting publish or
 	// review for an unservable version would be advice the server refuses.
 	const newestBuild = buildStateOf(newest);
-	if (newest && newestBuild === 'running') {
+	if (newest && newestBuild === 'running' && newest.state !== 'failed') {
 		lines.push({
 			tone: 'plain',
 			text: 'Hang tight. Once the build finishes, you can publish it or submit it for review.',
