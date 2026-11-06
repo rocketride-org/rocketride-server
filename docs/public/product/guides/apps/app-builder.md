@@ -24,12 +24,16 @@ the same loop runs from a terminal or CI.
 - Node and **pnpm**. Use pnpm, not npm: running `npm install` inside an app
   folder can corrupt the workspace layout. Dependencies install once at the
   workspace root.
-- A developer id for your organization. Every app id is
-  `<developerId>.<name>`. Your organization claims its developer id once,
-  on the Deploy tab or with `rocketride app developer register <id>`
-  (lowercase letters and underscores, starting with a letter; an org
-  admin's step, and permanent), and can then deploy
-  only apps inside that namespace. Until the prefix of your app's id
+- A developer id for your organization, on RocketRide Cloud. Every app id
+  is `<developerId>.<name>`. Your organization claims its developer id
+  once, on the Deploy tab or with the npm CLI's
+  `rocketride app developer register <id>`, which talks to the deployment
+  target named by `ROCKETRIDE_DEPLOY_URI` and `ROCKETRIDE_DEPLOY_APIKEY`
+  (the pip CLI has no `app developer` verbs). The id is lowercase letters
+  and underscores, starting with a letter; registering is an org admin's
+  step, and permanent. The organization can then deploy only apps inside
+  that namespace. A self-hosted server registers nothing: it publishes
+  under the fixed id `rocketride`. Until the prefix of your app's id
   matches, the Deploy tab is read-only with a banner; the fix is to rename
   the id in `package.json`. Design and Package always work.
 - Catalog nodes only, if the app is headed for the store. Pipelines in a

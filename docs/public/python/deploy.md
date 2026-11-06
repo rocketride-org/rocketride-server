@@ -84,9 +84,10 @@ The review state lives on the **deployment**, not the binding: an app deploys
 
 App ids are partitioned by the caller org's **developer id**: every app is
 `<developerId>.<name>` (globally unique), so an org can only deploy/publish
-ids inside its own namespace (the platform holds `rocketride`). Deploying or
-publishing an app requires the org to have claimed a developer id: an org
-admin claims it once, permanently, with `client.register_developer(id)`
+ids inside its own namespace (the platform holds `rocketride`). Deploying an app, or
+publishing one from your own namespace, requires the org to have claimed a
+developer id (pinning another organization's store app to `@me` or `@team`
+does not): an org admin claims it once, permanently, with `client.register_developer(id)`
 (RocketRide Cloud only), and `client.developer_status()` reads it back.
 
 The lifecycle, verb by verb: scaffold with `deploy.create_app`, pre-check with
