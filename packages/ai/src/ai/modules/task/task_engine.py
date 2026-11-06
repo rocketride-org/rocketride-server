@@ -40,6 +40,7 @@ import hashlib
 import secrets
 import shlex
 import shutil
+import signal
 from collections import deque
 from typing import TYPE_CHECKING, Awaitable, Callable, Deque, Dict, Any, List, Mapping, Optional, Tuple
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_fixed
@@ -351,10 +352,19 @@ CONST_MCP_CLIENT_NODE_PATH = 'nodes.tool_mcp_client'
 CONST_HOSTED_CHILD_FLAG = HOSTED_FLAG
 CONST_SHARED_HOST_CHILD_FLAG = SHARED_HOST_FLAG
 
-# Windows: an exception ends a task process with an NTSTATUS error code (from
-# 0xC0000000); Ctrl+C or Ctrl+Break ends it with STATUS_CONTROL_C_EXIT, no crash.
-CONST_NTSTATUS_ERROR = 0xC0000000
-CONST_STATUS_CONTROL_C_EXIT = 0xC000013A
+# Signals that end a task process as a crash: the engine's crash signals and an OOM kill
+CONST_CRASH_SIGNALS = ('SIGSEGV', 'SIGBUS', 'SIGFPE', 'SIGILL', 'SIGABRT', 'SIGKILL')
+
+# Windows exception codes that end a task process as a crash
+CONST_CRASH_EXCEPTIONS = {
+    0xC0000005: 'STATUS_ACCESS_VIOLATION',
+    0xC000001D: 'STATUS_ILLEGAL_INSTRUCTION',
+    0xC0000094: 'STATUS_INTEGER_DIVIDE_BY_ZERO',
+    0xC00000FD: 'STATUS_STACK_OVERFLOW',
+    0xC0000374: 'STATUS_HEAP_CORRUPTION',
+    0xC0000409: 'STATUS_STACK_BUFFER_OVERRUN',
+    0xC0000602: 'STATUS_FAIL_FAST_EXCEPTION',
+}
 
 
 def _service_capabilities(service: Any) -> List[str]:
@@ -1572,10 +1582,9 @@ class Task(DAPBase):
         unknown is not a success either, so it records 1. A requested stop
         keeps its existing exit code: the kill signal is not a task failure.
 
-        A process that reported no crash but was killed by a signal (a negative
-        code) or, on Windows, ended by an exception (from 0xC0000000, except
-        Ctrl+C's 0xC000013A) crashed before its handlers could say so, unless
-        the server killed it.
+        A process that reported no crash but ended by a crash signal, an OOM
+        kill or, on Windows, a crash exception code crashed before its handlers
+        could say so, unless the server killed it.
         """
         if not self._exit_event_seen and not self._stop_requested:
             self._status.exitCode = exit_code if exit_code is not None else 1
@@ -1583,10 +1592,15 @@ class Task(DAPBase):
             if exit_code is None or self._crash or self._process_killed:
                 return
             if exit_code < 0:
-                self._crash = {'code': str(-exit_code), 'description': f'signal {-exit_code}', 'file': None}
-            elif exit_code >= CONST_NTSTATUS_ERROR and exit_code != CONST_STATUS_CONTROL_C_EXIT:
+                try:
+                    name = signal.Signals(-exit_code).name
+                except ValueError:
+                    return
+                if name in CONST_CRASH_SIGNALS:
+                    self._crash = {'code': str(-exit_code), 'description': name, 'file': None}
+            elif exit_code in CONST_CRASH_EXCEPTIONS:
                 code = f'0x{exit_code:08x}'
-                self._crash = {'code': code, 'description': f'exception {code}', 'file': None}
+                self._crash = {'code': code, 'description': CONST_CRASH_EXCEPTIONS[exit_code], 'file': None}
 
     async def _terminated(self) -> None:
         """
@@ -1617,7 +1631,15 @@ class Task(DAPBase):
 
         self.debug_message(f'Subprocess for task exited with code {exit_code}')
 
+        reported = self._crash
         self._apply_process_exit_code(exit_code)
+
+        # The engine reported nothing: the console shows what its >CRASH would have
+        if self._crash is not reported:
+            output = f'Crash: {self._crash["description"]} (code {self._crash["code"]}), no dump\n'
+            await self._forward_task_event(
+                EVENT_TYPE.OUTPUT, self.build_event('output', body={'category': 'console', 'output': output})
+            )
 
         # If we are not restarting
         if not self._is_restarting:
@@ -1749,8 +1771,8 @@ class Task(DAPBase):
                 self._status.state = TASK_STATE.CANCELLED.value
                 self.debug_task_message('stopped', reason=self._stop_reason or 'user')
         elif self._crash:
-            # Says more than the engine's own exit message for the same crash
-            self._status.status = f'Crashed ({self._crash["description"]})'
+            # The crash's detail is in the console
+            self._status.status = 'Stopped unexpectedly'
             self._status.exitMessage = self._status.status
             self._status.state = TASK_STATE.CANCELLED.value
             self.debug_task_message('crashed', reason=self._crash['description'])
@@ -1875,8 +1897,10 @@ class Task(DAPBase):
                 else:
                     # A ttl-window expiry is SUCCESS: the run stayed up
                     # exactly as configured, then shut down. Only a real
-                    # stop (or abnormal exit) reads as cancelled.
-                    if self._status.state == TASK_STATE.CANCELLED.value:
+                    # stop (or abnormal exit) reads as cancelled; a crash is an error.
+                    if self._crash and not self._stop_requested:
+                        outcome = 'error'
+                    elif self._status.state == TASK_STATE.CANCELLED.value:
                         outcome = 'ok' if self._stop_reason == 'ttl' else 'cancelled'
                     elif self._status.exitCode == 0:
                         outcome = 'ok'

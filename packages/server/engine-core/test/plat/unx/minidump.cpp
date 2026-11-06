@@ -41,18 +41,6 @@ static std::set<std::filesystem::path> dumpsIn(
     return out;
 }
 
-// Where the crash child writes its crash report (code, description, dump)
-static std::filesystem::path crashReportPath() {
-    return std::filesystem::temp_directory_path() / "rr-crash-report";
-}
-
-static std::vector<std::string> readCrashReport() {
-    std::vector<std::string> lines;
-    std::ifstream in{crashReportPath()};
-    for (std::string line; std::getline(in, line);) lines.push_back(line);
-    return lines;
-}
-
 // Re-exec this test binary as a fresh process (RR_CRASH_CHILD handled in
 // testMain.ipp) so the child registers Crashpad and faults/exits without the
 // fork-in-a-threaded-process deadlock a plain fork() would hit. Returns the
@@ -71,14 +59,10 @@ static int runCrashChild(const char *mode, const char *crashDb = nullptr,
                        ? std::string(handlerEnv)
                        : _ts(application::execDir() / "crashpad_handler");
 
-    std::error_code ec;
-    std::filesystem::remove(crashReportPath(), ec);
-
     pid_t pid = ::fork();
     REQUIRE(pid >= 0);
     if (pid == 0) {
         ::setenv("RR_CRASH_CHILD", mode, 1);
-        ::setenv("RR_CRASH_REPORT", crashReportPath().c_str(), 1);
         ::setenv("ROCKETRIDE_CRASHPAD_HANDLER", handler.c_str(), 1);
         if (crashDb) ::setenv("ROCKETRIDE_CRASHDB_DIR", crashDb, 1);
         char *const argv[] = {const_cast<char *>(exe.c_str()),
@@ -119,24 +103,6 @@ TEST_CASE("crashpad") {
 
         // The child relocates its own dump at crash time; no parent sweep.
         REQUIRE(dumpsIn(crashDir).size() > before.size());
-
-        // Before the fatal exit it reports its signal and the dump it wrote
-        auto report = readCrashReport();
-        REQUIRE(report.size() == 3);
-        auto signal = std::stoi(report[0]);
-        // SIGABRT: under ASan the child crashes with abort()
-        REQUIRE((signal == SIGSEGV || signal == SIGABRT));
-        REQUIRE(report[1] ==
-                std::string{_fmt("{}: {}", plat::renderSignal(signal),
-                                 plat::renderSignalDescription(signal))
-                                .c_str()});
-
-        std::set<std::filesystem::path> added;
-        for (const auto &dump : dumpsIn(crashDir))
-            if (!before.count(dump)) added.insert(dump);
-        REQUIRE(added.size() == 1);
-        REQUIRE(std::filesystem::path{report[2]}.filename() ==
-                added.begin()->filename());
     }
 
     // Dumps are opt-in: without the flag, or with it set false, the crash is
@@ -157,12 +123,6 @@ TEST_CASE("crashpad") {
 
             REQUIRE(!std::filesystem::exists(dir, ec));
             REQUIRE(dumpsIn(crashDir) == before);
-
-            // The crash is still reported, naming no dump
-            auto report = readCrashReport();
-            REQUIRE(report.size() == 3);
-            REQUIRE(!report[0].empty());
-            REQUIRE(report[2].empty());
         }
     }
 

@@ -52,9 +52,11 @@ class IGlobal(IGlobalBase):
 """
 
 # A plain read of address 0: ctypes.string_at(0) would only raise OSError on
-# Windows, where ctypes guards its foreign calls. A fast fail skips every
-# handler in the process.
+# Windows, where ctypes guards its foreign calls. A fast fail and SIGKILL skip
+# every handler in the process; exit(-1) is no crash.
 _IINSTANCE = """import ctypes
+import os
+import signal
 
 from rocketlib import IInstanceBase
 
@@ -65,6 +67,10 @@ class IInstance(IInstanceBase):
             ctypes.c_int.from_address(0).value
         elif text == 'failfast':
             ctypes.windll.kernel32.RaiseFailFastException(None, None, 0)
+        elif text == 'sigkill':
+            os.kill(os.getpid(), signal.SIGKILL)
+        elif text == 'exit':
+            os._exit(-1)
 """
 
 _PIPELINE = {
@@ -189,35 +195,51 @@ def _dumps_of(token: str):
     return [p for p in Path(CONST_TASK_DATA_PATH).rglob('*') if token in p.name and p.suffix in ('.dmp', '.mdmp')]
 
 
+def _crash_lines(lines):
+    return [line.rstrip() for line in lines if line.startswith('Crash: ')]
+
+
 @pytest.mark.asyncio
-async def test_a_node_that_crashes_ends_its_task_as_crashed(server):
+async def test_a_node_that_crashes_stops_its_task_unexpectedly(server):
     token, status, lines = await _run(server['uri'], 'segv')
     dumps = _dumps_of(token)
     try:
-        expected = (
-            'Crashed (SEH exception 0xc0000005)' if os.name == 'nt' else 'Crashed (SIGSEGV: Invalid access to storage)'
-        )
-        assert status['status'] == expected, server['log'].read_text(errors='replace')
-        assert status['exitMessage'] == expected
+        assert status['status'] == 'Stopped unexpectedly', server['log'].read_text(errors='replace')
+        assert status['exitMessage'] == 'Stopped unexpectedly'
 
-        crash = [line for line in lines if line.startswith('Crash: ')]
+        crash = _crash_lines(lines)
         assert len(crash) == 1, lines
+        expected = 'SEH exception 0xc0000005' if os.name == 'nt' else 'SIGSEGV: Invalid access to storage'
+        assert crash[0].startswith(f'Crash: {expected} (code ')
         if server['dumps']:
             assert len(dumps) == 1
-            assert crash[0].rstrip().endswith(f'dump {dumps[0].name}')
+            assert crash[0].endswith(f'dump {dumps[0].name}')
         else:
             assert dumps == []
-            assert crash[0].rstrip().endswith('no dump')
+            assert crash[0].endswith('no dump')
     finally:
         for dump in dumps:
             dump.unlink()
 
 
 @pytest.mark.asyncio
-@pytest.mark.skipif(os.name != 'nt', reason='a Windows fast fail')
-async def test_a_crash_past_the_handlers_ends_its_task_as_crashed(server):
+async def test_a_crash_past_the_handlers_stops_its_task_unexpectedly(server):
     """The engine reports nothing; only the exit code tells the server."""
-    token, status, lines = await _run(server['uri'], 'failfast')
-    assert status['status'] == 'Crashed (exception 0xc0000602)', server['log'].read_text(errors='replace')
-    assert [line for line in lines if line.startswith('Crash: ')] == []
+    text, crash = (
+        ('failfast', 'STATUS_FAIL_FAST_EXCEPTION (code 0xc0000602)')
+        if os.name == 'nt'
+        else ('sigkill', 'SIGKILL (code 9)')
+    )
+    token, status, lines = await _run(server['uri'], text)
+    assert status['status'] == 'Stopped unexpectedly', server['log'].read_text(errors='replace')
+    assert _crash_lines(lines) == [f'Crash: {crash}, no dump']
+    assert _dumps_of(token) == []
+
+
+@pytest.mark.asyncio
+async def test_a_node_that_exits_stops_its_task(server):
+    """exit(-1) is no crash, although on Windows its code 0xffffffff looks like an exception's."""
+    token, status, lines = await _run(server['uri'], 'exit')
+    assert status['status'] == 'Stopped', server['log'].read_text(errors='replace')
+    assert _crash_lines(lines) == []
     assert _dumps_of(token) == []

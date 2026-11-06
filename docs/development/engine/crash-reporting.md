@@ -78,13 +78,15 @@ A crashing engine tells its monitor, in this order, before it exits:
   file, empty without one. The file is the last field.
 - `>EXIT*...` -- as for any fatal error.
 
-`eaas.py` marks the task crashed: its status and exit message read
-`Crashed (<description>)`. A task process
-that sent neither `>CRASH` nor `>EXIT`, with no stop requested, reads
-`Crashed (signal N)` when a signal killed it, and on Windows
-`Crashed (exception 0x...)` when it exited with an exception code (from
-`0xC0000000`, except Ctrl+C's `0xC000013A`), as a fast fail does: it skips the
-engine's handlers.
+`eaas.py` ends the task as `Stopped unexpectedly` (status and exit message),
+shows `Crash: <description> (code <code>), <dump or "no dump">` in its console
+and records the run's outcome as `error`. A task process that sent neither
+`>CRASH` nor `>EXIT`, with no stop requested and not killed by the server, ends
+the same way, with `no dump`, when a crash signal (`SIGSEGV`, `SIGBUS`,
+`SIGFPE`, `SIGILL`, `SIGABRT`) or an OOM kill (`SIGKILL`) ended it, or on
+Windows a crash exception code such as a fast fail's `0xc0000602`: these skip
+the engine's handlers. Any other exit code, such as `exit(-1)`, Ctrl+C or a
+failed start, reads `Stopped`.
 
 ## Getting a dump by hand
 
