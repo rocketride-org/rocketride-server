@@ -2059,19 +2059,66 @@ test('OAuth error discards pending signup context without reading it', async () 
 });
 
 
-test('an identity provider error return strips its state from the URL without a sign-in failure', async () => {
-	const envelope = btoa(JSON.stringify({ v: 1, signup: { ...signupContext(), consent_state: 'undecided' } }));
+/** A page load at `search`/`hash`, recording every URL replaceState writes. */
+function errorReturnPage(search: string, hash = '') {
 	const urls: string[] = [];
 	const win = topLevelWindow({
-		location: { search: `?error=access_denied&state=${encodeURIComponent(envelope)}`, pathname: '/' },
+		location: { search, hash, pathname: '/' },
 		history: { state: null, replaceState: (_state: unknown, _title: string, url: string) => urls.push(url) },
 	});
-	await withGlobals({ window: win, sessionStorage: recordingSession().storage, localStorage: recordingSession().storage, navigator: {} }, async () => {
+	return { urls, win };
+}
+
+const errorReturnState = encodeURIComponent(btoa(JSON.stringify({ v: 1, signup: { ...signupContext(), consent_state: 'undecided' } })));
+
+test('an identity provider error return strips its state from the URL without a sign-in failure', async () => {
+	const { urls, win } = errorReturnPage(`?error=access_denied&state=${errorReturnState}`);
+	const session = recordingSession([['rr:pkce_verifier', 'verifier-1']]);
+	await withGlobals({ window: win, sessionStorage: session.storage, localStorage: recordingSession().storage, navigator: {} }, async () => {
 		const { manager } = createTestManager();
 		manager.client = testClient();
 		manager._attachPromise = Promise.resolve();
 		await manager.bootstrap();
 		assert.deepEqual(urls, ['/']);
+		assert.notEqual(manager.connectionStatus.state, ConnectionState.AUTH_FAILED);
+	});
+});
+
+test('an identity provider error return is stripped even when the transport attach fails', async () => {
+	const { urls, win } = errorReturnPage(`?error=access_denied&state=${errorReturnState}`);
+	const session = recordingSession([['rr:pkce_verifier', 'verifier-1']]);
+	const fetch = async () => {
+		throw new Error('offline');
+	};
+	await withGlobals({ window: win, sessionStorage: session.storage, localStorage: recordingSession().storage, navigator: {}, fetch }, async () => {
+		const { manager } = createTestManager();
+		manager.client = testClient();
+		manager._attachPromise = Promise.reject(new Error('attach failed'));
+		assert.equal(await manager.bootstrap(), null);
+		assert.deepEqual(urls, ['/']);
+	});
+});
+
+test('an identity provider error return keeps the rest of the query and the fragment', async () => {
+	const { urls, win } = errorReturnPage(`?tab=2&error=access_denied&error_description=denied&state=${errorReturnState}`, '#section');
+	const session = recordingSession([['rr:pkce_verifier', 'verifier-1']]);
+	await withGlobals({ window: win, sessionStorage: session.storage, localStorage: recordingSession().storage, navigator: {} }, async () => {
+		const { manager } = createTestManager();
+		manager.client = testClient();
+		manager._attachPromise = Promise.resolve();
+		await manager.bootstrap();
+		assert.deepEqual(urls, ['/?tab=2#section']);
+	});
+});
+
+test('an error and state the shell did not start (no stored verifier) are left for the app', async () => {
+	const { urls, win } = errorReturnPage('?error=access_denied&state=app-owned');
+	await withGlobals({ window: win, sessionStorage: recordingSession().storage, localStorage: recordingSession().storage, navigator: {} }, async () => {
+		const { manager } = createTestManager();
+		manager.client = testClient();
+		manager._attachPromise = Promise.resolve();
+		await manager.bootstrap();
+		assert.deepEqual(urls, []);
 		assert.notEqual(manager.connectionStatus.state, ConnectionState.AUTH_FAILED);
 	});
 });

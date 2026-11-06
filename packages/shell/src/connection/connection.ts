@@ -903,6 +903,31 @@ export class ConnectionManager implements IConnectionManager {
 			}
 		}
 
+		// ── Identity provider error return ────────────────────────────────
+		// The generic OAuth `error`/`error_description` params can reach the
+		// app (the registered redirect URIs are origin roots), but honoring them
+		// would let any unrelated app deep-link (`/app?error=…`) into a false
+		// sign-in banner, so they are never a sign-in failure. A return from OUR
+		// authorize redirect (its PKCE verifier is still stored) carries `state`,
+		// which may hold a cookieless signup context: strip it before the
+		// transport wait, which can fail and return early. Only the OAuth params
+		// go; the rest of the query and the fragment stay for the app.
+		{
+			const returnParams = new URLSearchParams(window.location.search);
+			if (!returnParams.get('code') && !returnParams.get('auth_error') && returnParams.has('error') && returnParams.has('state') && getStoredVerifier()) {
+				clearSignupProperties();
+				for (const key of ['error', 'error_description', 'error_uri', 'state', 'iss']) {
+					returnParams.delete(key);
+				}
+				let url = window.location.pathname;
+				const rest = returnParams.toString();
+				if (rest) {
+					url += `?${rest}`;
+				}
+				window.history.replaceState({ ...(window.history.state ?? {}) }, '', url + String(window.location.hash ?? ''));
+			}
+		}
+
 		// Ensure the transport is attached before any login attempt. The native
 		// attach timeout closes a timed-out handshake before this promise rejects.
 		try {
@@ -922,16 +947,9 @@ export class ConnectionManager implements IConnectionManager {
 		const params = new URLSearchParams(window.location.search);
 		const code = params.get('code');
 		// Only `auth_error` is honored as a sign-in failure: our own OAuth
-		// callback sets it. The generic OAuth `error`/`error_description` params
-		// can reach the app too (the registered redirect URIs are origin roots),
-		// but honoring them would let any unrelated app deep-link (`/app?error=…`)
-		// into a false sign-in banner. Such a return still carries `state`, which
-		// may hold a cookieless signup context, so it is stripped from the URL.
+		// callback sets it. Identity provider `error` returns are stripped
+		// above, before the transport wait.
 		const errorDescription = params.get('auth_error');
-		if (!code && !errorDescription && params.has('error') && params.has('state')) {
-			clearSignupProperties();
-			window.history.replaceState({ ...(window.history.state ?? {}) }, '', window.location.pathname);
-		}
 
 		if (errorDescription) {
 			clearSignupProperties();
