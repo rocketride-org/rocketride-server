@@ -57,8 +57,6 @@ from __future__ import annotations
 import json
 import uuid
 
-from .framework.pipes import use_and_open
-
 # The whole chain runs on the `questions` lane: `prompt` only produces output
 # for a `questions` input.
 #
@@ -137,11 +135,12 @@ async def test_join_flushes_after_every_branch(client):
     Args:
         client: Connected RocketRide client (fixture).
     """
-    token, pipe = await use_and_open(
-        client, _diamond_pipeline(), objinfo={'name': 'lifecycle_diamond'}, mime_type='lane/questions'
-    )
+    result = await client.use(pipeline=_diamond_pipeline())
+    token = result['token']
 
     payload = json.dumps({'questions': [{'text': 'Summarize both branches.'}]}).encode('utf-8')
+    pipe = await client.pipe(token, objinfo={'name': 'lifecycle_diamond'}, mime_type='lane/questions')
+    await pipe.open()
     await pipe.write(payload)
     response = await pipe.close()
 

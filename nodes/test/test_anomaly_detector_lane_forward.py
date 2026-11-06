@@ -23,8 +23,6 @@ import json
 import uuid
 from typing import Any, Dict
 
-from .framework.pipes import use_and_open
-
 # Text carrying no digits: evaluate_text() passes non-numeric text through unchanged, so
 # the sentinel survives byte for byte and can be counted.
 SENTINEL = 'RocketRideLaneForwardSentinel'
@@ -77,11 +75,12 @@ async def _run(client, pipeline: Dict[str, Any], lane: str, payload: bytes):
     Returns:
         The list the response sink captured on that lane.
     """
-    token, pipe = await use_and_open(
-        client, pipeline, objinfo={'name': f'lane_forward_{lane}'}, mime_type=f'lane/{lane}'
-    )
+    result = await client.use(pipeline=pipeline)
+    token = result['token']
 
     try:
+        pipe = await client.pipe(token, objinfo={'name': f'lane_forward_{lane}'}, mime_type=f'lane/{lane}')
+        await pipe.open()
         await pipe.write(payload)
         response = await pipe.close()
     finally:
