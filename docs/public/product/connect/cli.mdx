@@ -63,7 +63,8 @@ which also read from the environment so you can set them once:
 Two task options read the environment the same way, on the commands that take
 them: `--pipeline <path>` (`start` and `upload`) defaults to
 `ROCKETRIDE_PIPELINE`, and `--token <token>` (`start`, `stop`, and `upload`)
-defaults to `ROCKETRIDE_TOKEN`.
+defaults to `ROCKETRIDE_TOKEN`. A variable exported in your shell takes
+precedence over the same one in `.env`.
 
 Against a [Cloud](/operate/cloud) endpoint use an `https://`/`wss://` URI so the
 connection is encrypted.
@@ -118,11 +119,14 @@ deployment pair for a different server, which both commands leave alone.
 already in `.env` works, `init` reuses it and writes nothing. To set or change
 the deployment pair in either case, run `rocketride login --deploy --uri <uri>`.
 
-Without `--apikey`, `login` first tries the development key already in `.env`.
-If the server rejects that key, for example after a command reports rejected
-credentials, pass a valid key with `--apikey <key>`. Or pass `--apikey ""` to sign in
-through the browser instead, or to be prompted for a key on a self-hosted
-server.
+Without `--apikey`, `login` first tries the development key from `.env` or your
+shell. If the server rejects that key, for example after a command reports
+rejected credentials, pass a valid key with `--apikey <key>`. Or pass
+`--apikey ""` to sign in through the browser instead, or to be prompted for a
+key on a self-hosted server. If you exported `ROCKETRIDE_APIKEY` in your shell,
+unset it afterwards, because it takes precedence over the new key in `.env`.
+With `--deploy`, also pass the deployment server's `--uri`, because `--uri`
+defaults to `ROCKETRIDE_URI`, the development server.
 
 Key flags:
 
