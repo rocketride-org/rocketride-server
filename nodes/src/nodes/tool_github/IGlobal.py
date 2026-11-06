@@ -155,13 +155,19 @@ def _read_tools(raw) -> frozenset:
 
     Only the shape is checked here; ``validate_tool_names`` checks the names.
     """
-    if raw is None:
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
         return frozenset()
     if isinstance(raw, str):
         raw = raw.split(',')
     if not isinstance(raw, (list, tuple)) or not all(isinstance(name, str) for name in raw):
         raise ValueError('tool_github: tools must be a list of tool names')
-    return frozenset(name.strip() for name in raw if name.strip())
+    names = frozenset(name.strip() for name in raw if name.strip())
+    if raw and not names:
+        # Entries that are all blank are a mistake, not a request for every tool: fail closed.
+        raise ValueError(
+            'tool_github: tools has only blank entries; name the tools to publish, or leave tools empty to publish every tool'
+        )
+    return names
 
 
 def _read_options(cfg) -> dict:

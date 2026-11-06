@@ -68,6 +68,13 @@ def test_begin_global_reads_the_allowlist(raw, expected):
     assert _begin({'tools': raw}).tools == expected
 
 
+@pytest.mark.parametrize('raw', [[' '], ' , ', ['', '  ']], ids=['blank-item', 'blank-comma-string', 'blank-items'])
+def test_an_allowlist_of_only_blank_entries_fails_closed(raw):
+    """Blank entries are dropped next to real names, but entries that are all blank must not mean every tool."""
+    with pytest.raises(ValueError, match='tools has only blank entries'):
+        _begin({'tools': raw})
+
+
 def test_absent_allowlist_means_every_tool():
     assert _begin({}).tools == frozenset()
 
