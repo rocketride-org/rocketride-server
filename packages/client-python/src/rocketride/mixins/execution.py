@@ -36,7 +36,7 @@ Key Features:
 
 Usage:
     # Start a pipeline from a configuration file
-    token = await client.use(filepath="text_processor.json")
+    token = (await client.use(filepath="text_processor.json"))["token"]
 
     # Start with custom parameters
     result = await client.use(
