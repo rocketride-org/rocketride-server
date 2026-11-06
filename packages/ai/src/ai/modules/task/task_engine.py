@@ -351,6 +351,11 @@ CONST_MCP_CLIENT_NODE_PATH = 'nodes.tool_mcp_client'
 CONST_HOSTED_CHILD_FLAG = HOSTED_FLAG
 CONST_SHARED_HOST_CHILD_FLAG = SHARED_HOST_FLAG
 
+# Windows: an exception ends a task process with an NTSTATUS error code (from
+# 0xC0000000); Ctrl+C or Ctrl+Break ends it with STATUS_CONTROL_C_EXIT, no crash.
+CONST_NTSTATUS_ERROR = 0xC0000000
+CONST_STATUS_CONTROL_C_EXIT = 0xC000013A
+
 
 def _service_capabilities(service: Any) -> List[str]:
     """Capability names of a service definition, lower-cased."""
@@ -1579,7 +1584,7 @@ class Task(DAPBase):
                 return
             if exit_code < 0:
                 self._crash = {'code': str(-exit_code), 'description': f'signal {-exit_code}', 'file': None}
-            elif exit_code >= 0xC0000000 and exit_code != 0xC000013A:
+            elif exit_code >= CONST_NTSTATUS_ERROR and exit_code != CONST_STATUS_CONTROL_C_EXIT:
                 code = f'0x{exit_code:08x}'
                 self._crash = {'code': code, 'description': f'exception {code}', 'file': None}
 
