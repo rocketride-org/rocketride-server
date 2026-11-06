@@ -34,6 +34,7 @@ import React, { CSSProperties, ReactNode, useEffect, useRef, useState } from 're
 import { createPortal } from 'react-dom';
 import { ViewMenuEntry } from '../../types/viewMenu';
 import { ViewMenuBadge } from '../tab-control/ViewMenuBadge';
+import { entryDescription } from '../tab-control/entryDescription';
 import { CLOSE_GLYPH, trapFocus, acquireOverlayLayer, isTopOverlayLayer, releaseOverlayLayer } from '../modal/Modal';
 import { ConfirmDialog } from '../modal/ConfirmDialog';
 import { BxChevronLeft } from '../BoxIcon';
@@ -915,6 +916,9 @@ export function DetailPanel({ open, onClose, avatar, title, subtitle, tabs, acti
 									key={entry.id}
 									role="tab"
 									aria-selected={isActive}
+									// Same as TabControl: the entry's description is the
+									// tab's tooltip; absent or blank renders no attribute.
+									title={entryDescription(entry)}
 									tabIndex={0}
 									style={styles.tab(isActive)}
 									onClick={() => onTabSelect?.(entry.id)}

@@ -53,6 +53,12 @@ export interface ViewMenuEntry {
 	id: string;
 	/** Human-readable label shown in both renderers. */
 	label: string;
+	/**
+	 * Optional one-sentence explanation of what the entry is for, written
+	 * for the user. Shown by TabControl and DetailPanel tabs as the tooltip;
+	 * ignored by SidebarMenu.
+	 */
+	description?: string;
 	/** Neutral count badge, e.g. Tokens 48. */
 	count?: number;
 	/** 'error' renders the count badge in --rr-color-error. */

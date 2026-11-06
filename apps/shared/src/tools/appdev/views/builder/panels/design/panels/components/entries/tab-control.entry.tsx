@@ -47,7 +47,8 @@ const TabControlDemo: React.FC<IGalleryDemoProps> = ({ knobs }) => {
 	// Menu rebuilt per render so the count knob applies immediately
 	const menu: ViewMenu = {
 		entries: [
-			{ id: 'overview', label: 'Overview' },
+			// A description becomes the tab's tooltip: hover Overview.
+			{ id: 'overview', label: 'Overview', description: 'A summary of this pipeline at a glance.' },
 			{ id: 'events', label: 'Events', count: knobs.count ? 48 : undefined },
 			{ id: 'settings', label: 'Settings' },
 		],
@@ -80,7 +81,7 @@ const buildCode = (knobs: KnobValues): string => {
 	return `import { TabControl, TabPanel } from 'shell';
 
 const menu = { entries: [
-	{ id: 'overview', label: 'Overview' },
+	{ id: 'overview', label: 'Overview', description: 'A summary of this pipeline at a glance.' },
 	{ id: 'events', label: 'Events'${countAttr} },
 	{ id: 'settings', label: 'Settings' },
 ] };
@@ -106,7 +107,7 @@ export const tabControlEntry: IGalleryEntry = {
 	demo: TabControlDemo,
 	code: buildCode,
 	props: [
-		{ name: 'menu', type: 'ViewMenu', dir: 'in', required: true, note: 'TabControl - the declared menu whose entries render as the strip tabs (id, label, count, severity).' },
+		{ name: 'menu', type: 'ViewMenu', dir: 'in', required: true, note: "TabControl - the declared menu whose entries render as the strip tabs (id, label, count, severity; a description becomes the tab's tooltip)." },
 		{ name: 'activeId', type: 'string', dir: 'in', required: true, note: 'Id of the active entry / visible panel (all other panels hide with display:none).' },
 		{ name: 'trailing', type: 'ReactNode', dir: 'in', note: 'TabControl - right-aligned slot (e.g. an id note or expand icon).' },
 		{ name: 'panels', type: 'Record<string, { content: ReactNode }>', dir: 'in', required: true, note: 'TabPanel - map of panel id to content. Hidden panels measure 0x0: canvases must lazy-mount on first activation.' },

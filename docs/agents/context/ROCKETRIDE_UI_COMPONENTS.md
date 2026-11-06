@@ -239,6 +239,12 @@ pass `viewsFromMenu(menu)` as `sidebarViews`.)
 first letter), `disabled?: boolean` (muted, unselectable — SidebarMenu
 only), `children?: ViewMenuEntry[]` (expandable SECTION, one level deep,
 accordion — at most one open; a section row does not navigate).
+Entries may also carry `description?: string`: one sentence on what the
+entry is for, shown as the tab's tooltip by TabControl and DetailPanel
+(SidebarMenu ignores it). Standalone apps type against the newest frozen
+contract, which `shell.tgz` ships as `shell.d.ts`; it carries
+`description` only from the first version frozen after the field was
+added, so if yours lacks it, leave it out.
 
 ```tsx
 import { SidebarMenu } from 'shell';

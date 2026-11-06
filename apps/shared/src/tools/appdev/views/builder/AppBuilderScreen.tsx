@@ -157,11 +157,11 @@ export const AppBuilderScreen: React.FC<IAppBuilderScreenProps> = ({
 	// Package is the complete-app bar, Store is commerce only.
 	const viewMenu: ViewMenu = useMemo(() => ({
 		entries: [
-			{ id: 'dashboard', label: 'Dashboard' },
-			{ id: 'design', label: 'Design' },
-			{ id: 'package', label: 'Package' },
-			{ id: 'store', label: 'Store' },
-			{ id: 'deploy', label: 'Deploy' },
+			{ id: 'dashboard', label: 'Dashboard', description: 'See where things stand with this app, the conversation with the reviewer, and what you might do next.' },
+			{ id: 'design', label: 'Design', description: 'Preview your app live while you build it, read its console (logs, events, and errors), and browse the components you can use.' },
+			{ id: 'package', label: 'Package', description: 'Set the app name, description, icon, and README, list the extra workspace paths it ships with, and check that it is ready to build and deploy.' },
+			{ id: 'store', label: 'Store', description: "Set this app's pricing on the public store (free, subscription, or paywall) and check the store requirements; skip it for personal or team use, and submit from Deploy." },
+			{ id: 'deploy', label: 'Deploy', description: 'Deploy new versions, publish each one to yourself or a team, send one to the public store for review, and see where each one is live.' },
 		],
 	}), []);
 
