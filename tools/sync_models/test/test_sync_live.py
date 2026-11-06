@@ -35,6 +35,7 @@ from markers import (
     requires_glm,
     requires_gmi_cloud,
     requires_nebius,
+    requires_atlascloud,
 )
 from core.patcher import get_profiles
 
@@ -457,3 +458,12 @@ def test_nebius_profiles_exist_in_api():
     profiles = _load_profiles('llm_openai_api', 'services.nebius.json')
     live_ids = _fetch_openai_model_ids(api_key, base_url='https://api.tokenfactory.nebius.com/v1/')
     _check_missing_models(profiles, live_ids, 'llm_nebius')
+
+
+@requires_atlascloud
+def test_atlascloud_profiles_exist_in_api():
+    """Every non-deprecated Atlas Cloud profile (llm_openai_api/services.atlascloud.json) must be in the live API."""
+    api_key = os.environ['ROCKETRIDE_ATLASCLOUD_KEY']
+    profiles = _load_profiles('llm_openai_api', 'services.atlascloud.json')
+    live_ids = _fetch_openai_model_ids(api_key, base_url='https://api.atlascloud.ai/v1/')
+    _check_missing_models(profiles, live_ids, 'llm_atlascloud')
