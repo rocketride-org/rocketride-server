@@ -575,6 +575,10 @@ export interface ShellApiConfig {
 	RR_APIKEY?: string;
 	/** Stripe publishable key — required for Stripe Elements checkout. */
 	RR_STRIPE_PUBLISHABLE_KEY?: string;
+	/** PostHog project token (phc_*), served by the probe; absent = telemetry off. */
+	RR_POSTHOG_KEY?: string;
+	/** The analytics ingestion address, served by the probe alongside the key. */
+	RR_POSTHOG_HOST?: string;
 	/** Zitadel instance base URL — required for PKCE OAuth login. */
 	RR_ZITADEL_URL?: string;
 	/** Zitadel application client ID — required for PKCE OAuth login. */
