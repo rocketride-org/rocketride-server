@@ -29,6 +29,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from ai.web.metrics import metrics
 from ai.common.utils.cuda_utils import model_gpu_gb
 from ..base import BaseLoader, get_model_server_address, ModelClient
+from ..device_budget import device_budget
 from .utils import preprocess_image_transparency, raise_on_error, with_error_field
 
 logger = logging.getLogger('rocketlib.models.doctr')
@@ -152,6 +153,20 @@ class DocTRLoader(BaseLoader):
                 raise ValueError(f'Unsupported input type: {type(inp)}')
 
         return {'images': images, 'batch_size': len(inputs)}
+
+    @staticmethod
+    def inference_cost_mb(preprocessed: Dict[str, Any]) -> Optional[float]:
+        """Peak device memory of ``inference``: about 0.4 GB allocated, 0.9 GB reserved at any page size.
+
+        Measured on torch 2.10, python-doctr 1.1.0; the predictor resizes each page to 1024 px.
+
+        Args:
+            preprocessed: The output of ``preprocess``; the cost does not depend on it.
+
+        Returns:
+            900 MB.
+        """
+        return 900.0
 
     @staticmethod
     def inference(
@@ -288,16 +303,26 @@ class DocTR:
         return results[0] if single_input else results
 
     def _read_local(self, images: List[bytes]) -> List[Dict]:
-        """Execute local OCR with perf timing."""
+        """Run OCR in this process and report its timings; inference waits in its device's ``device_budget``.
+
+        Args:
+            images: Encoded images.
+
+        Returns:
+            One result per image, as ``read`` returns them.
+        """
         # Preprocess phase — decode images and prepare for model
         t0 = time.perf_counter()
         preprocessed = DocTRLoader.preprocess(self._model, images, self._metadata)
         t_pre = (time.perf_counter() - t0) * 1000
 
-        # GPU inference phase — run OCR detection and recognition
+        # GPU inference phase — wait for room on the device, then run OCR detection and recognition
         t0 = time.perf_counter()
-        raw_output = DocTRLoader.inference(self._model, preprocessed, self._metadata)
-        t_gpu = (time.perf_counter() - t0) * 1000
+        with device_budget(self._model['device']).reserve(DocTRLoader.inference_cost_mb(preprocessed)):
+            t_wait = (time.perf_counter() - t0) * 1000
+            t0 = time.perf_counter()
+            raw_output = DocTRLoader.inference(self._model, preprocessed, self._metadata)
+            t_gpu = (time.perf_counter() - t0) * 1000
 
         # Postprocess phase — extract text and bounding boxes
         t0 = time.perf_counter()
@@ -311,7 +336,7 @@ class DocTR:
                 'gpu_preprocess': t_pre,
                 'gpu_compute': t_gpu,
                 'gpu_postprocess': t_post,
-                'gpu_queue_wait': 0,
+                'gpu_queue_wait': t_wait,
                 'gpu_memory': model_gpu_gb(self._model) * inference_sec,
             }
         )
