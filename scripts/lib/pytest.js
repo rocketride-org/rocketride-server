@@ -26,6 +26,7 @@ const path = require('path');
 const { glob } = require('glob');
 const { execCommand } = require('./exec');
 const { exists } = require('./fs');
+const { installCwdProbe } = require('./cwdprobe');
 
 /**
  * Run pytest with empty-directory skip.
@@ -78,7 +79,14 @@ async function runPytest({ engine, testsDir, extraArgs = [], execOpts = {} }) {
 	}
 
 	const args = ['-m', 'pytest', testsDir, ...extraArgs];
-	await execCommand(engine, args, execOpts);
+	// With ROCKETRIDE_TEST_CWD_PROBE set (Windows only), this pytest process watches its
+	// cwd handle (see cwdprobe.js).
+	const cwdProbe = installCwdProbe(path.dirname(engine), execOpts.env ?? process.env);
+	try {
+		await execCommand(engine, args, execOpts);
+	} finally {
+		cwdProbe?.release();
+	}
 	return { skipped: false };
 }
 
