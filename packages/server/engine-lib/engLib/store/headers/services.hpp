@@ -152,6 +152,13 @@ public:
         ///		Has this driver been resolved?
         //---------------------------------------------------------
         bool isResolved = false;
+
+        //---------------------------------------------------------
+        ///	@details
+        ///		The class types its combo fields list, so a call
+        ///		that brings nodes of one of them resolves it again
+        //---------------------------------------------------------
+        std::vector<Text> comboClassTypes;
     };
     using ServiceDefinitionPtr = ServiceDefinition *;
     using ServiceDefinitions = std::map<iText, ServiceDefinition>;
@@ -222,6 +229,11 @@ private:
 
         ServiceDefinition &def;
         ServiceFields privateFields;
+
+        // The definitions resolved with this one, and the field ids
+        // being resolved, outermost first
+        const ServiceDefinitions *scope = nullptr;
+        std::vector<iText> chain;
     };
 
     //-------------------------------------------------------------
@@ -260,15 +272,14 @@ private:
     static Error loadGlobalFields(json::Value &definition) noexcept;
     static Text getFieldName(TextView fieldName) noexcept;
     static ErrorOr<json::Value> lookupField(ServiceContext &context,
-                                            TextView fieldId) noexcept;
+                                            TextView fieldId);
     static ErrorOr<IServices::ServiceSchema> getField(
-        ServiceContext &context, TextView fieldName,
-        json::Value &field) noexcept;
+        ServiceContext &context, TextView fieldName, json::Value &field);
     static ErrorOr<IServices::ServiceSchema> getFields(
         ServiceContext &context, json::Value &section) noexcept;
-    static Error updateDefinitions(ServiceDefinitions &services) noexcept;
+    static Error updateDefinitions(ServiceDefinitions &services);
     static ErrorOr<std::optional<ServiceDefinition>> parseDefinition(
-        json::Value serviceInfo, const Path &definitionPath) noexcept;
+        json::Value serviceInfo, const Path &definitionPath);
     static Error registerFactories(const ServiceDefinition &def) noexcept;
     static void resolveString(json::Value &value) noexcept;
     static void resolveDescriptions(json::Value &value) noexcept;

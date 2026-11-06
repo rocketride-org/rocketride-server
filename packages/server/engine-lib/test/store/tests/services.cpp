@@ -118,6 +118,35 @@ TEST_CASE("store::Services") {
         cppNoLibrary["node"] = "cpp";
         cppNoLibrary["path"] = "";
 
+        auto colonOnly = customNode("custom_j");
+        colonOnly["protocol"] = ":";
+
+        auto loop = customNode("custom_k");
+        loop["fields"]["custom_k.loop"] = "custom_k.loop";
+        loop["shape"].append("custom_k.loop");
+
+        auto pingPong = customNode("custom_m");
+        pingPong["fields"]["custom_m.a"] = "custom_m.b";
+        pingPong["fields"]["custom_m.b"] = "custom_m.a";
+        pingPong["shape"].append("custom_m.a");
+
+        auto badLanes = customNode("custom_l");
+        badLanes["lanes"] = customList({"x"});
+
+        // Two combos that each wait for the other never resolve
+        auto waitsA = customNode("custom_n");
+        waitsA["classType"] = customList({"custom_kind_n"});
+        waitsA["fields"]["custom_n.pick"] =
+            R"({"title": "Pick", "combo": "custom_kind_o"})"_json;
+        waitsA["shape"].append(R"({"section": "Pipe", "title": "N",
+            "properties": ["custom_n.pick"]})"_json);
+        auto waitsB = customNode("custom_o");
+        waitsB["classType"] = customList({"custom_kind_o"});
+        waitsB["fields"]["custom_o.pick"] =
+            R"({"title": "Pick", "combo": "custom_kind_n"})"_json;
+        waitsB["shape"].append(R"({"section": "Pipe", "title": "O",
+            "properties": ["custom_o.pick"]})"_json);
+
         const json::Value refused[] = {
             customList({shadow}),
             customList({customNode("custom_g"), customNode("custom_g")}),
@@ -127,12 +156,71 @@ TEST_CASE("store::Services") {
             customList({cppNoLibrary}),
             customList({"custom_h"}),
             customNode("custom_i"),
+            customList({colonOnly}),
+            customList({loop}),
+            customList({pingPong}),
+            customList({badLanes}),
+            customList({waitsA, waitsB}),
         };
         for (const auto &custom : refused)
             REQUIRE_FALSE(IServices::withCustomServices(custom));
 
+        // ":" names no logical type: refused before anything reads one
+        auto colon = IServices::withCustomServices(customList({colonOnly}));
+        REQUIRE_FALSE(colon);
+        CHECK(std::string{colon.ccode().message()}.find("No logical type") !=
+              std::string::npos);
+
         // A registered type keeps its own definition
         REQUIRE(IServices::getServiceDefinition(registeredType()));
+    }
+
+    // A combo lists the nodes of its class type a call brings, in a custom
+    // node and in a registered one alike
+    SECTION("custom services: combos") {
+        auto chooser = customNode("custom_chooser");
+        chooser["fields"]["custom_chooser.pick"] =
+            R"({"title": "Pick", "combo": "custom_kind"})"_json;
+        chooser["shape"].append(R"({"section": "Pipe", "title": "Chooser",
+            "properties": ["custom_chooser.pick"]})"_json);
+
+        auto picked = customNode("custom_picked");
+        picked["classType"] = customList({"custom_kind"});
+        picked["fields"]["custom_picked.key"] =
+            R"({"type": "string", "title": "Key"})"_json;
+        picked["shape"].append(R"({"section": "Pipe", "title": "Picked",
+            "properties": ["custom_picked.key"]})"_json);
+
+        auto embedding = customNode("custom_embedding");
+        embedding["classType"] = customList({"embedding"});
+        embedding["fields"]["custom_embedding.key"] =
+            R"({"type": "string", "title": "Key"})"_json;
+        embedding["shape"].append(R"({"section": "Pipe", "title": "Embedding",
+            "properties": ["custom_embedding.key"]})"_json);
+
+        // The registered nodes whose combos name "embedding" (autopipe's
+        // all.embedding) offer the custom one only inside the call
+        const auto registeredOffer = localfcn()->bool {
+            auto schemas = IServices::getServiceSchemas();
+            REQUIRE_NO_ERROR(schemas);
+            auto services = (*schemas)["services"];
+            services.removeMember("custom_embedding");
+            return services.toStyledString().find("custom_embedding") !=
+                   std::string::npos;
+        };
+        REQUIRE_FALSE(registeredOffer());
+        {
+            auto scope = IServices::withCustomServices(
+                customList({chooser, picked, embedding}));
+            REQUIRE_NO_ERROR(scope);
+
+            auto def = IServices::getServiceDefinition("custom_chooser");
+            REQUIRE(def);
+            CHECK((*def)->serviceSchema.toStyledString().find(
+                      "custom_picked") != std::string::npos);
+            CHECK(registeredOffer());
+        }
+        CHECK_FALSE(registeredOffer());
     }
 
     // The Python surface: the catalogue and validation take the same list
