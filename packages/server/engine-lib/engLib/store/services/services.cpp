@@ -398,7 +398,7 @@ Text IServices::getFieldName(TextView fieldName) noexcept {
 ///		The field name
 //-------------------------------------------------------------------------
 ErrorOr<json::Value> IServices::lookupField(ServiceContext &context,
-                                            TextView fieldId) noexcept {
+                                            TextView fieldId) {
     // Find the private field
     auto privateField = context.privateFields.find(fieldId);
 
@@ -437,7 +437,7 @@ ErrorOr<json::Value> IServices::lookupField(ServiceContext &context,
 ///		Has either a string, or an object
 //-------------------------------------------------------------------------
 ErrorOr<IServices::ServiceSchema> IServices::getField(
-    ServiceContext &context, TextView fieldName, json::Value &field) noexcept {
+    ServiceContext &context, TextView fieldName, json::Value &field) {
     // Determines if this field is actually a reference to
     // a field in the private/global field list
     const auto isReference = localfcn(json::Value & fieldInfo)->bool {
@@ -622,12 +622,21 @@ ErrorOr<IServices::ServiceSchema> IServices::getField(
         // everything after the last .
         auto fieldName = getFieldName(fieldId);
 
+        // A field that reaches itself again would recurse without end
+        const iText id{fieldId};
+        if (std::find(context.chain.begin(), context.chain.end(), id) !=
+            context.chain.end())
+            return APERR(Ec::InvalidParam, "Field", fieldId,
+                         "refers to itself");
+
         // Get the field def from the global/private field list
         auto refField = lookupField(context, fieldId);
         if (!refField) return refField.ccode();
 
         // Parse it and process the field
+        context.chain.push_back(id);
         auto info = getField(context, fieldName, *refField);
+        context.chain.pop_back();
         if (!info) return info.ccode();
 
         // The name of this field is the end of the reference
@@ -1018,11 +1027,28 @@ ErrorOr<IServices::ServiceSchema> IServices::getField(
         // Define the default provider - the 1st one
         Text defaultProvider;
 
+        // Recorded so a call that brings nodes of this class type
+        // resolves this definition again
+        auto &listed = context.def.comboClassTypes;
+        if (std::find(listed.begin(), listed.end(), classType) == listed.end())
+            listed.push_back(classType);
+
+        // The registered services, then the ones a call resolves with this
+        // one (its own nodes, and the registered ones it resolves again)
+        const bool inCall = context.scope && context.scope != &m_services;
+        std::vector<const ServiceDefinition *> providers;
+        for (auto &service : m_services)
+            if (!inCall || !context.scope->count(service.first))
+                providers.push_back(&service.second);
+        if (inCall)
+            for (auto &service : *context.scope)
+                providers.push_back(&service.second);
+
         // Go through all the services looking for services matching
         // the class type and section given
-        for (auto &service : m_services) {
+        for (const auto *provider : providers) {
             // Get its definition
-            auto &def = service.second;
+            const auto &def = *provider;
 
             // Make sure it is an array
             if (!def.classType.isArray()) continue;
@@ -1178,7 +1204,7 @@ json::Value IServices::getChildConditionalUIElements(
 ///		This function will walk through all the declared services and
 ///		update their field settings
 //-------------------------------------------------------------------------
-Error IServices::updateDefinitions(ServiceDefinitions &services) noexcept {
+Error IServices::updateDefinitions(ServiceDefinitions &services) {
     // forward declaration
     std::function<json::Value(ServiceSchema &, ServiceDefinition &)>
         traverseSchema;
@@ -1419,6 +1445,7 @@ Error IServices::updateDefinitions(ServiceDefinitions &services) noexcept {
     const auto processService = localfcn(ServiceDefinition & def)->Error {
         // Create the context we pass around
         ServiceContext context(def);
+        context.scope = &services;
 
         // Default to resolved
         def.isResolved = true;
@@ -1663,7 +1690,7 @@ Error IServices::declareNode(const ServiceDefinition &def) noexcept {
 ///		release build
 //-------------------------------------------------------------------------
 ErrorOr<std::optional<IServices::ServiceDefinition>> IServices::parseDefinition(
-    json::Value serviceInfo, const file::Path &definitionPath) noexcept {
+    json::Value serviceInfo, const file::Path &definitionPath) {
     // Get the type
     iText protocol = serviceInfo.lookup<iText>("protocol");
     if (!protocol)
@@ -1702,6 +1729,9 @@ ErrorOr<std::optional<IServices::ServiceDefinition>> IServices::parseDefinition(
 
     // Parse off the ://
     iTextVector parsed = protocol.split(':');
+    if (parsed.empty())
+        return APERR(Ec::InvalidParam, "No logical type in protocol",
+                     protocol);
 
     // Save the bare logical type (filesys, ms-onedrive, etc)
     def.logicalType = _mv(parsed[0]);
@@ -2100,30 +2130,62 @@ ErrorOr<IServices::CustomServicesScope> IServices::withCustomServices(
     if (!custom.isArray())
         return APERR(Ec::InvalidParam, "Custom services must be an array");
 
-    ServiceDefinitions services;
-    for (const auto &serviceInfo : custom) {
-        if (!serviceInfo.isObject())
-            return APERR(Ec::InvalidParam,
-                         "A custom service must be a JSON object");
+    // jsoncpp throws on a member of the wrong type; that refuses the call
+    auto resolved = _call([&]() -> ErrorOr<ServiceDefinitions> {
+        ServiceDefinitions services;
+        for (const auto &serviceInfo : custom) {
+            if (!serviceInfo.isObject())
+                return APERR(Ec::InvalidParam,
+                             "A custom service must be a JSON object");
 
-        auto def = parseDefinition(serviceInfo, {});
-        if (!def) return def.ccode();
-        if (!*def) continue;
+            auto def = parseDefinition(serviceInfo, {});
+            if (!def) return def.ccode();
+            if (!*def) continue;
 
-        // Refused rather than shadowing: a pipeline names a node by its
-        // logical type, so a custom one must never stand in for a registered one
-        const auto logicalType = (*def)->logicalType;
-        if (m_services.find(logicalType) != m_services.end())
-            return APERR(Ec::InvalidParam, "The custom service", logicalType,
-                         "is already registered");
-        if (services.find(logicalType) != services.end())
-            return APERR(Ec::InvalidParam, "The custom service", logicalType,
-                         "is listed twice");
-        services[logicalType] = _mv(**def);
-    }
-    if (auto ccode = updateDefinitions(services)) return ccode;
+            // Refused rather than shadowing: a pipeline names a node by its
+            // logical type, so a custom one must never stand in for a
+            // registered one
+            const auto logicalType = (*def)->logicalType;
+            if (m_services.find(logicalType) != m_services.end())
+                return APERR(Ec::InvalidParam, "The custom service",
+                             logicalType, "is already registered");
+            if (services.find(logicalType) != services.end())
+                return APERR(Ec::InvalidParam, "The custom service",
+                             logicalType, "is listed twice");
+            services[logicalType] = _mv(**def);
+        }
 
-    return CustomServicesScope{_mv(services)};
+        // A registered node whose combo lists a class type the call brings
+        // is resolved again in the call, so the combo offers the new nodes
+        std::vector<Text> brought;
+        for (const auto &item : services)
+            for (const auto &type : item.second.classType)
+                if (type.isString()) brought.push_back(type.asString());
+        for (const auto &item : m_services) {
+            const auto &listed = item.second.comboClassTypes;
+            const bool lists = std::any_of(
+                listed.begin(), listed.end(), [&](const Text &type) {
+                    return std::find(brought.begin(), brought.end(), type) !=
+                           brought.end();
+                });
+            if (!lists) continue;
+            auto again = item.second;
+            again.isResolved = false;
+            services[item.first] = _mv(again);
+        }
+
+        if (auto ccode = updateDefinitions(services)) return ccode;
+
+        // A half-built schema is refused, not handed out
+        for (const auto &item : services)
+            if (!item.second.isResolved && !m_services.count(item.first))
+                return APERR(Ec::InvalidParam, "The custom service",
+                             item.second.logicalType, "could not be resolved");
+        return _mv(services);
+    });
+    if (!resolved) return resolved.ccode();
+
+    return CustomServicesScope{_mv(*resolved)};
 }
 
 //-------------------------------------------------------------------------
@@ -2146,15 +2208,16 @@ Error IServices::deinit() noexcept {
 //-------------------------------------------------------------------------
 ErrorOr<IServices::ServiceDefinitionPtr> IServices::getServiceDefinition(
     const Text &logicalType) noexcept {
-    // Find the mapper
-    auto def = m_services.find((iTextView)logicalType);
-    if (def != m_services.end()) return &def->second;
-
-    // Then the custom services of the call running on this thread
+    // The services of the call running on this thread first: its own
+    // nodes, and the registered ones it resolved again
     if (t_custom) {
         auto custom = t_custom->find((iTextView)logicalType);
         if (custom != t_custom->end()) return &custom->second;
     }
+
+    // Then the registered ones
+    auto def = m_services.find((iTextView)logicalType);
+    if (def != m_services.end()) return &def->second;
 
     return APERR(Ec::InvalidSchema, "The service", logicalType,
                  "was not found");
