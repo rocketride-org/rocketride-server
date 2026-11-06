@@ -6,10 +6,11 @@
 """Real Milvus tests for the store_milvus driver.
 
 Run with the built engine and RR_TEST_MILVUS_URI set to a Milvus server's http://
-address, for example http://127.0.0.1:19530. Without the variable every test
-skips, even with RR_REQUIRE_DB_TESTS=1, which CI sets for its Postgres suites and
-starts no Milvus; with both set, an address that is not http://, a server that
-does not answer or a missing pymilvus fails instead of skipping. Each test writes
+address with a host name or an IPv4 address, for example http://127.0.0.1:19530.
+Without the variable every test skips, even with RR_REQUIRE_DB_TESTS=1, which CI
+sets for its Postgres suites and starts no Milvus; with both set, any other
+address, a server that does not answer or a missing pymilvus fails instead of
+skipping. Each test writes
 to its own collection and drops it afterwards. The driver, pymilvus, the Doc
 models and DocumentStoreBase are real.
 """
@@ -45,9 +46,10 @@ def open_store(monkeypatch):
     if not _URI:
         pytest.skip('Set RR_TEST_MILVUS_URI to a Milvus test server')
     url = urlsplit(_URI)
-    if url.scheme != 'http' or not url.hostname:
-        # The store opens in local mode, which connects to http://<host>:<port>
-        message = 'RR_TEST_MILVUS_URI must be an http://<host>:<port> address'
+    if url.scheme != 'http' or not url.hostname or ':' in url.hostname:
+        # The store opens in local mode, which connects to http://<host>:<port>, and
+        # pymilvus does not connect to an IPv6 host
+        message = 'RR_TEST_MILVUS_URI must be an http://<host>:<port> address with a host name or an IPv4 address'
         if _REQUIRED:
             pytest.fail(message)
         pytest.skip(message)
