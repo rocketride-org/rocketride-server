@@ -133,11 +133,11 @@ class ContextOptimizer:
         'claude-sonnet-4': 1000000,
         'claude-sonnet-4-5': 1000000,
         'claude-sonnet-4-6': 1000000,
-        'claude-haiku-latest': 200000,
         'claude-opus-latest': 1000000,
         'claude-sonnet-latest': 1000000,
-        # Abbreviated family aliases (no provider publishes these ids; they
-        # mirror the corresponding `*-latest` catalogue entry).
+        # Abbreviated family aliases (no provider publishes these ids; opus and
+        # sonnet mirror their `*-latest` catalogue entry, haiku mirrors
+        # `claude-haiku-4-5`).
         'claude-haiku': 200000,
         'claude-opus': 1000000,
         'claude-sonnet': 1000000,

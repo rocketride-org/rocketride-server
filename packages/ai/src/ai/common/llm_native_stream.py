@@ -124,10 +124,7 @@ _ANTHROPIC_LEGACY_THINKING_MODELS = frozenset(
         'claude-sonnet-4-5',
         'claude-sonnet-4-6',
         # Haiku 4.5 does support extended thinking, but only the legacy shape.
-        # ``claude-haiku-latest`` resolves to it, so the alias belongs here too;
-        # move it out only when the newest Haiku accepts adaptive.
         'claude-haiku-4-5',
-        'claude-haiku-latest',
         'claude-mythos-preview',
     }
 )
