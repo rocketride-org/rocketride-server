@@ -44,6 +44,11 @@ TEST_CASE("plat::createMinidump") {
         minidumpPath = path;
     };
 
+    // The crash report names the dump this records (and restore it when done)
+    auto oldCrashDump = ap::dev::crashDump();
+    util::Guard restoreCrashDump = [&] { ap::dev::crashDump() = oldCrashDump; };
+    ap::dev::crashDump() = {};
+
     SECTION("writes a dump") {
         // Create the crash dump
         ap::plat::createMinidump(SIGABRT);
@@ -51,6 +56,7 @@ TEST_CASE("plat::createMinidump") {
         // Verify results
         REQUIRE(crashDumpCreated);
         REQUIRE(file::exists(minidumpPath));
+        REQUIRE(ap::dev::crashDump() == minidumpPath);
     }
 
     // The crash handlers ask dev::dumpsEnabled() the same way

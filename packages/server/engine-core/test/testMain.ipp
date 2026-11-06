@@ -97,6 +97,18 @@ Error TestMain() noexcept {
     if (auto mode = plat::env("RR_CRASH_CHILD")) {
         plat::minidumpRegister();
 
+        // Hand the crash report to the parent: code, description, dump path
+        if (auto report = plat::env("RR_CRASH_REPORT")) {
+            dev::crashCallback() = [reportPath = std::string{_ts(report).c_str()}](
+                                       TextView code, TextView description,
+                                       const file::Path &dump) noexcept {
+                std::ofstream out{reportPath};
+                out << _ts(code) << '\n'
+                    << _ts(description) << '\n'
+                    << _ts(dump) << '\n';
+            };
+        }
+
         auto crash = [] {
             // A null-pointer deref is intercepted by AddressSanitizer (it
             // reports and _exit()s), so the child would exit rather than die by

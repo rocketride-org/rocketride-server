@@ -34,6 +34,7 @@ The transport recognizes and parses various message types:
 - SVC: Service status ('>SVC*1_or_0')
 - JOB: Job status ('>JOB*status_message')
 - DBG: Debug commands ('>DBG*operation*id*total_pipes*pipe_id')
+- CRASH: Process crashing ('>CRASH*code*description*dump_file')
 - EXIT: Process exit ('>EXIT*exit_code_hex*exit_message')
 
 Usage Patterns:
@@ -567,6 +568,7 @@ class TransportStdio(TransportBase):
         - '>DL*json_data' - pip install info
         - '>USR**json' - User data for prompting
         - '>SSE*json' - Real-time node-to-UI message (pipe_id + message + optional data)
+        - '>CRASH*code*description*dump_file' - Process crashing (empty dump_file: no dump)
         - '>EXIT*exit_code_hex*exit_message' - Process exit
         """
         if message is None:
@@ -952,6 +954,25 @@ class TransportStdio(TransportBase):
                 )
                 # TRIGGER ON_DISCONNECTED CALLBACK (malformed exit)
                 await self._transport_disconnected('Process exited with malformed exit message', has_error=True)
+
+        # Parse crash reports: '>CRASH*code*description*dump_file' (the dump file, last, may hold '*')
+        elif message.startswith('>CRASH*'):
+            code, description, dump = (message.split('*', 3)[1:] + ['', ''])[:3]
+            await self._transport_receive(
+                {
+                    'type': 'event',
+                    'event': 'apaevt_crash',
+                    'body': {'code': code, 'description': description, 'file': dump or None},
+                }
+            )
+            where = f'dump {dump}' if dump else 'no dump'
+            await self._transport_receive(
+                {
+                    'type': 'event',
+                    'event': 'output',
+                    'body': {'category': 'console', 'output': f'Crash: {description} (code {code}), {where}\n'},
+                }
+            )
 
         # Parse SSE messages: '>SSE*{"pipe_id": N, "message": "...", "data": {...}}'
         elif message.startswith('>SSE*'):

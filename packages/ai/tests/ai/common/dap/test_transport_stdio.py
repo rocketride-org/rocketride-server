@@ -423,6 +423,42 @@ async def test_exit_message_too_short_dispatches_incomplete_event_and_disconnect
 
 
 # ---------------------------------------------------------------------------
+# >CRASH — crash reports
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'line, body, output',
+    [
+        (
+            '>CRASH*11*SIGSEGV: Invalid access to storage*engine.dmp',
+            {'code': '11', 'description': 'SIGSEGV: Invalid access to storage', 'file': 'engine.dmp'},
+            'Crash: SIGSEGV: Invalid access to storage (code 11), dump engine.dmp\n',
+        ),
+        (
+            '>CRASH*0xc0000005*SEH exception 0xc0000005*',
+            {'code': '0xc0000005', 'description': 'SEH exception 0xc0000005', 'file': None},
+            'Crash: SEH exception 0xc0000005 (code 0xc0000005), no dump\n',
+        ),
+        (
+            '>CRASH*11*SIGSEGV: Invalid access to storage*engine.a*b.dmp',
+            {'code': '11', 'description': 'SIGSEGV: Invalid access to storage', 'file': 'engine.a*b.dmp'},
+            'Crash: SIGSEGV: Invalid access to storage (code 11), dump engine.a*b.dmp\n',
+        ),
+        ('>CRASH*6', {'code': '6', 'description': '', 'file': None}, 'Crash:  (code 6), no dump\n'),
+    ],
+    ids=['dump', 'no dump', 'star in the dump name', 'short line'],
+)
+async def test_crash_message_dispatches_crash_event_and_console_line(line, body, output):
+    events, disconnects = await _drive(line)
+    assert [e['event'] for e in events] == ['apaevt_crash', 'output']
+    assert events[0]['body'] == body
+    assert events[1]['body']['output'] == output
+    assert disconnects == []
+
+
+# ---------------------------------------------------------------------------
 # >SSE — server-sent event JSON
 # ---------------------------------------------------------------------------
 

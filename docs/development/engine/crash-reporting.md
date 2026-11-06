@@ -29,8 +29,8 @@ process start time it records. The start time keeps a recycled process ID from
 being mistaken for the process that crashed.
 
 In both cases below, the crashing process then moves the dump into the configured
-crash-dump location and notifies the monitor before it exits, so the caller
-learns of the crash at crash time, as on Windows.
+crash-dump location and records it for the crash report before it exits, so the
+caller learns of the crash at crash time, as on Windows.
 
 - **Linux:** Crashpad catches the fatal signal and writes the dump before the
   process continues.
@@ -67,6 +67,24 @@ own `ROCKETRIDE_CRASHDB_DIR` to keep them apart.
 | --- | --- |
 | `ROCKETRIDE_CRASHPAD_HANDLER` | Override the handler path (relocated installs, containers). |
 | `ROCKETRIDE_CRASHDB_DIR` | Override the crash database directory. The same ownership and mode checks apply, so let the engine create it -- a directory you pre-create with the usual `0755` umask is rejected. `chmod 700` it if it must exist first. |
+
+## What the server learns
+
+A crashing engine tells its monitor, in this order, before it exits:
+
+- `>CRASH*<code>*<description>*<file>` -- the crash, with or without a dump: the
+  signal number (Linux, macOS), the exception code (Windows, e.g. `0xc0000005`)
+  or `jvm` (the JVM's abort and exit hooks), what happened, and this crash's dump
+  file, empty without one. The file is the last field.
+- `>EXIT*...` -- as for any fatal error.
+
+`eaas.py` marks the task crashed: its status and exit message read
+`Crashed (<description>)`. A task process
+that sent neither `>CRASH` nor `>EXIT`, with no stop requested, reads
+`Crashed (signal N)` when a signal killed it, and on Windows
+`Crashed (exception 0x...)` when it exited with an exception code (from
+`0xC0000000`, except Ctrl+C's `0xC000013A`), as a fast fail does: it skips the
+engine's handlers.
 
 ## Getting a dump by hand
 

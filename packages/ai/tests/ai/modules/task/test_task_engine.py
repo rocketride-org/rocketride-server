@@ -2271,6 +2271,8 @@ def _exit_task(exit_event_seen=False):
     t = _task(status=TASK_STATUS())  # a first run: exitCode starts at 0
     t._exit_event_seen = exit_event_seen
     t._stop_requested = False
+    t._crash = None
+    t._process_killed = False
     return t
 
 
@@ -2364,6 +2366,92 @@ async def test_a_process_that_does_not_exit_is_killed_and_reaped(monkeypatch):
     t._engine_process = _LingeringProcess()
     assert await Task._process_exit_code(t) == -9
     assert t._engine_process.killed
+
+    # The server's own kill is not a crash
+    Task._apply_process_exit_code(t, -9)
+    assert t._crash is None
+
+
+# ---------------------------------------------------------------------------
+# Crash reports: >CRASH and a death with no report
+# ---------------------------------------------------------------------------
+
+_SEGV = {'code': '11', 'description': 'SIGSEGV: Invalid access to storage', 'file': 'own.dmp'}
+
+
+def _ending_task(process_exit_code):
+    """A task whose output has closed, for running the real _terminated()."""
+    t = _exit_task()
+    t._terminated_called = False
+    t._is_restarting = False
+    t._debug_stdio = t._data_client = t._task_metrics = t._tmpfile = t._data_port = None
+    t._status_update_task = None
+    t._final_events_sent = True
+    t._stop_reason = None
+    t._run_trigger = None
+    t._send_status_update = AsyncMock()
+    t._forward_task_event = AsyncMock()
+    t._process_exit_code = AsyncMock(return_value=process_exit_code)
+    return t
+
+
+async def _event(t, name, body):
+    await Task.on_event(t, {'type': 'event', 'event': name, 'body': body})
+
+
+_CRASH = ('apaevt_crash', _SEGV)
+_SIGNAL_EXIT = ('apaevt_exit', {'exitCode': 1, 'message': 'Received terminal system signal'})
+_SEGV_TEXT = 'Crashed (SIGSEGV: Invalid access to storage)'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'case, events, process_code, stop_requested, status, exit_code',
+    [
+        ('reported crash', [_CRASH, _SIGNAL_EXIT], -6, False, _SEGV_TEXT, 1),
+        ('crash without >EXIT', [_CRASH], -6, False, _SEGV_TEXT, -6),
+        ('crash during a requested stop', [_CRASH], -6, True, 'Stopped', 0),
+        ('failure without a crash', [('apaevt_exit', {'exitCode': 1, 'message': 'boom'})], 1, False, 'Stopped', 1),
+        ('signal, no report', [], -11, False, 'Crashed (signal 11)', -11),
+        ('Windows exception, no report', [], 0xC0000409, False, 'Crashed (exception 0xc0000409)', 0xC0000409),
+        ('Windows fast fail, no report', [], 0xC0000602, False, 'Crashed (exception 0xc0000602)', 0xC0000602),
+    ],
+)
+async def test_how_a_task_ends(case, events, process_code, stop_requested, status, exit_code):
+    from rocketride import TASK_STATE
+
+    t = _ending_task(process_code)
+    t._stop_requested = stop_requested
+    for name, body in events:
+        await _event(t, name, dict(body))
+    await Task._terminated(t)
+    assert (t._status.status, t._status.exitCode) == (status, exit_code)
+    if status.startswith('Crashed'):
+        assert t._status.exitMessage == status
+        assert t._status.state == TASK_STATE.CANCELLED.value
+
+
+@pytest.mark.parametrize(
+    'case, exit_code',
+    [
+        ('stop requested', -15),
+        ('stop requested', 0xC0000409),
+        ('exit event seen', -6),
+        ('exit event seen', 0xC0000409),
+        ('killed by the server', -9),
+        ('killed by the server', 0xC0000409),
+        ('Ctrl+C on Windows', 0xC000013A),
+        ('killed on Windows', 1),
+        ('refused to start', 40),
+        ('code unknown', None),
+    ],
+)
+def test_no_crash_without_its_conditions(case, exit_code):
+    t = _exit_task(exit_event_seen=case == 'exit event seen')
+    t._stop_requested = case == 'stop requested'
+    t._process_killed = case == 'killed by the server'
+    Task._apply_process_exit_code(t, exit_code)
+    assert t._crash is None
 
 
 # ---------------------------------------------------------------------------

@@ -639,6 +639,10 @@ class Task(DAPBase):
         # _terminated() falls back to the process exit code.
         self._exit_event_seen = False
 
+        # This run's crash (code, description, dump) and whether the server killed the process
+        self._crash: Optional[Dict[str, Any]] = None
+        self._process_killed = False
+
         # Server reference
         self._server = server
 
@@ -1546,6 +1550,7 @@ class Task(DAPBase):
             except asyncio.TimeoutError:
                 # Output closed but the process is still alive: end it rather
                 # than leave it running behind a task recorded as finished.
+                self._process_killed = True
                 try:
                     engine.kill()
                     await asyncio.wait_for(engine.wait(), timeout=CONST_CANCEL_WAIT_TIMEOUT_SECONDS)
@@ -1561,10 +1566,22 @@ class Task(DAPBase):
         (a task refusing to start) as completed. An exit code that is still
         unknown is not a success either, so it records 1. A requested stop
         keeps its existing exit code: the kill signal is not a task failure.
+
+        A process that reported no crash but was killed by a signal (a negative
+        code) or, on Windows, ended by an exception (from 0xC0000000, except
+        Ctrl+C's 0xC000013A) crashed before its handlers could say so, unless
+        the server killed it.
         """
         if not self._exit_event_seen and not self._stop_requested:
             self._status.exitCode = exit_code if exit_code is not None else 1
             self._status.exitMessage = 'Stopped'
+            if exit_code is None or self._crash or self._process_killed:
+                return
+            if exit_code < 0:
+                self._crash = {'code': str(-exit_code), 'description': f'signal {-exit_code}', 'file': None}
+            elif exit_code >= 0xC0000000 and exit_code != 0xC000013A:
+                code = f'0x{exit_code:08x}'
+                self._crash = {'code': code, 'description': f'exception {code}', 'file': None}
 
     async def _terminated(self) -> None:
         """
@@ -1726,6 +1743,12 @@ class Task(DAPBase):
                 self._status.status = 'Stopped'
                 self._status.state = TASK_STATE.CANCELLED.value
                 self.debug_task_message('stopped', reason=self._stop_reason or 'user')
+        elif self._crash:
+            # Says more than the engine's own exit message for the same crash
+            self._status.status = f'Crashed ({self._crash["description"]})'
+            self._status.exitMessage = self._status.status
+            self._status.state = TASK_STATE.CANCELLED.value
+            self.debug_task_message('crashed', reason=self._crash['description'])
         elif self._status.exitCode == 0:
             self._status.status = 'Completed'
             self._status.state = TASK_STATE.COMPLETED.value
@@ -2271,6 +2294,9 @@ class Task(DAPBase):
             # Send out a status update when needed
             self._status_updated = True
 
+        elif event_type == 'apaevt_crash':
+            self._crash = body
+
         # Handle pipeline trace events to build summary and flow events
         elif event_type == 'apaevt_trace':
             operation = body.get('op', '')
@@ -2780,6 +2806,8 @@ class Task(DAPBase):
             self._final_events_sent = False
             self._terminated_called = False
             self._exit_event_seen = False
+            self._crash = None
+            self._process_killed = False
             self._service_up_notes = []
             self._service_down_notes = []
             self._stop_requested = False
