@@ -104,6 +104,15 @@ const S = {
 		width: '100%',
 		maxWidth: 1080,
 	} as CSSProperties,
+
+	/** Tile grid — compact launcher tiles, up to 4 per row. */
+	tileGrid: {
+		display: 'grid',
+		gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+		gap: 14,
+		width: '100%',
+		maxWidth: 1080,
+	} as CSSProperties,
 };
 
 // =============================================================================
@@ -128,6 +137,8 @@ export const DesktopView: React.FC<DesktopViewProps> = ({
 	greetingAttrs,
 	popoverBoundarySelector,
 	emptyMessage = 'No apps installed. Build and deploy an app to see it here.',
+	variant = 'card',
+	trailingItems,
 	style,
 }) => {
 	// The adapter is built once — all server affordances flow through it.
@@ -196,9 +207,9 @@ export const DesktopView: React.FC<DesktopViewProps> = ({
 			{/* Empty state without the header row (picker/compact surfaces). */}
 			{!showHeader && apps.length === 0 && <p style={S.greetingSub}>{emptyMessage}</p>}
 
-			{/* App grid */}
-			{apps.length > 0 && (
-				<div key={reveal.revealKey} style={S.grid}>
+			{/* App grid — trailing items (e.g. "Add apps") share its cells */}
+			{(apps.length > 0 || trailingItems) && (
+				<div key={reveal.revealKey} style={variant === 'tile' ? S.tileGrid : S.grid}>
 					{apps.map((app, i) => (
 						<DesktopAppCard
 							key={app.id}
@@ -210,8 +221,10 @@ export const DesktopView: React.FC<DesktopViewProps> = ({
 							resolveIcon={resolveIcon}
 							popoverBoundarySelector={popoverBoundarySelector}
 							animStyle={reveal.getItemStyle(i)}
+							variant={variant}
 						/>
 					))}
+					{trailingItems}
 				</div>
 			)}
 		</div>

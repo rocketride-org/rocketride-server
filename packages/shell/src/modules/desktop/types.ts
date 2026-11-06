@@ -14,7 +14,7 @@
 // overrides, desktop remove, unsubscribe, subscription status — through an
 // internal default adapter; hosts only supply the app list and chrome.
 
-import type { CSSProperties } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 
 // =============================================================================
 // APP SHAPE
@@ -127,6 +127,13 @@ export interface DesktopAdapter {
 // VIEW PROPS
 // =============================================================================
 
+/**
+ * How each app renders in the grid: 'card' (the default — icon, name,
+ * category, description, version chip) or 'tile' (compact launcher tile —
+ * icon, name, category; the version chip appears on hover).
+ */
+export type DesktopAppVariant = 'card' | 'tile';
+
 /** Props for the shared DesktopView component. */
 export interface DesktopViewProps {
 	/** Apps to show, in render order (hosts filter/sort before passing). */
@@ -163,6 +170,13 @@ export interface DesktopViewProps {
 	popoverBoundarySelector?: string;
 	/** Message for the zero-apps state. */
 	emptyMessage?: string;
+	/** Grid item style (default 'card'). */
+	variant?: DesktopAppVariant;
+	/**
+	 * Extra grid cells rendered after the apps (e.g. an "Add apps" tile).
+	 * They share the grid, so they size like the app items.
+	 */
+	trailingItems?: ReactNode;
 	/**
 	 * Extra attributes spread onto the greeting heading — the one element
 	 * that carries the user's real first name. Hosts whose telemetry uses

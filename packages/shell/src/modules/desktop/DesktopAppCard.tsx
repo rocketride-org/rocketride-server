@@ -20,7 +20,7 @@
 
 import React, { useState, useRef, useEffect, type CSSProperties } from 'react';
 import { X } from 'lucide-react';
-import type { DesktopApp, DesktopAdapter, DesktopVersionRow, DesktopVersionOverride } from './types';
+import type { DesktopApp, DesktopAdapter, DesktopAppVariant, DesktopVersionRow, DesktopVersionOverride } from './types';
 
 // =============================================================================
 // CONSTANTS
@@ -110,6 +110,8 @@ export interface DesktopAppCardProps {
 	popoverBoundarySelector?: string;
 	/** Staggered entrance style from useStaggerReveal — spread onto the root. */
 	animStyle?: CSSProperties;
+	/** 'card' (default) or the compact launcher 'tile' (no description; version chip on hover). */
+	variant?: DesktopAppVariant;
 }
 
 // =============================================================================
@@ -122,12 +124,16 @@ export interface DesktopAppCardProps {
  * opens the remove/unsubscribe confirmation.
  */
 export const DesktopAppCard: React.FC<DesktopAppCardProps> = ({
-	app, onLaunch, adapter, status, allowRemove, resolveIcon, popoverBoundarySelector, animStyle,
+	app, onLaunch, adapter, status, allowRemove, resolveIcon, popoverBoundarySelector, animStyle, variant = 'card',
 }) => {
 	const icon = resolveIcon ? resolveIcon(app) : app.icon;
+	const isTile = variant === 'tile';
 	const [hover, setHover] = useState(false);
 	const [confirmOpen, setConfirmOpen] = useState(false);
 	const [iconLoaded, setIconLoaded] = useState(false);
+	// A failed icon fetch (404, unentitled version, bad path) falls back to
+	// the monogram instead of the browser's broken-image glyph.
+	const [iconFailed, setIconFailed] = useState(false);
 	// Version drop list — rows load lazily on first open
 	const [versionsOpen, setVersionsOpen] = useState(false);
 	const [versionRows, setVersionRows] = useState<DesktopVersionRow[] | null>(null);
@@ -324,8 +330,10 @@ export const DesktopAppCard: React.FC<DesktopAppCardProps> = ({
 			onMouseLeave={() => setHover(false)}
 			style={{
 				position: 'relative',
-				display: 'flex', flexDirection: 'column', gap: 14,
-				padding: 20, borderRadius: 12, boxSizing: 'border-box',
+				display: 'flex', flexDirection: 'column', gap: isTile ? 0 : 14,
+				justifyContent: isTile ? 'center' : undefined,
+				minHeight: isTile ? 76 : undefined,
+				padding: isTile ? 16 : 20, borderRadius: 12, boxSizing: 'border-box',
 				backgroundColor: surface,
 				fontFamily: 'var(--rr-font-family)',
 				transform: hover && !blocked && !REDUCE_MOTION ? 'translateY(-2px)' : 'none',
@@ -358,14 +366,14 @@ export const DesktopAppCard: React.FC<DesktopAppCardProps> = ({
 
 			{/* Top row — icon chip + name/category. Borderless icon chip — the
 			    surface tint alone frames the icon. */}
-			<div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+			<div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: isTile ? 12 : 14 }}>
 				<div style={{
-					width: 52, height: 52, flexShrink: 0, borderRadius: 12, overflow: 'hidden',
+					width: isTile ? 40 : 52, height: isTile ? 40 : 52, flexShrink: 0, borderRadius: isTile ? 10 : 12, overflow: 'hidden',
 					backgroundColor: 'var(--rr-bg-surface-alt)',
 					display: 'flex', alignItems: 'center', justifyContent: 'center',
-					color: 'var(--rr-brand)', fontSize: 22, fontWeight: 800,
+					color: 'var(--rr-brand)', fontSize: isTile ? 17 : 22, fontWeight: 800,
 				}}>
-					{icon
+					{icon && !iconFailed
 						? <img
 							ref={iconRef}
 							src={icon}
@@ -373,7 +381,7 @@ export const DesktopAppCard: React.FC<DesktopAppCardProps> = ({
 							loading="lazy"
 							decoding="async"
 							onLoad={() => setIconLoaded(true)}
-							onError={() => setIconLoaded(true)}
+							onError={() => setIconFailed(true)}
 							style={{
 								width: '100%', height: '100%', objectFit: 'cover',
 								opacity: iconLoaded ? 1 : 0,
@@ -386,14 +394,14 @@ export const DesktopAppCard: React.FC<DesktopAppCardProps> = ({
 				{/* Name + category sublabel */}
 				<div style={{ flex: 1, minWidth: 0 }}>
 					<div style={{
-						fontSize: 16, fontWeight: 700, color: 'var(--rr-text-primary)',
+						fontSize: isTile ? 14.5 : 16, fontWeight: 700, color: 'var(--rr-text-primary)',
 						whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
 					}}>
 						{app.name}
 					</div>
 					{category && (
 						<div style={{
-							fontSize: 13, color: 'var(--rr-text-secondary)', marginTop: 2,
+							fontSize: isTile ? 12 : 13, color: 'var(--rr-text-secondary)', marginTop: 2,
 							whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
 						}}>
 							{category}
@@ -414,15 +422,21 @@ export const DesktopAppCard: React.FC<DesktopAppCardProps> = ({
 				)}
 			</div>
 
-			{/* Description — full width below */}
-			<div style={{ fontSize: 14, lineHeight: 1.45, color: 'var(--rr-text-secondary)', ...clamp2 }}>
-				{app.description || 'No description'}
-			</div>
+			{/* Description — full width below (cards only; tiles stay compact) */}
+			{!isTile && (
+				<div style={{ fontSize: 14, lineHeight: 1.45, color: 'var(--rr-text-secondary)', ...clamp2 }}>
+					{app.description || 'No description'}
+				</div>
+			)}
 
 			{/* Version chip — bottom-left, faint; opens the drop list. Raised
 			    above the launch overlay so the chip takes its own clicks. */}
-			{versionLabel && (
-				<div style={{ display: 'flex', alignItems: 'center', marginTop: 'auto', position: 'relative', zIndex: 1 }}>
+			{/* Tiles keep the chip (it is the version-override control) but show
+			    it bottom-right only on hover, or while its list is open. */}
+			{versionLabel && (!isTile || hover || versionsOpen) && (
+				<div style={isTile
+					? { position: 'absolute', right: 12, bottom: 8, zIndex: 1, display: 'flex', alignItems: 'center' }
+					: { display: 'flex', alignItems: 'center', marginTop: 'auto', position: 'relative', zIndex: 1 }}>
 					{!versionOverridesSupported ? (
 						// No override API: the version is a plain label, and the
 						// drop list it would open cannot do anything.

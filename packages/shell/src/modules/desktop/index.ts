@@ -7,4 +7,4 @@
 // internal (DesktopView builds it when no override is passed).
 
 export { DesktopView } from './DesktopView';
-export type { DesktopApp, DesktopViewProps, DesktopAdapter, DesktopQuote, DesktopVersionRow, DesktopVersionOverride } from './types';
+export type { DesktopApp, DesktopAppVariant, DesktopViewProps, DesktopAdapter, DesktopQuote, DesktopVersionRow, DesktopVersionOverride } from './types';
