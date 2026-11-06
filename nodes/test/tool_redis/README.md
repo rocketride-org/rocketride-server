@@ -43,3 +43,36 @@ trusted TLS and rejected untrusted certificate/hostname mismatch.
 A live hosted/public Redis endpoint and an agent-driven LLM canvas walkthrough
 are separate deployment checks. Direct engine dispatch does not prove model
 selection or hosted egress behavior.
+
+## Real-model acceptance
+
+The optional `test_agent.py` suite exercises every Redis tool through the real
+LlamaIndex agent and a local Ollama model. It checks the actual tool trace and
+Redis state, including exact key names, one call per single-operation request,
+and two explicitly requested increments that must produce 3 then 6. A successful
+answer string alone is not a pass. Three fresh pipeline runs execute ten requests
+each. These tests skip unless a model is explicitly selected; CI does not install
+or run Ollama.
+
+With Ollama running, prepare the model and run from the repository root:
+
+```sh
+ollama pull qwen2.5:7b
+ollama create rocketride-redis-qwen2.5-7b -f nodes/test/tool_redis/Modelfile
+export ROCKETRIDE_REDIS_AGENT_MODEL=rocketride-redis-qwen2.5-7b
+# REDIS_TEST_URL and the engine must already be configured as above.
+cd nodes
+../dist/server/engine -m pytest test/tool_redis/test_agent.py -q -s --rootdir .
+```
+
+`ROCKETRIDE_REDIS_AGENT_URL` optionally selects the local Ollama `/v1` endpoint.
+The Modelfile configures the server's 16,384-token context. Setting only the
+RocketRide model token field does not configure Ollama's context allocation.
+See [Ollama's compatibility documentation](https://github.com/ollama/ollama/blob/main/docs/api/openai-compatibility.mdx).
+The 7B model needs more local memory than the initial 3B smoke-test model.
+
+The acceptance suite loads the checked-in `agent-example.pipe`, switches its
+chat source to a Tools source for SDK invocation, and enables writes only for
+unique disposable test prefixes. It removes its keys and terminates its pipeline.
+The interactive example remains read-only by default. Model guidance does not
+provide an exactly-once write guarantee for arbitrary requests.

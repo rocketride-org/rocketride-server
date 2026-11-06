@@ -26,6 +26,8 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
+from dataclasses import dataclass, field
 from typing import Any, List
 
 from ai.common.agent import AgentBase, AgentContext
@@ -40,10 +42,19 @@ _MAX_ITERATIONS = 10
 
 def _build_tools(descriptors: List[Any]) -> List[Any]:
     """Wrap host tool descriptors as LlamaIndex FunctionTools (metadata only; we execute via call_tool)."""
-    from llama_index.core.tools import FunctionTool
+    from llama_index.core.tools import FunctionTool, ToolMetadata
 
-    # No params: FunctionTool infers a pydantic schema from the signature, and
-    # we execute the real tool via call_tool, so an empty schema is fine.
+    @dataclass
+    class HostToolMetadata(ToolMetadata):
+        """Keep the host JSON Schema authoritative in ReAct's Tool Args field."""
+
+        host_schema: dict = field(default_factory=dict)
+
+        def get_parameters_dict(self) -> dict:
+            return deepcopy(self.host_schema)
+
+    # The callable is never executed: call_tool dispatches through the host.
+    # Do not infer its empty signature as the real tool's argument schema.
     def _noop() -> str:
         return ''
 
@@ -53,10 +64,9 @@ def _build_tools(descriptors: List[Any]) -> List[Any]:
         if not name:
             continue
         description = (td or {}).get('description') or name
-        schema = (td or {}).get('inputSchema')
-        if schema:
-            description = f'{description}\nInput JSON schema: {json.dumps(schema, default=str)}'
-        tools.append(FunctionTool.from_defaults(fn=_noop, name=name, description=description))
+        schema = (td or {}).get('inputSchema') or {'type': 'object', 'properties': {}}
+        metadata = HostToolMetadata(name=name, description=description, host_schema=deepcopy(schema))
+        tools.append(FunctionTool.from_defaults(fn=_noop, tool_metadata=metadata))
     return tools
 
 

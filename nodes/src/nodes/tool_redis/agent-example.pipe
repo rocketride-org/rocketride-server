@@ -1,0 +1,141 @@
+{
+  "components": [
+    {
+      "id": "chat_1",
+      "provider": "chat",
+      "config": {
+        "hideForm": true,
+        "mode": "Source",
+        "parameters": {},
+        "type": "chat"
+      },
+      "ui": {
+        "position": {
+          "x": 20,
+          "y": 200
+        },
+        "measured": {
+          "width": 150,
+          "height": 66
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "agent_llamaindex_1",
+      "provider": "agent_llamaindex",
+      "config": {
+        "agent_description": "Explicit Redis key/value operations, using the exact key and arguments requested.",
+        "instructions": [
+          "Use exact logical Redis key names from the user request. Never rename a key or invent a suffix.",
+          "For writes, supply the requested arguments explicitly, including amount for redis_incr.",
+          "Execute each requested write once. A successful tool result is authoritative; do not repeat a successful write to verify or correct it. If a write was wrong or uncertain, report what happened and stop.",
+          "Read-only lookups may be repeated only when the user requests polling or a refresh. Complete a single-operation request with one tool invocation.",
+          "After completing the requested operations, respond with Answer: followed by the observed result. Missing keys and stored=false are normal results; report them without retrying."
+        ],
+        "require_tool_call": true
+      },
+      "input": [
+        {
+          "lane": "questions",
+          "from": "chat_1"
+        }
+      ],
+      "ui": {
+        "position": {
+          "x": 240,
+          "y": 200
+        },
+        "measured": {
+          "width": 150,
+          "height": 86
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "llm_ollama_1",
+      "provider": "llm_ollama",
+      "config": {
+        "profile": "custom",
+        "model": "rocketride-redis-qwen2.5-7b",
+        "serverbase": "http://127.0.0.1:11434/v1",
+        "modelTotalTokens": 16384,
+        "modelOutputTokens": 1024,
+        "temperature": 0
+      },
+      "control": [
+        {
+          "classType": "llm",
+          "from": "agent_llamaindex_1"
+        }
+      ],
+      "ui": {
+        "position": {
+          "x": 130,
+          "y": 360
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "redis_1",
+      "provider": "tool_redis",
+      "config": {
+        "host": "localhost",
+        "port": 6379,
+        "key_prefix": "rr:agent-demo:",
+        "allow_writes": false
+      },
+      "control": [
+        {
+          "classType": "tool",
+          "from": "agent_llamaindex_1"
+        }
+      ],
+      "ui": {
+        "position": {
+          "x": 350,
+          "y": 360
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "response_answers_1",
+      "provider": "response_answers",
+      "config": {
+        "laneName": "answers"
+      },
+      "input": [
+        {
+          "lane": "answers",
+          "from": "agent_llamaindex_1"
+        }
+      ],
+      "ui": {
+        "position": {
+          "x": 460,
+          "y": 200
+        },
+        "measured": {
+          "width": 150,
+          "height": 66
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    }
+  ],
+  "project_id": "d87ba273-fdcb-4492-a526-6e38368c6c8d",
+  "viewport": {
+    "x": 0,
+    "y": 0,
+    "zoom": 1
+  },
+  "version": 1
+}

@@ -6,6 +6,9 @@ on:
       - 'nodes/src/nodes/tool_redis/**'
       - 'nodes/test/tool_redis/**'
       - 'nodes/test/mocks/redis_fake/**'
+      - 'nodes/src/nodes/agent_llamaindex/**'
+      - 'nodes/test/agent_llamaindex/**'
+      - 'nodes/test/requirements.txt'
       - '.github/workflows/redis-node.yml'
   workflow_dispatch:
 permissions:
@@ -64,7 +67,7 @@ jobs:
         working-directory: nodes
         run: |
           set -o pipefail
-          ../dist/server/engine -m pytest test/tool_redis test/memory_persistent test/test_contracts.py -q --rootdir . --junitxml=../redis-test-evidence/results.xml 2>&1 | tee ../redis-test-evidence/tests.log
+          ../dist/server/engine -m pytest test/tool_redis test/agent_llamaindex test/memory_persistent test/test_contracts.py -q --rootdir . --junitxml=../redis-test-evidence/results.xml 2>&1 | tee ../redis-test-evidence/tests.log
       - name: Standard services.json cases
         working-directory: nodes
         run: ../dist/server/engine -m pytest test/test_dynamic.py -k tool_redis -q --rootdir .

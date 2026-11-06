@@ -84,6 +84,16 @@ write demonstration and review the agent behavior before enabling its writes.
 
 The supplied `example.pipe` is a read-only Tools-source example with `mode: Source` for the Development panel. Enable writes explicitly for local exercises, or attach the node to an agent and provide an LLM. SDK engine tests call all seven tools without a model; agent-driven testing requires your own model credentials.
 
+For a local agent walkthrough, [agent-example.pipe](agent-example.pipe) connects
+Chat, LlamaIndex, Ollama and Redis using catalog nodes. It uses the prepared
+`rocketride-redis-qwen2.5-7b` model, explicit one-operation instructions, and
+read-only Redis access by default. Follow the real-model acceptance setup in
+`nodes/test/tool_redis/README.md` to create that model. For disposable write tests,
+choose a unique prefix, configure the test port and enable writes explicitly.
+The agent bridge must carry the real input schemas in its Tool Args metadata.
+The earlier 3B walkthrough is not evidence that an arbitrary model is suitable
+for writes, and successful local examples do not guarantee every future plan.
+
 Unit tests extend `nodes/test/mocks/redis_fake`; there is no mock package named redis. Live tests skip unless `REDIS_TEST_URL` is set. Use disposable Valkey 8.1.11 and unique namespaced test keys. Tests remove only their own keys. Authentication/TLS tests additionally require REDIS_AUTH_TEST_URL, REDIS_TLS_TEST_URL and REDIS_TLS_CA_FILE. See `nodes/test/tool_redis/README.md` for commands and the proposed CI job.
 
 `services.json` declares configuration cases plus tool-call metadata consumed by `test_live.py`. The generic lane framework alone only smoke-tests pure-tool configuration; the dedicated engine test provides real tool-dispatch assertions. The proposed Valkey CI job needs reviewer approval. Local passing tests are not CI execution evidence.

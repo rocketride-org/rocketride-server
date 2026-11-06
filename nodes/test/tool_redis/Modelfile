@@ -1,0 +1,3 @@
+FROM qwen2.5:7b
+PARAMETER num_ctx 16384
+PARAMETER temperature 0
