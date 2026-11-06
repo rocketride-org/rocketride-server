@@ -8,4 +8,4 @@
  * the RocketRide SDK so all consumers share a single type definition.
  */
 
-export type { ConnectResult, ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, TeamMemberRecord, AccountSection, ProfileUpdate } from 'rocketride';
+export type { ConnectResult, ApiKeyRecord, OrgDetail, OrgInfo, MemberRecord, TeamRecord, TeamDetail, TeamMemberRecord, AccountSection, ProfileUpdate } from 'rocketride';

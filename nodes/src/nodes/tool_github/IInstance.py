@@ -33,9 +33,13 @@ requests, reviews, releases, workflows, orgs, users, and code search.
 from __future__ import annotations
 
 import base64
+import functools
+import itertools
 import re
+from collections.abc import Iterable
+from typing import TYPE_CHECKING, Callable
 
-from rocketlib import IInstanceBase, tool_function
+from rocketlib import IInstanceBase, tool_function, warning
 
 from ai.common.utils import normalize_tool_input, require_int, require_str
 
@@ -50,8 +54,12 @@ from .github_client import (
     clean_repo,
     clean_user,
     clean_workflow,
+    is_too_large,
 )
-from .IGlobal import IGlobal
+from . import github_client, graphql_guard, repository_reads
+
+if TYPE_CHECKING:
+    from .IGlobal import IGlobal
 
 # ---------------------------------------------------------------------------
 # Shared parameter descriptions
@@ -160,8 +168,43 @@ def _relax_query(q: str, *, max_terms: int = 5) -> str | None:
     return ' '.join([or_clause, *qualifiers]).strip()
 
 
+# Bytes git inspects for a NUL byte before treating a file as binary.
+_BINARY_PROBE_BYTES = 8000
+# file_get's max_bytes: the largest file whose content the blob path downloads. The
+# default is the Contents API's own boundary, 1 MiB: a file whose content the metadata
+# cannot carry is reported, not downloaded, until the call asks for it, so a pipeline
+# written before this option sees no larger payloads than before. Peak memory is a few
+# times the file size (base64 body, bytes, text). The range runs to GitHub's 100 MiB blob limit.
+FILE_MAX_BYTES_DEFAULT = 1024 * 1024
+FILE_MAX_BYTES_MIN = 1024 * 1024
+FILE_MAX_BYTES_LIMIT = 100 * 1024 * 1024
+
+
+def _decoded_bytes(content: str, encoding: str | None) -> bytes:
+    """Return GitHub's file content as bytes: base64-decoded when ``encoding`` is ``base64``, else UTF-8 encoded."""
+    if encoding == 'base64':
+        return base64.b64decode(content)
+    return content.encode('utf-8')
+
+
 class IInstance(IInstanceBase):
     IGlobal: IGlobal
+
+    # -----------------------------------------------------------------------
+    # Tool publication
+    # -----------------------------------------------------------------------
+
+    def _collect_tool_methods(self) -> dict[str, Callable]:
+        """Publish only the tools named in the ``tools`` allowlist; none named means all.
+
+        The engine builds ``tool.query`` and dispatches ``tool.invoke`` from this map,
+        so a tool left out is neither in the schema the agent sees (#648) nor callable.
+        """
+        methods = super()._collect_tool_methods()
+        allowed = self.IGlobal.tools
+        if not allowed:
+            return methods
+        return {name: method for name, method in methods.items() if name in allowed}
 
     # -----------------------------------------------------------------------
     # Helpers
@@ -170,15 +213,85 @@ class IInstance(IInstanceBase):
     def _token(self) -> str:
         return self.IGlobal.get_token()
 
-    def _repo(self, args: dict) -> str:
-        repo = (args.get('repo') or self.IGlobal.default_repo or '').strip()
+    def _repo(self, args: dict, tool_name: str = '') -> str:
+        """The call's repository, or the configured default; every error names ``tool_name``."""
+        prefix = f'{tool_name}: ' if tool_name else ''
+        repo = args.get('repo') or self.IGlobal.default_repo or ''
+        if not isinstance(repo, str):
+            raise ValueError(f'{prefix}repo must be in owner/repo format')
+        repo = repo.strip()
         if not repo:
-            raise ValueError('repo is required (or configure a default repo in the node settings)')
+            raise ValueError(f'{prefix}repo is required (or configure a default repo in the node settings)')
         return repo
 
     def _require_write(self) -> None:
         if self.IGlobal.read_only:
             raise ValueError('This operation is not permitted: the node is configured in read-only mode')
+
+    def _get(
+        self,
+        path: str,
+        *,
+        params: dict | None = None,
+        app_identity: bool = False,
+        budget: github_client.CallBudget | None = None,
+    ) -> dict:
+        """GET with server-held credentials and the result envelope; credentials never reach the result.
+
+        ``budget`` is the tool call's shared rate-limit budget; without it this request
+        has its own.
+        """
+        return self._with_credentials(
+            lambda credential, secrets: github_client.get_result(
+                credential, path, params=params, retry=self.IGlobal.retry_policy, secrets=secrets, budget=budget
+            ),
+            app_identity=app_identity,
+        )
+
+    def _with_credentials(
+        self, send: Callable[[github_client.Handed, tuple[str, ...]], dict], *, app_identity: bool = False
+    ) -> dict:
+        """Call ``send`` with a credential provider and the node's secrets; no credential reaches the result.
+
+        The provider is a ``github_client.Handed``: it returns the token minted here for
+        the first attempt and mints again for each retry (``IGlobal.get_token`` refreshes
+        an installation token near its expiry; an App JWT is signed again), so a retry
+        after a long wait does not send an expired credential. The client records every
+        token it hands out in ``handed.tokens``, the one list the result is redacted with.
+        """
+        mint = (
+            # GET /app wants the App JWT, not an installation access token.
+            (lambda: github_client.sign_app_jwt(self.IGlobal.app_id, self.IGlobal.private_key_pem))
+            if app_identity
+            else self._token
+        )
+        try:
+            first = mint()
+        except Exception as exc:
+            # Auth errors can carry the token endpoint's response or PEM parser details;
+            # neither belongs in a result an agent or a browser can see.
+            self._auth_failed(exc)
+            return github_client.failure_result(github_client.AUTH_FAILURE)
+        attempts = itertools.count()
+
+        def credential() -> str:
+            if next(attempts) == 0:
+                return first
+            try:
+                return mint()
+            except Exception as exc:
+                self._auth_failed(exc)
+                raise github_client.AuthenticationFailed() from None
+
+        handed = github_client.Handed(credential)
+        secrets = (self.IGlobal.token, self.IGlobal.private_key_pem)
+        result = send(handed, secrets)
+        return github_client.redact_result(result, (first, *handed.tokens, *secrets))
+
+    @staticmethod
+    def _auth_failed(exc: Exception) -> None:
+        """Leave the operator a trace of an authentication failure, with the exception class only."""
+        warning(f'tool_github: GitHub authentication failed ({type(exc).__name__}); the call returned a generic error')
 
     # =======================================================================
     # FILES
@@ -198,15 +311,33 @@ class IInstance(IInstanceBase):
                     'type': 'string',
                     'description': 'Branch, tag, or commit SHA to read from (default: repo default branch)',
                 },
+                'max_bytes': {
+                    'type': 'integer',
+                    'minimum': FILE_MAX_BYTES_MIN,
+                    'maximum': FILE_MAX_BYTES_LIMIT,
+                    'description': (
+                        f'Largest file over 1 MB whose content is downloaded, in bytes (default '
+                        f'{FILE_MAX_BYTES_DEFAULT}, 1 MiB, the Contents API boundary). A larger file comes back with content null and '
+                        'a message, without being downloaded; pass a larger max_bytes to read it.'
+                    ),
+                },
             },
         },
-        description='Get the decoded content and metadata of a single file from a GitHub repository.',
+        description='Get the decoded content and metadata of a single file from a GitHub repository. Files over 1 MB are read through the Git blob API, up to max_bytes (default 1 MiB, so a file over 1 MB needs a max_bytes to be read); when a file is larger than that, GitHub cannot serve the content, or such a file is binary, content is null and message says why.',
     )
     def file_get(self, args):
         """Get the decoded content and metadata of a single file from a GitHub repository."""
         args = normalize_tool_input(args, tool_name='tool_github')
         repo = self._repo(args)
         path = require_str(args, 'path', tool_name='file_get')
+        max_bytes = repository_reads.json_int(
+            args,
+            'max_bytes',
+            default=FILE_MAX_BYTES_DEFAULT,
+            lo=FILE_MAX_BYTES_MIN,
+            hi=FILE_MAX_BYTES_LIMIT,
+            tool_name='file_get',
+        )
         params = {'ref': args['ref']} if args.get('ref') else None
         # Mint the token outside the try: a 404 from the token endpoint is not a missing file.
         token = self._token()
@@ -215,21 +346,103 @@ class IInstance(IInstanceBase):
         except GitHubAPIError as e:
             if e.status_code == 404:
                 return {'found': False, 'message': str(e)}
+            if is_too_large(e):
+                # The Contents API refuses the file outright (GitHub does this over 100 MB): no
+                # metadata and no blob SHA to fall back to. Say so instead of surfacing a bare 403.
+                return {
+                    'found': True,
+                    'path': path.lstrip('/'),
+                    'content': None,
+                    'message': (
+                        'GitHub refused this file as too large for its Contents API (files over 100 MB '
+                        'are not served through the API). Clone the repository with tool_git to read it.'
+                    ),
+                }
             raise
         if isinstance(data, list):
             raise ValueError(f'Path "{path}" is a directory — use file_list instead')
-        content_b64 = data.get('content', '')
-        content = base64.b64decode(content_b64).decode('utf-8', errors='replace')
-        return {
+        result = {
             'found': True,
             'path': data.get('path'),
             'name': data.get('name'),
             'sha': data.get('sha'),
             'size': data.get('size'),
-            'content': content,
+            'content': None,
             'html_url': data.get('html_url'),
             'download_url': data.get('download_url'),
         }
+        if data.get('encoding') != 'none':
+            content = _decoded_bytes(data.get('content') or '', data.get('encoding'))
+            result['content'] = content.decode('utf-8', errors='replace')
+            return result
+        return self._read_large_file(token, repo, result, max_bytes)
+
+    def _read_large_file(self, token: str, repo: str, result: dict, max_bytes: int) -> dict:
+        """Fill ``content`` for a file the Contents API would not inline, or say why not.
+
+        Between 1 MB and 100 MB the Contents API returns the metadata with an empty
+        content and encoding "none". The same blob is read by SHA, which GitHub serves up
+        to 100 MB, so the content matches the metadata even if the branch moved meanwhile.
+        The read needs the blob SHA and an integer size: the size is what ``max_bytes``
+        bounds before any download, and what the body is checked against after it.
+        """
+        size = result['size']
+        if not result['sha']:
+            result['message'] = (
+                f'The file is {size} bytes, over the 1 MB Contents API limit, and GitHub '
+                'returned no blob SHA to read it by. Download it from download_url or clone the '
+                'repository with tool_git.'
+            )
+            return result
+        if not isinstance(size, int) or isinstance(size, bool):
+            result['message'] = (
+                'The file is over the 1 MB Contents API limit and GitHub returned no size for it, so '
+                'max_bytes cannot bound the read; its content was not downloaded. Download it from '
+                'download_url or clone the repository with tool_git.'
+            )
+            return result
+        if size > max_bytes:
+            # The metadata names the size, so a file over the cap is refused before its blob
+            # is downloaded, never after the body has been read.
+            result['message'] = (
+                f'The file is {size} bytes, more than max_bytes ({max_bytes}), so its content was '
+                f'not downloaded. Pass a larger max_bytes (up to {FILE_MAX_BYTES_LIMIT}) to read it, or '
+                'download it from download_url.'
+            )
+            return result
+        try:
+            blob = call(token, 'GET', f'/repos/{repo}/git/blobs/{result["sha"]}')
+            if not isinstance(blob, dict) or not isinstance(blob.get('content'), str):
+                # A body of another shape (a list, null, a missing or non-text content) is an
+                # invalid body too; a null content must not pass as an empty file.
+                raise ValueError('GitHub returned a blob of another shape')
+            raw = _decoded_bytes(blob['content'], blob.get('encoding'))
+        except ValueError as e:
+            # GitHubAPIError (an HTTP refusal), a transport failure or an invalid JSON/base64 body:
+            # the metadata is still worth returning, so none of them raises. Transport
+            # exception text is not echoed, as in the repository reads.
+            reason = str(e) if isinstance(e, GitHubAPIError) else 'GitHub request failed or returned invalid JSON'
+            result['message'] = (
+                f'The file is {size} bytes, over the 1 MB Contents API limit, and the Git '
+                f'blob read failed ({reason}). Download it from download_url or clone the repository '
+                'with tool_git.'
+            )
+            return result
+        if len(raw) != size:
+            result['message'] = (
+                f'GitHub returned {len(raw)} bytes for a {size}-byte file; the content is withheld '
+                'rather than returned incomplete. Download it from download_url.'
+            )
+            return result
+        if b'\0' in raw[:_BINARY_PROBE_BYTES]:
+            # git's own heuristic. Tens of megabytes of replacement characters help nobody.
+            result['message'] = (
+                f'The file is {size} bytes of binary content (a NUL byte within its first '
+                f'{_BINARY_PROBE_BYTES} bytes), which this tool returns only as text. Download it from download_url.'
+            )
+            return result
+        result['content'] = raw.decode('utf-8', errors='replace')
+        return result
 
     @tool_function(
         input_schema={
@@ -240,7 +453,7 @@ class IInstance(IInstanceBase):
                 'ref': {'type': 'string', 'description': 'Branch, tag, or commit SHA (default: repo default branch)'},
             },
         },
-        description='List files and directories at a path in a GitHub repository.',
+        description='List files and directories at a path in a GitHub repository: one directory, at most 1,000 entries (the Contents API limit, with no truncation flag). Use repo_tree for a whole or large tree.',
     )
     def file_list(self, args):
         """List files and directories at a path in a GitHub repository."""
@@ -747,6 +960,187 @@ class IInstance(IInstanceBase):
         repo = self._repo(args)
         data = call(self._token(), 'GET', f'/repos/{repo}')
         return clean_repo(data)
+
+    @tool_function(
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'repo': {'type': 'string', 'description': _REPO_DESC},
+                'ref': {
+                    'type': 'string',
+                    'description': 'Branch, tag or SHA; defaults to HEAD, the default branch.',
+                },
+                'walk': {
+                    'type': 'boolean',
+                    'description': 'Complete a truncated tree by reading its subtrees (default false).',
+                },
+                'max_requests': {
+                    'type': 'integer',
+                    'minimum': 1,
+                    'maximum': repository_reads.MAX_REQUESTS_LIMIT,
+                    'description': f'Subtree requests a walk may make (default {repository_reads.MAX_REQUESTS_DEFAULT}). Check data.complete before treating the result as the whole tree.',
+                },
+                'max_entries': {
+                    'type': 'integer',
+                    'minimum': 1,
+                    'maximum': repository_reads.MAX_ENTRIES_LIMIT,
+                    'description': f'Entries a walk may list (default {repository_reads.MAX_ENTRIES_DEFAULT}); a capped walk has data.complete false and a message.',
+                },
+            },
+        },
+        description='Read a repository tree recursively, sorted by path, with truncated and complete flags; walk completes a truncated tree from subtree reads pinned to the same snapshot. Returns data and rate_limit; data.sha is the SHA the ref resolved to: a commit SHA for a branch, tag or commit, which repo_tree and file_get accept as ref to read the same snapshot; a tree SHA passed as ref comes back as itself and works only with repo_tree.',
+    )
+    def repo_tree(self, args):
+        """Read a repository snapshot, optionally completing a truncated tree."""
+        args = normalize_tool_input(args, tool_name='repo_tree')
+        # One rate-limit budget for the whole call, shared by every subtree read of a walk.
+        read = functools.partial(self._get, budget=github_client.CallBudget())
+        return repository_reads.repo_tree(read, self._repo(args, 'repo_tree'), **repository_reads.tree_options(args))
+
+    @tool_function(
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'repo': {'type': 'string', 'description': _REPO_DESC},
+                'page': {'type': 'integer', 'minimum': 1, 'description': _PAGE_DESC},
+                'per_page': {'type': 'integer', 'minimum': 1, 'maximum': 100, 'description': _PER_PAGE_DESC},
+            },
+        },
+        description='List repository contributors with login, contributions and type. Returns data, next_page and rate_limit.',
+    )
+    def repo_contributors(self, args):
+        """Read one page of contributors without exposing private profile fields."""
+        args = normalize_tool_input(args, tool_name='repo_contributors')
+        path = repository_reads.repository_path(self._repo(args, 'repo_contributors'), 'repo_contributors')
+        params = repository_reads.page_params(args, 'repo_contributors')
+        return repository_reads.pick_items(
+            self._get(f'{path}/contributors', params=params), ('login', 'contributions', 'type')
+        )
+
+    @tool_function(
+        input_schema={
+            'type': 'object',
+            'properties': {'repo': {'type': 'string', 'description': _REPO_DESC}},
+        },
+        description='Get a repository language-to-byte-count map in data, with rate_limit metadata.',
+    )
+    def repo_languages(self, args):
+        """Read language byte counts, including an empty map for an empty repository."""
+        args = normalize_tool_input(args, tool_name='repo_languages')
+        path = repository_reads.repository_path(self._repo(args, 'repo_languages'), 'repo_languages')
+        return repository_reads.expect_object(self._get(f'{path}/languages'))
+
+    @tool_function(
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'repo': {'type': 'string', 'description': _REPO_DESC},
+                'page': {'type': 'integer', 'minimum': 1, 'description': _PAGE_DESC},
+                'per_page': {'type': 'integer', 'minimum': 1, 'maximum': 100, 'description': _PER_PAGE_DESC},
+            },
+        },
+        description='List repository labels with name, color and description. Returns data, next_page and rate_limit.',
+    )
+    def label_list(self, args):
+        """Read one page of labels without changing any issue's labels."""
+        args = normalize_tool_input(args, tool_name='label_list')
+        path = repository_reads.repository_path(self._repo(args, 'label_list'), 'label_list')
+        params = repository_reads.page_params(args, 'label_list')
+        return repository_reads.pick_items(self._get(f'{path}/labels', params=params), ('name', 'color', 'description'))
+
+    @tool_function(
+        input_schema={'type': 'object', 'properties': {}},
+        description='Identify the configured credential: PAT user login/type, or GitHub App slug with type App. Returns data and rate_limit.',
+    )
+    def user_get(self, args):
+        """Identify a PAT user or the App itself without returning credentials."""
+        normalize_tool_input(args, tool_name='user_get')
+        if self.IGlobal.auth_type == 'app':
+            # GET /app takes the App JWT and answers with the App's slug.
+            result = repository_reads.expect_object(self._get('/app', app_identity=True))
+            if 'data' not in result:
+                return result
+            identity = result['data'].get('slug')
+            if not isinstance(identity, str):
+                return github_client.shape_failure(result, 'an object naming the App')
+            result['data'] = {'login': identity, 'type': 'App'}
+            return result
+        # GET /user answers with the PAT user's login and type.
+        result = repository_reads.expect_object(self._get('/user'))
+        if 'data' not in result:
+            return result
+        identity = result['data'].get('login')
+        if not isinstance(identity, str):
+            return github_client.shape_failure(result, 'an object naming the user')
+        result['data'] = {'login': identity, 'type': result['data'].get('type')}
+        return result
+
+    # =======================================================================
+    # GRAPHQL
+    # =======================================================================
+
+    @tool_function(
+        input_schema={
+            'type': 'object',
+            'required': ['query'],
+            'properties': {
+                'query': {
+                    'type': 'string',
+                    'description': (
+                        'GraphQL document for https://api.github.com/graphql. Page with first/after and '
+                        'pageInfo { hasNextPage endCursor }. Select rateLimit { cost remaining resetAt } '
+                        'to see what the query spends.'
+                    ),
+                },
+                'variables': {
+                    'type': 'object',
+                    'description': 'Values for the variables the document declares, e.g. {"owner": "acme", "after": null}.',
+                },
+                'operationName': {
+                    'type': 'string',
+                    'description': 'Which operation to run when the document defines more than one.',
+                },
+            },
+        },
+        description=(
+            'Run a GitHub GraphQL document (POST /graphql). Returns data.data and data.errors as GitHub sent '
+            'them, with rate_limit; GraphQL errors are returned, not raised. In read-only mode a document '
+            'with a mutation operation is refused before it is sent; with read-only mode off, mutations run '
+            'only when graphqlAllowMutations is on.'
+        ),
+    )
+    def graphql(self, args):
+        """Run a GraphQL document; mutations are refused in read-only mode, and otherwise unless graphqlAllowMutations is on."""
+        args = normalize_tool_input(args, tool_name='graphql')
+        query = args.get('query')
+        if not isinstance(query, str) or not query.strip():
+            raise ValueError('graphql: query must be a non-empty GraphQL document')
+        variables = args.get('variables')
+        if variables is not None and not isinstance(variables, dict):
+            raise ValueError('graphql: variables must be an object')
+        operation_name = args.get('operationName')
+        if operation_name is not None and (not isinstance(operation_name, str) or not operation_name.strip()):
+            raise ValueError('graphql: operationName must be a non-empty string')
+        # Checked before a token is minted, so nothing reaches GitHub. The whole
+        # document is checked: operationName does not exempt a mutation in it.
+        refusal = graphql_guard.mutation_refusal(query)
+        if refusal and self.IGlobal.read_only:
+            return github_client.failure_result(refusal)
+        if refusal and not self.IGlobal.graphql_allow_mutations:
+            # Off by default: a mutation can do anything the credential allows, far more
+            # than the write tools, so existing settings do not enable GraphQL mutations.
+            return github_client.failure_result(graphql_guard.not_allowed(refusal))
+        return self._with_credentials(
+            lambda credential, secrets: github_client.graphql_result(
+                credential,
+                query,
+                variables,
+                operation_name,
+                retry=self.IGlobal.retry_policy,
+                max_bytes=self.IGlobal.graphql_max_bytes,
+                secrets=secrets,
+            )
+        )
 
     # =======================================================================
     # RELEASES
@@ -1263,3 +1657,24 @@ class IInstance(IInstanceBase):
             for f in (data.get('files') or [])
         ]
         return result
+
+
+def tool_names() -> frozenset[str]:
+    """Every tool this node implements, read from the ``@tool_function`` stamps."""
+    return frozenset(name for name in dir(IInstance) if hasattr(getattr(IInstance, name, None), '__tool_meta__'))
+
+
+def validate_tool_names(names: Iterable[str]) -> frozenset[str]:
+    """``names`` as a set when each is a tool this node implements; unknown names fail, listing the valid ones.
+
+    ``IGlobal`` parses the ``tools`` allowlist and checks it here, next to the tool
+    definitions, at pipeline start (``beginGlobal``) and in the canvas (``validateConfig``).
+    """
+    names = frozenset(names)
+    valid = tool_names()
+    unknown = sorted(names - valid)
+    if unknown:
+        raise ValueError(
+            f'tool_github: unknown tool name(s) in tools: {", ".join(unknown)}. Valid names: {", ".join(sorted(valid))}'
+        )
+    return names

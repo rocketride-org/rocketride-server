@@ -23,6 +23,10 @@ export default defineConfig({
 			{ find: /^shell\/src\//, replacement: resolve(__dirname, '../../../../../../../apps/shared/node_modules/shell/src') + '/' },
 			// The shared app source tree (trace components).
 			{ find: /^@app-shared\//, replacement: resolve(__dirname, '../../../../../../../apps/shared/src') + '/' },
+			// apps/shared uses its OWN 'shared/' alias internally (trace reaches
+			// the pipeline types, the event parser and json-tree that way), so a
+			// consumer of that tree has to resolve it too.
+			{ find: /^shared\//, replacement: resolve(__dirname, '../../../../../../../apps/shared/src') + '/' },
 		],
 		// apps/shared and shell each have their own node_modules copy of react;
 		// force a single copy or hooks break at runtime.

@@ -10,7 +10,9 @@ Four OCR engines are supported via the `ai.common.models` model-server wrappers:
 
 Table extraction uses **img2table** for OpenCV-based table structure detection, with OCR inference routed through the same model-server adapter (`ModelServerOCR`). Detected tables are emitted on the `table` lane as Markdown. Both img2table v1 and v2 plug-in APIs are supported: v2 reorganised the API and replaced the two-step `content`/`to_ocr_dataframe` contract with a single `of()` method returning `OCRData`; the node detects the installed version at import time via `_IMG2TABLE_V2`.
 
-Animated GIFs are handled frame by frame: each frame is OCR'd individually and the per-frame texts are joined with newlines before being written to the `text` lane. OCR reads are serialised with an internal threading lock so concurrent instances share one engine safely.
+Animated GIFs are handled frame by frame: each frame is OCR'd individually and the per-frame texts are joined with newlines before being written to the `text` lane.
+
+Concurrent instances share one engine. Without a model server, each read waits in a per-device memory budget (`ai.common.models.device_budget`). EasyOCR and DocTR state the memory a read needs, so several of their reads run on a GPU at once when they fit. Surya and TrOCR have no measured cost and read one at a time. On CPU one read runs at a time per process, across all OCR nodes and their table reads. While another engine process holds the GPU, the idle process of a finished task included, every engine reads one at a time. With a model server, the server batches the reads.
 
 ## Example pipelines
 

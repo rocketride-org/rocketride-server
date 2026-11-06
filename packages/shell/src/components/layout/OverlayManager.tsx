@@ -28,15 +28,16 @@ import React, { useCallback, useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { commonStyles } from '../../themes/styles';
 import { ConnectionManager } from '../../connection/connection';
-import AccountProvider from '../../providers/AccountProvider';
 import SettingsProvider from '../../providers/SettingsProvider';
-import EnvironmentProvider from '../../providers/EnvironmentProvider';
 
 // =============================================================================
 // TYPES
 // =============================================================================
 
-/** Shell overlay pages that render as modal dialogs over the client area. */
+/** Shell overlay pages that render as modal dialogs over the client area.
+ *  'environment' is LEGACY: Environment Variables is a Settings section now,
+ *  so the id stays accepted (frozen `shell:openOverlay` vocabulary) but maps
+ *  to the settings overlay at that section. */
 export type ShellOverlay = 'account' | 'settings' | 'environment' | null;
 
 /** Opaque overlay ids a guest app is allowed to request via `shell:openOverlay`. */
@@ -44,6 +45,19 @@ const OPENABLE_OVERLAYS = ['account', 'settings', 'environment'] as const;
 
 /** Type guard: is `id` a valid openable overlay id (not null/unknown)? */
 const isOpenableOverlay = (id: unknown): id is Exclude<ShellOverlay, null> => typeof id === 'string' && (OPENABLE_OVERLAYS as readonly string[]).includes(id);
+
+/** The Settings section id the legacy 'environment' overlay maps to. */
+const ENVIRONMENT_SECTION_ID = 'environment';
+
+/** The Settings section id the legacy 'account' overlay maps to. */
+const ACCOUNT_SECTION_ID = 'account:profile';
+
+/** sessionStorage flag the Profile workspace picker sets before committing a
+ *  switch: a freshly (re)mounted OverlayManager that finds it opens Settings
+ *  at the Profile section — continuity for the person who initiated the
+ *  switch there. sessionStorage, not state: the in-process rescope remounts
+ *  this component, and the rescope's reload FALLBACK replaces the page. */
+export const WORKSPACE_SWITCH_LAND_KEY = 'rr:workspace-switch-land';
 
 // =============================================================================
 // STYLES
@@ -108,22 +122,64 @@ export interface OverlayManagerProps {
  */
 export const OverlayManager: React.FC<OverlayManagerProps> = ({ children }) => {
 	// --- Overlay state -------------------------------------------------------
-	const [overlay, setOverlay] = useState<ShellOverlay>(null);
+	const [overlay, setOverlayState] = useState<ShellOverlay>(null);
+	/** Settings deep link: the nav section the NEXT settings open lands on. */
+	const [settingsSection, setSettingsSection] = useState<string | undefined>(undefined);
+
+	/** Overlay setter with the legacy mappings: 'environment' and 'account'
+	 *  open Settings at their sections (their own modals are gone). */
+	const setOverlay = useCallback((id: ShellOverlay) => {
+		if (id === 'environment') {
+			setOverlayState('settings');
+			setSettingsSection(ENVIRONMENT_SECTION_ID);
+		} else if (id === 'account') {
+			setOverlayState('settings');
+			setSettingsSection(ACCOUNT_SECTION_ID);
+		} else {
+			// Clear any stale deep link; the openOverlay listener re-sets it
+			// right after when the request carries a section.
+			setSettingsSection(undefined);
+			setOverlayState(id);
+		}
+	}, []);
 
 	/** Closes the currently open overlay. */
-	const closeOverlay = useCallback(() => setOverlay(null), []);
+	const closeOverlay = useCallback(() => {
+		setOverlayState(null);
+		setSettingsSection(undefined);
+	}, []);
+
+	// --- Post-switch landing ---------------------------------------------------
+	// A workspace switch initiated from the Profile picker remounts this
+	// component (in-process rescope) or reloads the page (fallback); either
+	// way the picker's sessionStorage flag survives into this fresh mount and
+	// reopens Settings at Profile, so the person lands where they left off.
+	useEffect(() => {
+		try {
+			if (window.sessionStorage.getItem(WORKSPACE_SWITCH_LAND_KEY) !== '1') return;
+			window.sessionStorage.removeItem(WORKSPACE_SWITCH_LAND_KEY);
+		} catch {
+			return; // storage unavailable — land on the workbench
+		}
+		setOverlayState('settings');
+		setSettingsSection(ACCOUNT_SECTION_ID);
+		// eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only: the flag is consumed once per (re)mount
+	}, []);
 
 	// --- Open-overlay requests from guest apps -------------------------------
 	// Guest apps (e.g. home-ui's profile menu) can't reach `setOverlay`
 	// directly, so they emit `shell:openOverlay` over the event bus and the
 	// shell routes it into the same overlay state the sidebar uses.
 	useEffect(() => {
-		return ConnectionManager.getInstance().on('shell:openOverlay', ({ id }: { id: ShellOverlay }) => {
+		return ConnectionManager.getInstance().on('shell:openOverlay', ({ id, section }: { id: ShellOverlay; section?: string }) => {
 			// Gate to the contracted ids so a stray runtime value can't open a
 			// blank modal shell with no page content.
-			if (isOpenableOverlay(id)) setOverlay(id);
+			if (isOpenableOverlay(id)) {
+				setOverlay(id);
+				if (id === 'settings') setSettingsSection(section);
+			}
 		});
-	}, []);
+	}, [setOverlay]);
 
 	// --- Escape key handler --------------------------------------------------
 	useEffect(() => {
@@ -150,14 +206,16 @@ export const OverlayManager: React.FC<OverlayManagerProps> = ({ children }) => {
 			{overlay !== null && (
 				<div style={styles.backdrop}>
 					{/* aria-label carries the overlay id (account/settings/…): the
-					    dialog itself has no visible heading to reference. */}
-					<div style={styles.dialog} role="dialog" aria-modal="true" aria-label={overlay}>
+					    dialog itself has no visible heading to reference.
+					    data-rr-overlay-root: the dialog IS the owning surface for
+					    every `contained` DetailPanel opened inside it — record
+					    drawers slide over (and dim) the whole dialog, chrome and
+					    nav included. */}
+					<div style={styles.dialog} role="dialog" aria-modal="true" aria-label={overlay} data-rr-overlay-root="1">
 						<button style={styles.dialogClose} onClick={closeOverlay} aria-label="Close" title="Close">
 							✕
 						</button>
-						{overlay === 'account' && <AccountProvider />}
-						{overlay === 'settings' && <SettingsProvider />}
-						{overlay === 'environment' && <EnvironmentProvider />}
+						{overlay === 'settings' && <SettingsProvider initialSectionId={settingsSection} />}
 					</div>
 				</div>
 			)}

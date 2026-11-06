@@ -46,6 +46,7 @@ import engLib
 from ai.common.schema import Doc, DocFilter, DocMetadata, QuestionText
 from ai.common.store import DocumentStoreBase
 from ai.common.config import Config
+from nodes.store_milvus.mode import is_local
 
 # Default batch size for bulk upsert operations
 DEFAULT_BULK_INSERT_BATCH_SIZE = 50
@@ -99,8 +100,6 @@ class Store(DocumentStoreBase):
         self.timeout = max(int(config.get('timeout', DEFAULT_TIMEOUT)), 1)
         self.bulkInsertBatchSize = max(int(config.get('bulkInsertBatchSize', DEFAULT_BULK_INSERT_BATCH_SIZE)), 1)
 
-        profile = config.get('mode')
-
         # check if the similarity matches milvus configuration options
         similarity = config.get('similarity', 'COSINE')
         if similarity in ['L2', 'IP', 'COSINE', 'JACCARD', 'HAMMING', 'BM25']:
@@ -110,7 +109,8 @@ class Store(DocumentStoreBase):
 
         # Establish a connection to the Milvus instance with configurable timeout
         try:
-            if profile != 'local':
+            # Read the same way as the key check (IGlobal._credentials).
+            if not is_local(config):
                 # Init the store (host was stripped of protocol at line 87, so always add https://)
                 self.client = MilvusClient(uri=f'https://{self.host}', token=self.apikey, timeout=self.timeout)
             else:
@@ -421,7 +421,7 @@ class Store(DocumentStoreBase):
             return {}
 
         # Base filter: Only chunk 0
-        filter_expr = "meta['chunkId'] == 0"
+        filter_expr = "meta['chunkId'] == 0 and meta['isDeleted'] == false"
 
         # If parent specified, add condition
         if parent is not None:
@@ -447,6 +447,11 @@ class Store(DocumentStoreBase):
     def addChunks(self, chunks: List[Doc], checkCollection: bool = True) -> None:
         """
         Add document chunks to the document store using batched bulk upsert.
+
+        Args:
+            chunks: The batch to write.
+            checkCollection: Create the collection if it is missing and check that the chunks match its
+                embedding model and vector size; createCollection passes False when it writes its control row.
         """
         # If no documents present, get out
         if not len(chunks):
@@ -456,18 +461,13 @@ class Store(DocumentStoreBase):
         if checkCollection and not self.createCollection(chunks):
             return
 
-        # Clear the object id list
-        objectIds: Dict = {}
+        # The objects this batch starts over
+        objectIds = self.objectIdsToReplace(chunks)
 
-        # For each document
-        for chunk in chunks:
-            # Save this object id
-            objectIds[chunk.metadata.objectId] = True
-
-        # Erase all documents/chunks associated with that ObjectId in one operation
+        # Erase all documents/chunks associated with those ObjectIds in one operation
         # so we can cleanly insert the new version
-        if len(objectIds.keys()):
-            filter_condition = f"meta['objectId'] in [{', '.join(json.dumps(k) for k in objectIds.keys())}]"
+        if len(objectIds):
+            filter_condition = f"meta['objectId'] in [{', '.join(json.dumps(k) for k in objectIds)}]"
             try:
                 # Delete entities
                 self.client.delete(collection_name=self.collection, filter=filter_condition)

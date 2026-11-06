@@ -13,6 +13,13 @@ export type ThemeTokens = {
 	'--rr-bg-paper': string;
 	'--rr-bg-surface': string;
 	'--rr-bg-surface-alt': string;
+	// Document tabs (DocTabs editor-group strips)
+	'--rr-doctabs-bg': string;
+	'--rr-doctabs-tab-active-bg': string;
+	'--rr-doctabs-tab-hover-bg': string;
+	'--rr-doctabs-fg-active': string;
+	'--rr-doctabs-fg-inactive': string;
+	'--rr-doctabs-border': string;
 	'--rr-fg-titleBar-active': string;
 	'--rr-fg-titleBar-inactive': string;
 	'--rr-bg-titleBar-active': string;
@@ -51,6 +58,10 @@ export type ThemeTokens = {
 	'--rr-btn-sm-font-size': string;
 	'--rr-btn-sm-radius': string;
 	'--rr-bg-input': string;
+	'--rr-bg-rail': string;
+	'--rr-bg-rail-hover': string;
+	'--rr-fg-rail': string;
+	'--rr-fg-rail-active': string;
 	'--rr-bg-list-hover': string;
 	'--rr-bg-list-active': string;
 	'--rr-fg-list-active': string;

@@ -41,3 +41,21 @@ def test_to_push_result_does_not_mutate_the_model():
     # touch the live AccountInfo (whose auth still drives permission checks).
     assert info.userToken == 'rr_k'
     assert info.auth == 'rr_k'
+
+
+def test_is_new_user_defaults_to_unknown_and_reaches_connect_result():
+    """The isNewUser field defaults to unknown and reaches the connect result unchanged.
+
+    The shell reads isNewUser off the connect result to tell a sign-up from a
+    sign-in on the OAuth callback. A provider that does not know must not look
+    like "existing user": the default is None (the shell reports null), and a
+    provider's True or False survives serialization unchanged.
+    """
+    info = AccountInfo(userId='u1', auth='rr_k', userToken='rr_k')
+    assert info.isNewUser is None
+    assert info.to_connect_result()['isNewUser'] is None
+    fresh = AccountInfo(userId='u2', auth='rr_k', userToken='rr_k', isNewUser=True)
+    assert fresh.to_connect_result()['isNewUser'] is True
+    returning = AccountInfo(userId='u3', auth='rr_k', userToken='rr_k', isNewUser=False)
+    assert returning.to_connect_result()['isNewUser'] is False
+    assert 'auth' not in fresh.to_connect_result()

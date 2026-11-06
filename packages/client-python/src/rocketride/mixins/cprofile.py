@@ -75,14 +75,20 @@ class CProfileMixin(DAPClient):
             session: Optional human-readable name for the session.
 
         Returns:
-            Dict with status, session name, owner, and start_time.
+            Dict with status 'started', session name, owner, and start_time.
+            If a session is already active, the dict has status 'error', a
+            message and the current owner instead; nothing is raised.
 
         Raises:
-            RuntimeError: If profiling is already active.
+            RuntimeError: If the caller lacks task.control, or ``target`` is
+                not a task the caller may control.
 
         Example:
             result = await client.cprofile_start(session='load_test')
-            print(f"Started: {result['session']}")
+            if result['status'] == 'error':
+                print(result['message'])
+            else:
+                print(f"Started: {result['session']}")
         """
         # Build arguments — only include non-None values
         args: Dict[str, Any] = {}
@@ -100,14 +106,19 @@ class CProfileMixin(DAPClient):
             target: Task token if profiling a pipeline, or None for server.
 
         Returns:
-            Dict with status, session name, and runtime.
+            Dict with status, session name, and runtime.  With no active
+            session, or a server-process session another connection started,
+            the dict has status 'error' and a message instead; nothing is
+            raised.
 
         Raises:
-            RuntimeError: If no session is active or caller is not the owner.
+            RuntimeError: If the caller lacks task.control, or ``target`` is
+                not a task the caller may control.
 
         Example:
             result = await client.cprofile_stop()
-            print(f"Ran for {result['runtime']:.2f}s")
+            if result['status'] != 'error':
+                print(f"Ran for {result['runtime']:.2f}s")
         """
         args: Dict[str, Any] = {}
         if target:
@@ -123,6 +134,10 @@ class CProfileMixin(DAPClient):
 
         Returns:
             Dict with active flag, owner, session name, and runtime.
+
+        Raises:
+            RuntimeError: If the caller lacks task.control, or ``target`` is
+                not a task the caller may control.
 
         Example:
             status = await client.cprofile_status()
@@ -142,7 +157,12 @@ class CProfileMixin(DAPClient):
             target: Task token if querying a pipeline, or None for server.
 
         Returns:
-            Dict with 'report' key containing the full pstats text.
+            Dict with 'report' key containing the full pstats text, or a
+            placeholder message when no session has completed.
+
+        Raises:
+            RuntimeError: If the caller lacks task.control, or ``target`` is
+                not a task the caller may control.
 
         Example:
             result = await client.cprofile_report()
@@ -181,6 +201,12 @@ class CProfileMixin(DAPClient):
         Returns:
             Dict with 'tree' (root node), 'functions' (exact per-function
             totals; absent from older servers), 'total_time', and 'total_calls'.
+            With no completed session, 'tree' is None and 'error' holds the
+            message.
+
+        Raises:
+            RuntimeError: If the caller lacks task.control, or ``target`` is
+                not a task the caller may control.
 
         Example:
             result = await client.cprofile_report_tree(max_depth=30, min_pct=0.5)
@@ -210,7 +236,12 @@ class CProfileMixin(DAPClient):
         Returns:
             Dict with 'threads', busiest first.  Each has 'id' (pass it to
             cprofile_report_tree() as thread), 'name', 'tid' (system thread id),
-            'ttot', 'sched_count', 'functions' and 'calls'.
+            'ttot', 'sched_count', 'functions' and 'calls'.  With no completed
+            session, 'threads' is empty and 'error' holds the message.
+
+        Raises:
+            RuntimeError: If the caller lacks task.control, or ``target`` is
+                not a task the caller may control.
 
         Example:
             result = await client.cprofile_threads()
