@@ -381,6 +381,41 @@ def test_graphql_execution_error_with_path_on_the_last_point_is_not_retried(node
     assert result['data'] == {'data': None, 'errors': body['errors']}
 
 
+@pytest.mark.parametrize(
+    'error',
+    [
+        {'message': 'Something went wrong while executing your query. Please try again.'},
+        {'type': 'RATE_LIMITED', 'message': 'API rate limit exceeded.'},
+    ],
+)
+@pytest.mark.parametrize('retry_after', [False, True])
+def test_mutation_http_200_errors_never_resend_a_possibly_applied_write(node, error, retry_after):
+    node.inst.IGlobal.read_only = False
+    node.inst.IGlobal.graphql_allow_mutations = True
+    body = {'data': None, 'errors': [error]}
+    headers = dict(graphql_limited().headers)
+    if retry_after:
+        headers['Retry-After'] = '1'
+    node.request.side_effect = [response(body, 200, headers), response({'data': {'addStar': {'id': 'twice'}}})]
+    result = node.inst.graphql({'query': 'mutation { addStar(input: {starrableId: "repo"}) { clientMutationId } }'})
+    assert node.request.call_count == 1
+    assert node.slept == []
+    assert result['status'] == 200
+    assert result['data'] == body
+
+
+@pytest.mark.parametrize('status', [403, 429])
+def test_mutation_http_rate_limit_refusal_still_backs_off(node, status):
+    node.inst.IGlobal.read_only = False
+    node.inst.IGlobal.graphql_allow_mutations = True
+    body = {'data': {'addStar': {'clientMutationId': 'once'}}}
+    node.request.side_effect = [secondary_limit(status, '1'), response(body)]
+    result = node.inst.graphql({'query': 'mutation { addStar(input: {starrableId: "repo"}) { clientMutationId } }'})
+    assert node.request.call_count == 2
+    assert node.slept == [1.0]
+    assert result['data']['data'] == body['data']
+
+
 def test_graphql_errors_of_other_types_are_not_retried(node):
     body = {'data': None, 'errors': [{'type': 'NOT_FOUND', 'message': 'RATE_LIMITED is not this error'}]}
     node.request.return_value = response(body, 200, dict(OK_HEADERS))

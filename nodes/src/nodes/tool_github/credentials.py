@@ -282,7 +282,9 @@ class AppCredential:
         """Forget a cached installation token GitHub answered 401 to (an App uninstall revokes them)."""
         with self._lock:
             slots = list(self._slots.values())
-        return any(slot.drop(token) for slot in slots)
+        # The tuple is replaced atomically. Skip unrelated slots before taking their
+        # locks, which can be held across a slow installation-token mint.
+        return any(slot.drop(token) for slot in slots if token in slot.minted)
 
     def installation_of(self, token: str) -> str | None:
         """The installation that minted ``token``, or None when none of this App's slots did."""

@@ -766,7 +766,10 @@ def _retry_after(value, now: float) -> float | None:
 
 
 def _graphql_rate_limited(resp: requests.Response, content: bytes, exhausted: bool) -> bool:
-    """Whether a GraphQL HTTP 200 is a rate limit GitHub answered without running anything.
+    """Whether a query's GraphQL HTTP 200 is treated as a rate limit.
+
+    Mutation documents never enter this classifier: a path-less error and exhausted
+    quota do not prove that GitHub refused the write before executing it.
 
     Only an answer without ``data`` counts: one with partial data ran part of the
     document, so it is returned, never retried. It counts when it carries
@@ -967,8 +970,19 @@ def graphql_result(
         payload['operationName'] = operation_name
     handed = Handed.of(credential)
     try:
+        # A mutation can finish with null data and a path-less execution error even
+        # when the rate-limit headers are exhausted. HTTP 200 is not proof that it
+        # never ran: only queries may retry those GraphQL error bodies. Explicit
+        # HTTP 403/429 rate-limit refusals still use the shared backoff for writes.
         resp, content = request_with_backoff(
-            handed, 'POST', '/graphql', body=payload, retry=retry, max_bytes=max_bytes, graphql=True, budget=budget
+            handed,
+            'POST',
+            '/graphql',
+            body=payload,
+            retry=retry,
+            max_bytes=max_bytes,
+            graphql=not may_write,
+            budget=budget,
         )
     except RateLimitExhausted as exc:
         error = _graphql_error(exc.status_code, exc.headers, exc.body, (*handed.tokens, *secrets))

@@ -464,7 +464,7 @@ GitHub rate limits and retry. A rate limit is:
 
 - a 429, or a 403 with `X-RateLimit-Remaining: 0`, `Retry-After` or a body that names a
   rate limit;
-- for `graphql`, an HTTP 200 without `data` that carries `Retry-After`, an error of type
+- for GraphQL queries, an HTTP 200 without `data` that carries `Retry-After`, an error of type
   `RATE_LIMITED` (GitHub's answer to an exhausted GraphQL primary limit), a message of
   GitHub's own naming a rate limit (a secondary limit: the top-level `message`, or an
   error without `locations`), or, while `X-RateLimit-Remaining` is 0, an error without
@@ -505,11 +505,11 @@ counts subtree reads, not the retries inside each read, so a walk can send up to
 `rateLimitMaxRetries + 1` times `max_requests` requests, and its stop message's "after
 N requests" counts reads.
 
-A rate-limited request was not run by GitHub, so retrying it, a mutation included, cannot
-apply it twice: the node retries only answers GitHub rejected before running anything (a
-403 or 429, or a GraphQL 200 without `data`). A GraphQL answer with partial data is
-returned, not retried, and transport failures, where a request may have reached GitHub,
-are never retried.
+A GraphQL document that contains a mutation, or that the mutation check cannot parse,
+is retried only after an HTTP 403 or 429 rate-limit refusal. Its HTTP 200 errors are
+returned without retrying, including null data and exhausted rate-limit headers:
+a timeout error without a field path can still follow an applied mutation. Queries
+retain the HTTP 200 backoff described above. Transport failures are never retried.
 
 When a mutation's response is lost, invalid JSON, a 2xx JSON body of another shape, over the response cap, or an HTTP 5xx error, its result
 warns that the mutation may already have been applied. Check the affected resource's
@@ -590,8 +590,8 @@ call's `repo`, else `defaultRepo`. Whenever the repository chooses the credentia
 with a `credentialMap`), it must be exactly `owner/repo`: one slash and no empty or dot-only
 parts. Anything else (`acme/app/`, `/acme/app`) fails before any request, with a message
 that does not repeat it, so it cannot fall through to a less specific entry. A
-`defaultRepo` that is not `owner/repo` is checked only where it chooses a credential, so
-it does not break a token call that needs no repository.
+nonempty `defaultRepo` is checked at pipeline start and by the configuration validator,
+before it can select a credential or cause a request.
 
 - **The App is not installed on the repository:** GitHub answers 404 and the call fails
   with a message naming the repository. Envelope tools return it as a result with
@@ -651,7 +651,10 @@ it is the same list of rows, or a JSON object of strings, with a variable per cr
 - **Values** are a token, a placeholder for one, or the JSON text of a GitHub App
   credential: `appId`, `privateKey` (PEM text or a data URL, decoded like the node's own
   key) and an optional `installationId`; without one, the installation is found per
-  repository as above. A PEM's line breaks may be written as `\n` or left as they are.
+  repository as above. The canvas value input is one line: paste compact JSON with
+  the PEM's line breaks escaped as `\n`, or use a data URL or an environment variable
+  for the key. Literal line breaks belong inside an environment variable's PEM value,
+  not inside a JSON string pasted into the canvas.
 - **Placeholders** resolve in one pass over the pipeline's own text, so they work in every
   value, inside an App entry's JSON text too.
 - **Hand-written pipelines** may write the map as the JSON object above, write an App
@@ -661,6 +664,10 @@ it is the same list of rows, or a JSON object of strings, with a variable per cr
   variable as an error ("must be array") until the field is rewritten as rows. A variable that holds the
   whole map must hold literal values: its text is not scanned again, so a placeholder
   inside it stays as written, and the run stops at start saying so.
+- **Saved secure maps:** when the engine has encrypted the list, the canvas shows
+  "Saved securely" and preserves it while other settings are edited, including maps
+  stored in the selected profile. "Replace saved entries" starts an empty replacement
+  list; saving replaces all previous entries. Cancel leaves the saved map intact.
 - **Matching:** each call uses the most specific entry for its repository: the exact
   `owner/repo`, then `owner/*`, then `*`. Organization tools (`org_list_repos`,
   `user_invite`) match `org/*`, then `*`. A call without a repository uses `*`, else the

@@ -12,6 +12,8 @@ token cache per installation. Only HTTP is faked.
 import base64
 import json
 import types
+from concurrent.futures import ThreadPoolExecutor
+from threading import Event
 from unittest.mock import Mock, patch
 
 import pytest
@@ -836,3 +838,61 @@ def test_secrets_cover_every_credential_and_minted_token(github, rsa_private_key
         secrets = set(inst.IGlobal.secrets())
     assert {SENTINEL, 'tok-default', rsa_private_key_pem.strip(), 'ghs_fake_22_1'} <= secrets
     assert '' not in secrets
+
+
+def test_dropping_one_installations_token_does_not_wait_for_another_slots_mint(github, rsa_private_key_pem):
+    github.installations = {'acme/api': 11, 'beta/api': 22}
+    with real_node(app_config(rsa_private_key_pem)) as inst:
+        inst.IGlobal.get_token('acme/api')
+        rejected = inst.IGlobal.get_token('beta/api')
+        credential = inst.IGlobal._credential
+        unrelated = credential._slots['11']
+        locked, release = Event(), Event()
+
+        def hanging_mint():
+            with unrelated.lock:
+                locked.set()
+                assert release.wait(5), 'test did not release the unrelated mint'
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            mint = pool.submit(hanging_mint)
+            try:
+                assert locked.wait(2)
+                assert pool.submit(credential.drop, rejected).result(timeout=2) is True
+                assert credential._slots['22'].token == ''
+                assert unrelated.token
+            finally:
+                release.set()
+            mint.result(timeout=2)
+
+
+@pytest.mark.parametrize('field', ['appId', 'installationId'])
+@pytest.mark.parametrize('value', [0, '0', '000'])
+@pytest.mark.parametrize('mapped', [False, True])
+def test_zero_app_ids_are_invalid_instead_of_missing_or_auto_discovered(rsa_private_key_pem, field, value, mapped):
+    cfg = app_config(rsa_private_key_pem, **{field: value})
+    if mapped:
+        cfg.pop('authType')
+        cfg = {'credentialMap': {'acme/api': cfg}}
+    message = _begin_error(cfg)
+    assert 'greater than zero' in message
+    assert 'required' not in message
+
+
+def test_app_client_id_is_still_accepted(github, rsa_private_key_pem):
+    with real_node(app_config(rsa_private_key_pem, appId='Iv1.client-id')) as inst:
+        assert inst.IGlobal.app_id == 'Iv1.client-id'
+    assert github.calls == []
+
+
+@pytest.mark.parametrize('repo', ['acme/api/', '/acme/api', 'acme/../api', 'acme//api', 'acme', SENTINEL, 0])
+def test_invalid_default_repository_is_refused_at_start_without_echoing_it(github, repo):
+    message = _begin_error({'token': 'tok-default', 'defaultRepo': repo})
+    assert message == 'tool_github: defaultRepo must be a repository in owner/repo form'
+    assert github.calls == []
+
+
+def test_default_repository_is_stripped_and_used_for_routing(github):
+    with real_node({'credentialMap': {'acme/api': 'tok-exact'}, 'defaultRepo': ' acme/api '}) as inst:
+        assert inst.IGlobal.default_repo == 'acme/api'
+        assert inst.IGlobal.get_token(inst.IGlobal.default_repo) == 'tok-exact'

@@ -117,8 +117,8 @@ def _read_node_credential(cfg, auth_type: str) -> dict:
 
 
 def _text(value) -> str:
-    """A config value as stripped text, as the node has always read its auth fields."""
-    return str(value or '').strip()
+    """A config value as stripped text; zero is a value, not an absent field."""
+    return '' if value is None else str(value).strip()
 
 
 def _read_app(app_id, private_key, installation_id) -> dict:
@@ -129,9 +129,14 @@ def _read_app(app_id, private_key, installation_id) -> dict:
     missing = [name for name, value in (('App ID', app_id), ('private key', private_key_pem)) if not value]
     if missing:
         raise ValueError(f'tool_github: {", ".join(missing)} required for GitHub App auth')
+    # GitHub also accepts a client ID as the JWT issuer, so retain nonnumeric IDs.
+    if re.fullmatch(r'[+-]?[0-9]+', app_id) and int(app_id) <= 0:
+        raise ValueError('tool_github: numeric App ID must be greater than zero for GitHub App auth')
     # The installation ID is a path segment of the token URL; only ASCII digits may reach it.
     if installation_id and not _INSTALLATION_ID_RE.fullmatch(installation_id):
         raise ValueError('tool_github: installation ID must be numeric for GitHub App auth')
+    if installation_id and int(installation_id) <= 0:
+        raise ValueError('tool_github: installation ID must be greater than zero for GitHub App auth')
     # Parse the PEM now so a malformed key surfaces at pipeline open, not on the first tool call.
     github_client.load_app_private_key(private_key_pem)
     return {
@@ -391,7 +396,13 @@ def _read_tools(raw) -> frozenset:
 
 def _read_options(cfg) -> dict:
     """Parse the non-auth options; ``beginGlobal`` and ``validateConfig`` share it."""
+    default_repo = _text(cfg.get('defaultRepo'))
+    try:
+        credentials.check_scope(default_repo, None)
+    except github_client.CredentialError:
+        raise ValueError('tool_github: defaultRepo must be a repository in owner/repo form') from None
     return {
+        'defaultRepo': default_repo,
         'tools': validate_tool_names(_read_tools(cfg.get('tools'))),
         'graphqlAllowMutations': _read_flag(cfg, 'graphqlAllowMutations'),
         'graphqlMaxResponseBytes': _read_int(cfg, _GRAPHQL_MAX_BYTES),
@@ -427,10 +438,10 @@ class IGlobal(IGlobalBase):
             return
 
         cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-        self.default_repo = str((cfg.get('defaultRepo') or '')).strip()
         self.read_only = bool(cfg.get('readOnly', False))
 
         options = _read_options(cfg)
+        self.default_repo = options['defaultRepo']
         self.tools = options['tools']
         self.graphql_max_bytes = options['graphqlMaxResponseBytes']
         self.graphql_allow_mutations = options['graphqlAllowMutations']

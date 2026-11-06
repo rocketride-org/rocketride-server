@@ -904,21 +904,18 @@ def test_a_malformed_organization_is_refused_before_matching(github):
     assert github.calls == []
 
 
-def test_a_malformed_default_repo_does_not_break_a_pat(github):
+def test_an_empty_default_repo_does_not_break_a_pat(github):
     github.routes[('GET', '/user')] = response({'login': 'me', 'type': 'User'})
     github.routes[('POST', '/graphql')] = response({'data': {'viewer': {'login': 'me'}}})
-    with real_node({'token': SENTINEL_PAT, 'defaultRepo': 'acme'}) as inst:
+    with real_node({'token': SENTINEL_PAT, 'defaultRepo': ''}) as inst:
         assert dispatch(inst, 'user_get', {})['data'] == {'login': 'me', 'type': 'User'}
         assert dispatch(inst, 'graphql', {'query': 'query { viewer { login } }'})['status'] == 200
 
 
-def test_a_malformed_default_repo_is_a_result_where_it_picks_the_credential(github):
-    with real_node({'credentialMap': {'acme/*': 'tok-owner'}, 'defaultRepo': 'acme'}) as inst:
-        from tool_github.credentials import BAD_REPOSITORY
-
-        result = dispatch(inst, 'user_get', {})
-    assert result['status'] is None
-    assert result['message'] == BAD_REPOSITORY
+def test_a_malformed_default_repo_is_refused_before_it_can_pick_a_credential(github):
+    with pytest.raises(ValueError, match='defaultRepo must be a repository in owner/repo form'):
+        with real_node({'credentialMap': {'acme/*': 'tok-owner'}, 'defaultRepo': 'acme'}):
+            pytest.fail('pipeline started with an invalid credential-routing default')
     assert github.calls == []
 
 
