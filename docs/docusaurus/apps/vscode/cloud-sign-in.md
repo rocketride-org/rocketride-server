@@ -86,5 +86,19 @@ extension sends is the usual cause.
 `error_description`. `redirect_uri is missing in the client configuration`
 means the registration you reached does not list your editor's scheme.
 
-**Sign-in reports success but you are still signed out.** Report it. That
-combination should not be reachable, and it hides its own cause.
+**Sign-in reports success but you are still signed out.** Report it — unless
+the message is "RocketRide Cloud sign-in succeeded, but no active API key was
+found for this account. Sign in to RocketRide Cloud in your browser to create
+a new key, then try again.", which is a known, separate case covered just
+below. Otherwise this combination should not be reachable, and it hides its
+own cause.
+
+**"RocketRide Cloud sign-in succeeded, but no active API key was found for
+this account. Sign in to RocketRide Cloud in your browser to create a new
+key, then try again."** Authentication itself succeeded — the account exists
+and is not on the access waitlist — but the server minted no token because
+every `rr_*` key on the account is inactive or revoked. The message includes
+an "Open RocketRide Cloud" button; the browser panel it opens supports
+creating a key, not reactivating a revoked one. This is distinct from the
+waitlist case: a waitlisted account shows an access-queue message instead,
+with no mention of API keys.
