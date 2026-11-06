@@ -24,6 +24,10 @@ import pytest
 _REPO = Path(__file__).resolve().parents[2]
 _REQUIRED = bool(os.environ.get('RR_REQUIRE_DB_TESTS'))
 
+# One xdist worker runs every module that creates tables in the RR_TEST_PG_DSN
+# database (see the group in test_rocketride_db_live.py).
+pytestmark = pytest.mark.xdist_group('rocketride_pg_live')
+
 
 @pytest.fixture(params=['rocketride_vector', 'store_postgres'])
 def store_env(monkeypatch, request):
@@ -132,6 +136,16 @@ def test_replacement_preserves_other_documents(store_env):
     store.addChunks([_doc(), _doc(chunk_id=1), _doc('b')])
     store.addChunks([_doc(content='replacement')])
     assert _rows(raw, table) == [('a', 0, 'replacement'), ('b', 0, 'original')]
+
+
+def test_every_flush_of_one_object_is_kept(store_env):
+    """An object written in flushes of 64 chunks keeps all of them; only chunk 0 starts it over (#1986)."""
+    store, raw, table = store_env
+    for flush in (range(0, 64), range(64, 128), range(128, 153)):
+        store.addChunks([_doc('big', chunk_id) for chunk_id in flush])
+    assert [chunk_id for _, chunk_id, _ in _rows(raw, table)] == list(range(153))
+    store.addChunks([_doc('big', 0, 'again'), _doc('big', 1, 'again')])
+    assert _rows(raw, table) == [('big', 0, 'again'), ('big', 1, 'again')]
 
 
 def test_failed_batch_rolls_back_deletion_and_partial_inserts(store_env):

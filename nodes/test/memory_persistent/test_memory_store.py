@@ -84,28 +84,30 @@ def test_inmemory_keys_added_after_session_start_inherit_remaining_ttl():
     not outlive it. The in-memory backend stores keys in the session's dict,
     so they are purged when _expire_if_needed sees expires_at passed.
     """
-    backend = InMemoryBackend()
-    # 0.5 second TTL
-    backend.create_session('session-ttl', ttl_seconds=0.5)
+    now = [1000.0]
+    with patch('nodes.memory_persistent.memory_store.time') as fake_time:
+        fake_time.time = lambda: now[0]
+        backend = InMemoryBackend()
+        backend.create_session('session-ttl', ttl_seconds=0.5)
 
-    # Add a key well after creation (but still within TTL)
-    time.sleep(0.2)
-    put_result = backend.put('session-ttl', 'late_key', 'late_value')
-    assert put_result['ok'] is True
+        # Add a key well after creation (but still within TTL)
+        now[0] += 0.2
+        put_result = backend.put('session-ttl', 'late_key', 'late_value')
+        assert put_result['ok'] is True
 
-    # Still within TTL window — key must be retrievable
-    got = backend.get('session-ttl', 'late_key')
-    assert got['ok'] is True
-    assert got['value'] == 'late_value'
+        # Still within TTL window: key must be retrievable
+        got = backend.get('session-ttl', 'late_key')
+        assert got['ok'] is True
+        assert got['value'] == 'late_value'
 
-    # Wait past the original session TTL
-    time.sleep(0.5)
+        # Move past the original session TTL
+        now[0] += 0.5
 
-    # Key must have expired with the session, not outlasted it
-    got_after = backend.get('session-ttl', 'late_key')
-    assert got_after['ok'] is False, (
-        'Late-added key should inherit remaining session TTL and be purged when the session expires; got stragglers instead.'
-    )
+        # Key must have expired with the session, not outlasted it
+        got_after = backend.get('session-ttl', 'late_key')
+        assert got_after['ok'] is False, (
+            'Late-added key should inherit remaining session TTL and be purged when the session expires; got stragglers instead.'
+        )
 
 
 def test_inmemory_create_prunes_expired_session_before_duplicate_check():
