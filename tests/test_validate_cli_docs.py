@@ -115,6 +115,10 @@ def test_package_table_accepts_the_real_differences():
             'lists `deploy list --team`, which both CLIs have',
         ),
         (
+            '| `app dev`, `app deploy --publish` | Yes | No |\n| `diff` | No | Yes |\n| `deploy list --team` | Yes | Yes |\n',
+            'lists `deploy list --team`, which both CLIs have',
+        ),
+        (
             '| `app dev`, `app deploy --publish`, `app ship` | Yes | No |\n| `diff` | No | Yes |\n',
             'lists `app ship`, which neither CLI has',
         ),

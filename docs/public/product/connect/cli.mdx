@@ -111,11 +111,12 @@ rocketride login --apikey <key>
 
 Against RocketRide Cloud, signing in opens your browser and mints a personal API
 key. A self-hosted server takes an API key, from `--apikey` or a
-prompt. The credentials go to `.env` as the development pair and, unless you
-pass `--no-deploy`, as the deployment pair too. `init` writes credentials only
-when it signs you in. If the development pair already in `.env` works, `init`
-reuses it and writes nothing, so run `rocketride login --deploy` to add the
-deployment pair.
+prompt. The credentials go to `.env` as the development pair. They also go to
+the deployment pair, unless you pass `--no-deploy` or `.env` already has a
+deployment pair for a different server, which both commands leave alone.
+`init` writes credentials only when it signs you in. If the development pair
+already in `.env` works, `init` reuses it and writes nothing. To set or change
+the deployment pair in either case, run `rocketride login --deploy --uri <uri>`.
 
 Key flags:
 
