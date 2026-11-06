@@ -26,6 +26,8 @@
  *     wins over the generator. A curated field may carry `auto_wire: false`: it
  *     is described but never auto-wired, for a field the node reads only
  *     inside the rows of a list, where a top-level binding would be ignored.
+ *     The MCP catalog parser treats it as `required: false` for readiness
+ *     and setup, even if `required` is omitted or a stub sets it to true.
  *   - Any detected path with no catalog entry gets a stub appended
  *     (`review: true`) so a human can give it a real name.
  *   - Staleness is split by who owns the field:
