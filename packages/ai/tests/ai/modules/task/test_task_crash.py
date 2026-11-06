@@ -124,7 +124,8 @@ def server(request, tmp_path_factory):
     _write_node(workspace)
 
     port = _free_port()
-    args = [sys.executable, 'ai/eaas.py', f'--port={port}', f'--node_path={workspace}']
+    # Task ports too, apart from those of the builder's test servers, which start at 20000
+    args = [sys.executable, 'ai/eaas.py', f'--port={port}', f'--base_port={_free_port()}', f'--node_path={workspace}']
     if dumps:
         args.append('--dumps')
 
