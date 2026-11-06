@@ -683,20 +683,23 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
           time limit itself; ``is_sql_safe`` refuses a ``SETTINGS`` clause, and only a MIN/MAX constraint
           in the profile makes the server refuse it. With readonly=2 the node may not send readonly=1, so
           table functions run when the user holds their grants.
-        - SQLite: ``PRAGMA query_only``.
+        - SQLite: ``PRAGMA query_only``, with no time limit: a slow query runs to its end. No shipped node uses
+          SQLite.
 
         Each dialect's helper (``_mysql_read_only_statements`` and its siblings) reads what it needs from the
-        session and returns the statements to run before the query and after it. A rollback then ends any transaction that
-        read opened, and only after it do those statements run: MySQL and MariaDB apply a session's access mode
-        from the next transaction on, so a transaction already open would run the query read-write, and on
-        PostgreSQL the statements must open the query's transaction, so no rollback may follow them.
+        session and returns the statements to run before the query and after it. A rollback then ends any
+        transaction that read opened, and only after it do those statements run: MySQL and MariaDB apply a
+        session's access mode from the next transaction on, so a transaction already open would run the query
+        read-write, and on PostgreSQL the statements must open the query's transaction, so no rollback may
+        follow them.
 
-        Nothing outlives the block: the transaction is rolled back, and the session settings the block changed
-        get back the values they had before it (which the server, ``init_connect`` or a role may have set, so
-        not the defaults) before the connection goes back to the pool. A connection whose reset fails is
-        discarded. Reads of server files and signals to other sessions (``pg_read_file``,
-        ``pg_terminate_backend``, ``LOAD_FILE``) are reads to the database: only a role without those
-        privileges stops them.
+        The transaction is rolled back, and the session settings the block changed get back the values they
+        had before it (which the server, ``init_connect`` or a role may have set, so not the defaults) before
+        the connection goes back to the pool. A connection whose reset fails is discarded. What a rollback
+        does not end stays on the pooled connection: a session-level lock that a ``SELECT`` takes
+        (PostgreSQL ``pg_advisory_lock``, MySQL ``GET_LOCK``) and MySQL user variables (``@x``). Reads of
+        server files and signals to other sessions (``pg_read_file``, ``pg_terminate_backend``,
+        ``LOAD_FILE``) are reads to the database: only a role without those privileges stops them.
 
         Raises:
             RuntimeError: The engine's dialect has no read-only mode here, so no query is run.

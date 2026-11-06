@@ -122,14 +122,75 @@ def test_rejects_chain_with_any_unsafe_statement(sql):
     ],
 )
 def test_rejects_a_chain_that_would_get_around_a_postgres_read_only_transaction(sql):
-    """On PostgreSQL a ;-chain can end the read-only transaction or lift its time limit, so this check must stop it."""
+    """On PostgreSQL a ;-chain can end the read-only transaction or lift its time limit, so this check must stop it.
+
+    Args:
+        sql: The SQL under test.
+    """
     assert is_sql_safe(sql) is False
 
 
 @pytest.mark.parametrize('sql', ['SELECT 1; SELECT 2', 'SELECT 1;\nSELECT 2;\n', 'EXPLAIN SELECT 1; SELECT 2'])
 def test_rejects_more_than_one_statement_even_reads(sql):
-    """A generated query is one statement; a chain of reads is refused too."""
+    """A generated query is one statement; a chain of reads is refused too.
+
+    Args:
+        sql: The SQL under test.
+    """
     assert is_sql_safe(sql) is False
+
+
+@pytest.mark.parametrize(
+    'sql',
+    [
+        # PostgreSQL reads a$$x$ as one name (a name may hold $), so no dollar quote hides the ';', and the #
+        # hides the rest from the MySQL reading
+        'SELECT 1 #2 AS a$$x$; SELECT 2 AS b$$x$',
+        'SELECT 1 #2 AS a$$x$; COMMIT; INSERT INTO t VALUES (1); SELECT 2 AS b$$x$',
+        # A name may hold any non-ASCII character: a no-break space, an arrow, a letter
+        'SELECT 1 #2 AS a\u00a0$x$; COMMIT; INSERT INTO t VALUES (1); SELECT 2 AS b\u00a0$x$',
+        'SELECT 1 #2 AS a\u2192$x$; COMMIT; INSERT INTO t VALUES (1); SELECT 2 AS b\u2192$x$',
+        'SELECT 1 #2 AS a\u00e9$x$; COMMIT; INSERT INTO t VALUES (1); SELECT 2 AS b\u00e9$x$',
+        # A dollar-quote tag may hold non-ASCII characters
+        "SELECT $\u00e9$'$\u00e9$; SELECT 'second'",
+        "SELECT $\u00e9$'$\u00e9$; COMMIT; INSERT INTO t VALUES (1); SELECT 'x' -- '",
+        "SELECT $\u00a0$'$\u00a0$; COMMIT; INSERT INTO t VALUES (1); SELECT 'x' -- '",
+        # An E that continues a name starts no E'...' string, so the backslash escapes nothing
+        "SELECT 1 #2, x\u00a0E'a\\'; COMMIT; INSERT INTO t VALUES (1); SELECT 1 -- '",
+        "SELECT 1 #2, x$E'a\\'; COMMIT; INSERT INTO t VALUES (1); SELECT 1 -- '",
+        # With standard_conforming_strings off, \' is a quote in any string
+        "SELECT 1 #2, 'a\\''; COMMIT; INSERT INTO t VALUES (1); SELECT 'x' -- '",
+    ],
+)
+def test_postgres_names_tags_and_string_settings_cannot_hide_a_statement(sql):
+    """The PostgreSQL reading follows its lexer (scan.l) for names, dollar-quote tags and both string settings.
+
+    Args:
+        sql: The SQL under test.
+    """
+    assert is_sql_safe(sql) is False
+
+
+@pytest.mark.parametrize(
+    'sql',
+    [
+        'SELECT 1 AS a$$x$',
+        'SELECT a\u00a0$x$ FROM t',
+        'SELECT col$1 FROM t',
+        "SELECT 'a;b'",
+        'SELECT $$a$$',
+        "SELECT $\u00e9$'$\u00e9$ AS q",
+        "SELECT E'a\\'b' AS q",
+        "SELECT 'C:\\path' AS p",
+    ],
+)
+def test_postgres_names_with_dollar_or_non_ascii_still_pass(sql):
+    """A name with $ or non-ASCII characters, a non-ASCII tag and a backslash in a string do not reject a read.
+
+    Args:
+        sql: The SQL under test.
+    """
+    assert is_sql_safe(sql) is True
 
 
 # ---------------------------------------------------------------------------
@@ -216,7 +277,11 @@ def test_into_inside_string_does_not_false_positive():
     ],
 )
 def test_literals_and_comments_cannot_hide_a_clause(sql):
-    """Masking follows each database's reading of quotes and comments, so nothing real is hidden."""
+    """Masking follows each database's reading of quotes and comments, so nothing real is hidden.
+
+    Args:
+        sql: The SQL under test.
+    """
     assert is_sql_safe(sql) is False
 
 
@@ -233,7 +298,11 @@ def test_literals_and_comments_cannot_hide_a_clause(sql):
     ],
 )
 def test_select_that_writes_or_locks_is_rejected(sql):
-    """SELECT INTO creates a table (PostgreSQL) or a file (MySQL); FOR UPDATE / SHARE take row locks."""
+    """SELECT INTO creates a table (PostgreSQL) or a file (MySQL); FOR UPDATE / SHARE take row locks.
+
+    Args:
+        sql: The SQL under test.
+    """
     assert is_sql_safe(sql) is False
 
 
@@ -251,7 +320,11 @@ def test_select_that_writes_or_locks_is_rejected(sql):
     ],
 )
 def test_a_clickhouse_settings_clause_is_rejected(sql):
-    """ClickHouse's SETTINGS clause lets a readonly=2 user lift the time limit the node sets."""
+    """ClickHouse's SETTINGS clause lets a readonly=2 user lift the time limit the node sets.
+
+    Args:
+        sql: The SQL under test.
+    """
     assert is_sql_safe(sql) is False
 
 
@@ -269,7 +342,11 @@ def test_a_clickhouse_settings_clause_is_rejected(sql):
     ],
 )
 def test_the_word_settings_alone_is_not_a_settings_clause(sql):
-    """A table, column or text named settings is not the clause."""
+    """A table, column or text named settings is not the clause.
+
+    Args:
+        sql: The SQL under test.
+    """
     assert is_sql_safe(sql) is True
 
 
@@ -288,5 +365,9 @@ def test_the_word_settings_alone_is_not_a_settings_clause(sql):
     ],
 )
 def test_ordinary_reads_with_quotes_and_comments_pass(sql):
-    """Quoted text, identifiers and comments that only look like a clause do not reject a read."""
+    """Quoted text, identifiers and comments that only look like a clause do not reject a read.
+
+    Args:
+        sql: The SQL under test.
+    """
     assert is_sql_safe(sql) is True

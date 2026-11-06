@@ -43,11 +43,25 @@ class _Global(DatabaseGlobalBase):
     READ_QUERY_TIMEOUT = 2
 
     def _connection_params(self, config):
-        """Unused: the tests attach an engine directly."""
+        """Unused: the tests attach an engine directly.
+
+        Args:
+            config: The node configuration.
+
+        Returns:
+            The configuration, unchanged.
+        """
         return dict(config)
 
     def _build_connection_url(self, params):
-        """Unused: the tests attach an engine directly."""
+        """Unused: the tests attach an engine directly.
+
+        Args:
+            params: The connection parameters.
+
+        Returns:
+            An empty URL.
+        """
         return ''
 
 
@@ -55,11 +69,19 @@ class _Instance(DatabaseInstanceBase):
     """Concrete DatabaseInstanceBase."""
 
     def _db_display_name(self):
-        """Name used in messages."""
+        """Name used in messages.
+
+        Returns:
+            The name ``TestDB``.
+        """
         return 'TestDB'
 
     def _db_dialect(self):
-        """Dialect used in prompts."""
+        """Dialect used in prompts.
+
+        Returns:
+            The dialect ``testdb``.
+        """
         return 'testdb'
 
 
@@ -108,7 +130,11 @@ def _count(engine):
 
 
 def test_sqlite_reads_and_refuses_writes(sqlite_global):
-    """A read returns rows; a write inside the block is refused by the database."""
+    """A read returns rows; a write inside the block is refused by the database.
+
+    Args:
+        sqlite_global: A global on an in-memory SQLite database with table ``t``, from the ``sqlite_global`` fixture.
+    """
     with sqlite_global.read_only_connection() as conn:
         assert conn.exec_driver_sql('SELECT count(*) FROM t').scalar() == 2
     with pytest.raises(OperationalError, match='readonly'):
@@ -118,7 +144,11 @@ def test_sqlite_reads_and_refuses_writes(sqlite_global):
 
 
 def test_sqlite_refuses_a_chain(sqlite_global):
-    """sqlite3 runs one statement per call, so a ;-chain cannot switch query_only off and then write."""
+    """sqlite3 runs one statement per call, so a ;-chain cannot switch query_only off and then write.
+
+    Args:
+        sqlite_global: A global on an in-memory SQLite database with table ``t``, from the ``sqlite_global`` fixture.
+    """
     # Python 3.10 raises sqlite3.Warning, which SQLAlchemy does not wrap; 3.11 and later raise ProgrammingError
     with pytest.raises((ProgrammingError, sqlite3.Warning), match='one statement'):
         with sqlite_global.read_only_connection() as conn:
@@ -127,7 +157,11 @@ def test_sqlite_refuses_a_chain(sqlite_global):
 
 
 def test_sqlite_connection_is_writable_again_after_the_block(sqlite_global):
-    """The pooled connection goes back read-write, also after a refused write."""
+    """The pooled connection goes back read-write, also after a refused write.
+
+    Args:
+        sqlite_global: A global on an in-memory SQLite database with table ``t``, from the ``sqlite_global`` fixture.
+    """
     with pytest.raises(OperationalError):
         with sqlite_global.read_only_connection() as conn:
             conn.exec_driver_sql('INSERT INTO t VALUES (3)')
@@ -137,7 +171,11 @@ def test_sqlite_connection_is_writable_again_after_the_block(sqlite_global):
 
 
 def test_sqlite_query_only_set_before_the_block_stays_on(sqlite_global):
-    """A connection that was query-only before the block is query-only after it, not read-write."""
+    """A connection that was query-only before the block is query-only after it, not read-write.
+
+    Args:
+        sqlite_global: A global on an in-memory SQLite database with table ``t``, from the ``sqlite_global`` fixture.
+    """
     with sqlite_global.engine.connect() as conn:
         conn.exec_driver_sql('PRAGMA query_only = ON')
     with sqlite_global.read_only_connection() as conn:
@@ -148,7 +186,11 @@ def test_sqlite_query_only_set_before_the_block_stays_on(sqlite_global):
 
 
 def test_generated_query_paths_use_the_read_only_connection(sqlite_global):
-    """``_executeSQLQuery`` and the EXPLAIN check cannot write, whatever the statement says."""
+    """``_executeSQLQuery`` and the EXPLAIN check cannot write, whatever the statement says.
+
+    Args:
+        sqlite_global: A global on an in-memory SQLite database with table ``t``, from the ``sqlite_global`` fixture.
+    """
     inst = _Instance.__new__(_Instance)
     inst.IGlobal = sqlite_global
 
@@ -238,7 +280,16 @@ def _engine_with(dialect, conn):
     ],
 )
 def test_a_mariadb_url_gets_the_mysql_read_only_session(dialect, is_mariadb, version, read_only, setting, value):
-    """A ``mariadb+`` URL names the dialect ``mariadb``: it gets the MySQL read-only session, with MariaDB's names."""
+    """A ``mariadb+`` URL names the dialect ``mariadb``: it gets the MySQL read-only session, with MariaDB's names.
+
+    Args:
+        dialect: The dialect name the engine reports.
+        is_mariadb: Whether the server says it is MariaDB.
+        version: The server version the dialect reports.
+        read_only: The session variable that holds the read-only flag.
+        setting: The session variable that holds the time limit.
+        value: The time limit the block sets, in that variable's unit.
+    """
     conn = _RecordingConnection(is_mariadb, version=version)
     with _global(_engine_with(dialect, conn)).read_only_connection():
         pass
@@ -274,6 +325,12 @@ def test_the_lookup_transaction_ends_before_the_read_only_statements(dialect, lo
 
     MySQL applies ``SET SESSION TRANSACTION READ ONLY`` from the next transaction on, so one the lookup opened must
     end first; on PostgreSQL ``SET TRANSACTION READ ONLY`` opens the query's transaction, so nothing may end it.
+
+    Args:
+        dialect: The dialect name the engine reports.
+        lookup: The statements that read the session before the block.
+        begin: The statements that make the session read-only.
+        end: The statements that give the session back its settings.
     """
     conn = _RecordingConnection()
     with _global(_engine_with(dialect, conn)).read_only_connection() as block:
@@ -290,7 +347,13 @@ def test_the_lookup_transaction_ends_before_the_read_only_statements(dialect, lo
     ],
 )
 def test_the_session_gets_back_what_it_had_not_the_defaults(dialect, session, end):
-    """A session the server or a role made read-only, or gave a stricter limit, is not reset to read-write."""
+    """A session the server or a role made read-only, or gave a stricter limit, is not reset to read-write.
+
+    Args:
+        dialect: The dialect name the engine reports.
+        session: What the session lookup returns: the read-only flag and, on MySQL, the time limit.
+        end: The statements that give the session back its settings.
+    """
     conn = _RecordingConnection(session=session)
     with _global(_engine_with(dialect, conn)).read_only_connection():
         pass
@@ -346,7 +409,11 @@ def test_a_session_changed_half_way_gets_its_settings_back():
 
 
 def test_a_connection_whose_reset_fails_is_discarded(monkeypatch):
-    """If the session cannot be made read-write again, it must not go back to the pool."""
+    """If the session cannot be made read-write again, it must not go back to the pool.
+
+    Args:
+        monkeypatch: pytest's ``monkeypatch`` fixture.
+    """
     conn = _FailingConnection('PRAGMA query_only = OFF')
     warnings = []
     monkeypatch.setattr('ai.common.database.db_global_base.warning', warnings.append)
@@ -438,11 +505,26 @@ _LIVE = {
 }
 
 
+def _run_all(engine, statements):
+    """Run the statements in one transaction and commit it.
+
+    Args:
+        engine: The engine to connect with.
+        statements: The SQL statements, run in order.
+    """
+    with engine.begin() as conn:
+        for statement in statements:
+            conn.exec_driver_sql(statement)
+
+
 @pytest.fixture(params=sorted(_LIVE))
 def live(request):
     """Yield ``(global, table, case)`` for each configured server, on a one-connection pool.
 
     One connection means the write after the block reuses exactly the connection the block changed.
+
+    Args:
+        request: pytest's request; ``request.param`` names the server.
     """
     case = _LIVE[request.param]
     dsn = os.environ.get(case['env'])
@@ -451,19 +533,19 @@ def live(request):
     engine = create_engine(dsn, pool_size=1, max_overflow=0)
     table = f'rr_read_only_{uuid4().hex[:12]}'
     try:
-        with engine.begin() as conn:
-            for statement in [case['create'], *case['extra']]:
-                conn.exec_driver_sql(statement.format(t=table))
+        _run_all(engine, [statement.format(t=table) for statement in [case['create'], *case['extra']]])
         yield _global(engine), table, case
     finally:
-        with engine.begin() as conn:
-            for statement in case['drop']:
-                conn.exec_driver_sql(statement.format(t=table))
+        _run_all(engine, [statement.format(t=table) for statement in case['drop']])
         engine.dispose()
 
 
 def test_live_server_reads_inside_the_block(live):
-    """A read runs inside the block, so the refusals below come from the server, not from a block that runs nothing."""
+    """A read runs inside the block, so the refusals below come from the server, not from a block that runs nothing.
+
+    Args:
+        live: ``(global, table, case)`` for one live server, from the ``live`` fixture.
+    """
     glb, table, _case = live
     with glb.read_only_connection() as conn:
         assert conn.execute(text(f'SELECT count(*) FROM {table}')).scalar() == 0
@@ -482,12 +564,15 @@ def _mysql_read_only(engine):
 
 
 def test_live_server_refuses_every_write(live):
-    """Each write, lock and DDL statement is refused by the server inside the block, and the table stays empty."""
+    """Each write, lock and DDL statement is refused by the server inside the block, and the table stays empty.
+
+    Args:
+        live: ``(global, table, case)`` for one live server, from the ``live`` fixture.
+    """
     glb, table, case = live
     for statement, refusal in case['refused']:
-        with pytest.raises(Exception, match=refusal):
-            with glb.read_only_connection() as conn:
-                conn.execute(text(statement.format(t=table))).fetchall()
+        with pytest.raises(Exception, match=refusal), glb.read_only_connection() as conn:
+            conn.execute(text(statement.format(t=table))).fetchall()
     with glb.engine.connect() as conn:
         assert conn.exec_driver_sql(f'SELECT count(*) FROM {table}').scalar() == 0
 
@@ -506,6 +591,10 @@ def test_live_a_lookup_that_reads_a_table_leaves_the_write_refused(live, monkeyp
 
     MySQL and MariaDB open a transaction at the first table read and apply ``SET SESSION TRANSACTION READ ONLY``
     from the next one on: the block ends the lookup's transaction first, or this write would run.
+
+    Args:
+        live: ``(global, table, case)`` for one live server, from the ``live`` fixture.
+        monkeypatch: pytest's ``monkeypatch`` fixture.
     """
     glb, table, case = live
     name = _LOOKUP[glb.engine.dialect.name]
@@ -532,7 +621,11 @@ def test_live_a_lookup_that_reads_a_table_leaves_the_write_refused(live, monkeyp
 
 
 def test_live_postgres_chain_needs_the_shape_check(live):
-    """On PostgreSQL a COMMIT in a ;-chain leaves the read-only transaction, so is_sql_safe's chain rule must stop it."""
+    """On PostgreSQL a COMMIT in a ;-chain leaves the read-only transaction, so is_sql_safe's chain rule must stop it.
+
+    Args:
+        live: ``(global, table, case)`` for one live server, from the ``live`` fixture.
+    """
     glb, table, _case = live
     if glb.engine.dialect.name != 'postgresql':
         pytest.skip('this driver refuses a ;-chain: see the refused statements')
@@ -544,8 +637,69 @@ def test_live_postgres_chain_needs_the_shape_check(live):
         assert conn.exec_driver_sql(f'SELECT count(*) FROM {table}').scalar() == 1
 
 
+@pytest.mark.parametrize(
+    'conforming, chain',
+    [
+        ('on', 'SELECT 1 #2 AS a$$x$; COMMIT; INSERT INTO {t} VALUES (9); SELECT 2 AS b$$x$'),
+        ('on', 'SELECT 1 #2 AS a $x$; COMMIT; INSERT INTO {t} VALUES (9); SELECT 2 AS b $x$'),
+        ('on', "SELECT $é$'$é$; COMMIT; INSERT INTO {t} VALUES (9); SELECT 'x' -- '"),
+        ('off', "SELECT 1 #2, 'a\\''; COMMIT; INSERT INTO {t} VALUES (9); SELECT 'x' -- '"),
+    ],
+)
+def test_live_postgres_reads_a_chain_where_a_misread_quote_would_hide_it(live, conforming, chain):
+    """PostgreSQL's lexer splits each of these into statements and the INSERT runs, so is_sql_safe must refuse them.
+
+    Each one passed is_sql_safe while it read ``$`` and non-ASCII characters in names, and ``\\'`` with
+    ``standard_conforming_strings`` off, differently from PostgreSQL.
+
+    Args:
+        live: ``(global, table, case)`` for one live server, from the ``live`` fixture.
+        conforming: The session's ``standard_conforming_strings``, ``on`` or ``off``.
+        chain: The input, with ``{t}`` for the test table.
+    """
+    glb, table, _case = live
+    if glb.engine.dialect.name != 'postgresql':
+        pytest.skip('this driver refuses a ;-chain: see the refused statements')
+    statement = chain.format(t=table)
+    assert not is_sql_safe(statement)
+    with glb.engine.connect() as conn:
+        # The one pooled connection keeps this for the block below
+        conn.exec_driver_sql(f'SET standard_conforming_strings = {conforming}')
+        conn.commit()
+    with glb.read_only_connection() as conn:
+        conn.execute(text(statement))
+    with glb.engine.connect() as conn:
+        assert conn.exec_driver_sql(f'SELECT count(*) FROM {table}').scalar() == 1
+
+
+def test_live_postgres_fails_a_backtick_before_anything_after_it_runs(live):
+    """The PostgreSQL reading masks a MySQL backtick identifier, so it relies on PostgreSQL failing the backtick.
+
+    PostgreSQL reads a backtick as an operator character and ships no operator with one, so the first
+    statement fails and the chain the mask hid never runs.
+
+    Args:
+        live: ``(global, table, case)`` for one live server, from the ``live`` fixture.
+    """
+    glb, table, _case = live
+    if glb.engine.dialect.name != 'postgresql':
+        pytest.skip('this driver refuses a ;-chain: see the refused statements')
+    chain = f'SELECT 1 ` 2; COMMIT; INSERT INTO {table} VALUES (9); SELECT ` 3'
+    assert is_sql_safe(chain)
+    with pytest.raises(Exception, match='operator does not exist'):
+        with glb.read_only_connection() as conn:
+            conn.execute(text(chain))
+    with glb.engine.connect() as conn:
+        assert conn.exec_driver_sql(f'SELECT count(*) FROM {table}').scalar() == 0
+        assert conn.exec_driver_sql("SELECT count(*) FROM pg_operator WHERE strpos(oprname, '`') > 0").scalar() == 0
+
+
 def test_live_postgres_chain_of_reads_lifts_the_time_limit(live):
-    """On PostgreSQL a later SELECT of a ;-chain can switch the time limit off, so is_sql_safe refuses any chain."""
+    """On PostgreSQL a later SELECT of a ;-chain can switch the time limit off, so is_sql_safe refuses any chain.
+
+    Args:
+        live: ``(global, table, case)`` for one live server, from the ``live`` fixture.
+    """
     glb, _table, _case = live
     if glb.engine.dialect.name != 'postgresql':
         pytest.skip('this driver refuses a ;-chain: see the refused statements')
@@ -560,7 +714,11 @@ def test_live_postgres_chain_of_reads_lifts_the_time_limit(live):
 
 
 def test_live_server_stops_a_long_query(live):
-    """A query that would run long is stopped by the server's time limit, when it is reached."""
+    """A query that would run long is stopped by the server's time limit, when it is reached.
+
+    Args:
+        live: ``(global, table, case)`` for one live server, from the ``live`` fixture.
+    """
     glb, _table, case = live
     start = time.monotonic()
     with pytest.raises(Exception, match=case['slow_error']):
@@ -570,7 +728,11 @@ def test_live_server_stops_a_long_query(live):
 
 
 def test_live_connection_is_ordinary_again_after_the_block(live):
-    """After refused writes, the pooled connection writes again and its session settings are back."""
+    """After refused writes, the pooled connection writes again and its session settings are back.
+
+    Args:
+        live: ``(global, table, case)`` for one live server, from the ``live`` fixture.
+    """
     glb, table, case = live
     statement, refusal = case['refused'][0]
     with pytest.raises(Exception, match=refusal):
@@ -586,7 +748,11 @@ def test_live_connection_is_ordinary_again_after_the_block(live):
 
 
 def test_live_explain_check_stops_near_the_limit(live):
-    """The EXPLAIN check is time-limited too: on MySQL, whose planner runs a constant subquery, the limit stops it."""
+    """The EXPLAIN check is time-limited too: on MySQL, whose planner runs a constant subquery, the limit stops it.
+
+    Args:
+        live: ``(global, table, case)`` for one live server, from the ``live`` fixture.
+    """
     glb, _table, case = live
     if not case['slow_explain']:
         pytest.skip('this server plans the slow query without running it')
@@ -629,7 +795,11 @@ _STRICT_SESSION = {
 
 
 def test_live_a_strict_session_comes_back_as_it_was(live):
-    """A pooled session that was read-only with a stricter limit is not reset to read-write and the defaults."""
+    """A pooled session that was read-only with a stricter limit is not reset to read-write and the defaults.
+
+    Args:
+        live: ``(global, table, case)`` for one live server, from the ``live`` fixture.
+    """
     glb, _table, _case = live
     dialect = glb.engine.dialect
     server = 'mariadb' if getattr(dialect, 'is_mariadb', False) else dialect.name
@@ -637,19 +807,13 @@ def test_live_a_strict_session_comes_back_as_it_was(live):
         pytest.skip('ClickHouse sends its settings with each query: there is no session to restore')
     strict, read, expected, undo = _STRICT_SESSION[server]
     try:
-        with glb.engine.connect() as conn:
-            for statement in strict:
-                conn.exec_driver_sql(statement)
-            conn.commit()
+        _run_all(glb.engine, strict)
         with glb.read_only_connection() as conn:
             conn.execute(text('SELECT 1')).fetchall()
         with glb.engine.connect() as conn:
             assert tuple(conn.exec_driver_sql(read).one()) == expected
     finally:
-        with glb.engine.connect() as conn:
-            for statement in undo:
-                conn.exec_driver_sql(statement)
-            conn.commit()
+        _run_all(glb.engine, undo)
 
 
 class _ProfileConnection:
@@ -709,6 +873,13 @@ def test_clickhouse_sends_only_the_settings_the_profile_allows(
     """A setting the user may not change fails every query, a looser limit would replace the profile's: neither is sent.
 
     A query that runs with no limit or a longer one than the node's gets one warning, also over several blocks.
+
+    Args:
+        monkeypatch: pytest's ``monkeypatch`` fixture.
+        readonly: The ``readonly`` row of ``system.settings``: ``(value, readonly, min, max)``.
+        max_execution_time: The ``max_execution_time`` row of ``system.settings``: ``(value, readonly, min, max)``.
+        settings: The settings the node should send with each query.
+        warns: Whether the node should warn that the query runs with no limit or a longer one.
     """
     warnings = []
     monkeypatch.setattr('ai.common.database.db_global_base.warning', warnings.append)
@@ -724,7 +895,11 @@ def test_clickhouse_sends_only_the_settings_the_profile_allows(
 
 
 def test_clickhouse_settings_follow_a_profile_changed_while_the_node_runs(monkeypatch):
-    """A profile changed from readonly=1 to writable gets readonly=1 sent from the next block on."""
+    """A profile changed from readonly=1 to writable gets readonly=1 sent from the next block on.
+
+    Args:
+        monkeypatch: pytest's ``monkeypatch`` fixture.
+    """
     monkeypatch.setattr('ai.common.database.db_global_base.warning', lambda message: None)
     glb = _global(None)
     conn = _ProfileConnection(_READONLY_1, ('1', 1, None, None))
@@ -735,7 +910,11 @@ def test_clickhouse_settings_follow_a_profile_changed_while_the_node_runs(monkey
 
 
 def test_clickhouse_writes_each_new_warning(monkeypatch):
-    """The warning is written again when the limit the query runs under changes, not for every block."""
+    """The warning is written again when the limit the query runs under changes, not for every block.
+
+    Args:
+        monkeypatch: pytest's ``monkeypatch`` fixture.
+    """
     warnings = []
     monkeypatch.setattr('ai.common.database.db_global_base.warning', warnings.append)
     glb = _global(None)
@@ -761,9 +940,57 @@ _LIVE_PROFILES = [
 ]
 
 
+def _create_writing_user(admin, user, password, profile, database):
+    """Create a ClickHouse user with ``profile`` that may create tables in ``database`` and insert into them.
+
+    The user may write, so a refused write is the read-only setting, not a missing grant.
+
+    Args:
+        admin: An engine whose user may create users.
+        user: The new user's name.
+        password: Its password.
+        profile: The ``SETTINGS`` clause of its profile.
+        database: The database it may write to.
+
+    Returns:
+        ``(created, error)``: whether ``CREATE USER`` ran, and what stopped the setup, or None.
+    """
+    created = False
+    try:
+        with admin.connect() as conn:
+            conn.exec_driver_sql(
+                f"CREATE USER {user} IDENTIFIED WITH sha256_password BY '{password}' SETTINGS {profile}"
+            )
+            created = True
+            conn.exec_driver_sql(f'GRANT CREATE TABLE, INSERT ON {database}.* TO {user}')
+    except Exception as e:  # noqa: BLE001 - each server says no in its own way
+        return created, e
+    return created, None
+
+
+def _drop_writing_user(admin, user, database):
+    """Drop the user, and the table that is there only if the read-only setting failed to refuse it.
+
+    Args:
+        admin: An engine whose user may drop users.
+        user: The user's name.
+        database: The database it could write to.
+    """
+    with admin.connect() as conn:
+        conn.exec_driver_sql(f'DROP TABLE IF EXISTS {database}.{user}_t')
+        conn.exec_driver_sql(f'DROP USER IF EXISTS {user}')
+
+
 @pytest.mark.parametrize(('profile', 'limit', 'warns'), _LIVE_PROFILES)
 def test_live_clickhouse_profiles_run_read_only(monkeypatch, profile, limit, warns):
-    """A ClickHouse user with each kind of profile runs a query read-only, under the strictest limit it may have."""
+    """A ClickHouse user with each kind of profile runs a query read-only, under the strictest limit it may have.
+
+    Args:
+        monkeypatch: pytest's ``monkeypatch`` fixture.
+        profile: The ``SETTINGS`` clause of the test user's profile.
+        limit: The time limit in seconds the query should run under, 0 for none.
+        warns: Whether the node should warn that the query runs with no limit or a longer one.
+    """
     dsn = os.environ.get('RR_TEST_CLICKHOUSE_DSN')
     if not dsn:
         pytest.skip('Set RR_TEST_CLICKHOUSE_DSN to run against a live ClickHouse server')
@@ -771,18 +998,12 @@ def test_live_clickhouse_profiles_run_read_only(monkeypatch, profile, limit, war
     monkeypatch.setattr('ai.common.database.db_global_base.warning', warnings.append)
     admin = create_engine(dsn)
     user, password = f'rr_profile_{uuid4().hex[:12]}', uuid4().hex
+    database = make_url(dsn).database
     created, engine = False, None
     try:
-        try:
-            with admin.connect() as conn:
-                conn.exec_driver_sql(
-                    f"CREATE USER {user} IDENTIFIED WITH sha256_password BY '{password}' SETTINGS {profile}"
-                )
-                created = True
-                # The user may write, so a refused write below is the read-only setting, not a missing grant
-                conn.exec_driver_sql(f'GRANT CREATE TABLE, INSERT ON {make_url(dsn).database}.* TO {user}')
-        except Exception as e:  # noqa: BLE001 - each server says no in its own way
-            pytest.skip(f'The DSN user cannot create a user and let it write: {e}')
+        created, error = _create_writing_user(admin, user, password, profile, database)
+        if error is not None:
+            pytest.skip(f'The DSN user cannot create a user and let it write: {error}')
         engine = create_engine(make_url(dsn).set(username=user, password=password))
         glb = _global(engine)
         with glb.read_only_connection() as conn:
@@ -790,17 +1011,13 @@ def test_live_clickhouse_profiles_run_read_only(monkeypatch, profile, limit, war
         assert int(row[0]) >= 1
         assert float(row[1]) == limit
         assert len(warnings) == (1 if warns else 0)
-        with pytest.raises(Exception, match='readonly mode'):
-            with glb.read_only_connection() as conn:
-                conn.exec_driver_sql(f'CREATE TABLE {user}_t (id Int32) ENGINE = Memory')
+        with pytest.raises(Exception, match='readonly mode'), glb.read_only_connection() as conn:
+            conn.exec_driver_sql(f'CREATE TABLE {user}_t (id Int32) ENGINE = Memory')
     finally:
         if engine is not None:
             engine.dispose()
         if created:
-            with admin.connect() as conn:
-                # Only there if the read-only setting failed to refuse it
-                conn.exec_driver_sql(f'DROP TABLE IF EXISTS {make_url(dsn).database}.{user}_t')
-                conn.exec_driver_sql(f'DROP USER IF EXISTS {user}')
+            _drop_writing_user(admin, user, database)
         admin.dispose()
 
 

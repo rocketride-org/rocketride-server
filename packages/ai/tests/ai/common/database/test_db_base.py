@@ -1203,12 +1203,20 @@ def _ask_for_widgets(fake_global):
 
 
 def test_execute_sql_query_returns_an_empty_list_when_no_row_matches(base):
-    """A query that matches no row ran: [] is its result, and only None means the query failed."""
+    """A query that matches no row ran: [] is its result, and only None means the query failed.
+
+    Args:
+        base: A ``DatabaseGlobalBase`` on an in-memory SQLite engine, from the ``base`` fixture.
+    """
     assert _sql_instance(_empty_widgets_global(base))._executeSQLQuery('SELECT id FROM widgets') == []
 
 
 def test_get_data_returns_no_rows_as_a_valid_result(base):
-    """get_data answers a generated query that matches no row with zero rows, not with the failure message."""
+    """get_data answers a generated query that matches no row with zero rows, not with the failure message.
+
+    Args:
+        base: A ``DatabaseGlobalBase`` on an in-memory SQLite engine, from the ``base`` fixture.
+    """
     result = _ask_for_widgets(_empty_widgets_global(base)).get_data({'question': 'widgets'})
 
     assert result == {'valid': True, 'rows': [], 'sql': 'SELECT id FROM widgets', 'row_limit': 250}

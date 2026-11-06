@@ -46,15 +46,19 @@ Literals and comments are masked before any check, so a keyword inside a
 string cannot trip a check and a comment cannot hide a clause from one. How
 a server reads quotes and comments depends on the database: MySQL escapes a
 quote with a backslash and starts a comment with ``#``; PostgreSQL does
-neither, but nests block comments and has dollar quoting. Masking by the
-wrong rules can hide real SQL behind a misread quote, so the SQL is checked
-once under PostgreSQL rules and once under MySQL rules, and must pass both.
+neither, but nests block comments and has dollar quoting, and a server with
+``standard_conforming_strings`` off escapes a quote with a backslash in every
+string. Masking by the wrong rules can hide real SQL behind a misread quote,
+so the SQL is checked under PostgreSQL rules with that setting on, again
+with it off, and under MySQL rules, and must pass all three. The PostgreSQL
+rules follow its lexer (``scan.l``): a name may hold ``$`` and any non-ASCII
+character, so ``a$$x$`` is one name, not a name and a dollar quote.
 """
 
 import re
 
-# A PostgreSQL dollar-quote delimiter: $$ or $tag$
-_DOLLAR_TAG = re.compile(r'\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$')
+# A PostgreSQL dollar-quote delimiter: $$ or $tag$; a tag may hold any non-ASCII character (scan.l dolq_start, dolq_cont)
+_DOLLAR_TAG = re.compile(r'\$(?:[A-Za-z_\x80-\U0010ffff][A-Za-z0-9_\x80-\U0010ffff]*)?\$')
 
 # MySQL block comments whose body the server runs: /*! version comments, MariaDB /*M!, and optimizer
 # hints /*+ (a hint can lift the statement time limit)
@@ -182,15 +186,29 @@ def _mask_dollar_quoted(sql: str, i: int, tag: str, out: list[str]) -> int:
     return end + len(tag)
 
 
-def _mask_postgres(sql: str) -> str:
+def _pg_name_char(c: str) -> bool:
+    """Return True if PostgreSQL reads ``c`` as part of a name that is already under way (scan.l ident_cont).
+
+    Args:
+        c: One character, or ``''`` at the start of the text.
+
+    Returns:
+        Whether ``c`` is an ASCII letter or digit, ``_``, ``$`` or any non-ASCII character.
+    """
+    return bool(c) and (c in '_$' or not c.isascii() or c.isalnum())
+
+
+def _mask_postgres(sql: str, backslash_strings: bool) -> str:
     """Blank literals, quoted identifiers and comments as PostgreSQL reads them.
 
     ``'...'`` (``''`` escape; an ``E'...'`` string also takes backslash escapes), ``"..."`` identifiers,
-    ``$tag$...$tag$``, ``--`` to the end of the line (CR or LF), and nested ``/* */``. MySQL backtick
-    identifiers are masked too.
+    ``$tag$...$tag$``, ``--`` to the end of the line (CR or LF), and nested ``/* */``. A ``$`` or an ``E``
+    that continues a name (see ``_pg_name_char``) starts nothing. MySQL backtick identifiers are masked too.
 
     Args:
         sql: The statement text.
+        backslash_strings: Whether every ``'...'`` string takes backslash escapes, as on a server with
+            ``standard_conforming_strings`` off.
 
     Returns:
         Text of the same length with only the executable parts left.
@@ -200,14 +218,14 @@ def _mask_postgres(sql: str) -> str:
     while i < n:
         ch = sql[i]
         before = sql[i - 1] if i else ''
-        after_word = before.isalnum() or before == '_'
-        dollar = _DOLLAR_TAG.match(sql, i) if ch == '$' and not after_word else None
+        dollar = _DOLLAR_TAG.match(sql, i) if ch == '$' and not _pg_name_char(before) else None
         if ch == "'":
-            # E'...' (the E not ending a longer word) takes backslash escapes
-            escape_string = before in ('e', 'E') and not (i > 1 and (sql[i - 2].isalnum() or sql[i - 2] == '_'))
+            # E'...' (the E not ending a longer name) takes backslash escapes
+            escape_string = backslash_strings or (before in ('e', 'E') and not (i > 1 and _pg_name_char(sql[i - 2])))
             i = _mask_quoted(sql, i, "'", escape_string, out)
         elif ch in ('"', '`'):
-            # PostgreSQL rejects a backtick outright, so masking a MySQL `identifier` here hides nothing it runs
+            # A backtick is an operator character to PostgreSQL, which ships no operator with one, so the statement
+            # that holds it fails before any after it runs: masking a MySQL `identifier` here hides nothing it runs
             i = _mask_quoted(sql, i, ch, False, out)
         elif dollar:
             i = _mask_dollar_quoted(sql, i, dollar.group(0), out)
@@ -284,8 +302,8 @@ def is_sql_safe(sql: str) -> bool:
     ClickHouse ``SETTINGS`` clause, which can lift the time limit. So is
     a ``;``-chain of more than one statement, reads included: on PostgreSQL a later statement could end
     the read-only transaction or lift its time limit, and a generated query is one statement. A trailing
-    ``;`` is fine. The text is read under PostgreSQL and under MySQL rules (see the module docstring) and
-    must pass both.
+    ``;`` is fine. The text is read under PostgreSQL rules with ``standard_conforming_strings`` on and off,
+    and under MySQL rules (see the module docstring), and must pass all three.
 
     Not a read-only guarantee: see the module docstring. Empty or whitespace-only input passes, as there is
     no statement to reject; a caller that must forbid empty SQL guards that itself.
@@ -296,4 +314,8 @@ def is_sql_safe(sql: str) -> bool:
     Returns:
         Whether the SQL may be sent to the database.
     """
-    return _is_read_shaped(_mask_postgres(sql)) and _is_read_shaped(_mask_mysql(sql))
+    return (
+        _is_read_shaped(_mask_postgres(sql, backslash_strings=False))
+        and _is_read_shaped(_mask_postgres(sql, backslash_strings=True))
+        and _is_read_shaped(_mask_mysql(sql))
+    )
