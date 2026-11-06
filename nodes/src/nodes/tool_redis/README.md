@@ -85,11 +85,15 @@ write demonstration and review the agent behavior before enabling its writes.
 The supplied `example.pipe` is a read-only Tools-source example with `mode: Source` for the Development panel. Enable writes explicitly for local exercises, or attach the node to an agent and provide an LLM. SDK engine tests call all seven tools without a model; agent-driven testing requires your own model credentials.
 
 For a local agent walkthrough, [agent-example.pipe](agent-example.pipe) connects
-Chat, LlamaIndex, Ollama and Redis using catalog nodes. It uses the prepared
-`rocketride-redis-qwen2.5-7b` model, explicit one-operation instructions, and
-read-only Redis access by default. Follow the real-model acceptance setup in
-`nodes/test/tool_redis/README.md` to create that model. For disposable write tests,
-choose a unique prefix, configure the test port and enable writes explicitly.
+Chat, LlamaIndex, Gemini Flash and Redis using catalog nodes. It uses
+`models/gemini-3.6-flash` with `${ROCKETRIDE_GEMINI_KEY}`, explicit one-operation
+instructions, and read-only Redis access by default. Copy
+`nodes/test/tool_redis/gemini.env.example` to `.env.gemini.local` at the repository
+root, paste your key there, then run `sh nodes/test/tool_redis/start_gemini_demo.sh`.
+See `nodes/test/tool_redis/README.md` for engine paths and acceptance testing.
+The optional [agent-ollama-example.pipe](agent-ollama-example.pipe) preserves the
+previous local Qwen setup. For disposable write tests, choose a unique prefix,
+configure the test port and enable writes explicitly.
 The agent bridge must carry the real input schemas in its Tool Args metadata.
 The earlier 3B walkthrough is not evidence that an arbitrary model is suitable
 for writes, and successful local examples do not guarantee every future plan.

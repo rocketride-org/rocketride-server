@@ -47,18 +47,68 @@ selection or hosted egress behavior.
 ## Real-model acceptance
 
 The optional `test_agent.py` suite exercises every Redis tool through the real
-LlamaIndex agent and a local Ollama model. It checks the actual tool trace and
+LlamaIndex agent and either Gemini Flash or a local Ollama model. It checks the actual tool trace and
 Redis state, including exact key names, one call per single-operation request,
 and two explicitly requested increments that must produce 3 then 6. A successful
 answer string alone is not a pass. Three fresh pipeline runs execute ten requests
 each. These tests skip unless a model is explicitly selected; CI does not install
-or run Ollama.
+or run a paid or free-tier hosted model.
+
+### Gemini Flash (default demo)
+
+Get a key from [Google AI Studio](https://aistudio.google.com/apikey). Google lists
+Gemini 3.6 Flash input and output in its [free tier](https://ai.google.dev/gemini-api/docs/pricing#gemini-3.6-flash);
+availability and rate limits depend on your project. The demo uses the Gemini
+Developer API, with no Vertex AI or Google Cloud service account setup.
+
+From the repository root:
+
+```sh
+cp nodes/test/tool_redis/gemini.env.example .env.gemini.local
+chmod 600 .env.gemini.local
+# Open .env.gemini.local and paste your key after ROCKETRIDE_GEMINI_KEY=.
+# For a downloaded engine, also set ROCKETRIDE_ENGINE to its absolute path.
+sh nodes/test/tool_redis/start_gemini_demo.sh
+```
+
+The launcher defaults to `dist/server/engine`, loads the ignored local key file,
+and starts the engine on localhost. Stop an existing engine on port 5565 first.
+Restart with this launcher whenever the key changes. A remote engine needs the
+key configured on that server instead. The sample stores only a variable reference,
+never the actual key. Do not paste keys into a pipeline or commit the local file.
+
+Open `nodes/src/nodes/tool_redis/agent-example.pipe` in the Development panel.
+The Redis connection defaults to localhost:6379, with writes off. Change the
+Redis port to 6381 for the disposable fixture above. Try `Scan Redis once and
+report the keys` for a read-only check.
+
+For opt-in acceptance, use another terminal and load the same key file into the
+test process, keeping the engine running from the launcher:
+
+```sh
+set -a
+. ./.env.gemini.local
+set +a
+export ROCKETRIDE_REDIS_AGENT_PROVIDER=gemini
+export ROCKETRIDE_REDIS_AGENT_MODEL=models/gemini-3.6-flash
+export REDIS_TEST_URL=redis://127.0.0.1:6381/0
+cd nodes
+"${ROCKETRIDE_ENGINE:-../dist/server/engine}" -m pytest test/tool_redis/test_agent.py -q -s --rootdir .
+```
+
+This runs 30 user requests with multiple model turns each, and can exceed a
+free-tier quota. A quota error is not a Redis failure. Do not run acceptance until
+you intend to use the key. No live Gemini result is claimed before a real key is
+configured and the suite passes.
+
+### Ollama (optional local alternative)
 
 With Ollama running, prepare the model and run from the repository root:
 
 ```sh
 ollama pull qwen2.5:7b
 ollama create rocketride-redis-qwen2.5-7b -f nodes/test/tool_redis/Modelfile
+export ROCKETRIDE_REDIS_AGENT_PROVIDER=ollama
 export ROCKETRIDE_REDIS_AGENT_MODEL=rocketride-redis-qwen2.5-7b
 # REDIS_TEST_URL and the engine must already be configured as above.
 cd nodes
@@ -71,7 +121,8 @@ RocketRide model token field does not configure Ollama's context allocation.
 See [Ollama's compatibility documentation](https://github.com/ollama/ollama/blob/main/docs/api/openai-compatibility.mdx).
 The 7B model needs more local memory than the initial 3B smoke-test model.
 
-The acceptance suite loads the checked-in `agent-example.pipe`, switches its
+The acceptance suite loads `agent-example.pipe` for Gemini or
+`agent-ollama-example.pipe` for Ollama, switches its
 chat source to a Tools source for SDK invocation, and enables writes only for
 unique disposable test prefixes. It removes its keys and terminates its pipeline.
 The interactive example remains read-only by default. Model guidance does not

@@ -13,9 +13,10 @@ import pytest
 import redis
 
 MODEL = os.environ.get('ROCKETRIDE_REDIS_AGENT_MODEL', '')
+PROVIDER = os.environ.get('ROCKETRIDE_REDIS_AGENT_PROVIDER', 'gemini')
 URL = os.environ.get('REDIS_TEST_URL', '')
 pytestmark = pytest.mark.skipif(
-    not MODEL or not URL, reason='Set ROCKETRIDE_REDIS_AGENT_MODEL and REDIS_TEST_URL for live local-model acceptance'
+    not MODEL or not URL, reason='Set ROCKETRIDE_REDIS_AGENT_MODEL and REDIS_TEST_URL for live model acceptance'
 )
 
 
@@ -23,7 +24,9 @@ pytestmark = pytest.mark.skipif(
 @pytest.mark.parametrize('attempt', range(3))
 async def test_agent_performs_each_requested_operation_once(client, attempt):
     """Run all seven tools, including two legitimate increments in separate requests."""
-    sample = Path(__file__).parents[2] / 'src/nodes/tool_redis/agent-example.pipe'
+    assert PROVIDER in ('gemini', 'ollama'), 'Select gemini or ollama with ROCKETRIDE_REDIS_AGENT_PROVIDER'
+    filename = 'agent-example.pipe' if PROVIDER == 'gemini' else 'agent-ollama-example.pipe'
+    sample = Path(__file__).parents[2] / 'src/nodes/tool_redis' / filename
     pipeline = json.loads(sample.read_text())
     pipeline['project_id'] = 'redis_agent_test_' + uuid.uuid4().hex
     pipeline['source'] = 'tools_1'
@@ -34,9 +37,12 @@ async def test_agent_performs_each_requested_operation_once(client, attempt):
     agent = next(node for node in pipeline['components'] if node['provider'] == 'agent_llamaindex')
     agent['input'] = []
     agent['control'] = [{'classType': 'tool', 'from': 'tools_1'}]
-    llm = next(node for node in pipeline['components'] if node['provider'] == 'llm_ollama')
+    llm = next(node for node in pipeline['components'] if node['provider'] == 'llm_' + PROVIDER)
     llm['config']['model'] = MODEL
-    llm['config']['serverbase'] = os.environ.get('ROCKETRIDE_REDIS_AGENT_URL', 'http://127.0.0.1:11434/v1')
+    if PROVIDER == 'ollama':
+        llm['config']['serverbase'] = os.environ.get('ROCKETRIDE_REDIS_AGENT_URL', 'http://127.0.0.1:11434/v1')
+    else:
+        assert os.environ.get('ROCKETRIDE_GEMINI_KEY'), 'Set ROCKETRIDE_GEMINI_KEY in the engine environment'
     parts = urlsplit(URL)
     prefix = 'rr:agent-test:' + uuid.uuid4().hex + ':'
     store = next(node for node in pipeline['components'] if node['provider'] == 'tool_redis')

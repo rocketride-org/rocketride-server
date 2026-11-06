@@ -56,14 +56,14 @@
       }
     },
     {
-      "id": "llm_ollama_1",
-      "provider": "llm_ollama",
+      "id": "llm_gemini_1",
+      "provider": "llm_gemini",
       "config": {
         "profile": "custom",
-        "model": "rocketride-redis-qwen2.5-7b",
-        "serverbase": "http://127.0.0.1:11434/v1",
-        "modelTotalTokens": 16384,
-        "modelOutputTokens": 1024,
+        "model": "models/gemini-3.6-flash",
+        "apikey": "${ROCKETRIDE_GEMINI_KEY}",
+        "modelTotalTokens": 1048576,
+        "modelOutputTokens": 8192,
         "temperature": 0
       },
       "control": [
