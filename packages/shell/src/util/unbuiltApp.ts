@@ -32,6 +32,7 @@
 export interface RailRow {
 	registryVersion: number;
 	buildStatus: string;
+	state?: string;
 }
 
 /** The error-screen copy for an app with no working build. */
@@ -49,13 +50,15 @@ export interface UnbuiltAppText {
  *          a working build (legacy rows carry no build word and count as built).
  */
 export function explainUnbuiltApp(appId: string, rail: readonly RailRow[]): UnbuiltAppText | null {
+	// The same failure rule as the SDK's waitForAppBuild.
+	const failed = (r: RailRow): boolean => r.buildStatus === 'failed' || r.state === 'failed';
 	const newest = rail[0];
-	if (!newest || rail.some((r) => r.buildStatus === 'ok' || r.buildStatus === '')) return null;
+	if (!newest || rail.some((r) => !failed(r) && (r.buildStatus === 'ok' || r.buildStatus === ''))) return null;
 	const v = newest.registryVersion;
-	if (newest.buildStatus === 'failed') {
+	if (failed(newest)) {
 		return {
 			title: `No working build of ${appId}`,
-			message: `This app has no working build yet, so there is nothing to open. Its latest version, v${v}, failed its server build. To see why, run “rocketride app log ${appId} ${v}”, or open the app in App Builder and click View build log on its Dashboard.`,
+			message: `This app has no working build yet, so there is nothing to open. Its latest version, v${v}, failed its server build. To see why, run “rocketride deploy log ${appId} ${v}”.`,
 		};
 	}
 	return {
