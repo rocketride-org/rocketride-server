@@ -690,8 +690,22 @@ def bootstrap():
 # ---------------------------------------------------------------------------
 
 
+# Written into a node unpacked from its package (ai.common.node_packages.DIGEST_FILE)
+_UNPACKED_MARKER = '.rrnode.sha256'
+
+
+def _unpacked(path: str, executable_dir: str) -> bool:
+    """A file of a node unpacked at run time: the server already ships its copy in nodes/node-requirements."""
+    folder = os.path.dirname(path)
+    while folder.startswith(executable_dir) and folder != executable_dir:
+        if os.path.isfile(os.path.join(folder, _UNPACKED_MARKER)):
+            return True
+        folder = os.path.dirname(folder)
+    return False
+
+
 def _find_requirement_files() -> list[str]:
-    """Find all requirement files matching the glob patterns."""
+    """Find all requirement files matching the glob patterns, but an unpacked node's, so the lock's hash keeps."""
     executable_dir = _get_executable_dir()
     found = []
 
@@ -700,7 +714,7 @@ def _find_requirement_files() -> list[str]:
         matches = glob(full_pattern, recursive=True)
         for path in matches:
             abs_path = os.path.abspath(path)
-            if os.path.isfile(abs_path) and abs_path not in found:
+            if os.path.isfile(abs_path) and abs_path not in found and not _unpacked(abs_path, executable_dir):
                 found.append(abs_path)
 
     return found
@@ -714,7 +728,7 @@ def _find_override_files() -> list[str]:
         full_pattern = os.path.join(executable_dir, pattern)
         for path in glob(full_pattern, recursive=True):
             abs_path = os.path.abspath(path)
-            if os.path.isfile(abs_path) and abs_path not in found:
+            if os.path.isfile(abs_path) and abs_path not in found and not _unpacked(abs_path, executable_dir):
                 found.append(abs_path)
     return found
 

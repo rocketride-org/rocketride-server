@@ -51,9 +51,9 @@ _STAGING = '.rrnode-staging-'
 DIGEST_FILE = '.rrnode.sha256'
 
 
-def _sweep(parent: str) -> None:
+def _sweep(nodes_dir: str) -> None:
     """Drop the staging folders an unpack that was killed left behind an hour ago or more."""
-    for path in glob.glob(os.path.join(parent, f'{_STAGING}*')):
+    for path in glob.glob(os.path.join(nodes_dir, f'{_STAGING}*')):
         with contextlib.suppress(OSError):
             if time.time() - os.path.getmtime(path) > 3600:
                 shutil.rmtree(path, ignore_errors=True)
@@ -79,10 +79,11 @@ def unpack(name: str, data: bytes, sha256: str, nodes_dir: str) -> str:
     if hashlib.sha256(data).hexdigest() != sha256:
         raise NodePackageInvalid(f'The package of {name} does not match its digest')
 
-    # Staged beside nodes/, not in it: the start-up scan must never see a half-written node
-    parent = os.path.dirname(os.path.abspath(nodes_dir))
-    _sweep(parent)
-    staging = tempfile.mkdtemp(prefix=_STAGING, dir=parent)
+    # Staged inside nodes/, so the move stays on one volume (nodes/ may be its own mount). The
+    # start-up scan reads only nodes/*/services*.json, never a node a staging folder holds.
+    os.makedirs(nodes_dir, exist_ok=True)
+    _sweep(nodes_dir)
+    staging = tempfile.mkdtemp(prefix=_STAGING, dir=nodes_dir)
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as package:
             if any(not entry.startswith(f'{name}/') for entry in package.namelist()):
@@ -90,7 +91,6 @@ def unpack(name: str, data: bytes, sha256: str, nodes_dir: str) -> str:
             package.extractall(staging)
         with open(os.path.join(staging, name, DIGEST_FILE), 'w', encoding='utf-8') as file:
             file.write(sha256)
-        os.makedirs(nodes_dir, exist_ok=True)
         if os.path.isdir(node_dir):
             # Another digest's copy: move it out of nodes/ first, a folder cannot be replaced in one step
             os.replace(node_dir, os.path.join(staging, 'replaced'))

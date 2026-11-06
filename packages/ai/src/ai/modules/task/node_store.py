@@ -102,14 +102,13 @@ def start() -> None:
 
 
 def _unwritable(nodes_dir: str) -> Optional[str]:
-    """Why a node cannot be unpacked into nodes_dir, or None: it is staged beside nodes/ and moved in."""
-    for path in (os.path.dirname(os.path.abspath(nodes_dir)), nodes_dir):
-        try:
-            # A real write: os.access does not see read-only mounts
-            with tempfile.NamedTemporaryFile(dir=path):
-                pass
-        except OSError as e:
-            return f'{path} is not writable ({e})'
+    """Why a node cannot be unpacked into nodes_dir, or None: it is staged in nodes/ and moved in place."""
+    try:
+        # A real write: os.access does not see read-only mounts
+        with tempfile.NamedTemporaryFile(dir=nodes_dir):
+            pass
+    except OSError as e:
+        return f'{nodes_dir} is not writable ({e})'
     return None
 
 
@@ -159,7 +158,15 @@ def _providers_of(components: Iterable[Dict[str, Any]]) -> Set[str]:
 
 def place(pipeline: Dict[str, Any]) -> List[str]:
     """Unpack into nodes/ each node the pipeline names that the server does not carry; the nodes placed."""
-    names = sorted({_providers[p] for p in _providers_of(pipeline.get('components', [])) if p in _providers})
+    names = {_providers[p] for p in _providers_of(pipeline.get('components', [])) if p in _providers}
+    # With the served nodes they import (the index's `requires`), and those nodes' own
+    pending = list(names)
+    while pending:
+        for other in _nodes[pending.pop()].get('requires', []):
+            if other in _nodes and other not in names:
+                names.add(other)
+                pending.append(other)
+    names = sorted(names)
     with _unpacking:
         for name in names:
             sha256 = _nodes[name]['sha256']

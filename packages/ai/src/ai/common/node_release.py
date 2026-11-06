@@ -40,6 +40,9 @@ from rocketlib import getVersion
 
 RELEASES = 'https://github.com/rocketride-org/rocketride-server/releases/download'
 
+# Every package any release has published, as <sha256>.rrnode: the prerelease clean-up never deletes it
+PACKAGES_TAG = 'node-packages'
+
 
 def _beside(*parts: str) -> str:
     """A path next to the folder the engine runs from."""
@@ -66,17 +69,25 @@ def _tags() -> list:
     return [*installed, f'server-v{version}', f'server-v{version}-prerelease']
 
 
-def _download(file: str) -> bytes:
-    """The release asset, from the first release that has it."""
-    tags = _tags()
-    for tag in tags:
+def _download(name: str, sha256: str) -> bytes:
+    """<name>.rrnode with that digest: from this engine's releases, else from the store of every package."""
+    sources = [(tag, f'{name}.rrnode') for tag in _tags()] + [(PACKAGES_TAG, f'{sha256}.rrnode')]
+    mismatched = False
+    for tag, file in sources:
         try:
             with urllib.request.urlopen(f'{RELEASES}/{tag}/{file}', timeout=15) as response:
-                return response.read()
+                data = response.read()
         except urllib.error.HTTPError as e:
             if e.code != 404:
                 raise
-    raise FileNotFoundError(f'{file} is not in releases {", ".join(tags)}')
+            continue
+        # A prerelease tag is reused: its asset may be a later build's
+        if hashlib.sha256(data).hexdigest() == sha256:
+            return data
+        mismatched = True
+    if mismatched:
+        raise ValueError(f'The release asset {name}.rrnode does not match the index')
+    raise FileNotFoundError(f'{name}.rrnode is not in releases {", ".join(tag for tag, _ in sources)}')
 
 
 def save(path: str, data: bytes) -> bytes:
@@ -114,13 +125,10 @@ def read_index() -> bytes:
 
 
 def read_package(name: str, sha256: str) -> bytes:
-    """<name>.rrnode: the local one, else the cached copy of that digest, else the release's."""
+    """<name>.rrnode: the local one, else the cached copy of that digest, else a download."""
     if os.path.exists(_local(f'{name}.rrnode')):
         return _read(_local(f'{name}.rrnode'))
     cached = _cached(f'{sha256}.rrnode')
     if os.path.exists(cached) and hashlib.sha256(data := _read(cached)).hexdigest() == sha256:
         return data
-    data = _download(f'{name}.rrnode')
-    if hashlib.sha256(data).hexdigest() != sha256:
-        raise ValueError(f'The release asset {name}.rrnode does not match the index')
-    return save(cached, data)
+    return save(cached, _download(name, sha256))

@@ -421,3 +421,25 @@ jobs:
           files: release-assets/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # And each node package by its digest, in one release no clean-up deletes: an engine installed
+      # from a prerelease still finds its packages once the next prerelease has replaced that one
+      - name: Publish node packages by digest
+        if: matrix.type == 'server' && (inputs.prerelease || steps.tag_check.outputs.exists == 'false')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if ! gh release view node-packages >/dev/null 2>&1; then
+            gh release create node-packages --prerelease --latest=false --title 'Node packages' \
+              --notes 'Every node package a server release published, named by its SHA-256.'
+          fi
+          existing=$(gh release view node-packages --json assets -q '.assets[].name')
+          mkdir -p by-digest
+          for file in release-assets/*.rrnode; do
+            name="$(sha256sum "$file" | cut -d' ' -f1).rrnode"
+            grep -qxF "$name" <<< "$existing" || cp "$file" "by-digest/$name"
+          done
+          if compgen -G 'by-digest/*.rrnode' >/dev/null; then
+            gh release upload node-packages by-digest/*.rrnode
+          fi

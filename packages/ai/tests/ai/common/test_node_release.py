@@ -75,6 +75,22 @@ def test_the_release_the_extension_installed_is_asked_first_and_a_containers_nev
     assert [url.rsplit('/', 2)[1] for url in asked] == ['server-v1.2.3-workshop']
 
 
+def test_a_package_whose_release_is_gone_is_fetched_by_its_digest(layout):
+    _, release, asked = layout
+    release[f'{node_release.RELEASES}/node-packages/{ZIP_SHA}.rrnode'] = ZIP
+
+    assert node_release.read_package('llm_x', ZIP_SHA) == ZIP
+    assert [url.rsplit('/', 2)[1] for url in asked] == ['server-v1.2.3', 'server-v1.2.3-prerelease', 'node-packages']
+
+
+def test_a_reused_prerelease_tag_with_a_later_build_falls_back_to_the_digest(layout):
+    _, release, _ = layout
+    release[f'{node_release.RELEASES}/server-v1.2.3-prerelease/llm_x.rrnode'] = b'later build'
+    release[f'{node_release.RELEASES}/node-packages/{ZIP_SHA}.rrnode'] = ZIP
+
+    assert node_release.read_package('llm_x', ZIP_SHA) == ZIP
+
+
 def test_a_package_is_downloaded_once_per_digest(layout):
     _, release, asked = layout
     release[f'{node_release.RELEASES}/server-v1.2.3/llm_x.rrnode'] = ZIP

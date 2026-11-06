@@ -16,6 +16,9 @@ FROM ${ENGINE_BASE}
 
 COPY --chown=rocketride:rocketride dist/server/static/ /opt/rocketride/static/
 
+# The node packages EaaS hands to runs, beside the server where it looks first
+COPY --chown=rocketride:rocketride dist/nodes/ /opt/nodes/
+
 # The server's task data persists; engine-base created it writable. See #1295.
 VOLUME /opt/data
 

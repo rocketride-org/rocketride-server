@@ -32,12 +32,17 @@
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
+const crypto = require('crypto');
+const AdmZip = require('adm-zip');
+const { stripComments } = require('jsonc-parser');
 const {
 	syncDir,
 	syncFile,
 	formatSyncStats,
 	isDirectory,
 	removeDir,
+	setState,
+	readDirSafe,
 	PROJECT_ROOT,
 	DIST_ROOT,
 	OVERLAY_ROOT,
@@ -55,7 +60,7 @@ const {
 	isLinux,
 	loadPackageJson,
 } = require('../../scripts/lib');
-const { stageNodeLibrary, makeNodeModule } = require('./node-build');
+const { nodeLibrary, stageNodeLibrary, makeNodeModule } = require('./node-build');
 
 const PACKAGE_DIR = path.join(__dirname, '..');
 
@@ -70,6 +75,25 @@ const SRC_NODE_DIRS = new Map(
 );
 const TEST_DIR = path.join(PACKAGE_DIR, 'test');
 const DIST_DIR = path.join(DIST_ROOT, 'server', 'nodes');
+
+// Each Python node ships on its own, as <name>.rrnode beside one index.json
+const PACKAGES_DIR = path.join(DIST_ROOT, 'nodes');
+
+// A packaged node's requirement files stay in the server, without its code, for the
+// constraints solve and the image's wheel cache; the dash keeps it from importing
+const REQUIREMENTS_DIR = path.join(DIST_DIR, 'node-requirements');
+
+// The index format the engine reads; bump it when that format changes
+const NODES_CONTRACT = 1;
+
+// The nodes the engine itself needs stay in the server; so do the C++ ones
+const SERVER_NODES = new Set(['core', 'autopipe']);
+
+// Fixed entry times keep a package's digest the same from build to build
+const ZIP_TIME = new Date(1980, 0, 1);
+
+// adm-zip stamps the building OS in each entry; one value keeps the digest the same on every platform
+const ZIP_MADE_BY = 0x0314; // Unix, zip 2.0
 
 // Build inputs or runtime files - none of it belongs in dist.
 const IGNORE = ['**/CMakeLists.txt', '**/src/**', '**/lib/**', '**/scripts/**', '**/target/**', '**/__pycache__/**'];
@@ -101,19 +125,135 @@ function makeSyncNodesAction() {
 	return {
 		run: async (ctx, task) => {
 			task.output = 'Scanning for changes...';
-
 			const stats = {};
-
-			for (const [name, srcDir] of SRC_NODE_DIRS) {
-				const src = path.join(srcDir, name);
-
-				if (await isDirectory(src)) await syncNode(name, src, stats);
-				else await syncFile(src, path.join(DIST_DIR, name), { package: true }, stats);
-			}
-
-			task.output = formatSyncStats(stats);
+			const packages = await syncNodes(stats);
+			task.output = `${formatSyncStats(stats)}, ${Object.keys(packages).length} packages`;
 		},
 	};
+}
+
+// Where the build puts each node, and the helpers that copy and record it; a test passes its own
+const SYNC = {
+	srcNodeDirs: SRC_NODE_DIRS,
+	distDir: DIST_DIR,
+	packagesDir: PACKAGES_DIR,
+	libraryOf: nodeLibrary,
+	copyFile: (src, dest, stats) => syncFile(src, dest, { package: true }, stats),
+	copyNode: (name, src, stats) => syncNode(name, src, stats),
+	forget: (src) => setState(['package', src], null),
+};
+
+// The server keeps core, autopipe and the C++ nodes; every other node becomes <name>.rrnode beside
+// index.json, and only its requirement files stay in the server. Returns the index's nodes
+async function syncNodes(stats, sync = SYNC) {
+	const { srcNodeDirs, distDir, packagesDir, libraryOf, copyFile, copyNode, forget } = { ...SYNC, ...sync };
+	const requirementsDir = path.join(distDir, path.basename(REQUIREMENTS_DIR));
+	const packages = {};
+	const sources = {};
+
+	for (const [name, srcDir] of srcNodeDirs) {
+		const src = path.join(srcDir, name);
+
+		if (!(await isDirectory(src))) {
+			await copyFile(src, path.join(distDir, name), stats);
+			continue;
+		}
+
+		const lib = await libraryOf(name, src);
+		if (lib || SERVER_NODES.has(name)) {
+			await copyNode(name, src, stats);
+			continue;
+		}
+
+		const { data, entry } = await packageNode(name, src);
+		await fs.promises.mkdir(packagesDir, { recursive: true });
+		await fs.promises.writeFile(path.join(packagesDir, `${name}.rrnode`), data);
+		packages[name] = entry;
+		sources[name] = src;
+
+		// It no longer ships inside the server archive, but its requirements do
+		await removeDir(path.join(distDir, name));
+		await forget(src);
+		for (const file of await readDirSafe(src)) {
+			if (!/^(requirement.*\.txt|overrides\.txt)$/.test(file)) continue;
+			await copyFile(path.join(src, file), path.join(requirementsDir, name, file), stats);
+		}
+	}
+
+	// A node it needs that the server keeps is on disk already; only packaged ones are listed
+	for (const entry of Object.values(packages)) {
+		entry.requires = entry.requires.filter((other) => other in packages);
+	}
+
+	// Drop what an older build left behind, such as a nodes/__init__.py
+	for (const name of await readDirSafe(distDir)) {
+		if (srcNodeDirs.has(name) || name === path.basename(requirementsDir)) continue;
+		await fs.promises.rm(path.join(distDir, name), { recursive: true, force: true });
+		await forget(path.join(PACKAGE_DIR, 'src', 'nodes', name));
+	}
+
+	// And the package or requirement file of a node that is gone, so it is not published again
+	for (const file of await readDirSafe(packagesDir)) {
+		if (file.endsWith('.rrnode') && !(path.basename(file, '.rrnode') in packages)) {
+			await fs.promises.rm(path.join(packagesDir, file), { force: true });
+		}
+	}
+	for (const name of await readDirSafe(requirementsDir)) {
+		for (const file of await readDirSafe(path.join(requirementsDir, name))) {
+			if (name in packages && fs.existsSync(path.join(sources[name], file))) continue;
+			await fs.promises.rm(path.join(requirementsDir, name, file), { force: true });
+		}
+		if (!(name in packages)) {
+			await fs.promises.rm(path.join(requirementsDir, name), { recursive: true, force: true });
+		}
+	}
+
+	const index = { contract: NODES_CONTRACT, nodes: packages };
+	await fs.promises.mkdir(packagesDir, { recursive: true });
+	await fs.promises.writeFile(path.join(packagesDir, 'index.json'), JSON.stringify(index));
+	// The server archive carries its own copy, so an engine reads the index of the build that made it
+	await copyFile(path.join(packagesDir, 'index.json'), path.join(distDir, 'index.json'), stats);
+	return packages;
+}
+
+// Zip a node as <name>/... with its .rrnode marker; return the zip and its index entry
+async function packageNode(name, srcDir) {
+	const { glob } = require('glob');
+	const zip = new AdmZip();
+	const add = (entry, data) => {
+		zip.addFile(entry, data);
+		zip.getEntry(entry).header.time = ZIP_TIME;
+		zip.getEntry(entry).header.made = ZIP_MADE_BY;
+	};
+
+	// Definitions travel as text so Python reads 1.0 as a float; JSON.parse checks they are plain JSON
+	const services = {};
+	const icons = {};
+	const requires = new Set();
+	// Sorted with '/' on every OS: the entry order is part of the digest
+	const found = await glob('**', { cwd: srcDir, nodir: true, ignore: IGNORE });
+	const files = found.map((file) => file.replace(/\\/g, '/'));
+	for (const file of files.sort()) {
+		const data = await fs.promises.readFile(path.join(srcDir, file));
+		add(`${name}/${file}`, data);
+		// Another node it imports must be on disk beside it
+		if (file.endsWith('.py')) {
+			for (const [, other] of data.toString('utf8').matchAll(/^\s*(?:from|import)\s+nodes\.(\w+)/gm)) {
+				if (other !== name) requires.add(other);
+			}
+		}
+		if (!/^services.*\.json$/.test(file)) continue;
+
+		const text = stripComments(data.toString('utf8'));
+		const { icon } = JSON.parse(text);
+		services[file] = text;
+		if (icon) icons[icon] = await fs.promises.readFile(path.join(srcDir, icon), 'utf8');
+	}
+	add(`${name}/.rrnode`, Buffer.from(JSON.stringify({ name })));
+
+	const data = zip.toBuffer();
+	const sha256 = crypto.createHash('sha256').update(data).digest('hex');
+	return { data, entry: { sha256, services, icons, requires: [...requires].sort() } };
 }
 
 function makeStartTestServerAction(options = {}) {
@@ -545,6 +685,7 @@ module.exports = {
 				description: 'Cleaning nodes',
 				run: async (ctx, task) => {
 					await removeDir(DIST_DIR);
+					await removeDir(PACKAGES_DIR);
 					task.output = 'Cleaned nodes';
 				},
 			}),
@@ -558,3 +699,6 @@ module.exports = [module.exports, ...CPP_NODES.map(makeNodeModule)];
 // Export paths for external use
 module.exports.DIST_DIR = DIST_DIR;
 module.exports.TEST_DIR = TEST_DIR;
+module.exports.packageNode = packageNode;
+module.exports.syncNodes = syncNodes;
+module.exports.NODES_CONTRACT = NODES_CONTRACT;

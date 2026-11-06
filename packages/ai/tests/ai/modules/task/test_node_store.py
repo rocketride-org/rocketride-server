@@ -157,6 +157,23 @@ def test_a_served_node_the_index_names_in_capitals_is_found_in_lower_case(server
     assert node_store.place({'components': [{'provider': 'provider_x'}]}) == ['llm_x']
 
 
+def test_a_served_node_comes_with_the_served_nodes_it_imports(server, monkeypatch):
+    index = _index()
+    index['nodes']['llm_x']['requires'] = ['embed_y']
+    for name, requires in (('embed_y', ['embed_z']), ('embed_z', ['webhook'])):
+        protocol = f'{name}_p://'
+        index['nodes'][name] = {
+            'sha256': name,
+            'services': {'services.json': json.dumps({'protocol': protocol})},
+            'icons': {},
+            'requires': requires,
+        }
+    monkeypatch.setattr(node_store.account, 'node_index', lambda: index)
+    node_store.start()
+
+    assert node_store.place({'components': [{'provider': 'provider_x'}]}) == ['embed_y', 'embed_z', 'llm_x']
+
+
 def test_a_pipeline_that_names_no_served_node_unpacks_nothing(server):
     node_store.start()
 
@@ -217,6 +234,21 @@ def test_a_read_only_install_serves_nothing_and_says_so_once(server, monkeypatch
     assert node_store.custom() == [] and node_store.place({'components': [{'provider': 'provider_x'}]}) == []
     assert len(server['warnings']) == 1
     assert 'not writable' in server['warnings'][0] and 'llm_x' in server['warnings'][0]
+
+
+def test_an_install_writable_only_in_nodes_serves_its_nodes(server, monkeypatch):
+    named = node_store.tempfile.NamedTemporaryFile
+
+    def only_in_nodes(dir=None, **kwargs):
+        if dir != server['nodes']:
+            raise OSError(30, 'Read-only file system', dir)
+        return named(dir=dir, **kwargs)
+
+    monkeypatch.setattr(node_store.tempfile, 'NamedTemporaryFile', only_in_nodes)
+
+    node_store.start()
+
+    assert server['warnings'] == [] and node_store.served('provider_x') is not None
 
 
 def test_the_autopipe_filters_are_the_ones_autopipe_inserts():
