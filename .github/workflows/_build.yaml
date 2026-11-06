@@ -384,8 +384,9 @@ jobs:
 
       # The same logs and the stack dumps of the task child processes
       # (test-logs/stack-dumps/stacks_<pid>.txt), for a child that stalls.
+      # A child can stall while every test still passes, so passing runs upload too.
       - name: Upload test server logs
-        if: failure()
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: test-server-logs-${{ matrix.platform }}
