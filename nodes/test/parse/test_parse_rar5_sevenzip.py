@@ -47,6 +47,8 @@ import zlib
 
 import pytest
 
+from test.framework.pipes import use_and_open
+
 RAR5_SIGNATURE = b'Rar!\x1a\x07\x01\x00'
 MARKER = 'rar5-through-sevenzipjbinding-' + uuid.uuid4().hex
 
@@ -126,13 +128,10 @@ async def test_parse_extracts_text_from_a_rar5_archive(client):
     """
     archive = rar5_stored('note.txt', f'The archive says: {MARKER}\n'.encode('utf-8'))
     pipeline = {'project_id': str(uuid.uuid4()), 'source': 'webhook_1', 'components': COMPONENTS}
-    result = await client.use(pipeline=pipeline)
-    token = result['token']
+    # parse skips an object whose size is 0; the size travels in objinfo, not in the bytes
+    objinfo = {'name': 'probe.rar', 'size': len(archive)}
+    token, pipe = await use_and_open(client, pipeline, objinfo=objinfo, mime_type='application/x-rar-compressed')
     try:
-        # parse skips an object whose size is 0; the size travels in objinfo, not in the bytes
-        objinfo = {'name': 'probe.rar', 'size': len(archive)}
-        pipe = await client.pipe(token, objinfo=objinfo, mime_type='application/x-rar-compressed')
-        await pipe.open()
         await pipe.write(archive)
         response = await pipe.close()
     finally:

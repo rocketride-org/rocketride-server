@@ -30,6 +30,8 @@ import uuid
 
 import pytest
 
+from test.framework.pipes import use_and_open
+
 from .test_streams import NODE, media as media_fixture
 
 media = media_fixture
@@ -99,13 +101,16 @@ async def test_streamed_operations_through_engine(client, media, record_property
         document = pipeline(request, root + '/' + request['mode'])
         validation = await client.validate(document)
         assert not validation.get('errors'), validation.get('errors')
-        token = (await client.use(pipeline=document, source='source', threads=1))['token']
+        started = time.perf_counter()
+        token, pipe = await use_and_open(
+            client,
+            document,
+            objinfo={'name': media.name, 'size': media.stat().st_size},
+            mime_type='video/mp4',
+            source='source',
+            threads=1,
+        )
         try:
-            started = time.perf_counter()
-            pipe = await client.pipe(
-                token, objinfo={'name': media.name, 'size': media.stat().st_size}, mime_type='video/mp4'
-            )
-            await pipe.open()
             with media.open('rb') as stream:
                 while chunk := stream.read(65536):
                     await pipe.write(chunk)

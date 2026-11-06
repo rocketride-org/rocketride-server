@@ -60,6 +60,8 @@ import json
 import uuid
 from typing import Any, Dict, List, Tuple
 
+from test.framework.pipes import use_and_open
+
 # `basic` keeps policy_mode at `warn`, so nothing is ever blocked and every
 # payload reaches the sink. A blocking profile would make a missing delivery
 # ambiguous: dropped on purpose, or lost?
@@ -148,12 +150,9 @@ async def _deliveries(client, pipeline: Dict[str, Any], lane: str, mime_type: st
     Returns:
         The number of entries the response sink captured on `lane`.
     """
-    result = await client.use(pipeline=pipeline)
-    token = result['token']
+    token, pipe = await use_and_open(client, pipeline, objinfo={'name': f'forward_once_{lane}'}, mime_type=mime_type)
 
     try:
-        pipe = await client.pipe(token, objinfo={'name': f'forward_once_{lane}'}, mime_type=mime_type)
-        await pipe.open()
         await pipe.write(payload)
         response = await pipe.close()
     finally:

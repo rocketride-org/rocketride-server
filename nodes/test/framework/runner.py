@@ -27,6 +27,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .discovery import NodeTestConfig, TestCase
 from .pipeline import PipelineBuilder
+from .pipes import OPEN_ATTEMPTS, is_target_not_ready
 from .expectations import ExpectationValidator, ExpectationError
 
 
@@ -157,6 +158,31 @@ class NodeTestRunner:
         # Fallback
         return str(input_data).encode('utf-8')
 
+    async def _open_pipe(self, lane: str, mime_type: str):
+        """
+        Open a data pipe, restarting the pipeline if its source was not ready yet.
+
+        A source that has not bound its data target fails the open and ends the
+        task, so the retry tears the pipeline down and starts it again.
+
+        Args:
+            lane: The input lane the pipe feeds.
+            mime_type: MIME type for the pipe.
+
+        Returns:
+            The opened pipe.
+        """
+        for attempt in range(1, OPEN_ATTEMPTS + 1):
+            pipe = await self.client.pipe(self.token, objinfo={'name': f'test_{lane}'}, mime_type=mime_type)
+            try:
+                await pipe.open()
+                return pipe
+            except Exception as error:
+                if attempt == OPEN_ATTEMPTS or not is_target_not_ready(error):
+                    raise
+            await self.teardown()
+            await self.setup()
+
     async def run_case(self, case: TestCase) -> Tuple[Dict[str, Any], List[ExpectationError]]:
         """
         Run a single test case.
@@ -206,10 +232,9 @@ class NodeTestRunner:
         print(f'[TEST] Expected outputs: {self.config.outputs}')
 
         # Get a pipe and send data
-        pipe = await self.client.pipe(self.token, objinfo={'name': f'test_{pipeline_input_lane}'}, mime_type=mime_type)
+        pipe = await self._open_pipe(pipeline_input_lane, mime_type)
 
         try:
-            await pipe.open()
             await pipe.write(data_bytes)
             result = await pipe.close()
         finally:

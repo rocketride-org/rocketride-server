@@ -24,6 +24,8 @@ from typing import Any, Dict
 
 import pytest
 
+from test.framework.pipes import use_and_open
+
 # The node downloads miniLM, which is why conftest keeps it in skip_nodes (RR-1120).
 # That set filters only the generated tests, so this file carries its own marker:
 #
@@ -93,12 +95,11 @@ async def _deliveries(client, pipeline: Dict[str, Any], payload: bytes) -> int:
     Returns:
         The number of entries the response sink captured on the documents lane.
     """
-    result = await client.use(pipeline=pipeline)
-    token = result['token']
+    token, pipe = await use_and_open(
+        client, pipeline, objinfo={'name': 'batch_forward_once'}, mime_type='lane/documents'
+    )
 
     try:
-        pipe = await client.pipe(token, objinfo={'name': 'batch_forward_once'}, mime_type='lane/documents')
-        await pipe.open()
         await pipe.write(payload)
         response = await pipe.close()
     finally:
