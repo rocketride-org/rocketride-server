@@ -1,0 +1,322 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "LanceDB",
+	//
+	// Required:
+	//     The protocol is the endpoint protocol
+	//
+	"protocol": "lancedb://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["store", "tool"],
+	//
+	// Required:
+	//     Capabilities are flags that change the behavior of the underlying
+	//     engine. "invoke" lets agents call the vector DB tools exposed via
+	//     VectorStoreToolMixin (search, upsert, delete). "experimental" stays
+	//     until the live runs in the acceptance criteria pass. "nosaas" because
+	//     a local directory on RocketRide Cloud does not survive a restart.
+	//
+	"capabilities": ["invoke", "experimental", "nosaas"],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//     The node is the actual physical node to instantiate - if
+	//     not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//     The path is the executable/script code - it is node dependent
+	//     and is optional for most node
+	//
+	"path": "nodes.store_lancedb",
+	//
+	// Required:
+	//     The prefix map when added/removed when convertting URLs <=> paths
+	//
+	"prefix": "LanceDB Vector Store",
+	//
+	// Optional:
+	//		Description to of this driver
+	//
+	"description": ["An embedded vector store for LanceDB. Tables are files in a local directory ", "or on S3, GCS or Azure Blob storage, so there is no server to run. Supports ", "semantic, keyword and hybrid search."],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "lancedb.svg",
+	"documentation": "https://docs.rocketride.org/nodes/store_lancedb",
+	//
+	//
+	//  Optional:
+	//      Rendering hints to the UI which indicate which fields of
+	//      the configuration should be used to display information
+	"tile": ["Location: ${parameters.lancedb.${profile}.uri}", "Table: ${parameters.lancedb.${profile}.table}"],
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"documents": [],
+		"questions": ["documents", "answers", "questions"]
+	},
+	//
+	// Test configuration for automated node testing
+	//
+	"test": {
+		"profiles": ["local"],
+		"cases": [
+			{
+				"name": "Add document to store",
+				"documents": [
+					{
+						"page_content": "The capital of France is Paris.",
+						"metadata": {
+							"objectId": "test-doc-1",
+							"nodeId": "test-node",
+							"parent": "/test",
+							"chunkId": 0,
+							"isDeleted": false
+						},
+						"embedding": [0.1, 0.2, 0.3, 0.4, 0.5],
+						"embedding_model": "test-model"
+					}
+				],
+				"expect": {
+					"documents": {
+						"notEmpty": true,
+						"contains": "capital of France"
+					}
+				}
+			},
+			{
+				"name": "Search with question",
+				"questions": {
+					"type": "semantic",
+					"questions": [
+						{
+							"text": "What is the capital of France?",
+							"embedding": [0.1, 0.2, 0.3, 0.4, 0.5],
+							"embedding_model": "test-model"
+						}
+					]
+				},
+				"expect": {
+					"documents": {
+						"notEmpty": true,
+						"contains": "Paris",
+						"property": [
+							{ "path": "[0].score", "greaterThan": 0.5 },
+							{ "path": "[0].metadata.objectId", "equals": "test-doc-1" }
+						]
+					}
+				}
+			}
+		]
+	},
+	//
+	//	Optional:
+	//		Profile section are configuration optoins used by the driver
+	//		itself
+	//
+	"preconfig": {
+		// Define the values that will be merged into any profile configuration
+		// specified, unless the profile is 'absolute'
+		"default": "local",
+		// Defines profiles used with the "profile": key
+		"profiles": {
+			"local": {
+				"mode": "local",
+				"title": "Local directory",
+				"uri": "./lancedb",
+				"table": "ROCKETRIDE",
+				"distance": "cosine",
+				"searchMode": "vector",
+				"indexAfterRows": 50000,
+				"optimizeAfterWrites": 1000,
+				"serverName": "lancedb",
+				"expose_tools": true,
+				"allow_write": true
+			},
+			"object": {
+				"mode": "object",
+				"title": "Object storage (S3, GCS, Azure Blob)",
+				"uri": "",
+				"storageOptions": "",
+				"table": "ROCKETRIDE",
+				"distance": "cosine",
+				"searchMode": "vector",
+				"indexAfterRows": 50000,
+				"optimizeAfterWrites": 1000,
+				"serverName": "lancedb",
+				"expose_tools": true,
+				"allow_write": true
+			}
+		}
+	},
+	//
+	// Optional:
+	//     Local fields definitions - these define fields only for the
+	//     current service. You may specify them here, or directly
+	//     in the shape
+	//
+	"fields": {
+		"lancedb.local.uri": {
+			"type": "string",
+			"title": "Directory",
+			"description": "Directory that holds the tables. A relative path is placed under the engine's data directory; an absolute path is used as given.",
+			"default": "./lancedb"
+		},
+		"lancedb.object.uri": {
+			"type": "string",
+			"title": "Storage URI",
+			"description": "Bucket and prefix for the tables, e.g. s3://my-bucket/rag, gs://my-bucket/rag or az://my-container/rag."
+		},
+		"lancedb.storageOptions": {
+			"type": "string",
+			"title": "Storage options",
+			"optional": true,
+			"secure": true,
+			"ui": {
+				"ui:widget": "password"
+			},
+			"description": "JSON object passed to LanceDB as storage_options, e.g. {\"region\": \"us-east-1\", \"aws_access_key_id\": \"...\", \"aws_secret_access_key\": \"...\"}. Leave empty to use the standard AWS_*, GOOGLE_* or AZURE_* environment variables."
+		},
+		"lancedb.table": {
+			"type": "string",
+			"title": "Table",
+			"description": "Name of the table that holds the vectors: 1-255 letters, digits, '_', '-' or '.'.",
+			"default": "ROCKETRIDE"
+		},
+		"lancedb.distance": {
+			"type": "string",
+			"title": "Distance",
+			"description": "Distance metric for vector search. Fixed when the table's index is built; changing it later needs a new table.",
+			"default": "cosine",
+			"enum": [
+				["cosine", "Cosine"],
+				["l2", "Euclidean (L2)"],
+				["dot", "Dot product"]
+			]
+		},
+		"lancedb.searchMode": {
+			"type": "string",
+			"title": "Semantic search",
+			"description": "Vector search only, or hybrid: vector search fused with full text search on the question text by reciprocal rank fusion. Keyword questions always use full text search.",
+			"default": "vector",
+			"enum": [
+				["vector", "Vector only"],
+				["hybrid", "Hybrid (vector and full text)"]
+			]
+		},
+		"lancedb.indexAfterRows": {
+			"type": "integer",
+			"title": "Index after rows",
+			"description": "Build an IVF_HNSW_SQ vector index once the table reaches this many rows; smaller tables are searched exactly. 0 never builds one.",
+			"default": 50000,
+			"minimum": 0
+		},
+		"lancedb.optimizeAfterWrites": {
+			"type": "integer",
+			"title": "Optimize after writes",
+			"description": "Compact the table and refresh its indexes after this many writes. 0 never does.",
+			"default": 1000,
+			"minimum": 0
+		},
+		"lancedb.serverName": {
+			"type": "string",
+			"title": "Tool Server Name",
+			"description": "Namespace for agent-facing tool names, e.g. 'lancedb' exposes tools as lancedb.search / lancedb.upsert / lancedb.delete. Change this when running multiple LanceDB nodes in the same pipeline so their tool names do not collide.",
+			"default": "lancedb",
+			"minLength": 1
+		},
+		"lancedb.expose_tools": {
+			"type": "boolean",
+			"title": "Expose as tools",
+			"default": true,
+			"description": "Offer this table to agents and apps as tool functions: search, objdir, get and stats, plus upsert and delete when writes through tools are allowed. The documents and questions lanes are unaffected."
+		},
+		"lancedb.allow_write": {
+			"type": "boolean",
+			"title": "Allow writes through tools",
+			"default": true,
+			"description": "Permit the upsert and delete tool functions to change this table. Applies only while Expose as tools is on. The documents lane and the read tools are unaffected."
+		},
+		"lancedb.local": {
+			"object": "local",
+			"properties": ["lancedb.local.uri", "lancedb.table", "vector.score", "lancedb.distance", "lancedb.searchMode", "lancedb.indexAfterRows", "lancedb.optimizeAfterWrites", "lancedb.serverName", "lancedb.expose_tools", "lancedb.allow_write"]
+		},
+		"lancedb.object": {
+			"object": "object",
+			"properties": ["lancedb.object.uri", "lancedb.storageOptions", "lancedb.table", "vector.score", "lancedb.distance", "lancedb.searchMode", "lancedb.indexAfterRows", "lancedb.optimizeAfterWrites", "lancedb.serverName", "lancedb.expose_tools", "lancedb.allow_write"]
+		},
+		"lancedb.profile": {
+			"title": "Where the tables live",
+			"description": "Store the tables in...",
+			"type": "string",
+			"default": "local",
+			"enum": ["*>preconfig.profiles.*.title"],
+			"conditional": [
+				{
+					"value": "local",
+					"properties": ["lancedb.local"]
+				},
+				{
+					"value": "object",
+					"properties": ["lancedb.object"]
+				}
+			]
+		},
+		"lancedb.provider": {
+			"type": "string",
+			"const": "lancedb",
+			"default": "lancedb"
+		},
+		"lancedb.lancedb": {
+			"object": "lancedb",
+			"properties": ["lancedb.profile"]
+		},
+		"lancedb.store": {
+			"object": "store",
+			"title": "Store",
+			"properties": ["lancedb.provider", "lancedb.lancedb"]
+		},
+		"lancedb.target.autopipe": {
+			"object": "parameters",
+			"properties": ["remote", "lancedb.store", "all.embedding"]
+		},
+		"lancedb.target.parameters": {
+			"object": "parameters",
+			"properties": ["lancedb.target.autopipe"]
+		}
+	},
+	//
+	// Required:
+	//     Defines the fields (shape) of the service. Either source or target
+	//     map be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "LanceDB Vector Store",
+			"properties": ["lancedb.profile"]
+		},
+		{
+			"section": "Transform",
+			"title": "LanceDB",
+			"properties": ["type", "lancedb.target.parameters", "target.mode"]
+		}
+	]
+}
