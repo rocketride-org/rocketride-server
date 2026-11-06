@@ -23,6 +23,7 @@
 
 """Tests for the cwd handle probe logic (scripts/lib/rr_test_cwd_probe.py); no engine or Windows needed."""
 
+import errno
 import importlib.util
 import os
 from pathlib import Path
@@ -34,119 +35,154 @@ SPEC.loader.exec_module(probe_mod)
 
 
 class FakeBackend:
-    """A backend whose handle state the test controls."""
-
-    def __init__(self, path_for_handle):
-        """
-        Parameters:
-            path_for_handle (callable): Returns ``(path, error)`` for the current handle.
-        """
-        self.handle = 0x60
-        self.path_for_handle = path_for_handle
-        self.reopened = 0
+    """A backend with fixed answers; the probe must not call it after start."""
 
     def cwd_handle(self):
-        return self.handle
-
-    def reopen_cwd_handle(self, cwd):
-        self.reopened += 1
-        self.handle = 0x70
-        return self.handle
+        return 0x60
 
     def final_path(self, handle):
-        return self.path_for_handle(handle)
+        return 'C:/fake', None
 
     def handle_count(self):
         return 42
 
     def modules(self):
-        return [r'C:\fake\one.dll', r'C:\fake\two.dll']
+        return ['fake_one.dll', 'fake_two.dll']
 
 
-def make_probe(tmp_path, path_for_handle):
+def make_probe(tmp_path, monkeypatch):
+    """Create a probe whose cwd is a directory with one file."""
+    work = tmp_path / 'work'
+    work.mkdir()
+    (work / 'entry.txt').write_text('x')
+    monkeypatch.chdir(work)
     out = tmp_path / 'reports'
     out.mkdir()
-    return probe_mod.CwdProbe(str(out), FakeBackend(path_for_handle)), out
+    return probe_mod.CwdProbe(str(out), FakeBackend()), out
 
 
-def test_norm_strips_prefixes_and_folds_case():
-    assert probe_mod._norm(r'\\?\C:\Foo\Bar') == r'c:\foo\bar'
-    assert probe_mod._norm(r'\\?\UNC\srv\share\x') == r'\\srv\share\x'
-    assert probe_mod._norm('c:/foo/bar/') == r'c:\foo\bar'
-    assert probe_mod._norm('c:/foo/bar') == r'c:\foo\bar'
+def patch_relative_open(monkeypatch, behaviour):
+    """Replace os.open so that relative names go through ``behaviour(name, real_open)``."""
+    real = os.open
+
+    def fake(path, *args, **kwargs):
+        if isinstance(path, str) and not os.path.isabs(path):
+            return behaviour(path, real)
+        return real(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, 'open', fake)
 
 
-def test_same_dir_text_match_and_mismatch(tmp_path):
-    assert probe_mod._same_dir(r'\\?\C:\a\b', r'c:\A\B')
-    assert not probe_mod._same_dir(r'C:\a\b', r'C:\a\c')
+def raise_oserror(code):
+    def behaviour(name, real):
+        raise OSError(code, os.strerror(code))
+
+    return behaviour
 
 
-def test_same_dir_resolves_equal_directories_by_identity(tmp_path):
-    (tmp_path / 'd').mkdir()
-    assert probe_mod._same_dir(str(tmp_path / 'd'), str(tmp_path / 'd' / '..' / 'd'))
-
-
-def test_healthy_handle_writes_nothing(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    probe, out = make_probe(tmp_path, lambda h: (os.getcwd(), None))
+def test_healthy_cwd_writes_nothing(tmp_path, monkeypatch):
+    probe, out = make_probe(tmp_path, monkeypatch)
     assert probe.check('manual') is False
-    assert probe.occurrences == 0
+    assert probe.check('manual') is False
+    assert probe.dead is False
     assert list(out.iterdir()) == []
 
 
-def test_failed_query_writes_report_and_rearms(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    probe, out = make_probe(tmp_path, lambda h: (None, 'winerror 6') if h == 0x60 else (os.getcwd(), None))
+def test_ebadf_is_dead_and_writes_one_report(tmp_path, monkeypatch):
+    probe, out = make_probe(tmp_path, monkeypatch)
     probe.enter('tests/test_x.py::test_a', 'call')
+    probe.start()
+    patch_relative_open(monkeypatch, raise_oserror(errno.EBADF))
 
     assert probe.check('before call') is True
+    probe.stop()
 
-    assert probe.occurrences == 1
-    assert probe.backend.reopened == 1
-    [report] = list(out.iterdir())
-    text = report.read_text(encoding='utf-8')
+    reports = [f for f in out.iterdir() if f.name.startswith('cwd_probe_')]
+    assert len(reports) == 1
+    text = reports[0].read_text(encoding='utf-8')
     assert 'test=tests/test_x.py::test_a phase=call' in text
     assert 'detected_by=before call' in text
-    assert 'winerror 6' in text
+    assert 'entry.txt' in text
     assert 'process_handle_count=42' in text
-    assert r'C:\fake\two.dll' in text
+    assert 'fake_two.dll' in text
     assert '--- thread stacks ---' in text
-    assert 'Current thread' in text or 'Thread 0x' in text
-    assert 're-armed: new handle 0x70' in text
-    # The re-armed handle is healthy, so the next check is quiet.
-    assert probe.check('thread') is False
+    assert 'start: handle=0x60' in text
 
 
-def test_handle_reused_by_another_object_is_dead(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    probe, out = make_probe(tmp_path, lambda h: (r'C:\some\other\file.txt', None) if h == 0x60 else (os.getcwd(), None))
+def test_winerror_6_is_dead(tmp_path, monkeypatch):
+    probe, _ = make_probe(tmp_path, monkeypatch)
+
+    def behaviour(name, real):
+        raise OSError(0, 'The handle is invalid', None, 6)
+
+    patch_relative_open(monkeypatch, behaviour)
     assert probe.check('thread') is True
-    assert 'file.txt' in next(out.iterdir()).read_text(encoding='utf-8')
 
 
-def test_closes_in_quick_succession_make_one_report(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    probe, out = make_probe(tmp_path, lambda h: (None, 'winerror 6'))
+def test_handle_now_pointing_at_another_directory_is_dead(tmp_path, monkeypatch):
+    probe, _ = make_probe(tmp_path, monkeypatch)
+    other = tmp_path / 'other'
+    other.mkdir()
+    (other / 'entry.txt').write_text('y')
+    patch_relative_open(
+        monkeypatch, lambda name, real: real(str(other / name), os.O_RDONLY | getattr(os, 'O_BINARY', 0))
+    )
+    assert probe.check('thread') is True
+
+
+def test_enoent_while_absolute_exists_is_dead(tmp_path, monkeypatch):
+    probe, _ = make_probe(tmp_path, monkeypatch)
+    patch_relative_open(monkeypatch, raise_oserror(errno.ENOENT))
+    assert probe.check('thread') is True
+
+
+def test_removed_entry_is_not_dead_and_is_picked_again(tmp_path, monkeypatch):
+    probe, out = make_probe(tmp_path, monkeypatch)
+    assert probe.check('thread') is False
+    os.remove('entry.txt')
+    assert probe.check('thread') is False
+    Path('second.txt').write_text('z')
+    assert probe.check('thread') is False
+    assert probe._entry == 'second.txt'
+    assert list(out.iterdir()) == []
+
+
+def test_entry_is_picked_again_when_cwd_changes(tmp_path, monkeypatch):
+    probe, _ = make_probe(tmp_path, monkeypatch)
     probe.check('thread')
-    probe.check('thread')
-    probe.check('thread')
-    assert probe.occurrences == 3
-    assert len(list(out.iterdir())) == 1
+    elsewhere = tmp_path / 'elsewhere'
+    elsewhere.mkdir()
+    (elsewhere / 'only.txt').write_text('1')
+    monkeypatch.chdir(elsewhere)
+    assert probe.check('thread') is False
+    assert probe._entry == 'only.txt'
 
 
-def test_report_count_is_capped(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(probe_mod, '_MIN_REPORT_GAP_SECS', 0)
-    monkeypatch.setattr(probe_mod, '_MAX_REPORTS', 2)
-    probe, out = make_probe(tmp_path, lambda h: (None, 'winerror 6'))
-    for _ in range(5):
-        probe.check('thread')
-    assert probe.occurrences == 5
-    assert len(list(out.iterdir())) == 2
+def test_relative_stat_is_not_the_test(tmp_path, monkeypatch):
+    probe, _ = make_probe(tmp_path, monkeypatch)
+    (tmp_path / 'work' / 'subdir').mkdir()
+    assert probe.check('thread') is False
+    assert probe._entry == 'entry.txt'
 
 
-def test_history_is_bounded_and_ordered(tmp_path):
-    probe, _ = make_probe(tmp_path, lambda h: (os.getcwd(), None))
+def test_empty_cwd_cannot_be_judged(tmp_path, monkeypatch):
+    probe, _ = make_probe(tmp_path, monkeypatch)
+    os.remove('entry.txt')
+    assert probe.check('thread') is False
+    assert probe.dead is False
+
+
+def test_no_checks_after_detection(tmp_path, monkeypatch):
+    probe, out = make_probe(tmp_path, monkeypatch)
+    patch_relative_open(monkeypatch, raise_oserror(errno.EBADF))
+    assert probe.check('thread') is True
+    assert probe.check('thread') is False
+    assert probe.checks == 1
+    assert len([f for f in out.iterdir() if f.name.startswith('cwd_probe_')]) == 1
+
+
+def test_history_is_bounded_and_ordered(tmp_path, monkeypatch):
+    probe, _ = make_probe(tmp_path, monkeypatch)
     for i in range(probe_mod._HISTORY_LEN + 5):
         probe.enter(f'n{i}', 'call')
     assert len(probe.history) == probe_mod._HISTORY_LEN
@@ -154,8 +190,7 @@ def test_history_is_bounded_and_ordered(tmp_path):
 
 
 def test_start_and_stop_write_the_armed_file(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    probe, out = make_probe(tmp_path, lambda h: (os.getcwd(), None))
+    probe, out = make_probe(tmp_path, monkeypatch)
     probe.start()
     assert 'state=started' in (out / f'armed_{os.getpid()}.txt').read_text(encoding='utf-8')
     probe.stop()
@@ -170,10 +205,10 @@ def test_enabled_needs_windows_and_the_variable(monkeypatch):
 
 
 def test_probe_error_never_propagates(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+    probe, _ = make_probe(tmp_path, monkeypatch)
 
-    def boom(handle):
+    def boom(cwd):
         raise RuntimeError('boom')
 
-    probe, _ = make_probe(tmp_path, boom)
+    monkeypatch.setattr(os, 'listdir', boom)
     assert probe.check('thread') is False

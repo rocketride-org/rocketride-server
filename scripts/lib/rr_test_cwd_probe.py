@@ -11,44 +11,45 @@ site-packages for a test run (see cwdprobe.js), so pytest loads it in every pyte
 process, xdist workers included. It acts only when ROCKETRIDE_TEST_CWD_PROBE names a
 directory and the platform is Windows. It then:
 
-- reads the cwd handle from the PEB and asks ``GetFinalPathNameByHandleW`` for its path;
-  the handle is dead when that call fails or the path is not the process's cwd (a closed
-  handle value can be reused by another object);
+- picks a regular file of the cwd with an absolute ``os.listdir`` (an absolute path does
+  not use the cwd handle), opens it by its relative name, which goes through the cwd
+  handle, and compares it with the absolute stat. The handle is dead when the relative
+  open raises EBADF or winerror 6, when it succeeds but names another file than the
+  absolute stat (the handle value now belongs to another directory), or when it raises
+  ENOENT while the absolute stat succeeds. A relative ``os.stat`` is no test: it resolves
+  the full path and works with a closed handle. The file is picked again when
+  ``os.getcwd()`` changes or the file disappears;
 - checks before and after every test phase (setup, call, teardown) and once a second
   from a background thread, which also covers closes between tests;
-- on a dead handle writes ``cwd_probe_<utc>_<pid>_<n>.txt`` into that directory: time,
+- on a dead handle writes one ``cwd_probe_<utc>_<pid>.txt`` into that directory: time,
   pid, argv, the current test and phase, the recent phases, the process handle count,
-  the loaded DLLs and the stack of every thread;
-- re-arms: the process leaves the cwd and enters it again, which opens a fresh handle
-  (see WindowsBackend.reopen_cwd_handle), then keeps watching and counts the occurrences.
-  The old handle value gets closed once more, so an object that reused it loses its
-  handle; the process is already broken at that point.
+  the loaded DLLs and the stack of every thread. Then it stops checking in this process.
 
-``armed_<pid>.txt`` is written at start and rewritten at the end with the check and
-occurrence counts, so an artifact without reports still shows that the probe ran.
+After the start the probe never queries or changes the handle: a closed handle value can
+be reused by any object, and asking a reused pipe or file handle for its path can block.
+The PEB handle and its path are read once at start for the report header.
+
+``armed_<pid>.txt`` is written at start and rewritten at the end with the number of
+checks, so an artifact without reports still shows that the probe ran.
 Nothing is ever written into the cwd.
 """
 
 import collections
 import ctypes
 import datetime
+import errno
 import faulthandler
-import ntpath
 import os
+import stat
 import sys
-import tempfile
 import threading
-import time
 
 import pytest
 
 _DIR_VAR = 'ROCKETRIDE_TEST_CWD_PROBE'
 _INTERVAL_SECS = 1.0
-_MAX_REPORTS = 10
-# A re-armed handle can die again at once (its value may still be in use elsewhere); closes this
-# close together count as one report.
-_MIN_REPORT_GAP_SECS = 5.0
 _HISTORY_LEN = 30
+_ERROR_INVALID_HANDLE = 6
 
 _probe = None
 
@@ -63,43 +64,17 @@ def _utc_now() -> str:
     return datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
 
 
-def _norm(path: str) -> str:
+def _is_invalid_handle(err: OSError) -> bool:
     """
-    Normalise a Windows path for comparison: no ``\\\\?\\`` prefix, no trailing slash, folded case.
+    Tell whether an error says the cwd handle is closed.
 
     Parameters:
-        path (str): A path as returned by GetFinalPathNameByHandleW or os.getcwd.
+        err (OSError): The error of a relative open.
 
     Returns:
-        str: The comparable form.
+        bool: True for EBADF or winerror 6 (ERROR_INVALID_HANDLE).
     """
-    if path.startswith('\\\\?\\UNC\\'):
-        path = '\\\\' + path[8:]
-    elif path.startswith('\\\\?\\'):
-        path = path[4:]
-    return ntpath.normcase(ntpath.normpath(path))
-
-
-def _same_dir(final_path: str, cwd: str) -> bool:
-    """
-    Tell whether the path a handle resolves to is the process's cwd.
-
-    The final path has links and junctions resolved while ``os.getcwd`` may not, so a
-    textual mismatch falls back to comparing the two directories on disk.
-
-    Parameters:
-        final_path (str): Path from GetFinalPathNameByHandleW.
-        cwd (str): The current directory from ``os.getcwd``.
-
-    Returns:
-        bool: True when both name the same directory.
-    """
-    if _norm(final_path) == _norm(cwd):
-        return True
-    try:
-        return os.path.samefile(final_path, cwd)
-    except (OSError, ValueError):
-        return False
+    return err.errno == errno.EBADF or getattr(err, 'winerror', None) == _ERROR_INVALID_HANDLE
 
 
 class WindowsBackend:
@@ -123,11 +98,6 @@ class WindowsBackend:
             ctypes.POINTER(wintypes.DWORD),
         ]
         k32.K32EnumProcessModules.restype = wintypes.BOOL
-        k32.CreateEventW.argtypes = [ctypes.c_void_p, wintypes.BOOL, wintypes.BOOL, ctypes.c_wchar_p]
-        k32.CreateEventW.restype = ctypes.c_void_p
-        k32.CloseHandle.argtypes = [ctypes.c_void_p]
-        k32.GetHandleInformation.argtypes = [ctypes.c_void_p, ctypes.POINTER(wintypes.DWORD)]
-        k32.GetHandleInformation.restype = wintypes.BOOL
         k32.GetModuleFileNameW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, wintypes.DWORD]
         k32.GetModuleFileNameW.restype = wintypes.DWORD
 
@@ -143,9 +113,9 @@ class WindowsBackend:
         self._ntdll = ntdll
         self._ptr = ctypes.sizeof(ctypes.c_void_p)
 
-    def _handle_slot(self) -> int:
+    def cwd_handle(self) -> int:
         """
-        Return the address of ``CurrentDirectory.Handle`` in this process's PEB.
+        Read the cwd handle from the PEB.
 
         The PEB holds ``ProcessParameters`` after four pointer-sized fields. In
         RTL_USER_PROCESS_PARAMETERS the 16 bytes of lengths and flags are followed by
@@ -153,7 +123,7 @@ class WindowsBackend:
         and the cwd UNICODE_STRING, which is two pointers wide; the handle comes next.
 
         Returns:
-            int: The address of the handle slot.
+            int: The handle value, 0 when the slot is empty.
 
         Raises:
             OSError: When NtQueryInformationProcess fails.
@@ -166,50 +136,7 @@ class WindowsBackend:
         if status != 0:
             raise OSError(f'NtQueryInformationProcess failed: 0x{status & 0xFFFFFFFF:08x}')
         params = ctypes.c_void_p.from_address(info[1] + 4 * ptr).value
-        return params + 16 + 7 * ptr
-
-    def cwd_handle(self) -> int:
-        """
-        Read the cwd handle from the PEB.
-
-        Returns:
-            int: The handle value, 0 when the slot is empty.
-        """
-        return ctypes.c_void_p.from_address(self._handle_slot()).value or 0
-
-    def reopen_cwd_handle(self, cwd: str) -> int:
-        """
-        Make the process open its current directory again and return the new handle.
-
-        ``os.chdir`` to the directory the process is already in does nothing, so the
-        process leaves it and enters it again. Every ``chdir`` opens the new handle
-        first and then closes the old handle value. A closed value is the first one to
-        be reused, so the new handle could get the old value and be closed at once. A
-        placeholder event takes that value first, and the ``chdir`` closes the event.
-
-        Parameters:
-            cwd (str): The current directory.
-
-        Returns:
-            int: The new handle value.
-
-        Raises:
-            OSError: When the process cannot change directory.
-        """
-        from ctypes import wintypes
-
-        dead = self.cwd_handle()
-        placeholder = self._k32.CreateEventW(None, True, False, None)
-        try:
-            parent = os.path.dirname(cwd)
-            os.chdir(parent if parent != cwd else tempfile.gettempdir())
-            os.chdir(cwd)
-        finally:
-            flags = wintypes.DWORD()
-            # Still open means the chdir did not close it: it did not hold the old value.
-            if placeholder and placeholder != dead and self._k32.GetHandleInformation(placeholder, ctypes.byref(flags)):
-                self._k32.CloseHandle(placeholder)
-        return self.cwd_handle()
+        return ctypes.c_void_p.from_address(params + 16 + 7 * ptr).value or 0
 
     def final_path(self, handle: int) -> tuple:
         """
@@ -269,7 +196,7 @@ class WindowsBackend:
 
 
 class CwdProbe:
-    """Watches the cwd handle of this process and writes a report when it dies."""
+    """Watches the cwd handle of this process and writes one report when it dies."""
 
     def __init__(self, out_dir: str, backend, interval: float = _INTERVAL_SECS) -> None:
         """
@@ -277,31 +204,38 @@ class CwdProbe:
 
         Parameters:
             out_dir (str): Directory for the report files.
-            backend: Object with cwd_handle, reopen_cwd_handle, final_path, handle_count, modules.
+            backend: Object with cwd_handle, final_path, handle_count and modules.
             interval (float): Seconds between background checks.
         """
         self.out_dir = out_dir
         self.backend = backend
         self.interval = interval
         self.checks = 0
-        self.occurrences = 0
+        self.dead = False
+        self.report_path = None
         self.nodeid = ''
         self.phase = ''
         self.history = collections.deque(maxlen=_HISTORY_LEN)
         self.last_ok = ''
-        self.reports = []
-        self._initial_handle = 0
-        self._last_report_at = None
+        self._start_info = ''
+        self._cwd = None
+        self._entry = None
+        self._entry_id = None
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread = None
 
     def start(self) -> None:
-        """Write the armed file and start the background thread."""
+        """Read the start state, write the armed file and start the background thread."""
         os.makedirs(self.out_dir, exist_ok=True)
-        self._initial_handle = self.backend.cwd_handle()
-        self._write_armed('started')
+        try:
+            handle = self.backend.cwd_handle()
+            path, error = self.backend.final_path(handle) if handle else (None, 'handle is 0')
+            self._start_info = f'handle=0x{handle:x} path={path} error={error}'
+        except Exception as err:
+            self._start_info = f'handle unreadable: {err!r}'
         self.last_ok = _utc_now()
+        self._write_armed('started')
         self._thread = threading.Thread(target=self._loop, name='rr-cwd-probe', daemon=True)
         self._thread.start()
 
@@ -326,66 +260,103 @@ class CwdProbe:
 
     def check(self, where: str) -> bool:
         """
-        Check the cwd handle once; on a dead handle write a report and re-arm.
+        Check the cwd handle once; on a dead handle write the report and stop checking.
 
         Parameters:
             where (str): What triggered the check, for example ``thread`` or ``before call``.
 
         Returns:
-            bool: True when the handle was dead.
+            bool: True when the handle was found dead by this call.
         """
         with self._lock:
+            if self.dead:
+                return False
             self.checks += 1
             try:
-                handle = self.backend.cwd_handle()
-                cwd = os.getcwd()
-                path, error = self.backend.final_path(handle) if handle else (None, 'handle is 0')
-                if path is not None and _same_dir(path, cwd):
+                reason = self._probe_once()
+                if reason is None:
                     self.last_ok = _utc_now()
                     return False
-                reason = (
-                    f'GetFinalPathNameByHandleW failed ({error})'
-                    if path is None
-                    else f'handle resolves to {path!r}, cwd is {cwd!r}'
-                )
-                self.occurrences += 1
-                now = time.monotonic()
-                quiet = self._last_report_at is not None and now - self._last_report_at < _MIN_REPORT_GAP_SECS
-                if len(self.reports) < _MAX_REPORTS and not quiet:
-                    self._last_report_at = now
-                    self._report(where, handle, cwd, reason)
-                self._rearm(cwd)
+                self.dead = True
+                self._stop.set()
+                self._report(where, reason)
                 return True
             except Exception as err:
                 # A diagnostic must never fail the test it observes.
                 self._note(f'probe error in {where}: {err!r}')
                 return False
 
+    def _pick_entry(self, cwd: str) -> None:
+        """
+        Choose a regular file of the cwd, by absolute paths only.
+
+        Parameters:
+            cwd (str): The current directory.
+        """
+        self._cwd, self._entry, self._entry_id = cwd, None, None
+        for name in os.listdir(cwd):
+            try:
+                st = os.stat(os.path.join(cwd, name))
+            except OSError:
+                continue
+            if not stat.S_ISREG(st.st_mode):
+                continue
+            self._entry, self._entry_id = name, (st.st_dev, st.st_ino)
+            return
+
+    def _probe_once(self):
+        """
+        Open one cwd file by its relative name and compare it with its absolute stat.
+
+        Returns:
+            str | None: Why the handle counts as dead, or None when it works or cannot be judged.
+        """
+        cwd = os.getcwd()
+        if cwd != self._cwd or self._entry is None:
+            self._pick_entry(cwd)
+            if self._entry is None:
+                return None
+        name = self._entry
+        absolute = os.path.join(cwd, name)
+        try:
+            fd = os.open(name, os.O_RDONLY | getattr(os, 'O_BINARY', 0))
+        except OSError as err:
+            if _is_invalid_handle(err):
+                return f'relative open of {name!r} failed: {err!r}'
+            if err.errno != errno.ENOENT:
+                return None
+            try:
+                os.stat(absolute)
+            except OSError:
+                self._entry = None
+                return None
+            return f'relative open of {name!r} gave ENOENT, the absolute stat succeeds'
+        try:
+            rel = os.fstat(fd)
+        finally:
+            os.close(fd)
+        try:
+            ab = os.stat(absolute)
+        except OSError:
+            self._entry = None
+            return None
+        if (rel.st_dev, rel.st_ino) != (ab.st_dev, ab.st_ino):
+            return f'relative open of {name!r} names another file than {absolute!r}: {(rel.st_dev, rel.st_ino)} vs {(ab.st_dev, ab.st_ino)}'
+        return None
+
     def _loop(self) -> None:
         """Check every interval until stopped."""
         while not self._stop.wait(self.interval):
             self.check('thread')
 
-    def _rearm(self, cwd: str) -> None:
-        """
-        Give the process a fresh cwd handle.
-
-        Parameters:
-            cwd (str): The directory to enter again.
-        """
-        try:
-            self._note(f're-armed: new handle 0x{self.backend.reopen_cwd_handle(cwd):x}')
-        except Exception as err:
-            self._note(f're-arm failed: {err!r}')
-
     def _note(self, line: str) -> None:
         """
-        Append a line to the newest report, or to the armed file when there is none.
+        Append a line to the report, or to the armed file when there is none.
 
         Parameters:
             line (str): The text to append.
         """
-        target = self.reports[-1] if self.reports else os.path.join(self.out_dir, f'armed_{os.getpid()}.txt')
+        target = self.report_path or os.path.join(self.out_dir, f'armed_{os.getpid()}.txt')
         try:
             with open(target, 'a', encoding='utf-8') as f:
                 f.write(f'{_utc_now()} {line}\n')
@@ -400,37 +371,32 @@ class CwdProbe:
             state (str): ``started`` or ``finished``.
         """
         try:
-            handle = self.backend.cwd_handle()
-            path, error = self.backend.final_path(handle) if handle else (None, 'handle is 0')
             with open(os.path.join(self.out_dir, f'armed_{os.getpid()}.txt'), 'w', encoding='utf-8') as f:
                 f.write(
                     f'state={state} utc={_utc_now()} pid={os.getpid()}\n'
-                    f'argv={" ".join(sys.argv)}\ncwd={os.getcwd()}\n'
-                    f'initial_handle=0x{self._initial_handle:x} handle=0x{handle:x} path={path} error={error}\n'
-                    f'checks={self.checks} occurrences={self.occurrences}\n'
+                    f'argv={" ".join(sys.argv)}\nstart: {self._start_info}\n'
+                    f'checks={self.checks} dead={self.dead}\n'
                 )
         except Exception:
             pass
 
-    def _report(self, where: str, handle: int, cwd: str, reason: str) -> None:
+    def _report(self, where: str, reason: str) -> None:
         """
-        Write one report file.
+        Write the report file.
 
         Parameters:
             where (str): What triggered the check.
-            handle (int): The dead handle value.
-            cwd (str): The process's current directory.
             reason (str): Why the handle counts as dead.
         """
         stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S')
-        path = os.path.join(self.out_dir, f'cwd_probe_{stamp}_{os.getpid()}_{self.occurrences}.txt')
+        path = os.path.join(self.out_dir, f'cwd_probe_{stamp}_{os.getpid()}.txt')
         with open(path, 'w', encoding='utf-8') as f:
             f.write(
-                f'cwd handle is dead (occurrence {self.occurrences})\n'
+                f'cwd handle is dead\n'
                 f'utc={_utc_now()} pid={os.getpid()}\nargv={" ".join(sys.argv)}\n'
                 f'detected_by={where}\n'
                 f'test={self.nodeid or "(none yet)"} phase={self.phase or "(none)"}\n'
-                f'handle=0x{handle:x} initial_handle=0x{self._initial_handle:x}\ncwd={cwd}\n'
+                f'cwd={self._cwd}\nstart: {self._start_info}\n'
                 f'reason={reason}\nlast_ok_utc={self.last_ok}\n'
                 f'process_handle_count={self.backend.handle_count()}\n'
                 f'\n--- recent test phases (oldest first) ---\n'
@@ -443,7 +409,7 @@ class CwdProbe:
             mods = self.backend.modules()
             f.write(f'\n--- loaded modules ({len(mods)}) ---\n')
             f.writelines(f'{m}\n' for m in mods)
-        self.reports.append(path)
+        self.report_path = path
 
 
 def enabled() -> bool:
@@ -517,6 +483,6 @@ def pytest_runtest_teardown(item):
 
 
 def pytest_terminal_summary(terminalreporter) -> None:
-    """Print how often the cwd handle died and where the reports are."""
-    if _probe is not None and _probe.occurrences:
-        terminalreporter.write_line(f'cwd probe: handle died {_probe.occurrences} time(s); reports: {_probe.reports}')
+    """Print where the report is when the cwd handle died."""
+    if _probe is not None and _probe.dead:
+        terminalreporter.write_line(f'cwd probe: handle died; report: {_probe.report_path}')
