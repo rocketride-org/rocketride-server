@@ -294,6 +294,28 @@ def test_graphql_200_rate_limited_with_partial_data_is_returned_not_retried(node
     assert result['data'] == {'data': body['data'], 'errors': body['errors']}
 
 
+@pytest.mark.parametrize(
+    'headers', [graphql_limited().headers, {**OK_HEADERS, 'Retry-After': '7'}], ids=['rate-limited', 'retry-after']
+)
+def test_graphql_200_with_a_path_error_and_null_data_is_returned_not_retried(node, headers):
+    # Null propagation emptied data after a field ran; the path says GitHub executed the document,
+    # so neither the RATE_LIMITED type nor Retry-After may trigger a retry.
+    node.inst.IGlobal.read_only = False
+    node.inst.IGlobal.graphql_allow_mutations = True
+    body = {
+        'data': None,
+        'errors': [{'type': 'RATE_LIMITED', 'path': ['second'], 'message': 'API rate limit exceeded.'}],
+    }
+    node.request.return_value = response(body, 200, headers)
+    result = node.inst.graphql(
+        {'query': 'mutation { first: addStar { clientMutationId } second: addStar { clientMutationId } }'}
+    )
+    assert node.slept == []
+    assert node.request.call_count == 1
+    assert result['status'] == 200
+    assert result['data'] == {'data': None, 'errors': body['errors']}
+
+
 def test_graphql_200_with_retry_after_and_no_data_waits_then_succeeds(node):
     _, _, payload = TOOLS['graphql']
     limited = response(

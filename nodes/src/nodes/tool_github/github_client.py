@@ -632,7 +632,8 @@ def _graphql_rate_limited(resp: requests.Response, content: bytes, exhausted: bo
     ``locations``. Parse and validation errors carry ``locations`` and may quote the
     document or its variables, so their text is never read as a rate limit. An error
     with ``path`` came from field execution, so GitHub ran the document: it never counts,
-    whatever its text, since retrying could run a mutation twice.
+    whatever its headers, types or text say, since retrying could run a mutation twice (null
+    propagation can empty ``data`` after a field ran).
     """
     hinted = b'RATE_LIMITED' in content or b'rate limit' in content.lower()
     if not ('Retry-After' in resp.headers or exhausted or hinted):
@@ -643,7 +644,11 @@ def _graphql_rate_limited(resp: requests.Response, content: bytes, exhausted: bo
         return False
     raw_errors = body.get('errors')
     errors = [error for error in raw_errors if isinstance(error, dict)] if isinstance(raw_errors, list) else []
-    unlocated = [error for error in errors if not error.get('locations') and not error.get('path')]
+    if any(error.get('path') for error in errors):
+        # Field execution happened, so the document ran at least in part: returned, never
+        # retried, before any of the signals below is read.
+        return False
+    unlocated = [error for error in errors if not error.get('locations')]
     own_words = [body.get('message')] + [error.get('message') for error in unlocated]
     return (
         'Retry-After' in resp.headers
