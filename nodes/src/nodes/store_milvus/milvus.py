@@ -54,14 +54,29 @@ DEFAULT_BULK_INSERT_BATCH_SIZE = 50
 # Default connection timeout in seconds
 DEFAULT_TIMEOUT = 60
 
-# Every read sees this process's own writes. A collection's default level (Bounded) reads a
-# view up to 5 s old, so a control row or chunk written a moment ago is not found yet.
+# Plain reads (search, get, paths, count, render) see every write of this process at once, and
+# what the server already holds of other processes' writes. The collection's default level
+# (Bounded) reads a view up to 5 s old, so a chunk written a moment ago is not found yet.
 READ_CONSISTENCY = 'Session'
+
+# Reads that must see every completed write, from any process: the rows markDeleted and
+# markActive change, a control row a Session read did not find, and all reads of a collection
+# configured as Strong. A Strong read waits for the server's next time tick (about 0.4 s).
+STRONG_CONSISTENCY = 'Strong'
 
 
 def _escape_milvus_str(value: object) -> str:
-    """Escape a value for safe interpolation into a Milvus filter expression."""
-    return str(value).replace('\\', '\\\\').replace("'", "\\'")
+    """Escape a value for a single-quoted Milvus string literal.
+
+    The filter grammar rejects a raw backslash, quote, CR or LF inside the literal.
+
+    Args:
+        value: The value to put in the literal.
+
+    Returns:
+        The literal's text, without the quotes.
+    """
+    return str(value).replace('\\', '\\\\').replace("'", "\\'").replace('\r', '\\r').replace('\n', '\\n')
 
 
 def _like_contains(text: str) -> str:
@@ -94,6 +109,9 @@ class Store(DocumentStoreBase):
     vectorSizePos: int = 1
     vectorIndexType: str = 'IVF_FLAT'
     scalarIndexType: str = 'STL_SORT'
+    # The level of plain reads: Strong once the collection turns out to be configured as Strong
+    readConsistency: str = READ_CONSISTENCY
+    levelChecked: bool = False
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
         """
@@ -160,10 +178,23 @@ class Store(DocumentStoreBase):
     def _doesCollectionExist(self) -> bool:
         """
         Check if the collection exists.
+
+        The first time it finds the collection, it reads the level the collection is configured
+        with, so that reads of a Strong collection stay Strong.
+
+        Returns:
+            True if the collection exists.
         """
         if self.client is None:
             return False
-        return self.client.has_collection(collection_name=self.collection)
+        if not self.client.has_collection(collection_name=self.collection):
+            return False
+        if not self.levelChecked:
+            # describe_collection reports the level as an int, and 0 is Strong
+            level = self.client.describe_collection(collection_name=self.collection).get('consistency_level')
+            self.readConsistency = STRONG_CONSISTENCY if level in (0, STRONG_CONSISTENCY) else READ_CONSISTENCY
+            self.levelChecked = True
+        return True
 
     def _createCollection(self, vectorSize: int) -> bool:
         """
@@ -324,7 +355,7 @@ class Store(DocumentStoreBase):
 
         # Get cound documents using query
         res = self.client.query(
-            collection_name=self.collection, output_fields=['count(*)'], consistency_level=READ_CONSISTENCY
+            collection_name=self.collection, output_fields=['count(*)'], consistency_level=self.readConsistency
         )
 
         # Parse query result
@@ -357,7 +388,7 @@ class Store(DocumentStoreBase):
             filter=filter_expression,
             limit=docFilter.limit,
             output_fields=['meta', 'content'],
-            consistency_level=READ_CONSISTENCY,
+            consistency_level=self.readConsistency,
         )
 
         docs = self._convertToDocs(points)
@@ -402,7 +433,7 @@ class Store(DocumentStoreBase):
             filter=filter_expression,
             limit=25 if docFilter.limit <= 10 else docFilter.limit,
             output_fields=['meta', 'content'],
-            consistency_level=READ_CONSISTENCY,
+            consistency_level=self.readConsistency,
         )
 
         docs = self._convertToDocs(points[0])
@@ -428,15 +459,30 @@ class Store(DocumentStoreBase):
         # Combine all conditions into a single filter expression
         filter_expression = ' and '.join(must_conditions) if must_conditions else None
 
-        # Perform the query
-        results = self.client.query(
-            collection_name=self.collection,
-            filter=filter_expression,
-            output_fields=['meta', 'content'],
-            offset=docFilter.offset,
-            limit=docFilter.limit,
-            consistency_level=READ_CONSISTENCY,
-        )
+        def query(level: str) -> List[dict]:
+            """Run the query at a consistency level.
+
+            Args:
+                level: The consistency level of the read.
+
+            Returns:
+                The matching rows.
+            """
+            return self.client.query(
+                collection_name=self.collection,
+                filter=filter_expression,
+                output_fields=['meta', 'content'],
+                offset=docFilter.offset,
+                limit=docFilter.limit,
+                consistency_level=level,
+            )
+
+        results = query(self.readConsistency)
+
+        # checkCollection=False is the control-row check: a Session read may not show yet the
+        # control row another process wrote a moment ago, and a missing row fails the store
+        if not results and not checkCollection and self.readConsistency != STRONG_CONSISTENCY:
+            results = query(STRONG_CONSISTENCY)
 
         # Convert results to Docs
         return self._convertToDocs(results)
@@ -464,7 +510,7 @@ class Store(DocumentStoreBase):
             output_fields=['meta'],
             offset=offset,
             limit=limit,
-            consistency_level=READ_CONSISTENCY,
+            consistency_level=self.readConsistency,
         )
 
         # Build paths dictionary
@@ -539,8 +585,9 @@ class Store(DocumentStoreBase):
                 'vector': embedding,
                 'content': chunk.page_content,
                 # A plain dict without the None fields: pymilvus encodes the JSON field itself, and Doc
-                # rejects a None it reads back for a field such as nodeId (the control row has many)
-                'meta': chunk.metadata.toDict(),
+                # rejects a None it reads back for a field such as nodeId (the control row has many).
+                # A chunk without isDeleted is live: default reads match only isDeleted == False.
+                'meta': {'isDeleted': False, **chunk.metadata.toDict()},
             }
 
             batch.append(tmp_struct)
@@ -627,7 +674,8 @@ class Store(DocumentStoreBase):
             collection_name=self.collection,
             filter=filter_expression,
             output_fields=['id', 'vector', 'content', 'meta'],
-            consistency_level=READ_CONSISTENCY,
+            # These rows decide what to change, so they include other processes' writes
+            consistency_level=STRONG_CONSISTENCY,
         )
 
         # Batch-update instead of one-at-a-time to avoid performance bottleneck
@@ -660,7 +708,8 @@ class Store(DocumentStoreBase):
             collection_name=self.collection,
             filter=filter_expression,
             output_fields=['id', 'vector', 'content', 'meta'],
-            consistency_level=READ_CONSISTENCY,
+            # These rows decide what to change, so they include other processes' writes
+            consistency_level=STRONG_CONSISTENCY,
         )
 
         # Batch-update instead of one-at-a-time to avoid performance bottleneck
@@ -693,7 +742,7 @@ class Store(DocumentStoreBase):
                 collection_name=self.collection,
                 filter=must_condition,
                 output_fields=['meta', 'content'],
-                consistency_level=READ_CONSISTENCY,
+                consistency_level=self.readConsistency,
             )
 
             # Create a renderChunkSize array with empty

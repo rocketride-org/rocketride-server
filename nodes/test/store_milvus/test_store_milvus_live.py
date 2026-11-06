@@ -10,14 +10,16 @@ address with a host name or an IPv4 address, for example http://127.0.0.1:19530.
 Without the variable every test skips, even with RR_REQUIRE_DB_TESTS=1, which CI
 sets for its Postgres suites and starts no Milvus; with both set, any other
 address, a server that does not answer or a missing pymilvus fails instead of
-skipping. Each test writes
-to its own collection and drops it afterwards. The driver, pymilvus, the Doc
+skipping. Each test writes to its own collection and drops it afterwards; one
+test also writes from a second engine process. The driver, pymilvus, the Doc
 models and DocumentStoreBase are real.
 """
 
 import importlib
 import importlib.util
+import json
 import os
+import subprocess
 import sys
 import types
 from pathlib import Path
@@ -32,6 +34,51 @@ _NODE_DIR = _REPO / 'nodes/src/nodes/store_milvus'
 _REQUIRED = bool(os.environ.get('RR_REQUIRE_DB_TESTS'))
 _URI = os.environ.get('RR_TEST_MILVUS_URI')
 
+# The writer process runs this file's _write_and_wait with the Store config
+_WRITER = 'import json, runpy, sys; runpy.run_path(sys.argv[1])["_write_and_wait"](json.loads(sys.argv[2]))'
+
+
+def _load_driver(prepend_path, set_module):
+    """Load the store_milvus driver from source, with the installed pymilvus.
+
+    Args:
+        prepend_path: Puts a directory first on ``sys.path``.
+        set_module: Puts a module into ``sys.modules`` under a name.
+
+    Returns:
+        The driver module.
+    """
+    for src in ('packages/ai/src', 'packages/client-python/src', 'nodes/src'):
+        prepend_path(str(_REPO / src))
+    # depends installs the node's requirements; the test uses the installed pymilvus as it is
+    set_module('depends', MagicMock())
+    package = types.ModuleType('nodes.store_milvus')
+    package.__path__ = [str(_NODE_DIR)]
+    set_module(package.__name__, package)
+    module = None
+    for name in ('mode', 'milvus'):
+        spec = importlib.util.spec_from_file_location(f'nodes.store_milvus.{name}', _NODE_DIR / f'{name}.py')
+        module = importlib.util.module_from_spec(spec)
+        set_module(spec.name, module)
+        spec.loader.exec_module(module)
+    return module
+
+
+def _write_and_wait(config):
+    """Write chunk 'a' to the collection, print 'written', and wait until stdin closes.
+
+    Runs in the writer process, started with ``_WRITER``.
+
+    Args:
+        config: The Store's config.
+    """
+    module = _load_driver(lambda path: sys.path.insert(0, path), sys.modules.__setitem__)
+    store = module.Store('milvus', config, {})
+    store.addChunks([_doc('a')])
+    print('written', flush=True)
+    sys.stdin.read()
+    store.client.close()
+
 
 @pytest.fixture
 def open_store(monkeypatch):
@@ -41,7 +88,8 @@ def open_store(monkeypatch):
         monkeypatch: Restores ``sys.path`` and ``sys.modules`` after the test.
 
     Yields:
-        A function that opens another Store on the same collection each time it is called.
+        A function that opens another Store on the same collection each time it is called; its
+        ``config`` attribute is the Store config.
     """
     if not _URI:
         pytest.skip('Set RR_TEST_MILVUS_URI to a Milvus test server')
@@ -68,19 +116,9 @@ def open_store(monkeypatch):
             pytest.fail(f'Milvus test server {_URI} is unavailable: {e}')
         pytest.skip(f'Milvus test server {_URI} is unavailable')
 
-    for src in ('packages/ai/src', 'packages/client-python/src', 'nodes/src'):
-        monkeypatch.syspath_prepend(str(_REPO / src))
-    # depends installs the node's requirements; the test uses the installed pymilvus as it is
-    monkeypatch.setitem(sys.modules, 'depends', MagicMock())
-    package = types.ModuleType('nodes.store_milvus')
-    package.__path__ = [str(_NODE_DIR)]
-    monkeypatch.setitem(sys.modules, package.__name__, package)
-    module = None
-    for name in ('mode', 'milvus'):
-        spec = importlib.util.spec_from_file_location(f'nodes.store_milvus.{name}', _NODE_DIR / f'{name}.py')
-        module = importlib.util.module_from_spec(spec)
-        monkeypatch.setitem(sys.modules, spec.name, module)
-        spec.loader.exec_module(module)
+    module = _load_driver(
+        monkeypatch.syspath_prepend, lambda name, value: monkeypatch.setitem(sys.modules, name, value)
+    )
 
     config = {
         'collection': 'rr_test_' + uuid4().hex,
@@ -101,6 +139,7 @@ def open_store(monkeypatch):
         stores.append(store)
         return store
 
+    open_store.config = config
     try:
         yield open_store
     finally:
@@ -165,6 +204,21 @@ def _chunks(docs):
     return sorted((doc.metadata.objectId, doc.metadata.chunkId, doc.page_content) for doc in docs)
 
 
+def _found(store, text):
+    """Return the object ids that a keyword search for text finds, sorted.
+
+    Args:
+        store: The Store to search.
+        text: The question's text.
+
+    Returns:
+        The sorted object ids.
+    """
+    from ai.common.schema import QuestionText
+
+    return [object_id for object_id, _, _ in _chunks(store.searchKeyword(QuestionText(text=text), _filter()))]
+
+
 @pytest.mark.parametrize(
     'metadata',
     [{}, {'signature': 'test-signature', 'extraField': 'kept'}],
@@ -220,8 +274,6 @@ def test_keyword_search_matches_the_question_text(open_store):
 
 def test_keyword_search_takes_percent_and_underscore_literally(open_store):
     """A % or _ in the question matches only itself; text that ends with % still finds every row that has it."""
-    from ai.common.schema import QuestionText
-
     store = open_store()
     store.addChunks(
         [
@@ -231,21 +283,27 @@ def test_keyword_search_takes_percent_and_underscore_literally(open_store):
             _doc('d', 0, 'key axb'),
         ]
     )
+    assert _found(store, '50% now') == ['a']
+    assert _found(store, 'a_b') == ['c']
+    assert 'a' in _found(store, '50%')
 
-    def found(text):
-        """Return the object ids that a keyword search for text finds, sorted.
 
-        Args:
-            text: The question's text.
-
-        Returns:
-            The sorted object ids.
-        """
-        return [object_id for object_id, _, _ in _chunks(store.searchKeyword(QuestionText(text=text), _filter()))]
-
-    assert found('50% now') == ['a']
-    assert found('a_b') == ['c']
-    assert 'a' in found('50%')
+def test_keyword_search_matches_text_with_line_breaks(open_store):
+    """A question with LF or CRLF finds the chunk with that text, and a match may sit between lines of a chunk."""
+    store = open_store()
+    store.addChunks(
+        [
+            _doc('a', 0, 'first line\nsecond line'),
+            _doc('b', 0, 'first line second line'),
+            _doc('c', 0, 'one\r\ntwo'),
+            _doc('d', 0, 'intro\ngrowth 50% now\nend'),
+        ]
+    )
+    assert _found(store, 'line\nsecond') == ['a']
+    assert _found(store, 'one\r\ntwo') == ['c']
+    assert _found(store, 'growth 50% now') == ['d']
+    # Text that ends with % takes the wildcard path
+    assert _found(store, 'growth 50%') == ['d']
 
 
 def test_render_joins_the_chunks_in_order(open_store):
@@ -272,6 +330,39 @@ def test_marks_and_removes_apply_right_after_a_write(open_store):
     store.remove(['b'])
     assert store.getPaths() == {'/a': 'a'}
     assert store.get(_filter(objectIds=['b'], isDeleted=True)) == []
+
+
+def test_a_mark_reaches_a_chunk_another_process_wrote_a_moment_before(open_store):
+    """A mark reaches a chunk another process just wrote, in a process that never wrote to the collection.
+
+    The writer process also creates the collection, so this process first finds a control row it did not write.
+    """
+    store = open_store()
+    writer = subprocess.Popen(
+        [sys.executable, '-c', _WRITER, __file__, json.dumps(open_store.config)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert 'written' in (line.strip() for line in iter(writer.stdout.readline, ''))
+        store.markDeleted(['a'])
+        assert store.getPaths() == {}
+        assert [doc.metadata.isDeleted for doc in store.get(_filter(objectIds=['a'], isDeleted=True))] == [True]
+    finally:
+        writer.stdin.close()
+        writer.wait(timeout=60)
+
+
+def test_a_chunk_without_a_deletion_flag_is_live(open_store):
+    """A chunk whose metadata leaves isDeleted out is found by default reads."""
+    from ai.common.schema import Doc, DocMetadata
+
+    store = open_store()
+    metadata = DocMetadata(objectId='a', chunkId=0, parent='/a')
+    store.addChunks([Doc(page_content='plain', metadata=metadata, embedding=[1.0, 0.0, 0.0], embedding_model='m')])
+    assert store.getPaths() == {'/a': 'a'}
+    assert _chunks(store.get(_filter(objectIds=['a']))) == [('a', 0, 'plain')]
 
 
 def test_only_chunk_zero_starts_an_object_over(open_store):
