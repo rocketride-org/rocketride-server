@@ -26,7 +26,8 @@
 """
 GitHub tool node - global (shared) state.
 
-Reads auth config (PAT or GitHub App), default_repo, and read_only flag from
+Reads auth config (PAT or GitHub App), default_repo, the read_only flag, the
+tool allowlist, the GraphQL response cap and the rate-limit retry policy from
 config. For App auth, mints and caches short-lived installation tokens,
 auto-refreshing them shortly before they expire.
 """
@@ -42,6 +43,7 @@ from ai.common.utils import decode_data_url
 from rocketlib import IGlobalBase, OPEN_MODE, warning
 
 from . import github_client
+from .IInstance import validate_tool_names
 
 # Refresh an installation token this many seconds before its actual expiry, so
 # an in-flight request never races a token that dies mid-call.
@@ -111,6 +113,74 @@ def _read_auth(cfg) -> dict:
     }
 
 
+# (config key, default, minimum, maximum) for the integer options.
+_GRAPHQL_MAX_BYTES = ('graphqlMaxResponseBytes', github_client.DEFAULT_GRAPHQL_MAX_BYTES, 1024, 100 * 1024 * 1024)
+# The call blocks for the whole wait, so the budget is capped at ten minutes.
+_RETRY_BUDGET = ('rateLimitBudgetSeconds', github_client.DEFAULT_RETRY_BUDGET_SECONDS, 0, 600)
+_MAX_RETRIES = ('rateLimitMaxRetries', github_client.DEFAULT_MAX_RETRIES, 0, 10)
+
+
+def _read_int(cfg, option: tuple) -> int:
+    """Read an integer option; blank means the default, anything else out of range fails."""
+    key, default, minimum, maximum = option
+    raw = cfg.get(key)
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return default
+    value = None
+    if isinstance(raw, int) and not isinstance(raw, bool):
+        value = raw
+    elif isinstance(raw, float) and raw.is_integer():
+        value = int(raw)
+    elif isinstance(raw, str) and raw.strip().isdecimal():
+        value = int(raw.strip())
+    if value is None or not minimum <= value <= maximum:
+        raise ValueError(f'tool_github: {key} must be an integer from {minimum} to {maximum}')
+    return value
+
+
+def _read_flag(cfg, key: str, default: bool = False) -> bool:
+    """Read a yes-or-no option; blank means the default, and the strings true and false are accepted."""
+    raw = cfg.get(key)
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return default
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, str) and raw.strip().lower() in ('true', 'false'):
+        return raw.strip().lower() == 'true'
+    raise ValueError(f'tool_github: {key} must be true or false')
+
+
+def _read_tools(raw) -> frozenset:
+    """Parse the ``tools`` allowlist into a set of names; empty means every tool.
+
+    Only the shape is checked here; ``validate_tool_names`` checks the names.
+    """
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return frozenset()
+    if isinstance(raw, str):
+        raw = raw.split(',')
+    if not isinstance(raw, (list, tuple)) or not all(isinstance(name, str) for name in raw):
+        raise ValueError('tool_github: tools must be a list of tool names')
+    names = frozenset(name.strip() for name in raw if name.strip())
+    if raw and not names:
+        # Entries that are all blank are a mistake, not a request for every tool: fail closed.
+        raise ValueError(
+            'tool_github: tools has only blank entries; name the tools to publish, or leave tools empty to publish every tool'
+        )
+    return names
+
+
+def _read_options(cfg) -> dict:
+    """Parse the non-auth options; ``beginGlobal`` and ``validateConfig`` share it."""
+    return {
+        'tools': validate_tool_names(_read_tools(cfg.get('tools'))),
+        'graphqlAllowMutations': _read_flag(cfg, 'graphqlAllowMutations'),
+        'graphqlMaxResponseBytes': _read_int(cfg, _GRAPHQL_MAX_BYTES),
+        'rateLimitBudgetSeconds': _read_int(cfg, _RETRY_BUDGET),
+        'rateLimitMaxRetries': _read_int(cfg, _MAX_RETRIES),
+    }
+
+
 class IGlobal(IGlobalBase):
     """Global state for tool_github."""
 
@@ -121,6 +191,10 @@ class IGlobal(IGlobalBase):
     installation_id: str = ''
     default_repo: str = ''
     read_only: bool = False
+    tools: frozenset = frozenset()
+    graphql_max_bytes: int = github_client.DEFAULT_GRAPHQL_MAX_BYTES
+    graphql_allow_mutations: bool = False
+    retry_policy: github_client.RetryPolicy = github_client.RetryPolicy()
 
     _cached_token: str = ''
     _cached_expiry: float = 0.0
@@ -139,6 +213,15 @@ class IGlobal(IGlobalBase):
         self._refresh_failed_at = 0.0
         self._lock = threading.Lock()
 
+        options = _read_options(cfg)
+        self.tools = options['tools']
+        self.graphql_max_bytes = options['graphqlMaxResponseBytes']
+        self.graphql_allow_mutations = options['graphqlAllowMutations']
+        self.retry_policy = github_client.RetryPolicy(
+            budget_seconds=options['rateLimitBudgetSeconds'],
+            max_retries=options['rateLimitMaxRetries'],
+        )
+
         auth = _read_auth(cfg)
         self.auth_type = auth['authType']
         if self.auth_type == 'app':
@@ -149,10 +232,11 @@ class IGlobal(IGlobalBase):
             self.token = auth['token']
 
     def validateConfig(self) -> None:
-        try:
-            _read_auth(Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig))
-        except Exception as e:
-            warning(str(e))
+        for read in (_read_auth, _read_options):
+            try:
+                read(Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig))
+            except Exception as e:
+                warning(str(e))
 
     def endGlobal(self) -> None:
         self.auth_type = 'pat'
@@ -162,6 +246,10 @@ class IGlobal(IGlobalBase):
         self.installation_id = ''
         self.default_repo = ''
         self.read_only = False
+        self.tools = frozenset()
+        self.graphql_max_bytes = github_client.DEFAULT_GRAPHQL_MAX_BYTES
+        self.graphql_allow_mutations = False
+        self.retry_policy = github_client.RetryPolicy()
         self._cached_token = ''
         self._cached_expiry = 0.0
         self._refresh_failed_at = 0.0
