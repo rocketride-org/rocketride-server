@@ -62,34 +62,42 @@ class IInstance(IInstanceBase):
         self.has_output = False
         self._reset()
 
+    # The engine forwards a handler's raw input unless preventDefault() raises, so
+    # each collector ends with it, after the input is stored. Only the merged
+    # question from closing() goes downstream.
+
     def writeQuestions(self, question: Question):
         """
-        Collect questions for merging.
+        Collect questions for merging; the raw question is not passed downstream.
         """
         for q in question.questions:
             self.question.addQuestion(q.text)
+        return self.preventDefault()
 
     def writeDocuments(self, documents):
         """
-        Collect documents for merging.
+        Collect documents for merging; the raw documents are not passed downstream.
         """
         # Create a question from documents
         self.question.addDocuments(documents)
+        return self.preventDefault()
 
     def writeText(self, text: str):
         """
-        Collect text for merging.
+        Collect text for merging; the raw text is not passed downstream.
         """
         # Create a question from text
 
         self.question.addContext(text)
+        return self.preventDefault()
 
     def writeTable(self, table: str):
         """
-        Collect table data for merging.
+        Collect table data for merging; the raw table is not passed downstream.
         """
         # Create a question from table data
         self.question.addContext(table)
+        return self.preventDefault()
 
     def _received_input(self):
         """Whether anything at all was written to this node during the turn."""
