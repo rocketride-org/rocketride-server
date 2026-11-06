@@ -168,7 +168,7 @@ export interface DesktopViewProps {
 	 * placing the version drop list (absent → the viewport top).
 	 */
 	popoverBoundarySelector?: string;
-	/** Message for the zero-apps state. */
+	/** Message for the zero-apps state; '' shows none (header-less hosts). */
 	emptyMessage?: string;
 	/** Grid item style (default 'card'). */
 	variant?: DesktopAppVariant;

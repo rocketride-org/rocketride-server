@@ -205,7 +205,7 @@ export const DesktopView: React.FC<DesktopViewProps> = ({
 			)}
 
 			{/* Empty state without the header row (picker/compact surfaces). */}
-			{!showHeader && apps.length === 0 && <p style={S.greetingSub}>{emptyMessage}</p>}
+			{!showHeader && apps.length === 0 && emptyMessage && <p style={S.greetingSub}>{emptyMessage}</p>}
 
 			{/* App grid — trailing items (e.g. "Add apps") share its cells */}
 			{(apps.length > 0 || trailingItems) && (
