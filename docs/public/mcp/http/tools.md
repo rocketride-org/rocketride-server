@@ -128,14 +128,11 @@ nothing itself.
   defaults to `lane_in`); `class_type` (string, optional, defaults to
   `lane_in`).
 - **Returns:** `{ok, name, provider, files, next_steps}` — `files` maps
-  `local_nodes/__init__.py` (the parent package marker) and
-  `local_nodes/<name>/...` paths to file contents. Write every returned path:
-  without the marker `local_nodes` is not a package and the engine cannot
-  import `local_nodes.<name>`.
+  `nodes/<name>/...` paths to file contents.
 - **Notable:** lanes and `class_type` are validated against the connected
   engine's live catalog, so the allowed sets never drift from what is actually
   in service.
-- **Scope:** a local node runs only on an engine started with `--node_path`.
+- **Scope:** a local node runs only on the engine whose `nodes/` directory holds it.
   RocketRide Cloud loads none, and store review rejects pipelines that use
   one, so an app headed for the store stays on catalog nodes.
 
