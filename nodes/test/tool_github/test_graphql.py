@@ -368,6 +368,22 @@ def test_server_error_preserves_status_and_warns_only_for_mutations(node, query,
     node.sleep.assert_not_called()
 
 
+@pytest.mark.parametrize('query', [VIEWER, MUTATION])
+def test_wrong_shape_success_body_warns_only_for_mutations(node, query):
+    # A 2xx JSON answer without data or errors: a mutation may still have run, a query did no harm.
+    node.inst.IGlobal.read_only = False
+    node.inst.IGlobal.graphql_allow_mutations = True
+    node.request.return_value = gql_response(raw=json.dumps({'ok': True}).encode())
+    result = node.inst.graphql({'query': query})
+    assert result['status'] == 200
+    assert result['message'].startswith(
+        'GitHub returned an unexpected response body; expected a JSON object with data or errors.'
+    )
+    assert ('mutation may already have been applied' in result['message']) is (query == MUTATION)
+    node.request.assert_called_once()
+    node.sleep.assert_not_called()
+
+
 def test_oversized_response_is_an_error_naming_the_cap_and_is_not_read_in_full(node):
     node.inst.IGlobal.graphql_max_bytes = 1024
     body = json.dumps({'data': {'blob': 'x' * (640 * 1024)}}).encode()

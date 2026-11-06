@@ -845,6 +845,9 @@ def _graphql_answer(
         result['message'] = _error_message(resp.status_code, body, secrets)
         documentation_url = body.get('documentation_url')
         result['documentation_url'] = documentation_url if isinstance(documentation_url, str) else None
+    if may_write:
+        # A 2xx answer GitHub shaped another way may still have run the mutation.
+        result['message'] = f'{result["message"].rstrip()} {_GRAPHQL_UNKNOWN_OUTCOME}'
     return result
 
 
