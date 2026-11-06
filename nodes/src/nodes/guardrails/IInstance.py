@@ -24,6 +24,9 @@
 from rocketlib import IInstanceBase, Entry, warning
 from ai.common.schema import Question, Answer
 from .IGlobal import IGlobal
+from .nonce_fencer import SecurityError
+
+NONCE_FENCE_INSTRUCTION_TITLE = 'Security Directive'
 
 
 class IInstance(IInstanceBase):
@@ -39,124 +42,111 @@ class IInstance(IInstanceBase):
         self.source_documents = []
 
     def writeQuestions(self, question: Question):
-        """Run input guardrails on the question before forwarding.
-
-        Extracts the question text, runs input-mode evaluation, then
-        either blocks, warns (logs + forwards), or passes (forwards
-        silently) depending on the policy mode.
-
-        Args:
-            question: The incoming Question object.
-        """
+        """Run input guardrails and forward an accepted question."""
         engine = self.IGlobal.engine
         if engine is None:
             self._forward_question(question)
             return
 
-        # Collect question text for evaluation
         text_parts = []
         if question.questions:
             text_parts.extend(q.text for q in question.questions)
         if question.context:
             text_parts.extend(question.context)
-
         full_text = ' '.join(text_parts)
 
         if not full_text.strip():
-            # Nothing to check, forward as-is
             self._forward_question(question)
             return
 
-        # Run input guardrails
         result = engine.evaluate(full_text, mode='input')
-
         if result['action'] == 'block':
             for violation in result['violations']:
-                warning(f'Guardrails input blocked: {violation["rule"]} \u2014 {violation["details"]}')
+                warning(f'Guardrails input blocked: {violation["rule"]} — {violation["details"]}')
             self.preventDefault()
             return
 
         if result['action'] == 'warn':
             for violation in result['violations']:
-                warning(f'Guardrails input warning: {violation["rule"]} \u2014 {violation["details"]}')
+                warning(f'Guardrails input warning: {violation["rule"]} — {violation["details"]}')
 
-        # Forward the question downstream
+        if self.IGlobal.nonce_fencer is not None and not self._apply_nonce_fencing(question):
+            self.preventDefault()
+            return
+
         self._forward_question(question)
 
-    def _forward_question(self, question: Question):
-        """Forward a question downstream exactly once.
+    def _apply_nonce_fencing(self, question: Question) -> bool:
+        """Fence untrusted question data using one nonce for the whole cycle."""
+        if question.instructions:
+            warning('[Guardrails] Caller-supplied instructions are rejected when nonce fencing is enabled')
+            return False
 
-        `preventDefault()` raises immediately (it's implemented as `raise
-        APERR(Ec.PreventDefault, ...)`), so it must come AFTER the explicit
-        forward, not before -- otherwise the forward call below would never
-        run at all. It must still be called, though: the engine always
-        re-runs its own default forward after a Python override returns
-        successfully unless preventDefault() was raised during the call, so
-        skipping it here would deliver this question a second time.
-        """
+        fencer = self.IGlobal.nonce_fencer
+        all_content = []
+        if question.questions:
+            all_content.extend(q.text for q in question.questions if q.text)
+        if question.context:
+            all_content.extend(str(ctx) for ctx in question.context if ctx)
+
+        try:
+            nonce = fencer.new_cycle(exclude='\n'.join(all_content))
+            if question.questions:
+                for item in question.questions:
+                    if item.text:
+                        item.text = fencer.fence(item.text, nonce)
+            if question.context:
+                question.context = [fencer.fence(str(ctx), nonce) for ctx in question.context]
+            question.addInstruction(
+                NONCE_FENCE_INSTRUCTION_TITLE,
+                fencer.build_system_addendum(nonce),
+            )
+        except SecurityError as exc:
+            warning(f'[Guardrails] Nonce fencing failed: {exc}; blocking question')
+            return False
+        return True
+
+    def _forward_question(self, question: Question):
+        """Forward a question downstream exactly once."""
         self.instance.writeQuestions(question)
         self.preventDefault()
 
     def writeAnswers(self, answer: Answer):
-        """Run output guardrails on the answer before forwarding.
-
-        Extracts the answer text, runs output-mode evaluation with
-        any collected source documents as context, then applies the
-        configured policy.
-
-        Args:
-            answer: The incoming Answer object.
-        """
+        """Run output guardrails on the answer before forwarding."""
         engine = self.IGlobal.engine
         if engine is None:
             self._forward_answer(answer)
             return
 
-        # Extract answer text
         text = answer.getText() if answer else ''
-
         if not text.strip():
-            # Nothing to check, forward as-is
             self._forward_answer(answer)
             return
 
-        # Build context for output checks
-        context = {
-            'source_documents': self.source_documents,
-        }
-
-        # Run output guardrails
-        result = engine.evaluate(text, mode='output', context=context)
-
+        result = engine.evaluate(
+            text,
+            mode='output',
+            context={'source_documents': self.source_documents},
+        )
         if result['action'] == 'block':
             for violation in result['violations']:
-                warning(f'Guardrails output blocked: {violation["rule"]} \u2014 {violation["details"]}')
+                warning(f'Guardrails output blocked: {violation["rule"]} — {violation["details"]}')
             self.preventDefault()
             return
 
         if result['action'] == 'warn':
             for violation in result['violations']:
-                warning(f'Guardrails output warning: {violation["rule"]} \u2014 {violation["details"]}')
+                warning(f'Guardrails output warning: {violation["rule"]} — {violation["details"]}')
 
-        # Forward the answer downstream
         self._forward_answer(answer)
 
     def _forward_answer(self, answer: Answer):
-        """Forward an answer downstream exactly once. See `_forward_question`
-        for why `preventDefault()` must come after the forward, not before.
-        """
+        """Forward an answer downstream exactly once."""
         self.instance.writeAnswers(answer)
         self.preventDefault()
 
     def writeDocuments(self, documents):
-        """Collect source documents for hallucination checks.
-
-        Documents received here are stored and used as ground-truth
-        context when checking answers for hallucination.
-
-        Args:
-            documents: List of Doc objects from the pipeline.
-        """
+        """Collect source documents and forward them downstream."""
         for doc in documents:
             if hasattr(doc, 'page_content'):
                 content = doc.page_content
@@ -167,9 +157,6 @@ class IInstance(IInstanceBase):
             if content and str(content).strip():
                 self.source_documents.append(str(content))
 
-        # Forward documents downstream. See `_forward_question` for why
-        # preventDefault() must come after the forward, not before -- it
-        # still has to be called, or the engine double-delivers these too.
         self.instance.writeDocuments(documents)
         self.preventDefault()
 
