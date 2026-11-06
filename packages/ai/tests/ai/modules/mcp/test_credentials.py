@@ -148,3 +148,34 @@ def test_shipped_http_request_does_not_auto_wire():
     state = creds.evaluate(spec, ['ROCKETRIDE_HTTP_REQUEST_AUTH_TOKEN'])
     assert state['status'] == 'configured'
     assert state['wiring'] is None
+
+
+def test_auto_wire_false_field_is_described_but_never_in_the_wiring():
+    # A row field of a list is set inside that list; a top-level binding would be ignored by the node.
+    raw = {
+        'tool_x': {
+            'title': 'X',
+            'fields': [
+                {
+                    'path': 'x.token',
+                    'title': 'Token',
+                    'kind': 'secret',
+                    'required': True,
+                    'suggests': 'ROCKETRIDE_X_TOKEN',
+                },
+                {
+                    'path': 'x.rowValue',
+                    'title': 'Row value',
+                    'kind': 'secret',
+                    'required': False,
+                    'auto_wire': False,
+                    'suggests': 'ROCKETRIDE_X_ROW_VALUE',
+                },
+            ],
+        }
+    }
+    spec = creds.catalog_from_dict(raw)['tool_x']
+    assert [f.auto_wire for f in spec.fields] == [True, False]
+    state = creds.evaluate(spec, ['ROCKETRIDE_X_TOKEN', 'ROCKETRIDE_X_ROW_VALUE'])
+    assert state['status'] == 'configured'
+    assert state['wiring'] == {'x.token': '${ROCKETRIDE_X_TOKEN}'}

@@ -54,6 +54,9 @@ class CredField:
     required: bool
     suggests: str
     review: bool = False
+    # False: described, never auto-wired. The node reads the field somewhere else (for
+    # example inside the rows of a list), so a top-level binding would be ignored.
+    auto_wire: bool = True
 
 
 @dataclass(frozen=True)
@@ -79,6 +82,7 @@ def catalog_from_dict(raw: dict) -> Dict[str, Integration]:
                 required=bool(f.get('required', True)),
                 suggests=f['suggests'],
                 review=bool(f.get('review', False)),
+                auto_wire=bool(f.get('auto_wire', True)),
             )
             for f in entry.get('fields', [])
             if isinstance(f, dict) and f.get('path') and f.get('suggests')
@@ -139,7 +143,9 @@ def evaluate(spec: Integration, env_keys: Optional[List[str]]) -> dict:
     have = set(env_keys)
     missing = [f.suggests for f in required if f.suggests not in have]
     if not missing:
-        wiring = {f.path: '${' + f.suggests + '}' for f in spec.fields if f.required or f.suggests in have}
+        wiring = {
+            f.path: '${' + f.suggests + '}' for f in spec.fields if f.auto_wire and (f.required or f.suggests in have)
+        }
         return {'status': 'configured', 'env_error': False, 'missing': [], 'candidates': [], 'wiring': wiring}
     tokens = node_tokens(spec.name)
     # Match on name *parts*, not raw substrings: a part must start with the
