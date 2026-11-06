@@ -352,7 +352,7 @@ jobs:
           # (e.g. cryptography's _rust.pyd) fails with a file lock; copy is atomic.
           UV_LINK_MODE: copy
           # Every task child process of the test servers writes periodic Python
-          # stack dumps here (scripts/lib/stackdumps.js), uploaded below on failure.
+          # stack dumps here (scripts/lib/stackdumps.js), uploaded below on every finished run.
           # One dump a minute keeps the hook light; on Windows scripts/lib/stackwatch.js
           # also writes native_<pid>.txt for a child frozen in startup.
           ROCKETRIDE_TEST_STACK_DUMPS: ${{ github.workspace }}/dist/server/test-logs/stack-dumps
