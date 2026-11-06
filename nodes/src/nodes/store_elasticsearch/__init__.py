@@ -20,29 +20,3 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-
-"""
-index_search node: Elasticsearch and OpenSearch.
-
-Exposes IEndpoint, IGlobal, IInstance for the pipeline and getStore() for
-direct access to the Elasticsearch Store class when the backend is Elasticsearch.
-"""
-
-from .IEndpoint import IEndpoint
-from .IGlobal import IGlobal
-from .IInstance import IInstance
-
-
-def getStore():
-    """Return the Elasticsearch Store class (for use when backend is Elasticsearch)."""
-    from .elasticsearch_store import Store
-
-    return Store
-
-
-__all__ = [
-    'IEndpoint',
-    'IGlobal',
-    'IInstance',
-    'getStore',
-]

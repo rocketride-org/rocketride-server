@@ -20,14 +20,3 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-
-"""
-Video Composer node.
-
-Stitches a stream of image frames into an MP4 video using FFmpeg.
-"""
-
-from .IGlobal import IGlobal
-from .IInstance import IInstance
-
-__all__ = ['IGlobal', 'IInstance']
