@@ -12,6 +12,8 @@ exercise the collection-time helper and the per-test teardown hook directly.
 
 import importlib.util
 import json
+import os
+import subprocess
 import sys
 import types
 from pathlib import Path
@@ -240,3 +242,60 @@ def test_a_failing_teardown_keeps_its_error_and_numpy_is_put_back(pinned_numpy):
     with pytest.raises(RuntimeError, match='fixture teardown failed'):
         teardown.throw(RuntimeError('fixture teardown failed'))
     assert sys.modules['numpy'] is pinned_numpy
+
+
+def test_the_teardown_check_is_registered_for_node_tests(request):
+    """The node tests' conftest registers the guard's teardown hook, as a wrapper, for this directory.
+
+    Args:
+        request (pytest.FixtureRequest): the running test, whose hook relay covers nodes/test.
+    """
+    impls = request.node.ihook.pytest_runtest_teardown.get_hookimpls()
+    assert any(impl.function is guard.pytest_runtest_teardown and impl.wrapper for impl in impls)
+
+
+def test_a_pytest_run_fails_the_test_that_replaces_numpy(tmp_path):
+    """In a real pytest run, the test that replaces numpy fails in teardown, and the next test gets the real numpy.
+
+    The run happens in a child process with only the guard's teardown hook
+    registered, so it exercises the hook as pytest calls it.
+
+    Args:
+        tmp_path (pathlib.Path): holds the child run's config, conftest and test module.
+    """
+    pytest.importorskip('numpy')
+    (tmp_path / 'pytest.ini').write_text('[pytest]\n')
+    (tmp_path / 'conftest.py').write_text(
+        'import importlib.util\n'
+        f'_spec = importlib.util.spec_from_file_location("_guard_under_test", {str(Path(guard.__file__))!r})\n'
+        '_guard = importlib.util.module_from_spec(_spec)\n'
+        '_spec.loader.exec_module(_guard)\n'
+        'pytest_runtest_teardown = _guard.pytest_runtest_teardown\n'
+    )
+    (tmp_path / 'test_probe.py').write_text(
+        'import sys\n'
+        'from unittest.mock import MagicMock\n'
+        '\n'
+        '\n'
+        'def test_a_replaces_numpy():\n'
+        "    sys.modules['numpy'] = MagicMock()\n"
+        '\n'
+        '\n'
+        'def test_b_sees_real_numpy():\n'
+        '    import numpy\n'
+        '\n'
+        '    assert numpy.zeros(2).sum() == 0\n'
+    )
+    env = {key: value for key, value in os.environ.items() if key != 'PYTEST_ADDOPTS'}
+    run = subprocess.run(
+        [sys.executable, '-m', 'pytest', str(tmp_path), '-q', '-rE', '-p', 'no:cacheprovider'],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    output = run.stdout + run.stderr
+    assert 'ERROR at teardown of test_a_replaces_numpy' in output, output
+    assert "sys.modules leak: test_probe.py::test_a_replaces_numpy replaced or removed ['numpy']" in output, output
+    assert '2 passed, 1 error' in output, output
