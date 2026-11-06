@@ -36,6 +36,34 @@ import sys
 import types
 
 
+class _AutoStubMeta(type):
+    """Metaclass that returns 0 for any attribute accessed on the class itself."""
+
+    def __getattr__(cls, name: str):
+        if name.startswith('_'):
+            raise AttributeError(name)
+        return 0
+
+
+class _AutoStubModule(types.ModuleType):
+    """Module stub that auto-creates any attribute accessed on it.
+
+    The ``rocketlib`` native extension exports dozens of classes and
+    functions; under the builder-managed test run the real .so is on the
+    path, but when running directly against the source tree it is absent.
+    Rather than enumerate every symbol (fragile), this stub returns a
+    dummy type for Capitalised names and a no-op callable for everything
+    else, so any ``from rocketlib import X`` succeeds.
+    """
+
+    def __getattr__(self, name: str):
+        if name.startswith('_'):
+            raise AttributeError(name)
+        if name and name[0].isupper():
+            return _AutoStubMeta(name, (), {})
+        return lambda *_args, **_kwargs: None
+
+
 def _stub_module(name: str, **attrs) -> None:
     """Register an inert module stub for ``name`` if it cannot be imported."""
     if name in sys.modules:
@@ -45,7 +73,7 @@ def _stub_module(name: str, **attrs) -> None:
         return
     except ImportError:
         pass
-    module = types.ModuleType(name)
+    module = _AutoStubModule(name)
     for key, value in attrs.items():
         setattr(module, key, value)
     sys.modules[name] = module
@@ -54,9 +82,10 @@ def _stub_module(name: str, **attrs) -> None:
 # dist/server dependency-bootstrap: a no-op satisfies the source tree.
 _stub_module('depends', depends=lambda *_args, **_kwargs: None)
 
-# dist/server shared logging/args helpers used by task_engine and friends.
+# dist/server native extension: classes + helpers used across the import chain.
 _stub_module(
     'rocketlib',
     debug=lambda *_args, **_kwargs: None,
-    args=types.SimpleNamespace(),
+    warning=lambda *_args, **_kwargs: None,
+    args=lambda *_args, **_kwargs: [],
 )
