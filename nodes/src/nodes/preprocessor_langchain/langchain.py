@@ -23,6 +23,7 @@
 
 import os
 import ast
+import importlib
 import inspect  # used to filter kwargs by constructor signature
 from depends import depends
 
@@ -241,8 +242,16 @@ class PreProcessor(PreProcessorBase):
             return splitter_instance
 
         elif splitter == 'NLTKTextSplitter':
-            requirements = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'nltk.txt')
+            requirements = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'requirements_nltk.txt')
             depends(requirements)
+
+            import langchain_text_splitters.nltk as nltk_splitters
+
+            # The module records whether nltk exists at import, which is before
+            # depends() has installed it. Reload so the class sees the package
+            # that was just installed. reload returns the same module object.
+            importlib.reload(nltk_splitters)
+            SplitterClass = nltk_splitters.NLTKTextSplitter
 
             import nltk
 
