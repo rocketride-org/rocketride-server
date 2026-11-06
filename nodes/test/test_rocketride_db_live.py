@@ -34,7 +34,7 @@ Requires a container on the live pin (PG16 + pgvector), e.g.::
 
     docker run -d --name rr-pg-phase1 -p 55432:5432 \
         -e POSTGRES_PASSWORD=rrpass -e POSTGRES_USER=rruser -e POSTGRES_DB=rrtenant \
-        pgvector/pgvector:pg16
+        pgvector/pgvector:0.8.0-pg16
     docker exec rr-pg-phase1 psql -U rruser -d rrtenant -c 'CREATE EXTENSION IF NOT EXISTS vector;'
 
 Configuration via environment variables:
