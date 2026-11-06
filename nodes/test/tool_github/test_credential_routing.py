@@ -445,6 +445,57 @@ def test_an_error_without_a_secret_is_raised_unchanged(github):
     assert str(error.value) == 'GitHub API 404: Not Found'
 
 
+def test_a_secret_only_in_a_chained_error_is_redacted(github):
+    """The chain is walked: a clean message over a cause that holds the token is replaced, unchained."""
+    with real_node({'token': SENTINEL_PAT}) as inst:
+        error = ValueError('request failed')
+        error.__cause__ = RuntimeError(f'token endpoint said Bearer {SENTINEL_PAT}')
+        safe = inst._safe_error(error)
+    assert safe is not error
+    assert type(safe) is ValueError
+    assert SENTINEL_PAT not in str(safe)
+    assert safe.__cause__ is None and safe.__context__ is None
+
+
+def test_the_app_jwt_the_call_used_is_redacted_from_a_raised_error(github):
+    """The App JWT is never a stored secret; it reaches the redaction only through the call's own tokens."""
+    jwt_token = 'eyJhbGciOiJSUzI1NiJ9.fake-app-jwt-only-in-this-call.sig'
+    with real_node({'token': SENTINEL_PAT}) as inst:
+        safe = inst._safe_error(ValueError(f'GET /app refused {jwt_token}'), used=[(None, None, jwt_token)])
+    assert jwt_token not in str(safe)
+    assert '[REDACTED]' in str(safe)
+
+
+def test_a_github_error_is_rebuilt_without_its_headers_and_body(github):
+    """A clean message is not enough: the body and headers GitHub sent can hold the token too."""
+    with real_node({'token': SENTINEL_PAT}) as inst:
+        from tool_github.github_client import GitHubAPIError
+
+        raised = GitHubAPIError(
+            422,
+            'Validation failed',
+            headers={'X-Debug': SENTINEL_PAT},
+            body={'documentation_url': f'https://docs.github.com/{SENTINEL_PAT}'},
+        )
+        safe = inst._safe_error(raised)
+    assert type(safe) is GitHubAPIError
+    assert (safe.status_code, safe.message) == (422, 'Validation failed')
+    assert safe.body is None and safe.headers == {}
+    assert SENTINEL_PAT not in json.dumps([str(safe), safe.body, safe.headers])
+
+
+def test_a_401_to_the_app_jwt_is_not_retried(github, rsa_private_key_pem):
+    """GET /app carries the App JWT, which no slot minted: nothing to drop, one request, GitHub's 401 returned."""
+    github.routes[('GET', '/app')] = response({'message': 'Bad credentials'}, 401)
+    with real_node(app_config(rsa_private_key_pem, installationId='456')) as inst:
+        # An installation token exists, so a slot could be dropped; the JWT is not one of its tokens.
+        inst.IGlobal.get_token()
+        result = dispatch(inst, 'user_get', {})
+    assert result['status'] == 401
+    assert len([call for call in github.calls if call.path == '/app']) == 1
+    assert len(github.requests_to('/app/installations/456/access_tokens')) == 1
+
+
 # ---------------------------------------------------------------------------
 # Redaction comes before the 2,000-character message cap on the REST envelope path
 # ---------------------------------------------------------------------------
@@ -671,6 +722,9 @@ def test_two_calls_in_flight_with_the_same_revoked_token_are_both_retried(github
     assert statuses == {'a': 200, 'b': 200}
     # Each call ran twice: once with the revoked token, once with a fresh one.
     assert len(github.requests_to('/repos/acme/app/languages')) == 4
+    # One mint before the calls and one after the first 401: the second 401, for the same revoked
+    # token, finds the fresh token already cached and must not clear it.
+    assert len(github.requests_to('/app/installations/11/access_tokens')) == 2
 
 
 def _walk_routes(github, root_limits):

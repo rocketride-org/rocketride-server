@@ -475,6 +475,9 @@ class IGlobal(IGlobalBase):
         self.retry_policy = github_client.RetryPolicy()
         self.credential_map = None
         self._credential = None
+        # The compiled redaction patterns are keyed by the secret sets they were built from;
+        # a reused engine process must not keep this pipeline's credentials in that cache.
+        github_client._secret_pattern.cache_clear()
 
     # -----------------------------------------------------------------------
     # Per-call credentials. ``repo`` is the call's repository; ``owner`` is used
