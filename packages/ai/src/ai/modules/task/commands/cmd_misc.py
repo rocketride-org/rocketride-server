@@ -52,7 +52,7 @@ from ai.common.config import Config
 from ai.common.dap import DAPConn, TransportBase
 from ai.common.list_rows import paginate_rows
 from ai.account.models import resolve_run_permissions
-from ..pipeline import resolve_implied_source, resolve_pipeline_env, substituted_env
+from ..pipeline import MultipleSourcesError, resolve_implied_source, resolve_pipeline_env, substituted_env
 from .. import services_catalog
 from .cmd_monitor import owner_key, owner_wildcard_key
 
@@ -426,6 +426,8 @@ class MiscCommands(DAPConn):
 
         except Exception as e:
             message = _template_message(substituted, 'failed') if substituted else str(e)
+            if substituted and isinstance(e, MultipleSourcesError):
+                message = 'Pipeline has multiple source components, please specify one explicitly. ' + message
             self.debug_message(f'Pipeline validation failed: {message}')
             if substituted:
                 raise RuntimeError(message) from None

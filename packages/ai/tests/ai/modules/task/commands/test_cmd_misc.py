@@ -621,6 +621,33 @@ async def test_on_rrext_validate_without_substitution_validates_once(monkeypatch
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('expanded', [False, True])
+async def test_on_rrext_validate_multiple_sources_keeps_fixed_reason(monkeypatch, expanded):
+    """The caller still gets the instruction to specify a source when references are used."""
+    validator = MagicMock()
+    monkeypatch.setattr(cmd_misc, 'validatePipeline', validator)
+    conn = _validate_conn(monkeypatch, env=ENV if expanded else {})
+    pipeline = {
+        'components': [
+            {'id': 'source-1', 'provider': 'source', 'config': {'mode': 'Source', 'model': CUSTOM_MODEL_REF}},
+            {'id': 'source-2', 'provider': 'source', 'config': {'mode': 'Source'}},
+        ],
+    }
+    request = {'seq': 7, 'command': 'rrext_validate', 'arguments': {'pipeline': pipeline}}
+
+    handled, response = await MiscCommands._call_method(conn, request, 'on_rrext_validate', None)
+
+    assert handled
+    assert response['success'] is False
+    expected = 'Pipeline has multiple source components, please specify one explicitly'
+    if expanded:
+        expected += '. ' + _template_message({'ROCKETRIDE_CUSTOM_MODEL': CUSTOM_MODEL_VALUE}, 'failed')
+    assert response['message'] == expected
+    assert conn.debug_message.call_args.args == (f'Pipeline validation failed: {expected}',)
+    validator.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_on_rrext_validate_error_keeps_template_references(monkeypatch):
     """An exception that quotes expanded values reaches the log and the error reply with the references."""
 
@@ -686,8 +713,9 @@ async def test_on_rrext_validate_transformed_messages_use_template_references(
     else:
         message = _template_message(env, 'error' if kind == 'errors' else 'warning')
         assert response['body'][kind] == [{'id': 'node-1', 'ccode': 75, 'message': message}]
-    assert formatted not in json.dumps(response)
-    assert formatted not in str(conn.debug_message.call_args_list)
+    for candidate in (value, formatted):
+        assert json.dumps(candidate)[1:-1] not in json.dumps(response)
+        assert repr(candidate)[1:-1] not in str(conn.debug_message.call_args_list)
 
 
 @pytest.mark.asyncio
