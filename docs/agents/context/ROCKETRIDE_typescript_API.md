@@ -903,7 +903,7 @@ Typed wrapper for profile, organization, API keys, members, teams, and environme
 
 **API keys:** `listKeys(): Promise<ApiKeyRecord[]>` · `createKey(params): Promise<{ key: string }>` (raw key string, shown once) · `revokeKey(keyId)`
 
-**Members:** `listMembers(orgId): Promise<MemberRecord[]>` · `inviteMember(orgId, { email, givenName, familyName, role })` · `updateMemberRole(orgId, userId, role)` · `removeMember(orgId, userId)` · `resendInvite(orgId, userId)`
+**Members:** `listMembers(orgId): Promise<MemberRecord[]>` · `invite(orgId, { email, givenName, familyName, role, teamAssignments?, devTeamId? }): Promise<InvitedMember>` (returns `{ userId, displayName, email, role, status, devTeamId }`; `inviteMember` is the deprecated form that returns nothing) · `updateMemberRole(orgId, userId, role)` · `removeMember(orgId, userId)` · `resendInvite(orgId, userId)`
 
 **Teams:** `listTeams(orgId): Promise<TeamRecord[]>` · `getTeamDetail(orgId, teamId): Promise<TeamDetail>` (includes members) · `createTeam(orgId, name)` · `deleteTeam(orgId, teamId)` · `addTeamMember(orgId, { teamId, userId, permissions })` · `updateTeamMemberPerms(orgId, { teamId, userId, permissions })` · `removeTeamMember(orgId, { teamId, userId })`
 
@@ -918,7 +918,7 @@ Typed wrapper for profile, organization, API keys, members, teams, and environme
 Every operation above is role-checked server-side; an unauthorized call is refused with an explicit error (`'Admin role required ...'`) — nothing fails silently. The split for the documented operations:
 
 - **Any org member**: their own profile (`getProfile`, `updateProfile`, `setDevTeam`, `setDefaultOrg`); leaving an organization they belong to (`leaveOrg` — refused for its last admin); their OWN API keys (`listKeys`, `createKey`, revoking their own); reading the org (`getOrg`); listing members and teams and reading a team's detail; USER-scope environment (`getEnv('user')` / `setEnv('user')`) and the merged key names (`getEnvironmentKeys`); billing reads (`getDetails`, `getCreditBalance`, `getProductPrices`) and promo codes (`validatePromoCode`, `redeemPromoCode`).
-- **Org admin only**: renaming the org (`updateOrgName`); member management (`inviteMember`, `updateMemberRole`, `removeMember`, `resendInvite`); revoking ANOTHER member's key (own-org keys only); creating teams (`createTeam`); ORG-scope environment — both `getEnv('org', ...)` and `setEnv('org', ...)` (reads too: the org layer holds shared secrets); and every billing operation that moves money or reads the org's ledger — checkout/subscribe, portal, cancel, upgrade, credit purchases and top-ups, `getUsageByUser`/`getUsageByTeam`, `getTransactions`, `getTransactionDistinct`.
+- **Org admin only**: renaming the org (`updateOrgName`); member management (`invite`, `inviteMember`, `updateMemberRole`, `removeMember`, `resendInvite`); revoking ANOTHER member's key (own-org keys only); creating teams (`createTeam`); ORG-scope environment — both `getEnv('org', ...)` and `setEnv('org', ...)` (reads too: the org layer holds shared secrets); and every billing operation that moves money or reads the org's ledger — checkout/subscribe, portal, cancel, upgrade, credit purchases and top-ups, `getUsageByUser`/`getUsageByTeam`, `getTransactions`, `getTransactionDistinct`.
 - **Team admin** (the `team.admin` permission on that team; org admins pass implicitly): `deleteTeam`, `addTeamMember`, `updateTeamMemberPerms`, `removeTeamMember`, and TEAM-scope `getEnv`/`setEnv` — both read and write.
 
 ### `client.billing`
