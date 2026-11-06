@@ -34,10 +34,15 @@
 //
 // Reads are confined to the open workspace folders — a realm can never use
 // this to read outside them. Watch subscriptions belong to one webview PAGE
-// (keyed by the realm-generated `sub` string): resetSubscriptions() runs on
-// every page boot, so a reloaded page never inherits (or leaks) its
-// predecessor's watchers. Watch events emit through the callback the owning
-// provider supplies (the realm-registered `sidebar.fs.event` op).
+// (keyed by the realm-generated `sub` string, `fs-<page>-<seq>`):
+// resetSubscriptions() runs on every page boot and drops every page's
+// watchers EXCEPT the newest page's, so a reloaded page never inherits its
+// predecessor's. It must spare the newest page because React runs child
+// effects first: a tool's watch can reach the host BEFORE the page's
+// view:ready, and a blind reset there dropped the live page's own watcher
+// (the MY APPS list then never refreshed after New App). Watch events emit
+// through the callback the owning provider supplies (the realm-registered
+// `sidebar.fs.event` op).
 // =============================================================================
 
 import * as vscode from 'vscode';
@@ -54,6 +59,13 @@ function insideWorkspace(fsPath: string): boolean {
 	});
 }
 
+/** The page part of a watch key (`fs-<page>-<seq>` → `fs-<page>`); a key
+ *  without a sequence suffix is its own page. */
+function pageOf(sub: string): string {
+	const cut = sub.lastIndexOf('-');
+	return cut > 0 ? sub.slice(0, cut) : sub;
+}
+
 /**
  * The generic workspace-FS service for one webview (the sidebar). Owns the
  * live watch subscriptions; the owning provider serves the `host.fs.*` ops
@@ -63,6 +75,9 @@ export class WorkspaceFsService {
 	/** Live watch disposables per subscription key (one watcher per glob,
 	 *  plus the workspace-folders listener). */
 	private watchers = new Map<string, vscode.Disposable[]>();
+
+	/** The most recently FIRST-SEEN page (by watch key) — the live page. */
+	private newestPage: string | undefined;
 
 	/** Glob search over the open workspace folders → absolute fsPaths. */
 	public async findFiles(include: string, exclude?: string): Promise<string[]> {
@@ -163,6 +178,9 @@ export class WorkspaceFsService {
 
 	/** Starts one watch subscription (idempotent-by-replace per key). */
 	public watch(sub: string, globs: string[], emit: (path: string) => void): void {
+		// A page never seen before is the newest (a page's keys share its prefix).
+		const page = pageOf(sub);
+		if (![...this.watchers.keys()].some((key) => pageOf(key) === page)) this.newestPage = page;
 		this.unwatch(sub);
 		const onUri = (uri: vscode.Uri): void => emit(uri.fsPath);
 		const disposables: vscode.Disposable[] = globs.map((glob) => {
@@ -188,18 +206,22 @@ export class WorkspaceFsService {
 	}
 
 	/**
-	 * Drops every live subscription — called on the webview's page boot
-	 * (view:ready): a fresh page mints fresh keys and must not inherit (or
-	 * leak) its predecessor's watchers. view:ready stays the page-lifecycle
-	 * signal because HTML rewrites (the CSP reboot, the Dev Tools RESET)
-	 * reboot the page WITHOUT re-resolving the webview.
+	 * Page boot (view:ready): drops every watcher except the newest page's.
+	 * HTML rewrites (the CSP reboot, the Dev Tools RESET) reboot the page
+	 * WITHOUT re-resolving the webview, so view:ready stays the page-lifecycle
+	 * signal. The newest page's watchers may already be live (see the
+	 * header). When the new page has not watched yet, the newest is still the
+	 * previous page — its watchers survive this boot and retire on the next.
 	 */
 	public resetSubscriptions(): void {
-		for (const sub of [...this.watchers.keys()]) this.unwatch(sub);
+		for (const sub of [...this.watchers.keys()]) {
+			if (pageOf(sub) !== this.newestPage) this.unwatch(sub);
+		}
 	}
 
 	/** Disposes all watchers (provider teardown). */
 	public dispose(): void {
-		this.resetSubscriptions();
+		for (const sub of [...this.watchers.keys()]) this.unwatch(sub);
+		this.newestPage = undefined;
 	}
 }
