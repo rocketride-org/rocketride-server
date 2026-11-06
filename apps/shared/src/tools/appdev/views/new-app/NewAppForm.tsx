@@ -45,6 +45,7 @@ import React, { useCallback, useState } from 'react';
 import { Button, Card, InputField } from 'shell';
 import type { FrameOptions } from '../../templates';
 import type { NewAppIdentity } from '../../types';
+import { useDeveloperRegistration } from '../useDeveloperRegistration';
 
 // =============================================================================
 // TYPES
@@ -311,6 +312,36 @@ export function deriveDisplayName(slug: string): string {
 		.trim();
 }
 
+/** What decides the form's footer note. */
+export interface IFooterNoteState {
+	workspaceOpen: boolean;
+	/** The host's own phrasing for a missing scaffold target. */
+	noWorkspaceNote?: string;
+	/** The Developer ID field is editable (no org id, host can claim one). */
+	canRegister: boolean;
+	source: NewAppIdentity['source'];
+}
+
+/**
+ * The footer note for the form's current state, most specific case first.
+ *
+ * @param state - See {@link IFooterNoteState}.
+ * @returns The note text.
+ */
+export function footerNote(state: IFooterNoteState): string {
+	if (!state.workspaceOpen) {
+		return state.noWorkspaceNote ?? 'Open a workspace folder first. The app is scaffolded into it.';
+	} else if (state.canRegister) {
+		return 'No developer id yet. Register one above, or create the app under "local".';
+	} else if (state.source === 'default') {
+		return 'No organization developer id. Using the "local" default.';
+	}
+	return 'Developer ID is read from the organization account profile.';
+}
+
+/** Client-side developer id shape check (the server has the final word). */
+const isValidDeveloperId = (slug: string): boolean => DEVELOPER_ID_RE.test(slug);
+
 // =============================================================================
 // COMPONENT
 // =============================================================================
@@ -336,10 +367,8 @@ export const NewAppForm: React.FC<INewAppFormProps> = ({ identity, creating, err
 	/** True once the user edits the display name directly. */
 	const [displayTouched, setDisplayTouched] = useState(false);
 
-	/** The developer id being claimed, its in-flight lock, and its failure. */
-	const [regSlug, setRegSlug] = useState('');
-	const [regBusy, setRegBusy] = useState(false);
-	const [regError, setRegError] = useState('');
+	/** The Developer ID register field (shared with the Deploy tab's form). */
+	const registration = useDeveloperRegistration(onRegisterDeveloper, isValidDeveloperId);
 
 	// ── Derivations ──────────────────────────────────────────────────────
 	// step: validate the slug and check for a live folder collision
@@ -351,8 +380,9 @@ export const NewAppForm: React.FC<INewAppFormProps> = ({ identity, creating, err
 	// The editable Developer ID field replaces the 'local' chip only while the
 	// org has no id and the host can claim one.
 	const canRegister = !!onRegisterDeveloper && identity.source === 'default';
-	const regSlugValid = DEVELOPER_ID_RE.test(regSlug.trim());
-	const canCreate = nameValid && !collision && displayName.trim() !== '' && workspaceOpen && !creating && !regBusy;
+	const regSlug = registration.slug.trim();
+	const regSlugValid = isValidDeveloperId(regSlug);
+	const canCreate = nameValid && !collision && displayName.trim() !== '' && workspaceOpen && !creating && !registration.busy;
 
 	// step: compute the identity summary values
 	const developerId = identity.developerId || 'local';
@@ -371,32 +401,10 @@ export const NewAppForm: React.FC<INewAppFormProps> = ({ identity, creating, err
 		[displayTouched],
 	);
 
-	/** Claims the typed developer id; success swaps the field for the chip. */
-	const onRegister = useCallback(async (): Promise<void> => {
-		const slug = regSlug.trim();
-		if (!onRegisterDeveloper || !DEVELOPER_ID_RE.test(slug)) return;
-		setRegBusy(true);
-		setRegError('');
-		try {
-			await onRegisterDeveloper(slug);
-			setRegSlug('');
-		} catch (e) {
-			setRegError(e instanceof Error ? e.message : String(e));
-		} finally {
-			setRegBusy(false);
-		}
-	}, [onRegisterDeveloper, regSlug]);
-
 	// ── Render ───────────────────────────────────────────────────────────
 
 	// step: pick the footer note for the current state
-	const note = !workspaceOpen
-		? (noWorkspaceNote ?? 'Open a workspace folder first. The app is scaffolded into it.')
-		: canRegister
-			? 'No developer id yet. Register one above, or create the app under "local".'
-			: identity.source === 'default'
-			? 'No organization developer id. Using the "local" default.'
-			: 'Developer ID is read from the organization account profile.';
+	const note = footerNote({ workspaceOpen, noWorkspaceNote, canRegister, source: identity.source });
 
 	return (
 		<div style={styles.page}>
@@ -469,21 +477,21 @@ export const NewAppForm: React.FC<INewAppFormProps> = ({ identity, creating, err
 									type="text"
 									spellCheck={false}
 									placeholder="developer id (e.g. acme_labs)"
-									value={regSlug}
-									disabled={regBusy || creating}
-									onChange={(e) => setRegSlug(e.target.value)}
+									value={registration.slug}
+									disabled={registration.busy || creating}
+									onChange={(e) => registration.setSlug(e.target.value)}
 									onKeyDown={(e) => {
-										if (e.key === 'Enter') void onRegister();
+										if (e.key === 'Enter') void registration.submit();
 									}}
-									style={{ ...styles.devInput, ...(regSlug.trim() !== '' && !regSlugValid ? styles.inputInvalid : {}) }}
+									style={{ ...styles.devInput, ...(regSlug !== '' && !regSlugValid ? styles.inputInvalid : {}) }}
 								/>
-								<Button variant="secondary" disabled={regBusy || creating || !regSlugValid} onClick={() => void onRegister()}>
-									{regBusy ? 'Registering...' : 'Register'}
+								<Button variant="secondary" disabled={registration.busy || creating || !regSlugValid} onClick={() => void registration.submit()}>
+									{registration.busy ? 'Registering...' : 'Register'}
 								</Button>
 							</div>
-							<div style={styles.devHint}>Every app id is &lt;developerId&gt;.&lt;name&gt;. Claim your organization&rsquo;s developer id once (lowercase letters and underscores, starting with a letter) to publish under your own namespace.</div>
-							{regSlug.trim() !== '' && !regSlugValid ? <div style={{ ...styles.fieldError, ...styles.devMsg }}>Must start with a lowercase letter; lowercase letters and underscores only.</div> : null}
-							{regError ? <div style={{ ...styles.fieldError, ...styles.devMsg }}>{regError}</div> : null}
+							<div style={styles.devHint}>Every app id is &lt;developerId&gt;.&lt;name&gt;. Only an org admin can claim it, and it is permanent (lowercase letters and underscores, starting with a letter).</div>
+							{regSlug !== '' && !regSlugValid ? <div style={{ ...styles.fieldError, ...styles.devMsg }}>Must start with a lowercase letter; lowercase letters and underscores only.</div> : null}
+							{registration.error ? <div style={{ ...styles.fieldError, ...styles.devMsg }}>{registration.error}</div> : null}
 						</div>
 					) : (
 						<div style={styles.identityRow}>
