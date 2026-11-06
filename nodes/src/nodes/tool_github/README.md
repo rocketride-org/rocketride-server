@@ -11,7 +11,7 @@ via GitHub Actions.
 ## What it does
 
 Exposes selected GitHub REST operations: files, issues, pull requests, reviews,
-repository metadata, releases, workflows, organizations, users, search,
+repository trees and metadata, releases, workflows, organizations, users, search,
 and commit history. Useful for agents that manage codebases, triage issues,
 automate releases, or operate CI/CD pipelines.
 
@@ -67,8 +67,8 @@ Most tools accept an optional `repo` parameter (`owner/repo`). If omitted, the c
 
 | Tool | Description |
 |---|---|
-| `file_get` | Get the decoded content and metadata of a single file |
-| `file_list` | List files and directories at a path |
+| `file_get` | Get the decoded content and metadata of a single file; files over 1 MB through the Git blob API, up to `max_bytes` (default 1 MiB, so a file over 1 MB needs a `max_bytes`) |
+| `file_list` | List files and directories at a path (one directory, at most 1,000 entries, GitHub's Contents API limit, with no truncation flag); use `repo_tree` for a whole tree |
 | `file_create` | Create a new file |
 | `file_edit` | Update an existing file. Requires the current file SHA (get it from `file_get` first) |
 | `file_delete` | Delete a file. Requires the current file SHA (get it from `file_get` first) |
@@ -77,6 +77,32 @@ Most tools accept an optional `repo` parameter (`owner/repo`). If omitted, the c
 `file_list` raises when the path is a file (use `file_get`). Reads accept an optional
 `ref` (branch, tag, or commit SHA); writes accept an optional `branch` and commit
 `message`.
+
+GitHub's Contents API carries file content up to 1 MB. For a larger file `file_get`
+reads the blob the metadata names (`GET /repos/{repo}/git/blobs/{sha}`), which GitHub
+serves up to 100 MB, so the result is complete and matches the returned `sha` and
+`size` (a blob body whose length differs from `size` is withheld with a message rather
+than returned). When GitHub cannot serve the content, for a file the Contents API refuses as
+too large (over 100 MB), when the metadata names no blob SHA or no integer size (without a
+size `max_bytes` cannot bound the read), or when the blob read fails, `content` is `null` and `message`
+says why and what to do instead (download it from `download_url`, or clone the
+repository with `tool_git`). A large file with a NUL byte in its first 8000 bytes is
+binary by git's own rule and is reported the same way instead of being returned as
+replacement characters. None of these cases raises, whether the blob read failed with
+an HTTP status, a transport error or an invalid body; the metadata request itself
+still raises as before, and `found: false` still marks a missing path.
+
+`max_bytes` (an integer from 1048576 to 104857600, default 1048576, that is 1 MiB) caps
+the files the blob path downloads. The default is the Contents API's own boundary, so a
+pipeline written before this option sees no larger payloads than before: a file over 1 MB
+is reported, not downloaded, until the call asks for it. The size comes with the metadata,
+so a larger file is
+refused before its blob is read: `found: true`, `content: null`, its `size`, and a
+`message` naming the size and the cap and saying that a larger `max_bytes` may be passed.
+Files of 1 MB or less arrive with the metadata and are returned as before. A blob read
+takes roughly four times the file's size in memory while the base64 body, its bytes and
+the decoded text exist together (about 200 MB for a 50 MB file), so raise the cap only for
+a file you need whole.
 
 ### Issues
 
@@ -114,12 +140,13 @@ GitHub's issues endpoint includes pull requests; `issue_list` filters them out, 
 | Tool                | Description                                                                              |
 |---------------------|------------------------------------------------------------------------------------------|
 | `repo_get`          | Repository metadata (stars, forks, language, default branch, etc.)                       |
+| `repo_tree`         | Tree for `repo` and optional `ref`, sorted by path, with `truncated` and `complete`; `walk` completes a truncated tree |
 | `repo_contributors` | One page of contributors: `login`, `contributions`, `type`                               |
 | `repo_languages`    | Language names mapped to byte counts                                                     |
 | `label_list`        | One page of repository labels: `name`, `color`, `description`                            |
 
-`repo_contributors`, `repo_languages`, `label_list` and `user_get` return an explicit
-response envelope:
+`repo_tree`, `repo_contributors`, `repo_languages`, `label_list` and `user_get` return an
+explicit response envelope:
 
 ```json
 {
@@ -137,7 +164,11 @@ omits their headers. The existing tools keep their original return formats.
 
 HTTP failures from these tools return `status`, `message`, `documentation_url` (null
 when GitHub sends none), `rate_limit`, and `next_page`, without `data`: a result is a
-success exactly when it has `data`. `message` is GitHub's message with any `errors`
+success exactly when it has `data`, with one exception. A `repo_tree` walk that stops
+early keeps the entries it gathered in `data`, sets `data.complete` to false and adds a
+`message`; when a subtree read failed, the result also carries that read's `status` (a
+404, say) and `documentation_url`. For `repo_tree`, check `data.complete` and `message`
+as well as `data`. `message` is GitHub's message with any `errors`
 details appended, capped at 2,000 characters, or `GitHub returned HTTP <status> without
 a JSON error body.` when the body is not JSON or has no string `message`. A 2xx body of
 an unexpected shape is a failure too: it keeps its 2xx `status` and its counters, and
@@ -151,6 +182,41 @@ responses share the existing retry policy: at most three attempts, waits capped 
 seconds each; a longer server-requested wait fails immediately, with the rate-limit
 counters in the result. This is not a configurable retry budget. Credentials stay in
 node configuration and are not tool arguments.
+
+`repo_tree` reads `ref` (a branch, tag or SHA; default `HEAD`, the default branch). Its
+`data` contains `sha`, `tree`, `truncated`, `complete`, and `walked`. `sha` is the SHA the
+ref resolved to: the commit SHA for a branch, tag or commit, which `repo_tree` and
+`file_get` accept as `ref` to read the same snapshot again. A tree SHA passed as `ref`
+comes back as itself; `repo_tree` accepts it, `file_get` does not (GitHub answers 404
+"No commit found for the ref", which `file_get` reports as `found: false`). `walked` is
+true when a walk ran (`walk: true` and the first listing was truncated). Entries are
+sorted by path and include `path`, `type`, and any supplied `size`, `sha`, and `mode`.
+Submodules remain entries; their repositories are not traversed.
+
+When GitHub truncates its recursive response (100,000 entries or 7 MB), `complete` is
+false and `message` says to set `walk: true`. The walk starts from the returned `sha`,
+so a branch that moves during the walk cannot mix revisions: it lists the root's direct
+children, reads each subtree recursively by its own SHA (one request per top-level
+directory covers most repositories), and splits only a subtree GitHub truncates again
+into its direct children. `truncated` keeps GitHub's flag for the first response even
+after a successful walk; use **`complete`** to decide whether all paths were returned.
+
+Both bounds are JSON integers: a numeric string, a boolean or a float is refused before any
+request, as for `page` and `max_bytes`. Two bounds keep a walk finite. `max_requests` (default 1000, maximum 10000; retries are
+not counted separately) limits subtree reads, and `max_entries` (default 200000, maximum
+1000000) limits the entries the walk lists, which matters when a few trees are referenced
+from thousands of paths: identical SHAs are read once and expanded at each path, so
+requests stay few while entries multiply. A value outside these ranges is refused before
+any request. Reaching either bound, or a subtree GitHub truncates even without recursion,
+returns `complete: false` and a `message` naming the bound (for the request budget, with
+the number of subtrees still pending) or the subtree GitHub truncated. A failed subtree
+read, or one whose body is not a tree, keeps its `status`, and `message` says where the
+walk stopped and that `data` is partial. In every early stop `data.tree` holds the
+entries listed so far merged by path with the ones GitHub's truncated listing already
+named, so `walk: true` never returns less than `walk: false`. To list one part of a large
+repository, call `repo_tree` with a subtree's `sha` as `ref`; its paths are relative to
+that subtree. Large walks return large payloads; leave `walk` off unless you need the
+complete tree.
 
 ### Releases
 
@@ -217,7 +283,7 @@ Blocked tools: `file_create`, `file_edit`, `file_delete`, `issue_create`,
 Always allowed: `file_get`, `file_list`, `issue_get`, `issue_list`, `pr_get`, `pr_list`,
 `review_list`, `review_get`, `repo_get`, `release_list`, `release_get`, `workflow_list`,
 `workflow_get`, `workflow_get_usage`, `org_list_repos`, `user_get_repos`, `search_code`,
-`search_issues`, `commit_list`, `commit_get`, `repo_contributors`,
+`search_issues`, `commit_list`, `commit_get`, `repo_tree`, `repo_contributors`,
 `repo_languages`, `label_list`, `user_get`.
 
 Note the default is `false`, a freshly added node can write. Turn read-only mode on
@@ -280,12 +346,13 @@ results instead, and report an authentication failure as a fixed message with
 ### Running the tests
 
 ```bash
-# Offline client, auth, search and new repository-read tests
+# Offline client, auth, search, repository-read and file_get tests
 python -m pytest --confcutdir=nodes/test/tool_github \
   nodes/test/tool_github/test_github_client.py \
   nodes/test/tool_github/test_iglobal_auth.py \
   nodes/test/tool_github/test_search_relax.py \
-  nodes/test/tool_github/test_repository_reads.py
+  nodes/test/tool_github/test_repository_reads.py \
+  nodes/test/tool_github/test_file_get.py
 
 # Native discovery and dispatch (mock HTTP; uses this checkout's node source)
 dist/server/engine -m pytest --confcutdir=nodes/test/tool_github \
@@ -308,6 +375,9 @@ pytest nodes/test/tool_github/test_app_auth_live.py -v
 
 - [GitHub REST API documentation](https://docs.github.com/en/rest)
 - [Authenticating as a GitHub App installation](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/authenticating-as-a-github-app-installation)
+- [Git trees and truncated results](https://docs.github.com/en/rest/git/trees#get-a-tree)
+- [Repository content size limits](https://docs.github.com/en/rest/repos/contents#get-repository-content)
+- [Get a blob](https://docs.github.com/en/rest/git/blobs#get-a-blob)
 - [Get the authenticated GitHub App](https://docs.github.com/en/rest/apps/apps#get-the-authenticated-app)
 
 ---

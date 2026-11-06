@@ -13,8 +13,8 @@ every module it touched, including the ``tool_github.*`` modules another test fi
 imported earlier, so file order does not matter.
 
 ``ai.common.utils.decode_data_url`` and the tool-argument validators the node uses
-(``normalize_tool_input``, ``require_str``, ``require_int``, ``optional_int``,
-``int_arg``) are the real helpers loaded from source: the node's PEM handling and input validation must match
+(``normalize_tool_input``, ``require_str``, ``require_int``, ``optional_str``,
+``optional_int``, ``optional_bool``, ``int_arg``) are the real helpers loaded from source: the node's PEM handling and input validation must match
 what the engine does, not a copy of it.
 """
 
@@ -36,7 +36,9 @@ _TOOL_ARG_HELPERS = (
     'normalize_tool_input',
     'require_str',
     'require_int',
+    'optional_str',
     'optional_int',
+    'optional_bool',
     'int_arg',
 )
 
