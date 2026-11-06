@@ -4,8 +4,9 @@
  * The Python dumps in <dir>/stacks_<pid>.txt (see stackdumps.js) cannot show native
  * frames. The watcher reads those files; when the main thread of a child shows the
  * same stack in two complete dumps in a row, and that stack is not the idle wait of
- * a ready child, it attaches cdb.exe (Debugging Tools for Windows) to the child and
- * writes native_<pid>.txt next to the dumps. Events go to <dir>/stackwatch.log.
+ * a ready child, it attaches cdb.exe (Debugging Tools for Windows) to the child without
+ * suspending it and writes native_<pid>.txt next to the dumps. Events go to
+ * <dir>/stackwatch.log.
  *
  * The watcher never throws into the builder: every failure is logged and ignored.
  */
@@ -21,6 +22,10 @@ const SYMBOL_URL = 'https://msdl.microsoft.com/download/symbols';
 const CDB_COMMANDS = '~*kn 80; !locks; lm; qd';
 const CDB_OVERRIDE_VAR = 'ROCKETRIDE_TEST_CDB';
 const CHILD_IMAGE = 'engine.exe';
+// A live child rewrites its file every dump interval; a file older than this many
+// intervals belongs to a dead child, even when its pid was given to a new process.
+const FRESH_INTERVALS = 3;
+const DEFAULT_INTERVAL_S = 30;
 
 const THREAD_RE = /^(?:Current thread|Thread) 0x[0-9a-fA-F]+(?: \[.*\])? \(most recent call first\):$/;
 const FRAME_RE = /^ {2}File "(.*)", line (\d+) in (.+)$/;
@@ -58,18 +63,21 @@ function parseDump(lines) {
  * Parse the text of a stacks_<pid>.txt file.
  *
  * @param {string} text - The file content
- * @returns {{pid: number|null, started: string|null, argv: string|null, dumps: object[]}}
- *   The header fields and one parseDump result per dump block, oldest first
+ * @returns {{pid: number|null, started: string|null, interval: number|null, argv: string|null,
+ *   dumps: object[]}} The header fields (interval in seconds) and one parseDump result per
+ *   dump block, oldest first
  */
 function parseStackFile(text) {
 	const parts = text.replace(/\r\n/g, '\n').split(/^Timeout \(.*\)!$/m);
 	const header = parts[0];
 	const pid = /^pid=(\d+)/m.exec(header);
 	const started = /\bstarted=(\S+)/.exec(header);
+	const interval = /\binterval=(\d+)s\b/.exec(header);
 	const argv = /^argv=(.*)$/m.exec(header);
 	return {
 		pid: pid ? Number(pid[1]) : null,
 		started: started ? started[1] : null,
+		interval: interval ? Number(interval[1]) : null,
 		argv: argv ? argv[1] : null,
 		dumps: parts.slice(1).map((block) => parseDump(block.split('\n'))),
 	};
@@ -217,7 +225,8 @@ function startStackWatch(dumpDir, opts = {}) {
 
 	/**
 	 * Attach cdb to one frozen child and write native_<pid>.txt. The attach is
-	 * noninvasive (-pv): the child keeps its state and is not killed with cdb.
+	 * noninvasive and suspends no thread (-pvr), so killing cdb on its timeout cannot
+	 * leave the child suspended; the frozen main thread stands still while it is read.
 	 *
 	 * @param {number} pid - The child's process id
 	 * @param {object[]} frames - The main-thread frames that matched
@@ -226,7 +235,7 @@ function startStackWatch(dumpDir, opts = {}) {
 	const capture = async (pid, frames) => {
 		const sympath = `srv*${cacheDir}*${SYMBOL_URL}`;
 		const started = Date.now();
-		const args = ['-pv', '-p', String(pid), '-y', sympath, '-c', CDB_COMMANDS];
+		const args = ['-pvr', '-p', String(pid), '-y', sympath, '-c', CDB_COMMANDS];
 		const options = { timeout: CDB_TIMEOUT_MS, killSignal: 'SIGKILL' };
 		const res = await run(cdb, args, options, exec, (child) => (running = child));
 		running = null;
@@ -277,9 +286,14 @@ function startStackWatch(dumpDir, opts = {}) {
 				const pid = Number(m[1]);
 				// Another watcher (a parallel test server) may have captured it already.
 				if (attempted.has(pid) || fs.existsSync(path.join(dumpDir, `native_${pid}.txt`))) continue;
-				const parsed = parseStackFile(fs.readFileSync(path.join(dumpDir, name), 'utf8'));
+				if (!alive(pid)) continue;
+				const file = path.join(dumpDir, name);
+				const parsed = parseStackFile(fs.readFileSync(file, 'utf8'));
+				if (parsed.pid !== pid) continue;
+				const ageMs = Date.now() - fs.statSync(file).mtimeMs;
+				if (ageMs > FRESH_INTERVALS * (parsed.interval ?? DEFAULT_INTERVAL_S) * 1000) continue;
 				const verdict = checkFrozen(parsed);
-				if (!verdict.frozen || parsed.pid !== pid || !alive(pid)) continue;
+				if (!verdict.frozen) continue;
 				if (!(await isEngine(pid))) continue;
 				attempted.add(pid);
 				await capture(pid, verdict.frames);

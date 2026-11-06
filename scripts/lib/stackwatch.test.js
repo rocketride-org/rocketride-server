@@ -45,6 +45,7 @@ test('parses the header and the dump blocks', () => {
 	const parsed = parseStackFile(HEADER + dump(FROZEN_MAIN) + dump(FROZEN_MAIN, '0:01:00'));
 	assert.strictEqual(parsed.pid, 9280);
 	assert.strictEqual(parsed.started, '2026-11-06T18:31:51+0000');
+	assert.strictEqual(parsed.interval, 30);
 	assert.ok(parsed.argv.endsWith('--data_port=1'));
 	assert.strictEqual(parsed.dumps.length, 2);
 	assert.deepStrictEqual(parsed.dumps[0].frames[0], {
@@ -71,7 +72,7 @@ test('POSIX paths are accepted for node.py', () => {
 });
 
 test('an empty file, a header only and a file without a header give no dumps', () => {
-	assert.deepStrictEqual(parseStackFile(''), { pid: null, started: null, argv: null, dumps: [] });
+	assert.deepStrictEqual(parseStackFile(''), { pid: null, started: null, interval: null, argv: null, dumps: [] });
 	const headerOnly = parseStackFile(HEADER);
 	assert.strictEqual(headerOnly.pid, 9280);
 	assert.deepStrictEqual(headerOnly.dumps, []);
@@ -181,7 +182,7 @@ test('scan captures a frozen live child once and writes native_<pid>.txt and the
 	watch.stop();
 	const cdbCalls = calls.filter((c) => c.file !== 'tasklist');
 	assert.strictEqual(cdbCalls.length, 1);
-	assert.deepStrictEqual(cdbCalls[0].args.slice(0, 3), ['-pv', '-p', '9280']);
+	assert.deepStrictEqual(cdbCalls[0].args.slice(0, 3), ['-pvr', '-p', '9280']);
 	assert.ok(cdbCalls[0].args[4].includes('rr-symcache') && cdbCalls[0].args[4].startsWith('srv*'));
 	const native = fs.readFileSync(path.join(dir, 'native_9280.txt'), 'utf8');
 	assert.match(native, /pid=9280/);
@@ -209,6 +210,30 @@ test('scan skips a dead child, a pid whose header differs and a pid that is not 
 	for (const w of [dead, mismatch, notEngine]) {
 		w.watch.stop();
 		assert.ok(!fs.readdirSync(w.dir).some((n) => n.startsWith('native_')));
+	}
+});
+
+test('scan skips a file older than three dump intervals, with or without an interval in its header', async () => {
+	const frozen = HEADER + dump(FROZEN_MAIN) + dump(FROZEN_MAIN);
+	const noInterval = frozen.replace(' interval=30s', '');
+	const slow = frozen.replace('interval=30s', 'interval=60s');
+	const cases = [
+		// [content, age in seconds, captured]
+		[frozen, 80, true],
+		[frozen, 100, false],
+		[noInterval, 80, true],
+		[noInterval, 100, false],
+		[slow, 170, true],
+		[slow, 190, false],
+	];
+	for (const [text, ageS, captured] of cases) {
+		const { dir, watch } = makeWatch({ 'stacks_9280.txt': text });
+		const old = new Date(Date.now() - ageS * 1000);
+		fs.utimesSync(path.join(dir, 'stacks_9280.txt'), old, old);
+		await watch.scan();
+		watch.stop();
+		const native = fs.existsSync(path.join(dir, 'native_9280.txt'));
+		assert.strictEqual(native, captured, `age ${ageS}s: ${text.split('\n')[0]}`);
 	}
 });
 
