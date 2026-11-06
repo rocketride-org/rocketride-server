@@ -136,6 +136,8 @@ from .types.account import (
     CreateKeyParams,
     CreateKeyResult,
     InviteMemberParams,
+    InvitedMember,
+    TeamAssignment,
     TeamMemberParams,
 )
 from .types.billing import (
@@ -267,6 +269,8 @@ __all__ = [
     'CreateKeyParams',
     'CreateKeyResult',
     'InviteMemberParams',
+    'InvitedMember',
+    'TeamAssignment',
     'TeamMemberParams',
     # Billing types
     'BillingDetail',

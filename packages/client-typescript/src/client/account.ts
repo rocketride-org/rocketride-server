@@ -32,7 +32,7 @@
 
 import type { RocketRideClient } from './client.js';
 import type { ConnectResult } from './types/client.js';
-import type { OrgDetail, DeleteOrgPrecheck, ApiKeyRecord, MemberRecord, TeamRecord, TeamDetail, ProfileUpdate, CreateKeyParams, InviteMemberParams, TeamMemberParams } from './types/account.js';
+import type { OrgDetail, DeleteOrgPrecheck, ApiKeyRecord, MemberRecord, TeamRecord, TeamDetail, ProfileUpdate, CreateKeyParams, InviteMemberParams, InvitedMember, TeamMemberParams } from './types/account.js';
 
 // =============================================================================
 // ACCOUNT API CLASS
@@ -229,14 +229,28 @@ export class AccountApi {
 	}
 
 	/**
-	 * Sends an invitation to a new organization member.
+	 * Invites a person to an organization and returns the membership the
+	 * server created. Only org admins can invite.
 	 *
 	 * @param orgId  - Organisation UUID.
 	 * @param params - Invitation parameters (email, givenName, familyName, role,
-	 *                 optional teamAssignments).
+	 *                 optional teamAssignments and devTeamId).
+	 * @returns The invited member, including the development team the server recorded.
+	 */
+	async invite(orgId: string, params: InviteMemberParams): Promise<InvitedMember> {
+		return this.client.call<InvitedMember>('rrext_account_members', { subcommand: 'invite', orgId, ...params });
+	}
+
+	/**
+	 * Sends an invitation to a new organization member.
+	 *
+	 * @deprecated Use {@link invite}, which returns the invited member.
+	 * @param orgId  - Organisation UUID.
+	 * @param params - Invitation parameters (email, givenName, familyName, role,
+	 *                 optional teamAssignments and devTeamId).
 	 */
 	async inviteMember(orgId: string, params: InviteMemberParams): Promise<void> {
-		await this.client.call('rrext_account_members', { subcommand: 'invite', orgId, ...params });
+		await this.invite(orgId, params);
 	}
 
 	/**

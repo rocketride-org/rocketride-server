@@ -25,6 +25,7 @@ import type { ShellApiV7 } from '../contract/versions/v7';
 import type { ShellApiV8 } from '../contract/versions/v8';
 import type { ShellApiV9 } from '../contract/versions/v9';
 import type { ShellApiV10 } from '../contract/versions/v10';
+import type { ShellApiV11 } from '../contract/versions/v11';
 import type { DAPException as Frozen_DAPException } from '../contract/versions/v0';
 import type { DAPException as Current_DAPException } from './api';
 import type { RocketRideException as Frozen_RocketRideException } from '../contract/versions/v0';
@@ -823,17 +824,19 @@ import type { DesktopAdapter as Frozen_DesktopAdapter } from '../contract/versio
 import type { DesktopAdapter as Current_DesktopAdapter } from './api';
 import type { DesktopViewProps as Frozen_DesktopViewProps } from '../contract/versions/v9';
 import type { DesktopViewProps as Current_DesktopViewProps } from './api';
-import type { ConsentChoice as Frozen_ConsentChoice } from '../contract/versions/v10';
+import type { InvitedMember as Frozen_InvitedMember } from '../contract/versions/v10';
+import type { InvitedMember as Current_InvitedMember } from './api';
+import type { ConsentChoice as Frozen_ConsentChoice } from '../contract/versions/v11';
 import type { ConsentChoice as Current_ConsentChoice } from './api';
-import type { ConsentState as Frozen_ConsentState } from '../contract/versions/v10';
+import type { ConsentState as Frozen_ConsentState } from '../contract/versions/v11';
 import type { ConsentState as Current_ConsentState } from './api';
-import type { ConsentOrigin as Frozen_ConsentOrigin } from '../contract/versions/v10';
+import type { ConsentOrigin as Frozen_ConsentOrigin } from '../contract/versions/v11';
 import type { ConsentOrigin as Current_ConsentOrigin } from './api';
-import type { TelemetryProviderProps as Frozen_TelemetryProviderProps } from '../contract/versions/v10';
+import type { TelemetryProviderProps as Frozen_TelemetryProviderProps } from '../contract/versions/v11';
 import type { TelemetryProviderProps as Current_TelemetryProviderProps } from './api';
-import type { ConsentApi as Frozen_ConsentApi } from '../contract/versions/v10';
+import type { ConsentApi as Frozen_ConsentApi } from '../contract/versions/v11';
 import type { ConsentApi as Current_ConsentApi } from './api';
-import type { SdkLike as Frozen_SdkLike } from '../contract/versions/v10';
+import type { SdkLike as Frozen_SdkLike } from '../contract/versions/v11';
 import type { SdkLike as Current_SdkLike } from './api';
 
 // VALUE floors — the live surface must still satisfy every frozen version.
@@ -859,6 +862,8 @@ const _floor_v9: ShellApiV9 = {} as ShellApiShape;
 void _floor_v9;
 const _floor_v10: ShellApiV10 = {} as ShellApiShape;
 void _floor_v10;
+const _floor_v11: ShellApiV11 = {} as ShellApiShape;
+void _floor_v11;
 
 // TYPE floors — each frozen exported type must still be satisfied.
 // Generic floors are emitted APPLIED (<any, …> at the frozen arity):
@@ -1661,6 +1666,8 @@ const _t_DesktopAdapter: Frozen_DesktopAdapter = {} as Current_DesktopAdapter;
 void _t_DesktopAdapter;
 const _t_DesktopViewProps: Frozen_DesktopViewProps = {} as Current_DesktopViewProps;
 void _t_DesktopViewProps;
+const _t_InvitedMember: Frozen_InvitedMember = {} as Current_InvitedMember;
+void _t_InvitedMember;
 const _t_ConsentChoice: Frozen_ConsentChoice = {} as Current_ConsentChoice;
 void _t_ConsentChoice;
 const _t_ConsentState: Frozen_ConsentState = {} as Current_ConsentState;

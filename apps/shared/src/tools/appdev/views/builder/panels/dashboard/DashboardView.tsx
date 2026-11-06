@@ -82,6 +82,8 @@ interface StatusLine {
 	text: string;
 	/** Tab that carries the recommended action, rendered as an "Open ..." button. */
 	stage?: AppBuilderStage;
+	/** Registry version whose build log the line opens; outranks `stage` when the host can read logs. */
+	buildLog?: number;
 }
 
 // =============================================================================
@@ -548,8 +550,9 @@ function deriveStatus(
 	if (newest && buildStateOf(newest) === 'failed') {
 		lines.push({
 			tone: 'error',
-			text: `v${newest.registryVersion} failed its server build. Click the failed badge on its card in Deploy to read the build log, then fix the source and deploy a new version. A version whose build failed can never be published or reviewed.`,
+			text: `v${newest.registryVersion} failed its server build. Read its build log to see why, then fix the source and deploy a new version. A version whose build failed can never be published or reviewed.`,
 			stage: 'deploy',
+			buildLog: newest.registryVersion,
 		});
 	}
 	if (newest?.state === 'failed') {
@@ -814,7 +817,11 @@ export const DashboardView: React.FC<IDashboardViewProps> = ({ host, app, readOn
 							status.map((line) => (
 								<div key={line.text} style={styles.statusRow}>
 									<div style={{ ...styles.statusText, color: TONE_COLOR[line.tone] }}>{line.text}</div>
-									{line.stage && onNavigate ? (
+									{line.buildLog !== undefined && host.loadBuildLog ? (
+										<Button variant="secondary" small onClick={() => openBuildLog(line.buildLog as number)}>
+											View build log
+										</Button>
+									) : line.stage && onNavigate ? (
 										<Button variant="secondary" small onClick={() => onNavigate(line.stage as AppBuilderStage)}>
 											Open {line.stage.charAt(0).toUpperCase() + line.stage.slice(1)}
 										</Button>

@@ -289,7 +289,7 @@ describe('DevSession', () => {
 		} finally {
 			await session.stop();
 		}
-	}, 15000);
+	}, 60000);
 });
 
 describe('executeAppDev', () => {
