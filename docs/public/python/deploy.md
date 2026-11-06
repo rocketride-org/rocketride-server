@@ -88,7 +88,9 @@ ids inside its own namespace (the platform holds `rocketride`). Deploying an app
 publishing one from your own namespace, requires the org to have claimed a
 developer id (pinning another organization's store app to `@me` or `@team`
 does not): an org admin claims it once, permanently, with `client.register_developer(id)`
-(RocketRide Cloud only), and `client.developer_status()` reads it back.
+(RocketRide Cloud only), and `client.developer_status()` reads it back. A self-hosted
+server registers nothing: its namespace is `rocketride`, and `client.developer_status()`
+reports that.
 
 The lifecycle, verb by verb: scaffold with `deploy.create_app`, pre-check with
 `deploy.verify_app`, then pack and deploy with `deploy.add_app` (or the raw

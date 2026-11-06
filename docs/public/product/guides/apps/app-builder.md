@@ -30,9 +30,10 @@ the same loop runs from a terminal or CI.
   `rocketride app developer register <id>`, which talks to the deployment
   target named by `ROCKETRIDE_DEPLOY_URI` and `ROCKETRIDE_DEPLOY_APIKEY`
   (the pip CLI has no `app developer` verbs). The id is lowercase letters
-  and underscores, starting with a letter; registering is an org admin's
-  step, and permanent. The organization can then deploy only apps inside
-  that namespace. A self-hosted server registers nothing: it publishes
+  and underscores, starting with a letter; `local`, the prefix of an app
+  scaffolded before registering, is reserved, so pick another id and rename
+  the app's prefix. Registering is an org admin's step, and permanent. The
+  organization can then deploy only apps inside that namespace. A self-hosted server registers nothing: it publishes
   under the fixed id `rocketride`. Until the prefix of your app's id
   matches, the Deploy tab is read-only with a banner; the fix is to rename
   the id in `package.json`. Design and Package always work.
