@@ -54,8 +54,9 @@ class CredField:
     required: bool
     suggests: str
     review: bool = False
-    # False: described, never auto-wired. The node reads the field somewhere else (for
-    # example inside the rows of a list), so a top-level binding would be ignored.
+    # False: described, never auto-wired or required by MCP readiness/setup. The node
+    # reads the field elsewhere (for example inside list rows), so a top-level binding
+    # would be ignored. Catalog parsing normalizes required to False for these fields.
     auto_wire: bool = True
 
 
@@ -70,6 +71,7 @@ class Integration:
 
 
 def catalog_from_dict(raw: dict) -> Dict[str, Integration]:
+    """Parse the catalog, treating fields excluded from auto-wiring as optional for MCP setup."""
     out: Dict[str, Integration] = {}
     for name, entry in raw.items():
         if not isinstance(entry, dict):
@@ -79,7 +81,7 @@ def catalog_from_dict(raw: dict) -> Dict[str, Integration]:
                 path=f['path'],
                 title=f.get('title', f['path']),
                 kind=f.get('kind', 'secret'),
-                required=bool(f.get('required', True)),
+                required=bool(f.get('required', True)) and bool(f.get('auto_wire', True)),
                 suggests=f['suggests'],
                 review=bool(f.get('review', False)),
                 auto_wire=bool(f.get('auto_wire', True)),
