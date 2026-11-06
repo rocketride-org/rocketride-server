@@ -32,14 +32,8 @@ config. Tool logic lives on IInstance via @tool_function.
 
 from __future__ import annotations
 
-import os
 
-from ai.common.config import Config
-from rocketlib import IGlobalBase, OPEN_MODE, error, warning
-
-# Pipeline env vars must be ROCKETRIDE_-prefixed (only those are substituted,
-# and the node-test framework maps ROCKETRIDE_<PROVIDER>_<ATTR> -> config).
-DEEPL_API_KEY_ENV = 'ROCKETRIDE_DEEPL_KEY'
+from rocketlib import IGlobalBase, error
 
 VALID_FORMALITIES = {'default', 'more', 'less', 'prefer_more', 'prefer_less'}
 VALID_MODEL_TYPES = {'latency_optimized', 'quality_optimized', 'prefer_quality_optimized'}
@@ -54,24 +48,21 @@ class IGlobal(IGlobalBase):
     model_type: str = ''
 
     def beginGlobal(self) -> None:
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
+        config = self.config
 
-        cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-
-        # Strip the config value FIRST so a whitespace-only field falls through
-        # to the env var rather than shadowing it (config still wins for any
-        # real value).
-        apikey = str(cfg.get('apikey') or '').strip() or os.environ.get(DEEPL_API_KEY_ENV, '').strip()
+        # The key reaches the node through its config (a ${ROCKETRIDE_DEEPL_APIKEY}
+        # reference resolved per call); there is no process-env fallback
+        apikey = str(config.apikey or '').strip()
 
         if not apikey:
-            error(f'tool_deepl: apikey is required — set it in node config or the {DEEPL_API_KEY_ENV} env var')
+            error('tool_deepl: apikey is required - set it in the node config (a ${ROCKETRIDE_DEEPL_APIKEY} reference)')
             raise ValueError('tool_deepl: apikey is required')
 
         self.apikey = apikey
 
-        target_lang = str(cfg.get('targetLang') or 'EN-US').strip()
-        self.target_lang = target_lang or 'EN-US'
+        # The schema default is EN-US; a field cleared in the UI stores '' and
+        # falls back to it here, because the instance treats target_lang as required.
+        self.target_lang = config.targetLang.strip() or 'EN-US'
 
         # formality / model_type are stored as the raw (stripped) config value,
         # NOT coerced to a default: the resolution rule is "argument wins, config
@@ -79,17 +70,8 @@ class IGlobal(IGlobalBase):
         # Coercing an empty config back to a value would defeat a user who
         # cleared the field in the UI. _resolve_enum on the instance side does
         # the validity check at request time.
-        self.formality = str(cfg.get('formality') or '').strip()
-        self.model_type = str(cfg.get('modelType') or '').strip()
-
-    def validateConfig(self) -> None:
-        try:
-            cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-            apikey = str(cfg.get('apikey') or '').strip() or os.environ.get(DEEPL_API_KEY_ENV, '').strip()
-            if not apikey:
-                warning('apikey is required')
-        except Exception as e:
-            warning(str(e))
+        self.formality = config.formality.strip()
+        self.model_type = config.modelType.strip()
 
     def endGlobal(self) -> None:
         self.apikey = ''

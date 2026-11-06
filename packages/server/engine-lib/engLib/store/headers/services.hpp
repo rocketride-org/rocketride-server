@@ -30,7 +30,7 @@ namespace engine::store {
 //-------------------------------------------------------------------------
 class IServices {
 public:
-    _const int VERSION = 2;
+    _const int VERSION = 3;
 
     //-----------------------------------------------------------------
     /// @details
@@ -146,12 +146,6 @@ public:
         ///		transformed value of the service definition
         //---------------------------------------------------------
         json::Value serviceSchema;
-
-        //---------------------------------------------------------
-        ///	@details
-        ///		Has this driver been resolved?
-        //---------------------------------------------------------
-        bool isResolved = false;
     };
     using ServiceDefinitionPtr = ServiceDefinition *;
     using ServiceDefinitions = std::map<iText, ServiceDefinition>;
@@ -167,6 +161,27 @@ public:
     static ErrorOr<IServices::ServiceDefinitionPtr>
     getServiceDefinitionFromService(const json::Value &service) noexcept;
     static ErrorOr<json::Value> getServiceSchemas() noexcept;
+
+    //-----------------------------------------------------------------
+    ///	@details
+    ///		Rejects a parsed services.*json that is still in the old
+    ///		format ("fields"/"shape" instead of "propertyDefinitions"/
+    ///		"properties"). The error names the file. Public so a
+    ///		fixture can be checked without walking the nodes tree
+    //-----------------------------------------------------------------
+    static Error requireNewFormat(const json::Value &serviceInfo,
+                                  const Path &definitionPath) noexcept;
+
+    //-----------------------------------------------------------------
+    ///	@details
+    ///		Expands one service definition's "properties" into its
+    ///		fully-resolved schema (def.serviceSchema): every leaf
+    ///		carries its "path", "params" lists the flat descriptors of
+    ///		the "param"-flagged properties, and "capabilities" is the
+    ///		node's PROTOCOL_CAPS bitmask. Public so a
+    ///		fixture definition can be resolved without being loaded
+    //-----------------------------------------------------------------
+    static Error buildSchema(ServiceDefinition &def) noexcept;
 
 private:
     //-----------------------------------------------------------------
@@ -193,35 +208,27 @@ private:
 
         ServiceDefinition &def;
         ServiceFields privateFields;
-    };
 
-    //-------------------------------------------------------------
-    // This is used when recursing the defintion tree
-    //-------------------------------------------------------------
-    struct ServiceSchema;
-    struct ServiceSchemaConditional {
-        json::Value value;
-        std::vector<ServiceSchema> fields;
-    };
+        // The flat descriptors of every "param"-flagged property seen so
+        // far, in schema order - becomes schema["params"]
+        json::Value params{json::arrayValue};
 
-    //-------------------------------------------------------------
-    // This is used when recursing the defintion tree
-    //-------------------------------------------------------------
-    struct ServiceSchema {
-        ServiceSchema(TextView name) : name(name) {}
-        const Text name;
-        bool isRequired = false;
-        bool isReadonly = false;
-        bool isSecured = false;
-        bool isSection = false;
-        bool isArray = false;
-        bool isCombo = false;
-        bool isResolved = true;
-        json::Value field;
-        json::Value ui;
-        std::vector<ServiceSchema> children;
-        std::vector<ServiceSchema> arrayItem;
-        std::vector<ServiceSchemaConditional> conditionals;
+        // The dotted "path" prefix of the level being expanded: a group
+        // pushes its name, a selector branch pushes the branch name, a
+        // hoisted leaf pushes nothing
+        std::vector<Text> pathPrefix;
+
+        // Empty at the top level or inside a plain group. Inside an enum
+        // branch or an array item it names that construct ("an enum
+        // branch" / "an array item") - "param" is a load error there,
+        // because such a property resolves branch- or item-dependently
+        Text nestedIn;
+
+        // The names recorded for the level currently being expanded.
+        // A selector registers its branch names and its hoisted leaves
+        // here, because they share the level's namespace with its
+        // sibling leaves
+        std::vector<Text> *levelNames{};
     };
 
     //-------------------------------------------------------------
@@ -229,20 +236,23 @@ private:
     //-------------------------------------------------------------
     static Error declareDefaultUrlMappers() noexcept;
     static Error loadGlobalFields(json::Value &definition) noexcept;
-    static Text getFieldName(TextView fieldName) noexcept;
     static ErrorOr<json::Value> lookupField(ServiceContext &context,
                                             TextView fieldId) noexcept;
-    static ErrorOr<IServices::ServiceSchema> getField(
-        ServiceContext &context, TextView fieldName,
-        json::Value &field) noexcept;
-    static ErrorOr<IServices::ServiceSchema> getFields(
-        ServiceContext &context, json::Value &section) noexcept;
+    static ErrorOr<json::Value> expandProperty(ServiceContext &context,
+                                               json::Value &property) noexcept;
+    static ErrorOr<json::Value> expandChildren(ServiceContext &context,
+                                               json::Value property) noexcept;
+    static ErrorOr<json::Value> expandProperties(
+        ServiceContext &context, json::Value &specifiers) noexcept;
+    static ErrorOr<json::Value> expandBranches(ServiceContext &context,
+                                               json::Value branches) noexcept;
+    static Error applyParam(ServiceContext &context,
+                            json::Value &field) noexcept;
+    static Error requireUniqueName(std::vector<Text> &seen, const Text &name,
+                                   ServiceContext &context) noexcept;
     static Error updateDefinitions() noexcept;
     static void resolveString(json::Value &value) noexcept;
     static void resolveDescriptions(json::Value &value) noexcept;
-    static std::list<Text> getFieldNames(const ServiceSchema &schema) noexcept;
-    static json::Value getChildConditionalUIElements(
-        const ServiceSchema &schema) noexcept;
 
     //-----------------------------------------------------------------
     /// @details

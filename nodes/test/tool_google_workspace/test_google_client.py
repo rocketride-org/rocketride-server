@@ -224,7 +224,7 @@ def _broker_credentials(monkeypatch, service, urlopen, *, token_extra=None):
     return google_client.build_service(
         service,
         'user',
-        {'userToken': json.dumps(token)},
+        {'userAuth': json.dumps(token)},
         ['https://www.googleapis.com/auth/spreadsheets'],
     )
 
@@ -358,7 +358,7 @@ def test_broker_refresh_invalid_expiry_raises_and_keeps_credentials_unchanged(se
         service,
         'user',
         {
-            'userToken': json.dumps(
+            'userAuth': json.dumps(
                 {
                     'access_token': 'stale',
                     'refresh_token': 'refresh',

@@ -1,5 +1,3 @@
-import importlib
-import warnings
 from abc import abstractmethod, ABC
 from typing import List, Dict, Any
 from .schema import Question
@@ -44,29 +42,3 @@ class EmbeddingBase(ABC):
         """
         Encode the chunks into a vector.
         """
-
-
-def getEmbedding(provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]) -> EmbeddingBase:
-    """
-    Examine configuration and return and initializes an embedding.
-    """
-    # Embedding providers ship in the nodes package.
-    name = 'nodes.' + provider
-
-    # Get the module
-    module = importlib.import_module(name)
-
-    # See if this has the proper interface
-    if not hasattr(module, 'getEmbedding'):
-        raise Exception(f'Module {provider} is not an embedding provider')
-
-    # This is a warning from pytorch that the sentence transformers
-    # use. We pin transformers to a specific version on purpose
-    # (see requirements_transformers.txt), so we suppress this warning here.
-    warnings.filterwarnings('ignore', message='TypedStorage is deprecated.*')
-
-    # Get the class
-    cls = getattr(module, 'getEmbedding')()
-
-    # Create an instance of the class
-    return cls(provider, connConfig, bag)

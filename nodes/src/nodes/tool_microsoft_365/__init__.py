@@ -22,10 +22,3 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-
-"""tool_microsoft_365: shared base for the Microsoft 365 tool services.
-
-The engine loads each service via its services.<svc>.json ``path``
-(e.g. ``nodes.tool_microsoft_365.excel``); this package root only carries
-the shared client machinery and base classes.
-"""

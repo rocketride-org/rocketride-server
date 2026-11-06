@@ -37,15 +37,10 @@ class IGlobal(StoreGlobalBase):
     credential_fields = ('host',)
 
     def _open_store(self, logical_type: str, conn_config: Dict[str, Any], bag: Dict[str, Any]):
-        """Return the driver's Store, resolved lazily via the package hook so config mode never loads the driver."""
-        from . import getStore
+        """Return the driver's Store, imported lazily so config mode never loads the driver."""
+        from .atlas import Store
 
-        Store = getStore()
         return Store(logical_type, conn_config, bag)
-
-    def _sub_key(self) -> str:
-        """Return the transform sub-key: host/database/collection."""
-        return f'{self.store.host}/{self.store.database}/{self.store.collection}'
 
     def _probe_connection(self, config: Dict[str, Any]) -> None:
         """

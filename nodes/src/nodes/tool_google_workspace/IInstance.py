@@ -38,7 +38,6 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from ai.common.config import Config
 from rocketlib import IInstanceBase
 
 from .google_client import GoogleService, token_scope_report
@@ -125,11 +124,11 @@ class GoogleToolInstanceBase(IInstanceBase):
                 if reason_code:
                     out['errorReason'] = reason_code
         try:
-            cfg = Config.getNodeConfig(self.IGlobal.glb.logicalType, self.IGlobal.glb.connConfig)
-            auth_type = (cfg.get('authType') or 'service').strip()
+            cfg = self.settings
+            auth_type = cfg['authType']
             out['authType'] = auth_type
             if auth_type == 'user':
-                token_str = str(cfg.get('userToken') or '').strip()
+                token_str = str(cfg.get('userAuth') or '').strip()
                 if token_str:
                     checked.append('scopes')
                     try:

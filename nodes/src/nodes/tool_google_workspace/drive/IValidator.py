@@ -1,4 +1,6 @@
 # =============================================================================
+# RocketRide Engine
+# =============================================================================
 # MIT License
 # Copyright (c) 2026 Aparavi Software AG
 #
@@ -21,10 +23,14 @@
 # SOFTWARE.
 # =============================================================================
 
-# ------------------------------------------------------------------------------
-# Main module
-# ------------------------------------------------------------------------------
+"""Google Drive tool node save-time validation backed by the shared Workspace validator."""
 
-# Import the filters
-from .IGlobal import IGlobal  # noqa: F401
-from .IInstance import IInstance  # noqa: F401
+from ..IValidator import GoogleToolValidatorBase
+from .client import SERVICE
+
+
+class IValidator(GoogleToolValidatorBase):
+    """Save-time validation for Google Drive: schema, then credential and scope coverage."""
+
+    SERVICE = SERVICE
+    SPEC_NAME = 'DRIVE'

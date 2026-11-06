@@ -39,22 +39,6 @@ class IGlobal(StoreGlobalBase):
 
         return Store(logical_type, conn_config, bag)
 
-    def _sub_key(self) -> str:
-        """Return the transform sub-key: endpoint-or-host/collection."""
-        store = self.store
-        collection = getattr(store, 'collection_name', getattr(store, 'collection', ''))
-
-        # Prefer cloud endpoint if present; otherwise fall back to host[:port]; otherwise logical type
-        if getattr(store, 'api_endpoint', ''):
-            identifier = store.api_endpoint.rstrip('/')
-        elif getattr(store, 'host', ''):
-            port = getattr(store, 'port', None)
-            identifier = f'{store.host}:{port}' if port else store.host
-        else:
-            identifier = self.glb.logicalType
-
-        return f'{identifier}/{collection}'
-
     def _probe_connection(self, config: Dict[str, Any]) -> None:
         """Astra validates the collection name inside Store.__init__; no save-time probe here."""
         return

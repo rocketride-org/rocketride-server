@@ -406,7 +406,7 @@ if (result.errors.length > 0) {
 
 ### `getServices()` / `getService(service)`
 
-`getServices(): Promise<ServicesResponse>` returns the server's service catalog: one summary per service (title, classType, lanes, capabilities bitmask, ...) plus a deduplicated `icons` table (icon id → raw SVG) that each summary's `icon` id points into. Configuration schemas are **not** included — `getService(service: string): Promise<ServiceDefinition>` returns one service's FULL definition by name (e.g. `'ocr'`, `'chat'`): the summary fields plus the dynamic configuration sections (schema + UI schema per section). An unknown service name is an error, not an `undefined` result.
+`getServices(options?: { definitions?: boolean }): Promise<ServicesResponse>` returns the server's service catalog: one summary per service (title, classType, lanes, capabilities bitmask, ...) plus a deduplicated `icons` table (icon id → raw SVG) that each summary's `icon` id points into. With `{ definitions: true }` every entry is the FULL definition (configuration schema included) and there is no icons table. Configuration schemas are **not** included — `getService(service: string): Promise<ServiceDefinition>` returns one service's FULL definition by name (e.g. `'ocr'`, `'chat'`): the summary fields plus the dynamic configuration sections (schema + UI schema per section). An unknown service name is an error, not an `undefined` result.
 
 ```typescript
 const { services, icons } = await client.getServices();

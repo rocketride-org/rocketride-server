@@ -226,10 +226,6 @@ def _build_rr_env(monkeypatch):
     config = types.ModuleType('ai.common.config')
     config.Config = types.SimpleNamespace(getNodeConfig=lambda provider, connConfig: dict(connConfig))
 
-    transform = types.ModuleType('ai.common.transform')
-    for name in ('IGlobalTransform', 'IInstanceTransform', 'IEndpointTransform'):
-        setattr(transform, name, type(name, (), {}))
-
     store_mod = types.ModuleType('ai.common.store')
 
     class _StubDocumentStoreBase:
@@ -258,7 +254,6 @@ def _build_rr_env(monkeypatch):
     monkeypatch.setitem(sys.modules, 'ai.common.schema', schema)
     monkeypatch.setitem(sys.modules, 'ai.common.table', table)
     monkeypatch.setitem(sys.modules, 'ai.common.config', config)
-    monkeypatch.setitem(sys.modules, 'ai.common.transform', transform)
     monkeypatch.setitem(sys.modules, 'ai.common.store', store_mod)
 
     # The driver asks its base which objects a batch replaces: give the stub the real rule, not a copy of it

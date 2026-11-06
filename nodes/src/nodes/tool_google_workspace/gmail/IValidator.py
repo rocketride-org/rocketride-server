@@ -1,4 +1,6 @@
 # =============================================================================
+# RocketRide Engine
+# =============================================================================
 # MIT License
 # Copyright (c) 2026 Aparavi Software AG
 #
@@ -21,4 +23,14 @@
 # SOFTWARE.
 # =============================================================================
 
-from .IInstance import IInstance as IInstanceBase  # noqa: F401
+"""Gmail tool node save-time validation backed by the shared Workspace validator."""
+
+from ..IValidator import GoogleToolValidatorBase
+from .client import SERVICE
+
+
+class IValidator(GoogleToolValidatorBase):
+    """Save-time validation for Gmail: schema, then credential and scope coverage."""
+
+    SERVICE = SERVICE
+    SPEC_NAME = 'GMAIL'

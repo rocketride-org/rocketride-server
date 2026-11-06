@@ -1,4 +1,6 @@
 # =============================================================================
+# RocketRide Engine
+# =============================================================================
 # MIT License
 # Copyright (c) 2026 Aparavi Software AG
 #
@@ -21,8 +23,15 @@
 # SOFTWARE.
 # =============================================================================
 
-from rocketlib import IInstanceBase
+
+"""Google Sheets tool node save-time validation backed by the shared Workspace validator."""
+
+from ..IValidator import GoogleToolValidatorBase
+from .client import SERVICE
 
 
-class IInstance(IInstanceBase):
-    pass
+class IValidator(GoogleToolValidatorBase):
+    """Save-time validation for Google Sheets: schema, then credential and scope coverage."""
+
+    SERVICE = SERVICE
+    SPEC_NAME = 'SHEETS'

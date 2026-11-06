@@ -44,6 +44,7 @@ def _build_import_stubs():
     rocketlib = MagicMock()
     rocketlib.IInstanceBase = object
     rocketlib.IGlobalBase = object
+    rocketlib.IValidatorBase = object
 
     def tool_function(**metadata):
         def decorate(func):
@@ -124,10 +125,12 @@ _imported_names = (
     'nodes.tool_google_workspace',
     'nodes.tool_google_workspace.IInstance',
     'nodes.tool_google_workspace.IGlobal',
+    'nodes.tool_google_workspace.IValidator',
     'nodes.tool_google_workspace.google_client',
     'nodes.tool_google_workspace.calendar',
     'nodes.tool_google_workspace.calendar.IInstance',
     'nodes.tool_google_workspace.calendar.IGlobal',
+    'nodes.tool_google_workspace.calendar.IValidator',
     'nodes.tool_google_workspace.calendar.client',
     'nodes.core.google_access',
 )
@@ -135,9 +138,11 @@ _preexisting_imports = {name for name in _imported_names if name in sys.modules}
 
 cal_iinstance = importlib.import_module('nodes.tool_google_workspace.calendar.IInstance')
 cal_iglobal = importlib.import_module('nodes.tool_google_workspace.calendar.IGlobal')
+cal_ivalidator = importlib.import_module('nodes.tool_google_workspace.calendar.IValidator')
 cal_client = importlib.import_module('nodes.tool_google_workspace.calendar.client')
 google_workspace_instance = importlib.import_module('nodes.tool_google_workspace.IInstance')
 google_workspace_global = importlib.import_module('nodes.tool_google_workspace.IGlobal')
+google_workspace_validator = importlib.import_module('nodes.tool_google_workspace.IValidator')
 ga = importlib.import_module('nodes.core.google_access')
 _imported_modules = {name: sys.modules[name] for name in _imported_names if name in sys.modules}
 
@@ -655,16 +660,10 @@ def test_validate_config_warns_for_malformed_user_token(monkeypatch):
     warnings = []
     for name, module in _imported_modules.items():
         monkeypatch.setitem(sys.modules, name, module)
-    # setattr (not .return_value) so this holds whether Config is the real class or a stub.
-    monkeypatch.setattr(
-        google_workspace_global.Config,
-        'getNodeConfig',
-        lambda *a, **k: {'authType': 'user', 'userToken': '{bad json'},
-    )
-    monkeypatch.setattr(google_workspace_global, 'warning', warnings.append)
-    glb = cal_iglobal.IGlobal()
-    glb.glb = types.SimpleNamespace(logicalType='calendar', connConfig={})
-    glb.validateConfig()
+    config = {'authType': 'user', 'userAuth': '{bad json'}
+    monkeypatch.setattr(google_workspace_validator, 'warning', warnings.append)
+    monkeypatch.setattr(cal_ivalidator.IValidator, 'config', property(lambda self: config))
+    cal_ivalidator.IValidator().validateConfig()
     assert any('invalid' in message.lower() for message in warnings)
 
 
@@ -678,7 +677,6 @@ def test_services_json_shape():
     assert data['classType'] == ['tool']
     assert data['capabilities'] == ['invoke']
     assert data['lanes'] == {}  # tool node: no data lanes
-    assert data['prefix'] == 'calendar'
     assert data['path'] == 'nodes.tool_google_workspace.calendar'
     assert 'test' not in data  # OAuth node: no dynamic test block
 
@@ -692,30 +690,31 @@ def test_calendar_service_uses_shared_workspace_bases():
 
 
 def test_services_json_has_access_and_allow_delete_fields():
-    # Issue AC: both calendar.access and calendar.allowDelete must be present.
-    data = json.loads(_SERVICES_JSON.read_text(encoding='utf-8'))
-    assert 'calendar.access' in data['fields']
-    assert 'calendar.allowDelete' in data['fields']
-    assert data['fields']['calendar.access']['default'] == 'write'
-    assert [row[0] for row in data['fields']['calendar.access']['enum']] == ['readonly', 'write']
-    assert data['fields']['calendar.allowDelete']['type'] == 'boolean'
-    assert data['fields']['calendar.allowDelete']['default'] is False
+    # Issue AC: both access and allowDelete must be present.
+    definitions = json.loads(_SERVICES_JSON.read_text(encoding='utf-8'))['propertyDefinitions']
+    assert 'access' in definitions
+    assert 'allowDelete' in definitions
+    assert definitions['access']['default'] == 'write'
+    assert [row[0] for row in definitions['access']['enum']] == ['readonly', 'write']
+    assert definitions['allowDelete']['type'] == 'boolean'
+    assert definitions['allowDelete']['default'] is False
 
 
 def test_services_json_has_allow_public_sharing_field():
     data = json.loads(_SERVICES_JSON.read_text(encoding='utf-8'))
-    assert data['fields']['calendar.allowPublicSharing']['type'] == 'boolean'
-    assert data['fields']['calendar.allowPublicSharing']['default'] is False
-    # allowDelete must NOT be in the default profile (absent -> False).
-    assert 'allowDelete' not in data['preconfig']['profiles']['default']
+    assert data['propertyDefinitions']['allowPublicSharing']['type'] == 'boolean'
+    assert data['propertyDefinitions']['allowPublicSharing']['default'] is False
+    # The gate flags are shown in the panel; their False default is the only stored-free value.
+    assert 'allowDelete' in data['properties']
 
 
 def test_services_json_no_secret_defaults():
     """Secrets must never carry a real default (gitleaks scans services*.json)."""
     data = json.loads(_SERVICES_JSON.read_text(encoding='utf-8'))
-    for prof in data['preconfig']['profiles'].values():
-        assert prof.get('serviceKey', '') == ''
-        assert prof.get('userToken', '') == ''
+    # Credentials come from the shared google.* definitions; the node declares none of its own.
+    assert 'preconfig' not in data
+    for name, prop in data['propertyDefinitions'].items():
+        assert not prop.get('secret') and prop.get('type') not in ('oauth2', 'upload'), name
 
 
 # ---------------------------------------------------------------------------

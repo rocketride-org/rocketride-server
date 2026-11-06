@@ -28,6 +28,7 @@ import json
 from typing import TYPE_CHECKING, Dict, Any, List, Optional, TypedDict, Callable, Protocol
 from .types import AVI_ACTION, OPEN_MODE, ENDPOINT_MODE, SERVICE_MODE, Entry, IControl, IInvoke, IJson
 from .error import APERR, Ec
+from .config import MULTITENANT_BIT, ConfigError, ConfigView, TenancyViolation, resolveConfig
 
 if TYPE_CHECKING:
     from ai.common.schema import Doc, Question, Answer
@@ -302,12 +303,74 @@ class IGlobalBase:
 
     IEndpoint: IEndpointBase = None
     glb: IFilterGlobal = None
+    _config_view: Optional[ConfigView] = None  #: Cached full resolution (see _resolved).
+    _config_restricted: Optional[ConfigView] = None  #: Cached node-facing view (see config).
 
     def preventDefault(self) -> None:
         """
         Raise an exception indicating that there is no default behavior to prevent.
         """
         raise APERR(Ec.PreventDefault, 'No default to prevent')
+
+    # ------------------------------------------------------------------
+    # Configuration
+    #
+    # The engine sets self.glb (logicalType, connConfig) before beginGlobal.
+    # The schema is the engine-resolved service schema, so the resolver is
+    # the schema validation: resolving IS validating.
+    # ------------------------------------------------------------------
+
+    def _schema(self) -> Dict[str, Any]:
+        """
+        Return this node's resolved service schema from the engine.
+
+        Returns:
+            dict: ``engLib.getServiceSchema(self.glb.logicalType)`` as native dicts.
+
+        Raises:
+            ConfigError: The engine knows no service of that logical type.
+        """
+        from . import engine
+
+        logical_type = self.glb.logicalType
+        schema = engine.getServiceSchema(logical_type)
+        if schema is None:
+            raise ConfigError(f'The service {logical_type} was not found')
+        return IJson.toDict(schema)
+
+    def _resolved(self) -> ConfigView:
+        """
+        Return the full resolved configuration, cached on first use.
+
+        Framework accessor: ``IInstanceBase.settings`` builds from this view,
+        never through the node-facing ``config`` refusals and never through
+        the methods-only facade.
+
+        Returns:
+            ConfigView: Defaults + connConfig, validated and flattened.
+        """
+        if self._config_view is None:
+            self._config_view = resolveConfig(self._schema(), IJson.toDict(self.glb.connConfig))
+        return self._config_view
+
+    @property
+    def config(self) -> ConfigView:
+        """
+        The node's shared configuration: defaults + connConfig, flattened to the active branch.
+
+        Reading a ``param``-flagged key here raises ``TenancyViolation``: a
+        parameter is per call and belongs in ``self.settings`` on the instance.
+        A key whose value carries a ``${ROCKETRIDE_*}`` placeholder is refused
+        the same way once the node declares the ``multitenant`` capability
+        (the rule is universal in the end state; enforcement is phased so an
+        unconverted node keeps running on its single-user engine).
+        """
+        if self._config_restricted is None:
+            full = self._resolved()
+            self._config_restricted = full.restricted(
+                refuse_params=True, refuse_env=bool(full.capabilities & MULTITENANT_BIT)
+            )
+        return self._config_restricted
 
     # -------------------
     # These the following are all overridable by
@@ -324,6 +387,121 @@ class IGlobalBase:
         Clean up global resources at the end of execution.
         """
         pass
+
+
+class IValidatorBase(IGlobalBase):
+    """
+    Framework default for a node package's ``IValidator``.
+
+    In CONFIG mode the engine constructs this (or the node's own
+    ``IValidator`` subclass) instead of ``IGlobal`` and calls
+    ``validateConfig``. The default resolves ``self.config``, which is the
+    schema validation; a node overrides it only for semantic checks
+    (a connectivity probe) and keeps its imports light - rocketlib, stdlib
+    and light clients - because ``IGlobal.py``/``IInstance.py`` are never
+    imported here.
+    """
+
+    def validateConfig(self, syntaxOnly: bool = False) -> None:
+        """
+        Validate the node's configuration against its schema.
+
+        Args:
+            syntaxOnly (bool): True when only the shape is checked (no probes).
+                The default has no probes, so the flag changes nothing here.
+
+        Raises:
+            ConfigError: The stored configuration does not fit the schema.
+        """
+        self.config
+
+
+# =========================================================================
+# Methods-only IGlobal facade
+#
+# C++ hands every instance its global via Python setattr
+# (python-instance.cpp: m_pyInstance.attr("IGlobal") = global), so a data
+# descriptor named IGlobal on IInstanceBase sees that assignment and can
+# wrap what the node reads back. Opt-in per certified node: a node sets
+# ``iglobal_methods_only = True`` once its IGlobal data reads are accessor
+# methods. Accident-prevention, not a sandbox.
+# =========================================================================
+
+
+class _MethodsOnlyIGlobal:
+    """
+    Read-through to the real IGlobal that serves callables only.
+
+    Methods run with the real IGlobal as ``self``, so IGlobal's own mutation
+    stays legal; a non-callable read or any write from the instance raises
+    ``TenancyViolation`` with a teaching message.
+    """
+
+    __slots__ = ('_target',)
+
+    #: Framework reach-through the base class itself needs.
+    WHITELIST = frozenset({'glb', 'tool_description'})
+
+    def __init__(self, target: Any):
+        """Wrap ``target``, the IGlobal the engine assigned."""
+        object.__setattr__(self, '_target', target)
+
+    def __getattr__(self, name: str) -> Any:
+        """Return a bound method of the real IGlobal; refuse data reads."""
+        target = object.__getattribute__(self, '_target')
+        if name in _MethodsOnlyIGlobal.WHITELIST:
+            return getattr(target, name)
+        value = getattr(target, name)
+        if callable(value):
+            return value
+        raise TenancyViolation(
+            f'IGlobal.{name} is shared state read from an instance; IGlobal access is methods-only. '
+            f'Add an accessor on IGlobal (def {name}(self)) and call self.IGlobal.{name}(), '
+            'or read a per-call value from self.settings.'
+        )
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        """Refuse writes: IGlobal is shared by every caller of this engine."""
+        raise TenancyViolation(
+            f'cannot set IGlobal.{name} from an instance: IGlobal is shared by every caller of this engine; '
+            'per-call state belongs on the instance.'
+        )
+
+    def __delattr__(self, name: str) -> None:
+        """Refuse deletes."""
+        raise TenancyViolation(f'cannot delete IGlobal.{name} from an instance: IGlobal is shared state.')
+
+    def __repr__(self) -> str:
+        """Name the wrapped global."""
+        return f'<methods-only {object.__getattribute__(self, "_target")!r}>'
+
+
+class _IGlobalFacade:
+    """
+    Data descriptor behind ``IInstanceBase.IGlobal``.
+
+    Stores whatever the engine (or a test) assigns in ``instance._iglobal``
+    and hands it back as-is unless the instance's class opted in with
+    ``iglobal_methods_only = True``, in which case reads go through
+    ``_MethodsOnlyIGlobal``.
+    """
+
+    def __get__(self, instance: Any, owner: Any) -> Any:
+        """Return the global for ``instance`` (None at class level, like the old class attribute)."""
+        if instance is None:
+            return None
+        target = instance._iglobal
+        if target is None or not getattr(owner, 'iglobal_methods_only', False):
+            return target
+        return _MethodsOnlyIGlobal(target)
+
+    def __set__(self, instance: Any, value: Any) -> None:
+        """Record the engine's assignment in ``instance._iglobal``."""
+        instance._iglobal = value
+
+    def __delete__(self, instance: Any) -> None:
+        """Forget the assignment."""
+        instance._iglobal = None
 
 
 class IServiceFilterInstance(Protocol):
@@ -812,13 +990,42 @@ class IInstanceBase:
     """
 
     IEndpoint: IEndpointBase = None  #: Endpoint instance for communication.
-    IGlobal: IGlobalBase = None  #: Global instance for shared data.
+    IGlobal: IGlobalBase = _IGlobalFacade()  #: Global instance for shared data (see _IGlobalFacade).
     instance: IFilterInstance = None  #: Instance data reference.
+
+    #: Opt-in for a certified node: IGlobal reads from this instance serve
+    #: callables only; data reads and writes raise TenancyViolation.
+    iglobal_methods_only: bool = False
+
+    _iglobal: IGlobalBase = None  #: The real IGlobal the engine assigned (behind the facade).
+
+    # Invalidation contract: whoever stamps _caller (data_conn at getPipe(),
+    # rocketlib's getPipe wrapper for sub-pipes) sets _settings = None in the
+    # same place; putPipe() clears _caller only, so a spawned worker thread
+    # keeps the cached view.
+    _caller: Optional[Dict[str, Any]] = None  #: Server-set caller context; None = no caller.
+    _settings: Optional[ConfigView] = None  #: Cached settings view for the current stamp.
 
     """
     These are all the overrides to provide
     the driver funtionality.
     """
+
+    @property
+    def settings(self) -> ConfigView:
+        """
+        This call's effective configuration: IGlobal.config (+) the caller's env (+) the caller's params.
+
+        Returns:
+            ConfigView: Flattened to the active branch; ``param``-flagged and
+            env-valued keys are served here (and only here). With no caller
+            (``_caller`` None) this is the shared config unchanged.
+        """
+        if self._settings is None:
+            caller = self._caller or {}
+            params = (caller.get('params') or {}).get(self.instance.pipeType.id)
+            self._settings = self._iglobal._resolved().expand_env(caller.get('env')).overlay(params)
+        return self._settings
 
     # ------------------------------------------------------------------
     # Media lane normalization

@@ -1,5 +1,5 @@
 {
-	"fields": {
+	"propertyDefinitions": {
 		"vector.host": {
 			"type": "string",
 			"title": "Host",
@@ -74,18 +74,7 @@
 			"type": "string",
 			"title": "API key",
 			"description": "Enter your API key",
-			"secure": true,
-			"ui": {
-				"ui:widget": "ApiKeyWidget"
-			}
-		},
-		"vectorizer.embedding": {
-			"title": "Embedding",
-			"combo": "embedding"
-		},
-		"vectorizer.store": {
-			"title": "Vector Store",
-			"combo": "store"
+			"secret": true
 		}
 	}
 }

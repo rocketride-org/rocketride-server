@@ -40,16 +40,15 @@ A concrete node inherits this class with no per-driver overrides. See
 from abc import ABC
 from typing import List, Set
 
-from rocketlib import Entry, warning
+from rocketlib import Entry, IInstanceBase, warning
 
 from ai.common.schema import Doc, Question
-from ai.common.transform import IInstanceTransform
 
 from .document_store import DocumentStoreBase, VectorStoreToolMixin
 from .store_global_base import StoreGlobalBase
 
 
-class StoreInstanceBase(VectorStoreToolMixin, IInstanceTransform, ABC):
+class StoreInstanceBase(VectorStoreToolMixin, IInstanceBase, ABC):
     """Abstract base for the IInstance layer of any vector store node."""
 
     IGlobal: StoreGlobalBase

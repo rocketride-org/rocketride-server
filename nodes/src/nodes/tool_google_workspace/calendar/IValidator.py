@@ -1,4 +1,6 @@
 # =============================================================================
+# RocketRide Engine
+# =============================================================================
 # MIT License
 # Copyright (c) 2026 Aparavi Software AG
 #
@@ -21,10 +23,14 @@
 # SOFTWARE.
 # =============================================================================
 
-from .IGlobal import IGlobal
-from .IInstance import IInstance
+"""Google Calendar tool node save-time validation backed by the shared Workspace validator."""
 
-__all__ = [
-    'IGlobal',
-    'IInstance',
-]
+from ..IValidator import GoogleToolValidatorBase
+from .client import SERVICE
+
+
+class IValidator(GoogleToolValidatorBase):
+    """Save-time validation for Google Calendar: schema, then credential and scope coverage."""
+
+    SERVICE = SERVICE
+    SPEC_NAME = 'CALENDAR'

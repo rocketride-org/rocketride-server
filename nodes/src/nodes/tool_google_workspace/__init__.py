@@ -22,10 +22,3 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-
-"""tool_google_workspace: shared base for the Google Workspace tool services.
-
-The engine loads each service via its services.<svc>.json ``path``
-(e.g. ``nodes.tool_google_workspace.gmail``); this package root only carries
-the shared client machinery and base classes.
-"""

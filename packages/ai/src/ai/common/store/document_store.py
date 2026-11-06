@@ -1,4 +1,3 @@
-import importlib
 import json
 import threading
 from abc import abstractmethod, ABC
@@ -620,27 +619,6 @@ class DocumentStoreBase(ABC):
 
         # Collection successfully created and validated
         return True
-
-
-def getStore(provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]) -> DocumentStoreBase:
-    """
-    Examine the configuration and returns and initializes a store.
-    """
-    # Build up the module name - it will be in the store dir
-    name = 'connectors.' + provider
-
-    # Get the module
-    module = importlib.import_module(name)
-
-    # See if this has the proper interface
-    if not hasattr(module, 'getStore'):
-        raise Exception(f'Module {provider} is not a store provider')
-
-    # Get the class
-    cls = getattr(module, 'getStore')()
-
-    # Create an instance of the class
-    return cls(provider, connConfig, bag)
 
 
 # ---------------------------------------------------------------------------

@@ -22,18 +22,3 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-
-"""
-GoHighLevel (LeadConnector) node for RocketRide Engine.
-
-Exposes the GoHighLevel v2 REST API as agent tools: contacts, notes, tasks,
-opportunities, pipelines, conversations, messages, calendars, appointments,
-custom fields, custom values, tags, businesses and users, surfaced as
-@tool_function decorators on IInstance. One node instance is scoped to one
-sub-account (location) by its Private Integration Token.
-"""
-
-from .IGlobal import IGlobal as IGlobal
-from .IInstance import IInstance as IInstance
-
-__all__ = ['IGlobal', 'IInstance']

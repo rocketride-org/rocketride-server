@@ -31,9 +31,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from rocketlib import Entry, debug
+from rocketlib import Entry, IInstanceBase, debug
 from ai.common.schema import Answer, Doc, Question
-from ai.common.transform import IInstanceTransform
 
 from .constants import (
     BACKEND_ELASTICSEARCH,
@@ -69,7 +68,7 @@ def _get_question_embedding(question: Question) -> Optional[Any]:
     return getattr(qs[0], 'embedding', None)
 
 
-class IInstance(IInstanceTransform):
+class IInstance(IInstanceBase):
     """
     Instance transform for index_search: runs search and ingest against
     Elasticsearch or OpenSearch depending on IGlobal.backend.

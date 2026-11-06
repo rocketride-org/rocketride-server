@@ -24,8 +24,8 @@
 # ------------------------------------------------------------------------------
 # This class controls the actual endpoint
 # ------------------------------------------------------------------------------
-from ai.common.transform import IEndpointTransform
+from rocketlib import IEndpointBase
 
 
-class IEndpoint(IEndpointTransform):
+class IEndpoint(IEndpointBase):
     pass

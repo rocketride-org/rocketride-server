@@ -138,11 +138,6 @@
 					"properties": ["embedding.custom"]
 				}
 			]
-		},
-		"embedding.preprocessor": {
-			"default": "preprocessor_langchain",
-			"providerTitle": "Preprocessor (chunking)",
-			"combo": "preprocessor"
 		}
 	},
 	//

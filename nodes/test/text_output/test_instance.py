@@ -3,7 +3,7 @@
 # Copyright (c) 2026 Aparavi Software AG
 # =============================================================================
 
-r"""Unit tests for text_output Instance path shortening (no engine/SMB server).
+r"""Unit tests for text_output IInstance path shortening (no engine/SMB server).
 
 text_output writes over SMB via smbclient. The Windows-long-path fix (issue
 #1415) applies per-component hash-truncation here (the ``\\?\`` prefix does NOT
@@ -26,7 +26,7 @@ while str(NODES_SRC) in sys.path:
     sys.path.remove(str(NODES_SRC))
 sys.path.insert(0, str(NODES_SRC))
 
-from text_output.instance import Instance  # noqa: E402
+from text_output.IInstance import IInstance  # noqa: E402
 
 
 class _Stub:
@@ -87,7 +87,7 @@ def fake_smb():
 
 
 def _make_instance(target_object_path, server='fileserver'):
-    inst = Instance()
+    inst = IInstance()
     inst.instance = _Stub(targetObjectPath=target_object_path)
     inst.IEndpoint = _Stub(server=server, settings_changed=False)
     inst.TRANFORM_KEY_TAG_NAME = f'text-output://{server}/status'

@@ -20,30 +20,3 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-
-from .IGlobal import IGlobal
-from .IInstance import IInstance
-
-
-def getEmbedding():
-    """
-    Return the Embedding class from the embedding module.
-
-    This function performs a lazy import of the Embedding class to avoid
-    import overhead or circular dependencies when this module is loaded.
-
-    Returns:
-        class: The Embedding class used for creating image embeddings.
-    """
-    from .embedding import Embedding
-
-    return Embedding
-
-
-# Explicitly define the public API of this module.
-# This helps tools and users know which names are intended for import.
-__all__ = [
-    'IInstance',  # Interface/class for instances handling document processing
-    'IGlobal',  # Interface/class for global-level operations and resources
-    'getEmbedding',  # Function to retrieve the Embedding class
-]

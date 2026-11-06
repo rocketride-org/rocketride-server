@@ -35,7 +35,7 @@ from depends import depends  # type: ignore
 depends(os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt')
 
 
-class Endpoint:
+class IEndpoint:
     """General connection to integration target 'Text Output'."""
 
     def beginEndpoint(self):
@@ -59,16 +59,16 @@ class Endpoint:
             IP_REGEX = r'^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$'
             HOSTNAME_REGEX = r'^(([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]*[a-zA-Z0-9])\.)*([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9\-]*[A-Za-z0-9])$'
             SERVER_REGEX = f'{IP_REGEX}|{HOSTNAME_REGEX}'
-            Endpoint.validate_param('Server Name', self.server, pattern=SERVER_REGEX)
+            IEndpoint.validate_param('Server Name', self.server, pattern=SERVER_REGEX)
 
-            Endpoint.validate_param(
-                'User Name', self.username, is_required=bool(self.password), validator=Endpoint.validate_smb_username
+            IEndpoint.validate_param(
+                'User Name', self.username, is_required=bool(self.password), validator=IEndpoint.validate_smb_username
             )
-            Endpoint.validate_param('Password', self.password, is_required=bool(self.username), max_length=127)
-            Endpoint.validate_param(
-                'Store Path', self.store_path, min_lenght=3, max_length=256, validator=Endpoint.validate_smb_path
+            IEndpoint.validate_param('Password', self.password, is_required=bool(self.username), max_length=127)
+            IEndpoint.validate_param(
+                'Store Path', self.store_path, min_lenght=3, max_length=256, validator=IEndpoint.validate_smb_path
             )
-            Endpoint.validate_param(
+            IEndpoint.validate_param(
                 'Anonymization Character', self.anonymize_char, is_required=self.anonymize, min_lenght=1, max_length=1
             )
 
@@ -78,7 +78,7 @@ class Endpoint:
         except ValueError as e:
             engLib.error(e)
         except Exception as e:
-            if Endpoint.is_smb_config_error(e):
+            if IEndpoint.is_smb_config_error(e):
                 engLib.error(e)
             else:
                 # Not bad config, so do not reject it. Validation also runs on
@@ -156,7 +156,7 @@ class Endpoint:
         if ntstatus is None:
             return False
 
-        expected = {getattr(NtStatus, name) for name in Endpoint._CONFIG_ERROR_STATUS_NAMES if hasattr(NtStatus, name)}
+        expected = {getattr(NtStatus, name) for name in IEndpoint._CONFIG_ERROR_STATUS_NAMES if hasattr(NtStatus, name)}
         return ntstatus in expected
 
     def connect(self):

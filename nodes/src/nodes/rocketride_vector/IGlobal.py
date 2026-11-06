@@ -69,18 +69,6 @@ class IGlobal(StoreGlobalBase):
 
         return Store(logical_type, conn_config, bag)
 
-    def _sub_key(self) -> str:
-        """Return the transform sub-key, scoped by tenant.
-
-        The resolved DSN points at the per-tenant database, so key on that
-        database: the store must not be shared across tenants even when the
-        pooler host/port are identical. (Identity rides the task file since
-        #1686; env identity is untrusted, and the tenant DB is the actual
-        isolation unit.)
-        """
-        tenant_scope = self.store.database or f'{self.store.host}:{self.store.port}'
-        return f'{tenant_scope}/{self.store.collection}'
-
     def _probe_connection(self, config: Dict[str, Any]) -> None:
         """
         Validate the RocketRide cloud vector store config with fast, read-only probes.

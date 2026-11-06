@@ -20,10 +20,3 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-
-# ------------------------------------------------------------------------------
-# Main module
-# ------------------------------------------------------------------------------
-
-from .IGlobal import IGlobal as IGlobal
-from .IInstance import IInstance as IInstance

@@ -20,16 +20,3 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OF OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-
-"""
-LangChain agent framework node for RocketRide Engine.
-
-Exposes:
-- IGlobal: dependency bootstrap
-- IInstance: framework adapter implementing IInstanceGenericAgent
-"""
-
-from .IGlobal import IGlobal as IGlobal
-from .IInstance import IInstance as IInstance
-
-__all__ = ['IGlobal', 'IInstance']

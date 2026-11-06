@@ -12,7 +12,6 @@ communication with their respective APIs.
 
 import time
 import json
-import importlib
 import contextvars
 from typing import Dict, Any, Callable, Optional
 from rocketlib import debug, warning
@@ -704,51 +703,3 @@ class ChatBase:
 
             # And return it
             return answer
-
-
-def getChat(provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]) -> ChatBase:
-    """
-    Create and initialize a chat driver for the specified provider.
-
-    This function uses dynamic module loading to instantiate the appropriate
-    chat driver based on the provider name. It follows a naming convention
-    where each provider has a module in the 'connectors' package with a
-    'Chat' class that extends ChatBase.
-
-    The factory pattern allows for easy extension of the system with new
-    providers without modifying existing code.
-
-    Args:
-        provider (str): The name of the AI provider (e.g., 'openai', 'anthropic')
-                       This corresponds to a module name in the connectors package
-        connConfig (Dict[str, Any]): Configuration dictionary specific to the provider
-        bag (Dict[str, Any]): Additional context/state information
-
-    Returns:
-        ChatBase: An instance of the appropriate chat driver subclass
-
-    Raises:
-        ImportError: If the provider module cannot be imported
-        Exception: If the provider module doesn't have a 'Chat' class
-
-    Example:
-        >>> chat = getChat('openai', {'api_key': 'sk-...', 'model': 'gpt-4'}, {})
-        >>> response = chat.chat_string('Hello, world!')
-    """
-    # Construct the module name following the naming convention
-    # All provider modules are expected to be in the 'connectors' package
-    name = 'connectors.' + provider
-
-    # Dynamically import the provider module
-    # This allows for runtime loading of different providers without
-    # having to import all possible providers at startup
-    module = importlib.import_module(name)
-
-    # Validate that the module has the expected 'Chat' class
-    # This ensures that the provider follows the required interface
-    if not hasattr(module, 'Chat'):
-        raise Exception(f'Module {provider} is not a chat provider')
-
-    # Instantiate and return the Chat class from the provider module
-    # The Chat class is expected to be a subclass of ChatBase
-    return getattr(module, 'Chat')(provider, connConfig, bag)

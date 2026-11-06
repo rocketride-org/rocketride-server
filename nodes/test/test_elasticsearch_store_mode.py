@@ -83,10 +83,7 @@ def _run_begin_elasticsearch(connConfig):
     stub = types.ModuleType('nodes.store_elasticsearch.elasticsearch_store')
     stub.Store = MagicMock(return_value=mock_store)
 
-    with (
-        patch.dict(sys.modules, {'nodes.store_elasticsearch.elasticsearch_store': stub}),
-        patch('nodes.store_elasticsearch.IGlobal.IGlobalTransform.beginGlobal', return_value=None),
-    ):
+    with patch.dict(sys.modules, {'nodes.store_elasticsearch.elasticsearch_store': stub}):
         glb._begin_elasticsearch(connConfig, {})
 
     return glb

@@ -34,8 +34,7 @@ import re
 from typing import Any, Dict
 
 from ai.common.config import Config, check_credential_resolved, warn_if_credential_unresolved
-from ai.common.transform import IGlobalTransform
-from rocketlib import OPEN_MODE, debug, warning
+from rocketlib import IGlobalBase, OPEN_MODE, debug, warning
 
 from .constants import (
     BACKEND_ELASTICSEARCH,
@@ -91,7 +90,7 @@ def _parse_mode_elasticsearch(mode_raw: Any) -> str:
     return MODE_VSTORE
 
 
-class IGlobal(IGlobalTransform):
+class IGlobal(IGlobalBase):
     """
     Global state for the index_search node.
 
@@ -123,7 +122,7 @@ class IGlobal(IGlobalTransform):
             return
         self._ensure_dependencies()
         bag = self.IEndpoint.endpoint.bag
-        connConfig = self.getConnConfig()
+        connConfig = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
         self.backend = _resolve_provider(connConfig, self.glb.logicalType)
         debug(f'Index search backend: {self.backend}')
 
@@ -147,9 +146,6 @@ class IGlobal(IGlobalTransform):
         self.search_enabled = bool(connConfig.get('search', False))
         if self.search_enabled or self.mode == MODE_INDEX:
             self._load_search_flags(connConfig)
-
-        subKey = f'{self.store.host}/{self.store.port}/{self.store.index}'
-        super().beginGlobal(subKey)
 
     def _begin_opensearch(self, connConfig: Dict[str, Any]) -> None:
         """Initialize OpenSearch client and load search options."""
@@ -191,14 +187,12 @@ class IGlobal(IGlobalTransform):
         if self.search_enabled:
             self._load_search_flags(connConfig)
 
-        subKey = f'{normalized_host}/{collection}'
         debug(f'OpenSearch beginGlobal host={normalized_host} collection={collection}')
-        super().beginGlobal(subKey)
 
     def validateConfig(self) -> None:
         """Validate node config at save-time (fast probe). Backend is auto-detected."""
         self._ensure_dependencies()
-        connConfig = self.getConnConfig()
+        connConfig = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
         provider = _resolve_provider(connConfig, self.glb.logicalType)
         if provider == BACKEND_ELASTICSEARCH:
             self._validate_elasticsearch()
@@ -252,7 +246,7 @@ class IGlobal(IGlobalTransform):
     def _validate_opensearch(self) -> None:
         """Validate OpenSearch config and optionally ping the host."""
         try:
-            connConfig = self.getConnConfig()
+            connConfig = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
             host = (connConfig.get('host') or '').strip()
             collection = (connConfig.get('collection') or '').strip()
             vector_dim = int(connConfig.get('dim') or 0)

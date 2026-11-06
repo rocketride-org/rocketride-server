@@ -31,7 +31,7 @@ def is_local(config: Dict[str, Any]) -> bool:
 
     The merged node config carries the profile selection in 'mode': getNodeConfig
     consumes the 'profile' key while merging the selected profile's contents, so
-    'profile' is absent when configured through a service/autopipe config. It stays
+    'profile' is absent when configured through a service config. It stays
     as a fallback for direct configurations. No profile at all means local.
     """
     return (config.get('mode') or config.get('profile') or 'local') == 'local'
