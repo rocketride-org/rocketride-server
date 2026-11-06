@@ -331,12 +331,21 @@ def test_legacy_fallback_recovers_matches_after_trash(indexed_store):
 
 
 def test_failed_iterative_query_releases_transaction_and_local_setting(indexed_store):
-    """A failed search leaves the shared connection usable and unpinned."""
+    """A failed search leaves the shared connection usable and unpinned.
+
+    Args:
+        indexed_store (tuple): store, raw connection, table, query vector and the
+            recorded searches, from the ``indexed_store`` fixture.
+    """
     import psycopg2
     from ai.common.schema import DocFilter, QuestionText
 
     store, _, _, query, _ = indexed_store
-    with pytest.raises(psycopg2.DataError, match='different vector dimensions'):
+    # pgvector reports a dimension mismatch from one of two checks, both SQLSTATE
+    # 22000: the distance check ("different vector dimensions 2 and 32") or the
+    # check against the column type vector(N) ("expected 32 dimensions, not 2").
+    # Which one fires depends on the pgvector version and the query path.
+    with pytest.raises(psycopg2.DataError, match=r'different vector dimensions|expected \d+ dimensions, not \d+'):
         store.searchSemantic(QuestionText(text='bad dimensions', embedding=[1.0, 0.0]), DocFilter(limit=5))
     assert store.client.autocommit is True
     assert store.client.get_transaction_status() == 0
