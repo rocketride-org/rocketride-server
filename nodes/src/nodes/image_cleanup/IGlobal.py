@@ -40,6 +40,13 @@ class IGlobal(IGlobalBase):
         requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
         depends(requirements)
 
+        try:
+            import pillow_heif
+
+            pillow_heif.register_heif_opener()
+        except ImportError:
+            pass
+
         from .process import process_image
 
         self.process = process_image

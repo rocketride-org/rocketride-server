@@ -127,7 +127,14 @@ class VisionLoader(BaseLoader):
         metadata: Optional[Dict] = None,
     ) -> Dict[str, Any]:
         """Prepare images for inference. inputs: list of image bytes or PIL Images."""
-        from PIL import Image
+        from PIL import Image, ImageOps
+
+        try:
+            import pillow_heif
+
+            pillow_heif.register_heif_opener()
+        except ImportError:
+            pass
 
         # Server passes ModelInstanceWrapper (model.model_obj = bundle); local uses bundle dict
         bundle = model if isinstance(model, dict) else getattr(model, 'model_obj', model)
@@ -137,9 +144,11 @@ class VisionLoader(BaseLoader):
         images = []
         for inp in inputs:
             if isinstance(inp, bytes):
-                img = Image.open(io.BytesIO(inp)).convert('RGB')
+                img = Image.open(io.BytesIO(inp))
+                img = (ImageOps.exif_transpose(img) or img).convert('RGB')
             elif hasattr(inp, 'convert'):
-                img = inp.convert('RGB') if inp.mode != 'RGB' else inp
+                img = ImageOps.exif_transpose(inp) or inp
+                img = img.convert('RGB') if img.mode != 'RGB' else img
             else:
                 raise TypeError(f'Expected bytes or PIL Image, got {type(inp)}')
             images.append(img)
