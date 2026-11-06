@@ -95,6 +95,7 @@ LOGGED_ERRORS: list[str] = []
 
 
 def _load_iinstance_class():
+    """Load the node's IInstance class from source with its imports stubbed, then restore sys.modules."""
     saved = {}
     stubs = {
         'rocketlib': types.ModuleType('rocketlib'),
@@ -185,6 +186,7 @@ def build():
     """
 
     def _build(instructions=None):
+        """Build one IInstance with these instructions, wired to a fake engine that records each lane."""
         IInstance = _load_iinstance_class()
 
         inst = IInstance()
