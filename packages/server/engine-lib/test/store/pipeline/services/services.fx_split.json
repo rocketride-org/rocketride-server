@@ -1,0 +1,22 @@
+{
+	"title": "Split",
+	"protocol": "fx_split://",
+	"classType": [
+		"text"
+	],
+	"capabilities": [],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.fx_split",
+	"prefix": "fx_split",
+	"description": [
+		"Test fixture: split."
+	],
+	"lanes": {
+		"tags": [
+			"documents"
+		]
+	},
+	"fields": {},
+	"shape": []
+}

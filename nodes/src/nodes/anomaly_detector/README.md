@@ -65,7 +65,8 @@ warm-up but does make the baseline slower to adapt.
 For documents, set **Metric field** to the metadata key containing the number;
 the default is `value`. A missing or non-numeric key does not stop the
 pipeline: the copied document is marked normal and receives an explanatory
-`anomaly_details` value. Text input first attempts to parse all of the text,
+`anomaly_details` value, and its decision is recorded as `unsupported` (see
+Decisions below). Text input first attempts to parse all of the text,
 then uses its first integer, decimal, or scientific-notation token; text with
 no number passes through unchanged.
 
@@ -87,6 +88,25 @@ For anomalous text, the node appends a suffix such as
 receive `anomaly_score`, `anomaly_severity`, `anomaly_is_anomalous`, and
 `anomaly_details` metadata. Non-finite numeric input is treated as normal and
 is not added to the history.
+
+### Decisions
+
+On the `documents` lane the node also records a decision for each document, so
+a Gate can route on the result without reading the `anomaly_*` metadata. Each
+decision answers three questions:
+
+| Question | Kind | Answer |
+| --- | --- | --- |
+| `is_anomalous` | yes/no | `yes` or `no` |
+| `severity` | rubric | `normal`, `warning` or `critical`, with its `index` (0 to 2) |
+| `score` | number | The anomaly score |
+
+A document the node could not score is recorded as `unsupported` with no
+answers: a document without metadata, or one whose metric field is missing, not
+a number, or not finite. A Gate blocks an `unsupported` item whatever its rule,
+so an unscored document never passes as a confident `no`. A document with a
+numeric metric that is still warming up (insufficient data or zero variance)
+was scored and is recorded as `normal`. The text lane records no decisions.
 
 ### Method edge cases
 

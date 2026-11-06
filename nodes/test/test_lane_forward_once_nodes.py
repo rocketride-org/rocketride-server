@@ -34,6 +34,7 @@ import sys
 import types
 
 import pytest
+import rocketlib.decisions as real_decisions
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _NODES_DIR = os.path.join(_HERE, '..', 'src', 'nodes')
@@ -184,6 +185,10 @@ class _FakeIInstanceBase:
     def preventDefault(self):
         """Raise, as the real implementation does."""
         raise _PreventDefaultRaised()
+
+    def recordDecision(self, questions, answers=None, **kwargs):
+        """Record through the real implementation; nothing engine-bound is involved."""
+        return real_decisions.record_decision(self, questions, answers, **kwargs)
 
 
 def _make_stubs():
@@ -338,18 +343,24 @@ def _build(pkg, iglobal, listeners=None):
 class _StubDetector:
     """Annotates text and scores documents the way AnomalyDetector does."""
 
+    metric = 'value'
+
     def evaluate_text(self, text):
         """Annotate the text so a duplicate delivery is distinguishable."""
         return f'{text} [ANOMALY: yes]'
 
     def evaluate_document(self, metadata_dict):
         """Return a fixed anomaly result."""
-        return {'score': 1.0, 'severity': 'high', 'is_anomalous': True, 'details': 'stub'}
+        return {'score': 1.0, 'severity': 'critical', 'is_anomalous': True, 'details': 'stub'}
 
 
 def _anomaly(detector, listeners=None):
-    """Build an anomaly_detector instance with the given detector."""
-    return _build('anomaly_detector', types.SimpleNamespace(detector=detector), listeners)
+    """Build an anomaly_detector instance with the given detector, on a fresh object."""
+    inst, fake = _build('anomaly_detector', types.SimpleNamespace(detector=detector), listeners)
+    # The node records decisions on the current object, so the fake needs one (and a component id).
+    fake.currentObject = types.SimpleNamespace(response={})
+    fake.pipeType = {'id': 'anomaly_detector_1'}
+    return inst, fake
 
 
 def test_anomaly_detector_text_delivered_once():
@@ -388,7 +399,7 @@ def test_anomaly_detector_documents_delivered_once():
 
     assert len(delivered) == 1, f'documents lane delivered {len(delivered)} docs for an input of 1'
     assert delivered[0] is not docs[0], 'the original document was delivered instead of the enriched copy'
-    assert delivered[0].metadata.anomaly_severity == 'high'
+    assert delivered[0].metadata.anomaly_severity == 'critical'
 
 
 def test_anomaly_detector_documents_delivered_once_without_detector():

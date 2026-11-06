@@ -62,6 +62,7 @@ const SPINE = [
 		label: 'Guides',
 		items: [
 			{ id: 'guides/error-handling', label: 'Error Handling' },
+			{ id: 'guides/decisions-and-gates', label: 'Decisions and Gates' },
 			{ id: 'guides/performance', label: 'Performance' },
 			{ id: 'guides/advanced-agents', label: 'Advanced Agents' },
 			{ id: 'guides/best-practices', label: 'Best Practices' },

@@ -511,6 +511,131 @@ Error IServiceEndpoint::buildConnections() noexcept {
         nodeLabels.push_back(label);
     }
 
+    // "*" wires: each stands for the typed lanes the nodes after its target
+    // ask for, out of what its source produces. Done here so the regions and
+    // bindFilters only ever see typed lanes
+    if (std::any_of(connections.begin(), connections.end(), [](const auto &conn) {
+            return std::get<2>(conn) == "*";
+        })) {
+        auto sourceProvider =
+            config.pipeline.source().lookup<Text>("provider", "");
+        std::string sourceLabel(config.pipeline.source().lookup<Text>("id", "source"));
+        if (auto sourceInfo = IServices::getServiceDefinition(sourceProvider)) {
+            const auto &def = (*sourceInfo)->serviceDefinition;
+            std::string title;
+            if (def.isMember("title")) title = std::string(def["title"].asString());
+            if (!title.empty()) sourceLabel = "\"" + title + "\" (" + sourceLabel + ")";
+        }
+
+        auto labelOf = localfcn(int index)->std::string {
+            return index == COMPONENT_SOURCE ? sourceLabel : nodeLabels[index];
+        };
+
+        // What each node on a "*" wire declares it produces; {"*": []} takes
+        // any lane and forwards nothing, so it is bound on what it is fed
+        std::map<int, std::set<std::string>> declared;
+        std::set<int> sinks;
+        auto declare = localfcn(int index)->Error {
+            if (declared.count(index)) return {};
+            Text provider = index == COMPONENT_SOURCE ? sourceProvider
+                                                      : pipeStack[index].logicalType;
+            auto service = IServices::getServiceDefinition(provider);
+            if (!service)
+                return APERR(Ec::InvalidParam, "Component", labelOf(index),
+                             "has no service definition, so its lanes cannot "
+                             "be resolved for a \"*\" connection");
+            // isMember, not operator[]: that would add a null "lanes" to the
+            // shared definition, served to every client
+            auto &lanes = declared[index];
+            const auto &def = (*service)->serviceDefinition;
+            if (!def.isMember("lanes") || !def["lanes"].isObject()) return {};
+            const auto &decl = def["lanes"];
+            for (const auto &key : decl.getMemberNames())
+                for (const auto &output : decl[key])
+                    if (output.isString() && output.asString() != "*")
+                        lanes.insert(output.asString());
+            if (decl.isMember("*") && decl["*"].isArray() && decl["*"].empty())
+                sinks.insert(index);
+            return {};
+        };
+
+        // asked: what the nodes after a node ask of it; produced: what a node
+        // can send on. Typed wires seed both
+        std::map<int, std::set<std::string>> asked, produced;
+        for (const auto &[from, to, lane] : connections) {
+            if (lane == "*") {
+                if (auto ccode = declare(from)) return ccode;
+                if (auto ccode = declare(to)) return ccode;
+                continue;
+            }
+            asked[from].insert(lane);
+            produced[to].insert(lane);
+        }
+        for (const auto &[node, lanes] : declared)
+            produced[node].insert(lanes.begin(), lanes.end());
+
+        // Across a "*" wire the target's asks reach the source, and the
+        // source's lanes reach the target; repeated until nothing changes, so
+        // a chain of "*" nodes settles whatever order it is wired in
+        for (bool changed = true; changed;) {
+            changed = false;
+            for (const auto &[from, to, lane] : connections) {
+                if (lane != "*") continue;
+                for (const auto &want : std::set<std::string>(asked[to]))
+                    changed |= asked[from].insert(want).second;
+                for (const auto &have : std::set<std::string>(produced[from]))
+                    if (asked[to].count(have))
+                        changed |= produced[to].insert(have).second;
+            }
+        }
+
+        // Rejected, naming the node at fault: a "*" node nothing is wired after,
+        // or asked for a lane nothing wired into it produces
+        for (const auto &[from, to, lane] : connections) {
+            if (lane != "*" || sinks.count(to)) continue;
+            if (asked[to].empty())
+                return APERR(Ec::InvalidParam, "Component", labelOf(to),
+                             "accepts any lane but nothing is wired after it, so "
+                             "there is no lane to bind: wire a consumer");
+            for (const auto &want : asked[to])
+                if (!produced[to].count(want))
+                    return APERR(Ec::InvalidParam, "Component", labelOf(to),
+                                 "is asked for", want, "by what follows it, but "
+                                 "nothing wired into it produces", want);
+        }
+
+        // Each "*" wire becomes one typed wire per lane, in MethodNames order
+        std::vector<std::tuple<int, int, std::string>> typed;
+        for (const auto &conn : connections) {
+            const auto &[from, to, lane] = conn;
+            if (lane != "*") {
+                if (std::find(typed.begin(), typed.end(), conn) == typed.end())
+                    typed.push_back(conn);
+                continue;
+            }
+            const auto &wanted = !sinks.count(to)      ? asked[to]
+                                 : declared[from].empty() ? produced[from]
+                                                          : declared[from];
+            std::string bound;
+            for (const char *name : Binder::MethodNames) {
+                std::string each = name;
+                if (!wanted.count(each) || !produced[from].count(each)) continue;
+                auto edge = std::make_tuple(from, to, each);
+                if (std::find(typed.begin(), typed.end(), edge) == typed.end())
+                    typed.push_back(edge);
+                bound += (bound.empty() ? "" : ", ") + each;
+            }
+            // Routing by rule is invisible when a lane does not arrive: log it
+            LOG(Services, "Any lane:", labelOf(to), "<-", labelOf(from), "on [",
+                bound, "]");
+            if (bound.empty())
+                return APERR(Ec::InvalidParam, "Component", labelOf(to),
+                             "takes any lane from", labelOf(from), "but",
+                             labelOf(from), "produces none of the lanes asked of it");
+        }
+        connections = _mv(typed);
+    }
+
     auto regions = computeLifecycleRegions(connections, invoked, nodeLabels);
     if (!regions) return regions.ccode();
     lifecycleOrder = _mv(regions->head);
@@ -1085,7 +1210,8 @@ Error IServiceEndpoint::buildPipeStack() noexcept {
     // Save the number of filters in the stack
     m_numberFilters = pipeStack.size();
 
-    // And done
-    return {};
+    // The stack is final: wire it, so a wiring error surfaces here, before
+    // any filter is instantiated
+    return buildConnections();
 }
 }  // namespace engine::store

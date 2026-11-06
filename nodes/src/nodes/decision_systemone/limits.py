@@ -1,0 +1,86 @@
+# =============================================================================
+# MIT License
+# Copyright (c) 2026 Aparavi Software AG
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+# =============================================================================
+"""Per-backend limits for System One decision models, and size estimates."""
+
+from __future__ import annotations
+
+import json
+import math
+from dataclasses import dataclass
+
+QUESTION_CHARS_PER_TOKEN = 4.0
+REQUEST_OVERHEAD_TOKENS = 260
+
+
+@dataclass(frozen=True)
+class DecisionLimits:
+    """Limits one backend enforces; they belong to the model, not the client."""
+
+    max_options: int
+    max_levels: int
+    max_questions: int
+    max_state_tokens: int
+    chars_per_token: float = 6.0
+    max_body_bytes: int | None = None
+    object_criteria: bool = True
+    # True for backends that silently truncate the state itself (Laya Studio, clm-serve): the limit then caps the state alone.
+    state_tokens_only: bool = False
+
+    @classmethod
+    def from_config(cls, config: dict) -> DecisionLimits:
+        """Build limits from the ``limits`` block of a merged node config."""
+        block = config.get('limits')
+        if not isinstance(block, dict):
+            raise ValueError('decision node config has no "limits" block')
+        return cls(
+            max_options=int(block['max_options']),
+            max_levels=int(block['max_levels']),
+            max_questions=int(block['max_questions']),
+            max_state_tokens=int(block['max_state_tokens']),
+            chars_per_token=float(block.get('chars_per_token', 6.0)),
+            max_body_bytes=int(block['max_body_bytes']) if block.get('max_body_bytes') else None,
+            object_criteria=bool(block.get('object_criteria', True)),
+            state_tokens_only=bool(block.get('state_tokens_only', False)),
+        )
+
+
+def estimate_tokens(text: str, chars_per_token: float) -> int:
+    """Estimate tokens for ``text``: ASCII at ``chars_per_token``, any other character as one token."""
+    if not text:
+        return 0
+    wide = sum(1 for ch in text if ord(ch) > 127)
+    return math.ceil((len(text) - wide) / chars_per_token) + wide
+
+
+def encode_json(value) -> bytes:
+    """Return ``value`` as the UTF-8 bytes that will be sent in a request body.
+
+    Uses compact encoding (no spaces, UTF-8 non-ASCII characters).
+    Lone surrogates, which UTF-8 cannot encode, are replaced with ``?``.
+    """
+    return json.dumps(value, ensure_ascii=False, separators=(',', ':')).encode('utf-8', errors='replace')
+
+
+def json_bytes(value) -> int:
+    """Return the number of bytes ``value`` occupies once JSON-encoded."""
+    return len(encode_json(value))

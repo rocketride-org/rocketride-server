@@ -53,6 +53,14 @@ only chooses which of them it accepts (see each node's entry in [Nodes](/nodes))
   `text` into `documents` (vector-ready chunks); a text embedding node enriches
   `documents` with vectors for a store (media embedding nodes turn `image`/
   `video` into `documents`); an LLM turns `questions` into `answers`.
+- **Any lane**: a node that acts on whatever flows through a wire (the `gate`)
+  is wired with `{ "lane": "*", "from": "..." }` and forwards each item on the
+  lane it arrived on. The engine binds it on the lanes the nodes after it ask
+  for, so the node before it behaves exactly as if those nodes were wired to it
+  directly. A `*` node with nothing after it, asked for a lane nothing before it
+  produces, or fed by a wire whose source produces none of those lanes, is a
+  pipeline error. A node that takes any lane and forwards nothing (`{"*": []}`)
+  is bound on everything its source produces.
 - **Fan-in**: a node can consume the same lane from several upstream nodes by
   listing multiple entries in `input`. A `response` node, for example, can merge
   `answers` from several agents.

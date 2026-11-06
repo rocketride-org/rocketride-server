@@ -316,6 +316,26 @@ TEST_CASE("PipelineConfig") {
                     "Component parse_1 input has unknown lane unknown_lane");
             }
 
+            // "*" is any lane: accepted here, resolved to typed lanes when
+            // the pipeline is built (buildConnections)
+            SECTION("lane:any") {
+                input["lane"] = "*";
+
+                REQUIRE_NO_ERROR(config.validate());
+            }
+
+            // Only the one character is the any lane
+            SECTION("lane:almost any") {
+                SECTION("doubled") { input["lane"] = "**"; }
+
+                SECTION("suffixed") { input["lane"] = "text*"; }
+
+                SECTION("padded") { input["lane"] = " *"; }
+
+                REQUIRE_ERROR(config.validate(), Ec::InvalidParam,
+                              "Component parse_1 input has unknown lane");
+            }
+
             SECTION("from") {
                 SECTION("missing") { input.removeMember("from"); }
 

@@ -70,10 +70,6 @@ Error IServiceEndpoint::beginEndpoint(OPEN_MODE _openMode) noexcept {
         // Build the global pipe
         if (ccode = buildGlobalPipe()) return ccode;
 
-        // We have now finalized all of our stack components, so we
-        // can build the connection list
-        if (ccode = buildConnections()) return ccode;
-
         // Build the breakpoint list
         if (ccode = buildBreakpoints()) return ccode;
     }
