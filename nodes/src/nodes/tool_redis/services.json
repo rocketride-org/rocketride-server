@@ -163,6 +163,9 @@
 		}
 	],
 	"test": {
+		"config": {
+			"port": 6381
+		},
 		"requires": [
 			"ROCKETRIDE_REDIS_HOST"
 		],

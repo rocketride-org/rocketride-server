@@ -19,7 +19,6 @@ jobs:
       REDIS_AUTH_TEST_URL: redis://:redis-node-test-only@localhost:6382
       REDIS_TLS_TEST_URL: rediss://:redis-node-test-only@localhost:6383
       ROCKETRIDE_REDIS_HOST: 127.0.0.1
-      ROCKETRIDE_REDIS_PORT: '6381'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:

@@ -12,7 +12,6 @@ export REDIS_AUTH_TEST_URL=redis://:redis-node-test-only@localhost:6382
 export REDIS_TLS_TEST_URL=rediss://:redis-node-test-only@localhost:6383
 export REDIS_TLS_CA_FILE="$PWD/nodes/test/tool_redis/.certs/server.crt"
 export ROCKETRIDE_REDIS_HOST=127.0.0.1
-export ROCKETRIDE_REDIS_PORT=6381
 # Start in a separate terminal: cd dist/server && ./engine ./ai/eaas.py --host=127.0.0.1
 cd nodes
 ../dist/server/engine -m pytest test/tool_redis test/memory_persistent test/test_contracts.py -q --rootdir .
@@ -27,6 +26,9 @@ nodes/test/tool_redis/compose.yaml down -v` from the repository root.
 The live engine test reads the `tool`, `arguments` and `expect_tool` metadata in
 `services.json` and dispatches each case through `client.tool`. The standard
 lane runner smoke-tests configuration only; it does not exercise tool methods.
+Its test configuration explicitly selects port 6381, matching the disposable
+plain fixture. Only variables listed in `test.requires` are injected by the
+generic runner; setting `ROCKETRIDE_REDIS_PORT` alone does not override a port.
 The proposed `.github/workflows/redis-node.yml` runs both without a model key.
 Adding these Valkey services to CI requires reviewer approval. CI evidence is
 only available after that workflow actually runs in GitHub.

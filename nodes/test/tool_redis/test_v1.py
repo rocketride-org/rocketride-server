@@ -3,6 +3,7 @@
 """Approved v1 contract regressions using the shared fake, not a redis import shadow."""
 
 import importlib
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -234,3 +235,18 @@ def test_real_pool_retry_configuration():
     finally:
         client.close()
         pool.disconnect()
+
+
+def test_catalog_pipeline_uses_disposable_fixture_port(monkeypatch):
+    """The generic runner must reach the fixture, not the default port 6379."""
+    from test.framework.discovery import get_node_test_config
+    from test.framework.pipeline import PipelineBuilder
+
+    monkeypatch.setenv('ROCKETRIDE_REDIS_HOST', '127.0.0.1')
+    nodes_dir = Path(__file__).parents[2] / 'src' / 'nodes'
+    config = get_node_test_config('tool_redis', str(nodes_dir))
+    assert config is not None
+    pipeline = PipelineBuilder(config, 'default').build()
+    redis_node = next(node for node in pipeline['components'] if node['provider'] == 'tool_redis')
+    assert redis_node['config']['port'] == 6381
+    assert redis_node['config']['default']['host'] == '127.0.0.1'

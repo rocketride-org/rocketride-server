@@ -74,6 +74,14 @@ Grant PING for startup; GETRANGE, TTL, MULTI and EXEC for GET; SCAN for discover
 
 ### Development and CI
 
+Disable writes when checking an unverified agent/model. Zero client retries
+does not prevent an agent from selecting the same tool more than once: each
+successful `redis_incr` call increments again. A local `qwen2.5:3b` walkthrough
+reported four separate increments for one request and repeated reads until the
+reasoning limit. This remains an agent/model integration issue, not an
+exactly-once guarantee from this node. Use direct SDK calls for a controlled
+write demonstration and review the agent behavior before enabling its writes.
+
 The supplied `example.pipe` is a read-only Tools-source example with `mode: Source` for the Development panel. Enable writes explicitly for local exercises, or attach the node to an agent and provide an LLM. SDK engine tests call all seven tools without a model; agent-driven testing requires your own model credentials.
 
 Unit tests extend `nodes/test/mocks/redis_fake`; there is no mock package named redis. Live tests skip unless `REDIS_TEST_URL` is set. Use disposable Valkey 8.1.11 and unique namespaced test keys. Tests remove only their own keys. Authentication/TLS tests additionally require REDIS_AUTH_TEST_URL, REDIS_TLS_TEST_URL and REDIS_TLS_CA_FILE. See `nodes/test/tool_redis/README.md` for commands and the proposed CI job.
