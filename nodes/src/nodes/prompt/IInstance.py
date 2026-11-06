@@ -72,6 +72,12 @@ class IInstance(IInstanceBase):
         """
         for q in question.questions:
             self.question.addQuestion(q.text)
+        # Chat clients send the conversation so far as the question's history, and
+        # the raw question no longer goes downstream, so the merged one keeps it.
+        # A turn has one conversation, so only the first history is kept.
+        if not self.question.history:
+            for item in question.history or []:
+                self.question.addHistory(item)
         return self.preventDefault()
 
     def writeDocuments(self, documents):

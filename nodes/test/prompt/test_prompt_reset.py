@@ -48,8 +48,8 @@ _NODE_DIR = os.path.join(_HERE, '..', '..', 'src', 'nodes', 'prompt')
 
 # ---------------------------------------------------------------------------
 # Fake schema collaborator. Shape matches ai.common.schema.Question as the node
-# uses it: addQuestion/addContext/addDocuments/addInstruction/getPrompt, over the
-# list fields the real model declares (question.py:306).
+# uses it: addQuestion/addContext/addDocuments/addHistory/addInstruction/getPrompt,
+# over the list fields the real model declares (question.py:306).
 # ---------------------------------------------------------------------------
 
 
@@ -59,6 +59,10 @@ class FakeQuestion:
         self.questions = []
         self.documents = []
         self.instructions = []
+        self.history = []
+
+    def addHistory(self, item):
+        self.history.append(item)
 
     def addInstruction(self, title, instruction):
         self.instructions.append((title, instruction))
@@ -479,3 +483,26 @@ def test_a_mixed_turn_emits_one_question_holding_everything(build):
     assert [q.text for q in merged.questions] == ['first question', 'second question', 'third question']
     assert merged.context == ['some context', '| a | table |']
     assert merged.documents == [['a document']]
+
+
+def test_the_merged_question_keeps_the_conversation_history(build):
+    """
+    Chat clients send the last turns as the question's history. The raw question
+    no longer goes downstream, so the merged one carries that history, once, even
+    when several questions arrive in one turn with the same history.
+    """
+    inst, captured = build()
+    history = [
+        types.SimpleNamespace(role='user', content='Good morning. What time does the library open?'),
+        types.SimpleNamespace(role='assistant', content='It opens at nine.'),
+    ]
+
+    inst.open(None)
+    for text in ('And on Sundays?', 'Is it open late on Fridays?'):
+        question = _question(text)
+        question.history = list(history)
+        _write(inst, 'questions', question)
+    inst.closing()
+
+    assert len(captured.questions) == 1
+    assert captured.questions[0].history == history
