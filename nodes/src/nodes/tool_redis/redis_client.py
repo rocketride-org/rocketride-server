@@ -91,7 +91,7 @@ class Settings:
                 ):
                     raise ValueError()
                 cfg['host'] = parsed.hostname
-                cfg['port'] = parsed.port or cfg.get('port', 6379)
+                cfg['port'] = parsed.port if parsed.port is not None else cfg.get('port', 6379)
                 cfg['use_tls'] = True
             except ValueError:
                 raise RedisNodeError(

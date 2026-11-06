@@ -218,6 +218,8 @@ def test_tls_url_and_prefix_rules():
         'rediss://u:secret@redis.example',
         'rediss://redis.example/0',
         'rediss://redis.example?x=1',
+        'rediss://redis.example:0',
+        'rediss://redis.example:65536',
         'redis://redis.example',
     ]:
         with pytest.raises(RedisNodeError):
@@ -225,6 +227,97 @@ def test_tls_url_and_prefix_rules():
     for prefix in ['bad.dot:', 'bad*', '', 'x' * 129]:
         with pytest.raises(RedisNodeError):
             Settings.from_config({'key_prefix': prefix})
+
+
+def test_hosted_tls_checks_peer_before_handshake(monkeypatch):
+    import redis
+
+    monkeypatch.setattr('socket.getaddrinfo', lambda *_a, **_k: [(0, 0, 0, '', ('8.8.8.8', 6379))])
+    sock = MagicMock()
+    sock.getpeername.return_value = ('127.0.0.1', 6379)
+    monkeypatch.setattr(redis.Connection, '_connect', lambda _self: sock)
+    wrap = MagicMock(return_value=sock)
+    monkeypatch.setattr(redis.SSLConnection, '_wrap_socket_with_ssl', wrap)
+    connection = public_connection(redis.SSLConnection)(host='redis.example')
+    with pytest.raises(RedisNodeError, match='non-public'):
+        connection._connect()
+    wrap.assert_not_called()
+    sock.close.assert_called_once()
+
+
+def test_hosted_tls_pins_ip_and_keeps_hostname_for_certificate(monkeypatch):
+    import redis
+
+    monkeypatch.setattr('socket.getaddrinfo', lambda *_a, **_k: [(0, 0, 0, '', ('8.8.8.8', 6379))])
+    sock, wrapped = MagicMock(), MagicMock()
+    sock.getpeername.return_value = ('8.8.8.8', 6379)
+    calls = []
+
+    def connect(connection):
+        calls.append(('tcp', connection.host))
+        return sock
+
+    def wrap(connection, raw):
+        calls.append(('tls', connection.host))
+        assert raw is sock
+        return wrapped
+
+    monkeypatch.setattr(redis.Connection, '_connect', connect)
+    monkeypatch.setattr(redis.SSLConnection, '_wrap_socket_with_ssl', wrap)
+    connection = public_connection(redis.SSLConnection)(host='redis.example')
+    assert connection._connect() is wrapped
+    assert calls == [('tcp', '8.8.8.8'), ('tls', 'redis.example')]
+    assert connection.host == 'redis.example'
+
+
+def test_hosted_connection_failure_restores_hostname(monkeypatch):
+    import redis
+
+    monkeypatch.setattr('socket.getaddrinfo', lambda *_a, **_k: [(0, 0, 0, '', ('8.8.8.8', 6379))])
+    monkeypatch.setattr(redis.Connection, '_connect', MagicMock(side_effect=OSError('unreachable')))
+    connection = public_connection(redis.Connection)(host='redis.example')
+    with pytest.raises(OSError):
+        connection._connect()
+    assert connection.host == 'redis.example'
+
+
+def test_hosted_connection_tries_only_validated_addresses(monkeypatch):
+    import redis
+
+    monkeypatch.setattr(
+        'socket.getaddrinfo',
+        lambda *_a, **_k: [(0, 0, 0, '', ('8.8.8.8', 6379)), (0, 0, 0, '', ('1.1.1.1', 6379))],
+    )
+    sock = MagicMock()
+    sock.getpeername.return_value = ('1.1.1.1', 6379)
+    attempts = []
+
+    def connect(connection):
+        attempts.append(connection.host)
+        if len(attempts) == 1:
+            raise OSError('first address unreachable')
+        return sock
+
+    monkeypatch.setattr(redis.Connection, '_connect', connect)
+    connection = public_connection(redis.Connection)(host='redis.example')
+    assert connection._connect() is sock
+    assert attempts == ['8.8.8.8', '1.1.1.1']
+    assert connection.host == 'redis.example'
+
+
+def test_hosted_tls_failure_closes_raw_socket(monkeypatch):
+    import redis
+
+    monkeypatch.setattr('socket.getaddrinfo', lambda *_a, **_k: [(0, 0, 0, '', ('8.8.8.8', 6379))])
+    sock = MagicMock()
+    sock.getpeername.return_value = ('8.8.8.8', 6379)
+    monkeypatch.setattr(redis.Connection, '_connect', lambda _self: sock)
+    monkeypatch.setattr(redis.SSLConnection, '_wrap_socket_with_ssl', MagicMock(side_effect=OSError('bad certificate')))
+    connection = public_connection(redis.SSLConnection)(host='redis.example')
+    with pytest.raises(OSError, match='bad certificate'):
+        connection._connect()
+    sock.close.assert_called_once()
+    assert connection.host == 'redis.example'
 
 
 def test_real_pool_retry_configuration():

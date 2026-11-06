@@ -3,6 +3,8 @@
 
 """Agent-facing Redis string tools, using RocketRide's standard dispatcher."""
 
+import json
+
 from ai.common.utils import normalize_tool_input
 from rocketlib import IInstanceBase, tool_function
 
@@ -37,8 +39,22 @@ class IInstance(IInstanceBase):
     IGlobal: IGlobal
 
     def _run(self, operation, raw, allowed, required):
-        args = normalize_tool_input(raw, tool_name=f'redis_{operation}')
         try:
+            # The shared normalizer deliberately returns {} on invalid input.
+            # Validate the object first so SCAN cannot mistake that for a
+            # legitimate request using its default cursor and count.
+            if not isinstance(raw, dict):
+                try:
+                    if isinstance(raw, str):
+                        raw = json.loads(raw)
+                    else:
+                        convert = getattr(raw, 'model_dump', None) or getattr(raw, 'dict', None)
+                        raw = convert() if callable(convert) else None
+                except Exception:
+                    raise RedisNodeError('invalid_input', 'Tool arguments must be an object.') from None
+            if not isinstance(raw, dict):
+                raise RedisNodeError('invalid_input', 'Tool arguments must be an object.')
+            args = normalize_tool_input(raw, tool_name=f'redis_{operation}')
             if (
                 set(args) - set(allowed)
                 or any(name not in args for name in required)
@@ -138,7 +154,7 @@ class IInstance(IInstanceBase):
             ['key'],
         ),
         output_schema=_output({'key': {'type': 'string'}, 'value_decimal': {'type': 'string'}}),
-        description='Atomically increment a namespaced integer using INCRBY. Missing starts at zero; existing expiry is preserved, new keys are persistent. Returns the exact signed 64-bit value as a decimal string. Requires allow_writes. Never retry an unknown outcome blindly.',
+        description='Atomically increment a namespaced integer using INCRBY. Each successful call increments again: call once per requested increment and use redis_get to inspect, not another increment. Missing starts at zero; existing expiry is preserved, new keys are persistent. Returns the exact signed 64-bit value as a decimal string. Requires allow_writes. Never retry an unknown outcome blindly.',
     )
     def redis_incr(self, args):
         return self._run('incr', args, ['key', 'amount'], ['key'])

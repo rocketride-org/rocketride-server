@@ -12,7 +12,7 @@ This tool-only node attaches to an agent through its Tool control connection, or
 
 ## As a tool
 
-Bare tool IDs below are used with `client.tool(token=token, tool=..., node_id='redis_1', input={...})`. Every input object rejects unknown fields and nulls. `key` means a nonempty logical UTF-8 key; the namespace is always prepended, and the complete key must fit in 256 UTF-8 bytes. Values are strings only. All serialized tool results are capped at 128 KiB using ASCII-escaped JSON size.
+Bare tool IDs below are used with `client.tool(token=token, tool=..., node_id='redis_1', input={...})`. Arguments must be an object, including an empty object for a default SCAN. JSON-encoded objects and model argument objects are normalized through the shared helper; malformed JSON, arrays, scalars and null are rejected. Every input object rejects unknown fields and null values. `key` means a nonempty logical UTF-8 key; the namespace is always prepended, and the complete key must fit in 256 UTF-8 bytes. Values are strings only. All serialized tool results are capped at 128 KiB using ASCII-escaped JSON size.
 
 | Tool | Inputs | Success result | Redis command / access |
 |---|---|---|---|
@@ -40,7 +40,7 @@ Targets standalone Redis 7.0+ or Valkey 7.2+. Cluster, Sentinel, custom CA/mTLS 
 
 ### Host
 
-Use a hostname/IP plus Port, or `rediss://host:port` to enable TLS. URL credentials, paths, query strings and fragments are rejected; configure username/password/database in their own fields. Local engines can use localhost or private networks. On hosted/shared engines, TLS is required and every DNS result must be public. DNS is checked initially and for every new connection; its connected peer is checked before Redis authentication. The original hostname remains available for TLS verification. No user-configurable switch bypasses hosted checks. Network egress controls remain recommended.
+Use a hostname/IP plus Port (1–65535), or `rediss://host:port` to enable TLS. URL credentials, paths, query strings and fragments are rejected; configure username/password/database in their own fields. Local engines can use localhost or private networks. On hosted/shared engines, TLS is required and every DNS result must be public. DNS is checked initially and for every new connection. Connections use the validated numeric addresses, and the connected peer is checked before the TLS handshake or Redis authentication. The original hostname is restored for TLS certificate and hostname verification. No user-configurable switch bypasses hosted checks. Network egress controls remain recommended.
 
 ### Key prefix
 

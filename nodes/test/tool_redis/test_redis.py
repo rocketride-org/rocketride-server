@@ -241,6 +241,43 @@ def test_malformed_tool_args(tool, client, args):
     assert client.mock_calls == []
 
 
+@pytest.mark.parametrize('args', [None, [], 3, True, 'malformed', 'null', '[]', '3', 'true'])
+def test_scan_rejects_non_object_arguments(tool, client, args):
+    result = tool.redis_scan(args)
+    assert result['error_code'] == 'invalid_input'
+    assert result['outcome'] == 'not_applied'
+    assert client.mock_calls == []
+
+
+@pytest.mark.parametrize('args', [{}, '{}', {'input': {}}, '{"input": {}}'])
+def test_scan_accepts_empty_argument_objects(tool, client, args):
+    client.scan.return_value = (0, [])
+    assert tool.redis_scan(args) == {'success': True, 'cursor': '0', 'keys': [], 'done': True}
+    client.scan.assert_called_once_with(cursor=0, match='rr:test:*', count=100)
+
+
+def test_scan_accepts_pydantic_arguments(tool, client):
+    from pydantic import BaseModel
+
+    class ScanInput(BaseModel):
+        count: int = 1
+
+    client.scan.return_value = (0, [])
+    assert tool.redis_scan(ScanInput())['success']
+    client.scan.assert_called_once_with(cursor=0, match='rr:test:*', count=1)
+
+
+def test_scan_rejects_failed_model_conversion(tool, client):
+    class InvalidInput:
+        def model_dump(self):
+            raise ValueError('credential:secret')
+
+    result = tool.redis_scan(InvalidInput())
+    assert result['error_code'] == 'invalid_input'
+    assert 'secret' not in str(result)
+    assert client.mock_calls == []
+
+
 def make_global():
     node = IGlobal.__new__(IGlobal)
     node.IEndpoint = SimpleNamespace(endpoint=SimpleNamespace(openMode=None))

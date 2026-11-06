@@ -1,0 +1,30 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.13, pytest-9.1.1, pluggy-1.7.0
+hardware: mps Apple Silicon, 16.0 GB RAM [probe]; strict off
+rootdir: <repository>/nodes
+configfile: ../pyproject.toml
+plugins: timeout-2.4.0, anyio-4.16.0, asyncio-1.4.1.post1
+timeout: 600.0s
+timeout method: signal
+timeout func_only: False
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 681 items
+
+test/tool_redis/test_live.py ..........                                  [  1%]
+test/tool_redis/test_redis.py .......................................... [  7%]
+........................................................................ [ 18%]
+.........                                                                [ 19%]
+test/tool_redis/test_v1.py ............................................. [ 26%]
+.....                                                                    [ 26%]
+test/memory_persistent/test_memory_store.py .............                [ 28%]
+test/memory_persistent/test_node.py .................................... [ 34%]
+.....................................................                    [ 41%]
+test/test_contracts.py ................................................. [ 49%]
+........................................................................ [ 59%]
+........................................................................ [ 70%]
+........................................................................ [ 80%]
+........................................................................ [ 91%]
+...........................................................              [100%]
+
+- generated xml file: <verification-runtime>/review-final.xml -
+============================= 681 passed in 14.52s =============================

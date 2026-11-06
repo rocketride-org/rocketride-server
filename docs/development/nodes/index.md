@@ -1,7 +1,5 @@
 # Pipeline Nodes
 
-- [Redis / Valkey tool](/nodes/tool_redis): seven namespaced key/value utilities for agents and SDK callers.
-
 A node is the unit you build pipelines from. Each one does a single job (parse a
 document, call an LLM, store embeddings, transcribe audio) and you chain them
 together through their service definitions.

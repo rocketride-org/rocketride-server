@@ -282,3 +282,30 @@ def test_real_acl_denies_mutation(live):
         if pool is not None:
             pool.disconnect()
         direct.acl_deluser(name)
+
+
+def test_real_hosted_tls_transport_preserves_certificate_hostname(monkeypatch):
+    """Exercise the guarded TLS transport, with loopback permitted only by this test."""
+    from nodes.tool_redis import host_policy
+    import importlib
+
+    module = importlib.import_module('nodes.tool_redis.IGlobal')
+    url, ca = os.environ.get('REDIS_TLS_TEST_URL'), os.environ.get('REDIS_TLS_CA_FILE')
+    if not url or not ca:
+        pytest.skip('Set REDIS_TLS_TEST_URL and REDIS_TLS_CA_FILE')
+    parts = urlsplit(url)
+    # The other tests enforce public-only DNS/peers. This test isolates real
+    # TLS/SNI behavior using the disposable localhost certificate and server.
+    monkeypatch.setattr(host_policy, 'public_ip', lambda address: address in ('127.0.0.1', '::1'))
+    monkeypatch.setattr(module, 'is_hosted', lambda: True)
+    monkeypatch.setenv('SSL_CERT_FILE', ca)
+    client, pool = module.create_client(
+        Settings(host=parts.hostname, port=parts.port, password=unquote(parts.password or ''), use_tls=True)
+    )
+    try:
+        assert client.ping()
+        assert pool.connection_kwargs['host'] == parts.hostname
+        assert pool.connection_kwargs['retry'].get_retries() == 0
+    finally:
+        client.close()
+        pool.disconnect()
