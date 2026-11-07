@@ -63,14 +63,15 @@ _pygit2_stub.Signature = MagicMock()
 # With these in place, `import rocketlib` works and we get the real
 # tool_function / normalize_tool_input / require_int / require_bool.
 sys.modules['engLib'] = MagicMock()
-# A real module, not a MagicMock: this stub stays in sys.modules for the
-# rest of the session, and other suites monkeypatch its attributes (e.g.
-# media_inspect patches load_depends). Since pytest 9.2, undoing a patch of a
-# MagicMock's lazily created attribute deletes it for every later test.
+# A real module, not a MagicMock: suites that run after this one monkeypatch its
+# attributes (media_inspect patches load_depends), and since pytest 9.2 undoing a
+# patch of a MagicMock's lazily created attribute deletes it for every later test.
+# Installed only for the imports below: leaving the no-op in sys.modules makes a
+# later node test that installs its packages through load_depends() skip the
+# install (test_embedding_image then fails with "No module named 'torch'").
 _depends_stub = ModuleType('depends')
 _depends_stub.depends = lambda *args, **kwargs: None
 _depends_stub.load_depends = lambda *args, **kwargs: None
-sys.modules['depends'] = _depends_stub
 
 _ai_config_stub = MagicMock()
 _ai_common_stub = MagicMock()
@@ -103,6 +104,7 @@ with patch.dict(
         'ai.common': _ai_common_stub,
         'ai.common.config': _ai_config_stub,
         'ai.common.utils': _ai_utils_stub,
+        'depends': _depends_stub,
     },
 ):
     _src = Path(__file__).resolve().parents[2] / 'src' / 'nodes' / 'tool_git'
