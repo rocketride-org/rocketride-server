@@ -20,7 +20,9 @@ The node automatically prepends a cross-region inference prefix to the model ID 
 the configured AWS region: `eu.` for `eu*` regions, `apac.` for `ap*` regions, and `us.`
 otherwise (for example, `meta.llama3-3-70b-instruct-v1:0` becomes
 `us.meta.llama3-3-70b-instruct-v1:0` in `us-east-1`). Model IDs that are ARNs or already
-carry a `us.` / `eu.` / `apac.` prefix are left untouched.
+carry a geographic prefix (`us.`, `eu.`, `apac.`, `au.`, `jp.`, `us-gov.`, `global.`,
+`amer.` or `sa.`) are left untouched. The save-time check and the pipeline compute the
+model ID the same way, so they always call the same model.
 
 When you save the node configuration, it is validated with a minimal live API call
 (`"Hi"`) against the selected model, so credential, model, and region problems surface
@@ -84,7 +86,15 @@ provider-prefixed model ID (for example,
 `anthropic.claude-3-7-sonnet-20250219-v1:0`) or an ARN for a custom or
 provisioned model, plus the model's total token limit and its output limit (4,096
 by default; raise it for models that reason before answering). Bare model names without a
-provider prefix produce a save-time warning. See the
+provider prefix produce a save-time warning.
+
+Bedrock formats each request for the model's vendor (`anthropic`, `meta`, `amazon`,
+`cohere`, `mistral`, `ai21`, ...). The vendor is read from a plain or prefixed model ID,
+and from an ARN that names its model: a foundation model, a system inference profile
+(`.../inference-profile/us.anthropic.claude-...`) or a custom model. The ARN of a
+provisioned model, an imported model or an application inference profile does not name
+it, so set **Provider** for those; without it the node warns at save time and refuses to
+start. A Provider you set is always used, whatever the model ID. See the
 [Bedrock model IDs reference](https://docs.aws.amazon.com/bedrock/latest/userguide/model-ids.html)
 for available identifiers.
 
