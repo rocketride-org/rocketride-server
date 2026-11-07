@@ -41,7 +41,9 @@ from sqlalchemy.sql.elements import TextClause
 # place (re.Pattern.match accepts a start offset) so a bulk INSERT with many
 # placeholders doesn't copy the rest of the statement at every '$'.
 _PLACEHOLDER_RE = re.compile(r'\$(\d+)')
-_DOLLAR_TAG_RE = re.compile(r'\$([A-Za-z_][\w]*)?\$')
+# A dollar-quote tag follows unquoted-identifier rules: no `$`, and PostgreSQL
+# accepts any non-ASCII character, not just ASCII letters.
+_DOLLAR_TAG_RE = re.compile(r'\$([A-Za-z_\u0080-\U0010FFFF][A-Za-z0-9_\u0080-\U0010FFFF]*)?\$')
 
 _SAVEPOINT_STMT = re.compile(
     # Postgres accepts RELEASE and ROLLBACK TO without the SAVEPOINT keyword;
@@ -51,6 +53,20 @@ _SAVEPOINT_STMT = re.compile(
     r'\s+(?P<name>[A-Za-z_][\w]*)\s*;?\s*$',
     re.IGNORECASE,
 )
+
+
+def _is_ident_start(ch: str) -> bool:
+    """True when PostgreSQL starts an unquoted identifier with ``ch``.
+
+    Any non-ASCII character counts, so identifiers such as ``col$1`` or ``café``
+    stay one token and their ``$`` never starts a placeholder.
+    """
+    return ch.isalpha() or ch == '_' or ord(ch) > 127
+
+
+def _is_ident_continue(ch: str) -> bool:
+    """True when ``ch`` may continue an unquoted identifier (``$`` included)."""
+    return ch.isalnum() or ch in '_$' or ord(ch) > 127
 
 
 def _rewrite_placeholders(sql: str, params: list, binds: dict) -> str:
@@ -103,6 +119,12 @@ def _rewrite_placeholders(sql: str, params: list, binds: dict) -> str:
                     j += 2
                 else:
                     j += 1
+            out.append(sql[i:j])
+            i = j
+        elif _is_ident_start(ch):  # unquoted identifier: `col$1`, `a$$x$`, `café`
+            j = i + 1
+            while j < n and _is_ident_continue(sql[j]):
+                j += 1
             out.append(sql[i:j])
             i = j
         elif ch == '$':
