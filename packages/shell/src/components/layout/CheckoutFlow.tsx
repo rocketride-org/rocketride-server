@@ -59,6 +59,7 @@ export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, orgId }) 
 		plan?: CheckoutPlan;
 		promo?: PromoValidation | null;
 	} | null>(null);
+	const activeCheckout = useRef<typeof checkout>(null);
 	const checkoutSequence = useRef(0);
 	/** Pending timer that clears the post-purchase welcome status message. */
 	const statusClearTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -72,12 +73,21 @@ export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, orgId }) 
 	// Bind the checkout to the organization that opened it. A preselected
 	// plan from the previous organization must never auto-start after a switch.
 	useEffect(() => {
-		setCheckout((current) => current?.orgId === orgId ? current : null);
+		if (activeCheckout.current && activeCheckout.current.orgId !== orgId) {
+			activeCheckout.current = null;
+			setCheckout(null);
+		}
 		return ConnectionManager.getInstance().on(
 			'shell:subscribe',
 			({ app, plan, promo }: { app: unknown; plan?: CheckoutPlan; promo?: PromoValidation | null }) => {
 				if (!orgId) return;
-				setCheckout({ id: ++checkoutSequence.current, orgId, app: app as AppManifestEntry, plan, promo });
+				const entry = app as AppManifestEntry;
+				const current = activeCheckout.current;
+				if (current?.orgId === orgId && current.app.id === entry.id &&
+					current.plan?.stripePriceId === plan?.stripePriceId && current.promo?.code === promo?.code) return;
+				const next = { id: ++checkoutSequence.current, orgId, app: entry, plan, promo };
+				activeCheckout.current = next;
+				setCheckout(next);
 			},
 		);
 	}, [orgId]);
@@ -139,8 +149,8 @@ export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, orgId }) 
 			}}
 			onSuccess={() => {
 				const currentOrg = cm.getAccountInfo()?.organization?.id;
-				if (checkoutSequence.current !== checkout.id || (currentOrg && currentOrg !== checkout.orgId)) return;
-				checkoutSequence.current += 1;
+				if (activeCheckout.current !== checkout || (currentOrg && currentOrg !== checkout.orgId)) return;
+				activeCheckout.current = null;
 				// New purchase complete: drop the user into the app they just bought
 				// and confirm briefly, rather than leaving them on the pricing grid.
 				// (Upgrades keep their own inline confirmation in UpgradeModal.)
@@ -155,8 +165,8 @@ export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, orgId }) 
 				statusClearTimer.current = setTimeout(() => cm.emit('shell:statusMessage', { message: null }), 5000);
 			}}
 			onClose={() => {
-				if (checkoutSequence.current !== checkout.id) return;
-				checkoutSequence.current += 1;
+				if (activeCheckout.current !== checkout) return;
+				activeCheckout.current = null;
 				setCheckout((current) => current === checkout ? null : current);
 			}}
 		/>
