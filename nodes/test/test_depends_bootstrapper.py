@@ -13,6 +13,10 @@ import sys
 
 
 def test_the_live_dep_bootstrapper_is_the_real_module():
+    # Import the module that installs the stub, so this test exercises the leak on its
+    # own: run alone, pytest would never collect it and the check could pass regardless.
+    import tool_git.test_tools  # noqa: F401
+
     module = sys.modules.get('depends')
     assert module is not None, 'depends is not importable in this engine runtime'
     assert getattr(module, '__file__', None), 'a test module left a no-op stub in sys.modules["depends"]'
