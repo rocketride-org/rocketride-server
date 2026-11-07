@@ -63,9 +63,11 @@ if TYPE_CHECKING:
 
 # Shown when a development run (launch or execute) comes from an account with
 # no development team: the run would have no team to bill to. Says where the
-# team is chosen: Account > Profile in the sidebar of the IDE and of the cloud
-# shell. SDK alternatives are documented in the troubleshooting error table.
-_NO_DEV_TEAM_MESSAGE = 'No development team selected. Open Account > Profile and choose "Set as development team".'
+# team is chosen in a way that fits both layouts: the IDE's Settings > Account >
+# Profile page has a "Your development team" dropdown, the cloud shell's Account >
+# Profile page has a "Set as development team" button on each team. The exact
+# paths and the SDK alternative are in the troubleshooting error table.
+_NO_DEV_TEAM_MESSAGE = 'No development team selected. Open Account > Profile and choose your development team.'
 
 
 class TaskCommands(DAPConn):

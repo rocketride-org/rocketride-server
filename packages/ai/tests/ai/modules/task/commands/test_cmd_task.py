@@ -134,7 +134,7 @@ async def test_on_execute_starts_task_with_resolved_org_id():
 
 def _assert_says_how_to_set_a_dev_team(message: str) -> None:
     """Keep the UI message short and point at the real profile control."""
-    assert message == 'No development team selected. Open Account > Profile and choose "Set as development team".'
+    assert message == 'No development team selected. Open Account > Profile and choose your development team.'
 
 
 @pytest.mark.asyncio
