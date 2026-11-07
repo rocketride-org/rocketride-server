@@ -116,9 +116,10 @@ export const CloudPanel: React.FC<CloudPanelProps> = ({ cloudSignedIn, cloudUser
 	const { key: stripeKey, reason: stripeKeyReason } = useStripeKey(Boolean(onFetchPlans));
 
 	const handleCheckoutSuccess = useCallback(() => {
+		if (cm.getAccountInfo()?.organization?.id !== checkoutOrgId) return;
 		setCheckoutOrgId(null);
 		onCheckoutSuccess?.();
-	}, [onCheckoutSuccess]);
+	}, [cm, checkoutOrgId, onCheckoutSuccess]);
 
 	// The effective target: the user's custom server when opted in, else the
 	// default cloud from the host. Nothing is baked into this bundle.

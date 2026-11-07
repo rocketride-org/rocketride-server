@@ -284,6 +284,12 @@ const PipelineWebview: React.FC = () => {
 		await needBillingClient().call('rrext_account_billing', { subcommand: 'confirm_pending', appId: PIPE_BUILDER_APP_ID, subscriptionId, priceId });
 	}, [needBillingClient]);
 
+	const handleCheckoutSuccess = () => {
+		if (ConnectionManager.getInstance().getAccountInfo()?.organization?.id !== checkoutOrgId) return;
+		setCheckoutOrgId(null);
+		setSubscribed(true);
+	};
+
 	// --- Wait for initial state from host before rendering --------------------
 
 	if (!viewState) return null;
@@ -293,7 +299,7 @@ const PipelineWebview: React.FC = () => {
 	return (
 		<>
 			<PipelineEditor project={project} host={editorHost} />
-			{showCheckout && stripeKey && <CheckoutModal key={checkoutOrgId} appName="RocketRide" appDescription="Visual AI pipeline editor: run and deploy pipelines on RocketRide Cloud." stripePublishableKey={stripeKey} onFetchPlans={handleFetchPlans} onCreateCheckout={handleCreateCheckout} onConfirmPending={handleConfirmPending} onSuccess={() => { setCheckoutOrgId(null); setSubscribed(true); }} onClose={() => setCheckoutOrgId(null)} onActionClick={(_plan: CheckoutPlan, action: PlanAction) => ConnectionManager.getInstance().emitOp('host.pipeline.openLink', { url: action.type === 'mailto' ? `mailto:${action.url}${action.subject ? `?subject=${encodeURIComponent(action.subject)}` : ''}` : action.url, browser: true })} />}
+			{showCheckout && stripeKey && <CheckoutModal key={checkoutOrgId} appName="RocketRide" appDescription="Visual AI pipeline editor: run and deploy pipelines on RocketRide Cloud." stripePublishableKey={stripeKey} onFetchPlans={handleFetchPlans} onCreateCheckout={handleCreateCheckout} onConfirmPending={handleConfirmPending} onSuccess={handleCheckoutSuccess} onClose={() => setCheckoutOrgId(null)} onActionClick={(_plan: CheckoutPlan, action: PlanAction) => ConnectionManager.getInstance().emitOp('host.pipeline.openLink', { url: action.type === 'mailto' ? `mailto:${action.url}${action.subject ? `?subject=${encodeURIComponent(action.subject)}` : ''}` : action.url, browser: true })} />}
 			{showCheckout && !stripeKey && <CheckoutUnavailableNotice reason={stripeKeyReason} onClose={() => setCheckoutOrgId(null)} />}
 		</>
 	);
