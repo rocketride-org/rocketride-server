@@ -109,9 +109,28 @@ class LlamaIndexDriver(AgentBase):
             messages = formatter.format(tools, chat_history, current_reasoning=current_reasoning)
             raw = safe_str(self.call_llm(context, _messages_to_text(messages), stop_words=['Observation:']))
 
+            # Some models skip the leading "Thought:" on a tool call; the parser would then treat the
+            # whole output as a direct answer and the tool would never run.
+            parse_input = raw
+            if 'Thought:' not in raw and 'Action:' in raw and 'Action Input:' in raw:
+                parse_input = f'Thought: (none)\n{raw}'
+
             try:
-                step = parser.parse(raw)
-            except Exception:
+                step = parser.parse(parse_input)
+            except Exception as e:
+                if 'Action:' in raw:
+                    # Malformed tool call (e.g. invalid JSON input): let the model retry rather than
+                    # returning the raw ReAct scaffolding as the answer.
+                    current_reasoning.append(
+                        ObservationReasoningStep(
+                            observation=(
+                                'Error: Could not parse output. Use "Thought: ...\nAction: <tool name>\n'
+                                'Action Input: <JSON object>" or "Thought: ...\nAnswer: ...". '
+                                f'Error: {e}'
+                            )
+                        )
+                    )
+                    continue
                 # Unparseable output means the model answered directly; strip scaffolding.
                 return _clean_answer(raw), stack
 
