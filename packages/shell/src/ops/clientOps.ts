@@ -67,6 +67,8 @@ import type { ShellOpMap, ShellOpSpec, ShellOpParams, ShellOpResult } from './bu
 // already loads, so there is no new dependency to carry.)
 import type { DAPMessage, RocketRideClient } from 'rocketride';
 import { decodeMessageData, encodeMessageData } from '../connection/binaryWire';
+import { getCheckoutScope, matchesCheckoutScope } from '../connection/checkoutScope';
+import type { CheckoutScope } from '../connection/checkoutScope';
 import { captureEnvelope } from '../connection/errorWire';
 import type { IWireEnvelope } from '../connection/errorWire';
 
@@ -115,7 +117,7 @@ export interface ClientOpMap extends ShellOpMap {
 	 * rejection cannot carry that across `postMessage` (see errorWire.ts).
 	 * `openEnvelope` unwraps at the realm end.
 	 */
-	'client.request': ShellOpSpec<{ message: DAPMessage; timeout?: number }, IWireEnvelope>;
+	'client.request': ShellOpSpec<{ message: DAPMessage; timeout?: number; checkoutScope?: CheckoutScope }, IWireEnvelope>;
 
 	// ── Monitors (broker-owned in multi-realm hosts) ─────────────────────────
 	'client.addMonitor': ShellOpSpec<{ key: ClientMonitorKey; types: string[] }, R<C['addMonitor']>>;
@@ -196,7 +198,13 @@ export function registerClientOps(bus: IOpBus, source: IClientOpsSource, options
 		// DAP's one binary member is unframed on the way in and re-framed on
 		// the way out: a read returns its bytes in `arguments.data` of the
 		// RESPONSE, which is why `fsRead` bypasses `call()` (`client.ts:2529`).
-		'client.request': (p) => captureEnvelope(async () => encodeMessageData(await client().request(decodeMessageData(p.message), p.timeout))),
+		'client.request': (p) => captureEnvelope(async () => {
+			const liveClient: RocketRideClient = client();
+			if (p.checkoutScope !== undefined && (!p.checkoutScope || !matchesCheckoutScope(getCheckoutScope(liveClient), p.checkoutScope))) {
+				throw new Error('The active checkout account changed. Reopen checkout.');
+			}
+			return encodeMessageData(await liveClient.request(decodeMessageData(p.message), p.timeout));
+		}),
 
 		'client.addMonitor': (p) => client().addMonitor(p.key, p.types),
 		'client.removeMonitor': (p) => client().removeMonitor(p.key, p.types),

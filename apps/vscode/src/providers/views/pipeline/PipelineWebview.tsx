@@ -35,6 +35,7 @@ import { isAppSubscribed } from 'shared/utils/subscriptionGate';
 import { PIPE_BUILDER_APP_ID } from '../../../shared/types';
 import { useMessaging } from '../hooks/useMessaging';
 import { useStripeKey } from '../hooks/useStripeKey';
+import { useCheckoutSession } from '../hooks/useCheckoutSession';
 import { CheckoutUnavailableNotice } from '../components';
 import type { PipelineHostToWebview, PipelineWebviewToHost } from '../../types/pipelineTypes';
 
@@ -53,15 +54,11 @@ const PipelineWebview: React.FC = () => {
 	const [isNew, setIsNew] = useState(false);
 	const [subscribed, setSubscribed] = useState(true);
 	const [isReadonly, setIsReadonly] = useState(false);
-	const [checkoutOrgId, setCheckoutOrgId] = useState<string | null>(null);
-	const showCheckout = checkoutOrgId !== null;
-	const openCheckout = useCallback(() => {
-		const orgId = ConnectionManager.getInstance().getAccountInfo()?.organization?.id ?? '';
-		setCheckoutOrgId(orgId);
-	}, []);
+
 	// Server-supplied Stripe publishable key — matches the connected server's
 	// Stripe account instead of a build-time value.
 	const { key: stripeKey, reason: stripeKeyReason } = useStripeKey();
+	const { checkout, checkoutStripeKey, openCheckout, closeCheckout, isCurrent } = useCheckoutSession(stripeKey);
 	const [cloudConnectionConfigured, setCloudConnectionConfigured] = useState(false);
 	// Host-pushed env-key updates (the Variables page saved) — delivered into
 	// the shared editor through the seam's feed.
@@ -155,7 +152,7 @@ const PipelineWebview: React.FC = () => {
 				const account = cm.getAccountInfo();
 				const sub = isAppSubscribed(account, PIPE_BUILDER_APP_ID);
 				setSubscribed(sub);
-				setCheckoutOrgId((openOrg) => !sub && openOrg === account?.organization?.id ? openOrg : null);
+				if (sub) closeCheckout();
 			}),
 			cm.subscribe('pipeline:env', (snap) => {
 				const keys = (snap as { envKeys?: string[] } | undefined)?.envKeys;
@@ -265,30 +262,24 @@ const PipelineWebview: React.FC = () => {
 		const cm = ConnectionManager.getInstance();
 		const client = cm.getClient();
 		if (!client || !cm.isConnected()) throw new Error('Not connected to server');
-		if (cm.getAccountInfo()?.organization?.id !== checkoutOrgId) throw new Error('The active organization changed. Reopen checkout.');
+		if (!checkout || !isCurrent(checkout)) throw new Error('The active checkout account changed. Reopen checkout.');
 		return client;
-	}, [checkoutOrgId]);
+	}, [checkout, isCurrent]);
 
 	const handleFetchPlans = useCallback((): Promise<CheckoutPlan[]> => {
 		return needBillingClient().billing.getProductPrices(PIPE_BUILDER_APP_ID) as Promise<CheckoutPlan[]>;
 	}, [needBillingClient]);
 
-	const handleCreateCheckout = useCallback((priceId: string, promotionCode?: string, attemptId?: string): Promise<{ clientSecret: string; subscriptionId: string }> => {
-		if (!checkoutOrgId) return Promise.reject(new Error('No organisation found'));
-		return needBillingClient().billing.createCheckoutSession(checkoutOrgId, PIPE_BUILDER_APP_ID, priceId, promotionCode, attemptId) as Promise<{ clientSecret: string; subscriptionId: string }>;
-	}, [needBillingClient, checkoutOrgId]);
+	const handleCreateCheckout = useCallback((priceId: string, promotionCode?: string, attemptId?: string) => {
+		if (!checkout) return Promise.reject(new Error('No checkout session found'));
+		return needBillingClient().billing.createCheckoutSession(checkout.scope.orgId, PIPE_BUILDER_APP_ID, priceId, promotionCode, attemptId);
+	}, [needBillingClient, checkout]);
 
 	const handleConfirmPending = useCallback(async (subscriptionId: string, priceId: string): Promise<void> => {
 		// No SDK method exists for confirm_pending; wrap the public call()
 		// exactly as BillingApi wraps its other verbs.
 		await needBillingClient().call('rrext_account_billing', { subcommand: 'confirm_pending', appId: PIPE_BUILDER_APP_ID, subscriptionId, priceId });
 	}, [needBillingClient]);
-
-	const handleCheckoutSuccess = () => {
-		if (ConnectionManager.getInstance().getAccountInfo()?.organization?.id !== checkoutOrgId) return;
-		setCheckoutOrgId(null);
-		setSubscribed(true);
-	};
 
 	// --- Wait for initial state from host before rendering --------------------
 
@@ -299,8 +290,8 @@ const PipelineWebview: React.FC = () => {
 	return (
 		<>
 			<PipelineEditor project={project} host={editorHost} />
-			{showCheckout && stripeKey && <CheckoutModal key={checkoutOrgId} appName="RocketRide" appDescription="Visual AI pipeline editor: run and deploy pipelines on RocketRide Cloud." stripePublishableKey={stripeKey} onFetchPlans={handleFetchPlans} onCreateCheckout={handleCreateCheckout} onConfirmPending={handleConfirmPending} onSuccess={handleCheckoutSuccess} onClose={() => setCheckoutOrgId(null)} onActionClick={(_plan: CheckoutPlan, action: PlanAction) => ConnectionManager.getInstance().emitOp('host.pipeline.openLink', { url: action.type === 'mailto' ? `mailto:${action.url}${action.subject ? `?subject=${encodeURIComponent(action.subject)}` : ''}` : action.url, browser: true })} />}
-			{showCheckout && !stripeKey && <CheckoutUnavailableNotice reason={stripeKeyReason} onClose={() => setCheckoutOrgId(null)} />}
+			{checkout && checkoutStripeKey && <CheckoutModal key={checkout.id} appName="RocketRide" appDescription="Visual AI pipeline editor: run and deploy pipelines on RocketRide Cloud." stripePublishableKey={checkoutStripeKey} isCheckoutCurrent={() => isCurrent(checkout)} supportsCheckoutReplay={checkout.scope.replaySupported} onFetchPlans={handleFetchPlans} onCreateCheckout={handleCreateCheckout} onConfirmPending={handleConfirmPending} onSuccess={() => closeCheckout(checkout)} onClose={() => closeCheckout(checkout)} onActionClick={(_plan: CheckoutPlan, action: PlanAction) => ConnectionManager.getInstance().emitOp('host.pipeline.openLink', { url: action.type === 'mailto' ? `mailto:${action.url}${action.subject ? `?subject=${encodeURIComponent(action.subject)}` : ''}` : action.url, browser: true })} />}
+			{checkout && !checkoutStripeKey && <CheckoutUnavailableNotice reason={stripeKeyReason} onClose={() => closeCheckout(checkout)} />}
 		</>
 	);
 };

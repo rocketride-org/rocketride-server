@@ -28,6 +28,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { CheckoutModal } from '../../modules/checkout';
 import type { CheckoutPlan, PromoValidation } from '../../modules/checkout';
 import { ConnectionManager } from '../../connection/connection';
+import { getCheckoutScope, matchesCheckoutScope } from '../../connection/checkoutScope';
+import type { CheckoutScope } from '../../connection/checkoutScope';
 import type { AppManifestEntry } from '../workspace/types';
 
 // =============================================================================
@@ -52,9 +54,10 @@ export interface CheckoutFlowProps {
  * billing API.
  */
 export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, orgId }) => {
+	const cm = ConnectionManager.getInstance();
 	const [checkout, setCheckout] = useState<{
 		id: number;
-		orgId: string;
+		scope: CheckoutScope;
 		app: AppManifestEntry;
 		plan?: CheckoutPlan;
 		promo?: PromoValidation | null;
@@ -70,27 +73,39 @@ export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, orgId }) 
 		if (statusClearTimer.current) clearTimeout(statusClearTimer.current);
 	}, []);
 
-	// Bind the checkout to the organization that opened it. A preselected
-	// plan from the previous organization must never auto-start after a switch.
 	useEffect(() => {
-		if (activeCheckout.current && activeCheckout.current.orgId !== orgId) {
+		const invalidate = () => {
 			activeCheckout.current = null;
 			setCheckout(null);
-		}
-		return ConnectionManager.getInstance().on(
-			'shell:subscribe',
-			({ app, plan, promo }: { app: unknown; plan?: CheckoutPlan; promo?: PromoValidation | null }) => {
-				if (!orgId) return;
+		};
+		const checkScope = () => {
+			const current = activeCheckout.current;
+			const scope = getCheckoutScope(cm.getClient());
+			if (current && (current.scope.orgId !== orgId || (scope && !matchesCheckoutScope(scope, current.scope)))) {
+				invalidate();
+			}
+		};
+		checkScope();
+		const off = [
+			cm.on('shell:workspaceWillChange', invalidate),
+			cm.on('shell:orgChanged', invalidate),
+			cm.on('shell:logoutRequest', invalidate),
+			cm.on('shell:connected', checkScope),
+			cm.on('shell:accountUpdate', checkScope),
+			cm.on('shell:subscribe', ({ app, plan, promo, checkoutScope }) => {
+				const scope = getCheckoutScope(cm.getClient());
+				if (!cm.isConnected() || !scope || scope.orgId !== orgId || !checkoutScope || !matchesCheckoutScope(scope, checkoutScope)) return;
 				const entry = app as AppManifestEntry;
 				const current = activeCheckout.current;
-				if (current?.orgId === orgId && current.app.id === entry.id &&
+				if (current && matchesCheckoutScope(scope, current.scope) && current.app.id === entry.id &&
 					current.plan?.stripePriceId === plan?.stripePriceId && current.promo?.code === promo?.code) return;
-				const next = { id: ++checkoutSequence.current, orgId, app: entry, plan, promo };
+				const next = { id: ++checkoutSequence.current, scope, app: entry, plan, promo };
 				activeCheckout.current = next;
 				setCheckout(next);
-			},
-		);
-	}, [orgId]);
+			}),
+		];
+		return () => off.forEach((unsubscribe) => unsubscribe());
+	}, [cm, orgId]);
 
 	// --- Listen for unsubscribe events ---------------------------------------
 	useEffect(() => {
@@ -105,19 +120,18 @@ export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, orgId }) 
 	}, [orgId]);
 
 	// --- Don't render if no checkout or missing config -----------------------
-	if (!checkout || !stripeKey || checkout.orgId !== orgId) return null;
+	if (!checkout || !stripeKey || checkout.scope.orgId !== orgId) return null;
 	const { app: checkoutApp } = checkout;
 
 	// --- Render CheckoutModal ------------------------------------------------
 	// Engine access is the realm's own client, so this flow renders in any
 	// realm (the real client at the cloud root; the realm client — requests
 	// over the bridge — in a page webview).
-	const cm = ConnectionManager.getInstance();
+	const isCheckoutCurrent = () => activeCheckout.current === checkout && cm.isConnected() &&
+		matchesCheckoutScope(getCheckoutScope(cm.getClient()), checkout.scope);
 	const needClient = () => {
 		const client = cm.getClient();
-		if (!client || !cm.isConnected()) throw new Error('Not connected to a server.');
-		const currentOrg = cm.getAccountInfo()?.organization?.id;
-		if (currentOrg && currentOrg !== checkout.orgId) throw new Error('The active organization changed. Reopen checkout.');
+		if (!client || !isCheckoutCurrent()) throw new Error('The active checkout account changed. Reopen checkout.');
 		return client;
 	};
 
@@ -129,6 +143,8 @@ export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, orgId }) 
 			stripePublishableKey={stripeKey}
 			preselectedPlan={checkout.plan}
 			preselectedPromo={checkout.promo}
+			isCheckoutCurrent={isCheckoutCurrent}
+			supportsCheckoutReplay={checkout.scope.replaySupported}
 			onFetchPlans={async () => {
 				return needClient().billing.getProductPrices(checkoutApp.id) as Promise<CheckoutPlan[]>;
 			}}
@@ -148,17 +164,15 @@ export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, orgId }) 
 				await needClient().call('rrext_account_billing', { subcommand: 'confirm_pending', appId: checkoutApp.id, subscriptionId, priceId });
 			}}
 			onSuccess={() => {
-				const currentOrg = cm.getAccountInfo()?.organization?.id;
-				if (activeCheckout.current !== checkout || (currentOrg && currentOrg !== checkout.orgId)) return;
+				if (!isCheckoutCurrent()) return;
 				activeCheckout.current = null;
-				// New purchase complete: drop the user into the app they just bought
-				// and confirm briefly, rather than leaving them on the pricing grid.
-				// (Upgrades keep their own inline confirmation in UpgradeModal.)
+				// Payment can complete before the account shows an active subscription.
 				const appId = checkoutApp.id;
 				const appName = checkoutApp.name;
 				setCheckout((current) => current === checkout ? null : current);
-				cm.emit('shell:switchApp', { appId });
-				cm.emit('shell:statusMessage', { message: `Welcome to ${appName}. Your plan is now active.` });
+				const status = cm.getClient()?.getAccountInfo()?.apps?.find((app) => app.id === appId)?.appStatus;
+				if (status === 'subscribed' || status === 'trialing') cm.emit('shell:switchApp', { appId });
+				cm.emit('shell:statusMessage', { message: `Checkout completed for ${appName}.` });
 				// Auto-clear so the confirmation doesn't linger in the status bar.
 				// Tracked in a ref so it's cancelled if we unmount before it fires.
 				if (statusClearTimer.current) clearTimeout(statusClearTimer.current);

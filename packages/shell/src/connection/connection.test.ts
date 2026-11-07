@@ -31,6 +31,7 @@ import { AuthenticationException, LoginAttemptCancelledError, RocketRideClient, 
 import { ConnectionState, AuthPhase } from '../types/connection';
 import type { ConnectionStatus } from '../types/connection';
 import { ConnectionManager } from './connection';
+import { RocketRideClientProxy } from './RocketRideClientProxy';
 import { ConnectionFailure, withTimeout } from './errors';
 import { RemoteManager } from './remote-manager';
 import { ApiKeyAuthProvider } from '../auth/ApiKeyAuthProvider';
@@ -1637,6 +1638,32 @@ function createTopicManager(): ConnectionManager {
 	fields.retainedPort = localRetainedPort(createRetainedRegistry());
 	return manager;
 }
+
+test('live and buffered checkout intents retain their authenticated origin across deferred delivery', async () => {
+	for (const buffered of [false, true]) {
+		const manager: ConnectionManager = Reflect.construct(ConnectionManager, []);
+		const client = new RocketRideClientProxy({ request: async () => { throw new Error('No request expected'); } });
+		manager.getClient = () => client;
+		manager.isConnected = () => true;
+		const uri = 'https://app.rocketride.ai';
+		const identity = (orgId: string): ConnectResult => ({
+			...authenticatedResult,
+			organization: { id: orgId } as NonNullable<ConnectResult['organization']>,
+		});
+		client.applyIdentity({ connected: true, accountInfo: identity('org-a'), uri });
+		const seen: Array<string | undefined> = [];
+		const listen = () => manager.on('shell:subscribe', ({ checkoutScope }) => seen.push(checkoutScope?.orgId));
+		if (!buffered) listen();
+
+		manager.emit('shell:subscribe', { app: { id: 'app-a', name: 'App A' } });
+		client.applyIdentity({ connected: true, accountInfo: identity('org-b'), uri });
+		if (buffered) listen();
+		await Promise.resolve();
+
+		assert.deepEqual(seen, ['org-a']);
+		assert.equal(client.getOrgId(), 'org-b');
+	}
+});
 
 test('a retained topic replays to EVERY subscriber, not just the one that opened the port', async () => {
 	const cm = createTopicManager();

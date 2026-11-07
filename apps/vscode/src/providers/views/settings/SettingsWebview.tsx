@@ -789,10 +789,10 @@ export const Settings: React.FC = () => {
 	}, [needClient]);
 
 	const handleCreateCheckout = useCallback(
-		(priceId: string, promotionCode?: string, attemptId?: string): Promise<{ clientSecret: string; subscriptionId: string }> => {
+		(priceId: string, promotionCode?: string, attemptId?: string) => {
 			const orgId = cm.getAccountInfo()?.organization?.id;
 			if (!orgId) return Promise.reject(new Error('No organisation found'));
-			return needClient().billing.createCheckoutSession(orgId, PIPE_BUILDER_APP_ID, priceId, promotionCode, attemptId) as Promise<{ clientSecret: string; subscriptionId: string }>;
+			return needClient().billing.createCheckoutSession(orgId, PIPE_BUILDER_APP_ID, priceId, promotionCode, attemptId);
 		},
 		[cm, needClient]
 	);
@@ -805,10 +805,6 @@ export const Settings: React.FC = () => {
 		},
 		[needClient]
 	);
-
-	const handleCheckoutSuccess = useCallback(() => {
-		setSubscribed(true);
-	}, []);
 
 	// ── Cloud auth actions — staged on the host, status arrives on the push.
 	// Sign-in targets the form's CURRENT effective server — the saved config
@@ -905,7 +901,6 @@ export const Settings: React.FC = () => {
 							onFetchPlans={handleFetchPlans}
 							onCreateCheckout={handleCreateCheckout}
 							onConfirmPending={handleConfirmPending}
-							onCheckoutSuccess={handleCheckoutSuccess}
 						/>
 						{connectionsFooter}
 					</div>
@@ -972,7 +967,6 @@ export const Settings: React.FC = () => {
 							onFetchPlans={handleFetchPlans}
 							onCreateCheckout={handleCreateCheckout}
 							onConfirmPending={handleConfirmPending}
-							onCheckoutSuccess={handleCheckoutSuccess}
 						/>
 						{connectionsFooter}
 					</div>

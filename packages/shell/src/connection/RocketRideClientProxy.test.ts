@@ -28,12 +28,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AuthenticationException, DAPException } from 'rocketride';
-import type { DAPMessage } from 'rocketride';
+import type { ConnectResult, DAPMessage } from 'rocketride';
 import { RocketRideClientProxy } from './RocketRideClientProxy';
 import type { IProxyTransport } from './RocketRideClientProxy';
 import { captureEnvelope } from './errorWire';
 import { registerShellHostOps } from '../ops/hostOps';
 import { createOpBus } from '../ops/busOps';
+import { registerClientOps } from '../ops/clientOps';
 import { decodeMessageData, encodeMessageData } from './binaryWire';
 
 /**
@@ -78,6 +79,76 @@ void test('a realm call reaches the root and its body comes back', async () => {
 	assert.deepEqual(body, { echoed: 'rrext_account_me', got: 'rod' });
 	assert.equal(seen[0].command, 'rrext_account_me');
 	assert.deepEqual(seen[0].arguments?.name, 'rod');
+});
+
+void test('the broker refuses checkout work queued before a root scope change', async () => {
+	const bus = createOpBus();
+	const account = {
+		userId: 'user-a',
+		organization: { id: 'org-a' },
+		capabilities: ['billing_checkout_replay'],
+	} as ConnectResult;
+	const originalUri = 'https://app.rocketride.ai';
+	let rootAccount = account;
+	let rootUri = originalUri;
+	const dispatched: DAPMessage[] = [];
+	registerClientOps(bus, {
+		getClient: () => ({
+			isAuthenticated: () => true,
+			getAccountInfo: () => rootAccount,
+			getConnectionInfo: () => ({ uri: rootUri }),
+			request: (message: DAPMessage) => {
+				dispatched.push(message);
+				return { type: 'response', seq: 1, success: true, body: {} };
+			},
+		}),
+		isConnected: () => true,
+	});
+	let release: () => void = () => {};
+	let gate = Promise.resolve();
+	const proxy = new RocketRideClientProxy({
+		async request(op, params) {
+			const wire = JSON.parse(JSON.stringify(params)) as Record<string, unknown>;
+			await gate;
+			return bus.request(op, wire);
+		},
+	});
+	proxy.applyIdentity({ connected: true, accountInfo: account, uri: originalUri });
+
+	for (const changeScope of [
+		() => { rootAccount = { ...account, organization: { ...account.organization!, id: 'org-b' } }; },
+		() => { rootAccount = { ...account, userId: 'user-b' }; },
+		() => { rootUri = 'https://other.rocketride.ai'; },
+		() => { rootAccount = { ...account, capabilities: [] }; },
+	]) {
+		rootAccount = account;
+		rootUri = originalUri;
+		gate = new Promise<void>((resolve) => { release = resolve; });
+		const calls = [
+			proxy.billing.createCheckoutSession('org-a', 'app-a', 'price-a', undefined, 'checkout-attempt'),
+			proxy.billing.redeemPromoCode('org-a', 'CODE', 'promo-attempt'),
+			proxy.call('rrext_account_billing', { subcommand: 'confirm_pending', subscriptionId: 'sub-a' }),
+		];
+		changeScope();
+		release();
+		await Promise.all(calls.map((call) => assert.rejects(call, /active checkout account changed/)));
+	}
+	assert.equal(dispatched.length, 0);
+
+	rootAccount = account;
+	rootUri = originalUri;
+	await proxy.billing.redeemPromoCode('org-a', 'CODE', 'promo-attempt');
+	assert.deepEqual(dispatched[0]?.arguments, { subcommand: 'promo_redeem', orgId: 'org-a', code: 'CODE', attemptId: 'promo-attempt' });
+
+	const message = { type: 'request', seq: 1, command: 'rrext_account_billing', arguments: { subcommand: 'confirm_pending' } };
+	for (const checkoutScope of [null, { orgId: 'org-a', userId: 'user-a', server: originalUri }]) {
+		const response = await bus.request('client.request', { message, checkoutScope });
+		assert.equal((response as { ok: boolean }).ok, false);
+	}
+	assert.equal(dispatched.length, 1);
+	const legacy = await bus.request('client.request', { message });
+	assert.equal((legacy as { ok: boolean }).ok, true);
+	assert.equal(dispatched.length, 2);
 });
 
 void test('a namespace method the proxy never overrode still works', async () => {

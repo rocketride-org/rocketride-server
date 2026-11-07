@@ -52,6 +52,7 @@ import type { ConnectionMode, ConnectionStatus } from '../types/connection';
 import { BaseManager } from './base-manager';
 import { RemoteManager } from './remote-manager';
 import { RocketRideClientProxy } from './RocketRideClientProxy';
+import { getCheckoutScope } from './checkoutScope';
 import { AUTH_REJECTED_MESSAGE, ConnectionFailure } from './errors';
 import { shouldReloadForTokenStorageUpdate } from './tokenStorageUpdate';
 import { createOpBus } from '../ops/busOps';
@@ -1882,14 +1883,18 @@ export class ConnectionManager implements IConnectionManager {
 	 * @param payload - The payload matching the event's type.
 	 */
 	public emit<K extends keyof ShellConnectionEventMap>(event: K, payload: ShellConnectionEventMap[K]): void {
-		// Push into debug log
-		this.logDebug(event as string, payload);
+		// A buffered preselection must not start checkout under a different
+		// account when a subscriber eventually receives the event.
+		const eventPayload = event === 'shell:subscribe'
+			? { ...(payload as ShellConnectionEventMap['shell:subscribe']), checkoutScope: this.isConnected() ? getCheckoutScope(this.getClient()) : null }
+			: payload;
+		this.logDebug(event as string, eventPayload);
 
 		// Dispatch to registered handlers via microtask. An unsubscribed handler
 		// leaves an empty Set behind, so check size — not just presence.
 		const handlers = this.listeners.get(event as string);
 		if (handlers && handlers.size > 0) {
-			Promise.resolve().then(() => this.dispatch(handlers, event as string, payload));
+			Promise.resolve().then(() => this.dispatch(handlers, event as string, eventPayload));
 			return;
 		}
 
@@ -1898,7 +1903,7 @@ export class ConnectionManager implements IConnectionManager {
 		// Without this, a click whose listener isn't yet/no-longer mounted is
 		// silently swallowed — the prod "Get Started does nothing" symptom.
 		if (ConnectionManager.REPLAYABLE_EVENTS.has(event as string)) {
-			this.pendingEvents.set(event as string, payload);
+			this.pendingEvents.set(event as string, eventPayload);
 			console.warn(
 				`[ConnectionManager] '${event as string}' emitted with no listener — buffered for replay.`,
 			);
@@ -2222,6 +2227,11 @@ export class ConnectionManager implements IConnectionManager {
 			else if (!mirror.connected && wasConnected) this.emit('shell:disconnected', { reason: 'root disconnected', hasError: false } as never);
 		});
 		this.subscribe('shell:account', (snapshot) => {
+			if (snapshot === null) {
+				this.accountInfo = undefined;
+				this.seedMirrorClient();
+				return;
+			}
 			if (!snapshot) return;
 			this.accountInfo = snapshot as ConnectResult;
 			this.seedMirrorClient();

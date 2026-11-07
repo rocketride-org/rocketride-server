@@ -233,6 +233,12 @@ export interface CheckoutModalBaseProps {
 	 */
 	onConfirmPending: (subscriptionId: string, priceId: string) => Promise<void>;
 
+	/** Whether the checkout still belongs to the host's current session and modal. */
+	isCheckoutCurrent?: () => boolean;
+
+	/** The server confirmed it can safely resolve an already-used attempt ID. */
+	supportsCheckoutReplay?: boolean;
+
 	/** Called after a successful payment — host should close the modal. */
 	onSuccess: () => void;
 
