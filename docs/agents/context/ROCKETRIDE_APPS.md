@@ -1785,7 +1785,7 @@ it to open the full phase-by-phase build log, failure reason at the end.
 The Dashboard's status card opens the same log with **View build log**. An
 app whose builds have all failed is missing from the shell, so opening it
 shows your organization a screen that names
-`rocketride app log <appId> <version>` instead of "App not found".
+`rocketride deploy log <appId> <version>` instead of "App not found".
 
 A fresh deployment is born **private**: it exists in your org's registry,
 can be published internally, and is invisible to everyone else.

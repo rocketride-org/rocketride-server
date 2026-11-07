@@ -959,7 +959,7 @@ Account management: profile, API keys, organization, members, teams, and server-
 **Members:**
 
 - `async list_members(org_id: str) -> list[MemberRecord]`
-- `async invite_member(org_id: str, *, email: str, given_name: str, family_name: str, role: str) -> None`
+- `async invite(org_id: str, *, email: str, given_name: str, family_name: str, role: str, team_assignments: list[TeamAssignment] | None = None, dev_team_id: str | None = None) -> InvitedMember`: returns `{userId, displayName, email, role, status, devTeamId}`. `dev_team_id` must be one of the `team_assignments` teams with `task.control` (any org team for an admin). `invite_member` takes the same arguments, returns `None`, and is deprecated.
 - `async update_member_role(org_id: str, user_id: str, role: str) -> None`
 - `async remove_member(org_id: str, user_id: str) -> None`
 
@@ -988,7 +988,7 @@ await client.account.set_env('team', {'ROCKETRIDE_OPENAI_KEY': 'sk-...'}, scope_
 Every operation above is role-checked server-side; an unauthorized call is refused with an explicit error (`'Admin role required ...'`) — nothing fails silently. The split for the documented operations:
 
 - **Any org member**: their own profile (`get_profile`, `update_profile`, `set_dev_team`, `set_default_org`); their OWN API keys (`list_keys`, `create_key`, revoking their own); reading the org (`get_org`); listing members and teams and reading a team's detail; USER-scope environment (`get_env('user')` / `set_env('user')`) and the merged key names (`get_environment_keys`); billing reads (`get_details`, `get_credit_balance`, `get_product_prices`) and promo codes (`validate_promo_code`, `redeem_promo_code`).
-- **Org admin only**: renaming the org (`update_org_name`); member management (`invite_member`, `update_member_role`, `remove_member`); revoking ANOTHER member's key (own-org keys only); creating teams (`create_team`); ORG-scope environment — both `get_env('org', ...)` and `set_env('org', ...)` (reads too: the org layer holds shared secrets); and every billing operation that moves money or reads the org's ledger — checkout/subscribe, portal, cancel, upgrade, credit purchases and top-ups, `get_usage_by_user`/`get_usage_by_team`, `get_transactions`, `get_transaction_distinct`.
+- **Org admin only**: renaming the org (`update_org_name`); member management (`invite`, `invite_member`, `update_member_role`, `remove_member`); revoking ANOTHER member's key (own-org keys only); creating teams (`create_team`); ORG-scope environment — both `get_env('org', ...)` and `set_env('org', ...)` (reads too: the org layer holds shared secrets); and every billing operation that moves money or reads the org's ledger — checkout/subscribe, portal, cancel, upgrade, credit purchases and top-ups, `get_usage_by_user`/`get_usage_by_team`, `get_transactions`, `get_transaction_distinct`.
 - **Team admin** (the `team.admin` permission on that team; org admins pass implicitly): `delete_team`, `add_team_member`, `update_team_member_perms`, `remove_team_member`, and TEAM-scope `get_env`/`set_env` — both read and write.
 
 ### `client.billing`
@@ -1070,7 +1070,9 @@ await client.database.query(
 
 The package installs a `rocketride` command-line tool (`pip install
 rocketride`, then `rocketride --help`). The TypeScript client installs the
-IDENTICAL command — same verbs, same flags, same output. The full reference
+same command with more `app` verbs and `deploy source-config`, but without
+`diff` and `otel`, which only this package has. ROCKETRIDE_CLI.md has the
+table of which package ships which command. The full reference
 (workspace, validate, task, store, app, and deploy verbs, the `--json`
 contract, and when to prefer it over SDK code) is ROCKETRIDE_CLI.md; every
 deploy and app verb there fronts a `client.deploy.*` method from §Deploy.
