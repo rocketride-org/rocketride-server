@@ -83,10 +83,17 @@ _WRITING_CLAUSE = re.compile(
 # is a call; masking blanks the name before the pattern below can see it, so the quoted
 # form is checked on the raw text. A quoted name without a following `(` is a string, not
 # a call, which keeps a literal that names the function out of the rule.
-_QUOTED_CALL = re.compile(r'"([^"]*)"\s*\(')
+# Anything PostgreSQL accepts as whitespace between the name and `(` — spaces, a block
+# comment, a line comment — still makes it a call.
+_GAP = r'(?:\s|/\*.*?\*/|--[^\n]*)*'
+_QUOTED_CALL = re.compile(r'(?P<unicode>U&)?"(?P<name>[^"]*)"' + _GAP + r'\(', re.DOTALL)
+_BACKTICK_CALL = re.compile(r'`(?P<name>[^`]*)`' + _GAP + r'\(', re.DOTALL)
 _SESSION_FUNCTION_NAMES = frozenset(
     {'pg_advisory_lock', 'pg_advisory_lock_shared', 'pg_try_advisory_lock', 'pg_try_advisory_lock_shared'}
 )
+# MySQL resolves a backtick-quoted built-in function name, and the maskers remove it.
+_MYSQL_SESSION_FUNCTION_NAMES = frozenset({'get_lock'})
+_UNICODE_ESCAPE = re.compile(r'\\(?:\+(?P<long>[0-9a-fA-F]{6})|(?P<short>[0-9a-fA-F]{4}))')
 
 _SESSION_STATE_CLAUSE = re.compile(
     r'\bpg_(?:try_)?advisory_lock(?:_shared)?\s*\('
@@ -314,16 +321,38 @@ def _is_read_shaped(masked: str | None) -> bool:
     )
 
 
+def _decode_pg_identifier(name: str) -> str:
+    """Decode ``U&"..."`` escapes (``\\XXXX`` and ``\\+XXXXXX``) into the identifier they name."""
+
+    def replace(match: 're.Match[str]') -> str:
+        codepoint = match.group('long') or match.group('short')
+        try:
+            return chr(int(codepoint, 16))
+        except (TypeError, ValueError):
+            return match.group(0)
+
+    return _UNICODE_ESCAPE.sub(replace, name)
+
+
 def _quoted_session_call(sql: str) -> bool:
-    """True when a quoted identifier PostgreSQL folds to a session-lock function is called.
+    """True when a quoted identifier resolves to a session-lock function.
+
+    Covers PostgreSQL's double-quoted and ``U&"..."`` identifiers and MySQL's backtick
+    form, with the comments PostgreSQL and MySQL accept between the name and ``(``.
 
     Args:
         sql: The generated SQL, unmasked.
 
     Returns:
-        Whether a quoted ``pg_advisory_lock`` family name is used as a function.
+        Whether a quoted session-lock function name is used as a function.
     """
-    return any(match.group(1).strip().lower() in _SESSION_FUNCTION_NAMES for match in _QUOTED_CALL.finditer(sql))
+    for match in _QUOTED_CALL.finditer(sql):
+        name = _decode_pg_identifier(match.group('name')) if match.group('unicode') else match.group('name')
+        if name.strip().lower() in _SESSION_FUNCTION_NAMES:
+            return True
+    return any(
+        match.group('name').strip().lower() in _MYSQL_SESSION_FUNCTION_NAMES for match in _BACKTICK_CALL.finditer(sql)
+    )
 
 
 def is_sql_safe(sql: str) -> bool:
