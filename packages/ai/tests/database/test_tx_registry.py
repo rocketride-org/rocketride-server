@@ -186,6 +186,11 @@ def test_to_sqlalchemy_text_maps_placeholders():
         ('select $é$costs $1$é$, $1', [2], 'select $é$costs $1$é$, :b1', {'b1': 2}),
         ('select $١$costs $9$١$, $1', [9], 'select $١$costs $9$١$, :b1', {'b1': 9}),
         ('select a$$x$, $1', [5], 'select a$$x$, :b1', {'b1': 5}),
+        ('select $a$ text $b$ more $a$, $1', [9], 'select $a$ text $b$ more $a$, :b1', {'b1': 9}),
+        ('select 1 -- $1\n, $2', [7, 8], 'select 1 -- $1\n, :b2', {'b2': 8}),
+        ('select /* $1 */ $2', [7, 8], 'select /* $1 */ :b2', {'b2': 8}),
+        ('select $1, $1', [5], 'select :b1, :b1', {'b1': 5}),
+        ('select $1::int', [5], 'select :b1::int', {'b1': 5}),
         ("select E'\\' $1' , $1", [9], "select E'\\' $1' , :b1", {'b1': 9}),
     ],
 )
