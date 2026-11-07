@@ -495,3 +495,20 @@ def test_a_uescape_clause_cannot_hide_the_function_name():
 def test_a_string_literal_that_spells_a_lock_call_still_passes():
     """The text of a string literal is not an identifier, so it is not a call."""
     assert is_sql_safe('SELECT \'"pg_advisory_lock"(42)\'' ) is True
+
+
+@pytest.mark.parametrize(
+    'sql',
+    [
+        'SELECT $$"pg_advisory_lock"(42)$$',
+        'SELECT $tag$"pg_advisory_lock"(42)$tag$',
+    ],
+)
+def test_a_dollar_quoted_body_is_text_not_a_call(sql):
+    """A dollar-quoted body is text, so a quoted function name inside it is not a call."""
+    assert is_sql_safe(sql) is True
+
+
+def test_a_placeholder_is_still_a_placeholder():
+    """Skipping dollar quotes must not swallow a positional placeholder."""
+    assert is_sql_safe('SELECT * FROM t WHERE id = $1') is True

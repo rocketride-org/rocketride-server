@@ -380,6 +380,24 @@ def _skip_literal(sql: str, index: int) -> int:
     return n
 
 
+_DOLLAR_TAG = re.compile(r'\$([A-Za-z_\u0080-\U0010FFFF][A-Za-z0-9_\u0080-\U0010FFFF]*)?\$')
+
+
+def _skip_dollar_quoted(sql: str, index: int) -> int:
+    """Return the index after the dollar-quoted body that starts at ``index``.
+
+    A dollar-quoted body is text, like a single-quoted literal, so a quoted function
+    name inside it must not be read as a call. Returns ``index`` when the text there is
+    not a tag (a bare ``$`` or a placeholder).
+    """
+    match = _DOLLAR_TAG.match(sql, index)
+    if not match:
+        return index
+    delimiter = match.group(0)
+    end = sql.find(delimiter, match.end())
+    return len(sql) if end == -1 else end + len(delimiter)
+
+
 def _quoted_session_call(sql: str) -> bool:
     """True when a quoted identifier resolves to a session-lock function.
 
@@ -400,6 +418,10 @@ def _quoted_session_call(sql: str) -> bool:
         char = sql[index]
         if char == "'":
             index = _skip_literal(sql, index)
+            continue
+        if char == '$':
+            after_dollar = _skip_dollar_quoted(sql, index)
+            index = after_dollar if after_dollar > index else index + 1
             continue
         unicode_name = sql[index : index + 2].lower() == 'u&'
         quote_at = index + 2 if unicode_name else index
