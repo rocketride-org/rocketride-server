@@ -1583,6 +1583,12 @@ class Task(DAPBase):
             return
         self._terminated_called = True
 
+        # Read the restart flag once. restart_task moves on as soon as the
+        # state below turns terminal, and a new start can clear the flag
+        # while this teardown still has broadcasts to make; reading it again
+        # later would send this run a second end.
+        restarting = self._is_restarting
+
         # Block new operations (e.g. data requests) during teardown
         self._is_terminating = True
 
@@ -1598,7 +1604,7 @@ class Task(DAPBase):
         self._apply_process_exit_code(exit_code)
 
         # If we are not restarting
-        if not self._is_restarting:
+        if not restarting:
             self._status.completed = True
             self._status.endTime = time.time()
 
@@ -1718,7 +1724,7 @@ class Task(DAPBase):
 
         # Set final state
         if self._stop_requested:
-            if self._is_restarting:
+            if restarting:
                 self._status.status = 'Restarting'
                 self._status.state = TASK_STATE.CANCELLED.value
                 self.debug_task_message('restarted by user request')
@@ -1745,7 +1751,7 @@ class Task(DAPBase):
         # it — a later broadcast becomes the new "last known" reading and
         # silently undoes the zero (that bug shipped once). body['final']
         # marks it so the run-log sampler always records it.
-        if self._is_restarting:
+        if restarting:
             await self._send_status_update()
         else:
             try:
@@ -1781,7 +1787,7 @@ class Task(DAPBase):
             )
 
             # If we are not restarting, send the final events
-            if not self._is_restarting:
+            if not restarting:
                 # Broadcast termination event
                 terminated_event = self.build_event(
                     'terminated',
@@ -1842,7 +1848,7 @@ class Task(DAPBase):
         # outcome. Best-effort — never blocks or breaks teardown.
         if self._run_log is not None:
             try:
-                if self._is_restarting:
+                if restarting:
                     self._run_log.note_restart()
                 else:
                     # A ttl-window expiry is SUCCESS: the run stayed up
@@ -2922,6 +2928,14 @@ class Task(DAPBase):
                 env=subprocess_env,
             )
 
+            # From here a termination is this new run's end, not part of a
+            # restart: the engine can exit during the awaits below, and its
+            # stdio disconnect runs _terminated() at once. The begin/restart
+            # event further down uses the copy; restart_task's finally clears
+            # the flag too.
+            restarting = self._is_restarting
+            self._is_restarting = False
+
             # Initialize stdio interface
             try:
                 self._debug_stdio = Task.TaskDbgStdio(
@@ -3016,6 +3030,14 @@ class Task(DAPBase):
                 self._task_metrics = None
                 self.debug_message(f'Failed to initialize metrics tracking: {e}')
 
+            # The engine may already have exited during the awaits above, and
+            # _terminated() has then reported the run's end. Don't put a dead
+            # task back to INITIALIZING, or start a status loop after its
+            # final status.
+            if self._terminated_called:
+                self.debug_message('The engine exited while the task was starting')
+                return
+
             # Setup to initializing
             self._status.state = TASK_STATE.INITIALIZING.value
 
@@ -3023,7 +3045,7 @@ class Task(DAPBase):
             self._status_update_task = asyncio.create_task(self._status_update_loop())
 
             # If we are not restarting, notify of task action
-            if not self._is_restarting:
+            if not restarting:
                 # Send out a begin message
                 task_message = self.build_event(
                     'apaevt_task',
