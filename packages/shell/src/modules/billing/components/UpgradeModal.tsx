@@ -109,6 +109,12 @@ const S = {
 // PROPS
 // =============================================================================
 
+interface PlanChangeAttempt {
+	priceId: string;
+	expectedPriceId: string;
+	id: string;
+}
+
 /** Props for the UpgradeModal component. */
 export interface UpgradeModalProps {
 	/** All plans from app_prices for the subscribed app. */
@@ -182,7 +188,8 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 		error?: string;
 	} | null>(null);
 	const [previewRetry, setPreviewRetry] = useState(0);
-	const attempt = useRef<{ priceId: string; expectedPriceId: string; id: string } | null>(null);
+	const attempt = useRef<PlanChangeAttempt | null>(null);
+	const [paymentToFinish, setPaymentToFinish] = useState<PlanChangeAttempt | null>(null);
 	const inFlight = useRef(false);
 	const mounted = useRef(false);
 	const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -218,7 +225,7 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 
 	useEffect(() => {
 		setPreviewState(null);
-		if (!available || !onPreview || !selectedPriceId) return;
+		if (!available || paymentToFinish || !onPreview || !selectedPriceId) return;
 		let active = true;
 		const selection = { priceId: selectedPriceId, expectedPriceId: currentPriceId, source: onPreview };
 		void onPreview(selectedPriceId, currentPriceId).then(
@@ -228,50 +235,59 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 			},
 		);
 		return () => { active = false; };
-	}, [available, onPreview, selectedPriceId, currentPriceId, previewRetry]);
+	}, [available, paymentToFinish, onPreview, selectedPriceId, currentPriceId, previewRetry]);
 
-	const currentPreview = available && onPreview && previewState?.priceId === selectedPriceId &&
+	const currentPreview = available && !paymentToFinish && onPreview && previewState?.priceId === selectedPriceId &&
 		previewState?.expectedPriceId === currentPriceId && previewState.source === onPreview ? previewState : null;
-	const previewLoading = Boolean(available && onPreview && selectedPriceId && !currentPreview);
+	const previewLoading = Boolean(available && !paymentToFinish && onPreview && selectedPriceId && !currentPreview);
 	const preview = currentPreview?.preview;
-	const canConfirm = Boolean(available && isValidSelection && !previewLoading && !currentPreview?.error && preview?.timing !== 'unchanged');
+	const canConfirm = Boolean(available && (paymentToFinish ||
+		(isValidSelection && !previewLoading && !currentPreview?.error && preview?.timing !== 'unchanged')));
 
 	const handleSelect = (plan: CheckoutPlan) => {
 		if (!available || plan.stripePriceId === currentPriceId || inFlight.current) return;
-		if (selectedPlan?.stripePriceId !== plan.stripePriceId) attempt.current = null;
 		setSelectedPlan(plan);
 		setError(null);
 	};
 
 	const handleConfirm = async () => {
-		if (!selectedPriceId || !canConfirm || inFlight.current) return;
+		if (!canConfirm || inFlight.current) return;
 		inFlight.current = true;
+		const initialSelection = paymentSelection.current;
 		setUpgrading(true);
 		setError(null);
 		try {
-			if (attempt.current?.priceId !== selectedPriceId || attempt.current.expectedPriceId !== currentPriceId) {
-				const id = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, '0')).join('');
-				attempt.current = { priceId: selectedPriceId, expectedPriceId: currentPriceId, id };
+			let operation = paymentToFinish;
+			if (!operation) {
+				if (!selectedPriceId) return;
+				if (attempt.current?.priceId !== selectedPriceId || attempt.current.expectedPriceId !== currentPriceId) {
+					const id = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, '0')).join('');
+					attempt.current = { priceId: selectedPriceId, expectedPriceId: currentPriceId, id };
+				}
+				operation = attempt.current;
 			}
-			const { id, expectedPriceId } = attempt.current;
-			let result = await onUpgrade(selectedPriceId, id, expectedPriceId);
+			const { priceId, id, expectedPriceId } = operation;
+			let result = await onUpgrade(priceId, id, expectedPriceId);
 			if (!mounted.current) return;
-			if (result?.status === 'requires_action' && result.clientSecret && result.stripePublishableKey) {
+			if (!paymentToFinish && result?.status === 'requires_action' && result.clientSecret && result.stripePublishableKey) {
 				const stripe = await loadStripe(result.stripePublishableKey);
 				if (!mounted.current) return;
 				if (!stripe) throw new Error('Payment authentication could not be loaded. Try again.');
-				const live = paymentSelection.current;
-				if (!live.available || live.currentPriceId !== expectedPriceId || live.selectedPriceId !== selectedPriceId) {
-					throw new Error('The subscription changed. Review the plan change before trying again.');
+				if (paymentSelection.current !== initialSelection) {
+					throw new Error('The subscription or connection changed. Review the plan change before trying again.');
 				}
 				result.assertPaymentScope?.();
 				const confirmation = await stripe.confirmCardPayment(result.clientSecret);
 				if (!mounted.current) return;
 				if (confirmation.error) throw new Error(confirmation.error.message ?? 'Payment authentication failed.');
-				if (confirmation.paymentIntent?.status === 'succeeded') result = await onUpgrade(selectedPriceId, id, expectedPriceId);
+				if (confirmation.paymentIntent?.status === 'succeeded') {
+					setPaymentToFinish(operation);
+					result = await onUpgrade(priceId, id, expectedPriceId);
+				}
 			}
 			if (!mounted.current) return;
 			const outcome = planChangeCompletion(result);
+			setPaymentToFinish(null);
 			setCompletion(outcome);
 			if (!outcome.pending) closeTimer.current = setTimeout(onClose, 1500);
 		} catch (e: any) {
@@ -285,6 +301,7 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 	const buttonLabel = () => {
 		if (upgrading) return 'Processing...';
 		if (!available) return 'Plan changes unavailable';
+		if (paymentToFinish) return 'Finish plan change';
 		if (previewLoading) return 'Checking plan change...';
 		if (currentPreview?.error) return 'Retry preview';
 		if (!selectedPlan) return 'Select a plan';
@@ -342,7 +359,9 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 				<div style={completion.pending ? S.prorationNote : S.success} role="status">{completion.message}</div>
 			) : (
 				<div style={S.body}>
-					{compact && selectedPlan ? (
+					{paymentToFinish ? (
+						<p style={S.prorationNote} role="status">Payment authentication completed. Finish the plan change to check its outcome.</p>
+					) : compact && selectedPlan ? (
 						/* Focused confirmation: caller preselected the plan, so summarise
 						   it instead of re-showing the picker. */
 						<div style={S.currentPlan}>
@@ -370,7 +389,6 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 								intervalDisabled={upgrading || !available}
 								onIntervalChange={(interval) => {
 									if (inFlight.current || selectedPlan?.interval === interval) return;
-									attempt.current = null;
 									setSelectedPlan(null);
 									setError(null);
 								}}
