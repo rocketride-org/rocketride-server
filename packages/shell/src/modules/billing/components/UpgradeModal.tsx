@@ -15,15 +15,17 @@
  *
  * Reuses the PlanPicker card grid to display available plans for the
  * current app. The user's current plan is highlighted and disabled.
- * On confirmation, calls the host's upgrade callback which swaps the
- * Stripe subscription item server-side with proration.
+ * On confirmation, the host applies the plan change or schedules it for renewal.
  */
 
-import React, { useState, useMemo, type CSSProperties } from 'react';
+import React, { useEffect, useLayoutEffect, useState, useMemo, useRef, type CSSProperties } from 'react';
+import { loadStripe } from '@stripe/stripe-js';
 import { commonStyles } from '../../../themes/styles';
 import { Modal } from '../../../components/modal/Modal';
 import { PlanPicker, planAmount } from '../../checkout/PlanPicker';
 import type { CheckoutPlan } from '../../checkout/types';
+import { parsePlanChangeOutcome, parsePlanChangePreview, planChangeCompletion } from './planChange';
+import type { PlanChangeOutcome, PlanChangePreview } from './planChange';
 
 // =============================================================================
 // STYLES
@@ -107,6 +109,12 @@ const S = {
 // PROPS
 // =============================================================================
 
+interface PlanChangeAttempt {
+	priceId: string;
+	expectedPriceId: string;
+	id: string;
+}
+
 /** Props for the UpgradeModal component. */
 export interface UpgradeModalProps {
 	/** All plans from app_prices for the subscribed app. */
@@ -121,8 +129,14 @@ export interface UpgradeModalProps {
 	 * confirm. Ignored if it equals the current plan. Defaults to no selection.
 	 */
 	preselectedPriceId?: string;
-	/** Called when the user confirms the plan change. */
-	onUpgrade: (newPriceId: string) => Promise<void>;
+	/** Preview from the server. Return null if the connected server has no preview. */
+	onPreview?: (newPriceId: string, expectedPriceId: string) => Promise<PlanChangePreview | null>;
+	/** Keep the dialog and its attempt open if the host is temporarily unavailable. */
+	available?: boolean;
+	/** A host may permit replay of an authenticated attempt after its original row disappears. */
+	canFinishPayment?: boolean;
+	/** Confirm a plan change. Retries for the same selection reuse the attempt ID. */
+	onUpgrade: (newPriceId: string, attemptId?: string, expectedPriceId?: string) => Promise<void | PlanChangeOutcome>;
 	/** Called when the modal is dismissed. */
 	onClose: () => void;
 }
@@ -137,7 +151,8 @@ export interface UpgradeModalProps {
  * both the picker grid and preselected plans so a hidden plan can never be
  * reached via `preselectedPriceId`.
  */
-const isVisibleSubscriptionPlan = (p: CheckoutPlan): boolean =>
+export const isVisibleSubscriptionPlan = (p: CheckoutPlan): boolean =>
+	(!p.interval || p.interval === 'month' || p.interval === 'year') &&
 	p.metadata?.kind !== 'topup' &&
 	p.metadata?.kind !== 'promo_base' &&
 	!p.metadata?.action &&
@@ -147,25 +162,49 @@ const isVisibleSubscriptionPlan = (p: CheckoutPlan): boolean =>
  * Modal dialog for upgrading or downgrading a subscription plan.
  *
  * Displays the PlanPicker grid with the current plan disabled. The user
- * selects a new plan and clicks Confirm to trigger the server-side
- * Stripe subscription modification with proration.
+ * selects a new plan and confirms the timing reported by the server.
  */
 export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 	plans,
 	currentPriceId,
 	currentPlanName,
 	preselectedPriceId,
+	onPreview,
+	available = true,
+	canFinishPayment = available,
 	onUpgrade,
 	onClose,
 }) => {
-	const [selectedPlan, setSelectedPlan] = useState<CheckoutPlan | null>(
-		() => (preselectedPriceId && preselectedPriceId !== currentPriceId
-			? plans.find((p) => p.stripePriceId === preselectedPriceId && isVisibleSubscriptionPlan(p)) ?? null
-			: null),
+	const [selectedPlanId, setSelectedPlanId] = useState<string | null>(() =>
+		preselectedPriceId && preselectedPriceId !== currentPriceId &&
+		plans.some((p) => p.stripePriceId === preselectedPriceId && isVisibleSubscriptionPlan(p))
+			? preselectedPriceId
+			: null,
 	);
 	const [upgrading, setUpgrading] = useState(false);
-	const [success, setSuccess] = useState(false);
+	const [completion, setCompletion] = useState<{ message: string; pending: boolean } | null>(null);
 	const [error, setError] = useState<string | null>(null);
+	const [previewState, setPreviewState] = useState<({
+		priceId: string;
+		expectedPriceId: string;
+		source: NonNullable<UpgradeModalProps['onPreview']>;
+	} & (
+		{ status: 'ready'; preview: PlanChangePreview | null } |
+		{ status: 'failed'; message: string }
+	)) | null>(null);
+	const [previewRetry, setPreviewRetry] = useState(0);
+	const attempt = useRef<PlanChangeAttempt | null>(null);
+	const [paymentToFinish, setPaymentToFinish] = useState<PlanChangeAttempt | null>(null);
+	const inFlight = useRef(false);
+	const mounted = useRef(false);
+	const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+	useLayoutEffect(() => {
+		mounted.current = true;
+		return () => {
+			mounted.current = false;
+			if (closeTimer.current) clearTimeout(closeTimer.current);
+		};
+	}, []);
 
 	// Filter out top-up packs, hidden promo-base plans, and action-only plans
 	const subscriptionPlans = useMemo(
@@ -173,7 +212,8 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 		[plans],
 	);
 
-	/** Whether the selected plan differs from the current plan. */
+	// Resolve the selected card and its interval from the latest catalog.
+	const selectedPlan = subscriptionPlans.find((plan) => plan.stripePriceId === selectedPlanId) ?? null;
 	const isValidSelection = selectedPlan && selectedPlan.stripePriceId !== currentPriceId;
 
 	/**
@@ -182,52 +222,113 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 	 */
 	const compact = !!preselectedPriceId && isValidSelection;
 
-	/**
-	 * Determine if the selected plan is an upgrade or downgrade. Matches the
-	 * server (change_subscription_plan), which compares RAW price amounts: a
-	 * higher amount is an immediate prorated upgrade, a lower one is scheduled
-	 * for the next renewal. (Comparing normalized monthly cost mislabels
-	 * cross-interval switches, e.g. monthly→annual.)
-	 */
-	const changeDirection = useMemo(() => {
-		if (!selectedPlan) return null;
-		const currentPlan = subscriptionPlans.find((p) => p.stripePriceId === currentPriceId);
-		if (!currentPlan) return 'change';
-		if (selectedPlan.amountCents > currentPlan.amountCents) return 'upgrade';
-		if (selectedPlan.amountCents < currentPlan.amountCents) return 'downgrade';
-		return 'change';
-	}, [selectedPlan, currentPriceId, subscriptionPlans]);
+	const selectedPriceId = isValidSelection ? selectedPlan?.stripePriceId : undefined;
+	const paymentSelection = useRef({ available, currentPriceId, selectedPriceId });
+	useLayoutEffect(() => {
+		paymentSelection.current = { available, currentPriceId, selectedPriceId };
+	}, [available, currentPriceId, selectedPriceId]);
 
-	/** Handle plan selection -- skip if it's the current plan. */
+	useEffect(() => {
+		setPreviewState(null);
+		if (!available || paymentToFinish || !onPreview || !selectedPriceId) return;
+		let active = true;
+		const selection = { priceId: selectedPriceId, expectedPriceId: currentPriceId, source: onPreview };
+		void Promise.resolve()
+			.then(() => onPreview(selectedPriceId, currentPriceId))
+			.then((preview) => preview === null ? null : parsePlanChangePreview(preview))
+			.then(
+				(preview) => { if (active) setPreviewState({ ...selection, status: 'ready', preview }); },
+				(error: unknown) => {
+					if (!active) return;
+					const message = error instanceof Error && error.message ? error.message : 'Could not preview the plan change.';
+					setPreviewState({ ...selection, status: 'failed', message });
+				},
+			);
+		return () => { active = false; };
+	}, [available, paymentToFinish, onPreview, selectedPriceId, currentPriceId, previewRetry]);
+
+	const currentPreview = available && !paymentToFinish && onPreview && previewState?.priceId === selectedPriceId &&
+		previewState?.expectedPriceId === currentPriceId && previewState.source === onPreview ? previewState : null;
+	const previewLoading = Boolean(available && !paymentToFinish && onPreview && selectedPriceId && !currentPreview);
+	const preview = currentPreview?.status === 'ready' ? currentPreview.preview : null;
+	const previewError = currentPreview?.status === 'failed' ? currentPreview.message : null;
+	const actionAvailable = paymentToFinish ? canFinishPayment : available;
+	const canConfirm = Boolean(actionAvailable && (paymentToFinish ||
+		(isValidSelection && !previewLoading && currentPreview?.status !== 'failed' && preview?.timing !== 'unchanged')));
+
 	const handleSelect = (plan: CheckoutPlan) => {
-		if (plan.stripePriceId === currentPriceId) return;
-		setSelectedPlan(plan);
+		if (!available || plan.stripePriceId === currentPriceId || inFlight.current) return;
+		setSelectedPlanId(plan.stripePriceId);
 		setError(null);
 	};
 
-	/** Handle upgrade confirmation. */
 	const handleConfirm = async () => {
-		if (!selectedPlan || upgrading || !isValidSelection) return;
+		if (!canConfirm || inFlight.current) return;
+		inFlight.current = true;
+		const initialSelection = paymentSelection.current;
 		setUpgrading(true);
 		setError(null);
 		try {
-			await onUpgrade(selectedPlan.stripePriceId);
-			setSuccess(true);
-			// Auto-close after a brief success display
-			setTimeout(() => onClose(), 1500);
-		} catch (e: any) {
-			setError(e?.message ?? 'Plan change failed. Please try again.');
+			let operation = paymentToFinish;
+			if (!operation) {
+				if (!selectedPriceId) return;
+				if (attempt.current?.priceId !== selectedPriceId || attempt.current.expectedPriceId !== currentPriceId) {
+					const id = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, '0')).join('');
+					attempt.current = { priceId: selectedPriceId, expectedPriceId: currentPriceId, id };
+				}
+				operation = attempt.current;
+			}
+			const { priceId, id, expectedPriceId } = operation;
+			let authenticated = Boolean(paymentToFinish);
+			let result = await onUpgrade(priceId, id, expectedPriceId);
+			if (!mounted.current) return;
+			const paymentAction = !paymentToFinish && result?.status === 'requires_action' ? parsePlanChangeOutcome(result) : null;
+			if (paymentAction?.clientSecret && paymentAction.stripePublishableKey) {
+				const stripe = await loadStripe(paymentAction.stripePublishableKey);
+				if (!mounted.current) return;
+				if (!stripe) throw new Error('Payment authentication could not be loaded. Try again.');
+				if (paymentSelection.current !== initialSelection) {
+					throw new Error('The subscription or connection changed. Review the plan change before trying again.');
+				}
+				paymentAction.assertPaymentScope?.();
+				const confirmation = await stripe.confirmCardPayment(paymentAction.clientSecret);
+				if (!mounted.current) return;
+				if (confirmation.error) throw new Error(confirmation.error.message ?? 'Payment authentication failed.');
+				if (confirmation.paymentIntent?.status === 'succeeded') {
+					authenticated = true;
+					setPaymentToFinish(operation);
+					result = await onUpgrade(priceId, id, expectedPriceId);
+				}
+			}
+			if (!mounted.current) return;
+			const validated = authenticated ? parsePlanChangeOutcome(result) : result;
+			if (authenticated && validated?.status === 'requires_action') {
+				throw new Error('Payment is still awaiting confirmation. Try finishing the plan change again.');
+			}
+			const outcome = planChangeCompletion(validated);
+			setPaymentToFinish(null);
+			setCompletion(outcome);
+			if (!outcome.pending) closeTimer.current = setTimeout(onClose, 1500);
+		} catch (error: unknown) {
+			if (mounted.current) {
+				setError(error instanceof Error && error.message ? error.message : 'Plan change failed. Please try again.');
+			}
 		} finally {
-			setUpgrading(false);
+			inFlight.current = false;
+			if (mounted.current) setUpgrading(false);
 		}
 	};
 
-	/** Build the confirm button label based on selection state. */
 	const buttonLabel = () => {
 		if (upgrading) return 'Processing...';
-		if (!selectedPlan) return 'Select a plan';
-		if (!isValidSelection) return 'Current plan';
-		const verb = changeDirection === 'downgrade' ? 'Downgrade' : 'Upgrade';
+		if (!actionAvailable) return 'Plan changes unavailable';
+		if (paymentToFinish) return 'Finish plan change';
+		if (previewLoading) return 'Checking plan change...';
+		if (previewError) return 'Retry preview';
+		if (!selectedPlanId) return 'Select a plan';
+		if (selectedPlanId === currentPriceId || preview?.timing === 'unchanged') return 'Current plan';
+		if (!selectedPlan || !isValidSelection) return 'Plan unavailable';
+		const verb = preview?.direction === 'upgrade' ? 'Upgrade' : preview?.direction === 'downgrade' ? 'Downgrade' : 'Switch';
 		return `${verb} to ${selectedPlan.nickname} (${planAmount(selectedPlan)})`;
 	};
 
@@ -235,7 +336,7 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 	// selection exists and no plan change is in flight.
 	const confirmStyle: CSSProperties = {
 		...commonStyles.buttonPrimary,
-		...(isValidSelection && !upgrading ? null : { opacity: 0.5, cursor: 'default' }),
+		...((canConfirm || previewError) && !upgrading ? null : { opacity: 0.5, cursor: 'default' }),
 	};
 
 	return (
@@ -251,7 +352,9 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 			width={600}
 			showClose={false}
 			closeOnEscape={!upgrading}
-			footer={success ? undefined : (
+			footer={completion?.pending ? (
+				<button type="button" style={commonStyles.buttonSecondary} onClick={onClose}>Close</button>
+			) : completion ? undefined : (
 				<>
 					{/* Cancel — the dialog's explicit dismiss control. */}
 					<button
@@ -266,25 +369,21 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 					<button
 						type="button"
 						style={confirmStyle}
-						onClick={handleConfirm}
-						disabled={!isValidSelection || upgrading}
+						onClick={previewError ? () => setPreviewRetry((value) => value + 1) : handleConfirm}
+						disabled={(!canConfirm && !previewError) || upgrading}
 					>
 						{buttonLabel()}
 					</button>
 				</>
 			)}
 		>
-			{success ? (
-				/* Success confirmation — shown briefly until the auto-close timer
-				   dismisses the dialog (the footer is dropped in this state). */
-				<div style={S.success}>
-					{changeDirection === 'downgrade'
-						? 'Downgrade scheduled! Your current plan stays active until the end of this billing period.'
-						: 'Plan upgraded! Your new features and prorated token credits are available now.'}
-				</div>
+			{completion ? (
+				<div style={completion.pending ? S.prorationNote : S.success} role="status">{completion.message}</div>
 			) : (
 				<div style={S.body}>
-					{compact && selectedPlan ? (
+					{paymentToFinish ? (
+						<p style={S.prorationNote} role="status">Payment authentication completed. Finish the plan change to check its outcome.</p>
+					) : compact && selectedPlan ? (
 						/* Focused confirmation: caller preselected the plan, so summarise
 						   it instead of re-showing the picker. */
 						<div style={S.currentPlan}>
@@ -309,21 +408,30 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 								selectedPlan={selectedPlan}
 								onSelectPlan={handleSelect}
 								currentPriceId={currentPriceId}
+								keepSelectedPlanVisible
+								intervalDisabled={upgrading || !available}
+								onIntervalChange={(interval) => {
+									if (inFlight.current || selectedPlan?.interval === interval) return;
+									setSelectedPlanId(null);
+									setError(null);
+								}}
 							/>
 						</>
 					)}
 
-					{/* Proration info -- explains what happens on upgrade vs downgrade */}
-					{isValidSelection && changeDirection === 'upgrade' && (
+					{preview?.timing === 'immediate' && (
 						<div style={S.prorationNote}>
-							You will be charged the prorated difference for the remainder of your current billing period. Token credits will be adjusted accordingly.
+							{preview.billingIntervalChanges || preview.direction === 'interval_change'
+								? 'Your new billing period begins after payment. Stripe applies any unused-time credit to the first charge.'
+								: 'This change takes effect after payment. Any applicable proration is included in the charge.'}
 						</div>
 					)}
-					{isValidSelection && changeDirection === 'downgrade' && (
+					{preview?.timing === 'next_renewal' && (
 						<div style={S.prorationNote}>
-							Your current plan will remain active until the end of your billing period. The new plan takes effect at your next renewal.
+							Your current plan stays active until the new plan takes effect at your next renewal.
 						</div>
 					)}
+					{previewError && <div style={S.error} role="alert">{previewError}</div>}
 
 					{/* Error banner */}
 					{error && <div style={S.error}>{error}</div>}
