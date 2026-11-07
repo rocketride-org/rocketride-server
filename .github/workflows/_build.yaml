@@ -351,6 +351,12 @@ jobs:
           # test time. On Windows a hardlink over an already-loaded native .pyd
           # (e.g. cryptography's _rust.pyd) fails with a file lock; copy is atomic.
           UV_LINK_MODE: copy
+          # Every task child process of the test servers writes periodic Python
+          # stack dumps here (scripts/lib/stackdumps.js), uploaded below on every finished run.
+          # One dump a minute keeps the hook light; on Windows scripts/lib/stackwatch.js
+          # also writes native_<pid>.txt for a child frozen in startup.
+          ROCKETRIDE_TEST_STACK_DUMPS: ${{ github.workspace }}/dist/server/test-logs/stack-dumps
+          ROCKETRIDE_TEST_STACK_DUMPS_SECS: '60'
         run: ${{ matrix.builder_cmd }} ${{ inputs.test_targets }} --verbose ${{ vars.CI_TEST_SEQUENTIAL == 'true' && '--sequential' || '' }} --autoinstall ${{ matrix.platform == 'ubuntu' && '--system-compiler' || '' }}
 
       # rocketride_graph applies different Cypher rules on AGE 1.5.0 and 1.6.0,
@@ -378,6 +384,18 @@ jobs:
             echo "::$stop::"
             echo "::endgroup::"
           done
+
+      # The same logs and the stack dumps of the task child processes
+      # (test-logs/stack-dumps/stacks_<pid>.txt), for a child that stalls.
+      # A child can stall while every test still passes, so passing runs upload too.
+      - name: Upload test server logs
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: test-server-logs-${{ matrix.platform }}-${{ github.run_attempt }}
+          retention-days: 3
+          path: ${{ github.workspace }}/dist/server/test-logs/
+          if-no-files-found: ignore
 
       - name: Perform CodeQL Analysis
         if: inputs.codeql && matrix.platform == 'ubuntu'
