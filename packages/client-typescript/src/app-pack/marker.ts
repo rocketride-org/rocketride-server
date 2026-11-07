@@ -229,12 +229,6 @@ export interface AppListing {
 	typecheck?: boolean;
 }
 
-/**
- * Reads the STORE listing from the folder's appManifest.
- *
- * @param folder - The app's bound folder (absolute path).
- * @returns The listing projection (mode defaults to 'free').
- */
 /** Narrows an unknown JSON value to a plain object. */
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -281,6 +275,12 @@ function normalizeBillingPlan(raw: unknown): BillingPlan {
 	};
 }
 
+/**
+ * Reads the STORE listing from the folder's appManifest.
+ *
+ * @param folder - The app's bound folder (absolute path).
+ * @returns The listing projection (mode defaults to 'free').
+ */
 export function readAppListing(folder: string): AppListing {
 	const { pkg } = readPkg(folder);
 	const m = pkg.appManifest as AppManifestJson;
