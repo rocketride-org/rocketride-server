@@ -5,11 +5,13 @@ Unit tests for ai.modules.task.pipeline.
 omits an explicit ``source`` field. It scans every component, returns the id
 of the single ``config.mode == 'Source'`` component, and refuses to guess
 when the pipeline contains more than one.
+
+``substituted_env`` identifies the submitted references used in validation.
 """
 
 import pytest
 
-from ai.modules.task.pipeline import resolve_implied_source
+from ai.modules.task.pipeline import resolve_implied_source, substituted_env
 
 
 # ---------------------------------------------------------------------------
@@ -123,3 +125,15 @@ def test_mode_match_is_case_sensitive_and_exact(mode_value):
     """Only the literal string 'Source' counts; case / abbreviations do not."""
     pipeline = {'components': [{'id': 'maybe', 'config': {'mode': mode_value}}]}
     assert resolve_implied_source(pipeline) is None
+
+
+# ---------------------------------------------------------------------------
+# substituted_env
+# ---------------------------------------------------------------------------
+
+
+def test_substituted_env_lists_only_the_references_that_resolve():
+    """Missing, non-ROCKETRIDE_ and unreferenced variables are not substitutions."""
+    pipeline = {'a': '${ROCKETRIDE_ONE}', 'b': 'x ${ROCKETRIDE_MISSING} ${OTHER}', '${ROCKETRIDE_TWO}': 1}
+    env = {'ROCKETRIDE_ONE': 'v1', 'ROCKETRIDE_TWO': 'v2', 'OTHER': 'v3', 'ROCKETRIDE_UNUSED': 'v4'}
+    assert substituted_env(pipeline, env) == {'ROCKETRIDE_ONE': 'v1', 'ROCKETRIDE_TWO': 'v2'}
