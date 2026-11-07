@@ -1097,16 +1097,24 @@ def test_a_failing_lane_write_while_reporting_a_failure_passes_the_downstream_er
     assert fake_instance.text_written == 'Query execution failed'
 
 
-class _RaisingEngine:
-    """An engine whose every statement fails with one exception."""
+class _RaisingDatabase:
+    """A database whose every statement fails with one exception."""
 
     def __init__(self, exc):
-        """Fail every statement with ``exc``."""
+        """Fail every statement with ``exc``.
+
+        Args:
+            exc: The exception each statement raises.
+        """
         self.exc = exc
 
     @contextmanager
-    def connect(self):
-        """Yield a connection whose ``execute`` raises."""
+    def read_only_connection(self):
+        """Stand in for ``DatabaseGlobalBase.read_only_connection``, where generated SQL runs.
+
+        Yields:
+            A connection whose ``execute`` raises.
+        """
         yield SimpleNamespace(execute=self._fail)
 
     def _fail(self, *_args, **_kwargs):
@@ -1117,11 +1125,9 @@ class _RaisingEngine:
 def test_execute_sql_query_reports_a_clickhouse_failure_as_none():
     """clickhouse+native:// raises a DatabaseException that is not a SQLAlchemyError; it is still a failed query."""
     inst = _sql_instance(
-        SimpleNamespace(
-            engine=_RaisingEngine(
-                _StandInClickHouseDatabaseException(
-                    _StandInClickHouseServerException(60, "Table default.widgets doesn't exist")
-                )
+        _RaisingDatabase(
+            _StandInClickHouseDatabaseException(
+                _StandInClickHouseServerException(60, "Table default.widgets doesn't exist")
             )
         )
     )
@@ -1131,7 +1137,7 @@ def test_execute_sql_query_reports_a_clickhouse_failure_as_none():
 
 def test_execute_sql_query_lets_a_non_database_error_through():
     """Only database failures become None; anything else is a bug and propagates."""
-    inst = _sql_instance(SimpleNamespace(engine=_RaisingEngine(RuntimeError('boom'))))
+    inst = _sql_instance(_RaisingDatabase(RuntimeError('boom')))
 
     with pytest.raises(RuntimeError, match='boom'):
         inst._executeSQLQuery('SELECT 1')
@@ -1141,11 +1147,11 @@ def test_write_questions_reports_a_clickhouse_failure_on_the_lanes():
     """Through the real _executeSQLQuery, a ClickHouse runtime failure reaches the lanes as the failure message."""
     fake_global = _FakeGlobal()
     fake_global._validateQuery = lambda sql: (True, None)
-    fake_global.engine = _RaisingEngine(
+    fake_global.read_only_connection = _RaisingDatabase(
         _StandInClickHouseDatabaseException(
             _StandInClickHouseServerException(60, "Table default.widgets doesn't exist")
         )
-    )
+    ).read_only_connection
     inst = _sql_instance(fake_global)
     inst._buildSQLQueryOnce = lambda question_text, *, limit, previous_sql, error: {
         'isValid': True,
@@ -1160,6 +1166,60 @@ def test_write_questions_reports_a_clickhouse_failure_on_the_lanes():
 
     assert fake_instance.text_written == 'Query execution failed'
     assert fake_instance.answer_written.getJson() == {'error': 'Query execution failed'}
+
+
+def _empty_widgets_global(base):
+    """Return a stub IGlobal whose generated SQL runs read-only on ``base``, where table ``widgets`` has no row.
+
+    Args:
+        base: The SQLite-backed DatabaseGlobalBase fixture.
+
+    Returns:
+        The stub, with EXPLAIN accepting every query.
+    """
+    with base.engine.begin() as conn:
+        conn.exec_driver_sql('CREATE TABLE widgets (id INTEGER)')
+    fake_global = _FakeGlobal()
+    fake_global._validateQuery = lambda sql: (True, None)
+    fake_global.read_only_connection = base.read_only_connection
+    return fake_global
+
+
+def _ask_for_widgets(fake_global):
+    """Return an instance on ``fake_global`` whose LLM translates every question into ``SELECT id FROM widgets``.
+
+    Args:
+        fake_global: The stub IGlobal the instance queries.
+
+    Returns:
+        The instance.
+    """
+    inst = _sql_instance(fake_global)
+    inst._buildSQLQueryOnce = lambda question_text, *, limit, previous_sql, error: {
+        'isValid': True,
+        'query': 'SELECT id FROM widgets',
+    }
+    return inst
+
+
+def test_execute_sql_query_returns_an_empty_list_when_no_row_matches(base):
+    """A query that matches no row ran: [] is its result, and only None means the query failed.
+
+    Args:
+        base: A ``DatabaseGlobalBase`` on an in-memory SQLite engine, from the ``base`` fixture.
+    """
+    assert _sql_instance(_empty_widgets_global(base))._executeSQLQuery('SELECT id FROM widgets') == []
+
+
+def test_get_data_returns_no_rows_as_a_valid_result(base):
+    """get_data answers a generated query that matches no row with zero rows, not with the failure message.
+
+    Args:
+        base: A ``DatabaseGlobalBase`` on an in-memory SQLite engine, from the ``base`` fixture.
+    """
+    result = _ask_for_widgets(_empty_widgets_global(base)).get_data({'question': 'widgets'})
+
+    assert result == {'valid': True, 'rows': [], 'sql': 'SELECT id FROM widgets', 'row_limit': 250}
 
 
 @pytest.mark.parametrize('reply', [{'isValid': False}, {'isValid': True, 'query': None}])
