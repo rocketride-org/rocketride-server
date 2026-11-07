@@ -193,7 +193,7 @@ export interface IAccountViewProps {
 	onPurchaseTopup?: (plan: any) => Promise<{ status: string; clientSecret?: string }>;
 	/** Called when the user confirms a plan upgrade/downgrade from the billing panel. */
 	onUpgradeSubscription?: (appId: string, newPriceId: string, attemptId?: string, expectedPriceId?: string) => Promise<void | PlanChangeOutcome>;
-	onPreviewSubscriptionChange?: (appId: string, newPriceId: string) => Promise<PlanChangePreview | null>;
+	onPreviewSubscriptionChange?: (appId: string, newPriceId: string, expectedPriceId: string) => Promise<PlanChangePreview | null>;
 
 	// -- Navigation state ------------------------------------------------------
 	/** The currently active section / tab. */

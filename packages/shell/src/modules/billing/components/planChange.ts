@@ -14,6 +14,25 @@ export interface PlanChangeOutcome {
 	timing?: PlanChangePreview['timing'];
 	clientSecret?: string | null;
 	stripePublishableKey?: string;
+	/** Host guard called immediately before Stripe confirmation. */
+	assertPaymentScope?: () => void;
+}
+
+/** Read a preview from a connected server before enabling confirmation. */
+export function parsePlanChangePreview(value: unknown): PlanChangePreview {
+	if (value && typeof value === 'object' && 'direction' in value && 'timing' in value) {
+		const { direction, timing } = value;
+		const billingIntervalChanges = 'billingIntervalChanges' in value ? value.billingIntervalChanges : undefined;
+		const validTransition =
+			(direction === 'upgrade' && timing === 'immediate') ||
+			(direction === 'downgrade' && timing === 'next_renewal') ||
+			(direction === 'interval_change' && (timing === 'immediate' || timing === 'next_renewal')) ||
+			(direction === 'unchanged' && timing === 'unchanged');
+		if (validTransition && (billingIntervalChanges === undefined || typeof billingIntervalChanges === 'boolean')) {
+			return { direction, timing, billingIntervalChanges };
+		}
+	}
+	throw new Error('The server returned an invalid plan change preview. Try again.');
 }
 
 /** Describe what the server actually applied after confirmation. */

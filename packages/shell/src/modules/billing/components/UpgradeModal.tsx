@@ -15,8 +15,7 @@
  *
  * Reuses the PlanPicker card grid to display available plans for the
  * current app. The user's current plan is highlighted and disabled.
- * On confirmation, calls the host's upgrade callback which swaps the
- * Stripe subscription item server-side with proration.
+ * On confirmation, the host applies the plan change or schedules it for renewal.
  */
 
 import React, { useEffect, useState, useMemo, useRef, type CSSProperties } from 'react';
@@ -125,7 +124,9 @@ export interface UpgradeModalProps {
 	 */
 	preselectedPriceId?: string;
 	/** Preview from the server. Return null if the connected server has no preview. */
-	onPreview?: (newPriceId: string) => Promise<PlanChangePreview | null>;
+	onPreview?: (newPriceId: string, expectedPriceId: string) => Promise<PlanChangePreview | null>;
+	/** Keep the dialog and its attempt open if the host is temporarily unavailable. */
+	available?: boolean;
 	/** Confirm a plan change. Retries for the same selection reuse the attempt ID. */
 	onUpgrade: (newPriceId: string, attemptId?: string, expectedPriceId?: string) => Promise<void | PlanChangeOutcome>;
 	/** Called when the modal is dismissed. */
@@ -153,8 +154,7 @@ const isVisibleSubscriptionPlan = (p: CheckoutPlan): boolean =>
  * Modal dialog for upgrading or downgrading a subscription plan.
  *
  * Displays the PlanPicker grid with the current plan disabled. The user
- * selects a new plan and clicks Confirm to trigger the server-side
- * Stripe subscription modification with proration.
+ * selects a new plan and confirms the timing reported by the server.
  */
 export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 	plans,
@@ -162,6 +162,7 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 	currentPlanName,
 	preselectedPriceId,
 	onPreview,
+	available = true,
 	onUpgrade,
 	onClose,
 }) => {
@@ -173,9 +174,15 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 	const [upgrading, setUpgrading] = useState(false);
 	const [completion, setCompletion] = useState<{ message: string; pending: boolean } | null>(null);
 	const [error, setError] = useState<string | null>(null);
-	const [previewState, setPreviewState] = useState<{ priceId: string; preview: PlanChangePreview | null; error?: string } | null>(null);
+	const [previewState, setPreviewState] = useState<{
+		priceId: string;
+		expectedPriceId: string;
+		source: NonNullable<UpgradeModalProps['onPreview']>;
+		preview: PlanChangePreview | null;
+		error?: string;
+	} | null>(null);
 	const [previewRetry, setPreviewRetry] = useState(0);
-	const attempt = useRef<{ priceId: string; id: string } | null>(null);
+	const attempt = useRef<{ priceId: string; expectedPriceId: string; id: string } | null>(null);
 	const inFlight = useRef(false);
 	const mounted = useRef(false);
 	const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -205,25 +212,27 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 
 	const selectedPriceId = isValidSelection ? selectedPlan?.stripePriceId : undefined;
 	useEffect(() => {
-		if (!onPreview || !selectedPriceId) return;
-		let active = true;
 		setPreviewState(null);
-		void onPreview(selectedPriceId).then(
-			(preview) => { if (active) setPreviewState({ priceId: selectedPriceId, preview }); },
+		if (!available || !onPreview || !selectedPriceId) return;
+		let active = true;
+		const selection = { priceId: selectedPriceId, expectedPriceId: currentPriceId, source: onPreview };
+		void onPreview(selectedPriceId, currentPriceId).then(
+			(preview) => { if (active) setPreviewState({ ...selection, preview }); },
 			(err) => {
-				if (active) setPreviewState({ priceId: selectedPriceId, preview: null, error: err?.message ?? 'Could not preview the plan change.' });
+				if (active) setPreviewState({ ...selection, preview: null, error: err?.message ?? 'Could not preview the plan change.' });
 			},
 		);
 		return () => { active = false; };
-	}, [onPreview, selectedPriceId, previewRetry]);
+	}, [available, onPreview, selectedPriceId, currentPriceId, previewRetry]);
 
-	const currentPreview = onPreview && previewState?.priceId === selectedPriceId ? previewState : null;
-	const previewLoading = Boolean(onPreview && selectedPriceId && !currentPreview);
+	const currentPreview = available && onPreview && previewState?.priceId === selectedPriceId &&
+		previewState?.expectedPriceId === currentPriceId && previewState.source === onPreview ? previewState : null;
+	const previewLoading = Boolean(available && onPreview && selectedPriceId && !currentPreview);
 	const preview = currentPreview?.preview;
-	const canConfirm = Boolean(isValidSelection && !previewLoading && !currentPreview?.error && preview?.timing !== 'unchanged');
+	const canConfirm = Boolean(available && isValidSelection && !previewLoading && !currentPreview?.error && preview?.timing !== 'unchanged');
 
 	const handleSelect = (plan: CheckoutPlan) => {
-		if (plan.stripePriceId === currentPriceId || inFlight.current) return;
+		if (!available || plan.stripePriceId === currentPriceId || inFlight.current) return;
 		if (selectedPlan?.stripePriceId !== plan.stripePriceId) attempt.current = null;
 		setSelectedPlan(plan);
 		setError(null);
@@ -235,21 +244,22 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 		setUpgrading(true);
 		setError(null);
 		try {
-			if (!attempt.current || attempt.current.priceId !== selectedPriceId) {
+			if (attempt.current?.priceId !== selectedPriceId || attempt.current.expectedPriceId !== currentPriceId) {
 				const id = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, '0')).join('');
-				attempt.current = { priceId: selectedPriceId, id };
+				attempt.current = { priceId: selectedPriceId, expectedPriceId: currentPriceId, id };
 			}
-			const { id } = attempt.current;
-			let result = await onUpgrade(selectedPriceId, id, currentPriceId);
+			const { id, expectedPriceId } = attempt.current;
+			let result = await onUpgrade(selectedPriceId, id, expectedPriceId);
 			if (!mounted.current) return;
 			if (result?.status === 'requires_action' && result.clientSecret && result.stripePublishableKey) {
 				const stripe = await loadStripe(result.stripePublishableKey);
 				if (!mounted.current) return;
 				if (!stripe) throw new Error('Payment authentication could not be loaded. Try again.');
+				result.assertPaymentScope?.();
 				const confirmation = await stripe.confirmCardPayment(result.clientSecret);
 				if (!mounted.current) return;
 				if (confirmation.error) throw new Error(confirmation.error.message ?? 'Payment authentication failed.');
-				if (confirmation.paymentIntent?.status === 'succeeded') result = await onUpgrade(selectedPriceId, id, currentPriceId);
+				if (confirmation.paymentIntent?.status === 'succeeded') result = await onUpgrade(selectedPriceId, id, expectedPriceId);
 			}
 			if (!mounted.current) return;
 			const outcome = planChangeCompletion(result);
@@ -265,6 +275,7 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 
 	const buttonLabel = () => {
 		if (upgrading) return 'Processing...';
+		if (!available) return 'Plan changes unavailable';
 		if (previewLoading) return 'Checking plan change...';
 		if (currentPreview?.error) return 'Retry preview';
 		if (!selectedPlan) return 'Select a plan';
@@ -347,6 +358,7 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 								selectedPlan={selectedPlan}
 								onSelectPlan={handleSelect}
 								currentPriceId={currentPriceId}
+								intervalDisabled={upgrading || !available}
 								onIntervalChange={(interval) => {
 									if (inFlight.current || selectedPlan?.interval === interval) return;
 									attempt.current = null;

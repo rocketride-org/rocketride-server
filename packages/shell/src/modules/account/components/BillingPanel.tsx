@@ -356,7 +356,7 @@ export interface BillingPanelProps {
 	onPurchaseTopup?: (plan: CheckoutPlan) => Promise<{ status: string; clientSecret?: string }>;
 	/** Called when the user confirms a plan change. */
 	onUpgradeSubscription?: (appId: string, newPriceId: string, attemptId?: string, expectedPriceId?: string) => Promise<void | PlanChangeOutcome>;
-	onPreviewSubscriptionChange?: (appId: string, newPriceId: string) => Promise<PlanChangePreview | null>;
+	onPreviewSubscriptionChange?: (appId: string, newPriceId: string, expectedPriceId: string) => Promise<PlanChangePreview | null>;
 }
 
 // =============================================================================
@@ -375,10 +375,13 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscri
 	const [showTopUpModal, setShowTopUpModal] = useState(false);
 	// ── Upgrade modal state ─────────────────────────────────────────────────
 	const [upgradeTarget, setUpgradeTarget] = useState<BillingDetail | null>(null);
+	const activeUpgradeTarget = upgradeTarget && subscriptions.find((row) =>
+		row.appId === upgradeTarget.appId && row.stripeSubscriptionId === upgradeTarget.stripeSubscriptionId
+	);
 	const upgradePlans = useMemo(() => allPlans?.filter((plan) => plan.appId === upgradeTarget?.appId), [allPlans, upgradeTarget?.appId]);
 	const previewUpgrade = useCallback(
-		(newPriceId: string) => upgradeTarget && onPreviewSubscriptionChange
-			? onPreviewSubscriptionChange(upgradeTarget.appId, newPriceId)
+		(newPriceId: string, expectedPriceId: string) => upgradeTarget && onPreviewSubscriptionChange
+			? onPreviewSubscriptionChange(upgradeTarget.appId, newPriceId, expectedPriceId)
 			: Promise.resolve(null),
 		[upgradeTarget, onPreviewSubscriptionChange],
 	);
@@ -698,13 +701,17 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscri
 			)}
 
 			{/* Upgrade / change plan modal */}
-			{upgradeTarget && upgradePlans && onUpgradeSubscription && (
+			{upgradeTarget && upgradePlans && (
 				<UpgradeModal
 					plans={upgradePlans}
-					currentPriceId={upgradeTarget.stripePriceId}
-					currentPlanName={upgradeTarget.planNickname}
+					currentPriceId={(activeUpgradeTarget || upgradeTarget).stripePriceId}
+					currentPlanName={(activeUpgradeTarget || upgradeTarget).planNickname}
+					available={Boolean(isConnected && isOrgAdmin && activeUpgradeTarget && onUpgradeSubscription)}
 					onPreview={onPreviewSubscriptionChange ? previewUpgrade : undefined}
-					onUpgrade={(newPriceId, attemptId, expectedPriceId) => onUpgradeSubscription(upgradeTarget.appId, newPriceId, attemptId, expectedPriceId)}
+					onUpgrade={(newPriceId, attemptId, expectedPriceId) => {
+						if (!onUpgradeSubscription) throw new Error('Plan changes are currently unavailable.');
+						return onUpgradeSubscription(upgradeTarget.appId, newPriceId, attemptId, expectedPriceId);
+					}}
 					onClose={() => setUpgradeTarget(null)}
 				/>
 			)}

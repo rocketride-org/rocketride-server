@@ -5,7 +5,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { planChangeCompletion } from './planChange';
+import { parsePlanChangePreview, planChangeCompletion } from './planChange';
 
 test('uses neutral copy for legacy callbacks without a result', () => {
 	assert.deepEqual(planChangeCompletion(undefined), { message: 'Plan change requested.', pending: false });
@@ -30,4 +30,20 @@ test('keeps authentication and payment states pending', () => {
 
 test('reports a failed payment as an error', () => {
 	assert.throws(() => planChangeCompletion({ status: 'payment_failed' }), /Payment failed/);
+});
+
+test('parses supported server preview transitions', () => {
+	assert.deepEqual(parsePlanChangePreview({ direction: 'upgrade', timing: 'immediate', billingIntervalChanges: true }), {
+		direction: 'upgrade', timing: 'immediate', billingIntervalChanges: true,
+	});
+	for (const timing of ['immediate', 'next_renewal']) {
+		assert.equal(parsePlanChangePreview({ direction: 'interval_change', timing }).timing, timing);
+	}
+});
+
+test('rejects empty, malformed and contradictory preview responses', () => {
+	for (const response of [null, {}, { success: true }, { direction: 'upgrade', timing: 'next_renewal' },
+		{ direction: 'interval_change', timing: 'unchanged' }, { direction: 'downgrade', timing: 'next_renewal', billingIntervalChanges: 'false' }]) {
+		assert.throws(() => parsePlanChangePreview(response), /invalid plan change preview/);
+	}
 });

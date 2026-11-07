@@ -367,6 +367,9 @@ export interface PlanPickerProps {
 	/** Content rendered below the plan cards (e.g. a "Continue" button). */
 	footer?: React.ReactNode;
 
+	/** Disable the billing-interval toggle while a host operation is in progress. */
+	intervalDisabled?: boolean;
+
 	/** Called when the user changes the visible billing interval. */
 	onIntervalChange?: (interval: 'month' | 'year') => void;
 
@@ -441,6 +444,7 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 	ctaConfig,
 	currentPriceId,
 	footer,
+	intervalDisabled = false,
 	onIntervalChange,
 	defaultInterval = 'month',
 	autoSelectDefault = false,
@@ -526,6 +530,7 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 	/** Switch interval and try to keep the same tier selected. */
 	const handleToggle = useCallback(
 		(newInterval: 'month' | 'year') => {
+			if (intervalDisabled) return;
 			setInterval(newInterval);
 			onIntervalChange?.(newInterval);
 
@@ -553,7 +558,7 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 				.sort((a, b) => planOrder(a) - planOrder(b))[0];
 			if (fallback) onSelectPlan(fallback);
 		},
-		[plans, selectedPlan, onSelectPlan, autoSelectDefault, onIntervalChange]
+		[plans, selectedPlan, onSelectPlan, autoSelectDefault, intervalDisabled, onIntervalChange]
 	);
 
 	// ── Render ───────────────────────────────────────────────────────────
@@ -574,10 +579,10 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 			{showToggle && (
 				<div style={S.toggleRow}>
 					<div style={S.toggleBar}>
-						<button style={S.toggleBtn(interval === 'month')} onClick={() => handleToggle('month')}>
+						<button style={S.toggleBtn(interval === 'month')} disabled={intervalDisabled} onClick={() => handleToggle('month')}>
 							Monthly
 						</button>
-						<button style={S.toggleBtn(interval === 'year')} onClick={() => handleToggle('year')}>
+						<button style={S.toggleBtn(interval === 'year')} disabled={intervalDisabled} onClick={() => handleToggle('year')}>
 							Annual
 						</button>
 					</div>
