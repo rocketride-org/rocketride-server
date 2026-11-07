@@ -42,8 +42,16 @@ test('parses supported server preview transitions', () => {
 });
 
 test('rejects empty, malformed and contradictory preview responses', () => {
-	for (const response of [null, {}, { success: true }, { direction: 'upgrade', timing: 'next_renewal' },
-		{ direction: 'interval_change', timing: 'unchanged' }, { direction: 'downgrade', timing: 'next_renewal', billingIntervalChanges: 'false' }]) {
+	for (const response of [
+		null,
+		{},
+		{ success: true },
+		{ direction: 'upgrade', timing: 'next_renewal' },
+		{ direction: 'interval_change', timing: 'unchanged' },
+		{ direction: 'interval_change', timing: 'immediate', billingIntervalChanges: false },
+		{ direction: 'unchanged', timing: 'unchanged', billingIntervalChanges: true },
+		{ direction: 'downgrade', timing: 'next_renewal', billingIntervalChanges: 'false' },
+	]) {
 		assert.throws(() => parsePlanChangePreview(response), /invalid plan change preview/);
 	}
 });

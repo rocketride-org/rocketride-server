@@ -28,7 +28,12 @@ export function parsePlanChangePreview(value: unknown): PlanChangePreview {
 			(direction === 'downgrade' && timing === 'next_renewal') ||
 			(direction === 'interval_change' && (timing === 'immediate' || timing === 'next_renewal')) ||
 			(direction === 'unchanged' && timing === 'unchanged');
-		if (validTransition && (billingIntervalChanges === undefined || typeof billingIntervalChanges === 'boolean')) {
+		const validIntervalChange = billingIntervalChanges === undefined || (
+			typeof billingIntervalChanges === 'boolean' &&
+			(direction !== 'interval_change' || billingIntervalChanges) &&
+			(direction !== 'unchanged' || !billingIntervalChanges)
+		);
+		if (validTransition && validIntervalChange) {
 			return { direction, timing, billingIntervalChanges };
 		}
 	}

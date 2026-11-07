@@ -305,7 +305,8 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 		if (previewLoading) return 'Checking plan change...';
 		if (currentPreview?.error) return 'Retry preview';
 		if (!selectedPlan) return 'Select a plan';
-		if (!isValidSelection || preview?.timing === 'unchanged') return 'Current plan';
+		if (selectedPlan.stripePriceId === currentPriceId || preview?.timing === 'unchanged') return 'Current plan';
+		if (!isValidSelection) return 'Plan unavailable';
 		const verb = preview?.direction === 'upgrade' ? 'Upgrade' : preview?.direction === 'downgrade' ? 'Downgrade' : 'Switch';
 		return `${verb} to ${selectedPlan.nickname} (${planAmount(selectedPlan)})`;
 	};
@@ -398,7 +399,7 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 
 					{preview?.timing === 'immediate' && (
 						<div style={S.prorationNote}>
-							{preview.billingIntervalChanges
+							{preview.billingIntervalChanges || preview.direction === 'interval_change'
 								? 'Your new billing period begins after payment. Stripe applies any unused-time credit to the first charge.'
 								: 'This change takes effect after payment. Any applicable proration is included in the charge.'}
 						</div>

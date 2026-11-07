@@ -485,13 +485,21 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 		return false;
 	}, [plans]);
 
+	// In a plan change, keep the chosen card visible even when a catalog
+	// refresh introduces a toggle that was absent when the choice was made.
+	const selectedInterval = selectedPlan?.interval;
+	const displayedInterval = currentPriceId && (selectedInterval === 'month' || selectedInterval === 'year') &&
+		plans.some((plan) => plan.stripePriceId === selectedPlan?.stripePriceId)
+		? selectedInterval
+		: interval;
+
 	// Plans visible at the current interval, sorted by order ascending.
 	const visiblePlans = useMemo(() => {
 		const filtered = showToggle
-			? plans.filter((p) => !p.interval || p.interval === 'one_time' || p.interval === interval)
+			? plans.filter((p) => !p.interval || p.interval === 'one_time' || p.interval === displayedInterval)
 			: plans;
 		return [...filtered].sort((a, b) => planOrder(a) - planOrder(b));
-	}, [plans, interval, showToggle]);
+	}, [plans, displayedInterval, showToggle]);
 
 	// Largest description length across ALL plans (both intervals). Drives the
 	// ``uniformCardHeight`` spacer padding so a card reserves the tallest feature
@@ -579,10 +587,10 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 			{showToggle && (
 				<div style={S.toggleRow}>
 					<div style={S.toggleBar}>
-						<button style={S.toggleBtn(interval === 'month')} disabled={intervalDisabled} onClick={() => handleToggle('month')}>
+						<button style={S.toggleBtn(displayedInterval === 'month')} disabled={intervalDisabled} onClick={() => handleToggle('month')}>
 							Monthly
 						</button>
-						<button style={S.toggleBtn(interval === 'year')} disabled={intervalDisabled} onClick={() => handleToggle('year')}>
+						<button style={S.toggleBtn(displayedInterval === 'year')} disabled={intervalDisabled} onClick={() => handleToggle('year')}>
 							Annual
 						</button>
 					</div>
