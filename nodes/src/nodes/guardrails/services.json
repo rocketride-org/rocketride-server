@@ -72,6 +72,16 @@
 	"tile": [],
 	//
 	//	Optional:
+	//		The invoke connections this driver may use. The llm judges, after a
+	//		retrieval miss, whether an answer states anything needing a source.
+	//
+	"invoke": {
+		"llm": {
+			"description": "Optional LLM that judges whether an answer given after a retrieval miss needs a source; without one, any stated figure counts",
+			"min": 0
+		}
+	},
+	//	Optional:
 	//		As a pipe component, define what this pipe component takes
 	//		and what it produces
 	//
@@ -125,6 +135,7 @@
 				"enable_content_safety": false,
 				"enable_pii_detection": true,
 				"enable_hallucination_check": false,
+				"require_grounding": false,
 				"max_input_length": 0,
 				"max_tokens_estimate": 0,
 				"expected_format": "",
@@ -138,6 +149,7 @@
 				"enable_content_safety": true,
 				"enable_pii_detection": true,
 				"enable_hallucination_check": true,
+				"require_grounding": true,
 				"max_input_length": 50000,
 				"max_tokens_estimate": 4096,
 				"expected_format": "",
@@ -151,6 +163,7 @@
 				"enable_content_safety": true,
 				"enable_pii_detection": true,
 				"enable_hallucination_check": true,
+				"require_grounding": false,
 				"max_input_length": 0,
 				"max_tokens_estimate": 0,
 				"expected_format": "",
@@ -208,6 +221,12 @@
 			"type": "boolean",
 			"title": "Enable hallucination check",
 			"description": "Verify that output claims are grounded in source documents",
+			"default": false
+		},
+		"require_grounding": {
+			"type": "boolean",
+			"title": "Require grounding",
+			"description": "After a retrieval returns nothing, treat an answer that states something needing a source as a violation. Under block it is replaced with a short refusal rather than dropped. With an llm connected, that model judges the answer; without one, any stated figure counts and other claims are not checked. Needs the documents lane wired to have any effect.",
 			"default": false
 		},
 		"max_input_length": {
@@ -274,6 +293,7 @@
 				"enable_content_safety",
 				"enable_pii_detection",
 				"enable_hallucination_check",
+				"require_grounding",
 				"max_input_length",
 				"max_tokens_estimate",
 				"expected_format",
@@ -291,6 +311,7 @@
 			"object": "strict",
 			"properties": [
 				"policy_mode",
+				"require_grounding",
 				"max_tokens_estimate",
 				"expected_format"
 			]
