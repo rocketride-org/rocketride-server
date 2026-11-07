@@ -510,21 +510,141 @@ def test_format_db_error_returns_a_neutral_string_when_the_message_is_only_detai
             'DB::Exception: tenant QA_APP_T1 rejected. Upload failed at position 3 of batch',
         ),
         (
+            1054,
+            "Unknown column 'foo' in 'field list'",
+            "Unknown column 'foo' in 'field list'",
+        ),
+        (
+            1062,
+            "Duplicate entry 'x' for key 'k'",
+            "Duplicate entry 'x' for key 'k'",
+        ),
+        (
             1064,
             'You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version '
             "for the right syntax to use near 'BY id LIMIT 1, 'QA_CANARY_M2'' at line 1",
             'You have an error in your SQL syntax',
         ),
     ],
-    ids=['signal', 'signal-looking-like-clickhouse', 'syntax-error'],
+    ids=['signal', 'signal-looking-like-clickhouse', 'unknown-column', 'duplicate-entry', 'syntax-error'],
 )
 def test_format_db_error_leaves_other_databases_text_alone(base, errno, text, kept):
+    """Non-1064 MySQL errors keep their full primary sentence while 1064 trims the near-quote."""
     exc = _wrapped(_FakeDriverError(errno, text), 'SELECT 1', {})
 
     result = base._format_db_error(exc)
 
-    assert result.startswith(f'Error {errno}: ')
-    assert kept in result
+    if errno != 1064:
+        assert result == f'Error {errno}: {kept}'
+    else:
+        assert result.startswith(f'Error {errno}: ')
+        assert kept in result
+
+
+# Live capture provenance (MySQL 8.4.11 via PyMySQL 1.2.3 / SQLAlchemy 2.0.55, 2026-10-20):
+# Capture procedure:
+#   docker run --rm -d --name mysql84 -e MYSQL_ROOT_PASSWORD=test -e MYSQL_DATABASE=t -p 3306:3306 mysql:8.4.11
+#   python -c "import pymysql; c = pymysql.connect(host='127.0.0.1', user='root', password='test', database='t').cursor(); c.execute(sql, params)"
+# PyMySQL's Cursor.mogrify() client-interpolates `%s` bind parameters before sending the query
+# string to the server, so ER_PARSE_ERROR (1064) quotes up to 80 bytes of the interpolated SQL
+# starting at the parser's stop point:
+#   1. SQL: 'SELECT id FROM t ORDER BYY id LIMIT 1, %s', params: ('QA_CANARY_M2',)
+#      Driver output: OperationalError(1064, "... near 'BY id LIMIT 1, 'QA_CANARY_M2'' at line 1")
+#   2. SQL: "INSERT INTO t VALUES (1, 'a') (2, %s)", params: ('QA_CANARY_M4',)
+#      Driver output: OperationalError(1064, "... near '(2, 'QA_CANARY_M4')' at line 1")
+#   3. SQL: 'SELECT id FROM t ORDER BYY id LIMIT 1, %s, %s, %s, %s',
+#      params: ('QA_CANARY_N01', 'QA_CANARY_N02', 'QA_CANARY_N03', 'QA_CANARY_N04')
+#      Driver output: OperationalError(1064, "... near 'BY id LIMIT 1, 'QA_CANARY_N01', 'QA_CANARY_N02', 'QA_CANARY_N03', 'QA_CANARY_N04' at line 1")
+#   4. SQL: 'SELECT id FROM t ORDER BYY id\nLIMIT 1, %s', params: ('QA_CANARY_M2',)
+#      Driver output: OperationalError(1064, "... near 'BY id\nLIMIT 1, 'QA_CANARY_M2'' at line 2")
+#   5. SQL: 'SELECT id FROM t WHERE id = %s %s', params: (1, 'QA_CANARY_M5')
+#      Driver output: OperationalError(1064, "... near ''QA_CANARY_M5'' at line 1")
+#   6. SQL: 'SELECT id FROM t WHERE id = 1 %s', params: (b'QA_CANARY_M6',)
+#      Driver output: OperationalError(1064, "... near '_binary'QA_CANARY_M6'' at line 1")
+#   7. SQL: 'SELECT * FROM t WHERE id =', params: ()
+#      Driver output: OperationalError(1064, "... near '' at line 1")
+@pytest.mark.parametrize(
+    ('text', 'expected_tail', 'forbidden'),
+    [
+        (
+            'You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version '
+            "for the right syntax to use near 'BY id LIMIT 1, 'QA_CANARY_M2'' at line 1",
+            "for the right syntax to use near 'BY' at line 1",
+            ('QA_CANARY_M2', 'LIMIT 1'),
+        ),
+        (
+            'You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version '
+            "for the right syntax to use near '(2, 'QA_CANARY_M4')' at line 1",
+            "for the right syntax to use near '(' at line 1",
+            ('QA_CANARY_M4',),
+        ),
+        (
+            'You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version '
+            "for the right syntax to use near 'BY id LIMIT 1, 'QA_CANARY_N01', 'QA_CANARY_N02', 'QA_CANARY_N03', 'QA_CANARY_N04' at line 1",
+            "for the right syntax to use near 'BY' at line 1",
+            ('QA_CANARY_N01', 'QA_CANARY_N02', 'QA_CANARY_N03', 'QA_CANARY_N04'),
+        ),
+        (
+            'You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version '
+            "for the right syntax to use near 'BY id\nLIMIT 1, 'QA_CANARY_M2'' at line 2",
+            "for the right syntax to use near 'BY' at line 2",
+            ('QA_CANARY_M2',),
+        ),
+        (
+            'You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version '
+            "for the right syntax to use near ''QA_CANARY_M5'' at line 1",
+            'for the right syntax to use at line 1',
+            ('QA_CANARY_M5',),
+        ),
+        (
+            'You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version '
+            "for the right syntax to use near '_binary'QA_CANARY_M6'' at line 1",
+            'for the right syntax to use at line 1',
+            ('QA_CANARY_M6', '_binar'),
+        ),
+        (
+            'You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version '
+            "for the right syntax to use near '' at line 1",
+            "for the right syntax to use near '' at line 1",
+            (),
+        ),
+    ],
+    ids=[
+        'bound-value-after-stop-point',
+        'missing-comma-in-values-list',
+        'eighty-character-cap-mid-value',
+        'multiline-statement',
+        'rejected-token-is-quoted-bound-value',
+        'rejected-token-is-binary-introducer-literal',
+        'empty-quote-at-end-of-input',
+    ],
+)
+def test_format_db_error_trims_mysql_1064_near_quote_without_echoing_bound_values(
+    base, text, expected_tail, forbidden
+):
+    """MySQL 1064 parse errors retain at most the first non-literal token and line number."""
+    exc = _wrapped(_FakeDriverError(1064, text), 'SELECT 1', {})
+
+    result = base._format_db_error(exc)
+
+    assert result.startswith('Error 1064: You have an error in your SQL syntax;')
+    assert result.endswith(expected_tail)
+    for canary in forbidden:
+        assert canary not in result
+
+
+def test_format_db_error_replaces_unmatched_mysql_1064_with_neutral_message(base):
+    """Non-English 1064 server messages that do not match _MYSQL_NEAR_QUOTE fall back to a neutral string."""
+    localized = (
+        'Tienes un error en tu sintaxis SQL; consulta el manual de tu versión de MySQL '
+        "para conocer la sintaxis correcta cerca de 'BY id LIMIT 1, 'QA_CANARY_M2'' en la línea 1"
+    )
+    exc = _wrapped(_FakeDriverError(1064, localized), 'SELECT 1', {})
+
+    result = base._format_db_error(exc)
+
+    assert result == 'You have an error in your SQL syntax (Error 1064).'
+    assert 'QA_CANARY_M2' not in result
 
 
 @pytest.mark.parametrize(
