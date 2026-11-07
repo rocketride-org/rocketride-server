@@ -86,27 +86,23 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: ubuntu
-            label: Ubuntu 22.04
-            runner: ubuntu-22.04
-            builder_cmd: ./builder
-            vcpkg_cmd: ./build/vcpkg/vcpkg
           - platform: windows
             label: Windows Server 2022
             runner: windows-2022
             builder_cmd: ./builder.cmd
             vcpkg_cmd: ./build/vcpkg/vcpkg.exe
-          - platform: macos
-            label: macOS (ARM64)
-            runner: macos-15
-            builder_cmd: ./builder
-            vcpkg_cmd: ./build/vcpkg/vcpkg
     steps:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ inputs.ref }}
           submodules: recursive
+      - name: Verify diagnostic source
+        shell: bash
+        run: |
+          actual=$(git rev-parse HEAD)
+          echo "Testing PR 3091 source: $actual"
+          test "$actual" = b24e4b82bdd47fe63a7c9ae01bd7ba396e829be9
       - name: Set up pnpm
         uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4
         with:
@@ -365,7 +361,7 @@ jobs:
       # storage-cleanup.yml deletes artifacts after 3 days, the job log stays.
       # Workflow commands are stopped around each file so log lines stay inert.
       - name: Show test server logs
-        if: failure()
+        if: always()
         shell: bash
         run: |
           shopt -s nullglob
