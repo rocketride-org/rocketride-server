@@ -37,11 +37,13 @@ from rocketride import TASK_STATE
 
 from ai.constants import CONST_STATUS_HISTORY_LIMIT
 from ai.modules.task.task_engine import (
+    CONST_PARAM_TOKEN_SECRET_ENV,
     CONST_TRACE_PAYLOAD_CAP,
     CONST_TRACE_PREVIEW_BYTES,
     Task,
     cap_trace_payload,
     filter_subprocess_env,
+    resolve_parameter_tokens,
     saas_pipeline_violation,
 )
 
@@ -1339,6 +1341,7 @@ def test_filter_subprocess_env_is_an_allowlist():
             # engine-only: deployment credentials and server-side settings
             'RR_DB_URL': 'postgresql://platform',
             'RR_MASTER_KEY': 'fernet',
+            'RR_PARAM_TOKEN_SECRET': 'param-token-secret',
             'RR_IDP_SERVICE_TOKEN': 'jwt',
             'RR_APP_URL': 'https://app.example',
             'ENGINE_API_KEY': 'engine',
@@ -1398,6 +1401,65 @@ def test_filter_subprocess_env_star_passes_everything():
     """A bare '*' is the explicit opt-out back to full inheritance."""
     src = {'RR_SUBPROCESS_ENV': '*', 'RR_MASTER_KEY': 'fernet', 'PATH': '/usr/bin'}
     assert filter_subprocess_env(src) == src
+
+
+# ---------------------------------------------------------------------------
+# resolve_parameter_tokens — the child gets values, not tokens it cannot read
+# ---------------------------------------------------------------------------
+
+_TOKEN_PIPELINE = {
+    'source': 'source_1',
+    'components': [
+        {
+            'id': 'source_1',
+            'provider': 'filesys',
+            'config': {'parameters': {'secureParameters': {'secure': ['password'], 'token': 'UlJQVAI='}}},
+        }
+    ],
+}
+
+
+@pytest.fixture
+def engine_resolve(monkeypatch):
+    """Record calls to rocketlib.resolveSecureParameters and return a decoded pipeline."""
+    calls = []
+    decoded = {'source': 'source_1', 'components': [{'id': 'source_1', 'config': {'parameters': {'password': 'pw'}}}]}
+
+    def resolve(pipeline):
+        calls.append(pipeline)
+        return decoded
+
+    monkeypatch.setattr(sys.modules['rocketlib'], 'resolveSecureParameters', resolve, raising=False)
+    return SimpleNamespace(calls=calls, decoded=decoded)
+
+
+def test_resolve_parameter_tokens_without_secret_passes_through(engine_resolve):
+    """Without the deployment secret the child decodes its own tokens, as before."""
+    assert resolve_parameter_tokens(_TOKEN_PIPELINE, environ={}) is _TOKEN_PIPELINE
+    assert resolve_parameter_tokens(_TOKEN_PIPELINE, environ={CONST_PARAM_TOKEN_SECRET_ENV: ''}) is _TOKEN_PIPELINE
+    assert engine_resolve.calls == []
+
+
+def test_resolve_parameter_tokens_with_secret_decodes_in_engine(engine_resolve):
+    """With the deployment secret set, the engine decodes the tokens before the task file is written."""
+    result = resolve_parameter_tokens(_TOKEN_PIPELINE, environ={CONST_PARAM_TOKEN_SECRET_ENV: 'param-token-secret'})
+    assert result is engine_resolve.decoded
+    assert engine_resolve.calls == [_TOKEN_PIPELINE]
+
+
+def test_resolve_parameter_tokens_reads_process_environment(engine_resolve, monkeypatch):
+    """The default environment is the engine process's own."""
+    monkeypatch.delenv(CONST_PARAM_TOKEN_SECRET_ENV, raising=False)
+    assert resolve_parameter_tokens(_TOKEN_PIPELINE) is _TOKEN_PIPELINE
+
+    monkeypatch.setenv(CONST_PARAM_TOKEN_SECRET_ENV, 'param-token-secret')
+    assert resolve_parameter_tokens(_TOKEN_PIPELINE) is engine_resolve.decoded
+
+
+def test_param_token_secret_stays_out_of_subprocess():
+    """The child never gets the secret, which is why the engine decodes for it."""
+    env = filter_subprocess_env({'PATH': '/usr/bin', CONST_PARAM_TOKEN_SECRET_ENV: 'param-token-secret'})
+    assert env == {'PATH': '/usr/bin'}
 
 
 def test_filter_subprocess_env_matches_names_case_insensitively():

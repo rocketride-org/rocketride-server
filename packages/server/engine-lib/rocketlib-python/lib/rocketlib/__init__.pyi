@@ -822,6 +822,10 @@ def validatePipeline(config: Dict[str, Any]) -> Dict[str, Any]:
     """Validate a pipeline configuration dict; returns it annotated with errors."""
     ...
 
+def resolveSecureParameters(pipeline: Dict[str, Any]) -> Dict[str, Any]:
+    """Return the pipeline with its secure parameter tokens replaced by the values they hold."""
+    ...
+
 def getServiceDefinition(logicalType: str) -> Dict[str, Any]:
     """Return the service definition for the given logical type name."""
     ...
