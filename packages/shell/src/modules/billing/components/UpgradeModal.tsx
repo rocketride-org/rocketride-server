@@ -18,7 +18,7 @@
  * On confirmation, the host applies the plan change or schedules it for renewal.
  */
 
-import React, { useEffect, useState, useMemo, useRef, type CSSProperties } from 'react';
+import React, { useEffect, useLayoutEffect, useState, useMemo, useRef, type CSSProperties } from 'react';
 import { loadStripe } from '@stripe/stripe-js';
 import { commonStyles } from '../../../themes/styles';
 import { Modal } from '../../../components/modal/Modal';
@@ -211,6 +211,11 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 	const compact = !!preselectedPriceId && isValidSelection;
 
 	const selectedPriceId = isValidSelection ? selectedPlan?.stripePriceId : undefined;
+	const paymentSelection = useRef({ available, currentPriceId, selectedPriceId });
+	useLayoutEffect(() => {
+		paymentSelection.current = { available, currentPriceId, selectedPriceId };
+	}, [available, currentPriceId, selectedPriceId]);
+
 	useEffect(() => {
 		setPreviewState(null);
 		if (!available || !onPreview || !selectedPriceId) return;
@@ -255,6 +260,10 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 				const stripe = await loadStripe(result.stripePublishableKey);
 				if (!mounted.current) return;
 				if (!stripe) throw new Error('Payment authentication could not be loaded. Try again.');
+				const live = paymentSelection.current;
+				if (!live.available || live.currentPriceId !== expectedPriceId || live.selectedPriceId !== selectedPriceId) {
+					throw new Error('The subscription changed. Review the plan change before trying again.');
+				}
 				result.assertPaymentScope?.();
 				const confirmation = await stripe.confirmCardPayment(result.clientSecret);
 				if (!mounted.current) return;
