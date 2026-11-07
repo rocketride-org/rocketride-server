@@ -390,6 +390,7 @@ export class ConnectionManager implements IConnectionManager {
 				// duplicate handling downstream. The guard narrows the untyped
 				// push body to a ConnectResult without a cast.
 				if (message.event === 'apaext_account' && isConnectResult(message.body)) {
+					this.accountInfo = message.body;
 					this.emit('shell:accountUpdate', message.body);
 					return;
 				}
@@ -1597,7 +1598,7 @@ export class ConnectionManager implements IConnectionManager {
 		return { ...this.connectionStatus };
 	}
 
-	/** Returns the cached ConnectResult from the most recent successful connect. */
+	/** Returns the latest cached ConnectResult for this connection. */
 	public getAccountInfo(): ConnectResult | undefined {
 		return this.accountInfo ?? this.client?.getAccountInfo() as ConnectResult | undefined;
 	}

@@ -119,6 +119,7 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 	const [billingError, setBillingError] = useState<string | null>(null);
 	const [billingScope, setBillingScope] = useState<{ client: NonNullable<typeof client>; orgId: string } | null>(null);
 	const billingLoadSequence = useRef(0);
+	const subscriptionLoadSequence = useRef(0);
 	const [creditBalance, setCreditBalance] = useState<CreditBalance | null>((authUser as { credits?: CreditBalance })?.credits ?? null);
 	const [allPlans, setAllPlans] = useState<any[]>([]);
 	const [transactions, setTransactions] = useState<TransactionsResult | null>(null);
@@ -241,22 +242,27 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 
 	// ── Load billing data ───────────────────────────────────────────────────
 
+	const isCurrentBillingScope = useCallback(() => {
+		const manager = ConnectionManager.getInstance();
+		return manager.getClient() === client && manager.getAccountInfo()?.organization?.id === orgId;
+	}, [client, orgId]);
+
 	/** Fetches all billing data in one shot: subscriptions, balance, plans, transactions, usage. */
 	const loadBilling = useCallback(async () => {
 		if (!client || !orgId) {
 			setBillingLoading(false);
 			return;
 		}
-		const manager = ConnectionManager.getInstance();
-		const inScope = () => manager.getClient() === client && manager.getAccountInfo()?.organization?.id === orgId;
-		if (!inScope()) return;
+		if (!isCurrentBillingScope()) return;
 		const sequence = ++billingLoadSequence.current;
-		const isCurrentLoad = () => sequence === billingLoadSequence.current && inScope();
+		const subscriptionSequence = ++subscriptionLoadSequence.current;
+		const isCurrentLoad = () => sequence === billingLoadSequence.current && isCurrentBillingScope();
+		const isCurrentSubscriptionLoad = () => subscriptionSequence === subscriptionLoadSequence.current && isCurrentLoad();
 		setBillingError(null);
 		try {
 			const [subs, balance, plans, tx, byUser, byTeam] = await Promise.all([
 				client.billing.getDetails(orgId).catch((err: any) => {
-					if (isCurrentLoad()) setBillingError(err.message ?? 'Failed to load subscriptions');
+					if (isCurrentSubscriptionLoad()) setBillingError(err.message ?? 'Failed to load subscriptions');
 					return [] as BillingDetail[];
 				}),
 				client.billing.getCreditBalance(orgId).catch(() => null),
@@ -267,7 +273,7 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 			]);
 			if (!isCurrentLoad()) return;
 			setBillingScope({ client, orgId });
-			setSubscriptions(subs);
+			if (isCurrentSubscriptionLoad()) setSubscriptions(subs);
 			setCreditBalance(balance);
 			setAllPlans(plans);
 			setTransactions(tx);
@@ -279,7 +285,7 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 				setDashboardLoading(false);
 			}
 		}
-	}, [client, orgId]);
+	}, [client, orgId, isCurrentBillingScope]);
 
 	/** Fetches just the transactions page (legacy pagination callback). */
 	const handleTransactionPage = useCallback(
@@ -342,12 +348,11 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 
 	const requirePlanChangeClient = useCallback(() => {
 		if (!client || !orgId) throw new Error('Not connected');
-		const manager = ConnectionManager.getInstance();
-		if (manager.getClient() !== client || manager.getAccountInfo()?.organization?.id !== orgId) {
+		if (!isCurrentBillingScope()) {
 			throw new Error('The active organization changed. Reopen the plan change.');
 		}
 		return client;
-	}, [client, orgId]);
+	}, [client, orgId, isCurrentBillingScope]);
 
 	const handlePreviewSubscriptionChange = useCallback(
 		async (appId: string, newPriceId: string) => {
@@ -761,11 +766,19 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 	 */
 	const handleCancelSubscription = useCallback(
 		async (appId: string) => {
-			if (!client || !orgId) return;
-			await client.billing.cancelSubscription(orgId, appId);
-			await loadBilling();
+			if (!client || !orgId || !isCurrentBillingScope()) return;
+			let sequence: number | undefined;
+			try {
+				await client.billing.cancelSubscription(orgId, appId);
+				if (!isCurrentBillingScope()) return;
+				sequence = ++subscriptionLoadSequence.current;
+				const updated = await client.billing.getDetails(orgId);
+				if (sequence === subscriptionLoadSequence.current && isCurrentBillingScope()) setSubscriptions(updated);
+			} catch (error) {
+				if (isCurrentBillingScope() && (sequence === undefined || sequence === subscriptionLoadSequence.current)) throw error;
+			}
 		},
-		[client, orgId, loadBilling]
+		[client, orgId, isCurrentBillingScope]
 	);
 
 	/** Opens the Stripe customer portal for payment method management.

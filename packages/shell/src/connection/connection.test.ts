@@ -1200,6 +1200,39 @@ test('onConnected ignores stale callbacks, accepts the active connection, and pr
 	}
 });
 
+test('an inbound account update refreshes the manager identity before notifying listeners', async (t) => {
+	const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+	Object.defineProperty(globalThis, 'window', {
+		configurable: true,
+		value: { location: { origin: 'https://shell.example.test' }, addEventListener: () => {} },
+	});
+	t.after(() => {
+		if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
+		else delete (globalThis as { window?: Window }).window;
+	});
+	t.mock.method(RocketRideClient.prototype, 'attach', async () => {});
+
+	const { manager } = createTestManager();
+	manager.initialize();
+	assert.ok(manager.client instanceof RocketRideClient);
+	manager.lifecycleOwner = {
+		key: 'active', generation: 0, credential: 'token', promise: Promise.resolve(null), connectedPublished: false,
+	};
+	manager.accountInfo = authenticatedResult;
+	const updated = { ...authenticatedResult, displayName: 'Updated Account' };
+	const identitiesSeenByListeners: Array<ConnectResult | undefined> = [];
+	manager.emit = (event) => {
+		if (event === 'shell:accountUpdate') identitiesSeenByListeners.push(manager.accountInfo);
+	};
+
+	await manager.client.onEvent({ type: 'event', seq: 1, event: 'apaext_account', body: updated });
+	manager.connectionGeneration++;
+	await manager.client.onEvent({ type: 'event', seq: 2, event: 'apaext_account', body: { ...authenticatedResult } });
+
+	assert.deepEqual(identitiesSeenByListeners, [updated]);
+	assert.equal(manager.accountInfo, updated);
+});
+
 test('onConnectError latches a session-expired auth failure when a background re-login is rejected', async () => {
 	const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
 	const originalAttach = RocketRideClient.prototype.attach;
