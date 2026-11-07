@@ -90,7 +90,6 @@ _SESSION_FUNCTION_NAMES = frozenset(
 )
 # MySQL resolves a backtick-quoted built-in function name, and the maskers remove it.
 _MYSQL_SESSION_FUNCTION_NAMES = frozenset({'get_lock'})
-_UNICODE_ESCAPE = re.compile(r'\\(?:\+(?P<long>[0-9a-fA-F]{6})|(?P<short>[0-9a-fA-F]{4}))')
 
 _SESSION_STATE_CLAUSE = re.compile(
     r'\bpg_(?:try_)?advisory_lock(?:_shared)?\s*\('
