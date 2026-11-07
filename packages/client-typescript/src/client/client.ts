@@ -2541,7 +2541,6 @@ export class RocketRideClient extends DAPClient {
 	 *
 	 * @param path - Relative path within the account store
 	 * @param mode - 'r' for read, 'w' for write (default: 'r')
-	 * @param offset - Initial byte offset (read mode only)
 	 * @returns Object with 'handle' (string). Read mode also includes 'size' (number).
 	 */
 	async fsOpen(path: string, mode: 'r' | 'w' = 'r'): Promise<{ handle: string; size?: number }> {
