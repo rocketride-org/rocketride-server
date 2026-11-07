@@ -12,8 +12,17 @@ function object(value: unknown): Data {
 	return value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Data) : {};
 }
 
+function own(data: Data, key: string): unknown {
+	return Object.hasOwn(data, key) ? data[key] : undefined;
+}
+
+/** Saved profile and schema names are data, including names such as __proto__. */
+function setOwn(data: Data, key: string, value: unknown): void {
+	Object.defineProperty(data, key, { value, enumerable: true, configurable: true, writable: true });
+}
+
 function secured(data: Data, key: string): boolean {
-	const names = object(data.secureParameters).secure;
+	const names = own(object(own(data, 'secureParameters')), 'secure');
 	return Array.isArray(names) && names.includes(key);
 }
 
@@ -22,32 +31,33 @@ export function storedArrays(schema: RJSFSchema, data: Data, path: string[] = []
 	const result: StoredArray[] = [];
 	const profileSchema = schema.properties?.profile;
 	const profileDefault = typeof profileSchema === 'object' ? profileSchema.default : undefined;
-	const profile = data.profile ?? profileDefault ?? 'default';
-	const inherited = typeof profile === 'string' ? object(data[profile]) : {};
+	const profile = own(data, 'profile') ?? profileDefault ?? 'default';
+	const inherited = typeof profile === 'string' ? object(own(data, profile)) : {};
 	for (const [key, field] of Object.entries(schema.properties ?? {})) {
 		if (typeof field !== 'object') continue;
 		const fieldPath = [...path, key];
-		if (field.type === 'array' && data[key] == null) {
+		if (field.type === 'array' && own(data, key) == null) {
 			if (secured(data, key)) result.push({ path: fieldPath, sourcePath: path });
-			else if (typeof profile === 'string' && inherited[key] == null && secured(inherited, key)) {
+			else if (typeof profile === 'string' && own(inherited, key) == null && secured(inherited, key)) {
 				result.push({ path: fieldPath, sourcePath: [...path, profile] });
 			}
 		} else if (field.type === 'object') {
-			result.push(...storedArrays(field, object(data[key]), fieldPath));
+			result.push(...storedArrays(field, object(own(data, key)), fieldPath));
 		}
 	}
 	return result;
 }
 
 function at(data: Data, path: string[]): Data {
-	return path.reduce((current, key) => object(current[key]), data);
+	return path.reduce((current, key) => object(own(current, key)), data);
 }
 
 function parent(data: Data, path: string[]): Data {
 	let current = data;
 	for (const key of path) {
-		current[key] = { ...object(current[key]) };
-		current = current[key] as Data;
+		const child = { ...object(own(current, key)) };
+		setOwn(current, key, child);
+		current = child;
 	}
 	return current;
 }
@@ -59,7 +69,7 @@ export function preserveStoredArrays(changed: Data, original: Data, stored: Stor
 		delete parent(result, path.slice(0, -1))[path[path.length - 1]];
 		const source = at(original, sourcePath);
 		const target = parent(result, sourcePath);
-		target.secureParameters = source.secureParameters;
+		setOwn(target, 'secureParameters', own(source, 'secureParameters'));
 	}
 	return result;
 }
@@ -72,6 +82,6 @@ export function mergeFormDefaults(schema: RJSFSchema, defaults: Data, data: Data
 /** An explicit replacement is an ordinary editable array and overrides the saved value. */
 export function replaceStoredArray(data: Data, path: string[]): Data {
 	const result = { ...data };
-	parent(result, path.slice(0, -1))[path[path.length - 1]] = [];
+	setOwn(parent(result, path.slice(0, -1)), path[path.length - 1], []);
 	return result;
 }

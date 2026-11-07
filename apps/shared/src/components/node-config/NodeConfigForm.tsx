@@ -152,16 +152,18 @@ const NodeConfigForm = forwardRef<INodeConfigFormHandle, INodeConfigFormProps>(f
 	// --- Secured field transforms -------------------------------------------
 	// Fields currently holding secured values render encrypted and drop their
 	// required-ness (the stored value satisfies the requirement).
-	const securedFormData = getSecuredFormData(formData);
-	const stored = storedArrays(schema.schema, formData);
-	const storedPaths: [string[], string[]][] = stored.map(({ path }) => [path.slice(0, -1), path.slice(-1)]);
-	const _schema = removeRequired(schema.schema, [...securedFormData, ...storedPaths]);
+	const securedFormData = useMemo(() => getSecuredFormData(formData), [formData]);
+	const stored = useMemo(() => storedArrays(schema.schema, formData), [schema.schema, formData]);
+	const _schema = useMemo(() => {
+		const storedPaths: [string[], string[]][] = stored.map(({ path }) => [path.slice(0, -1), path.slice(-1)]);
+		return removeRequired(schema.schema, [...securedFormData, ...storedPaths]);
+	}, [schema.schema, securedFormData, stored]);
 	const _uiSchema = useMemo(() => {
 		const ui = setUiSchemaProperty(schema.ui, securedFormData, { 'ui:encrypted': true });
 		for (const { path } of stored) {
 			let field = ui;
 			for (const segment of path) {
-				field[segment] = { ...field[segment] };
+				Object.defineProperty(field, segment, { value: { ...(Object.hasOwn(field, segment) ? field[segment] : {}) }, enumerable: true, configurable: true, writable: true });
 				field = field[segment];
 			}
 			Object.assign(field, {

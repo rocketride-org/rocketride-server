@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { getDefaultFormState, type RJSFSchema } from '@rjsf/utils';
+import { deepEquals, getDefaultFormState, type RJSFSchema } from '@rjsf/utils';
 import validator from '@rjsf/validator-ajv8';
 import { mergeFormDefaults, preserveStoredArrays, replaceStoredArray, storedArrays } from './storedArrays';
 
@@ -97,4 +97,53 @@ test('protecting one array does not remove an edit to another', () => {
 	const saved = preserveStoredArrays({ ...original, credentialMap: [], other: [{ credentialValue: 'new' }] }, original, storedArrays(two, original));
 	assert.equal(Object.hasOwn(saved, 'credentialMap'), false);
 	assert.deepEqual(saved.other, [{ credentialValue: 'new' }]);
+});
+
+test('late defaults can replace a null placeholder without changing the number of config keys', () => {
+	const existing = { credentialMap: null, secureParameters };
+	const config = mergeFormDefaults(schema, { credentialMap: [], defaultRepo: '' }, existing);
+	assert.equal(Object.keys(config).length, Object.keys(existing).length);
+	assert.equal(deepEquals(config, existing), false);
+	assert.equal(Object.hasOwn(config, 'credentialMap'), false);
+	assert.equal(config.defaultRepo, '');
+	assert.equal(deepEquals(mergeFormDefaults(schema, { credentialMap: [], defaultRepo: '' }, config), config), true);
+});
+
+for (const key of ['__proto__', 'constructor', 'prototype']) {
+	test(`a profile named ${key} remains an own property through save and reload`, () => {
+		const original = JSON.parse(JSON.stringify({ profile: key, [key]: { secureParameters } }));
+		const stored = storedArrays(schema, original);
+		assert.equal(stored.length, 1);
+		const saved = preserveStoredArrays({ profile: key, credentialMap: [] }, original, stored);
+		assert.equal(Object.getPrototypeOf(saved), Object.prototype);
+		assert.equal(Object.hasOwn(saved, key), true);
+		assert.deepEqual(JSON.parse(JSON.stringify(saved)), original);
+		assert.equal(Object.hasOwn(Object.prototype, 'secureParameters'), false);
+	});
+
+	test(`a schema path named ${key} is preserved and replaced without changing prototypes`, () => {
+		const nested = { type: 'object', properties: { [key]: schema } } satisfies RJSFSchema;
+		const original = { [key]: { secureParameters } };
+		const saved = preserveStoredArrays({ [key]: { credentialMap: [] } }, original, storedArrays(nested, original));
+		assert.equal(Object.getPrototypeOf(saved), Object.prototype);
+		assert.deepEqual(JSON.parse(JSON.stringify(saved)), original);
+		const replaced = replaceStoredArray(saved, [key, 'credentialMap']);
+		assert.equal(Object.getPrototypeOf(replaced), Object.prototype);
+		assert.deepEqual(JSON.parse(JSON.stringify(replaced)), { [key]: { secureParameters, credentialMap: [] } });
+		assert.deepEqual(saved, original);
+		const leaf = { type: 'object', properties: { [key]: { type: 'array' } } } satisfies RJSFSchema;
+		const flat = { secureParameters: { ...secureParameters, secure: [key] } };
+		assert.equal(storedArrays(leaf, flat).length, 1);
+		const cleared = replaceStoredArray(flat, [key]);
+		assert.equal(Object.getPrototypeOf(cleared), Object.prototype);
+		assert.equal(Object.hasOwn(cleared, key), true);
+		assert.deepEqual(cleared[key], []);
+		assert.deepEqual(storedArrays(leaf, cleared), []);
+	});
+}
+
+test('inherited profile and secure metadata are not treated as saved configuration', () => {
+	const inheritedProfile = Object.assign(Object.create({ saved: { secureParameters } }), { profile: 'saved' });
+	assert.deepEqual(storedArrays(schema, inheritedProfile), []);
+	assert.deepEqual(storedArrays(schema, Object.create({ secureParameters })), []);
 });
