@@ -539,14 +539,14 @@ class TaskConn(
         Retrieve the task token associated with a command request and verify permissions if needed.
 
         Args:
-            request (Dict[str, Any]): The command request containing task token
-            token (str): The task token to look up.
+            request (Dict[str, Any]): The command request containing the task token.
+            permissions (str): Requested permissions, checked by the callers that know the team.
 
         Returns:
-            TASK: The task instance corresponding to the token.
+            str: The task token for the request.
 
         Raises:
-            KeyError: If the task with the specified token does not exist.
+            PermissionError: If the request is not authenticated.
         """
         if not self._account_info:
             raise PermissionError('Not authenticated')
@@ -579,8 +579,11 @@ class TaskConn(
         If a task token is not specfied, we use the initial auth token
 
         Args:
-            apikey (str): API key for authentication.
-            token (str): The task token to look up.
+            request (Dict[str, Any]): The command request; its token selects the task.
+            permissions (str): Permission to require. Resolved against the task's
+                effective permissions (owner-scoped or team membership) for API-key
+                auth; pk_/tk_ credentials are already scoped to their own task, and
+                sys.admin bypasses the check.
 
         Returns:
             TASK: The task instance corresponding to the token.

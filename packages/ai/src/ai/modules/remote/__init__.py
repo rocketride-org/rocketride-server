@@ -16,7 +16,7 @@ def initModule(server: WebServer, _config: Optional[Autopipe] = None):
 
     Args:
         server (WebServer): The web server instance where routes will be registered.
-        config (Dict[str, Any]): Configuration settings for the module.
+        _config (Dict[str, Any]): Configuration settings for the module.
     """
     # Add the route
     server.add_route('/remote', remote_create, methods=['POST'])

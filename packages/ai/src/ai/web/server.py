@@ -945,7 +945,8 @@ class WebServer:
             routeHandler (Callable): The function that handles requests to this route.
             methods (List[str]): A list of allowed HTTP methods (e.g., ["GET", "POST"]).
             public (bool): If True, the route is considered public and does not require authorization.
-            recursive (bool): If public route, applies to all child routes as well.
+            private (bool): If True, the route requires authorization.
+            deprecated (bool): If True, the route is marked as deprecated in the OpenAPI schema.
 
         Behavior:
             - The function dynamically adds a new route to `app.router` at runtime.
@@ -1014,7 +1015,7 @@ class WebServer:
             path (str): The URL path for the new route (e.g., "/process").
             listener (Callable): The function that accepts the socket connection request.
             public (bool): If True, the route is considered public and does not require authorization.
-            recursive (bool): If public route, applies to all child routes as well.
+            private (bool): If True, the route requires authorization.
 
         Behavior:
             - The function dynamically adds a new route to `app.router` at runtime.
@@ -1046,19 +1047,20 @@ class WebServer:
         Dynamically loads a service module and enables its API endpoints.
 
         Args:
-            module (str): The name of the service module to load.
-
-        Returns:
-            module: The loaded module instance.
+            moduleName (str): The name of the service module to load. It is lower-cased and
+                stripped, and must appear in ``ALLOWED_MODULES``; anything else raises
+                ``ValueError`` instead of reaching ``importlib``.
+            config (Optional[Dict[str, Any]]): Config handed to the module's ``initModule``;
+                an empty dict when omitted.
 
         Behavior:
-            - Uses `importlib.import_module()` to dynamically import a module.
-            - The module is expected to exist within the `ai.modules.<module>.endpoints` namespace.
-            - This allows API endpoints from the specified module to be registered dynamically.
+            - Uses `importlib.import_module()` to import `ai.modules.<module>`.
+            - Registers the module's endpoints through its ``initModule`` and records the
+              module on the server, so a second call for the same module returns at once.
+            - Returns nothing: the module stays reachable through the server's state.
 
         Example:
             >>> use('analytics')
-            <module 'ai.modules.analytics.endpoints' from 'path/to/module.py'>
         """
         # Clean it up
         moduleName = moduleName.lower().strip()
