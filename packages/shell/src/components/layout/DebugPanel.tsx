@@ -228,7 +228,7 @@ const DebugPanel: React.FC<{ onClose: () => void }> = ({ onClose }) => {
 	// --- Render --------------------------------------------------------------
 
 	return (
-		<div style={styles.panel}>
+		<div style={styles.panel} data-rr-private="">
 			<div style={styles.header}>
 				<span>Debug</span>
 				<div style={styles.headerActions}>
