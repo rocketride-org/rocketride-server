@@ -446,7 +446,7 @@ class Store(DocumentStoreBase):
                 '_id': str(uuid4()),
                 '$vector': DataAPIVector(embedding),
                 'content': chunk.page_content,
-                'meta': chunk.metadata.__dict__,  # Convert metadata to dict
+                'meta': chunk.metadata.model_dump(),
             }
 
             documents.append(document)
