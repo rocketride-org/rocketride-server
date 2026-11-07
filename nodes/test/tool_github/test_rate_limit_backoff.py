@@ -551,3 +551,46 @@ def test_sentinel_token_never_reaches_a_rate_limit_error(node, path):
     result, _ = run(node, path)
     assert result['retry_after'] == 5
     assert TOKEN not in json.dumps(result)
+
+
+EXECUTION_TIMEOUT = {
+    'data': None,
+    'errors': [
+        {
+            'message': (
+                'Something went wrong while executing your query. This may be the result of a timeout, '
+                'or it could be a GitHub bug.'
+            )
+        }
+    ],
+}
+MUTATION = {'query': 'mutation { addStar(input: {starrableId: "x"}) { clientMutationId } }'}
+
+
+def test_graphql_exhausted_with_an_unlocated_error_is_not_retried_for_a_mutation(node):
+    # GitHub's execution-timeout error has no path, no locations and HTTP 200; with the
+    # last point of the hour spent it looks exactly like a rate limit. Retrying could
+    # apply the mutation twice, so it is returned instead.
+    node.inst.IGlobal.read_only = False
+    node.inst.IGlobal.graphql_allow_mutations = True
+    node.request.return_value = response(EXECUTION_TIMEOUT, 200, graphql_limited().headers)
+
+    result = node.inst.graphql(MUTATION)
+
+    assert node.slept == []
+    assert node.request.call_count == 1
+    assert result['status'] == 200
+    assert result['data'] == {'data': None, 'errors': EXECUTION_TIMEOUT['errors']}
+    # Returned instead of retried, so it must say the mutation may already have run.
+    assert 'may already have been applied' in result['message']
+
+
+def test_graphql_exhausted_with_an_unlocated_error_is_still_retried_for_a_query(node):
+    _, _, payload = TOOLS['graphql']
+    node.request.side_effect = [response(EXECUTION_TIMEOUT, 200, graphql_limited().headers), response(payload)]
+
+    result, _ = run(node, 'graphql')
+
+    assert node.slept == [5.0]
+    assert node.request.call_count == 2
+    assert result['status'] == 200
