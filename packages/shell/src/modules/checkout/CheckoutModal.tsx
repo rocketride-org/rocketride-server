@@ -340,10 +340,8 @@ function billingAttemptId(): string {
 /** @internal */
 interface PaymentFormProps {
 	plan: CheckoutPlan;
-	subscriptionId: string;
 	/** Validated discount code applied to this checkout, if any. */
 	promo?: PromoValidation | null;
-	onConfirmPending: (subscriptionId: string, priceId: string) => Promise<void>;
 	isCurrent: () => boolean;
 	onSuccess: () => void;
 	onPending: () => void;
@@ -355,13 +353,13 @@ interface PaymentFormProps {
  * Stripe Elements payment form shown after the user has selected a plan.
  * Must be rendered inside an ``<Elements>`` provider with a valid ``clientSecret``.
  */
-const PaymentForm: React.FC<PaymentFormProps> = ({ plan, subscriptionId, promo, onConfirmPending, isCurrent, onSuccess, onPending, onError, onBack }) => {
+const PaymentForm: React.FC<PaymentFormProps> = ({ plan, promo, isCurrent, onSuccess, onPending, onError, onBack }) => {
 	const stripe = useStripe();
 	const elements = useElements();
 	const [submitting, setSubmitting] = useState(false);
 	const paymentInFlight = useRef(false);
 
-	/** Confirms the Stripe payment, then notifies the server. */
+	/** Classifies the outcome of confirmation for this Elements intent. */
 	const handleSubmit = useCallback(
 		async (e: React.FormEvent) => {
 			e.preventDefault();
@@ -384,19 +382,12 @@ const PaymentForm: React.FC<PaymentFormProps> = ({ plan, subscriptionId, promo, 
 
 				// A rejected or unresolved confirmation can already be settling.
 				submitted = true;
-				if (error || status !== 'succeeded' || !isCurrent()) {
+				if (error || status !== 'succeeded') {
 					onPending();
 					return;
 				}
 
-				// The webhook remains authoritative for the subscription.
-				try {
-					await onConfirmPending(subscriptionId, plan.stripePriceId);
-				} catch {
-					// Non-fatal — the webhook will still update the DB
-				}
-
-				if (isCurrent()) onSuccess();
+				onSuccess();
 			} catch {
 				submitted = true;
 				onPending();
@@ -405,7 +396,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({ plan, subscriptionId, promo, 
 				setSubmitting(false);
 			}
 		},
-		[stripe, elements, subscriptionId, plan, onConfirmPending, isCurrent, onSuccess, onPending, onError]
+		[stripe, elements, isCurrent, onSuccess, onPending, onError]
 	);
 
 	// Discounted first-payment display when a discount code is applied
@@ -499,6 +490,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 	const [outcome, setOutcome] = useState<'complete' | 'pending' | null>(null);
 	const checkoutAttempts = useRef(new Map<string, string>());
 	const promoAttempts = useRef(new Map<string, { input: string; displayCode: string; id: string }>());
+	const unresolvedGrant = useRef<string | null>(null);
 	const selectedPriceId = useRef(preselectedPlan?.stripePriceId);
 	const settled = useRef(false);
 	const notifyingSuccess = useRef(false);
@@ -515,25 +507,31 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 		mounted.current = false;
 		onClose();
 	};
-	const notifySuccess = useCallback(async () => {
+	const notifySuccess = useCallback(async (acknowledge?: () => Promise<void>) => {
 		if (!isCurrent() || notifyingSuccess.current) return;
 		notifyingSuccess.current = true;
 		try {
-			await onSuccess();
+			if (acknowledge) {
+				try {
+					await acknowledge();
+				} catch {
+					// A failed notification does not undo payment. The webhook settles it.
+				}
+			}
+			if (isCurrent()) await onSuccess();
 		} catch {
 			if (isCurrent()) setError('Checkout completed. Try opening the app again.');
 		} finally {
 			notifyingSuccess.current = false;
 		}
 	}, [isCurrent, onSuccess]);
-	const finishCheckout = useCallback((result: 'complete' | 'pending') => {
+	const finishCheckout = useCallback((result: 'complete' | 'pending', acknowledge?: () => Promise<void>) => {
 		if (!mounted.current || settled.current) return;
 		settled.current = true;
 		setError(null);
-		const completed = result === 'complete' && isCurrent();
-		setOutcome(completed ? 'complete' : 'pending');
-		if (completed) void notifySuccess();
-	}, [isCurrent, notifySuccess]);
+		setOutcome(result);
+		if (result === 'complete') void notifySuccess(acknowledge);
+	}, [notifySuccess]);
 
 	// ── Promo code state ─────────────────────────────────────────────────
 	const promoEnabled = Boolean(onValidatePromoCode);
@@ -578,7 +576,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 	const handleContinue = useCallback(async () => {
 		// Never start checkout while a just-entered code is
 		// still validating/redeeming — it would silently drop the promo.
-		if (!isCurrent() || settled.current || !selectedPlan || selectedPlan.metadata?.action || promoInFlight.current || checkoutInFlight.current) return;
+		if (!isCurrent() || settled.current || unresolvedGrant.current || !selectedPlan || selectedPlan.metadata?.action ||
+			promoInFlight.current || checkoutInFlight.current) return;
 
 		checkoutInFlight.current = true;
 		setLoadingSecret(true);
@@ -602,14 +601,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 					finishCheckout('pending');
 					return;
 				}
-				// $0 first invoice (100%-off code) — the subscription is already
-				// active; never mount Elements. Best-effort pending write, then done.
-				try {
-					if (isCurrent()) await onConfirmPending(res.subscriptionId, selectedPlan.stripePriceId);
-				} catch {
-					// Non-fatal — the webhook will still update the DB
-				}
-				finishCheckout('complete');
+				// No Elements is needed for the accepted no-payment response.
+				finishCheckout('complete', () => onConfirmPending(res.subscriptionId, priceId));
 				return;
 			}
 			setClientSecret(res.clientSecret);
@@ -642,13 +635,17 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 		if (!isCurrent() || settled.current || !onValidatePromoCode || promoInFlight.current || checkoutInFlight.current) return;
 		const code = promoInput.trim();
 		if (!code) return;
+		const codeKey = code.toUpperCase();
+		if (unresolvedGrant.current && unresolvedGrant.current !== codeKey) {
+			setPromoError('Retry the previous code before redeeming another.');
+			return;
+		}
 
 		promoInFlight.current = true;
 		setPromoBusy(true);
 		setPromoError(null);
 		let redeeming = false;
 		try {
-			const codeKey = code.toUpperCase();
 			let attempt = promoAttempts.current.get(codeKey);
 			if (!attempt) {
 				const priceId = selectedPlan?.stripePriceId;
@@ -672,14 +669,16 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 				redeeming = true;
 				const redemption = await onRedeemPromoCode(attempt.input, attempt.id);
 				if (!mounted.current) return;
-				if (!isCurrent() || (!redemption.redeemed && !supportsCheckoutReplay)) {
-					finishCheckout('pending');
-					return;
-				}
 				if (!redemption.redeemed) {
-					setPromoError('The server did not confirm redemption. Please try again.');
+					if (supportsCheckoutReplay) {
+						unresolvedGrant.current = codeKey;
+						setPromoError('The server did not confirm redemption. Please try again.');
+					} else {
+						finishCheckout('pending');
+					}
 					return;
 				}
+				unresolvedGrant.current = null;
 				settled.current = true;
 				setGrantResult({
 					code: attempt.displayCode,
@@ -691,6 +690,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 			if (redeeming && !supportsCheckoutReplay) {
 				finishCheckout('pending');
 			} else if (mounted.current) {
+				if (redeeming) unresolvedGrant.current = codeKey;
 				setPromoError(err instanceof Error ? err.message : 'Could not apply this code. Please try again.');
 			}
 		} finally {
@@ -802,11 +802,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 						<Elements stripe={stripePromise} options={{ clientSecret, appearance }}>
 							<PaymentForm
 								plan={selectedPlan}
-								subscriptionId={subscriptionId}
 								promo={appliedPromo}
-								onConfirmPending={onConfirmPending}
 								isCurrent={isCurrent}
-								onSuccess={() => finishCheckout('complete')}
+								onSuccess={() => finishCheckout('complete', () => onConfirmPending(subscriptionId, selectedPlan.stripePriceId))}
 								onPending={() => finishCheckout('pending')}
 								onError={setError}
 								onBack={handleBack}
@@ -817,10 +815,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 						<p style={S.status}>Preparing checkout&hellip;</p>
 
 					) : retryCheckout ? (
-						<>
-							<button style={S.backBtn} onClick={() => { setRetryCheckout(false); setError(null); }}>Change plan</button>
-							<button style={S.continueBtn(false)} onClick={handleContinue}>Retry checkout</button>
-						</>
+						<button style={S.continueBtn(false)} onClick={handleContinue}>Retry checkout</button>
 
 					) : (
 						/* Step 1: plan picker (+ promo code box when the host wires it) */
@@ -875,8 +870,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 										</>
 									))}
 									<button
-										style={S.continueBtn(!selectedPlan || !!selectedPlan.metadata?.action || promoBusy)}
-										disabled={!selectedPlan || !!selectedPlan.metadata?.action || promoBusy}
+										style={S.continueBtn(!selectedPlan || !!selectedPlan.metadata?.action || promoBusy || !!unresolvedGrant.current)}
+										disabled={!selectedPlan || !!selectedPlan.metadata?.action || promoBusy || !!unresolvedGrant.current}
 										onClick={handleContinue}
 									>
 										Continue
