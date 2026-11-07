@@ -40,7 +40,9 @@ from sqlalchemy.sql.elements import TextClause
 # Matched at a '$' while rewriting placeholders. Compiled once and matched in
 # place (re.Pattern.match accepts a start offset) so a bulk INSERT with many
 # placeholders doesn't copy the rest of the statement at every '$'.
-_PLACEHOLDER_RE = re.compile(r'\$(\d+)')
+# ASCII digits only: Python's \d also matches Arabic-Indic and other Unicode
+# digits, which would make a tag such as $١$ look like a placeholder.
+_PLACEHOLDER_RE = re.compile(r'\$([0-9]+)')
 # A dollar-quote tag follows unquoted-identifier rules: no `$`, and PostgreSQL
 # accepts any non-ASCII character, not just ASCII letters.
 _DOLLAR_TAG_RE = re.compile(r'\$([A-Za-z_\u0080-\U0010FFFF][A-Za-z0-9_\u0080-\U0010FFFF]*)?\$')
