@@ -1,13 +1,13 @@
 # Preprocessor: SpaCy
-spacy==3.8.14
+spacy==3.8.18
 spacy-transformers==1.4.0
 spacy-curated-transformers==0.3.1
 
 # SpaCy deps
 catalogue==2.0.10
-cymem==2.0.13
-murmurhash==1.0.15
-preshed==3.0.13
-srsly==2.5.3
-thinc==8.3.13
+cymem==2.0.16
+murmurhash==1.0.16
+preshed==3.0.15
+srsly==2.5.5
+thinc==8.3.14
 wasabi==1.1.3
