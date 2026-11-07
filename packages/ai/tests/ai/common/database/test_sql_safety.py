@@ -480,3 +480,18 @@ def test_a_unicode_escaped_postgresql_lock_name_is_rejected():
 def test_ordinary_quoted_names_still_pass(sql):
     """Only the lock family is refused: a quoted name is not a call on its own."""
     assert is_sql_safe(sql) is True
+
+
+def test_a_nested_block_comment_between_the_name_and_its_parenthesis_is_rejected():
+    """PostgreSQL lets block comments nest; the gap must skip the whole comment."""
+    assert is_sql_safe('SELECT "pg_advisory_lock" /* outer /* inner */ outer */ (42)') is False
+
+
+def test_a_uescape_clause_cannot_hide_the_function_name():
+    """`UESCAPE '!'` picks the escape character the identifier uses."""
+    assert is_sql_safe('SELECT U&"pg_advisory_!006cock" UESCAPE \'!\'(42)') is False
+
+
+def test_a_string_literal_that_spells_a_lock_call_still_passes():
+    """The text of a string literal is not an identifier, so it is not a call."""
+    assert is_sql_safe('SELECT \'"pg_advisory_lock"(42)\'' ) is True

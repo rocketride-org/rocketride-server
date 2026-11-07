@@ -85,9 +85,6 @@ _WRITING_CLAUSE = re.compile(
 # a call, which keeps a literal that names the function out of the rule.
 # Anything PostgreSQL accepts as whitespace between the name and `(` — spaces, a block
 # comment, a line comment — still makes it a call.
-_GAP = r'(?:\s|/\*.*?\*/|--[^\n]*)*'
-_QUOTED_CALL = re.compile(r'(?P<unicode>U&)?"(?P<name>[^"]*)"' + _GAP + r'\(', re.DOTALL)
-_BACKTICK_CALL = re.compile(r'`(?P<name>[^`]*)`' + _GAP + r'\(', re.DOTALL)
 _SESSION_FUNCTION_NAMES = frozenset(
     {'pg_advisory_lock', 'pg_advisory_lock_shared', 'pg_try_advisory_lock', 'pg_try_advisory_lock_shared'}
 )
@@ -321,8 +318,13 @@ def _is_read_shaped(masked: str | None) -> bool:
     )
 
 
-def _decode_pg_identifier(name: str) -> str:
-    """Decode ``U&"..."`` escapes (``\\XXXX`` and ``\\+XXXXXX``) into the identifier they name."""
+def _decode_pg_identifier(name: str, escape: str = chr(92)) -> str:
+    """Decode ``U&"..."`` escapes (``ESCAPEXXXX``) into the identifier they name.
+
+    ``escape`` is the character the statement's ``UESCAPE`` clause names; PostgreSQL
+    defaults it to the backslash.
+    """
+    pattern = re.compile(re.escape(escape) + r'(?:\+(?P<long>[0-9a-fA-F]{6})|(?P<short>[0-9a-fA-F]{4}))')
 
     def replace(match: 're.Match[str]') -> str:
         codepoint = match.group('long') or match.group('short')
@@ -331,14 +333,60 @@ def _decode_pg_identifier(name: str) -> str:
         except (TypeError, ValueError):
             return match.group(0)
 
-    return _UNICODE_ESCAPE.sub(replace, name)
+    return pattern.sub(replace, name)
+
+def _skip_gap(sql: str, index: int) -> int:
+    """Return the index after whitespace and comments, whose block form nests."""
+    n = len(sql)
+    while index < n:
+        char = sql[index]
+        if char.isspace():
+            index += 1
+        elif sql.startswith('--', index):
+            newline = sql.find(chr(10), index)
+            index = n if newline == -1 else newline + 1
+        elif sql.startswith('/*', index):
+            depth = 1
+            index += 2
+            while index < n and depth:
+                if sql.startswith('/*', index):
+                    depth += 1
+                    index += 2
+                elif sql.startswith('*/', index):
+                    depth -= 1
+                    index += 2
+                else:
+                    index += 1
+        else:
+            break
+    return index
+
+
+def _skip_literal(sql: str, index: int) -> int:
+    """Return the index after the single-quoted literal that starts at ``index``."""
+    n = len(sql)
+    backslash_escapes = index > 0 and sql[index - 1] in 'eE'
+    index += 1
+    while index < n:
+        if backslash_escapes and sql[index] == chr(92):
+            index += 2
+            continue
+        if sql[index] == "'":
+            if index + 1 < n and sql[index + 1] == "'":
+                index += 2
+                continue
+            return index + 1
+        index += 1
+    return n
 
 
 def _quoted_session_call(sql: str) -> bool:
     """True when a quoted identifier resolves to a session-lock function.
 
-    Covers PostgreSQL's double-quoted and ``U&"..."`` identifiers and MySQL's backtick
-    form, with the comments PostgreSQL and MySQL accept between the name and ``(``.
+    Covers PostgreSQL's double-quoted and ``U&"..."`` identifiers (including a
+    ``UESCAPE`` clause) and MySQL's backtick form. The statement is walked instead of
+    matched with a regex: a string literal must never be read as an identifier, block
+    comments nest, and ``UESCAPE`` sits between the name and the call.
 
     Args:
         sql: The generated SQL, unmasked.
@@ -346,14 +394,49 @@ def _quoted_session_call(sql: str) -> bool:
     Returns:
         Whether a quoted session-lock function name is used as a function.
     """
-    for match in _QUOTED_CALL.finditer(sql):
-        name = _decode_pg_identifier(match.group('name')) if match.group('unicode') else match.group('name')
-        if name.strip().lower() in _SESSION_FUNCTION_NAMES:
-            return True
-    return any(
-        match.group('name').strip().lower() in _MYSQL_SESSION_FUNCTION_NAMES for match in _BACKTICK_CALL.finditer(sql)
-    )
-
+    n = len(sql)
+    index = 0
+    while index < n:
+        char = sql[index]
+        if char == "'":
+            index = _skip_literal(sql, index)
+            continue
+        unicode_name = sql[index : index + 2].lower() == 'u&'
+        quote_at = index + 2 if unicode_name else index
+        if quote_at < n and sql[quote_at] == '"':
+            close = sql.find('"', quote_at + 1)
+            if close == -1:
+                return False
+            name = sql[quote_at + 1 : close]
+            cursor = _skip_gap(sql, close + 1)
+            escape = chr(92)
+            if sql[cursor : cursor + 7].lower() == 'uescape':
+                literal = _skip_gap(sql, cursor + 7)
+                if (
+                    literal + 2 < n
+                    and sql[literal] == "'"
+                    and sql[literal + 2] == "'"
+                ):
+                    escape = sql[literal + 1]
+                    cursor = _skip_gap(sql, literal + 3)
+            if cursor < n and sql[cursor] == '(':
+                resolved = _decode_pg_identifier(name, escape) if unicode_name else name
+                if resolved.strip().lower() in _SESSION_FUNCTION_NAMES:
+                    return True
+            index = close + 1
+            continue
+        if char == '`':
+            close = sql.find('`', index + 1)
+            if close == -1:
+                return False
+            after = _skip_gap(sql, close + 1)
+            if after < n and sql[after] == '(':
+                if sql[index + 1 : close].strip().lower() in _MYSQL_SESSION_FUNCTION_NAMES:
+                    return True
+            index = close + 1
+            continue
+        index += 1
+    return False
 
 def is_sql_safe(sql: str) -> bool:
     """Return False unless the SQL is one statement shaped like a read: ``SELECT``, optionally behind ``EXPLAIN``.
