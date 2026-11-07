@@ -24,7 +24,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { DeveloperIdentity, LOOKUP_FAILED_MESSAGE, makeRegisterDeveloperHandler } from '../appdev/developerIdentity';
+import { DeveloperIdentity, LOOKUP_FAILED_MESSAGE, STATUS_TIMEOUT_MS, makeRegisterDeveloperHandler } from '../appdev/developerIdentity';
 import type { IDeveloperClient, IDeveloperConnection } from '../appdev/developerIdentity';
 import type { NewAppIdentity } from 'shared/tools/appdev/types';
 
@@ -37,18 +37,38 @@ interface IFake {
 	registerReturns?: string;
 }
 
-/** A fake connection plus a log of the server calls it received. */
-function fake(opts: IFake): { connection: IDeveloperConnection; calls: string[]; setOrg: (orgId: string) => void } {
+/**
+ * The status reply, bounded the way the real client bounds a request with a
+ * `timeout` option: past the limit it rejects and ignores any later reply.
+ */
+function statusReply(status: IFake['status'], timeoutMs: number | undefined): Promise<{ developerId: string | null }> {
+	if (status instanceof Error) return Promise.reject(status);
+	if (!(status instanceof Promise)) return Promise.resolve({ developerId: status ?? null });
+	const reply = status.then((developerId) => ({ developerId }));
+	if (timeoutMs === undefined) return reply;
+	return new Promise((resolve, reject) => {
+		const timer = setTimeout(() => reject(new Error(`Request timed out after ${timeoutMs}ms`)), timeoutMs);
+		void reply.then((value) => {
+			clearTimeout(timer);
+			resolve(value);
+		});
+	});
+}
+
+/** A fake connection plus a log of the server calls (and status time limits) it received. */
+function fake(opts: IFake): { connection: IDeveloperConnection; calls: string[]; timeouts: (number | undefined)[]; setOrg: (orgId: string) => void } {
 	const calls: string[] = [];
+	const timeouts: (number | undefined)[] = [];
 	let orgId = opts.orgId ?? 'org-1';
 	const client: IDeveloperClient = {
 		getAccountInfo: () => ({ organization: opts.loginId ? { developerId: opts.loginId } : {} }),
 		getOrgId: () => orgId,
-		developerStatus: async () => {
+		call: async <T>(command: string, args?: Record<string, unknown>, options?: { timeout?: number }): Promise<T> => {
+			assert.equal(command, 'rrext_deploy_app');
+			assert.equal(args?.subcommand, 'developer_status');
 			calls.push('status');
-			if (opts.status instanceof Error) throw opts.status;
-			if (opts.status instanceof Promise) return { developerId: await opts.status };
-			return { developerId: opts.status ?? null };
+			timeouts.push(options?.timeout);
+			return (await statusReply(opts.status, options?.timeout)) as T;
 		},
 		registerDeveloper: async (id) => {
 			calls.push(`register:${id}`);
@@ -59,7 +79,7 @@ function fake(opts: IFake): { connection: IDeveloperConnection; calls: string[];
 		getClient: () => (opts.connected === false ? undefined : client),
 		isConnected: () => opts.connected !== false,
 	};
-	return { connection, calls, setOrg: (next) => (orgId = next) };
+	return { connection, calls, timeouts, setOrg: (next) => (orgId = next) };
 }
 
 // ── resolve() ────────────────────────────────────────────────────────────────
@@ -132,6 +152,13 @@ test('scaffold uses local when disconnected', async () => {
 test('scaffold uses local when the org has no id', async () => {
 	const { connection } = fake({ status: null });
 	assert.equal(await new DeveloperIdentity(connection).resolveForScaffold(), 'local');
+});
+
+test('resolve: the status lookup passes its time limit to the client', async () => {
+	const { connection, timeouts } = fake({ status: 'acme' });
+	await new DeveloperIdentity(connection).resolve();
+	assert.deepEqual(timeouts, [STATUS_TIMEOUT_MS]);
+	assert.ok(STATUS_TIMEOUT_MS < 120_000, 'shorter than the bus request timeout');
 });
 
 test('resolve: status hangs, so the lookup times out', async () => {
