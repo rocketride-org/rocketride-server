@@ -42,8 +42,10 @@ from .types.account import (
     ApiKeyRecord,
     CreateKeyResult,
     DeleteOrgPrecheck,
+    InvitedMember,
     MemberRecord,
     OrgDetail,
+    TeamAssignment,
     TeamDetail,
     TeamRecord,
 )
@@ -270,6 +272,44 @@ class AccountApi:
         body = await self._client.call('rrext_account_members', subcommand='list', orgId=org_id)
         return body.get('members', [])
 
+    async def invite(
+        self,
+        org_id: str,
+        *,
+        email: str,
+        given_name: str,
+        family_name: str,
+        role: str,
+        team_assignments: list[TeamAssignment] | None = None,
+        dev_team_id: str | None = None,
+    ) -> InvitedMember:
+        """
+        Invite a person to an organization and return the membership the server created.
+
+        Only org admins can invite.
+
+        Args:
+            org_id: Organisation UUID.
+            email: Email address of the person to invite.
+            given_name: First / given name of the invitee.
+            family_name: Last / family name of the invitee.
+            role: Organization-level role to assign (e.g. "admin" or "member").
+            team_assignments: Optional teams to add the invitee to.
+            dev_team_id: Optional development team for the invitee. It must be one
+                of the ``team_assignments`` teams with ``task.control`` (any org
+                team when ``role`` is "admin"). When omitted the server picks one
+                if only one team qualifies.
+
+        Returns:
+            The invited member, including the development team the server recorded.
+        """
+        args = {'email': email, 'givenName': given_name, 'familyName': family_name, 'role': role}
+        if team_assignments is not None:
+            args['teamAssignments'] = team_assignments
+        if dev_team_id is not None:
+            args['devTeamId'] = dev_team_id
+        return await self._client.call('rrext_account_members', subcommand='invite', orgId=org_id, **args)
+
     async def invite_member(
         self,
         org_id: str,
@@ -278,9 +318,14 @@ class AccountApi:
         given_name: str,
         family_name: str,
         role: str,
+        team_assignments: list[TeamAssignment] | None = None,
+        dev_team_id: str | None = None,
     ) -> None:
         """
         Send an invitation to a new organization member.
+
+        .. deprecated::
+            Use :meth:`invite`, which returns the invited member.
 
         Args:
             org_id: Organisation UUID.
@@ -288,15 +333,17 @@ class AccountApi:
             given_name: First / given name of the invitee.
             family_name: Last / family name of the invitee.
             role: Organization-level role to assign (e.g. "admin" or "member").
+            team_assignments: Optional teams to add the invitee to.
+            dev_team_id: Optional development team for the invitee.
         """
-        await self._client.call(
-            'rrext_account_members',
-            subcommand='invite',
-            orgId=org_id,
+        await self.invite(
+            org_id,
             email=email,
-            givenName=given_name,
-            familyName=family_name,
+            given_name=given_name,
+            family_name=family_name,
             role=role,
+            team_assignments=team_assignments,
+            dev_team_id=dev_team_id,
         )
 
     async def update_member_role(self, org_id: str, user_id: str, role: str) -> None:
