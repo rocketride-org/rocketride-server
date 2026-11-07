@@ -535,3 +535,185 @@ TEST_CASE("store::lifecycleRegions") {
         REQUIRE(regions->control[0] == std::pair<int, std::vector<int>>{9, {6, 7, 8}});
     }
 }
+
+//-----------------------------------------------------------------------------
+// Unit tests for IServiceEndpoint::buildConnections chat response-node warning.
+//
+// When a pipeline's source component has provider == "chat" and no reachable
+// downstream node in lifecycleOrder is a response node (prefix "response"),
+// buildConnections emits a monitor warning while still returning no error.
+// Non-chat sources (e.g. webhook, dropper) legitimately terminate at a store
+// and must not emit the warning.
+//-----------------------------------------------------------------------------
+TEST_CASE("store::buildConnections: chat response warning") {
+    using namespace engine::store;
+
+    struct TestEndpoint : IServiceEndpoint {
+        TestEndpoint(const json::Value &pipelineJson, IPipeStack stack)
+            : IServiceEndpoint(FactoryArgs{IPipeType{"pipe", "pipe"}}) {
+            m_isPipeline = true;
+            config.pipeline.setRoot(pipelineJson);
+            pipeStack = _mv(stack);
+        }
+    };
+
+    SECTION("warns when chat pipeline has no response node") {
+        if (engine::config::monitor()) MONITOR(reset);
+
+        auto pipelineJson = R"({
+            "pipeline": {
+                "source": "chat_1",
+                "version": 1,
+                "components": [
+                    {
+                        "id": "chat_1",
+                        "provider": "chat",
+                        "config": {}
+                    },
+                    {
+                        "id": "llm_1",
+                        "provider": "llm_openai",
+                        "config": {},
+                        "input": [
+                            {
+                                "from": "chat_1",
+                                "lane": "questions"
+                            }
+                        ]
+                    }
+                ]
+            }
+        })"_json;
+
+        IPipeStack stack = {
+            IPipeType{"pipe", "pipe"},
+            IPipeType{"llm_1", "llm_openai", "llm_openai"},
+            IPipeType{"bottom", "bottom"},
+        };
+
+        TestEndpoint endpoint(pipelineJson, _mv(stack));
+        REQUIRE_NO_ERROR(endpoint.config.pipeline.validate());
+        REQUIRE_NO_ERROR(endpoint.buildConnections());
+
+        if (engine::config::monitor()) {
+            const auto &warnings = MONITOR(warnings);
+            REQUIRE(warnings.size() == 1);
+            REQUIRE(warnings[0].code() == Ec::Warning);
+            REQUIRE(warnings[0].message().find(
+                        "This chat pipeline has no Return Answers node, so "
+                        "responses won't reach the chat. Add a Return Answers "
+                        "node after the LLM.") != std::string::npos);
+        }
+    }
+
+    SECTION("does not warn when chat pipeline includes a response node") {
+        if (engine::config::monitor()) MONITOR(reset);
+
+        auto pipelineJson = R"({
+            "pipeline": {
+                "source": "chat_1",
+                "version": 1,
+                "components": [
+                    {
+                        "id": "chat_1",
+                        "provider": "chat",
+                        "config": {}
+                    },
+                    {
+                        "id": "llm_1",
+                        "provider": "llm_openai",
+                        "config": {},
+                        "input": [
+                            {
+                                "from": "chat_1",
+                                "lane": "questions"
+                            }
+                        ]
+                    },
+                    {
+                        "id": "response_answers_1",
+                        "provider": "response_answers",
+                        "config": {},
+                        "input": [
+                            {
+                                "from": "llm_1",
+                                "lane": "answers"
+                            }
+                        ]
+                    }
+                ]
+            }
+        })"_json;
+
+        IPipeStack stack = {
+            IPipeType{"pipe", "pipe"},
+            IPipeType{"llm_1", "llm_openai", "llm_openai"},
+            IPipeType{"response_answers_1", "response_answers",
+                      "response_answers"},
+            IPipeType{"bottom", "bottom"},
+        };
+
+        TestEndpoint endpoint(pipelineJson, _mv(stack));
+        REQUIRE_NO_ERROR(endpoint.config.pipeline.validate());
+        REQUIRE_NO_ERROR(endpoint.buildConnections());
+
+        if (engine::config::monitor()) {
+            REQUIRE(MONITOR(warnings).empty());
+        }
+    }
+
+    SECTION("does not warn for non-chat ingestion pipelines without response node") {
+        if (engine::config::monitor()) MONITOR(reset);
+
+        auto pipelineJson = R"({
+            "pipeline": {
+                "source": "webhook_1",
+                "version": 1,
+                "components": [
+                    {
+                        "id": "webhook_1",
+                        "provider": "webhook",
+                        "config": {}
+                    },
+                    {
+                        "id": "parse_1",
+                        "provider": "parse",
+                        "config": {},
+                        "input": [
+                            {
+                                "from": "webhook_1",
+                                "lane": "tags"
+                            }
+                        ]
+                    },
+                    {
+                        "id": "qdrant_1",
+                        "provider": "qdrant",
+                        "config": {},
+                        "input": [
+                            {
+                                "from": "parse_1",
+                                "lane": "documents"
+                            }
+                        ]
+                    }
+                ]
+            }
+        })"_json;
+
+        IPipeStack stack = {
+            IPipeType{"pipe", "pipe"},
+            IPipeType{"parse_1", "parse", "parse"},
+            IPipeType{"qdrant_1", "qdrant", "qdrant"},
+            IPipeType{"bottom", "bottom"},
+        };
+
+        TestEndpoint endpoint(pipelineJson, _mv(stack));
+        REQUIRE_NO_ERROR(endpoint.config.pipeline.validate());
+        REQUIRE_NO_ERROR(endpoint.buildConnections());
+
+        if (engine::config::monitor()) {
+            REQUIRE(MONITOR(warnings).empty());
+        }
+    }
+}
