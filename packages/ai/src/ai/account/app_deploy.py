@@ -1135,25 +1135,28 @@ def manifest_snapshot(entry: Dict[str, Any], artifact: Dict[str, Any]) -> Dict[s
     }
 
 
-def _icon_url_of(app_id: str, version: int, icon_path: str) -> str:
-    """One snapshot's icon resolved to the URL the desktop can load.
+def _asset_url_of(app_id: str, version: int, asset_path: str) -> str:
+    """One snapshot's asset (icon, readme) resolved to the URL the desktop can load.
 
-    Snapshots store appManifest.icon verbatim. Seeded entries carry an
-    absolute static path ('/apps/<id>/icon.svg') — served as-is. A deployed
-    app declares its icon APP-RELATIVE ('./icon.svg'); the build harvest
-    copies it into the version's dist/ tree, so it serves at the constructed
-    versioned URL (the same scheme as remoteEntry.js). Empty or unsafe
-    (traversal) paths resolve to '' — the shell falls back to its monogram.
+    Snapshots store appManifest.icon and appManifest.readme verbatim. Seeded
+    entries carry an absolute static path ('/apps/<id>/icon.svg') — served
+    as-is. A deployed app declares its assets APP-RELATIVE ('./icon.svg',
+    './README.md'); the build harvest copies them into the version's dist/
+    tree, so they serve at the constructed versioned URL (the same scheme as
+    remoteEntry.js). Empty or unsafe (traversal) paths resolve to ''.
     """
-    rel = str(icon_path or '').strip().replace('\\', '/')
+    rel = str(asset_path or '').strip().replace('\\', '/')
     if not rel:
         return ''
-    if rel.startswith('/'):
+    if rel.startswith(('/', 'http://', 'https://')):
         return rel
     parts = [p for p in rel.split('/') if p not in ('', '.')]
     if not parts or '..' in parts:
         return ''
     return f'/apps/{app_id}/v{version}/' + '/'.join(parts)
+
+
+_icon_url_of = _asset_url_of
 
 
 def _audience_handle(conn: Any, audience: Dict[str, str]) -> str:
@@ -1409,8 +1412,8 @@ async def resolve_app_pins(org_id: str, user_id: Optional[str], team_ids: List[s
             'name': snapshot.get('name') or artifact.get('name') or app_id,
             'publisher': str(snapshot.get('publisher') or artifact_manifest.get('publisher') or ''),
             'description': snapshot.get('description') or '',
-            'icon': _icon_url_of(app_id, version, snapshot.get('iconPath')),
-            'readme': snapshot.get('readmePath') or '',
+            'icon': _asset_url_of(app_id, version, snapshot.get('iconPath')),
+            'readme': _asset_url_of(app_id, version, snapshot.get('readmePath')),
             'categories': snapshot.get('categories') or [],
             # NO entry URL — the wire carries the version NUMBER and clients
             # construct /apps/<appId>/v<N>/remoteEntry.js themselves. The dev
