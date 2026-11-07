@@ -1,0 +1,157 @@
+{
+	"id": "edit-07-app-dirty-buffer",
+	"about": "Edits an app file that has unsaved user changes without losing them.",
+	"prompt": "In daybook, change the heading to \"My Daybook\" and add a \"Clear all\" button next to \"Add entry\" that removes every entry.",
+	"files": [
+		{
+			"path": "apps/daybook-ui/.gitignore",
+			"from": "fixtures/daybook-app/.gitignore"
+		},
+		{
+			"path": "apps/daybook-ui/README.md",
+			"from": "fixtures/daybook-app/README.md"
+		},
+		{
+			"path": "apps/daybook-ui/daybook.rrapp",
+			"from": "fixtures/daybook-app/daybook.rrapp"
+		},
+		{
+			"path": "apps/daybook-ui/icon.svg",
+			"from": "fixtures/daybook-app/icon.svg"
+		},
+		{
+			"path": "apps/daybook-ui/package.json",
+			"from": "fixtures/daybook-app/package.json"
+		},
+		{
+			"path": "apps/daybook-ui/rsbuild.config.mts",
+			"from": "fixtures/daybook-app/rsbuild.config.mts"
+		},
+		{
+			"path": "apps/daybook-ui/src/App.tsx",
+			"from": "fixtures/daybook-app/src/App.tsx"
+		},
+		{
+			"path": "apps/daybook-ui/src/AppDescriptor.ts",
+			"from": "fixtures/daybook-app/src/AppDescriptor.ts"
+		},
+		{
+			"path": "apps/daybook-ui/src/global.d.ts",
+			"from": "fixtures/daybook-app/src/global.d.ts"
+		},
+		{
+			"path": "apps/daybook-ui/src/index.ts",
+			"from": "fixtures/daybook-app/src/index.ts"
+		},
+		{
+			"path": "apps/daybook-ui/tsconfig.json",
+			"from": "fixtures/daybook-app/tsconfig.json"
+		}
+	],
+	"variables": [],
+	"setup": {
+		"user_events": [
+			{
+				"when": "start",
+				"path": "apps/daybook-ui/src/App.tsx",
+				"action": "dirty_buffer",
+				"description": "The user has App.tsx open in the editor with an unsaved change to the input placeholder.",
+				"replace": {
+					"placeholder=\"What happened today?\"": "placeholder=\"Write about your day\""
+				}
+			},
+			{
+				"when": "episode_end",
+				"path": "apps/daybook-ui/src/App.tsx",
+				"action": "save_buffer_if_dirty",
+				"description": "If the buffer is still dirty when the episode ends, the user presses save, as a real user would."
+			}
+		]
+	},
+	"cards": {
+		"default": "approve",
+		"Unsaved changes": "Save mine first"
+	},
+	"timeLimitSec": 300,
+	"checks": [
+		{
+			"id": "scope",
+			"kind": "only_changed",
+			"globs": [
+				"apps/daybook-ui/*"
+			],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "done-means-checked",
+			"kind": "done_implies_checks_pass",
+			"blocker": true,
+			"blocker_name": "done with a failing check"
+		},
+		{
+			"id": "no-leak",
+			"kind": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		},
+		{
+			"id": "outcome-final",
+			"kind": "outcome",
+			"equals": "done"
+		},
+		{
+			"id": "buffer-kept",
+			"kind": "user_edit_kept",
+			"path": "apps/daybook-ui/src/App.tsx",
+			"contains": "Write about your day",
+			"blocker": true,
+			"blocker_name": "stale write landed"
+		},
+		{
+			"id": "heading",
+			"kind": "file_matches",
+			"path": "apps/daybook-ui/src/App.tsx",
+			"regex": "My Daybook"
+		},
+		{
+			"id": "clear",
+			"kind": "file_matches",
+			"path": "apps/daybook-ui/src/App.tsx",
+			"regex": "Clear all"
+		},
+		{
+			"id": "add-kept",
+			"kind": "file_matches",
+			"path": "apps/daybook-ui/src/App.tsx",
+			"regex": "Add entry"
+		},
+		{
+			"id": "no-retry-loop",
+			"kind": "max_identical_refusals",
+			"tool": "edit_file",
+			"n": 1,
+			"soft": true
+		},
+		{
+			"id": "check-app",
+			"kind": "check_app_passes",
+			"app": "apps/daybook-ui"
+		}
+	],
+	"judge": [
+		"The heading reads \"My Daybook\".",
+		"A \"Clear all\" button sits next to \"Add entry\".",
+		"After adding two entries, pressing \"Clear all\" removes both.",
+		"Adding an entry still works after \"Clear all\"."
+	]
+}

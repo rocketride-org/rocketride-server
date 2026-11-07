@@ -1,0 +1,84 @@
+{
+	"id": "build-14-app-unit-converter",
+	"about": "Creates a kilometers and miles converter app and sets its store description.",
+	"prompt": "Create an app unitconv (display name Unit Converter) that converts kilometers to miles and back, with a swap button. Set its store description to \"Convert kilometers and miles\".",
+	"files": [],
+	"variables": [],
+	"cards": "approve",
+	"timeLimitSec": 600,
+	"checks": [
+		{
+			"id": "outcome",
+			"kind": "outcome",
+			"equals": "done"
+		},
+		{
+			"id": "scope",
+			"kind": "only_changed",
+			"globs": [
+				"apps/unitconv-ui/*"
+			],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "done-means-checked",
+			"kind": "done_implies_checks_pass",
+			"blocker": true,
+			"blocker_name": "done with a failing check"
+		},
+		{
+			"id": "no-leak",
+			"kind": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		},
+		{
+			"id": "created-with-tool",
+			"kind": "tool_called",
+			"tool": "create_app",
+			"args_match": {
+				"appName": "^unitconv$"
+			}
+		},
+		{
+			"id": "description",
+			"kind": "json_value",
+			"path": "apps/unitconv-ui/package.json",
+			"pointer": "appManifest/description",
+			"equals": "Convert kilometers and miles"
+		},
+		{
+			"id": "factor",
+			"kind": "file_matches",
+			"path": "apps/unitconv-ui/src/App.tsx",
+			"regex": "1\\.609|0\\.621"
+		},
+		{
+			"id": "swap",
+			"kind": "file_matches",
+			"path": "apps/unitconv-ui/src/App.tsx",
+			"regex": "(?i)swap"
+		},
+		{
+			"id": "check-app",
+			"kind": "check_app_passes",
+			"app": "apps/unitconv-ui"
+		}
+	],
+	"judge": [
+		"Converting 10 kilometers shows about 6.21 miles.",
+		"After pressing swap, converting 10 miles shows about 16.09 kilometers.",
+		"The labels show which unit goes in and which comes out, before and after swap.",
+		"Changing the number changes the result."
+	]
+}

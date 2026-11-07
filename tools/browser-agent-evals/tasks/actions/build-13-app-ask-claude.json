@@ -1,0 +1,107 @@
+{
+	"id": "build-13-app-ask-claude",
+	"about": "Creates an app that ships its own chat pipeline and shows Claude's answer.",
+	"prompt": "Build an app called askclaude (display name Ask Claude): a text box and an Ask button. The question goes to Claude Sonnet 4.6 through a pipeline that ships inside the app, and the answer shows under the box. My Anthropic key is in Variables.",
+	"files": [],
+	"variables": [
+		"ROCKETRIDE_ANTHROPIC_KEY"
+	],
+	"cards": "approve",
+	"timeLimitSec": 600,
+	"checks": [
+		{
+			"id": "outcome",
+			"kind": "outcome",
+			"equals": "done"
+		},
+		{
+			"id": "scope",
+			"kind": "only_changed",
+			"globs": [
+				"apps/askclaude-ui/*"
+			],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "done-means-checked",
+			"kind": "done_implies_checks_pass",
+			"blocker": true,
+			"blocker_name": "done with a failing check"
+		},
+		{
+			"id": "no-leak",
+			"kind": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		},
+		{
+			"id": "created-with-tool",
+			"kind": "tool_called",
+			"tool": "create_app",
+			"args_match": {
+				"appName": "^askclaude$"
+			}
+		},
+		{
+			"id": "pipe-in-app",
+			"kind": "glob_count",
+			"glob": "apps/askclaude-ui/src/*.pipe",
+			"n": 1
+		},
+		{
+			"id": "pipe-imported",
+			"kind": "file_matches",
+			"path": "apps/askclaude-ui/src/App.tsx",
+			"regex": "import \\w+ from '\\./[\\w-]+\\.pipe'"
+		},
+		{
+			"id": "uses-client",
+			"kind": "file_matches",
+			"path": "apps/askclaude-ui/src/App.tsx",
+			"regex": "useShellConnection"
+		},
+		{
+			"id": "use-pipeline-object",
+			"kind": "file_matches",
+			"path": "apps/askclaude-ui/src/App.tsx",
+			"regex": "use\\(\\{\\s*pipeline"
+		},
+		{
+			"id": "no-filepath",
+			"kind": "file_not_matches",
+			"path": "apps/askclaude-ui/src/App.tsx",
+			"regex": "filepath"
+		},
+		{
+			"id": "chat-call",
+			"kind": "file_matches",
+			"path": "apps/askclaude-ui/src/App.tsx",
+			"regex": "\\.chat\\("
+		},
+		{
+			"id": "pipe-placeholder",
+			"kind": "secrets_are_placeholders"
+		},
+		{
+			"id": "check-app",
+			"kind": "check_app_passes",
+			"app": "apps/askclaude-ui"
+		}
+	],
+	"judge": [
+		"Typing a question and pressing Ask shows an answer under the box.",
+		"The answer fits the question. Asking \"What is 2 + 2?\" gives an answer that says 4.",
+		"Asking a second question shows a new answer without reloading the page.",
+		"No error shows on the page after asking."
+	]
+}

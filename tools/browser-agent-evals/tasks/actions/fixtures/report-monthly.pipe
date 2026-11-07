@@ -1,0 +1,34 @@
+{
+	"components": [
+		{
+			"id": "webhook_1",
+			"provider": "webhook",
+			"config": {
+				"hideForm": true,
+				"mode": "Source",
+				"parameters": {},
+				"type": "webhook"
+			}
+		},
+		{
+			"id": "response_text_1",
+			"provider": "response_text",
+			"config": {
+				"laneName": "text"
+			},
+			"input": [
+				{
+					"lane": "text",
+					"from": "webhook_1"
+				}
+			]
+		}
+	],
+	"project_id": "d3d3d3d3-0000-4000-8000-00000000000b",
+	"viewport": {
+		"x": 0,
+		"y": 0,
+		"zoom": 1
+	},
+	"version": 1
+}

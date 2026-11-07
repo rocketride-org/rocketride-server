@@ -1,0 +1,118 @@
+{
+	"id": "edit-05-user-saves-mid-turn",
+	"about": "Keeps the user's own save when it lands while the agent's write is in flight.",
+	"prompt": "Switch translate-bot to Claude Sonnet 4.6.",
+	"files": [
+		{
+			"path": "pipelines/translate-bot.pipe",
+			"from": "fixtures/translate-bot.pipe"
+		}
+	],
+	"variables": [
+		"ROCKETRIDE_ANTHROPIC_KEY"
+	],
+	"setup": {
+		"user_events": [
+			{
+				"when": "between_freshness_check_and_write",
+				"path": "pipelines/translate-bot.pipe",
+				"action": "save",
+				"description": "The user edits the prompt instructions in the canvas and saves while the agent's write is in flight. The runner holds the agent's write with a deferred, as the round 3 probe does, applies the save, then releases the write.",
+				"set_pointer": {
+					"components/1/config/instructions/0": "Translate the user's message into French. Keep product names in English."
+				}
+			}
+		]
+	},
+	"cards": "approve",
+	"timeLimitSec": 300,
+	"hold": "The user's save has to land after the agent's freshness check and before its write. Krish timed that with an L2 harness hook, and L2 is gone. A browser runner could do it by holding the agent's write frame on the WebSocket, but nothing does that yet.",
+	"checks": [
+		{
+			"id": "outcome",
+			"kind": "outcome",
+			"equals": "done"
+		},
+		{
+			"id": "scope",
+			"kind": "only_changed",
+			"globs": [
+				"pipelines/translate-bot.pipe"
+			],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "done-means-checked",
+			"kind": "done_implies_checks_pass",
+			"blocker": true,
+			"blocker_name": "done with a failing check"
+		},
+		{
+			"id": "no-leak",
+			"kind": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		},
+		{
+			"id": "parses",
+			"kind": "json_parses",
+			"path": "pipelines/translate-bot.pipe"
+		},
+		{
+			"id": "static-valid",
+			"kind": "pipe_static_valid",
+			"path": "pipelines/translate-bot.pipe"
+		},
+		{
+			"id": "engine-valid",
+			"kind": "engine_validate",
+			"path": "pipelines/translate-bot.pipe"
+		},
+		{
+			"id": "placeholders",
+			"kind": "secrets_are_placeholders",
+			"path": "pipelines/translate-bot.pipe"
+		},
+		{
+			"id": "project-id",
+			"kind": "project_id_unchanged",
+			"path": "pipelines/translate-bot.pipe",
+			"from": "pipelines/translate-bot.pipe"
+		},
+		{
+			"id": "user-save-kept",
+			"kind": "user_edit_kept",
+			"path": "pipelines/translate-bot.pipe",
+			"contains": "Keep product names in English",
+			"blocker": true,
+			"blocker_name": "stale write landed"
+		},
+		{
+			"id": "model",
+			"kind": "config_value",
+			"path": "pipelines/translate-bot.pipe",
+			"provider": "llm_anthropic",
+			"pointer": "profile",
+			"equals": "claude-sonnet-4-6"
+		},
+		{
+			"id": "openai-gone",
+			"kind": "providers_absent",
+			"path": "pipelines/translate-bot.pipe",
+			"providers": [
+				"llm_openai"
+			]
+		}
+	],
+	"judge": []
+}

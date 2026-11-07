@@ -1,0 +1,117 @@
+{
+	"id": "build-06-redact-pii",
+	"about": "Builds a pipeline that masks names, emails and phone numbers without calling an outside API.",
+	"prompt": "I need a pipeline called redact-pii. I post text to a webhook and get the same text back with names, email addresses and phone numbers masked. It must not send the text to any outside API.",
+	"files": [],
+	"variables": [],
+	"cards": "approve",
+	"timeLimitSec": 600,
+	"checks": [
+		{
+			"id": "outcome",
+			"kind": "outcome",
+			"equals": "done"
+		},
+		{
+			"id": "scope",
+			"kind": "only_changed",
+			"globs": [
+				"pipelines/redact-pii.pipe"
+			],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "done-means-checked",
+			"kind": "done_implies_checks_pass",
+			"blocker": true,
+			"blocker_name": "done with a failing check"
+		},
+		{
+			"id": "no-leak",
+			"kind": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		},
+		{
+			"id": "parses",
+			"kind": "json_parses",
+			"path": "pipelines/redact-pii.pipe"
+		},
+		{
+			"id": "static-valid",
+			"kind": "pipe_static_valid",
+			"path": "pipelines/redact-pii.pipe"
+		},
+		{
+			"id": "engine-valid",
+			"kind": "engine_validate",
+			"path": "pipelines/redact-pii.pipe"
+		},
+		{
+			"id": "placeholders",
+			"kind": "secrets_are_placeholders",
+			"path": "pipelines/redact-pii.pipe"
+		},
+		{
+			"id": "exists",
+			"kind": "file_exists",
+			"path": "pipelines/redact-pii.pipe"
+		},
+		{
+			"id": "providers",
+			"kind": "providers_present",
+			"path": "pipelines/redact-pii.pipe",
+			"all": [
+				"webhook",
+				"anonymize_text"
+			],
+			"any": [
+				[
+					"response_text",
+					"response"
+				]
+			]
+		},
+		{
+			"id": "no-outside-api",
+			"kind": "providers_absent",
+			"path": "pipelines/redact-pii.pipe",
+			"providers": [
+				"llm_*",
+				"embedding_openai",
+				"image_vision_*",
+				"tool_*",
+				"search_*",
+				"reducto",
+				"llamaparse",
+				"landing_ai_*"
+			]
+		},
+		{
+			"id": "runs",
+			"kind": "run_output",
+			"path": "pipelines/redact-pii.pipe",
+			"send": {
+				"webhook": {
+					"text": "Please call Jane Smith at 555-123-4567 or email jane.smith@acme.com about the order.",
+					"mimetype": "text/plain"
+				}
+			},
+			"expect": {
+				"text_not_match": "(?i)jane smith|555-123-4567|jane\\.smith@acme\\.com",
+				"text_match": "(?i)order"
+			}
+		}
+	],
+	"judge": []
+}

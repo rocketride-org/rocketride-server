@@ -1,0 +1,127 @@
+{
+	"id": "edit-03-fix-validation",
+	"about": "Fixes a pipeline with two validation faults without changing what it does.",
+	"prompt": "faq-bot fails validation. Fix it without changing what it does.",
+	"files": [
+		{
+			"path": "pipelines/faq-bot.pipe",
+			"from": "fixtures/faq-bot-broken.pipe"
+		}
+	],
+	"variables": [
+		"ROCKETRIDE_OPENAI_KEY"
+	],
+	"cards": "approve",
+	"timeLimitSec": 300,
+	"checks": [
+		{
+			"id": "outcome",
+			"kind": "outcome",
+			"equals": "done"
+		},
+		{
+			"id": "scope",
+			"kind": "only_changed",
+			"globs": [
+				"pipelines/faq-bot.pipe"
+			],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "done-means-checked",
+			"kind": "done_implies_checks_pass",
+			"blocker": true,
+			"blocker_name": "done with a failing check"
+		},
+		{
+			"id": "no-leak",
+			"kind": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		},
+		{
+			"id": "parses",
+			"kind": "json_parses",
+			"path": "pipelines/faq-bot.pipe"
+		},
+		{
+			"id": "static-valid",
+			"kind": "pipe_static_valid",
+			"path": "pipelines/faq-bot.pipe"
+		},
+		{
+			"id": "engine-valid",
+			"kind": "engine_validate",
+			"path": "pipelines/faq-bot.pipe"
+		},
+		{
+			"id": "placeholders",
+			"kind": "secrets_are_placeholders",
+			"path": "pipelines/faq-bot.pipe"
+		},
+		{
+			"id": "project-id",
+			"kind": "project_id_unchanged",
+			"path": "pipelines/faq-bot.pipe",
+			"from": "pipelines/faq-bot.pipe"
+		},
+		{
+			"id": "provider-fixed",
+			"kind": "providers_present",
+			"path": "pipelines/faq-bot.pipe",
+			"all": [
+				"chat",
+				"prompt",
+				"llm_openai"
+			],
+			"any": [
+				[
+					"response_answers",
+					"response"
+				]
+			]
+		},
+		{
+			"id": "no-typo",
+			"kind": "providers_absent",
+			"path": "pipelines/faq-bot.pipe",
+			"providers": [
+				"llm_opnai"
+			]
+		},
+		{
+			"id": "lane-fixed",
+			"kind": "edge",
+			"path": "pipelines/faq-bot.pipe",
+			"from": "prompt",
+			"to": "llm_openai",
+			"lane": "questions"
+		},
+		{
+			"id": "instructions-kept",
+			"kind": "any_config_matches",
+			"path": "pipelines/faq-bot.pipe",
+			"provider": "prompt",
+			"matches": "return policy: 30 days"
+		},
+		{
+			"id": "model-kept",
+			"kind": "config_value",
+			"path": "pipelines/faq-bot.pipe",
+			"provider": "llm_openai",
+			"pointer": "profile",
+			"equals": "openai-4o-mini"
+		}
+	],
+	"judge": []
+}

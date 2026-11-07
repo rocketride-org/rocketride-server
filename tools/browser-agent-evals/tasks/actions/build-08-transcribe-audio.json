@@ -1,0 +1,113 @@
+{
+	"id": "build-08-transcribe-audio",
+	"about": "Builds a pipeline that turns an uploaded meeting recording into a text transcript.",
+	"prompt": "Make me a pipeline, meeting-transcript, where I upload an audio recording of a meeting and get the transcript back as text.",
+	"files": [],
+	"variables": [],
+	"cards": "approve",
+	"timeLimitSec": 600,
+	"needs": "The sample recording inputs/meeting-30s.wav. No key, because transcription runs on the engine.",
+	"checks": [
+		{
+			"id": "outcome",
+			"kind": "outcome",
+			"equals": "done"
+		},
+		{
+			"id": "scope",
+			"kind": "only_changed",
+			"globs": [
+				"pipelines/meeting-transcript.pipe"
+			],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "done-means-checked",
+			"kind": "done_implies_checks_pass",
+			"blocker": true,
+			"blocker_name": "done with a failing check"
+		},
+		{
+			"id": "no-leak",
+			"kind": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		},
+		{
+			"id": "parses",
+			"kind": "json_parses",
+			"path": "pipelines/meeting-transcript.pipe"
+		},
+		{
+			"id": "static-valid",
+			"kind": "pipe_static_valid",
+			"path": "pipelines/meeting-transcript.pipe"
+		},
+		{
+			"id": "engine-valid",
+			"kind": "engine_validate",
+			"path": "pipelines/meeting-transcript.pipe"
+		},
+		{
+			"id": "placeholders",
+			"kind": "secrets_are_placeholders",
+			"path": "pipelines/meeting-transcript.pipe"
+		},
+		{
+			"id": "exists",
+			"kind": "file_exists",
+			"path": "pipelines/meeting-transcript.pipe"
+		},
+		{
+			"id": "providers",
+			"kind": "providers_present",
+			"path": "pipelines/meeting-transcript.pipe",
+			"all": [
+				"parse",
+				"audio_transcribe"
+			],
+			"any": [
+				[
+					"dropper",
+					"webhook"
+				],
+				[
+					"response_text",
+					"response"
+				]
+			]
+		},
+		{
+			"id": "audio-lane",
+			"kind": "edge",
+			"path": "pipelines/meeting-transcript.pipe",
+			"from": "parse",
+			"to": "audio_transcribe",
+			"lane": "audio"
+		},
+		{
+			"id": "runs",
+			"kind": "run_output",
+			"path": "pipelines/meeting-transcript.pipe",
+			"send": {
+				"dropper": {
+					"file": "inputs/meeting-30s.wav"
+				}
+			},
+			"expect": {
+				"text_match": "(?i)budget"
+			}
+		}
+	],
+	"judge": []
+}

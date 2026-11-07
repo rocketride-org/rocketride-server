@@ -1,0 +1,94 @@
+{
+	"id": "build-11-app-daybook",
+	"about": "Creates a small journal app from the Blank template.",
+	"prompt": "Create an app called daybook (display name Daybook). It is a simple journal: a text box and an \"Add entry\" button, and below it the entries, newest first, each with the date and time it was added. It does not need to save entries between sessions.",
+	"files": [],
+	"variables": [],
+	"cards": "approve",
+	"timeLimitSec": 600,
+	"checks": [
+		{
+			"id": "outcome",
+			"kind": "outcome",
+			"equals": "done"
+		},
+		{
+			"id": "scope",
+			"kind": "only_changed",
+			"globs": [
+				"apps/daybook-ui/*"
+			],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "done-means-checked",
+			"kind": "done_implies_checks_pass",
+			"blocker": true,
+			"blocker_name": "done with a failing check"
+		},
+		{
+			"id": "no-leak",
+			"kind": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		},
+		{
+			"id": "created-with-tool",
+			"kind": "tool_called",
+			"tool": "create_app",
+			"args_match": {
+				"appName": "^daybook$"
+			}
+		},
+		{
+			"id": "folder",
+			"kind": "file_exists",
+			"path": "apps/daybook-ui/package.json"
+		},
+		{
+			"id": "name",
+			"kind": "json_value",
+			"path": "apps/daybook-ui/package.json",
+			"pointer": "appManifest/name",
+			"equals": "Daybook"
+		},
+		{
+			"id": "button",
+			"kind": "file_matches",
+			"path": "apps/daybook-ui/src/App.tsx",
+			"regex": "Add entry"
+		},
+		{
+			"id": "state",
+			"kind": "file_matches",
+			"path": "apps/daybook-ui/src/App.tsx",
+			"regex": "useState"
+		},
+		{
+			"id": "shell-only",
+			"kind": "file_not_matches",
+			"path": "apps/daybook-ui/src/App.tsx",
+			"regex": "from '\\.\\./|from \"\\.\\./"
+		},
+		{
+			"id": "check-app",
+			"kind": "check_app_passes",
+			"app": "apps/daybook-ui"
+		}
+	],
+	"judge": [
+		"Typing text and pressing \"Add entry\" adds it as an entry below the box.",
+		"With two entries added, the newer one is listed first.",
+		"Each entry shows the date and the time it was added."
+	]
+}

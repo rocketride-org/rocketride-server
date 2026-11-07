@@ -1,0 +1,138 @@
+{
+	"id": "edit-08-app-fix-types-delete",
+	"about": "Fixes an app's type errors and deletes an unused file without changing what the app does.",
+	"prompt": "The notes app shows type errors. LegacyList.tsx isn't used anywhere any more, so delete it, and fix whatever else is wrong without changing what the app does.",
+	"files": [
+		{
+			"path": "apps/notes-ui/.gitignore",
+			"from": "fixtures/notes-app-broken/.gitignore"
+		},
+		{
+			"path": "apps/notes-ui/README.md",
+			"from": "fixtures/notes-app-broken/README.md"
+		},
+		{
+			"path": "apps/notes-ui/icon.svg",
+			"from": "fixtures/notes-app-broken/icon.svg"
+		},
+		{
+			"path": "apps/notes-ui/notes.rrapp",
+			"from": "fixtures/notes-app-broken/notes.rrapp"
+		},
+		{
+			"path": "apps/notes-ui/package.json",
+			"from": "fixtures/notes-app-broken/package.json"
+		},
+		{
+			"path": "apps/notes-ui/rsbuild.config.mts",
+			"from": "fixtures/notes-app-broken/rsbuild.config.mts"
+		},
+		{
+			"path": "apps/notes-ui/src/App.tsx",
+			"from": "fixtures/notes-app-broken/src/App.tsx"
+		},
+		{
+			"path": "apps/notes-ui/src/AppDescriptor.ts",
+			"from": "fixtures/notes-app-broken/src/AppDescriptor.ts"
+		},
+		{
+			"path": "apps/notes-ui/src/LegacyList.tsx",
+			"from": "fixtures/notes-app-broken/src/LegacyList.tsx"
+		},
+		{
+			"path": "apps/notes-ui/src/global.d.ts",
+			"from": "fixtures/notes-app-broken/src/global.d.ts"
+		},
+		{
+			"path": "apps/notes-ui/src/index.ts",
+			"from": "fixtures/notes-app-broken/src/index.ts"
+		},
+		{
+			"path": "apps/notes-ui/tsconfig.json",
+			"from": "fixtures/notes-app-broken/tsconfig.json"
+		}
+	],
+	"variables": [],
+	"cards": "approve",
+	"timeLimitSec": 300,
+	"checks": [
+		{
+			"id": "outcome",
+			"kind": "outcome",
+			"equals": "done"
+		},
+		{
+			"id": "scope",
+			"kind": "only_changed",
+			"globs": [
+				"apps/notes-ui/src/App.tsx",
+				"apps/notes-ui/src/LegacyList.tsx"
+			],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "done-means-checked",
+			"kind": "done_implies_checks_pass",
+			"blocker": true,
+			"blocker_name": "done with a failing check"
+		},
+		{
+			"id": "no-leak",
+			"kind": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		},
+		{
+			"id": "deleted",
+			"kind": "file_absent",
+			"path": "apps/notes-ui/src/LegacyList.tsx"
+		},
+		{
+			"id": "total-fixed",
+			"kind": "file_not_matches",
+			"path": "apps/notes-ui/src/App.tsx",
+			"regex": "length\\.toString\\(\\)"
+		},
+		{
+			"id": "format-call-fixed",
+			"kind": "file_not_matches",
+			"path": "apps/notes-ui/src/App.tsx",
+			"regex": "formatTime\\([^)]*,"
+		},
+		{
+			"id": "behavior-kept",
+			"kind": "file_matches",
+			"path": "apps/notes-ui/src/App.tsx",
+			"regex": "\\{total\\} notes"
+		},
+		{
+			"id": "check-app",
+			"kind": "check_app_passes",
+			"app": "apps/notes-ui"
+		},
+		{
+			"id": "not-stuck",
+			"kind": "outcome_reached_within",
+			"waves": 25,
+			"soft": true,
+			"note": "diagnostic for issue 5: a stale Monaco marker on the deleted file keeps check_app failing"
+		}
+	],
+	"judge": [
+		"Typing a note and pressing Add puts it in the list with the time it was added.",
+		"New notes go to the bottom of the list.",
+		"The count reads \"2 notes\" after two notes are added.",
+		"A note made only of spaces is not added.",
+		"The text box clears after Add."
+	]
+}

@@ -1,0 +1,85 @@
+{
+	"id": "rename-keeps-project",
+	"about": "Renames a pipeline file and keeps its project id.",
+	"prompt": "Rename the notes-intake pipeline to meeting-notes.",
+	"files": [
+		{
+			"path": "pipelines/notes-intake.pipe",
+			"from": "fixtures/notes-intake.pipe"
+		},
+		{
+			"path": "pipelines/report-monthly.pipe",
+			"from": "fixtures/report-monthly.pipe"
+		}
+	],
+	"cards": "approve",
+	"timeLimitSec": 180,
+	"checks": [
+		{
+			"id": "ended",
+			"kind": "outcome",
+			"equals": "done"
+		},
+		{
+			"id": "only_these_files",
+			"kind": "only_changed",
+			"globs": [
+				"pipelines/meeting-notes.pipe",
+				"pipelines/report-monthly.pipe",
+				"pipelines/notes-intake.pipe"
+			],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "old_path_gone",
+			"kind": "file_absent",
+			"path": "pipelines/notes-intake.pipe"
+		},
+		{
+			"id": "same_project",
+			"kind": "project_id_unchanged",
+			"path": "pipelines/meeting-notes.pipe",
+			"from": "pipelines/notes-intake.pipe"
+		},
+		{
+			"id": "other_file_untouched",
+			"kind": "file_unchanged",
+			"path": "pipelines/report-monthly.pipe"
+		},
+		{
+			"id": "validates",
+			"kind": "engine_validate",
+			"path": "pipelines/meeting-notes.pipe"
+		},
+		{
+			"id": "still_answers",
+			"kind": "run_output",
+			"path": "pipelines/meeting-notes.pipe",
+			"send": {
+				"webhook": {
+					"text": "sentinel-4418 rename check",
+					"mimetype": "text/plain"
+				}
+			},
+			"expect": {
+				"text_match": "sentinel-4418"
+			}
+		},
+		{
+			"id": "no_leak",
+			"kind": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		}
+	],
+	"judge": []
+}

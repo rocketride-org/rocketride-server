@@ -1,0 +1,131 @@
+{
+	"id": "edit-04-swap-embeddings",
+	"about": "Switches both embedding steps of a RAG pipeline to OpenAI so ingest and query still match.",
+	"prompt": "Switch docs-qa to OpenAI embeddings, text-embedding-3-small.",
+	"files": [
+		{
+			"path": "pipelines/docs-qa.pipe",
+			"from": "fixtures/docs-qa-minilm.pipe"
+		}
+	],
+	"variables": [
+		"ROCKETRIDE_OPENAI_KEY",
+		"ROCKETRIDE_QDRANT_HOST"
+	],
+	"cards": "approve",
+	"timeLimitSec": 300,
+	"checks": [
+		{
+			"id": "outcome",
+			"kind": "outcome",
+			"equals": "done"
+		},
+		{
+			"id": "scope",
+			"kind": "only_changed",
+			"globs": [
+				"pipelines/docs-qa.pipe"
+			],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "done-means-checked",
+			"kind": "done_implies_checks_pass",
+			"blocker": true,
+			"blocker_name": "done with a failing check"
+		},
+		{
+			"id": "no-leak",
+			"kind": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		},
+		{
+			"id": "parses",
+			"kind": "json_parses",
+			"path": "pipelines/docs-qa.pipe"
+		},
+		{
+			"id": "static-valid",
+			"kind": "pipe_static_valid",
+			"path": "pipelines/docs-qa.pipe"
+		},
+		{
+			"id": "engine-valid",
+			"kind": "engine_validate",
+			"path": "pipelines/docs-qa.pipe"
+		},
+		{
+			"id": "placeholders",
+			"kind": "secrets_are_placeholders",
+			"path": "pipelines/docs-qa.pipe"
+		},
+		{
+			"id": "project-id",
+			"kind": "project_id_unchanged",
+			"path": "pipelines/docs-qa.pipe",
+			"from": "pipelines/docs-qa.pipe"
+		},
+		{
+			"id": "no-transformer",
+			"kind": "providers_absent",
+			"path": "pipelines/docs-qa.pipe",
+			"providers": [
+				"embedding_transformer"
+			]
+		},
+		{
+			"id": "two-openai",
+			"kind": "count",
+			"path": "pipelines/docs-qa.pipe",
+			"provider": "embedding_openai",
+			"n": 2
+		},
+		{
+			"id": "same-model",
+			"kind": "same_config",
+			"path": "pipelines/docs-qa.pipe",
+			"provider": "embedding_openai",
+			"pointer": "profile"
+		},
+		{
+			"id": "model",
+			"kind": "config_value",
+			"path": "pipelines/docs-qa.pipe",
+			"provider": "embedding_openai",
+			"pointer": "profile",
+			"equals": "text-embedding-3-small"
+		},
+		{
+			"id": "ingest-path",
+			"kind": "reaches",
+			"path": "pipelines/docs-qa.pipe",
+			"from": "webhook",
+			"to": "qdrant"
+		},
+		{
+			"id": "query-path",
+			"kind": "reaches",
+			"path": "pipelines/docs-qa.pipe",
+			"from": "chat",
+			"to": "response*"
+		},
+		{
+			"id": "mentions-reindex",
+			"kind": "answer_matches",
+			"regex": "(?i)re-?(index|ingest|upload|embed)",
+			"soft": true
+		}
+	],
+	"judge": []
+}

@@ -1,0 +1,59 @@
+{
+	"components": [
+		{
+			"id": "webhook_1",
+			"provider": "webhook",
+			"config": {
+				"hideForm": true,
+				"mode": "Source",
+				"parameters": {},
+				"type": "webhook"
+			}
+		},
+		{
+			"id": "question_1",
+			"provider": "question",
+			"config": {},
+			"input": [
+				{
+					"lane": "text",
+					"from": "webhook_1"
+				}
+			]
+		},
+		{
+			"id": "llm_anthropic_1",
+			"provider": "llm_anthropic",
+			"config": {
+				"profile": "{{CANARY_PROFILE}}",
+				"parameters": {}
+			},
+			"input": [
+				{
+					"lane": "questions",
+					"from": "question_1"
+				}
+			]
+		},
+		{
+			"id": "response_answers_1",
+			"provider": "response_answers",
+			"config": {
+				"laneName": "answers"
+			},
+			"input": [
+				{
+					"lane": "answers",
+					"from": "llm_anthropic_1"
+				}
+			]
+		}
+	],
+	"project_id": "e4e4e4e4-0000-4000-8000-000000000001",
+	"viewport": {
+		"x": 0,
+		"y": 0,
+		"zoom": 1
+	},
+	"version": 1
+}
