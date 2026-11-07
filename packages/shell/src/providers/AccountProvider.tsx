@@ -763,10 +763,9 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 		async (appId: string) => {
 			if (!client || !orgId) return;
 			await client.billing.cancelSubscription(orgId, appId);
-			const updated = await client.billing.getDetails(orgId);
-			setSubscriptions(updated);
+			await loadBilling();
 		},
-		[client, orgId]
+		[client, orgId, loadBilling]
 	);
 
 	/** Opens the Stripe customer portal for payment method management.
