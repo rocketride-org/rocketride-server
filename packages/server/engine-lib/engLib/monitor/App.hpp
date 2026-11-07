@@ -37,7 +37,7 @@ class App : public Monitor {
     ///		Define the constant types we need to output
     //-----------------------------------------------------------------
     _const auto CountsTag = ">CNT"_tv;
-    _const auto DumpTag = ">DUMP"_tv;
+    _const auto CrashTag = ">CRASH"_tv;
     _const auto ErrorTag = ">ERR"_tv;
     _const auto ExitTag = ">EXIT"_tv;
     _const auto InfoTag = ">INF"_tv;
@@ -124,18 +124,35 @@ public:
 
     //-----------------------------------------------------------------
     ///	@details
-    ///		Output the crash dump file name
+    ///		Output the crash report
     ///	@param[in]	location
     ///		Location where the call occured
-    ///	@param[in]	path
-    ///		Path to the crash dump file
+    ///	@param[in]	code
+    ///		Signal or exception code
+    ///	@param[in]	description
+    ///		What happened
+    ///	@param[in]	dump
+    ///		This crash's dump, empty without one
     //-----------------------------------------------------------------
-    virtual void onCrashDumpCreated(Location location,
-                                    const file::Path &path) noexcept override {
-        Monitor::onCrashDumpCreated(location, path);
+    virtual void onCrash(Location location, TextView code, TextView description,
+                         const file::Path &dump) noexcept override {
+        Monitor::onCrash(location, code, description, dump);
 
-        // Only report the dump name-- the directory is configured by the app
-        outputTag(DumpTag, path.fileName());
+        outputTag(CrashTag, crashMessage(code, description, dump.fileName()));
+    }
+
+    //-----------------------------------------------------------------
+    ///	@details
+    ///		code*description*dump by hand: '*' formatting drops empty fields
+    //-----------------------------------------------------------------
+    static Text crashMessage(TextView code, TextView description,
+                             TextView dump) noexcept {
+        Text text{code};
+        text += '*';
+        for (auto ch : description) text += ch == '*' ? ' ' : ch;
+        text += '*';
+        text += dump;
+        return text;
     }
 
     //-----------------------------------------------------------------

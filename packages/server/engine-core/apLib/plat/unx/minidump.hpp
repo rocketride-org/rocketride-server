@@ -277,6 +277,7 @@ inline void relocateAndNotify(const std::filesystem::path &src) noexcept {
     }
 
     LOG(Error, "Minidump recovered:", target);
+    dev::crashDump() = target;
     if (dev::crashDumpCreatedCallback()) dev::crashDumpCreatedCallback()(target);
 }
 

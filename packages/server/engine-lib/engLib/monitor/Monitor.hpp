@@ -158,6 +158,8 @@ public:
     virtual Error exit(Error &&ccode) noexcept;
     virtual void onCrashDumpCreated(Location location,
                                     const file::Path &path) noexcept;
+    virtual void onCrash(Location location, TextView code, TextView description,
+                         const file::Path &dump) noexcept;
     virtual void info(const json::Value &info) noexcept;
     virtual void metrics(const json::Value &metrics) noexcept;
     virtual void status(TextView status) noexcept;

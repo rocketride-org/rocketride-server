@@ -29,8 +29,8 @@ process start time it records. The start time keeps a recycled process ID from
 being mistaken for the process that crashed.
 
 In both cases below, the crashing process then moves the dump into the configured
-crash-dump location and notifies the monitor before it exits, so the caller
-learns of the crash at crash time, as on Windows.
+crash-dump location and records it for the crash report before it exits, so the
+caller learns of the crash at crash time, as on Windows.
 
 - **Linux:** Crashpad catches the fatal signal and writes the dump before the
   process continues.
@@ -67,6 +67,26 @@ own `ROCKETRIDE_CRASHDB_DIR` to keep them apart.
 | --- | --- |
 | `ROCKETRIDE_CRASHPAD_HANDLER` | Override the handler path (relocated installs, containers). |
 | `ROCKETRIDE_CRASHDB_DIR` | Override the crash database directory. The same ownership and mode checks apply, so let the engine create it -- a directory you pre-create with the usual `0755` umask is rejected. `chmod 700` it if it must exist first. |
+
+## What the server learns
+
+A crashing engine tells its monitor, in this order, before it exits:
+
+- `>CRASH*<code>*<description>*<file>` -- the crash, with or without a dump: the
+  signal number (Linux, macOS), the exception code (Windows, e.g. `0xc0000005`)
+  or `jvm` (the JVM's abort and exit hooks), what happened, and this crash's dump
+  file, empty without one. The file is the last field.
+- `>EXIT*...` -- as for any fatal error.
+
+`eaas.py` ends the task as `Stopped unexpectedly` (status and exit message),
+shows `Crash: <description> (code <code>), <dump or "no dump">` in its console
+and records the run's outcome as `error`. A task process that sent neither
+`>CRASH` nor `>EXIT`, with no stop requested and not killed by the server, ends
+the same way, with `no dump`, when a crash signal (`SIGSEGV`, `SIGBUS`,
+`SIGFPE`, `SIGILL`, `SIGABRT`) or an OOM kill (`SIGKILL`) ended it, or on
+Windows a crash exception code such as a fast fail's `0xc0000602`: these skip
+the engine's handlers. Any other exit code, such as `exit(-1)`, Ctrl+C or a
+failed start, reads `Stopped`.
 
 ## Getting a dump by hand
 

@@ -314,6 +314,7 @@ void initJvm() noexcept(false) {
                   const auto reason = string::format(
                       "JNI called abort on thread {}", async::threadId());
                   java::onJvmCrash(reason);
+                  dev::onCrash("jvm", reason);
                   dev::fatality(_location, reason);
               })));
 
@@ -323,6 +324,7 @@ void initJvm() noexcept(false) {
                       "JNI called exit with status {} on thread {}", status,
                       async::threadId());
                   java::onJvmCrash(reason);
+                  dev::onCrash("jvm", reason);
                   dev::fatality(_location, reason);
               })));
 

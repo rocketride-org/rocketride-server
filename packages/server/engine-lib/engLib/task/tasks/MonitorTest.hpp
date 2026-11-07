@@ -72,10 +72,6 @@ protected:
         // >CNT
         // (automatic)
 
-        // >DUMP
-        const file::Path dumpPath{"crash/dump"};
-        MONITOR(onCrashDumpCreated, _location, dumpPath);
-
         // >ERR
         MONERR(error, Ec::Failed, "this is an error");
 

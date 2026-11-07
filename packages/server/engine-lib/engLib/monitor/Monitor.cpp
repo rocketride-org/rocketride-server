@@ -126,6 +126,23 @@ void Monitor::onCrashDumpCreated(Location location,
 
 //-----------------------------------------------------------------
 ///	@details
+///		Output the crash report
+///	@param[in]	location
+///		Location where the call occured
+///	@param[in]	code
+///		Signal or exception code
+///	@param[in]	description
+///		What happened
+///	@param[in]	dump
+///		This crash's dump, empty without one
+//-----------------------------------------------------------------
+void Monitor::onCrash(Location location, TextView code, TextView description,
+                      const file::Path &dump) noexcept {
+    return;
+}
+
+//-----------------------------------------------------------------
+///	@details
 ///		Output the json info
 ///	@param[in]	info
 ///		Info to output

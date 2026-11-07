@@ -91,6 +91,11 @@ void processSignal(int signal) noexcept {
             return;
     }
 
+    // A crash, unless this is the abort() that ends our own fatality
+    if (!dev::fatalityExecuting())
+        dev::onCrash(_ts(signal), _fmt("{}: {}", plat::renderSignal(signal),
+                                       plat::renderSignalDescription(signal)));
+
     // Finally, exit
     dev::fatality(_location, "Received terminal system signal");
 }
