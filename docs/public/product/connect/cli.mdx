@@ -6,8 +6,9 @@ import { SiPython, SiTypescript } from 'react-icons/si';
 
 # CLI Reference
 
-The `rocketride` command-line tool starts pipelines, streams files through them,
-and manages the engine's file store — the same operations the
+The `rocketride` command-line tool sets up a workspace, starts pipelines,
+streams files through them, manages the engine's file store, profiles running
+pipelines, and deploys pipelines and apps — the same operations the
 [SDKs](/clients/typescript) expose, from a terminal. It ships with both the
 [TypeScript](/clients/typescript) and [Python](/clients/python) clients, so
 installing either package puts `rocketride` on your path.
@@ -16,10 +17,12 @@ installing either package puts `rocketride` on your path.
 > [MCP server](/connect/mcp/stdio) exposes the same pipeline operations as tools for
 > Claude, Cursor, and other MCP clients.
 
-> **Python vs TypeScript CLI:** Both packages ship a `rocketride` command with
-> the same commands and flag names, with two exceptions that ship with the
-> Python package only: [`diff`](#diff) and `otel`, the
-> [OpenTelemetry bridge](/clients/python/otel-bridge). Output is plain,
+> **Python vs TypeScript CLI:** Both packages ship a `rocketride` command, but
+> not the same set of commands. [`diff`](#diff) and `otel`, the
+> [OpenTelemetry bridge](/clients/python/otel-bridge), ship with the Python
+> package only. The Python package has only three [`app`](#app) sub-commands
+> (`create`, `verify`, and `deploy`) and no `deploy source-config`. The
+> [Commands](#commands) table notes each difference. Output is plain,
 > line-oriented text; continuous live monitoring is deliberately not part of
 > the CLI (the platform's monitor apps own that job) — `otel` forwards the
 > engine's monitor stream to your own observability backend rather than
@@ -48,24 +51,35 @@ to a running pipeline in five steps; this page is the command reference.
 
 ## Connecting
 
-Every command _except_ [`diff`](#diff) — which runs entirely locally and never
-contacts an engine — accepts connection options, which also read from the
-environment so you can set them once:
+Every command _except_ [`diff`](#diff) and [`app verify`](#app) — which run
+entirely locally and never contact an engine — accepts connection options,
+which also read from the environment so you can set them once:
 
 | Option           | Env var                | Default               | Description                                                            |
 | ---------------- | ---------------------- | --------------------- | ---------------------------------------------------------------------- |
-| `--uri <uri>`    | `ROCKETRIDE_URI`       | Python: `https://api.rocketride.ai`; TypeScript: `http://localhost:5565` (normalized to `ws://` at connect time) | Engine endpoint (see [Cloud](/operate/cloud) / [Self-hosting](/operate/self-hosting)). |
+| `--uri <uri>`    | `ROCKETRIDE_URI`       | `http://localhost:5565` (normalized to `ws://` at connect time) | Engine endpoint (see [Cloud](/operate/cloud) / [Self-hosting](/operate/self-hosting)). |
 | `--apikey <key>` | `ROCKETRIDE_APIKEY`    | -                     | API token for authentication.                                          |
-| `--pipeline <path>` | `ROCKETRIDE_PIPELINE` | -                  | Default pipeline path for `start`/`upload`.                            |
-| `--token <token>` | `ROCKETRIDE_TOKEN`    | -                     | Default task token for token-bearing commands.                         |
+
+Two task options read the environment the same way, on the commands that take
+them: `--pipeline <path>` (`start` and `upload`) defaults to
+`ROCKETRIDE_PIPELINE`, and `--token <token>` (`start`, `stop`, and `upload`)
+defaults to `ROCKETRIDE_TOKEN`. A variable exported in your shell takes
+precedence over the same one in `.env`.
 
 Against a [Cloud](/operate/cloud) endpoint use an `https://`/`wss://` URI so the
 connection is encrypted.
+
+The `deploy` commands, and every `app` command except `create`, `dev`, and
+`verify`, connect to the deployment target instead: `ROCKETRIDE_DEPLOY_URI` and
+`ROCKETRIDE_DEPLOY_APIKEY`, which `init` and `login` write to `.env`. They
+refuse to run when no deployment target is set.
 
 ## Commands
 
 | Command  | What it does                                                               |
 | -------- | -------------------------------------------------------------------------- |
+| `init`   | Sign in and set up a workspace: sync the component catalog and schemas, and install the platform packages and agent docs. |
+| `login`  | Sign in again and save the credentials to `.env`.                          |
 | `start`  | Start a new pipeline from a `.pipe` file and print its task token.         |
 | `upload` | Send files through a pipeline (by `--pipeline` or an existing task token). |
 | `stop`   | Stop a running task.                                                       |
@@ -74,6 +88,54 @@ connection is encrypted.
 | `list`   | List all active tasks.                                                     |
 | `otel`   | Export live pipeline traces and metrics to an OpenTelemetry collector. Python CLI only. |
 | `store`  | File-store operations: `dir`, `type`, `write`, `rm`, `mkdir`, `stat`.     |
+| `profile` | Find where the server or a running pipeline spends its time.             |
+| `app`    | Create, preview, check, deploy, and publish apps. The Python CLI has only `create`, `verify`, and `deploy`. |
+| `deploy` | Version pipelines in the server's registry, point teams at a version, and schedule runs. `source-config` is TypeScript CLI only. |
+
+### init and login
+
+Run `init` once per workspace, and again whenever the server changes. It signs
+you in, syncs the services catalog and schemas into `.rocketride/`, vendors the
+platform packages, installs the agent docs, and adds `.rocketride/` and `.env`
+to `.gitignore`. Run `login` when a command reports rejected credentials.
+
+```bash
+# Set up a workspace against RocketRide Cloud
+rocketride init --uri https://api.rocketride.ai
+
+# Sign in again
+rocketride login
+
+# Sign in without a browser, from CI or an agent
+rocketride login --apikey <key>
+```
+
+Against RocketRide Cloud, signing in opens your browser and mints a personal API
+key. A self-hosted server takes an API key, from `--apikey` or a
+prompt. The credentials go to `.env` as the development pair. They also go to
+the deployment pair, unless you pass `--no-deploy` or `.env` already has a
+deployment pair for a different server, which both commands leave alone.
+`init` writes credentials only when it signs you in. If the development pair
+already in `.env` works, `init` reuses it and writes nothing. To set or change
+the deployment pair in either case, run `rocketride login --deploy --uri <uri>`.
+
+Without `--apikey`, `login` first tries the development key from `.env` or your
+shell. If the server rejects that key, for example after a command reports
+rejected credentials, pass a valid key with `--apikey <key>`. Or pass
+`--apikey ""` to sign in through the browser instead, or to be prompted for a
+key on a self-hosted server. If you exported `ROCKETRIDE_APIKEY` in your shell,
+unset it afterwards, because it takes precedence over the new key in `.env`.
+With `--deploy`, also pass the deployment server's `--uri`, because `--uri`
+defaults to `ROCKETRIDE_URI`, the development server.
+
+Key flags:
+
+| Flag | Description |
+| --- | --- |
+| `--apikey <key>` | Save this key instead of signing in through the browser. |
+| `--deploy` | On `login`, sign in for the deployment pair (`ROCKETRIDE_DEPLOY_*`) instead of the development pair. On `init` (TypeScript CLI only), also use this server as the deployment target, which `init` does by default. |
+| `--no-deploy` | Do not write the deployment pair. |
+| `--no-install` | `init` only. Skip the workspace `pnpm install`. |
 
 ### start
 
@@ -118,7 +180,7 @@ Key flags:
 | --- | --- |
 | `--pipeline <path>` | Path to the `.pipe` file. Required unless `--token` is given. |
 | `--token <token>` | Send files to an existing task instead of starting a new one. |
-| `--max-concurrent <n>` | Maximum number of files to upload in parallel. Default 5. TypeScript CLI only. |
+| `--max-concurrent <n>` | Maximum number of files to upload in parallel. Default 5. The Python CLI accepts this flag but ignores it. |
 
 ### stop
 
@@ -550,6 +612,102 @@ Sub-commands:
 | `rm <path>` | Delete a file from the store. |
 | `mkdir <path>` | Create a directory in the store. |
 | `stat <path>` | Print metadata (size, type, modified time) for `<path>`. |
+
+### profile
+
+Use `profile` to find where the time goes. With `--token`, it profiles the
+engine subprocess that runs that task's nodes. Without `--token`, it profiles
+the server process. Here `--token` does not read `ROCKETRIDE_TOKEN`.
+
+```bash
+# Profile a running pipeline for 30 seconds, then read the call tree
+rocketride profile run --token <task-token> --duration 30
+rocketride profile tree --token <task-token>
+
+# Profile the server process until Ctrl+C
+rocketride profile run
+```
+
+Sub-commands:
+
+| Sub-command | Description |
+| --- | --- |
+| `start --token <token>` | Start a session on a task and return at once. |
+| `stop --token <token>` | Stop the session. Its results stay readable. |
+| `run` | Start a session, wait for Ctrl+C or `--duration <seconds>`, then stop it. |
+| `status` | Show the active session, or whether a report exists. |
+| `list` | Show the same for the server process and every task. `--active` lists only the processes being profiled. |
+| `report` | Print a text report of the last completed session. |
+| `threads` | List threads, busiest first. |
+| `tree` | Print the call tree of the last completed session. `--thread <id>`, `--min-pct <n>`, `--max-depth <n>`, and `--no-include-system` trim it. |
+
+### app
+
+Use `app` to build and ship apps from a terminal, with the same steps as the
+[App Builder](/guides/apps/app-builder). The Python CLI has only `create`,
+`verify`, and `deploy`, and its `verify` has no `--store` and its `deploy` has
+no `--publish`. The other sub-commands need the TypeScript CLI
+(`npx rocketride`).
+
+```bash
+rocketride app create clock                 # scaffold ./apps/clock-ui
+rocketride app dev clock --open             # live preview that updates on every save
+rocketride app verify clock                 # check the app without deploying it
+rocketride app deploy clock --publish @me   # deploy, wait for the server build, publish to yourself
+rocketride app versions clock
+```
+
+`[app]` is an app folder, an app id, the app's name, or nothing for the
+current directory. In the Python CLI, `verify` and `deploy` take only an app
+folder, and it is required.
+
+Sub-commands:
+
+| Sub-command | Description |
+| --- | --- |
+| `create <slug>` | Scaffold a new app under `./apps/<slug>-ui`. |
+| `dev [app]` | Serve a live preview. `--open` opens it in your browser. |
+| `verify [app]` | Check the manifest, the declared assets, and the pack size. Needs no connection. `--store` adds the public store-submission checks. |
+| `deploy [app]` | Pack the source and deploy it as the next registry version. `--publish <target>` waits for the server build and publishes the new version. |
+| `publish [app] [version]` | Publish a version to `--to @me` (the default), `@team/<name>`, or `@public`. |
+| `unpublish [app]`, `disable [app]` | Stop serving the audience given by `--from`. `disable` keeps it listed, switched off. |
+| `versions [app]` | List versions, newest first, with build status and audiences. |
+| `where [app]` | Show which audiences serve which version. |
+| `log [app] [version]` | Print a version's server build log. |
+| `submit [app] [version]`, `withdraw [app] [version]` | Enter or leave public store review. |
+| `reply [app] [version] -m <text>` | Post on the store review thread. |
+| `developer status`, `developer register <id>` | Show or register your organization's developer id. |
+
+### deploy
+
+Use `deploy` to version pipelines in the server's registry, point teams at a
+version, and schedule runs. `--team` takes `@me`, a team name, or a team id.
+
+```bash
+rocketride deploy add pipelines/ingest.pipe --comment "v2 parse"   # next registry version
+rocketride deploy publish <projectId> 3 --team @me                  # point a team at version 3
+rocketride deploy schedule set <projectId> <sourceId> "0 9 * * 1-5" --team @me
+rocketride deploy list
+```
+
+Sub-commands:
+
+| Sub-command | Description |
+| --- | --- |
+| `add <file>` | Deploy a `.pipe` file as the next registry version. `--deploy-to <team>` also points that team at it. |
+| `list` | List deployments. |
+| `get <project>` | Show one deployment's state and schedules. |
+| `versions <project>` | List registry versions. |
+| `history <project>` | Show the deploy and publish audit trail. |
+| `publish <project> <version>` | Point a team at a version. |
+| `run <project> <source>` | Run a source now. |
+| `artifact <project> <version>` | Print one version's artifact JSON. |
+| `enable <project>`, `disable <project>`, `remove <project>` | Switch a deployment on or off, or remove it. Versions and history survive `remove`. |
+| `schedule set <project> <source> <cron>` | Set a source's schedule (five-field cron), or `none` to clear it. `--ttl <seconds>` sets a fixed run window. |
+| `schedule pause <project> <source>`, `schedule resume <project> <source>` | Pause or resume a schedule. |
+| `schedule preview <cron>` | Check a cron expression and list its next firings. |
+| `source-config <project> <source>` | Set a source's run settings, such as `--trace-level`. TypeScript CLI only. |
+| `log <appId> <version>` | Print an app version's server build log. |
 
 ## Related
 
