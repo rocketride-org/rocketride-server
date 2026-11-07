@@ -174,6 +174,23 @@ function isConnectResult(body: unknown): body is ConnectResult {
 	);
 }
 
+type AccountTransition = Readonly<{ changingWorkspace: boolean }>;
+const idleAccountTransition: AccountTransition = { changingWorkspace: false };
+const accountTransitions = new WeakMap<ConnectionManager, AccountTransition>();
+
+/** Internal snapshot used to invalidate billing actions before event observers run. */
+export function getAccountTransition(manager: ConnectionManager): AccountTransition {
+	return accountTransitions.get(manager) ?? idleAccountTransition;
+}
+
+function advanceAccountTransition(manager: ConnectionManager, changingWorkspace = getAccountTransition(manager).changingWorkspace): void {
+	accountTransitions.set(manager, { changingWorkspace });
+}
+
+function isSameAccountScope(previous: ConnectResult, next: ConnectResult): boolean {
+	return previous.userId === next.userId && previous.organization?.id === next.organization?.id;
+}
+
 function isVersionResponse(body: unknown): boolean {
 	// The reachability probe only proves THIS backend is up if the page origin
 	// answers with the server's own /version contract ({ status: 'OK', with a
@@ -390,7 +407,7 @@ export class ConnectionManager implements IConnectionManager {
 				// duplicate handling downstream. The guard narrows the untyped
 				// push body to a ConnectResult without a cast.
 				if (message.event === 'apaext_account' && isConnectResult(message.body)) {
-					this.accountInfo = message.body;
+					this.cacheAccountInfo(message.body);
 					this.emit('shell:accountUpdate', message.body);
 					return;
 				}
@@ -444,6 +461,11 @@ export class ConnectionManager implements IConnectionManager {
 			onConnected: async () => {
 				if (!this.hasCurrentLifecycleOwner()) return;
 				if (!this.client?.isAttached() || !this.client.isAuthenticated()) return;
+				const account = this.client.getAccountInfo();
+				if (this.accountInfo && isConnectResult(account) && !isSameAccountScope(this.accountInfo, account)) {
+					this.cacheAccountInfo(account);
+					this.emit('shell:accountUpdate', account);
+				}
 				this.publishConnected(this.lifecycleOwner!);
 			},
 
@@ -1126,7 +1148,7 @@ export class ConnectionManager implements IConnectionManager {
 		if (!operation) {
 			if (result.userToken) this.saveToken(result.userToken);
 			this.clearLatchedFailure();
-			this.accountInfo = result;
+			this.cacheAccountInfo(result);
 			this.emit('shell:login', { user: result });
 		}
 
@@ -1316,7 +1338,7 @@ export class ConnectionManager implements IConnectionManager {
 			this.assertCurrentOperation(operation);
 			this.updateConnectionStatus({ lastFailure: undefined });
 			this.assertCurrentOperation(operation);
-			this.accountInfo = result;
+			this.cacheAccountInfo(result);
 			// Identity established — this is the only signal that retires an
 			// auth latch (publishConnected deliberately no longer does).
 			this.clearLatchedFailure();
@@ -1603,6 +1625,11 @@ export class ConnectionManager implements IConnectionManager {
 		return this.accountInfo ?? this.client?.getAccountInfo() as ConnectResult | undefined;
 	}
 
+	private cacheAccountInfo(result: ConnectResult): void {
+		if (this.accountInfo && !isSameAccountScope(this.accountInfo, result)) advanceAccountTransition(this);
+		this.accountInfo = result;
+	}
+
 	/** Returns the resolved server HTTP URL. */
 	public getHttpUrl(): string {
 		return this.serverUri;
@@ -1883,6 +1910,12 @@ export class ConnectionManager implements IConnectionManager {
 	 * @param payload - The payload matching the event's type.
 	 */
 	public emit<K extends keyof ShellConnectionEventMap>(event: K, payload: ShellConnectionEventMap[K]): void {
+		if (event === 'shell:workspaceWillChange') advanceAccountTransition(this, true);
+		else if (event === 'shell:workspaceChanged') advanceAccountTransition(this, false);
+		else if (event === 'shell:orgChanged' || event === 'shell:disconnected' || event === 'shell:logout') {
+			advanceAccountTransition(this);
+		}
+
 		// Push into debug log
 		this.logDebug(event as string, payload);
 
@@ -2224,9 +2257,10 @@ export class ConnectionManager implements IConnectionManager {
 		});
 		this.subscribe('shell:account', (snapshot) => {
 			if (!snapshot) return;
-			this.accountInfo = snapshot as ConnectResult;
+			const account = snapshot as ConnectResult;
+			this.cacheAccountInfo(account);
 			this.seedMirrorClient();
-			this.emit('shell:accountUpdate', this.accountInfo);
+			this.emit('shell:accountUpdate', account);
 		});
 		this.subscribe('shell:services', (snapshot) => {
 			const services = snapshot as { services: Record<string, unknown>; icons?: Record<string, string>; servicesError?: string } | undefined;

@@ -1200,6 +1200,46 @@ test('onConnected ignores stale callbacks, accepts the active connection, and pr
 	}
 });
 
+test('a background reconnect publishes the new workspace before connected observers', async (t) => {
+	const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+	Object.defineProperty(globalThis, 'window', {
+		configurable: true,
+		value: { location: { origin: 'https://shell.example.test' }, addEventListener: () => {} },
+	});
+	t.after(() => {
+		if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
+		else delete (globalThis as { window?: Window }).window;
+	});
+	t.mock.method(RocketRideClient.prototype, 'attach', async () => {});
+	t.mock.method(RocketRideClient.prototype, 'isAttached', () => true);
+	t.mock.method(RocketRideClient.prototype, 'isAuthenticated', () => true);
+
+	const { manager, emitted } = createTestManager();
+	manager.initialize();
+	assert.ok(hasConnectedCallback(manager.client));
+	manager.lifecycleOwner = {
+		key: 'active', generation: 0, credential: 'token', promise: Promise.resolve(null), connectedPublished: false,
+	};
+	manager.accountInfo = {
+		...authenticatedResult,
+		organization: { id: 'old', name: 'Old', permissions: [], teams: [] },
+	};
+	const updated: ConnectResult = {
+		...authenticatedResult,
+		organization: { id: 'current', name: 'Current', permissions: [], teams: [] },
+	};
+	t.mock.method(manager.client, 'getAccountInfo', () => updated);
+	manager.refreshServices = async () => {};
+
+	await manager.client._callerOnConnected();
+
+	assert.equal(manager.accountInfo, updated);
+	assert.deepEqual(emitted.filter(({ event }) => event === 'shell:accountUpdate' || event === 'shell:connected'), [
+		{ event: 'shell:accountUpdate', payload: updated },
+		{ event: 'shell:connected', payload: {} },
+	]);
+});
+
 test('an inbound account update refreshes the manager identity before notifying listeners', async (t) => {
 	const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
 	Object.defineProperty(globalThis, 'window', {

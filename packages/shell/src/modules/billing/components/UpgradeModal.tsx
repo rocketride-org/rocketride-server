@@ -24,7 +24,7 @@ import { commonStyles } from '../../../themes/styles';
 import { Modal } from '../../../components/modal/Modal';
 import { PlanPicker, planAmount } from '../../checkout/PlanPicker';
 import type { CheckoutPlan } from '../../checkout/types';
-import { planChangeCompletion } from './planChange';
+import { parsePlanChangePreview, planChangeCompletion } from './planChange';
 import type { PlanChangeOutcome, PlanChangePreview } from './planChange';
 
 // =============================================================================
@@ -133,6 +133,8 @@ export interface UpgradeModalProps {
 	onPreview?: (newPriceId: string, expectedPriceId: string) => Promise<PlanChangePreview | null>;
 	/** Keep the dialog and its attempt open if the host is temporarily unavailable. */
 	available?: boolean;
+	/** A host may permit replay of an authenticated attempt after its original row disappears. */
+	canFinishPayment?: boolean;
 	/** Confirm a plan change. Retries for the same selection reuse the attempt ID. */
 	onUpgrade: (newPriceId: string, attemptId?: string, expectedPriceId?: string) => Promise<void | PlanChangeOutcome>;
 	/** Called when the modal is dismissed. */
@@ -149,8 +151,8 @@ export interface UpgradeModalProps {
  * both the picker grid and preselected plans so a hidden plan can never be
  * reached via `preselectedPriceId`.
  */
-const isVisibleSubscriptionPlan = (p: CheckoutPlan): boolean =>
-	(p.interval === 'month' || p.interval === 'year') &&
+export const isVisibleSubscriptionPlan = (p: CheckoutPlan): boolean =>
+	(!p.interval || p.interval === 'month' || p.interval === 'year') &&
 	p.metadata?.kind !== 'topup' &&
 	p.metadata?.kind !== 'promo_base' &&
 	!p.metadata?.action &&
@@ -169,6 +171,7 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 	preselectedPriceId,
 	onPreview,
 	available = true,
+	canFinishPayment = available,
 	onUpgrade,
 	onClose,
 }) => {
@@ -180,20 +183,21 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 	const [upgrading, setUpgrading] = useState(false);
 	const [completion, setCompletion] = useState<{ message: string; pending: boolean } | null>(null);
 	const [error, setError] = useState<string | null>(null);
-	const [previewState, setPreviewState] = useState<{
+	const [previewState, setPreviewState] = useState<({
 		priceId: string;
 		expectedPriceId: string;
 		source: NonNullable<UpgradeModalProps['onPreview']>;
-		preview: PlanChangePreview | null;
-		error?: string;
-	} | null>(null);
+	} & (
+		{ status: 'ready'; preview: PlanChangePreview | null } |
+		{ status: 'failed'; message: string }
+	)) | null>(null);
 	const [previewRetry, setPreviewRetry] = useState(0);
 	const attempt = useRef<PlanChangeAttempt | null>(null);
 	const [paymentToFinish, setPaymentToFinish] = useState<PlanChangeAttempt | null>(null);
 	const inFlight = useRef(false);
 	const mounted = useRef(false);
 	const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-	useEffect(() => {
+	useLayoutEffect(() => {
 		mounted.current = true;
 		return () => {
 			mounted.current = false;
@@ -228,21 +232,28 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 		if (!available || paymentToFinish || !onPreview || !selectedPriceId) return;
 		let active = true;
 		const selection = { priceId: selectedPriceId, expectedPriceId: currentPriceId, source: onPreview };
-		void onPreview(selectedPriceId, currentPriceId).then(
-			(preview) => { if (active) setPreviewState({ ...selection, preview }); },
-			(err) => {
-				if (active) setPreviewState({ ...selection, preview: null, error: err?.message ?? 'Could not preview the plan change.' });
-			},
-		);
+		void Promise.resolve()
+			.then(() => onPreview(selectedPriceId, currentPriceId))
+			.then((preview) => preview === null ? null : parsePlanChangePreview(preview))
+			.then(
+				(preview) => { if (active) setPreviewState({ ...selection, status: 'ready', preview }); },
+				(error: unknown) => {
+					if (!active) return;
+					const message = error instanceof Error && error.message ? error.message : 'Could not preview the plan change.';
+					setPreviewState({ ...selection, status: 'failed', message });
+				},
+			);
 		return () => { active = false; };
 	}, [available, paymentToFinish, onPreview, selectedPriceId, currentPriceId, previewRetry]);
 
 	const currentPreview = available && !paymentToFinish && onPreview && previewState?.priceId === selectedPriceId &&
 		previewState?.expectedPriceId === currentPriceId && previewState.source === onPreview ? previewState : null;
 	const previewLoading = Boolean(available && !paymentToFinish && onPreview && selectedPriceId && !currentPreview);
-	const preview = currentPreview?.preview;
-	const canConfirm = Boolean(available && (paymentToFinish ||
-		(isValidSelection && !previewLoading && !currentPreview?.error && preview?.timing !== 'unchanged')));
+	const preview = currentPreview?.status === 'ready' ? currentPreview.preview : null;
+	const previewError = currentPreview?.status === 'failed' ? currentPreview.message : null;
+	const actionAvailable = paymentToFinish ? canFinishPayment : available;
+	const canConfirm = Boolean(actionAvailable && (paymentToFinish ||
+		(isValidSelection && !previewLoading && currentPreview?.status !== 'failed' && preview?.timing !== 'unchanged')));
 
 	const handleSelect = (plan: CheckoutPlan) => {
 		if (!available || plan.stripePriceId === currentPriceId || inFlight.current) return;
@@ -300,10 +311,10 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 
 	const buttonLabel = () => {
 		if (upgrading) return 'Processing...';
-		if (!available) return 'Plan changes unavailable';
+		if (!actionAvailable) return 'Plan changes unavailable';
 		if (paymentToFinish) return 'Finish plan change';
 		if (previewLoading) return 'Checking plan change...';
-		if (currentPreview?.error) return 'Retry preview';
+		if (previewError) return 'Retry preview';
 		if (!selectedPlan) return 'Select a plan';
 		if (selectedPlan.stripePriceId === currentPriceId || preview?.timing === 'unchanged') return 'Current plan';
 		if (!isValidSelection) return 'Plan unavailable';
@@ -315,7 +326,7 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 	// selection exists and no plan change is in flight.
 	const confirmStyle: CSSProperties = {
 		...commonStyles.buttonPrimary,
-		...((canConfirm || currentPreview?.error) && !upgrading ? null : { opacity: 0.5, cursor: 'default' }),
+		...((canConfirm || previewError) && !upgrading ? null : { opacity: 0.5, cursor: 'default' }),
 	};
 
 	return (
@@ -348,8 +359,8 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 					<button
 						type="button"
 						style={confirmStyle}
-						onClick={currentPreview?.error ? () => setPreviewRetry((value) => value + 1) : handleConfirm}
-						disabled={(!canConfirm && !currentPreview?.error) || upgrading}
+						onClick={previewError ? () => setPreviewRetry((value) => value + 1) : handleConfirm}
+						disabled={(!canConfirm && !previewError) || upgrading}
 					>
 						{buttonLabel()}
 					</button>
@@ -387,6 +398,7 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 								selectedPlan={selectedPlan}
 								onSelectPlan={handleSelect}
 								currentPriceId={currentPriceId}
+								keepSelectedPlanVisible
 								intervalDisabled={upgrading || !available}
 								onIntervalChange={(interval) => {
 									if (inFlight.current || selectedPlan?.interval === interval) return;
@@ -409,7 +421,7 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 							Your current plan stays active until the new plan takes effect at your next renewal.
 						</div>
 					)}
-					{currentPreview?.error && <div style={S.error} role="alert">{currentPreview.error}</div>}
+					{previewError && <div style={S.error} role="alert">{previewError}</div>}
 
 					{/* Error banner */}
 					{error && <div style={S.error}>{error}</div>}

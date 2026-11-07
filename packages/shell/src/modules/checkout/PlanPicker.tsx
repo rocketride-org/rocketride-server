@@ -367,6 +367,9 @@ export interface PlanPickerProps {
 	/** Content rendered below the plan cards (e.g. a "Continue" button). */
 	footer?: React.ReactNode;
 
+	/** Keep the selected plan visible if the catalog introduces an interval toggle. */
+	keepSelectedPlanVisible?: boolean;
+
 	/** Disable the billing-interval toggle while a host operation is in progress. */
 	intervalDisabled?: boolean;
 
@@ -444,6 +447,7 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 	ctaConfig,
 	currentPriceId,
 	footer,
+	keepSelectedPlanVisible = false,
 	intervalDisabled = false,
 	onIntervalChange,
 	defaultInterval = 'month',
@@ -488,7 +492,7 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 	// In a plan change, keep the chosen card visible even when a catalog
 	// refresh introduces a toggle that was absent when the choice was made.
 	const selectedInterval = selectedPlan?.interval;
-	const displayedInterval = currentPriceId && (selectedInterval === 'month' || selectedInterval === 'year') &&
+	const displayedInterval = keepSelectedPlanVisible && (selectedInterval === 'month' || selectedInterval === 'year') &&
 		plans.some((plan) => plan.stripePriceId === selectedPlan?.stripePriceId)
 		? selectedInterval
 		: interval;
