@@ -516,6 +516,7 @@ def request_with_backoff(
     retry: RetryPolicy | None = None,
     max_bytes: int | None = None,
     graphql: bool = False,
+    may_write: bool = False,
     budget: CallBudget | None = None,
 ) -> tuple[requests.Response, bytes | None]:
     """Send a request, waiting out rate limits within ``retry``, and return ``(response, body)``.
@@ -556,7 +557,7 @@ def request_with_backoff(
         if content is None:
             return resp, None
         now = clock()
-        limited, wait = _rate_limit(resp, content, now, graphql=graphql)
+        limited, wait = _rate_limit(resp, content, now, graphql=graphql, may_write=may_write)
         if not limited:
             return resp, content
         named = wait is not None
@@ -621,7 +622,7 @@ def _retry_after(value, now: float) -> float | None:
     return max(0.0, when.timestamp() - now)
 
 
-def _graphql_rate_limited(resp: requests.Response, content: bytes, exhausted: bool) -> bool:
+def _graphql_rate_limited(resp: requests.Response, content: bytes, exhausted: bool, *, may_write: bool = False) -> bool:
     """Whether a GraphQL HTTP 200 is a rate limit GitHub answered without running anything.
 
     Only an answer without ``data`` counts: one with partial data ran part of the
@@ -650,15 +651,34 @@ def _graphql_rate_limited(resp: requests.Response, content: bytes, exhausted: bo
         return False
     unlocated = [error for error in errors if not error.get('locations')]
     own_words = [body.get('message')] + [error.get('message') for error in unlocated]
-    return (
+    if (
         'Retry-After' in resp.headers
         or any(error.get('type') == 'RATE_LIMITED' for error in errors)
         or any(isinstance(text, str) and 'rate limit' in text.lower() for text in own_words)
-        or (exhausted and bool(unlocated))
+    ):
+        return True
+    # ``exhausted`` with an unlocated error is the only heuristic left, and GitHub's
+    # execution-timeout error has the same shape: ``data: null`` and one error with no
+    # ``path`` and no ``locations``. Retrying a document that may write could apply it
+    # twice, so only a document that cannot write is retried on this signal.
+    return exhausted and bool(unlocated) and not may_write
+
+
+def _has_unlocated_error(errors) -> bool:
+    """True when one of ``errors`` carries neither ``path`` nor ``locations``.
+
+    That shape has two readings — a rate limit GitHub answered without running the
+    document, or an execution timeout that may have run it — so a may-write answer
+    carrying it is returned with the uncertain-outcome notice.
+    """
+    return isinstance(errors, list) and any(
+        isinstance(error, dict) and not error.get('path') and not error.get('locations') for error in errors
     )
 
 
-def _rate_limit(resp: requests.Response, content: bytes, now: float, *, graphql: bool) -> tuple[bool, float | None]:
+def _rate_limit(
+    resp: requests.Response, content: bytes, now: float, *, graphql: bool, may_write: bool = False
+) -> tuple[bool, float | None]:
     """Return whether the answer is a rate limit and the seconds GitHub names (``None``: none).
 
     A 403 or 429 is one when GitHub marks it so (a 429, ``X-RateLimit-Remaining: 0``,
@@ -670,7 +690,9 @@ def _rate_limit(resp: requests.Response, content: bytes, now: float, *, graphql:
     if resp.status_code in (403, 429):
         limited = resp.status_code == 429 or exhausted or 'Retry-After' in headers or b'rate limit' in content.lower()
     else:
-        limited = graphql and resp.status_code == 200 and _graphql_rate_limited(resp, content, exhausted)
+        limited = (
+            graphql and resp.status_code == 200 and _graphql_rate_limited(resp, content, exhausted, may_write=may_write)
+        )
     if not limited:
         return False, None
     waits = []
@@ -794,7 +816,14 @@ def graphql_result(
     handed = Handed.of(credential)
     try:
         resp, content = request_with_backoff(
-            handed, 'POST', '/graphql', body=payload, retry=retry, max_bytes=max_bytes, graphql=True
+            handed,
+            'POST',
+            '/graphql',
+            body=payload,
+            retry=retry,
+            max_bytes=max_bytes,
+            graphql=True,
+            may_write=may_write,
         )
     except RateLimitExhausted as exc:
         error = _graphql_error(exc.status_code, exc.headers, exc.body, (*handed.tokens, *secrets))
@@ -838,6 +867,9 @@ def _graphql_answer(
     if isinstance(body, dict) and ('data' in body or 'errors' in body):
         result = envelope(resp.status_code, resp.headers, {'data': body.get('data'), 'errors': body.get('errors')})
         result['next_page'] = None
+        if may_write and body.get('data') is None and _has_unlocated_error(body.get('errors')):
+            # Not retried (see _graphql_rate_limited), and GitHub may have run it anyway.
+            result['message'] = _GRAPHQL_UNKNOWN_OUTCOME
         return result
     # JSON of the wrong shape: keep the status and counters, and GitHub's message if any.
     result = shape_failure(envelope(resp.status_code, resp.headers, None), 'a JSON object with data or errors')
