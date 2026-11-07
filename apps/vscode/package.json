@@ -433,7 +433,7 @@
 	"dependencies": {
 		"@module-federation/runtime": "^2.5.1",
 		"@octokit/rest": "^22.0.1",
-		"adm-zip": "^0.6.0",
+		"adm-zip": "^0.6.1",
 		"chart.js": "^4.4.0",
 		"dockerode": "^4.0.12",
 		"es-module-lexer": "^1.7.0",
