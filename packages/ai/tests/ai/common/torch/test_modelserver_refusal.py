@@ -170,6 +170,22 @@ def test_falls_through_when_the_guard_is_not_active(monkeypatch, depends_calls):
     assert _wrapper_installs(depends_calls), 'the install was not reached'
 
 
+def test_saas_engine_installs_the_guard(monkeypatch):
+    """The cloud front server (--saas) blocks torch even with no model server (#1697)."""
+    from ai.common.models import gpu_guard
+
+    monkeypatch.setattr(sys, 'argv', ['engine', 'eaas.py', '--saas'])
+    monkeypatch.setattr(sys, 'meta_path', list(sys.meta_path))
+    monkeypatch.setattr(gpu_guard, '_installed', False)
+    monkeypatch.setattr(gpu_guard, '_reason', None)
+    monkeypatch.setattr(gpu_guard, 'get_model_server_address', lambda: None)
+
+    gpu_guard.install_gpu_guard()
+
+    assert gpu_guard.is_installed()
+    assert gpu_guard._reason == 'hosted'
+
+
 def test_shared_host_alone_installs_no_guard(monkeypatch):
     """--shared-host is about the host, not the hosted rules: torch stays allowed."""
     from ai.common.models import gpu_guard
