@@ -33,7 +33,7 @@ interface IFake {
 	connected?: boolean;
 	loginId?: string;
 	orgId?: string;
-	status?: string | null | Error;
+	status?: string | null | Error | Promise<string | null>;
 	registerReturns?: string;
 }
 
@@ -47,6 +47,7 @@ function fake(opts: IFake): { connection: IDeveloperConnection; calls: string[];
 		developerStatus: async () => {
 			calls.push('status');
 			if (opts.status instanceof Error) throw opts.status;
+			if (opts.status instanceof Promise) return { developerId: await opts.status };
 			return { developerId: opts.status ?? null };
 		},
 		registerDeveloper: async (id) => {
@@ -131,6 +132,24 @@ test('scaffold uses local when disconnected', async () => {
 test('scaffold uses local when the org has no id', async () => {
 	const { connection } = fake({ status: null });
 	assert.equal(await new DeveloperIdentity(connection).resolveForScaffold(), 'local');
+});
+
+test('resolve: status hangs, so the lookup times out', async () => {
+	const { connection } = fake({ status: new Promise<string | null>(() => {}) });
+	const started = Date.now();
+	const r = await new DeveloperIdentity(connection, 20).resolve();
+	assert.deepEqual(r, { developerId: 'local', source: 'default', canRegisterDeveloper: false, lookupFailed: true });
+	assert.ok(Date.now() - started < 1000);
+});
+
+test('scaffold: a late status reply does not rescue a timed-out scaffold', async () => {
+	let reply!: (id: string) => void;
+	const late = new Promise<string | null>((resolve) => (reply = resolve));
+	const { connection } = fake({ status: late });
+	const scaffold = new DeveloperIdentity(connection, 20).resolveForScaffold();
+	await assert.rejects(scaffold, { message: LOOKUP_FAILED_MESSAGE });
+	reply('acme'); // the server answers after the limit
+	await assert.rejects(scaffold, { message: LOOKUP_FAILED_MESSAGE });
 });
 
 // ── host.appdev.registerDeveloper handler ────────────────────────────────────

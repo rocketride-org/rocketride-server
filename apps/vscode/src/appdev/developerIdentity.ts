@@ -13,6 +13,10 @@
 // developer_status lookup. Disconnected sessions and orgs without an id fall
 // back to 'local'. A FAILED lookup is different: the id is unknown, not
 // absent, so scaffolding refuses instead of silently creating local.<name>.
+// The lookup is time-limited (STATUS_TIMEOUT_MS, far under the bus's 120 s
+// request timeout): a silent server counts as a failed lookup, so the wizard
+// never sits on "Loading…" and a reply that arrives after the limit cannot
+// let a scaffold go through.
 // =============================================================================
 
 import type { NewAppIdentity } from 'shared/tools/appdev/types';
@@ -44,6 +48,26 @@ export interface IResolvedDeveloperId {
 	lookupFailed: boolean;
 }
 
+/** Longest wait for the developer_status lookup before it counts as failed. */
+export const STATUS_TIMEOUT_MS = 10_000;
+
+/**
+ * Settles with `promise`, or rejects once `ms` passes first. The timer is
+ * cleared either way, so a settled lookup leaves nothing running.
+ *
+ * @param promise - The request to bound.
+ * @param ms - The limit in milliseconds.
+ * @returns The request's result.
+ * @throws Error when the limit passes first.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const limit = new Promise<never>((_, reject) => {
+		timer = setTimeout(() => reject(new Error(`developer_status timed out after ${ms}ms`)), ms);
+	});
+	return Promise.race([promise, limit]).finally(() => clearTimeout(timer));
+}
+
 /** Shown when scaffolding cannot confirm the org's developer id. */
 export const LOOKUP_FAILED_MESSAGE = "Could not confirm your organization's developer id with the server, so the app was not created. Check your connection and try again.";
 
@@ -55,8 +79,12 @@ export class DeveloperIdentity {
 
 	/**
 	 * @param connection - The extension's connection manager.
+	 * @param statusTimeoutMs - Limit for the live lookup (tests pass a small one).
 	 */
-	constructor(private readonly connection: IDeveloperConnection) {}
+	constructor(
+		private readonly connection: IDeveloperConnection,
+		private readonly statusTimeoutMs: number = STATUS_TIMEOUT_MS
+	) {}
 
 	/**
 	 * Resolves the developer id for display and scaffolding.
@@ -77,12 +105,12 @@ export class DeveloperIdentity {
 		}
 
 		try {
-			const status = await client.developerStatus();
+			const status = await withTimeout(client.developerStatus(), this.statusTimeoutMs);
 			if (status?.developerId) return { ...fallback, developerId: status.developerId, source: 'organization' };
 			return { ...fallback, canRegisterDeveloper: true };
 		} catch {
 			// OSS servers always carry an id at login, so this is a SaaS
-			// lookup failure: hide the form, and let scaffolding refuse.
+			// lookup failure or timeout: hide the form, and let scaffolding refuse.
 			return { ...fallback, lookupFailed: true };
 		}
 	}
