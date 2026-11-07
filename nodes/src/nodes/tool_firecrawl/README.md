@@ -1,18 +1,17 @@
 # tool_firecrawl
 
-A RocketRide tool node that lets an AI agent scrape a known web page or discover URLs on a site through Firecrawl.
+A RocketRide tool node that lets an AI agent search the web, scrape a known web page, or discover URLs on a site through Firecrawl.
 
 ## About Firecrawl
 
-Firecrawl is a web-data service for retrieving and structuring website content. It is
-used to turn web pages into agent-ready content and to discover a site's linked pages.
+Firecrawl is a web-data service for searching, retrieving, and structuring website content. It is
+used to find relevant web pages, turn web pages into agent-ready content, and discover a site's linked pages.
 
 ## What it does
 
-This node exposes Firecrawl only as an agent tool and has no pipeline lanes. Pick it when
-an agent already has a URL to read, or needs a site's link map; use a search tool instead
-when it first needs to discover relevant sites. The node provides one single-page scrape
-operation and one URL-map operation.
+This node exposes Firecrawl only as an agent tool and has no pipeline lanes. It provides one
+web-search operation (`search_web`), one single-page scrape operation (`scrape_url`), and one
+URL-map operation (`map_url`).
 
 ## As a tool
 
@@ -20,27 +19,39 @@ The tool server prefix is `firecrawl` by default. It registers these functions:
 
 | Function | Description |
 | --- | --- |
+| `firecrawl.search_web` | Searches the web and returns matching results with optional scraped Markdown. |
 | `firecrawl.scrape_url` | Scrapes one URL and returns its content and metadata. |
 | `firecrawl.map_url` | Maps a site from a root URL and returns discovered links. |
 
-Both functions require a truthy `url`. `scrape_url` accepts `format` of `markdown`
-(default) or `html`; after scraping, the node selects that attribute from the response,
-then falls back to Markdown and finally an empty string. Its successful result is
-`{success, content, metadata}`; non-string content is JSON-encoded. `map_url` returns
-`{success, links}`, retaining string links and URL fields from returned link objects.
+`search_web` requires a non-empty `query` and accepts optional `limit` (1–20, defaulting to
+the configured **Max Results**) and `scrape_markdown` (`false` by default). It returns
+`{success, results}` where each item includes `url`, `title`, `description`, and `markdown`
+when requested.
+
+`scrape_url` and `map_url` require a truthy `url`. `scrape_url` accepts `format` of `markdown`
+(default) or `html` and requests that format from Firecrawl; after scraping, the node selects
+that attribute from the response, then falls back to Markdown and finally an empty string. Its
+successful result is `{success, content, metadata}`; non-string content is JSON-encoded.
+`map_url` returns `{success, links}`, retaining string links and URL fields from returned link
+objects.
 
 Invalid input and Firecrawl errors raise tool errors rather than returning an error
-object. This lets the agent distinguish an empty successful map from a failed request.
+object. This lets the agent distinguish an empty successful response from a failed request.
 
 ## Configuration
 
-The node has one operational setting: the API key. There are no per-call service defaults
-to tune; choose the scrape format in the individual `scrape_url` call.
+Configure the API key and the default maximum number of search results. Per-call arguments on
+`search_web` and `scrape_url` override the defaults when needed.
 
 ### API Key
 
 Provide a non-empty key before starting the pipeline. Startup fails if it is absent, and
 the configured key is the only credential source used by this node.
+
+### Max Results
+
+Sets the default number of results returned by `search_web` (1–20, default 5). Individual
+`search_web` calls can override this value via the `limit` parameter.
 
 ## Authentication
 
@@ -144,6 +155,7 @@ The key is passed directly to `FirecrawlApp`, no other credentials are needed.
 | Field | Type | Description | Default |
 |---|---|---|---|
 | `tool_firecrawl.apikey` | `string` | **API Key**<br/>Firecrawl API key | `""` |
+| `tool_firecrawl.maxResults` | `integer` | **Max Results**<br/>Maximum number of search results to return (1-20) | `5` |
 
 ## Dependencies
 
