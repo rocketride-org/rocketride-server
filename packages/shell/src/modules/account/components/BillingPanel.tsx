@@ -42,6 +42,7 @@ import { CreditsPanel } from '../../billing/components/CreditsPanel';
 import { BillingDashboard } from '../../billing/components/BillingDashboard';
 import { TopUpModal } from '../../billing/components/TopUpModal';
 import { UpgradeModal } from '../../billing/components/UpgradeModal';
+import type { PlanChangeOutcome, PlanChangePreview } from '../../billing/components/planChange';
 import type { ActiveTask, TopupPlan } from '../../billing/components/BillingDashboard';
 import type { CheckoutPlan } from '../../checkout/types';
 import { Badge, parseWireDate } from './shared';
@@ -354,7 +355,8 @@ export interface BillingPanelProps {
 	/** Called to purchase a top-up pack (charges card on file). */
 	onPurchaseTopup?: (plan: CheckoutPlan) => Promise<{ status: string; clientSecret?: string }>;
 	/** Called when the user confirms a plan change. */
-	onUpgradeSubscription?: (appId: string, newPriceId: string) => Promise<void>;
+	onUpgradeSubscription?: (appId: string, newPriceId: string, attemptId?: string, expectedPriceId?: string) => Promise<void | PlanChangeOutcome>;
+	onPreviewSubscriptionChange?: (appId: string, newPriceId: string) => Promise<PlanChangePreview | null>;
 }
 
 // =============================================================================
@@ -368,11 +370,18 @@ export interface BillingPanelProps {
  * panel (view / change plan / cancel), and the admin dashboard. The cancel
  * confirmation and its error handling live HERE, not in AccountView.
  */
-export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscriptions, loading, error, creditBalance, onCancelSubscription, onOpenPortal, isOrgAdmin, onSubscribe, transactions, usageByUser, usageByTeam, activeTasks, dashboardLoading, onTransactionPage, fetchTransactions, fetchTransactionDistinct, topupPlans, onBuyTopup, allPlans, onPurchaseTopup, onUpgradeSubscription }) => {
+export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscriptions, loading, error, creditBalance, onCancelSubscription, onOpenPortal, isOrgAdmin, onSubscribe, transactions, usageByUser, usageByTeam, activeTasks, dashboardLoading, onTransactionPage, fetchTransactions, fetchTransactionDistinct, topupPlans, onBuyTopup, allPlans, onPurchaseTopup, onUpgradeSubscription, onPreviewSubscriptionChange }) => {
 	// ── Top-up modal state ──────────────────────────────────────────────────
 	const [showTopUpModal, setShowTopUpModal] = useState(false);
 	// ── Upgrade modal state ─────────────────────────────────────────────────
 	const [upgradeTarget, setUpgradeTarget] = useState<BillingDetail | null>(null);
+	const upgradePlans = useMemo(() => allPlans?.filter((plan) => plan.appId === upgradeTarget?.appId), [allPlans, upgradeTarget?.appId]);
+	const previewUpgrade = useCallback(
+		(newPriceId: string) => upgradeTarget && onPreviewSubscriptionChange
+			? onPreviewSubscriptionChange(upgradeTarget.appId, newPriceId)
+			: Promise.resolve(null),
+		[upgradeTarget, onPreviewSubscriptionChange],
+	);
 	// ── Record panel state ──────────────────────────────────────────────────
 	// The open record's appId; the record itself resolves LIVE from props so a
 	// host refresh (e.g. a cancel flipping cancelAtPeriodEnd) updates the open
@@ -689,12 +698,13 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscri
 			)}
 
 			{/* Upgrade / change plan modal */}
-			{upgradeTarget && allPlans && onUpgradeSubscription && (
+			{upgradeTarget && upgradePlans && onUpgradeSubscription && (
 				<UpgradeModal
-					plans={allPlans.filter((p) => p.appId === upgradeTarget.appId)}
+					plans={upgradePlans}
 					currentPriceId={upgradeTarget.stripePriceId}
 					currentPlanName={upgradeTarget.planNickname}
-					onUpgrade={(newPriceId) => onUpgradeSubscription(upgradeTarget.appId, newPriceId)}
+					onPreview={onPreviewSubscriptionChange ? previewUpgrade : undefined}
+					onUpgrade={(newPriceId, attemptId, expectedPriceId) => onUpgradeSubscription(upgradeTarget.appId, newPriceId, attemptId, expectedPriceId)}
 					onClose={() => setUpgradeTarget(null)}
 				/>
 			)}
