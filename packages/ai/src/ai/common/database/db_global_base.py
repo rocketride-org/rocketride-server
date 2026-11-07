@@ -75,17 +75,6 @@ DEFAULT_MAX_EXECUTE_ROWS = 25000
 #     client-side, so that line can contain the parameters verbatim.
 #   * PostgreSQL DETAIL/HINT/CONTEXT/QUERY/STATEMENT blocks routinely restate
 #     the offending key values ("Key (email)=(a@b.com) already exists.").
-#   * ClickHouse appends a symbolised server stack trace ("Stack trace:\n\n0.
-#     DB::Exception::Exception(...) @ 0x...") the caller cannot act on, and
-#     quotes the failing statement fragment after "failed at position N".
-#   * ClickHouse also splices the WHOLE statement into the middle of a
-#     sentence rather than after it. Code 47 (UNKNOWN_IDENTIFIER) reads
-#     "Missing columns: 'x' while processing query: '<sql>', required columns:
-#     'x'" on the old parser and "Unknown expression identifier 'x' in scope
-#     <sql>" on the analyzer. This is the dialect where that echo matters
-#     most: clickhouse-driver sends no server-side parameters by default, so
-#     it interpolates binds client-side and the repeated statement carries the
-#     caller's literal, not a placeholder.
 #
 # The primary message alone -- "no such column: foo", "duplicate key value
 # violates unique constraint users_email_key" -- is what a caller needs in
@@ -105,50 +94,16 @@ DEFAULT_MAX_EXECUTE_ROWS = 25000
 #     deliberately: `^` also matches at position 0, which would make a message
 #     whose first token is one of the five all-detail and degrade it to the
 #     fallback constant.
-#
-# `[Ii]n scope ` carries a lookahead for the same reason: ClickHouse formats
-# the echoed query back out of its AST, so the phrase is followed by an
-# uppercase statement keyword there, while in prose ("not in scope for this
-# trigger") it is not. The optional `\(` in front of the keyword is not
-# cosmetic: a scope that is itself a subquery or a CTE body is formatted
-# through `ASTSubquery`, which parenthesises it, so the analyzer prints
-# `in scope (SELECT ...)` -- the same echo, one character further along, and it
-# carries the caller's inlined bind values just as the bare form does.
-#
-# The capital `I` is not cosmetic either, and is in fact the common case. The
-# analyzer has two ways of appending the scope: a few messages splice a
-# lowercase ` in scope {}` into the middle of a sentence ("Unknown expression
-# identifier '{}' in scope {}"), but dozens per release end the sentence first
-# and start a new one -- "There are no table sources. In scope {}", "Compound
-# identifier '{}' cannot be resolved as {}. In scope {}", "Multiple expressions
-# with the same alias {}. In scope {}". Both substitute the same
-# `formatASTForErrorMessage` output, so both carry the caller's inlined binds;
-# matching only the lowercase form left the majority of the analyzer's
-# messages echoing the statement. The other two ClickHouse phrases are
-# distinctive enough on their own.
 _DB_ERROR_DETAIL = re.compile(
-    r"""(?:
-        \s*(?:
-              \[SQL:
-            | \[parameters:
-            | \[cached\ since
-            | \[generated\ in
-            | \(Background\ on\ this\ error
-            | LINE\ \d+:
-            | Stack\ trace:
-            | failed\ at\ position
-            | while\ processing\ query:
-            | ,\ required\ columns:
-            | [Ii]n\ scope\ (?=\(?(?:SELECT|INSERT|WITH|CREATE|ALTER|DROP|DELETE|UPDATE|EXPLAIN)\b)
-        )
-      | \n[ \t]*(?:
-              DETAIL:
-            | HINT:
-            | CONTEXT:
-            | QUERY:
-            | STATEMENT:
-        )
-    )""",
+    r"""
+        \[SQL:
+      | \[parameters:
+      | \[cached\ since
+      | \[generated\ in
+      | \(Background\ on\ this\ error
+      | LINE\ \d+:
+      | \n[ \t]*(?:DETAIL:|HINT:|CONTEXT:|QUERY:|STATEMENT:)
+    """,
     re.VERBOSE,
 )
 
@@ -286,23 +241,10 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
 
         * pymysql puts ``(errno, message)`` in ``.orig.args``
           -> ``Error <code>: <message>``.
-        * clickhouse-driver does NOT: its ``ServerException`` carries the code
-          on ``.code`` and the text on ``.message``, so those attributes are
-          read directly -> ``Error <code>: <message>``. The message itself
-          carries the server stack trace and, for a syntax error, the
-          statement fragment after ``failed at position``; for an unknown
-          identifier it repeats the whole statement mid-sentence, after
-          ``while processing query:`` or ``in scope`` (bare, or parenthesised
-          when the scope is a subquery or a CTE body). All of those are cut by
-          the stripper's markers. That last pair is not cosmetic: the driver
-          sends no server-side parameters by default, so the statement it
-          echoes back has the caller's bind values already interpolated into
-          it. Note the two layers differ:
-          ``clickhouse_driver.dbapi`` raises ``OperationalError(ServerException)``,
-          while ``clickhouse+native://`` -- what the db_clickhouse node uses --
-          is clickhouse-sqlalchemy's connector and raises its own
-          ``DatabaseException``, a plain ``Exception`` carrying the same
-          ``ServerException`` in ``.orig``. Both unwrap to the same place.
+        * Drivers that carry the code on ``.code`` and the text on ``.message``
+          (clickhouse-driver) are read directly -> ``Error <code>: <message>``.
+          The db_clickhouse node overrides this method for ClickHouse's own text,
+          whose echoes these markers do not cover.
         * psycopg2 exposes the server's primary message on ``.orig.diag``;
           its ``str()`` also carries the ``LINE n:`` echo of the statement,
           which psycopg2 has already interpolated the bind values into.
@@ -333,16 +275,14 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
           psycopg2's ``LINE n:`` echo, PostgreSQL's DETAIL / HINT / CONTEXT /
           QUERY / STATEMENT *as lines of the message* (the five words are
           left alone in the middle of a sentence, where they belong to the
-          application, not to the server), ClickHouse's server stack trace,
-          its ``failed at position`` echo, and the statement it repeats after
-          ``while processing query:`` / ``in scope`` together with the
-          ``, required columns:`` list that follows.
+          application, not to the server).
         * PASSED THROUGH: the driver's own primary sentence, as the database
-          wrote it. It can quote the fragment of the statement the parser
-          stopped on (sqlite3 ``near "'hunter2'": syntax error``, MySQL 1064
-          ``near '...' at line 1``, psycopg2 ``syntax error at or near ...``),
-          and because pymysql and psycopg2 interpolate bind values
-          client-side, such a fragment can contain a bound value. It can also
+          wrote it. A syntax error can quote part of the statement: sqlite3
+          and psycopg2 name the token they rejected, but MySQL 1064 ``near '...'
+          at line N`` quotes the rest of the statement from where the parser
+          stopped, up to 80 characters, so a value bound after that point can
+          appear in it (pymysql and psycopg2 interpolate bind values
+          client-side). It can also
           quote a value the statement merely TOUCHED rather than carried:
           PostgreSQL's ``invalid input syntax for type integer: "<value>"``
           names the offending row value for an ``INSERT ... SELECT`` or a
@@ -387,10 +327,10 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
                 # (`RAISE EXCEPTION 'Order rejected. HINT: contact billing'`).
                 return f'Error {code}: {primary}' if isinstance(code, str) and code else primary
 
-            # clickhouse-driver's ServerException carries the code on `.code`
-            # and the text on `.message`, not as an (int, str) pair in args, so
-            # the numeric branch above misses it and args[0] alone would drop
-            # the code that identifies the failure.
+            # Drivers such as clickhouse-driver carry the code on `.code` and the
+            # text on `.message`, not as an (int, str) pair in args, so the
+            # numeric branch above misses it and args[0] alone would drop the
+            # code that identifies the failure.
             code = getattr(orig, 'code', None)
             message = getattr(orig, 'message', None)
             if isinstance(code, int) and isinstance(message, str) and message.strip():

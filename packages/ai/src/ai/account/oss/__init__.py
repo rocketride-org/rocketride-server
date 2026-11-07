@@ -167,12 +167,12 @@ class Account(AccountBase):
         Built-ins are seeded into the deployment registry at init
         (``_seed_builtin_apps``), so runtime assembly never consults
         apps.json: every app — seeded or user-published — resolves through
-        the ONE scope walk over the publish bindings, with the dev overlay
-        applied on top. OSS decoration: everything is free and on the
-        desktop.
+        the ONE scope walk over the publish bindings. Dev previews are
+        LOCAL-FIRST (client-side registration in the preview page) — no
+        server-side overlay exists. OSS decoration: everything is free and
+        on the desktop.
         """
         from ai.account.app_deploy import resolve_app_pins
-        from ai.account.dev_overlay import apply_overlay
 
         try:
             entries = await resolve_app_pins('local', 'local', ['local'])
@@ -188,7 +188,7 @@ class Account(AccountBase):
             entry['appStatus'] = 'free'
             entry['onDesktop'] = True
             apps.append(entry)
-        return apply_overlay('local', apps)
+        return apps
 
     # =========================================================================
     # INIT — seed built-ins into the registry (apps.json is the seed)
@@ -309,6 +309,15 @@ class Account(AccountBase):
     async def update_organization(self, org_id: str, name: str):
         self._saas_only()
 
+    async def create_organization(self, **kw):
+        self._saas_only()
+
+    async def delete_org_precheck(self, org_id: str):
+        self._saas_only()
+
+    async def delete_organization(self, **kw):
+        self._saas_only()
+
     async def list_org_members(self, org_id: str) -> List:
         self._saas_only()
 
@@ -364,14 +373,14 @@ class Account(AccountBase):
 
         Registry-only: walks the public publish rung and hides entries whose
         seeded manifest declared ``public: false`` (the binding snapshot
-        carries the flag on the file backend). The dev overlay applies on
-        top so a register_dev'd bundle previews pre-auth too.
+        carries the flag on the file backend). Dev previews are LOCAL-FIRST
+        (the preview page registers the app client-side) — nothing applies
+        on top here.
 
         Returns:
             List of app manifest dicts.
         """
         from ai.account.app_deploy import resolve_app_pins
-        from ai.account.dev_overlay import apply_overlay
 
         try:
             # Snapshot 'public' flags live on the binding rows; the walk
@@ -382,7 +391,7 @@ class Account(AccountBase):
         except Exception as exc:
             debug(f'[oss] public app resolution failed: {exc}')
             entries = []
-        return apply_overlay('local', entries)
+        return entries
 
     async def get_apps_for_user(self, user_id: str, organizations: list) -> list:
         """

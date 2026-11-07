@@ -33,7 +33,7 @@ import os
 import re
 from typing import Any, Dict
 
-from ai.common.config import Config
+from ai.common.config import Config, check_credential_resolved, warn_if_credential_unresolved
 from ai.common.transform import IGlobalTransform
 from rocketlib import OPEN_MODE, debug, warning
 
@@ -167,6 +167,10 @@ class IGlobal(IGlobalTransform):
         if use_auth is None:
             use_auth = bool(username or password)
 
+        if use_auth:
+            # An unfilled password names the missing variable instead of reaching the server.
+            check_credential_resolved(self.glb.logicalType, 'password', password)
+
         normalized_host = _normalize_opensearch_host(host, bool(use_auth))
         debug(f'OpenSearch client init host={normalized_host} collection={collection} auth={use_auth}')
         self.client = OpenSearchClient(
@@ -210,6 +214,11 @@ class IGlobal(IGlobalTransform):
             apikey = (config.get('apikey') or '').strip()
             index = (config.get('index') or '').strip()
             mode = config.get('mode', 'self-managed')
+
+            # Do not send a ${...} the engine left unfilled to the server as the key:
+            # its reply would say the key is wrong, not which variable is missing.
+            if warn_if_credential_unresolved(self.glb.logicalType, 'apikey', apikey, self.glb.connConfig):
+                return
 
             if not INDEX_NAME_RE.fullmatch(index):
                 warning(
@@ -268,6 +277,9 @@ class IGlobal(IGlobalTransform):
                     return
                 if not password:
                     warning('Password is required when basic auth is enabled')
+                    return
+                # An unfilled password is reported as such, and the ping does not send it.
+                if warn_if_credential_unresolved(self.glb.logicalType, 'password', password):
                     return
 
             normalized_host = _normalize_opensearch_host(host, use_auth)

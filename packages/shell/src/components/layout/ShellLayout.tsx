@@ -48,15 +48,34 @@ import { HostChromeProvider, useHostChromeState } from './HostChromeContext';
 import { AppFrame } from './AppFrame';
 import RocketRideWordmark from '../../assets/icons/RocketRideWordmark';
 import Sidebar, { useHasSidebarContent } from './Sidebar';
+import SidebarWorkbench from './SidebarWorkbench';
 import { BxMenu } from '../BoxIcon';
 import { useIsCompact } from '../../hooks/useIsCompact';
-import { CompactNavProvider } from './CompactNavContext';
+import { CompactNavProvider, useCompactNav } from './CompactNavContext';
 import StatusBar from './StatusBar';
 import LoadingScreen from './LoadingScreen';
 import DebugPanel from './DebugPanel';
 import { ConnectionErrorBanner } from './ConnectionErrorBanner';
+import { SignedOutScreen } from './SignedOutScreen';
+import { AuthPhase } from '../../types/connection';
+import { isFramedShell, tabSession, updateTabSession } from '../../util/devGate';
+
+/**
+ * Whether the tab's auth phase demands the signed-out SURFACE instead of an
+ * auto-started login: an explicit sign-out (SIGNED_OUT), or a sign-in that
+ * launched and never completed — AUTHORIZING read by a document that did
+ * NOT start the launch itself (isSignInRedirectPending covers the window
+ * between launching and the redirect unloading the page).
+ */
+function signedOutSurfaceHeld(): boolean {
+	const cm = ConnectionManager.getInstance();
+	const phase = cm.getConnectionStatus().authPhase;
+	if (phase === AuthPhase.SIGNED_OUT) return true;
+	return phase === AuthPhase.AUTHORIZING && !cm.isSignInRedirectPending();
+}
 import { getPrerenderedCapture } from '../../util/prerenderFallback';
 import type { ShellConfig } from '../workspace/types';
+import type { ShellSidebarMode } from '../../types/sidebarChrome';
 import { commonStyles } from '../../themes/styles';
 
 // =============================================================================
@@ -505,22 +524,22 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 	// --- Auth gate: auto-trigger login for authenticated apps ----------------
 	const activeManifest = appManifest.find((m) => m.id === activeAppId);
 	const authGateTriggeredRef = useRef<string | null>(null);
-	const prevIdentityRef = useRef(identity);
-	const suppressGateRef = useRef(false);
+
+	// Remember the locked app's identity WHILE the manifest is in hand: the
+	// anonymous manifest omits auth-required apps, so after a logout the
+	// signed-out/loading surfaces would otherwise regress to the raw app id
+	// and a monogram. Persisted in the tab session, beside the lock itself.
+	useEffect(() => {
+		if (!activeManifest || activeManifest.id !== tabSession().appId) return;
+		if (tabSession().appName === activeManifest.name && tabSession().appIcon === activeManifest.icon) return;
+		updateTabSession({ appName: activeManifest.name, appIcon: activeManifest.icon });
+	}, [activeManifest]);
 
 	useEffect(() => {
-		// Detect a logout transition (had an identity, now none). On logout the
-		// shell switches the active app back to home via shell:switchApp, but that
-		// event is delivered on a microtask, so the workspace's activeAppId flips a
-		// tick AFTER identity clears. During that gap the check below would see
-		// "no identity + auth-required app still active" and fire shell:loginRequest
-		// → startOAuth, bouncing a signing-out user to the Zitadel login screen
-		// instead of leaving them on the logged-out home. Suppress the gate from the
-		// moment identity drops until the active app settles back on the default.
-		const wasLoggedIn = !!prevIdentityRef.current;
-		prevIdentityRef.current = identity;
-		if (wasLoggedIn && !identity) suppressGateRef.current = true;
-		if (identity || activeAppId === defaultAppId) suppressGateRef.current = false;
+		// No logout-transition suppression needed here: logout() writes
+		// AuthPhase.SIGNED_OUT synchronously before identity clears, so the
+		// phase check below already holds the gate through the gap that the
+		// old suppressGateRef ref-dance papered over.
 
 		// Only gate when the manifest is loaded and explicitly requires auth.
 		// Skip for the default app (home/hello) — it must always be accessible.
@@ -528,11 +547,18 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 		// showing (network down / session expired), bouncing the visitor into an
 		// OAuth redirect would hide it — and with the server unreachable the
 		// redirect can't complete anyway. The banner's actions restart the flow.
+		// A FRESH signed-out encounter with an auth-required app goes
+		// straight to the login flow — a page that says "you need to log in"
+		// on first run is a detour, not a gate. The signed-out SURFACE is
+		// reserved for the two states where auto-login would be hostile: an
+		// explicit sign-out in this tab (the person is usually terminating
+		// the app), and an initiated sign-in that never completed (Back from
+		// the IdP — re-firing would trap them in a redirect loop).
 		const failureLatched = !!ConnectionManager.getInstance().getConnectionStatus().lastFailure;
-		if (!suppressGateRef.current && !identity && !failureLatched && activeManifest && activeManifest.authenticated !== false && activeAppId !== defaultAppId) {
+		if (!identity && !failureLatched && !signedOutSurfaceHeld() && activeManifest && activeManifest.authenticated !== false && activeAppId !== defaultAppId) {
 			if (authGateTriggeredRef.current === activeAppId) return;
 			authGateTriggeredRef.current = activeAppId;
-			ConnectionManager.getInstance().emit('shell:loginRequest', { appId: activeAppId });
+			ConnectionManager.getInstance().emit('shell:loginRequest', { appId: activeAppId, auto: true });
 		} else {
 			authGateTriggeredRef.current = null;
 		}
@@ -637,14 +663,47 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 	}
 	if (!loaded && !seeded && !bootStalled) return <LoadingScreen />;
 
+
 	// First boot: stay full-screen on the rocket until the first activation
-	// resolves to real content — the mounted app, or a terminal error surface
-	// (load failure, unknown app id) that the user must see. A pending dev
-	// preview counts as still-loading (see the dev-preview hold above).
+	// resolves to real content — the mounted app, a terminal error surface
+	// (load failure, unknown app id) that the user must see, or the dev
+	// tab's signed-out surface (an app that cannot render without identity
+	// would otherwise hold the rocket forever).
 	const hasFirstContent =
 		hasAppUi ||
 		(!devPending && !!appLoadErrors[activeAppId]) ||
 		activeAppUnresolvable;
+	// THE auth render gate, one invariant: an auth-required app renders
+	// NOTHING without an identity. No prediction of what the gate effect
+	// will do — signed-out/abandoned shows the signed-out page, everything
+	// else holds the loading screen until the auto-login navigates away.
+	// A MISSING manifest counts as auth-required (the platform default),
+	// which closes the async-registration window where the app could mount
+	// before its manifest said otherwise. A latched failure falls through:
+	// the recovery dialog owns that screen, over the signed-out app.
+	const needsIdentity =
+		!identity &&
+		!ConnectionManager.getInstance().getConnectionStatus().lastFailure &&
+		activeManifest?.authenticated !== false &&
+		activeAppId !== defaultAppId;
+	if (needsIdentity) {
+		// Signed out, the manifest may be GONE (anonymous manifests omit
+		// auth-required apps) — fall back to the identity the tab remembered.
+		const remembered = activeAppId === tabSession().appId ? tabSession() : undefined;
+		if (!signedOutSurfaceHeld()) return <LoadingScreen iconUrl={activeManifest?.icon ?? remembered?.appIcon} />;
+		return (
+			<SignedOutScreen
+				appName={activeManifest?.name ?? remembered?.appName ?? activeAppId}
+				iconUrl={activeManifest?.icon ?? remembered?.appIcon}
+				// Framed shells sign in through a separate window (the popup
+				// flow) — say so; the loginRequest handler kicks it directly
+				// off this button's gesture, no second prompt.
+				note={isFramedShell() ? 'Sign in opens in a separate window; this preview continues automatically afterwards.' : undefined}
+				onSignIn={() => ConnectionManager.getInstance().emit('shell:loginRequest', { appId: activeAppId })}
+			/>
+		);
+	}
+
 	if (hasFirstContent) firstContentRef.current = true;
 	if (!firstContentRef.current) {
 		// A latched failure (server unreachable, session expired) can strand the
@@ -700,6 +759,10 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 					account={config.account}
 					hideAppSwitcher={hideAppSwitcher}
 					isSaas={(config.capabilities ?? []).includes('saas')}
+					// Platform sidebar extras (ticker + docs) are HOST content;
+					// a deep-app tab is the app's surface, so the slot is
+					// withheld there along with Home/Switch App.
+					sidebarExtras={hideAppSwitcher ? undefined : config.sidebarExtras}
 				/>
 
 				{/* Client area */}
@@ -721,7 +784,7 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 							// is a lie that flashes and self-corrects (the injection
 							// invalidates + retries the load when it lands). Hold
 							// the loading animation instead, until the hold expires.
-							<LoadingScreen />
+							<LoadingScreen iconUrl={activeManifest?.icon} />
 						) : appLoadErrors[activeAppId] && !autoReloading ? (
 							<div style={styles.appLoadError}>
 								<div style={styles.appLoadErrorTitle}>Could not load {activeManifest?.name ?? activeAppId}</div>
@@ -789,7 +852,7 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 							// AuthTransitionPage (all phase-anchored) so the post-login
 							// boot → app-load → transition handoff is one continuous animation
 							// with no "Loading…" text frame flashing between them.
-							<LoadingScreen />
+							<LoadingScreen iconUrl={activeManifest?.icon} />
 						) : null}
 					</div>
 
@@ -861,8 +924,21 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 // =============================================================================
 
 /**
- * Thin wrapper that connects the Sidebar component to the OverlayManager
- * context so it can trigger Account/Settings overlays.
+ * Thin wrapper that connects the sidebar frame to the OverlayManager context
+ * so it can trigger Account/Settings overlays — and picks WHICH frame renders.
+ *
+ * Frame resolution: the rail-plus-panel frame exists ONLY for apps that
+ * declare view containers (`sidebarViews`) — one rail icon per container.
+ * A classic `sidebar={content}` declaration (or the presence-only legacy
+ * descriptor) always renders the classic column; it is never projected
+ * into the rail as a synthetic single icon. On top of that, the classic
+ * column also wins when:
+ *   • compact width — every mode shares the classic drawer below the
+ *     breakpoint (a rail-plus-panel makes no sense on a phone), and
+ *   • an effective 'rocketride' mode — the user's General > Sidebar setting
+ *     when it is anything but 'default' (it overrides the app), otherwise the
+ *     app's explicit `sidebarMode` opt-out (kept for migration).
+ * Apps with no sidebar declaration render no frame (both frames self-hide).
  */
 const SidebarWithOverlay: React.FC<{
 	themeConfig: ShellConfig['themeConfig'];
@@ -870,8 +946,39 @@ const SidebarWithOverlay: React.FC<{
 	hideAppSwitcher?: boolean;
 	/** Server-probed edition flag ('saas' capability) — gates SaaS-only menu items. */
 	isSaas?: boolean;
-}> = ({ themeConfig, account, hideAppSwitcher, isSaas }) => {
+	/** Host-owned sidebar extras (already withheld for deep-app tabs). */
+	sidebarExtras?: ShellConfig['sidebarExtras'];
+}> = ({ themeConfig, account, hideAppSwitcher, isSaas, sidebarExtras }) => {
 	const onOverlay = useOverlay();
+	const { sidebarMode, sidebarViews } = useHostChromeState();
+	const { isCompact } = useCompactNav();
+	const { activeAppId, settings } = useWorkspace();
+
+	// The user's General > Sidebar setting: 'default' (or unset) defers to the
+	// app's declared mode; any concrete choice overrides what the app requested.
+	const settingMode = settings['rocketride.general.sidebar'];
+	const userMode: ShellSidebarMode | null = settingMode === 'vscode' || settingMode === 'cursor' || settingMode === 'rocketride' ? settingMode : null;
+	const effectiveMode: ShellSidebarMode | null = userMode ?? sidebarMode;
+
+	// Only DECLARED view containers earn the workbench frame — a classic
+	// `sidebar={content}` node (or the presence-only legacy descriptor) is
+	// built for the classic column and renders there, whatever mode is asked.
+	const hasDeclaredViews = (sidebarViews?.length ?? 0) > 0;
+	const optedOut = effectiveMode === 'rocketride';
+	if (hasDeclaredViews && !optedOut && !isCompact) {
+		return (
+			<SidebarWorkbench
+				key={activeAppId}
+				variant={effectiveMode === 'cursor' ? 'cursor' : 'vscode'}
+				themeConfig={themeConfig}
+				account={account}
+				hideAppSwitcher={hideAppSwitcher}
+				isSaas={isSaas}
+				onOverlay={onOverlay}
+				sidebarExtras={sidebarExtras}
+			/>
+		);
+	}
 	return (
 		<Sidebar
 			themeConfig={themeConfig}
@@ -879,6 +986,7 @@ const SidebarWithOverlay: React.FC<{
 			hideAppSwitcher={hideAppSwitcher}
 			isSaas={isSaas}
 			onOverlay={onOverlay}
+			sidebarExtras={sidebarExtras}
 		/>
 	);
 };

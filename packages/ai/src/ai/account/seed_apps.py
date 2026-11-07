@@ -42,6 +42,7 @@
 
 """Edition-neutral seeding of the fixed platform apps from apps.json."""
 
+import hashlib
 import json
 import os
 import sys
@@ -117,6 +118,56 @@ def load_manifest_entries() -> List[Dict[str, Any]]:
 
 
 # =============================================================================
+# THE BUNDLE — the local built tree, and its digest
+# =============================================================================
+
+
+def _local_bundle_root(app_id: str) -> str:
+    """Where the app build emits an app's bundle: ``<engine_dir>/static/apps/<app_id>/``."""
+    return os.path.join(os.path.dirname(sys.executable), 'static', 'apps', app_id)
+
+
+def bundle_digest(app_id: str) -> Optional[str]:
+    """sha256 of an app's built bundle in the local static tree, or None when there is none.
+
+    Covers each file's path relative to the bundle root and its bytes, walked
+    in sorted order, so the same build gives the same digest on every pod and
+    a changed, added, removed or renamed file changes it. Seeded rows record
+    it as ``metadata.build.bundleSha256``; ``bundle_changed`` compares against it.
+
+    None means "no digest": no directory, an empty one (the copy would find no
+    files and fail the seed), or a file or directory that can't be read. Callers
+    then seed without a digest rather than fail, which is how rows looked before
+    the field.
+    """
+    root = _local_bundle_root(app_id)
+    if not os.path.isdir(root):
+        return None
+    digest = hashlib.sha256()
+    found = False
+
+    def unreadable_dir(exc: OSError) -> None:
+        # os.walk skips a directory it can't list unless told otherwise, which
+        # would digest only the readable part of the bundle.
+        raise exc
+
+    try:
+        for dirpath, dirs, files in os.walk(root, onerror=unreadable_dir):
+            dirs.sort()
+            for filename in sorted(files):
+                abs_path = os.path.join(dirpath, filename)
+                rel = os.path.relpath(abs_path, root).replace(os.sep, '/')
+                with open(abs_path, 'rb') as handle:
+                    content = hashlib.sha256(handle.read()).digest()
+                digest.update(rel.encode('utf-8') + b'\0' + content)
+                found = True
+    except OSError as exc:
+        debug(f'[seed_apps] {app_id}: bundle digest unavailable: {exc}')
+        return None
+    return digest.hexdigest() if found else None
+
+
+# =============================================================================
 # THE PRIMITIVE — mint one seed version + copy its bundle
 # =============================================================================
 
@@ -143,6 +194,47 @@ def seed_artifact_of(entry: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _manifest_for_compare(manifest: Any) -> Dict[str, Any]:
+    """A manifest reduced to its comparable fields.
+
+    Strips ``entry`` (modern rows never store it, but legacy rows may carry
+    the dead build-time static path) so a stored-vs-current comparison keys
+    on the semantic manifest only.
+    """
+    if not isinstance(manifest, dict):
+        return {}
+    return {k: v for k, v in manifest.items() if k != 'entry'}
+
+
+def seed_is_current(entry: Dict[str, Any], latest_row: Dict[str, Any]) -> bool:
+    """Whether the latest rail row still matches the local build output.
+
+    The change signal behind ``reseed_changed``: compares the apps.json entry
+    against the row's stored ``metadata.manifest`` AND the local bundle tree's
+    hash against the row's stamped ``metadata.build.bundleSha256``. A missing
+    LOCAL bundle reads as current — there is nothing servable to reseed from,
+    so minting a version would only strand a failed-build row. A missing
+    STORED hash (row seeded before hashes were stamped, or a user deploy on
+    the latest version) reads as changed — the one-time bump that establishes
+    the baseline.
+
+    Args:
+        entry:      The apps.json entry (current manifest truth).
+        latest_row: The newest registry row for the app.
+
+    Returns:
+        True when nothing changed (skip), False when a reseed is due.
+    """
+    local = bundle_digest(str(entry['id']))
+    if local is None:
+        return True
+    metadata = latest_row.get('metadata') if isinstance(latest_row.get('metadata'), dict) else {}
+    if _manifest_for_compare(metadata.get('manifest')) != _manifest_for_compare(entry):
+        return False
+    build = metadata.get('build') if isinstance(metadata.get('build'), dict) else {}
+    return str(build.get('bundleSha256') or '') == local
+
+
 async def copy_bundle_to_store(app_id: str, artifact_path: str) -> int:
     """Copy an app's built bundle from the local static tree INTO the file
     store, at the version's ``dist/`` serving tree.
@@ -164,7 +256,7 @@ async def copy_bundle_to_store(app_id: str, artifact_path: str) -> int:
     from ai.account.deployment_backend import artifact_content_dir
     from ai.account.store import Store
 
-    local_root = os.path.join(os.path.dirname(sys.executable), 'static', 'apps', app_id)
+    local_root = _local_bundle_root(app_id)
     if not os.path.isdir(local_root):
         debug(f'[seed_apps] no local bundle at {local_root} — store copy skipped for {app_id} (rebuild the app)')
         return 0
@@ -217,6 +309,14 @@ async def seed_app(account: Any, org_id: str, entry: Dict[str, Any], actor: Dict
     # from version numbers everywhere, so recording apps.json's build-time
     # static path would only seed a dead field into every new row.
     manifest = {k: v for k, v in entry.items() if k != 'entry'}
+    # Digest the local tree BEFORE the copy so the stamp records exactly the
+    # bytes this version was seeded from — ``seed_is_current`` and
+    # ``bundle_changed`` both compare later rebuilds against it to decide
+    # whether a reseed is due.
+    build: Dict[str, Any] = {'status': 'ok', 'seeded': True, 'endedAt': time.time()}
+    digest = bundle_digest(app_id)
+    if digest:
+        build['bundleSha256'] = digest
     registered = await account.deployments_publish(
         org_id,
         app_id,
@@ -226,7 +326,7 @@ async def seed_app(account: Any, org_id: str, entry: Dict[str, Any], actor: Dict
         # build.status 'ok': the seed's dist/ is populated by the copy below
         # from an already-built static tree, so seeded versions pass the SAME
         # built gate server builds do (no special-casing anywhere downstream).
-        metadata={'manifest': manifest, 'build': {'status': 'ok', 'seeded': True, 'endedAt': time.time()}},
+        metadata={'manifest': manifest, 'build': build},
         state='ready',
     )
     try:
@@ -279,6 +379,48 @@ def _build_ok(entry: Dict[str, Any]) -> bool:
 
 
 # =============================================================================
+# CHANGED-BUILD POLICY — for orchestrators that re-seed only what moved
+# =============================================================================
+
+
+async def bundle_changed(account: Any, org_id: str, entry: Dict[str, Any]) -> bool:
+    """Whether this pod's built bundle differs from the one the app was last seeded with.
+
+    The policy behind an orchestrator's changed-only re-seed: force an app
+    only when its build changed, so an unchanged app does not gain a version
+    on every deploy. Compares the local bundle digest with ``bundleSha256``
+    on the newest SEED row; user deploys of the same id are not seeds and
+    are ignored. A seed row without a digest counts as changed: either it
+    predates the field (one re-seed records a digest), or its build failed
+    and was stamped without one, so the next deploy retries the seed.
+
+    Returns False when there is no local bundle (nothing to seed from), no
+    rail rows (the plain seed handles a fresh app), no seed rows (a user
+    deployed the id first, and it is left alone), or when the public audience
+    serves a direct deploy rather than a seed: a release must not replace what
+    someone deployed on purpose. A manual ``--reseed`` still does.
+    """
+    app_id = str(entry['id'])
+    local = bundle_digest(app_id)
+    if local is None:
+        return False
+    rows = await account.deployments_versions(org_id, app_id)
+    # Rows are newest-first, so the first seed row is the latest seed.
+    seeds = [row for row in rows or [] if row.get('comment') == SEED_COMMENT]
+    if not seeds:
+        return False
+    public = await account.publish_get(org_id, 'app', app_id, PUBLIC_AUDIENCE)
+    if public is not None:
+        bound = int(public.get('version', 0))
+        live = next((row for row in rows if int(row.get('version', 0)) == bound), None)
+        if live is not None and live.get('comment') != SEED_COMMENT:
+            return False
+    metadata = seeds[0].get('metadata') if isinstance(seeds[0].get('metadata'), dict) else {}
+    build = metadata.get('build') if isinstance(metadata.get('build'), dict) else {}
+    return build.get('bundleSha256') != local
+
+
+# =============================================================================
 # ONE ENTRY — presence check, self-heal, mint, bind
 # =============================================================================
 
@@ -290,6 +432,7 @@ async def seed_manifest_app(
     actor: Dict[str, Any],
     *,
     force: bool = False,
+    reseed_changed: bool = False,
     repoint_latest: Optional[Callable[[str, int, int, Dict[str, Any]], Awaitable[None]]] = None,
 ) -> bool:
     """
@@ -297,12 +440,19 @@ async def seed_manifest_app(
 
     The INSERT-if-absent gate: an app whose rail already has rows is skipped
     unless ``force`` (the deliberate-update path — which appends a NEW
-    version and repoints the public row; it never rewrites history).
-    Edition extras (billing, org bootstrap) are the caller's responsibility.
+    version and repoints the public row; it never rewrites history) or
+    ``reseed_changed`` detects the local build no longer matches the latest
+    rail row (same append-and-repoint path, but only for apps that actually
+    changed). Edition extras (billing, org bootstrap) are the caller's
+    responsibility.
 
     Args:
         entry:          One apps.json app entry (the manifest truth).
         force:          Append a new version even when rail rows exist.
+        reseed_changed: Compare the entry + local bundle hash against the
+                        latest rail row (``seed_is_current``) and reseed the
+                        app when they differ — per-app change detection
+                        instead of the all-or-nothing ``force``.
         repoint_latest: Optional fleet-bump hook for ``force``: called with
                         (app_id, old_latest, new_version, snapshot) to
                         re-point every pin on the old latest. When None the
@@ -339,39 +489,58 @@ async def seed_manifest_app(
         # Backfill just the binding rather than skip.
         pub = await account.publish_get(org_id, 'app', app_id, PUBLIC_AUDIENCE)
         if pub is not None:
-            return False  # fully seeded, nothing to do.
-        # Point the public audience at the latest ready AND BUILT version —
-        # binding an unbuilt row would expose a version with no servable
-        # bytes (seeds are born 'ready'; deployments_versions is
-        # newest-first). A ready seed row whose earlier bundle copy failed
-        # gets the copy RETRIED here (idempotent — the dist path derives
-        # from the row's artifactPath), so a rebuilt tree heals on the next
-        # run without minting runaway versions.
-        ready = [v for v in existing if v.get('state') == 'ready'] or existing
-        target = next((row for row in ready if _build_ok(row)), None)
-        if target is None:
-            for row in ready:
-                # Newest SEED row only — user deploys are the worker's job.
-                if str(row.get('comment') or '') != SEED_COMMENT:
-                    continue
-                try:
-                    if await copy_bundle_to_store(app_id, str(row.get('artifactPath') or '')) > 0:
-                        stamp = {'status': 'ok', 'seeded': True, 'endedAt': time.time()}
-                        await account.deployments_set_build(org_id, app_id, int(row.get('version', 0)), stamp)
-                        row.setdefault('metadata', {})['build'] = stamp
-                        target = row
-                except Exception as exc:
-                    debug(f'[seed_apps] {app_id}: bundle-copy retry failed: {exc}')
-                break
-        if target is None:
-            debug(f'[seed_apps] {app_id}: no BUILT ready version — public binding withheld (rebuild the app)')
-            return False
-        version = int(target.get('version', 1))
-        await account.publish_set(
-            org_id, 'app', app_id, PUBLIC_AUDIENCE, version, manifest_snapshot(target, artifact), actor
-        )
-        debug(f'[seed_apps] backfilled missing public binding for {app_id} v{version}')
-        return True
+            # Fully seeded. With reseed_changed, a local build that no longer
+            # matches the LATEST rail row (manifest or bundle hash) promotes
+            # this entry onto the force path below — the per-app equivalent
+            # of --reseed: mint the next version, repoint the pins on the
+            # old latest. The newest row is the comparison target whatever
+            # its origin (a user deploy there reads as changed and gets a
+            # fresh seed baseline), mirroring the fleet-bump semantics.
+            latest = max(existing, key=lambda v: int(v.get('version', 0)))
+            if not reseed_changed or seed_is_current(entry, latest):
+                return False  # fully seeded and current, nothing to do.
+            force = True
+            old_latest = int(latest.get('version', 0))
+            debug(f'[seed_apps] {app_id}: local build differs from v{old_latest} — reseeding')
+        else:
+            # Point the public audience at the latest ready AND BUILT version —
+            # binding an unbuilt row would expose a version with no servable
+            # bytes (seeds are born 'ready'; deployments_versions is
+            # newest-first). A ready seed row whose earlier bundle copy failed
+            # gets the copy RETRIED here (idempotent — the dist path derives
+            # from the row's artifactPath), so a rebuilt tree heals on the next
+            # run without minting runaway versions.
+            ready = [v for v in existing if v.get('state') == 'ready'] or existing
+            target = next((row for row in ready if _build_ok(row)), None)
+            if target is None:
+                for row in ready:
+                    # Newest SEED row only — user deploys are the worker's job.
+                    if str(row.get('comment') or '') != SEED_COMMENT:
+                        continue
+                    try:
+                        if await copy_bundle_to_store(app_id, str(row.get('artifactPath') or '')) > 0:
+                            # The retried copy serves the CURRENT local tree,
+                            # so the heal stamp carries its digest — the
+                            # change baseline.
+                            stamp = {'status': 'ok', 'seeded': True, 'endedAt': time.time()}
+                            digest = bundle_digest(app_id)
+                            if digest:
+                                stamp['bundleSha256'] = digest
+                            await account.deployments_set_build(org_id, app_id, int(row.get('version', 0)), stamp)
+                            row.setdefault('metadata', {})['build'] = stamp
+                            target = row
+                    except Exception as exc:
+                        debug(f'[seed_apps] {app_id}: bundle-copy retry failed: {exc}')
+                    break
+            if target is None:
+                debug(f'[seed_apps] {app_id}: no BUILT ready version — public binding withheld (rebuild the app)')
+                return False
+            version = int(target.get('version', 1))
+            await account.publish_set(
+                org_id, 'app', app_id, PUBLIC_AUDIENCE, version, manifest_snapshot(target, artifact), actor
+            )
+            debug(f'[seed_apps] backfilled missing public binding for {app_id} v{version}')
+            return True
 
     # Step 2: mint the seed version + copy its bundle (the primitive).
     registered = await seed_app(account, org_id, entry, actor)

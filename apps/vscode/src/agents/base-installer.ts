@@ -40,7 +40,7 @@
  */
 
 import * as vscode from 'vscode';
-import { installStub, stripStubContent, MARKER_BEGIN, MARKER_END } from '../../../../packages/client-common/typescript/src/provision';
+import { installStub, stripStubContent } from '../../../../packages/client-common/typescript/src/provision';
 
 export abstract class BaseAgentInstaller {
 	/** Agent display name (e.g., "Cursor") */
@@ -62,20 +62,6 @@ export abstract class BaseAgentInstaller {
 	 */
 	async install(workspaceRoot: vscode.Uri): Promise<boolean> {
 		return installStub(workspaceRoot.fsPath, this.stubSource, this.stubTarget);
-	}
-
-	/**
-	 * Check if the stub is already installed in the workspace.
-	 */
-	async isInstalled(workspaceRoot: vscode.Uri): Promise<boolean> {
-		const targetUri = vscode.Uri.joinPath(workspaceRoot, this.stubTarget);
-		try {
-			const bytes = await vscode.workspace.fs.readFile(targetUri);
-			const content = Buffer.from(bytes).toString('utf8');
-			return content.includes(MARKER_BEGIN) && content.includes(MARKER_END);
-		} catch {
-			return false;
-		}
 	}
 
 	/**

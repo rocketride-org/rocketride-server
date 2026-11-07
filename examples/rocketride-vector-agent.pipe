@@ -1,0 +1,109 @@
+{
+  "components": [
+    {
+      "id": "chat_1",
+      "provider": "chat",
+      "config": {
+        "hideForm": true,
+        "mode": "Source",
+        "parameters": {},
+        "type": "chat"
+      }
+    },
+    {
+      "id": "agent_1",
+      "provider": "agent_rocketride",
+      "config": {
+        "instructions": [
+          "You answer questions about a document knowledge base kept in the team's RocketRide vector store, attached to you as tools.",
+          "Always answer from the tools, never from memory: list_documents lists the stored documents one by one with their object id, parent path and chunk count, in pages (follow has_more); objdir is a map of parent path to one object id each and may hide documents that share a path. stats gives the row count, the number of active documents, embedding model and vector size, get returns the chunks of one document by object_id and fails for an unknown or trashed one, search finds documents by meaning.",
+          "The write tools (upsert, delete, soft_delete, restore) are offered only when the store's 'Allow writes through tools' setting is on. If a tool you need is not available, say so plainly and stop; do not invent a workaround.",
+          "Answer briefly and quote the exact object ids and paths you saw."
+        ],
+        "max_waves": 6,
+        "parameters": {}
+      },
+      "input": [
+        {
+          "lane": "questions",
+          "from": "chat_1"
+        }
+      ]
+    },
+    {
+      "id": "llm_1",
+      "provider": "llm_anthropic",
+      "config": {
+        "profile": "claude-haiku-4-5",
+        "claude-haiku-4-5": {
+          "apikey": "${ROCKETRIDE_ANTHROPIC_KEY}"
+        },
+        "parameters": {}
+      },
+      "control": [
+        {
+          "classType": "llm",
+          "from": "agent_1"
+        }
+      ]
+    },
+    {
+      "id": "memory_1",
+      "provider": "memory_internal",
+      "config": {
+        "type": "memory_internal"
+      },
+      "control": [
+        {
+          "classType": "memory",
+          "from": "agent_1"
+        }
+      ]
+    },
+    {
+      "id": "rrvector_1",
+      "provider": "rocketride_vector",
+      "config": {
+        "profile": "cloud",
+        "cloud": {
+          "collection": "knowledge_base",
+          "expose_tools": true,
+          "allow_write": false
+        },
+        "embedding": {
+          "provider": "embedding_transformer",
+          "embedding_transformer": {
+            "profile": "miniLM"
+          }
+        },
+        "parameters": {}
+      },
+      "control": [
+        {
+          "classType": "tool",
+          "from": "agent_1"
+        }
+      ]
+    },
+    {
+      "id": "response_1",
+      "provider": "response_answers",
+      "config": {
+        "laneName": "answers"
+      },
+      "input": [
+        {
+          "lane": "answers",
+          "from": "agent_1"
+        }
+      ]
+    }
+  ],
+  "project_id": "d917416e-8bd1-4ecb-977f-f0a51e083245",
+  "viewport": {
+    "x": 0,
+    "y": 0,
+    "zoom": 1
+  },
+  "version": 1
+}

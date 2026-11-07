@@ -154,6 +154,19 @@ async function readNodeMeta(nodeDir) {
 }
 
 /**
+ * Whether every service a node registers is marked internal.
+ */
+async function isNodeInternal(nodeDir) {
+	const svcs = await glob('services*.json', { cwd: nodeDir, nodir: true });
+	if (!svcs.length) return false;
+	for (const svc of svcs) {
+		const caps = /"capabilities"\s*:\s*\[([^\]]*)\]/.exec(await readFile(path.join(nodeDir, svc)));
+		if (!caps || !/"internal"/.test(caps[1])) return false;
+	}
+	return true;
+}
+
+/**
  * Extract a first-sentence description from a raw services*.json text string.
  * The JSON `description` is an array of complete lines, so they join with a
  * space — joining bare runs them together ("a node.Can be invoked"), which also
@@ -596,12 +609,17 @@ async function gather({ projectRoot, contentStaticDir, contentDir, staticDir, mo
 		variantsByNode.get(name).push({ variant, rel });
 	}
 	const nodeDocs = [];
+	let skippedNodeCount = 0;
 	const stagedCategories = new Set();
 	for (const [name, rel] of [...docByNode.entries()].sort(([a], [b]) => a.localeCompare(b))) {
 		const srcAbs = path.join(projectRoot, rel);
 		const nodeDir = path.dirname(srcAbs);
 		const content = await readFile(srcAbs);
 		if (!content.includes(GENERATED_START)) continue; // legacy README, not a doc
+		if (await isNodeInternal(nodeDir)) {
+			skippedNodeCount++;
+			continue;
+		}
 		nodeDocs.push(rel);
 		const route = `${NODES_DIR}/${name}`; // flat public route, preserved via slug
 		claim(route, srcAbs);
@@ -789,7 +807,10 @@ async function gather({ projectRoot, contentStaticDir, contentDir, staticDir, mo
 	// 5. Persist the manifest for docs:index (Phase 3).
 	await writeFileEnsure(path.join(contentDir, '.manifest.json'), JSON.stringify(manifest, null, 2));
 
-	if (task) task.output = `Staged ${manifest.length} pages, ${nodeDocs.length} nodes, ${contributors.length} mounts`;
+	if (task) {
+		const staged = `Staged ${manifest.length} pages, ${nodeDocs.length} nodes, ${contributors.length} mounts`;
+		task.output = skippedNodeCount ? `${staged}; Skipped ${skippedNodeCount} nodes` : staged;
+	}
 	return manifest;
 }
 

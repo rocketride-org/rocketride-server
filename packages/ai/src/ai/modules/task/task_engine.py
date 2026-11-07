@@ -18,7 +18,7 @@ Classes:
     Task: Main pipeline task execution and lifecycle management
 
 Constants:
-    CONST_DEFAULT_MAX_THREADS: Default thread pool size (4)
+    CONST_DEFAULT_MAX_THREADS: Default thread pool size (64)
     CONST_CANCEL_WAIT_TIMEOUT_SECONDS: Graceful termination timeout (5s)
     CONST_STATUS_UPDATE_FREQ: Status update frequency (100ms)
     CONST_MAX_READY_TIME: Maximum time to wait for task readiness (30s)
@@ -30,18 +30,22 @@ Global Resources:
 
 import os
 import asyncio
+import contextlib
 import sys
 import json
 import tempfile
 import time
 import socket
 import hashlib
+import secrets
 import shlex
 import shutil
-from typing import TYPE_CHECKING, Callable, Dict, Any, List, Mapping, Optional, Tuple
-from tenacity import retry, stop_after_attempt, wait_fixed
+from collections import deque
+from typing import TYPE_CHECKING, Awaitable, Callable, Deque, Dict, Any, List, Mapping, Optional, Tuple
+from tenacity import retry, retry_if_exception, stop_after_attempt, wait_fixed
 
 from rocketlib import debug, warning, args as startup_args
+from hosting import HOSTED_FLAG, SHARED_HOST_FLAG
 from ai.constants import (
     CONST_DEFAULT_MAX_THREADS,
     CONST_CANCEL_WAIT_TIMEOUT_SECONDS,
@@ -53,12 +57,26 @@ from ai.constants import (
     CONST_STATUS_HISTORY_LIMIT,
     CONST_ANALYTICS_SLOWEST_DOCS,
     CONST_TASK_DATA_PATH,
+    CONST_BILLING_UNAVAILABLE,
+    CONST_CHANNEL_DATA_WAIT,
+    CONST_CHANNEL_DIAL_LIMIT,
+    CONST_CHANNEL_DIAL_WINDOW,
+    CONST_CHANNEL_MAX_INFLIGHT,
+    CONST_CHANNEL_REDIAL_DELAY,
 )
+from ai.account.base import OutOfCreditsError
 from ai import CONST_AI_NODE_SCRIPT
 from ai.common.dap import DAPBase, DAPClient, TransportWebSocket
 from ai.common.rocketride_db import db_target, dsn_key, exposes_public_endpoint, is_db_provider, scrub_db_env
 from ai.modules.task.pipeflow import apply_pipeflow_event
 from ai.modules.task.run_log import RunLogWriter
+from ai.modules.task.task_channel import (
+    ChannelRefused,
+    ChannelReply,
+    ChannelStreams,
+    handle as handle_channel_request,
+    register_channel_command,
+)
 from rocketride import (
     TASK_STATUS,
     TASK_STATUS_FLOW,
@@ -68,7 +86,7 @@ from rocketride import (
     EVENT_TYPE,
 )
 from .dbg_stdio import DbgStdio
-from .pipeline import resolve_pipeline_env
+from .pipeline import references_env, resolve_pipeline_env
 from .types import LAUNCH_TYPE, TaskError
 from .task_conn import TaskConn
 from .task_metrics import TaskMetrics
@@ -318,17 +336,20 @@ def filter_subprocess_env(environ: Mapping[str, str]) -> Dict[str, str]:
 # Nodes a hosted (SaaS) engine refuses to launch. The canvas already hides
 # `nosaas` services, but a pipeline can reach the engine without the canvas,
 # so the engine enforces the same rule itself. Any service built on the MCP
-# client node is refused in stdio mode: that transport launches a command
-# inside the engine's container. Its HTTP transports are fine. Matching is on
-# the node module, not the provider name: several services share the node
-# (tool_butterbase is one) and provider lookup is case-insensitive.
+# client node is refused in stdio mode while the task shares the engine's
+# host: that transport launches a command there. Its HTTP transports are
+# fine. Matching is on the node module, not the provider name: several
+# services share the node (tool_butterbase is one) and provider lookup is
+# case-insensitive.
 CONST_SAAS_BLOCKED_CAPABILITY = 'nosaas'
 CONST_MCP_CLIENT_NODE_PATH = 'nodes.tool_mcp_client'
 
-# Task subprocesses of a hosted engine get this flag on their command line.
-# Pipeline-supplied args can add flags but not remove this one, so nodes can
-# rely on it (the MCP stdio client refuses to start when it is present).
-CONST_HOSTED_CHILD_FLAG = '--hosted'
+# Task subprocesses of a hosted engine get these flags on their command line
+# (see the hosting module): --hosted always, --shared-host when the task shares
+# the engine's host. Pipeline-supplied args can add flags but not remove these,
+# so the task can rely on them.
+CONST_HOSTED_CHILD_FLAG = HOSTED_FLAG
+CONST_SHARED_HOST_CHILD_FLAG = SHARED_HOST_FLAG
 
 
 def _service_capabilities(service: Any) -> List[str]:
@@ -343,6 +364,7 @@ def saas_pipeline_violation(
     pipeline: Dict[str, Any],
     get_service: Callable[[str], Any],
     get_node_config: Callable[[str, Dict[str, Any]], Dict[str, Any]],
+    shared_host: bool = True,
 ) -> Optional[str]:
     """Return why a hosted engine must refuse ``pipeline``, or None if it may run.
 
@@ -350,7 +372,8 @@ def saas_pipeline_violation(
     and ``Config.getNodeConfig`` in production. The MCP transport is resolved the
     way the node resolves it (profile defaults merged under the component config),
     because the default profile is itself stdio. Anything that cannot be resolved
-    is refused.
+    is refused. ``shared_host`` says the task will share the engine's host (the
+    task's ``--shared-host``); only then is stdio MCP refused.
     """
     for component in pipeline.get('components', []) or []:
         provider = str(component.get('provider') or '')
@@ -360,7 +383,7 @@ def saas_pipeline_violation(
         if CONST_SAAS_BLOCKED_CAPABILITY in _service_capabilities(service):
             return f'Node "{label}" ({provider}) is not available on RocketRide Cloud.'
 
-        if str((service or {}).get('path') or '').lower() == CONST_MCP_CLIENT_NODE_PATH:
+        if shared_host and str((service or {}).get('path') or '').lower() == CONST_MCP_CLIENT_NODE_PATH:
             try:
                 transport = str(get_node_config(provider, component.get('config') or {}).get('transport') or 'stdio')
             except Exception:
@@ -409,6 +432,22 @@ def _log_db_authorizer(account: Any) -> None:
         f'RocketRide DB authorizer: {name} (authorize_db_target defined in '
         f'{getattr(authorizer, "__module__", "?")}.{getattr(authorizer, "__qualname__", "?")})'
     )
+
+
+async def _check_spend(task: 'Task', arguments: Dict[str, Any], data: Optional[bytes]) -> ChannelReply:
+    """Answer a task's credit check: no refusal, or why its org may not open a pipe."""
+    from ai.account import account
+
+    try:
+        refusal = await account.check_spend(task.org_id)
+    except Exception as e:
+        # The ledger's error stays in the server log; the task gets a fixed one
+        warning(f'Credit check failed for org {task.org_id}: {e}')
+        raise ChannelRefused(CONST_BILLING_UNAVAILABLE) from None
+    return ChannelReply(body={'refusal': refusal})
+
+
+register_channel_command('spend.check', _check_spend)
 
 
 class Task(DAPBase):
@@ -490,27 +529,64 @@ class Task(DAPBase):
             await self._parent_task._terminated()
 
     class TaskData(DAPClient):
-        """DAP client for data communication with pipeline."""
+        """DAP client for data communication with pipeline; also answers the task's own requests."""
 
-        def __init__(self, parent_task: 'Task', **kwargs):
-            """Initialize the data client with parent task integration."""
+        def __init__(self, parent_task: 'Task', channel_id: str, **kwargs):
+            """Initialize the data client with parent task integration.
+
+            Args:
+                parent_task: The task this connection belongs to.
+                channel_id: The id sent on the handshake; the task names it when the connection ends.
+                **kwargs: Passed to ``DAPClient``.
+            """
             self._parent_task = parent_task
+            self.channel_id = channel_id
+            # Replies the task is pulling in chunks, and the handlers answering it
+            self.streams = ChannelStreams()
+            self._handlers: set = set()
             super().__init__(**kwargs)
+
+        async def on_receive(self, message: Dict[str, Any]) -> None:
+            """Answer a request from the task in its own task; route the rest as before.
+
+            Handlers run outside the transport's message tasks so a drain on
+            disconnect never waits for them.
+
+            Args:
+                message: The parsed DAP message.
+            """
+            if message.get('type') != 'request':
+                await super().on_receive(message)
+                return
+            if len(self._handlers) >= CONST_CHANNEL_MAX_INFLIGHT:
+                await self._send(self.build_error(message, 'busy'))
+                return
+            handler = asyncio.create_task(self._parent_task._on_channel_request(self, message))
+            self._handlers.add(handler)
+            handler.add_done_callback(self._handlers.discard)
+
+        def cancel_handlers(self) -> None:
+            """Cancel the handlers still answering the task and drop its streams."""
+            for handler in list(self._handlers):
+                handler.cancel()
+            self._handlers.clear()
+            self.streams.close_all()
 
         async def on_disconnected(self, reason=None, has_error=False):
             """
-            Handle unusual disconnection on the data channel.
+            Handle disconnection on the data channel.
 
-            Forgets the channel so the next data request reconnects, and fails
-            the requests still waiting on it so their callers get an error
+            Nothing the task asked can be answered any more, and the parent
+            forgets this client — only if it is still the current one. The
+            requests still waiting on it fail, so their callers get an error
             instead of waiting forever.
 
             Args:
                 reason: Why the channel closed, if the transport knows.
                 has_error: True when the channel closed because of an error.
             """
-            # Clear it so the next time we come through, we try again
-            self._parent_task._data_client = None
+            self.cancel_handlers()
+            self._parent_task._on_data_client_gone(self)
             # Nothing can answer the requests still waiting on this channel
             await super().on_disconnected(reason or 'Task data connection closed', has_error)
 
@@ -534,6 +610,7 @@ class Task(DAPBase):
         run_kind: str = 'dev',
         owner_kind: str = '',
         trigger: str = 'manual',
+        env_source: Optional[Callable[[], Awaitable[Dict[str, str]]]] = None,
         **kwargs,
     ) -> None:
         """
@@ -549,6 +626,9 @@ class Task(DAPBase):
             client_id: Account identifier for store access scoping
             team_id: Owning team id (rides the task file as trusted identity)
             org_id: Owning org id (rides the task file as trusted identity)
+            env: Fixed values for ${...} placeholders, used when no env_source is given
+            env_source: Returns the values for ${...} placeholders. Called at every
+                start and restart, so the values live only while the pipeline is resolved
             run_kind: Run classification ('dev' | 'deploy') — picks the
                 run-log continuum; only the trusted dispatch sets 'deploy'
             trigger: What fired the run ('' | 'manual' | 'schedule');
@@ -619,6 +699,9 @@ class Task(DAPBase):
         # Lifecycle state
         self._tmpfile = None
         self._stop_requested = False
+        # Bumped by every stop_task, so a restart can tell whether a stop arrived
+        # while it loaded, even on a task whose last run was already stopped
+        self._stop_count = 0
         # WHY the stop was requested ('user' | 'ttl'); None until requested.
         # A ttl-window expiry is SUCCESS (the run stayed up exactly as
         # configured), so the run-log outcome derives from this.
@@ -634,7 +717,10 @@ class Task(DAPBase):
         # Data communication
         self._data_lock: asyncio.Lock = asyncio.Lock()
         self._data_port: Optional[int] = None
-        self._data_client: DAPClient = None
+        self._data_client: Optional[Task.TaskData] = None
+        # Per-run credential for the child's /task/data, separate from self.token
+        self._data_token: Optional[str] = None
+        self._reset_channel_state()
 
         # Status broadcasting
         self._status_update_task: Optional[asyncio.Task] = None
@@ -703,6 +789,8 @@ class Task(DAPBase):
 
         # Termination management
         self._is_restarting = False
+        # One restart at a time: two would share _restart_env and _is_restarting
+        self._restart_in_progress = False
         self._is_terminating = False
         self._termination_lock = asyncio.Lock()
 
@@ -710,17 +798,39 @@ class Task(DAPBase):
         self._launch_args = launch_args
         self._launch_type: LAUNCH_TYPE = launch_type
         self._pipeline: Dict[str, Any] = pipeline
-        self._env: Dict[str, str] = env or {}
+        # Where ${...} placeholders resolve from. The values are loaded at each
+        # (re)start and dropped once the task file is written, so decrypted
+        # variables are not held for the task's lifetime.
+        if env_source is None:
+            fixed_env = dict(env or {})
+
+            async def env_source() -> Dict[str, str]:
+                return dict(fixed_env)
+
+        self._env_source = env_source
+
+        # Values a restart loaded before stopping the old process, for the next start only
+        self._restart_env: Optional[Dict[str, str]] = None
 
         # Initialize DAP base
         super().__init__(f'TASK-{self.id}', **kwargs)
 
-    def _resolve_pipeline(self, pipeline: Dict[str, Any]) -> Dict[str, Any]:
-        """Replace ``${KEY}`` placeholders using the merged environment dict.
+    async def _load_env(self, pipeline: Dict[str, Any]) -> Dict[str, str]:
+        """Load the values for the pipeline's placeholders; nothing is loaded when it has none."""
+        if not references_env(pipeline):
+            return {}
+        return await self._env_source()
 
-        Delegates to :func:`pipeline.resolve_pipeline_env`.
+    async def _resolve_pipeline(self, pipeline: Dict[str, Any]) -> Dict[str, Any]:
+        """Replace ``${KEY}`` placeholders using freshly loaded environment values.
+
+        Uses the values a restart already loaded, if any. Delegates to
+        :func:`pipeline.resolve_pipeline_env`.
         """
-        return resolve_pipeline_env(pipeline, self._env)
+        env, self._restart_env = self._restart_env, None
+        if env is None:
+            env = await self._load_env(pipeline)
+        return resolve_pipeline_env(pipeline, env)
 
     # Reason handed to the node subprocess when this engine has no database
     # broker (a local engine, or a self-hosted one without the broker env).
@@ -1052,6 +1162,18 @@ class Task(DAPBase):
 
         return subprocess_env
 
+    def _shares_host(self) -> bool:
+        """
+        Whether the task shares the engine's host, so it gets --shared-host.
+
+        A hosted engine's task does: spawn is the only runtime. The pre-launch
+        check and the task's command line both ask here, so they agree.
+
+        Returns:
+            True for a task of a hosted engine.
+        """
+        return _is_saas_engine()
+
     def _check_pipeline(self, pipeline: Dict[str, Any]) -> None:
         """
         Validate pipeline configuration and extract metadata.
@@ -1076,7 +1198,9 @@ class Task(DAPBase):
             from rocketlib import getServiceDefinition
             from ai.common.config import Config
 
-            problem = saas_pipeline_violation(pipeline, getServiceDefinition, Config.getNodeConfig)
+            problem = saas_pipeline_violation(
+                pipeline, getServiceDefinition, Config.getNodeConfig, shared_host=self._shares_host()
+            )
             if problem:
                 raise ValueError(problem)
 
@@ -1263,9 +1387,222 @@ class Task(DAPBase):
         except Exception:
             return False
 
+    def _reset_channel_state(self) -> None:
+        """Forget the previous run's channel: ``restart_task`` reuses this object."""
+        # A redial still pending would dial the next run before its task reports a listener
+        if getattr(self, '_redial', None) is not None:
+            self._redial.cancel()
+        # Set once the task has reported its listener; from then on the engine dials only on its signal
+        self._channel_signalled = False
+        # Startup-only commands are answered until the task reports it is loading the pipeline
+        self._channel_startup_open = True
+        # Set while a data client is connected
+        self._data_connected = asyncio.Event()
+        # The dial in progress, and the signal that arrived during it
+        self._dial_task: Optional[asyncio.Task] = None
+        self._dial_pending: Optional[Tuple[Optional[str]]] = None
+        # Dial times inside the rate-limit window
+        self._dial_times: Deque[float] = deque()
+        # The one dial waiting for its delay
+        self._redial: Optional[asyncio.TimerHandle] = None
+
+    def _data_uri(self) -> str:
+        """The address of this run's ``/task/data``; the runtime decides it, never the task.
+
+        Returns:
+            str: The websocket URI.
+        """
+        return f'ws://127.0.0.1:{self._data_port}/task/data'
+
+    def _on_channel_signal(self, state: Optional[str], channel_id: Optional[str]) -> None:
+        """React to a ``>CHN*`` line from the task.
+
+        ``2`` closes the startup phase. ``1`` asks for a connection: dial when
+        there is no client, or when the signal names the current client (it
+        is dead); ignore anything else, so a repeated or forged line never
+        closes a live connection.
+
+        Args:
+            state: ``'1'`` or ``'2'``.
+            channel_id: The connection the task says has ended, or ``None``.
+        """
+        if state == '2':
+            self._channel_startup_open = False
+            return
+        if state != '1':
+            return
+        self._channel_signalled = True
+        if self._is_terminating:
+            return
+        if self._dial_task is not None and not self._dial_task.done():
+            # Coalesce: re-checked by the rule once the dial is over
+            self._dial_pending = (channel_id,)
+            return
+
+        client = self._data_client
+        if client is not None and channel_id != client.channel_id:
+            return
+
+        now = time.monotonic()
+        while self._dial_times and self._dial_times[0] < now - CONST_CHANNEL_DIAL_WINDOW:
+            self._dial_times.popleft()
+        if len(self._dial_times) >= CONST_CHANNEL_DIAL_LIMIT:
+            self.debug_message(f'WARNING: data channel dial limit reached for task {self.id}; trying again later')
+            self._redial_later(CONST_CHANNEL_DIAL_WINDOW)
+            return
+        self._dial_times.append(now)
+        self._dial_task = asyncio.create_task(self._open_data_channel(stale=client))
+        self._dial_task.add_done_callback(self._after_dial)
+
+    def _after_dial(self, _dial: asyncio.Task) -> None:
+        """Re-check the signal that arrived during the dial, now that none is in progress.
+
+        Args:
+            _dial: The finished dial task.
+        """
+        pending, self._dial_pending = self._dial_pending, None
+        if pending is not None and not self._is_terminating:
+            self._on_channel_signal('1', pending[0])
+        elif self._data_client is None and not self._is_terminating:
+            # Nothing else asks again, and a hosted run's credit checks need the channel
+            self._redial_later(CONST_CHANNEL_REDIAL_DELAY)
+
+    def _redial_later(self, delay: float) -> None:
+        """Ask for a connection again after ``delay`` seconds, through the same dial rule; one pending, the earliest."""
+        loop = asyncio.get_running_loop()
+        if self._redial is not None:
+            if self._redial.when() <= loop.time() + delay:
+                return
+            self._redial.cancel()
+
+        def redial() -> None:
+            self._redial = None
+            self._on_channel_signal('1', None)
+
+        self._redial = loop.call_later(delay, redial)
+
+    async def _open_data_channel(self, stale: Optional['Task.TaskData']) -> None:
+        """Replace ``stale`` (if any) with a fresh connection to the task.
+
+        Args:
+            stale: The client the task reported dead, to close first; or ``None``.
+        """
+        async with self._data_lock:
+            if self._is_terminating or not self._data_token:
+                return
+            if stale is not None:
+                self._on_data_client_gone(stale)
+                stale.cancel_handlers()
+                try:
+                    await stale.disconnect()
+                except Exception as e:
+                    self.debug_message(f'Error closing the stale data client: {e}')
+            try:
+                client = await self._dial()
+            except Exception as e:
+                self.debug_message(f'Data channel dial failed: {e}')
+                return
+            self._data_client = client
+            self._data_connected.set()
+
+    @staticmethod
+    def _dial_refused(error: BaseException) -> bool:
+        """Tell whether a connect error is the task refusing the handshake (HTTP 403).
+
+        The SDK re-raises the handshake failure as a ``ConnectionError``; the
+        status is on the library's exception it wraps, else in its text.
+
+        Args:
+            error: The exception ``connect()`` raised.
+
+        Returns:
+            bool: True for a refusal, which a retry cannot fix.
+        """
+        wrapped = error.__cause__ or error.__context__
+        return getattr(getattr(wrapped, 'response', None), 'status_code', None) == 403 or 'HTTP 403' in str(error)
+
+    async def _dial(self) -> 'Task.TaskData':
+        """Open a connection to the task's ``/task/data``, retrying a refused connect.
+
+        There is a race condition: the C++ engine emits the ">SVC*1" readiness
+        signal slightly before the child process's uvicorn server has finished
+        binding to its port. This means the first connection attempt may hit a
+        "Connection refused" error. We retry up to 10 times (150ms apart) to
+        give uvicorn time to start accepting connections. A 403 is not retried.
+
+        Returns:
+            Task.TaskData: The connected client.
+
+        Raises:
+            Exception: The last connect error.
+        """
+        channel_id = secrets.token_hex(8)
+        uri = self._data_uri()
+
+        @retry(
+            stop=stop_after_attempt(10),
+            wait=wait_fixed(0.15),
+            reraise=True,
+            retry=retry_if_exception(lambda e: not Task._dial_refused(e)),
+            before_sleep=lambda retry_state: self.debug_message(
+                f'Data connection attempt {retry_state.attempt_number} failed, retrying in 0.15s: {retry_state.outcome.exception()}'
+            ),
+        )
+        async def _connect_data_client():
+            # Don't retry if subprocess has died
+            if self._engine_process and self._engine_process.returncode is not None:
+                raise RuntimeError(f'Subprocess exited with code {self._engine_process.returncode}')
+            headers = {'Authorization': f'Bearer {self._data_token}', 'X-Channel-Id': channel_id}
+            transport = TransportWebSocket(uri, headers=headers)
+            name = f'DATA-{self.id}'
+            client = Task.TaskData(parent_task=self, channel_id=channel_id, module=name, transport=transport)
+            await client.connect()
+            return client
+
+        return await _connect_data_client()
+
+    def _on_data_client_gone(self, client: 'Task.TaskData') -> None:
+        """Forget ``client`` if it is still the current one; a newer one stays.
+
+        Args:
+            client: The client that disconnected.
+        """
+        if self._data_client is client:
+            self._data_client = None
+            self._data_connected.clear()
+
+    async def _on_channel_request(self, client: 'Task.TaskData', message: Dict[str, Any]) -> None:
+        """Answer one request the task sent over ``client``.
+
+        Args:
+            client: The connection the request arrived on.
+            message: The DAP request.
+        """
+        if self._is_terminating:
+            response = client.build_error(message, 'closed')
+        else:
+            try:
+                response = await handle_channel_request(
+                    self, client, client.streams, message, startup_open=self._channel_startup_open
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                # A reply that cannot be read (a stream, a file): answer now, not at the task's timeout
+                self.debug_message(f'Channel request {message.get("command")} failed: {e}')
+                response = client.build_error(message, 'internal error')
+        try:
+            await client._send(response)
+        except Exception as e:
+            self.debug_message(f'Could not answer the task: {e}')
+
     async def _send_data(self, data: Dict[str, Any]) -> None:
         """
         Send data requests to task's data communication channel.
+
+        A task that reported its listener is connected on that signal; this
+        waits for that connection and never dials by itself. A task that did
+        not report (an older ``node.py``) is connected on first use.
 
         Args:
             data: Data processing request
@@ -1283,36 +1620,20 @@ class Task(DAPBase):
         if self._is_terminating:
             raise RuntimeError('Task is terminating, cannot process data requests')
 
-        # Thread-safe data channel access
+        if self._channel_signalled:
+            # Outside the lock: the dial the signal started runs under the lock
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(self._data_connected.wait(), CONST_CHANNEL_DATA_WAIT)
+
+        # No connection yet, or the signalled dial failed: dial here
         async with self._data_lock:
-            # Establish the data WebSocket connection on first use.
-            # There is a race condition: the C++ engine emits the ">SVC*1" readiness
-            # signal slightly before the child process's uvicorn server has finished
-            # binding to its port. This means the first connection attempt may hit a
-            # "Connection refused" error. We retry up to 10 times (150ms apart) to
-            # give uvicorn time to start accepting connections.
             if not self._data_client:
-                uri = f'ws://127.0.0.1:{self._data_port}/task/data'
-
-                @retry(
-                    stop=stop_after_attempt(10),
-                    wait=wait_fixed(0.15),
-                    reraise=True,
-                    before_sleep=lambda retry_state: self.debug_message(
-                        f'Data connection attempt {retry_state.attempt_number} failed, retrying in 0.15s: {retry_state.outcome.exception()}'
-                    ),
-                )
-                async def _connect_data_client():
-                    # Don't retry if subprocess has died
-                    if self._engine_process and self._engine_process.returncode is not None:
-                        raise RuntimeError(f'Subprocess exited with code {self._engine_process.returncode}')
-                    transport = TransportWebSocket(uri)
-                    name = f'DATA-{self.id}'
-                    client = Task.TaskData(parent_task=self, module=name, transport=transport)
-                    await client.connect()
-                    return client
-
-                self._data_client = await _connect_data_client()
+                # No token: the run never started or was torn down while we waited for the lock
+                if not self._data_token:
+                    raise RuntimeError('Task is not running, cannot open the data channel')
+                self._data_client = await self._dial()
+                self._data_connected.set()
+            client = self._data_client
 
         # Get the arguments
         args = data.get('arguments', {})
@@ -1335,7 +1656,7 @@ class Task(DAPBase):
         # the originating chat forever.  dap_request() builds a fresh envelope via
         # build_request() which allocates a unique seq from _data_client._next_seq()
         # so each outbound message has its own correlation slot.
-        response = await self._data_client.dap_request(
+        response = await client.dap_request(
             command=data['command'],
             arguments=args,
             token=args.get('token'),
@@ -1343,7 +1664,9 @@ class Task(DAPBase):
 
         # Propagate subprocess failures so callers don't silently
         # receive success for a failed operation.
-        if self._data_client.did_fail(response):
+        if client.did_fail(response):
+            if response.get('code') == OutOfCreditsError.code:
+                raise OutOfCreditsError(response.get('message'))
             raise RuntimeError(response.get('message', 'Data request failed'))
 
         return response
@@ -1390,7 +1713,7 @@ class Task(DAPBase):
         Handle task termination with comprehensive resource cleanup.
 
         Manages subprocess termination, resource cleanup, connection management,
-        and final status updates.
+        and final status updates. The run's channel token is dropped here.
 
         Idempotent: safe to call multiple times (only the first call performs
         cleanup; subsequent calls return immediately).
@@ -1444,14 +1767,27 @@ class Task(DAPBase):
             self.debug_message(f'Error cleaning up stdio: {e}')
 
         try:
+            if self._dial_task and not self._dial_task.done():
+                self._dial_task.cancel()
+                try:
+                    await self._dial_task
+                except BaseException:
+                    pass
+            self._dial_task = None
+        except Exception as e:
+            self.debug_message(f'Error cancelling the data channel dial: {e}')
+
+        try:
             if self._data_client:
                 try:
+                    self._data_client.cancel_handlers()
                     await self._data_client.disconnect()
                     self.debug_message('Data client cleaned up')
                 except Exception as e:
                     self.debug_message(f'Error cleaning up data client: {e}')
                 finally:
                     self._data_client = None
+                    self._data_connected.clear()
         except Exception as e:
             self.debug_message(f'Error cleaning up data client: {e}')
 
@@ -1488,6 +1824,9 @@ class Task(DAPBase):
                 self._data_port = None
         except Exception as e:
             self.debug_message(f'Error cleaning up data port: {e}')
+
+        # The token dies with the run; a restart mints a new one
+        self._data_token = None
 
         try:
             # Cancel status update task
@@ -2019,6 +2358,11 @@ class Task(DAPBase):
         event_type = message.get('event', '')
         body = message.get('body', {})
 
+        # Channel signals are for this Task alone: not forwarded, not activity
+        if event_type == 'apaevt_channel':
+            self._on_channel_signal(body.get('state'), body.get('id'))
+            return
+
         # Pipeline events count as dev-task activity; deploy uses ttl as a run window.
         if self._run_kind == 'dev' and event_type.startswith('apaevt_'):
             self.reset_idle_timer()
@@ -2027,6 +2371,10 @@ class Task(DAPBase):
         if event_type == 'apaevt_status_state':
             service_up = body.get('service', False)
             self._status.serviceUp = service_up
+
+            # A running pipeline is past its startup, whether or not the task said so
+            if service_up:
+                self._channel_startup_open = False
 
             # Gate billing accumulation on pipeline readiness so users
             # are not charged for startup time (model loading, deps, etc.)
@@ -2474,12 +2822,28 @@ class Task(DAPBase):
         5. Reset all status from the previous run
         6. Start task (full initialization)
         """
+        # Checked and set before the first await, so a concurrent restart is refused
+        # instead of starting with the other restart's values
+        if self._restart_in_progress:
+            raise RuntimeError('Failed to restart task: a restart is already in progress')
+        self._restart_in_progress = True
+
         try:
             self._server.debug_message(f'Task "{self.id}" restart initiated...')
 
             # Check if debugger is attached - fail if so
             if self.has_attached_debugger():
                 raise RuntimeError('Cannot restart task while debugger is attached. Please detach the debugger first.')
+
+            # Load the new run's values while the old process still runs and
+            # nothing has changed yet: a failed load leaves the task as it was
+            stops_before = self._stop_count
+            self._restart_env = await self._load_env(pipeline)
+
+            # A stop that arrived while the values loaded wins: nothing has
+            # changed yet, so the task stays stopped instead of starting again
+            if self._stop_count != stops_before:
+                raise RuntimeError('the task was stopped while the restart loaded its values')
 
             # Set the restart flag to inhibit termination/start events
             self._is_restarting = True
@@ -2522,15 +2886,19 @@ class Task(DAPBase):
             raise RuntimeError(f'Failed to restart task: {str(e)}')
 
         finally:
-            # Always reset this
+            # Always reset these
             self._is_restarting = False
+            self._restart_env = None
+            self._restart_in_progress = False
 
     async def start_task(self) -> None:
         """
         Launch subprocess and initialize communication interfaces.
 
         Performs complete startup sequence with environment detection,
-        resource allocation, and interface initialization.
+        resource allocation, and interface initialization. Every start mints
+        a new channel token for the child's ``/task/data``; the child gets
+        only its SHA-256.
 
         Raises:
             RuntimeError: If already started or critical startup failure
@@ -2559,13 +2927,14 @@ class Task(DAPBase):
             self._stop_requested = False
             self._stop_reason = None
             self._is_terminating = False
+            self._reset_channel_state()
 
             # Set our current state
             self._status.state = TASK_STATE.STARTING.value
 
             # Resolve ${...} placeholders into a local variable — never stored on self
             # so secrets are not retained in memory beyond the temp file write.
-            resolved = self._resolve_pipeline(self._pipeline)
+            resolved = await self._resolve_pipeline(self._pipeline)
 
             # Check it - throws on error
             self._check_pipeline(resolved)
@@ -2620,48 +2989,50 @@ class Task(DAPBase):
                 self._debug_subprocess = True
                 exec_path = sys.executable
 
-            # Configure data communication
+            # Configure data communication; a fresh channel token per start, and
+            # only its hash goes on argv — the token itself stays here
             self._data_port = self._server.assign_port()
+            self._data_token = secrets.token_urlsafe(32)
+            token_sha256 = hashlib.sha256(self._data_token.encode('utf-8')).hexdigest()
             child_args.extend(
                 [
                     f'--data_port={self._data_port}',
                     '--data_host=127.0.0.1',
+                    f'--data_token_sha256={token_sha256}',
                 ]
             )
-            # Tell the task it runs under a hosted engine (see CONST_HOSTED_CHILD_FLAG)
+            # Tell the task it runs under a hosted engine, and on its host (see CONST_HOSTED_CHILD_FLAG)
             if _is_saas_engine():
                 child_args.append(CONST_HOSTED_CHILD_FLAG)
+            if self._shares_host():
+                child_args.append(CONST_SHARED_HOST_CHILD_FLAG)
 
             # Pass model server address if configured
             modelserver = self._server._config.get('modelserver')
             if modelserver:
                 child_args.append(f'--modelserver={modelserver}')
 
-            user_args = self._launch_args.get('args', [])
-            for arg in user_args:
-                if ' ' in arg:
+            def _user_args():
+                """A pipeline's own arguments, a quoted string split as a shell would split it."""
+                for arg in self._launch_args.get('args', []):
                     try:
-                        child_args.extend(shlex.split(arg))
+                        yield from shlex.split(arg) if ' ' in arg else [arg]
                     except ValueError as e:
                         self.debug_message(f'Failed to parse engine arg {arg!r}: {e}, using as-is')
-                        child_args.append(arg)
-                else:
+                        yield arg
+
+            for arg in _user_args():
+                # Crash dumps are the operator's call, so a pipeline's own --dumps is skipped
+                if arg.split('=', 1)[0].lower() != '--dumps':
                     child_args.append(arg)
 
-            # Inherit parent engine's --trace setting if not explicitly provided
-            if not any(a.startswith('--trace=') for a in child_args):
-                for arg in startup_args():
-                    if arg.startswith('--trace='):
-                        child_args.append(arg)
-                        break
-
-            # Inherit parent engine's --node_path so workspace-local nodes load
-            # in the task subprocess too (Opt reads argv only, not the env).
-            if not any(a.startswith('--node_path=') for a in child_args):
-                for arg in startup_args():
-                    if arg.startswith('--node_path='):
-                        child_args.append(arg)
-                        break
+            # The engine's own options: --dumps always, trace and node path unless the caller set one
+            for arg in startup_args():
+                option = arg.split('=', 1)[0] + '='
+                if option == '--dumps=':
+                    child_args.append(arg)
+                elif option in ('--trace=', '--node_path=') and not any(a.startswith(option) for a in child_args):
+                    child_args.append(arg)
 
             await self._send_status_update()
 
@@ -2675,6 +3046,12 @@ class Task(DAPBase):
             # avoidMocks: strip ROCKETRIDE_MOCK so node.py loads real libraries
             if self._pipeline.get('avoidMocks'):
                 subprocess_env.pop('ROCKETRIDE_MOCK', None)
+
+            # A stop that arrived during the awaits above (loading the
+            # placeholder values, writing the task file) found no process to
+            # end: honour it here instead of starting one
+            if self._stop_requested:
+                raise RuntimeError('the task was stopped before it started')
 
             self._engine_process = await asyncio.create_subprocess_exec(
                 exec_path,
@@ -2833,6 +3210,11 @@ class Task(DAPBase):
             self.debug_message(f'Task started successfully with PID {self._engine_process.pid}')
 
         except Exception as e:
+            # A start that fails ends the run, restart or not. Left set, the
+            # flag makes _terminated report "Restarting" for a dead task and
+            # skip the end event and the run log's end. restart_task's
+            # finally clears it too.
+            self._is_restarting = False
             await self._terminated()
             self.debug_message(f'Task startup failed: {e}')
             raise
@@ -2854,6 +3236,7 @@ class Task(DAPBase):
 
                 # Mark as a requested stop and block new operations.
                 self._stop_requested = True
+                self._stop_count += 1
                 self._stop_reason = reason
                 self._is_terminating = True
 

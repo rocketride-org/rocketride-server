@@ -26,6 +26,9 @@ let packageJsonLoaded = false;
 
 const TODAY = new Date().toISOString().slice(0, 10).replace(/-/g, '.'); // yyyy.MM.dd
 
+/** How long a force-pushed tag's assets are reused before being re-fetched */
+const PRERELEASE_TTL_MS = 60 * 60 * 1000;
+
 async function loadPackageJson() {
 	if (!packageJsonLoaded) {
 		const packageJson = await readJson(path.join(PROJECT_ROOT, 'package.json'));
@@ -86,15 +89,19 @@ async function downloadGitHubFile(releaseTag, filename, task) {
 			return null;
 		}
 
-		// Download the new file or re-download the prerelease if it is out of date
-		if (!(await exists(filePath)) || (releaseTag.endsWith('-prerelease') && fileState?.date !== TODAY)) {
+		// Prerelease or experimental release 'server-vX.X.X-<suffix>'
+		const prerelease = /-v[\d.]+-.+$/.test(releaseTag);
+		const expired = Date.now() - (fileState?.timestamp ?? 0) >= PRERELEASE_TTL_MS;
+
+		// Download the new file or re-download a prerelease one if it is out of date
+		if (!(await exists(filePath)) || (prerelease && expired)) {
 			// Ensure downloads directory exists
 			await mkdir(DOWNLOADS_DIR);
 
 			// Download the file
 			await _download(fileUrl, filePath, task);
 
-			await setState(stateKey, { name: downloadName, date: TODAY });
+			await setState(stateKey, { name: downloadName, date: TODAY, timestamp: Date.now() });
 		}
 
 		return filePath;

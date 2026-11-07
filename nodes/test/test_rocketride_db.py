@@ -27,7 +27,8 @@
 
 Covers the shared connection seam (``ai.common.rocketride_db``), the OSS
 ``Account.resolve_db_dsn`` stub, the ``rocketride_sql`` connection override,
-and the ``rocketride_vector`` HNSW default-index logic. Real base classes are
+the ``rocketride_vector`` HNSW default-index logic, and the trash row counts
+of ``rocketride_vector`` and ``store_postgres``, which share their SQL. Real base classes are
 loaded from disk with ``rocketlib`` and heavy drivers stubbed, mirroring
 ``test_graph_neo4j.py``.
 """
@@ -39,6 +40,8 @@ import importlib.util
 import json
 import sys
 import types
+
+from ._store_base_stubs import store_base_stubs
 
 from pathlib import Path
 
@@ -55,12 +58,13 @@ _VEC_NODE_DIR = _REPO / 'nodes' / 'src' / 'nodes' / 'rocketride_vector'
 TEST_DSN = 'postgresql://rruser:rrpass@localhost:55432/rrtenant'
 
 
-def _load_from_path(name: str, path: Path, *, is_package: bool = False):
+def _load_from_path(name: str, path: Path, *, is_package: bool = False, register: bool = True):
     search = [str(path.parent)] if is_package else None
     spec = importlib.util.spec_from_file_location(name, path, submodule_search_locations=search)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
+    if register:
+        sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -661,9 +665,11 @@ class TestSqlEnginePoolSize:
 
 
 class _FakeCursor:
-    def __init__(self, executed, fetch_batches):
+    def __init__(self, executed, fetch_batches, rowcount=-1):
         self._executed = executed
         self._fetch_batches = fetch_batches
+        # What psycopg2 reports after a statement; -1 when it does not know.
+        self.rowcount = rowcount
 
     def execute(self, sql, params=None):
         self._executed.append(sql)
@@ -688,9 +694,11 @@ class _FakeClient:
         self.commits = 0
         # Queue of row batches returned by successive fetchall() calls.
         self.fetch_batches: list[list] = []
+        # The row count every cursor reports after its statement.
+        self.rowcount = -1
 
     def cursor(self):
-        return _FakeCursor(self.executed, self.fetch_batches)
+        return _FakeCursor(self.executed, self.fetch_batches, self.rowcount)
 
     def commit(self):
         self.commits += 1
@@ -743,6 +751,12 @@ def _vector_store_cls(monkeypatch):
             self.threshold_search = 0.5
 
     store_mod.DocumentStoreBase = _StubDocumentStoreBase
+    # rocketride_vector's IGlobal / IInstance sit on the store base since #2587;
+    # these tests drive the driver Store directly, so only the names matter.
+    bases = store_base_stubs()
+    store_mod.StoreGlobalBase = bases.StoreGlobalBase
+    store_mod.StoreInstanceBase = bases.StoreInstanceBase
+    store_mod.CONTROL_OBJECT_ID = bases.CONTROL_OBJECT_ID
     config = types.ModuleType('ai.common.config')
     config.Config = types.SimpleNamespace(getNodeConfig=lambda provider, connConfig: dict(connConfig))
     transform = types.ModuleType('ai.common.transform')
@@ -761,6 +775,11 @@ def _vector_store_cls(monkeypatch):
     # Deliver the org DSN the way the task engine does.
     monkeypatch.setenv('ROCKETRIDE_DB_DSNS', json.dumps({'org': TEST_DSN}))
 
+    search_module = _load_from_path(
+        'ai.common.store.pgvector_store', _AI_SRC / 'ai/common/store/pgvector_store.py', register=False
+    )
+    monkeypatch.setitem(sys.modules, 'ai.common.store.pgvector_store', search_module)
+
     iglobal = _load_from_path('nodes.rocketride_vector.IGlobal', _VEC_NODE_DIR / 'IGlobal.py')
     pkg = types.ModuleType('nodes.rocketride_vector')
     pkg.__path__ = [str(_VEC_NODE_DIR)]
@@ -776,6 +795,51 @@ def _make_store(cls, config):
 
 
 class TestRocketrideVectorStore:
+    @pytest.mark.parametrize('version, iterative', [('0.7.4', False), ('0.8.0', True), ('0.8.1', True)])
+    def test_search_detects_extension_capability_once_per_connection(self, monkeypatch, version, iterative):
+        cls, _ = _vector_store_cls(monkeypatch)
+        monkeypatch.setattr(sys.modules[cls.__module__], 'Doc', types.SimpleNamespace)
+        monkeypatch.setattr(_FakeCursor, 'description', [('content',), ('objectid',), ('distance',)], raising=False)
+        monkeypatch.setattr(
+            _FakeCursor,
+            'fetchone',
+            lambda cur: (version,) if cur._executed[-1].startswith('SELECT extversion') else (True,),
+        )
+        store = _make_store(cls, {'collection': 'rr_vec', 'similarity': 'cosine', 'score': 0.5})
+        monkeypatch.setattr(store, '_convertFilter', lambda doc_filter: ('WHERE isDeleted = %s', [False]))
+        for _ in range(2):
+            store.client.fetch_batches = [[('eligible', 'present', 0.05)]] * 2
+            docs = store.searchSemantic(types.SimpleNamespace(embedding=[1.0, 0.0]), types.SimpleNamespace(limit=5))
+            assert [doc.metadata['objectId'] for doc in docs] == ['present']
+        assert store._iterative_scan is iterative
+        statements = store.client.executed
+        assert sum(sql.startswith('SELECT extversion') for sql in statements) == 1
+        assert statements.count('SET LOCAL hnsw.iterative_scan = strict_order') == (2 if iterative else 0)
+        assert sum('distance + 0' in sql for sql in statements) == (0 if iterative else 2)
+
+    @pytest.mark.parametrize('iterative', [False, True])
+    @pytest.mark.parametrize('candidate_score', [0.1, 0.3])
+    def test_full_batch_of_weak_ann_candidates_does_not_hide_a_strong_match(
+        self, monkeypatch, candidate_score, iterative
+    ):
+        """Retry after the 0.20 floor or configured threshold removes ANN hits."""
+        cls, _ = _vector_store_cls(monkeypatch)
+        module = sys.modules[cls.__module__]
+        monkeypatch.setattr(module, 'Doc', types.SimpleNamespace)
+        monkeypatch.setattr(_FakeCursor, 'description', [('content',), ('objectid',), ('distance',)], raising=False)
+        store = _make_store(cls, {'collection': 'rr_vec', 'similarity': 'cosine', 'score': 0.5})
+        store._iterative_scan = iterative
+        monkeypatch.setattr(store, '_convertFilter', lambda doc_filter: ('WHERE isDeleted = %s', [False]))
+        store.client.fetch_batches = [
+            [('weak candidate', f'weak-{i}', 1 - candidate_score) for i in range(5)],
+            [('strong match', 'recovered', 0.05)],
+        ]
+
+        docs = store.searchSemantic(types.SimpleNamespace(embedding=[1.0, 0.0]), types.SimpleNamespace(limit=5))
+
+        assert [doc.metadata['objectId'] for doc in docs] == ['recovered']
+        assert abs(docs[0].score - 0.95) < 1e-9
+
     def test_store_connects_to_its_scopes_database(self, monkeypatch):
         cls, _ = _vector_store_cls(monkeypatch)
         user_dsn = 'postgresql://u_rw:pw@pooler:5432/t_user_u1'
@@ -800,7 +864,7 @@ class TestRocketrideVectorStore:
         glb.glb = types.SimpleNamespace(
             logicalType='rocketride_vector', connConfig={'collection': 'rr_vec', 'scope': 'team'}
         )
-        glb.validateConfig()
+        glb._probe_connection(glb.glb.connConfig)
         assert warnings == [] and connects == []
 
     def test_save_time_probe_still_checks_the_scope(self, monkeypatch):
@@ -813,7 +877,7 @@ class TestRocketrideVectorStore:
         glb.glb = types.SimpleNamespace(
             logicalType='rocketride_vector', connConfig={'collection': 'rr_vec', 'scope': 'org', 'target': 't-1'}
         )
-        glb.validateConfig()
+        glb._probe_connection(glb.glb.connConfig)
         assert len(warnings) == 1 and 'the org scope takes no target' in warnings[0]
 
     def test_connects_via_resolved_dsn(self, monkeypatch):
@@ -927,6 +991,39 @@ class TestRocketrideVectorStore:
 
 
 # ---------------------------------------------------------------------------
+# rocketride_vector and store_postgres: trash row counts
+# ---------------------------------------------------------------------------
+
+_PG_NODE_DIR = _REPO / 'nodes' / 'src' / 'nodes' / 'store_postgres'
+
+
+def _trash_store(monkeypatch, node):
+    """One of the two Postgres drivers on a fake client, with the stubs of _vector_store_cls."""
+    cls, _ = _vector_store_cls(monkeypatch)
+    if node == 'rocketride_vector':
+        return _make_store(cls, {'collection': 'rr_vec', 'similarity': 'cosine'})
+    pkg = types.ModuleType('nodes.store_postgres')
+    pkg.__path__ = [str(_PG_NODE_DIR)]
+    monkeypatch.setitem(sys.modules, 'nodes.store_postgres', pkg)
+    iglobal = _load_from_path('nodes.store_postgres.IGlobal', _PG_NODE_DIR / 'IGlobal.py')
+    monkeypatch.setitem(sys.modules, 'nodes.store_postgres.IGlobal', iglobal)
+    driver = _load_from_path('nodes.store_postgres.postgres', _PG_NODE_DIR / 'postgres.py')
+    return driver.Store('postgres', {'collection': 'pg_vec', 'host': 'localhost', 'similarity': 'cosine'}, {})
+
+
+@pytest.mark.parametrize('node', ['rocketride_vector', 'store_postgres'])
+@pytest.mark.parametrize('method', ['markDeleted', 'markActive'])
+@pytest.mark.parametrize('rowcount, matched', [(3, 3), (0, 0), (-1, None)])
+def test_trash_reports_the_row_count_and_none_when_it_is_unknown(monkeypatch, node, method, rowcount, matched):
+    """The UPDATE's row count is matched_chunks; psycopg2's -1 (not known) is None, never a claimed 0."""
+    store = _trash_store(monkeypatch, node)
+    store.client.rowcount = rowcount
+
+    assert getattr(store, method)(['a']) == matched
+    assert any(sql.startswith(f'UPDATE {store.collection} SET isDeleted') for sql in store.client.executed)
+
+
+# ---------------------------------------------------------------------------
 # rocketride_graph: scope-aware connection and the save-time probe
 # ---------------------------------------------------------------------------
 
@@ -976,6 +1073,8 @@ def _graph_iglobal(monkeypatch):
     for name in ('AgeTranslationError', 'FirewallConfig', 'TranslatedQuery'):
         setattr(age, name, type(name, (), {}))
     age.TranslateMode = types.SimpleNamespace(SAFE='safe')
+    age.CAPABILITY_TABLES = {'1.5.0': {}, '1.6.0': {}}
+    age.DEFAULT_AGE_VERSION = '1.5.0'
     for name in ('decode_agtype', 'decode_row', 'translate'):
         setattr(age, name, lambda *a, **kw: None)
     for name, mod in (

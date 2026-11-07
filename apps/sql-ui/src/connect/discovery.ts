@@ -31,8 +31,9 @@
 // file is the only place that changes.
 // =============================================================================
 
-import type { RocketRideClient } from 'shell';
-import type { ISqlEndpoint } from './types';
+import type { RocketRideClient } from 'rocketride';
+import { isDirectEndpointKey } from './resolver';
+import type { SqlEndpoint } from './types';
 
 // =============================================================================
 // PROVIDER SET
@@ -47,6 +48,7 @@ export const DATABASE_PROVIDERS: ReadonlySet<string> = new Set([
 	'db_mysql',
 	'db_postgres',
 	'db_clickhouse',
+	'rocketride_sql',
 ]);
 
 // =============================================================================
@@ -54,7 +56,7 @@ export const DATABASE_PROVIDERS: ReadonlySet<string> = new Set([
 // =============================================================================
 
 /** The subset of a pipeline component discovery needs. */
-interface IPipelineComponent {
+interface PipelineComponent {
 	/** Component id (tool call target). */
 	id?: string;
 	/** Component provider name. */
@@ -64,9 +66,9 @@ interface IPipelineComponent {
 }
 
 /** The subset of the pipeline dict discovery needs. */
-interface IPipelineDict {
+interface PipelineDict {
 	/** The pipeline's components. */
-	components?: IPipelineComponent[];
+	components?: PipelineComponent[];
 }
 
 // =============================================================================
@@ -82,14 +84,20 @@ interface IPipelineDict {
  * @param client - The shell's RocketRide client.
  * @returns Endpoints sorted by pipeline name, then node id.
  */
-export async function discoverSqlEndpoints(client: RocketRideClient): Promise<ISqlEndpoint[]> {
+export async function discoverSqlEndpoints(client: RocketRideClient): Promise<SqlEndpoint[]> {
 	// One page of 100 covers realistic task counts; discovery re-runs on demand.
 	const tasks = await client.listTasks({ page_size: 100 });
+	/** The task-row shape this discovery reads (loose adapter result). */
+	interface TaskRow { projectId: string; source: string; completed?: boolean; state: number; name?: string }
+	const rows = (tasks.rows ?? []) as TaskRow[];
 
 	// Deduplicate tasks by project+source: restarts can leave multiple task
 	// rows for the same pipeline; the token resolver returns the live one.
 	const seen = new Set<string>();
-	const candidates = tasks.rows.filter((task) => {
+	const candidates = rows.filter((task) => {
+		// Direct-mode temp pipelines (sqlconn-<id>) are not user pipelines —
+		// surfacing them would let a pipeline binding alias a direct endpoint.
+		if (isDirectEndpointKey(task.projectId)) return false;
 		// TASK_STATE >= 4 (STOPPING/COMPLETED/CANCELLED) is not attachable;
 		// `completed` alone misses the stopping window.
 		if (task.completed || task.state >= 4) return false;
@@ -100,13 +108,13 @@ export async function discoverSqlEndpoints(client: RocketRideClient): Promise<IS
 	});
 
 	// Resolve each candidate's pipeline and collect its database components.
-	const endpoints: ISqlEndpoint[] = [];
+	const endpoints: SqlEndpoint[] = [];
 	for (const task of candidates) {
 		try {
 			// The token names the running task; the pipeline is read through it.
 			const token = await client.getTaskToken({ projectId: task.projectId, source: task.source });
 			if (!token) continue;
-			const pipeline = (await client.getTaskPipeline(token)) as IPipelineDict | undefined;
+			const pipeline = (await client.getTaskPipeline(token)) as PipelineDict | undefined;
 			if (!pipeline?.components) continue;
 
 			// Every database-provider component in the pipeline is an endpoint.
@@ -118,7 +126,7 @@ export async function discoverSqlEndpoints(client: RocketRideClient): Promise<IS
 					// several tasks, each exposing a component with this id.
 					key: `${task.projectId}:${task.source}:${component.id}`,
 					projectId: task.projectId,
-					pipelineName: task.name,
+					pipelineName: task.name ?? task.source,
 					source: task.source,
 					nodeId: component.id,
 					nodeName: component.name ?? component.id,

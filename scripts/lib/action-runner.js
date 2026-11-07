@@ -371,6 +371,15 @@ function buildBracketTask(bracket, seen, logModule, options) {
 				throw e; // Still throw so this task shows as failed
 			}
 		},
+		// Listr calls this only when the task failed. Returning false keeps the
+		// list going, so teardown runs and then rethrows the stored error. The
+		// fallback covers a failure inside a subtask list, which the catch above
+		// never sees.
+		exitOnError: (ctx) => {
+			ctx._bracketErrors = ctx._bracketErrors || {};
+			ctx._bracketErrors[bracket.name] ??= new Error(`${bracket.name}: ${innerTask.title} failed`);
+			return false;
+		},
 	}));
 
 	const setupTask = {

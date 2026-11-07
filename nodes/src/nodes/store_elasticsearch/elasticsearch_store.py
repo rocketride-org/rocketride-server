@@ -37,7 +37,7 @@ from elasticsearch.helpers import bulk, scan, BulkIndexError
 
 from ai.common.schema import Doc, DocFilter, DocMetadata, QuestionText
 from ai.common.store import DocumentStoreBase
-from ai.common.config import Config
+from ai.common.config import Config, check_credential_resolved
 
 from .constants import (
     CONTENT_FIELD,
@@ -97,6 +97,8 @@ class Store(DocumentStoreBase):
         self.port = config.get('port', ELASTICSEARCH_DEFAULT_PORT)
 
         self.apikey = (config.get('apikey') or '').strip() or None
+        # An unfilled key names the missing variable instead of reaching the server.
+        check_credential_resolved(provider, 'apikey', self.apikey, connConfig)
         self.renderChunkSize = config.get('renderChunkSize', self.renderChunkSize)
         self.payload_limit = config.get('payloadLimit', self.payload_limit)
         self.threshold_search = config.get('score', 0.5)
@@ -488,6 +490,11 @@ class Store(DocumentStoreBase):
     def addChunks(self, chunks: List[Doc], checkCollection: bool = True) -> None:
         """
         Add document chunks to the document store.
+
+        Args:
+            chunks: The batch to write.
+            checkCollection: Create the collection if it is missing and check that the chunks match its
+                embedding model and vector size; createCollection passes False when it writes its control row.
         """
         # If no documents present, get out
         if not len(chunks):
@@ -497,19 +504,12 @@ class Store(DocumentStoreBase):
         if checkCollection and not self.createCollection(chunks):
             return
 
-        # Clear the object id list
-        objectIds: Dict[str, bool] = {}
-
-        # For each document
-        for chunk in chunks:
-            # If we are writing chunk 0, then delete the object
-            if not chunk.metadata.chunkId:
-                # Save this object id to be deleted
-                objectIds[chunk.metadata.objectId] = True
+        # The objects this batch starts over
+        objectIds = self.objectIdsToReplace(chunks)
 
         # Delete existing documents with matching objectIds
         if objectIds:
-            delete_query = {'query': {'terms': {'meta.objectId': list(objectIds.keys())}}}
+            delete_query = {'query': {'terms': {'meta.objectId': objectIds}}}
             self.client.delete_by_query(index=self.index, body=delete_query)
 
         # Prepare bulk operations

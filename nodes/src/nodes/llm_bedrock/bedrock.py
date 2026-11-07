@@ -28,7 +28,7 @@ Bedrock binding for the ChatLLM.
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any, Dict, Optional
 from ai.common.chat import ChatBase
-from ai.common.config import Config
+from ai.common.config import Config, check_credential_resolved
 from ai.common.llm_native_stream import PROMPT_CACHE_PREFIX_VAR, apply_prompt_cache_breakpoint
 from langchain_aws import ChatBedrock
 from packaging.version import InvalidVersion, Version
@@ -173,6 +173,10 @@ class Chat(ChatBase):
 
         # Get the AWS access Key, don't save it
         secretKey = config.get('secretKey')
+
+        # ChatBase checks apikey only: an AWS key left as ${ROCKETRIDE_...} would sign requests.
+        check_credential_resolved(provider, 'accessKey', accessKey, connConfig)
+        check_credential_resolved(provider, 'secretKey', secretKey, connConfig)
 
         # Get the AWS region, save it
         self.region = config.get('region')

@@ -69,6 +69,7 @@ import re
 
 from . import data_types
 from . import info
+from .exceptions import TooManyDocumentsToCountException
 
 # Re-export commonly used types
 from .data_types import DataAPIVector
@@ -366,12 +367,13 @@ class Collection:
 
         return {'matched_count': matched, 'modified_count': modified}
 
-    def count_documents(self, filter: Dict[str, Any] = None) -> int:
+    def count_documents(self, filter: Dict[str, Any], *, upper_bound: int) -> int:
         """
         Count documents matching the filter.
 
         Args:
-            filter: Optional filter conditions
+            filter: Filter conditions
+            upper_bound: Maximum count accepted by the caller
 
         Returns:
             Count of matching documents
@@ -381,7 +383,15 @@ class Collection:
         if filter:
             data = [doc for doc in data if _evaluate_filter(filter, doc)]
 
+        if len(data) > upper_bound:
+            raise TooManyDocumentsToCountException(
+                'Document count exceeds required upper bound', server_max_count_exceeded=False
+            )
         return len(data)
+
+    def estimated_document_count(self, **_: Any) -> int:
+        """Estimate the collection size; the mock knows it exactly."""
+        return len(self._get_data())
 
 
 # =============================================================================
