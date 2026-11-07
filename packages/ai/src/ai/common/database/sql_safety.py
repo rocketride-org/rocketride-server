@@ -335,6 +335,7 @@ def _decode_pg_identifier(name: str, escape: str = chr(92)) -> str:
 
     return pattern.sub(replace, name)
 
+
 def _skip_gap(sql: str, index: int) -> int:
     """Return the index after whitespace and comments, whose block form nests."""
     n = len(sql)
@@ -343,8 +344,10 @@ def _skip_gap(sql: str, index: int) -> int:
         if char.isspace():
             index += 1
         elif sql.startswith('--', index):
-            newline = sql.find(chr(10), index)
-            index = n if newline == -1 else newline + 1
+            # A line comment ends at either line terminator: a document that uses
+            # CR-only line endings would otherwise hide everything after it.
+            while index < n and sql[index] not in ('\r', '\n'):
+                index += 1
         elif sql.startswith('/*', index):
             depth = 1
             index += 2
@@ -416,6 +419,11 @@ def _quoted_session_call(sql: str) -> bool:
     index = 0
     while index < n:
         char = sql[index]
+        if sql.startswith('--', index) or sql.startswith('/*', index):
+            # A comment comes first: an apostrophe inside it opens nothing, and a
+            # quoted name after it is still a name.
+            index = _skip_gap(sql, index)
+            continue
         if char == "'":
             index = _skip_literal(sql, index)
             continue
@@ -434,11 +442,7 @@ def _quoted_session_call(sql: str) -> bool:
             escape = chr(92)
             if sql[cursor : cursor + 7].lower() == 'uescape':
                 literal = _skip_gap(sql, cursor + 7)
-                if (
-                    literal + 2 < n
-                    and sql[literal] == "'"
-                    and sql[literal + 2] == "'"
-                ):
+                if literal + 2 < n and sql[literal] == "'" and sql[literal + 2] == "'":
                     escape = sql[literal + 1]
                     cursor = _skip_gap(sql, literal + 3)
             if cursor < n and sql[cursor] == '(':
@@ -459,6 +463,7 @@ def _quoted_session_call(sql: str) -> bool:
             continue
         index += 1
     return False
+
 
 def is_sql_safe(sql: str) -> bool:
     """Return False unless the SQL is one statement shaped like a read: ``SELECT``, optionally behind ``EXPLAIN``.

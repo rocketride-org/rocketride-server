@@ -494,7 +494,7 @@ def test_a_uescape_clause_cannot_hide_the_function_name():
 
 def test_a_string_literal_that_spells_a_lock_call_still_passes():
     """The text of a string literal is not an identifier, so it is not a call."""
-    assert is_sql_safe('SELECT \'"pg_advisory_lock"(42)\'' ) is True
+    assert is_sql_safe('SELECT \'"pg_advisory_lock"(42)\'') is True
 
 
 @pytest.mark.parametrize(
@@ -512,3 +512,13 @@ def test_a_dollar_quoted_body_is_text_not_a_call(sql):
 def test_a_placeholder_is_still_a_placeholder():
     """Skipping dollar quotes must not swallow a positional placeholder."""
     assert is_sql_safe('SELECT * FROM t WHERE id = $1') is True
+
+
+def test_a_line_comment_ends_at_a_carriage_return_too():
+    """A CR-only line ending must not swallow the call that follows it."""
+    assert is_sql_safe('SELECT "pg_advisory_lock" --x\r(42)') is False
+
+
+def test_an_apostrophe_inside_a_comment_opens_nothing():
+    """The comment comes first: its quote is not the start of a literal."""
+    assert is_sql_safe('SELECT /* \' */ "pg_advisory_lock"(42)') is False
