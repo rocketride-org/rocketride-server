@@ -14,7 +14,8 @@
  */
 
 import React, { useEffect, useState, useCallback, useMemo, useRef, type CSSProperties } from 'react';
-import { loadStripe } from '@stripe/stripe-js';
+// pure: Stripe.js loads when checkout first calls loadStripe(), not on import, so other pages set no Stripe cookies.
+import { loadStripe } from '@stripe/stripe-js/pure';
 import type { PaymentWalletsOption } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
 import { commonStyles } from '../../themes/styles';
