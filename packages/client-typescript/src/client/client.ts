@@ -2929,11 +2929,14 @@ export class RocketRideClient extends DAPClient {
 	 * every app id it owns. Readable on both editions (OSS answers the
 	 * fixed namespace its sessions carry; there is no Stripe Connect there).
 	 *
+	 * @param options - Optional request settings.
+	 * @param options.timeout - Per-request timeout in ms; on expiry the request
+	 *   rejects and is dropped from the pending table, so a late reply is ignored.
 	 * @returns `{developerId, stripeAccountId, stripeAccountStatus}`;
 	 *   `developerId` is null until an org admin registers one
 	 */
-	async developerStatus(): Promise<{ developerId: string | null; stripeAccountId: string | null; stripeAccountStatus: string }> {
-		return (await this.call('rrext_deploy_app', { subcommand: 'developer_status' })) as any;
+	async developerStatus(options?: { timeout?: number }): Promise<{ developerId: string | null; stripeAccountId: string | null; stripeAccountStatus: string }> {
+		return (await this.call('rrext_deploy_app', { subcommand: 'developer_status' }, options)) as any;
 	}
 
 	/**
@@ -2942,10 +2945,14 @@ export class RocketRideClient extends DAPClient {
 	 * publish beyond the workspace.
 	 *
 	 * @param developerId - The slug to claim (lowercase letters/underscores)
+	 * @param options - Optional request settings.
+	 * @param options.timeout - Per-request timeout in ms; on expiry the request
+	 *   rejects and is dropped from the pending table (the claim may still land
+	 *   on the server, so callers should re-check developerStatus()).
 	 * @returns The server's registration record
 	 */
-	async registerDeveloper(developerId: string): Promise<Record<string, unknown>> {
-		return (await this.call('rrext_deploy_app', { subcommand: 'developer_register', developerId })) as any;
+	async registerDeveloper(developerId: string, options?: { timeout?: number }): Promise<Record<string, unknown>> {
+		return (await this.call('rrext_deploy_app', { subcommand: 'developer_register', developerId }, options)) as any;
 	}
 
 	// (appEntry is RETIRED: versions serve from stable constructed URLs —

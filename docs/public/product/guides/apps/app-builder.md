@@ -26,8 +26,8 @@ the same loop runs from a terminal or CI.
   workspace root.
 - A developer id for your organization. Every app id is
   `<developerId>.<name>`. Your organization claims its developer id once,
-  on the Deploy tab (lowercase letters and underscores, starting with a
-  letter), and can then deploy
+  in the New App wizard or on the Deploy tab (lowercase letters and
+  underscores, starting with a letter), and can then deploy
   only apps inside that namespace. Until the prefix of your app's id
   matches, the Deploy tab is read-only with a banner; the fix is to rename
   the id in `package.json`. Design and Package always work.
@@ -46,8 +46,10 @@ Start from the Dashboard tab, or run **RocketRide: New App** from the
 command palette. The wizard asks for a name and a template (Blank or
 Dashboard) and scaffolds the app under `apps/<slug>-ui`. Always create apps
 this way; a hand-made folder fails later with symptoms far from the cause.
-The scaffold starts the id at `local.<slug>` until your organization has a
-developer id; renaming the id later makes it a different app.
+If your organization has no developer id yet, the wizard's Developer ID
+field lets you claim one before you create the app. Skip it and the
+scaffold starts the id at `local.<slug>`; renaming the id later makes it a
+different app.
 
 The `<name>.rrapp` file it creates is empty on purpose. Opening it opens
 the App Builder; the app's identity lives in `package.json`.
