@@ -789,10 +789,10 @@ export const Settings: React.FC = () => {
 	}, [needClient]);
 
 	const handleCreateCheckout = useCallback(
-		(priceId: string): Promise<{ clientSecret: string; subscriptionId: string }> => {
+		(priceId: string, promotionCode?: string, attemptId?: string): Promise<{ clientSecret: string; subscriptionId: string }> => {
 			const orgId = cm.getAccountInfo()?.organization?.id;
 			if (!orgId) return Promise.reject(new Error('No organisation found'));
-			return needClient().billing.createCheckoutSession(orgId, PIPE_BUILDER_APP_ID, priceId) as Promise<{ clientSecret: string; subscriptionId: string }>;
+			return needClient().billing.createCheckoutSession(orgId, PIPE_BUILDER_APP_ID, priceId, promotionCode, attemptId) as Promise<{ clientSecret: string; subscriptionId: string }>;
 		},
 		[cm, needClient]
 	);

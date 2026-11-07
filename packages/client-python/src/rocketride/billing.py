@@ -111,6 +111,8 @@ class BillingApi:
         app_id: str,
         price_id: str,
         promotion_code: str | None = None,
+        *,
+        attempt_id: str | None = None,
     ) -> dict:
         """
         Create a Stripe subscription and return the Stripe Elements client_secret.
@@ -127,6 +129,7 @@ class BillingApi:
             app_id: App being subscribed (e.g. "brandi").
             price_id: Stripe price_* identifier for the plan.
             promotion_code: Optional promo code to apply (validated server-side).
+            attempt_id: Optional checkout identifier. Reuse it for retries of this checkout.
 
         Returns:
             Dict with ``clientSecret`` (or None), ``subscriptionId``, and ``status``.
@@ -139,6 +142,8 @@ class BillingApi:
         }
         if promotion_code:
             kwargs['promotionCode'] = promotion_code
+        if attempt_id is not None:
+            kwargs['attemptId'] = attempt_id
         return await self._client.call('rrext_account_billing', **kwargs)
 
     async def validate_promo_code(
@@ -171,7 +176,7 @@ class BillingApi:
             kwargs['priceId'] = price_id
         return await self._client.call('rrext_account_billing', **kwargs)
 
-    async def redeem_promo_code(self, org_id: str, code: str) -> PromoRedemption:
+    async def redeem_promo_code(self, org_id: str, code: str, *, attempt_id: str | None = None) -> PromoRedemption:
         """
         Redeem a credit-grant (hackathon) code for the caller's org.
 
@@ -187,16 +192,15 @@ class BillingApi:
         Args:
             org_id: Organisation UUID (context only — server uses the caller's org).
             code: Customer-facing code string (case-insensitive).
+            attempt_id: Optional redemption identifier. Reuse it for retries of this redemption.
 
         Returns:
             Redemption result with mode and granted credits.
         """
-        return await self._client.call(
-            'rrext_account_billing',
-            subcommand='promo_redeem',
-            orgId=org_id,
-            code=code,
-        )
+        kwargs: dict = {'subcommand': 'promo_redeem', 'orgId': org_id, 'code': code}
+        if attempt_id is not None:
+            kwargs['attemptId'] = attempt_id
+        return await self._client.call('rrext_account_billing', **kwargs)
 
     async def create_portal_session(self, org_id: str, return_url: str) -> dict:
         """

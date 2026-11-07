@@ -328,6 +328,11 @@ function formatCredits(credits: Record<string, number>): string {
 		.join(', ');
 }
 
+/** Generate an opaque 128-bit ID in browsers and embedded webviews. */
+function billingAttemptId(): string {
+	return Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
 // =============================================================================
 // PAYMENT FORM (inner — needs Stripe context from <Elements>)
 // =============================================================================
@@ -352,13 +357,14 @@ const PaymentForm: React.FC<PaymentFormProps> = ({ plan, subscriptionId, promo, 
 	const stripe = useStripe();
 	const elements = useElements();
 	const [submitting, setSubmitting] = useState(false);
+	const paymentInFlight = useRef(false);
 
 	/** Confirms the Stripe payment, then notifies the server. */
 	const handleSubmit = useCallback(
 		async (e: React.FormEvent) => {
 			e.preventDefault();
-			if (!stripe || !elements) return;
-
+			if (!stripe || !elements || paymentInFlight.current) return;
+			paymentInFlight.current = true;
 			setSubmitting(true);
 			try {
 				// Step 1: Confirm the Stripe payment
@@ -385,6 +391,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({ plan, subscriptionId, promo, 
 			} catch (err: any) {
 				onError(err.message ?? 'An unexpected error occurred.');
 			} finally {
+				paymentInFlight.current = false;
 				setSubmitting(false);
 			}
 		},
@@ -402,7 +409,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({ plan, subscriptionId, promo, 
 
 	return (
 		<>
-			<button style={S.backBtn} onClick={onBack}>&#8592; Change plan</button>
+			<button style={S.backBtn} onClick={onBack} disabled={submitting}>&#8592; Change plan</button>
 
 			{/* Plan recap bar (struck-through list price when discounted) */}
 			<div style={S.planRecap}>
@@ -476,6 +483,20 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 	const [subscriptionId, setSubscriptionId] = useState<string>('');
 	const [loadingSecret, setLoadingSecret] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const checkoutAttempt = useRef<{ priceId: string; promotionCode?: string; id: string } | null>(null);
+	const promoAttempt = useRef<{ input: string; displayCode: string; id: string } | null>(null);
+	const checkoutInFlight = useRef(false);
+	const promoInFlight = useRef(false);
+
+	// A checkout can finish after its modal was closed or replaced.
+	const mounted = useRef(false);
+	useEffect(() => {
+		mounted.current = true;
+		return () => { mounted.current = false; };
+	}, []);
+	const finishCheckout = useCallback(() => {
+		if (mounted.current) onSuccess();
+	}, [onSuccess]);
 
 	// ── Promo code state ─────────────────────────────────────────────────
 	const promoEnabled = Boolean(onValidatePromoCode);
@@ -511,14 +532,23 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
 	/** Creates a Stripe subscription and advances to payment. */
 	const handleContinue = useCallback(async () => {
-		// promoBusy guard: never start checkout while a just-entered code is
+		// Never start checkout while a just-entered code is
 		// still validating/redeeming — it would silently drop the promo.
-		if (!selectedPlan || selectedPlan.metadata?.action || promoBusy) return;
+		if (!selectedPlan || selectedPlan.metadata?.action || promoInFlight.current || checkoutInFlight.current) return;
 
+		checkoutInFlight.current = true;
 		setLoadingSecret(true);
 		setError(null);
 		try {
-			const res = await onCreateCheckout(selectedPlan.stripePriceId, appliedPromo?.code);
+			const priceId = selectedPlan.stripePriceId;
+			const promotionCode = appliedPromo?.code;
+			let attempt = checkoutAttempt.current;
+			if (!attempt || attempt.priceId !== priceId || attempt.promotionCode !== promotionCode) {
+				attempt = { priceId, promotionCode, id: billingAttemptId() };
+				checkoutAttempt.current = attempt;
+			}
+			const res = await onCreateCheckout(priceId, promotionCode, attempt.id);
+			if (!mounted.current) return;
 			if (res.clientSecret === null) {
 				// $0 first invoice (100%-off code) — the subscription is already
 				// active; never mount Elements. Best-effort pending write, then done.
@@ -527,7 +557,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 				} catch {
 					// Non-fatal — the webhook will still update the DB
 				}
-				onSuccess();
+				finishCheckout();
 				return;
 			}
 			setClientSecret(res.clientSecret);
@@ -535,9 +565,10 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 		} catch (err: any) {
 			setError(err.message ?? 'Failed to start checkout. Please try again.');
 		} finally {
+			checkoutInFlight.current = false;
 			setLoadingSecret(false);
 		}
-	}, [selectedPlan, appliedPromo, promoBusy, onCreateCheckout, onConfirmPending, onSuccess]);
+	}, [selectedPlan, appliedPromo, onCreateCheckout, onConfirmPending, finishCheckout]);
 
 	/** Resets back to the plan picker. */
 	const handleBack = useCallback(() => {
@@ -551,36 +582,45 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 	 * applied and flow into checkout via handleContinue.
 	 */
 	const handleApplyPromo = useCallback(async () => {
-		if (!onValidatePromoCode) return;
+		if (!onValidatePromoCode || promoInFlight.current || checkoutInFlight.current) return;
 		const code = promoInput.trim();
 		if (!code) return;
 
+		promoInFlight.current = true;
 		setPromoBusy(true);
 		setPromoError(null);
 		try {
-			const validation = await onValidatePromoCode(code, selectedPlan?.stripePriceId);
-			if (!validation.valid) {
-				setPromoError(validation.reason ?? 'This code is not valid or has expired.');
-				return;
+			let attempt = promoAttempt.current;
+			if (!attempt || attempt.input.toUpperCase() !== code.toUpperCase()) {
+				promoAttempt.current = null;
+				const validation = await onValidatePromoCode(code, selectedPlan?.stripePriceId);
+				if (!mounted.current) return;
+				if (!validation.valid) {
+					setPromoError(validation.reason ?? 'This code is not valid or has expired.');
+					return;
+				}
+				const displayCode = validation.code ?? code.toUpperCase();
+				if (!validation.appId || !onRedeemPromoCode) {
+					setAppliedPromo({ ...validation, code: displayCode });
+					return;
+				}
+				attempt = { input: code, displayCode, id: billingAttemptId() };
+				promoAttempt.current = attempt;
 			}
-			if (validation.appId && onRedeemPromoCode) {
-				// Grant/hackathon code (identified by its target app) — redeem
-				// right away, skip plan + payment. Credits are optional: a
-				// 0-token code just activates the plan.
-				const redemption = await onRedeemPromoCode(code);
+			// A lost redemption response can leave the code already used. Retry
+			// the validated attempt directly so the server can return its result.
+			if (onRedeemPromoCode) {
+				const redemption = await onRedeemPromoCode(attempt.input, attempt.id);
 				setGrantResult({
-					code: validation.code ?? code.toUpperCase(),
+					code: attempt.displayCode,
 					credits: redemption.credits ?? {},
 					mode: redemption.mode,
 				});
-				return;
 			}
-			// Preserve the entered code if validation omits the canonical one —
-			// handleContinue sends appliedPromo.code to the server.
-			setAppliedPromo({ ...validation, code: validation.code ?? code.toUpperCase() });
 		} catch (err: any) {
 			setPromoError(err?.message ?? 'Could not apply this code. Please try again.');
 		} finally {
+			promoInFlight.current = false;
 			setPromoBusy(false);
 		}
 	}, [promoInput, selectedPlan, onValidatePromoCode, onRedeemPromoCode]);
@@ -682,7 +722,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 								subscriptionId={subscriptionId}
 								promo={appliedPromo}
 								onConfirmPending={onConfirmPending}
-								onSuccess={onSuccess}
+								onSuccess={finishCheckout}
 								onError={setError}
 								onBack={handleBack}
 							/>

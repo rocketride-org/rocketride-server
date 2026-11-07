@@ -19,7 +19,7 @@ import { settingsStyles as S } from '../../settings/SettingsWebview';
 import { useTheme } from '../../hooks/useTheme';
 import { useStripeKey } from '../../hooks/useStripeKey';
 import { CheckoutUnavailableNotice } from '../CheckoutUnavailableNotice';
-import { Banner, CheckoutModal } from 'shell';
+import { Banner, CheckoutModal, ConnectionManager } from 'shell';
 import type { CheckoutPlan } from 'shell';
 
 // =============================================================================
@@ -78,7 +78,7 @@ export interface CloudPanelProps {
 	isSubscribed?: boolean;
 	/** Checkout callbacks -- when provided, CloudPanel renders the CheckoutModal itself. */
 	onFetchPlans?: () => Promise<CheckoutPlan[]>;
-	onCreateCheckout?: (priceId: string) => Promise<{ clientSecret: string; subscriptionId: string }>;
+	onCreateCheckout?: (priceId: string, promotionCode?: string, attemptId?: string) => Promise<{ clientSecret: string; subscriptionId: string }>;
 	onConfirmPending?: (subscriptionId: string, priceId: string) => Promise<void>;
 	onCheckoutSuccess?: () => void;
 }
@@ -100,16 +100,26 @@ const serverIdentity = (url: string): string => {
 
 export const CloudPanel: React.FC<CloudPanelProps> = ({ cloudSignedIn, cloudUserName, cloudSignedInUrl, waitlisted, waitlistedName, onCloudSignIn, onCloudSignOut, pending, onUndoPending, idPrefix, simplified, useCustomServer, customUrl, defaultCloudUrl, onUseCustomServerChange, onCustomUrlChange, isSaas, probeUnreachable, onProbeServer, isSubscribed, onFetchPlans, onCreateCheckout, onConfirmPending, onCheckoutSuccess }) => {
 	const theme = useTheme();
-	const [showCheckout, setShowCheckout] = useState(false);
+	const cm = ConnectionManager.getInstance();
+	const [checkoutOrgId, setCheckoutOrgId] = useState<string | null>(null);
+	const showCheckout = checkoutOrgId !== null;
+	useEffect(() => {
+		if (!onFetchPlans) return;
+		return cm.on('shell:accountUpdate', () => {
+			const orgId = cm.getAccountInfo()?.organization?.id ?? '';
+			setCheckoutOrgId((openOrg) => openOrg === orgId ? openOrg : null);
+		});
+	}, [cm, onFetchPlans]);
 
 	// Server-supplied Stripe publishable key — only fetched when this panel
 	// can actually render a checkout (simplified/Welcome panels never do).
 	const { key: stripeKey, reason: stripeKeyReason } = useStripeKey(Boolean(onFetchPlans));
 
 	const handleCheckoutSuccess = useCallback(() => {
-		setShowCheckout(false);
+		if (cm.getAccountInfo()?.organization?.id !== checkoutOrgId) return;
+		setCheckoutOrgId(null);
 		onCheckoutSuccess?.();
-	}, [onCheckoutSuccess]);
+	}, [cm, checkoutOrgId, onCheckoutSuccess]);
 
 	// The effective target: the user's custom server when opted in, else the
 	// default cloud from the host. Nothing is baked into this bundle.
@@ -292,7 +302,7 @@ export const CloudPanel: React.FC<CloudPanelProps> = ({ cloudSignedIn, cloudUser
 					</div>
 					<button
 						type="button"
-						onClick={() => setShowCheckout(true)}
+						onClick={() => setCheckoutOrgId(cm.getAccountInfo()?.organization?.id ?? '')}
 						style={{ whiteSpace: 'nowrap', padding: '10px 24px', fontWeight: 600, flexShrink: 0 }}
 					>
 						Subscribe to Pipe Builder
@@ -303,17 +313,26 @@ export const CloudPanel: React.FC<CloudPanelProps> = ({ cloudSignedIn, cloudUser
 			{/* Checkout modal overlay */}
 			{showCheckout && stripeKey && onFetchPlans && onCreateCheckout && onConfirmPending && (
 				<CheckoutModal
+					key={checkoutOrgId}
 					appName="Pipe Builder"
 					appDescription="Visual AI pipeline editor: run and deploy pipelines on RocketRide Cloud."
 					stripePublishableKey={stripeKey}
 					onFetchPlans={onFetchPlans}
-					onCreateCheckout={onCreateCheckout}
-					onConfirmPending={onConfirmPending}
+					onCreateCheckout={(...args) => {
+						if (cm.getAccountInfo()?.organization?.id !== checkoutOrgId) {
+							return Promise.reject(new Error('The active organization changed. Reopen checkout.'));
+						}
+						return onCreateCheckout(...args);
+					}}
+					onConfirmPending={async (...args) => {
+						if (cm.getAccountInfo()?.organization?.id !== checkoutOrgId) return;
+						await onConfirmPending(...args);
+					}}
 					onSuccess={handleCheckoutSuccess}
-					onClose={() => setShowCheckout(false)}
+					onClose={() => setCheckoutOrgId(null)}
 				/>
 			)}
-			{showCheckout && !stripeKey && <CheckoutUnavailableNotice reason={stripeKeyReason} onClose={() => setShowCheckout(false)} />}
+			{showCheckout && !stripeKey && <CheckoutUnavailableNotice reason={stripeKeyReason} onClose={() => setCheckoutOrgId(null)} />}
 
 		</>
 	);

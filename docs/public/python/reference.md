@@ -293,6 +293,8 @@ Further public methods, present in both SDKs, in brief:
 | Profiling | `cprofile_start`, `cprofile_stop`, `cprofile_status`, `cprofile_report`, `cprofile_report_tree`, `cprofile_threads` |
 | Namespaces | `client.account`, `client.billing` (account and billing APIs) |
 
+`client.billing.create_checkout_session` and `client.billing.redeem_promo_code` accept an optional `attempt_id`. Generate a unique ID for each checkout or redemption and reuse it with the same parameters if you retry. Retry handling depends on the connected server version.
+
 ## Advanced: low-level DAP
 
 For commands not covered by the typed surface.

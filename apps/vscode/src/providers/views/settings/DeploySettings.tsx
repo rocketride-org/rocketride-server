@@ -58,7 +58,7 @@ interface DeploySettingsProps {
 	isSubscribed?: boolean;
 	/** Checkout callbacks for CloudPanel. */
 	onFetchPlans?: () => Promise<any[]>;
-	onCreateCheckout?: (priceId: string) => Promise<{ clientSecret: string; subscriptionId: string }>;
+	onCreateCheckout?: (priceId: string, promotionCode?: string, attemptId?: string) => Promise<{ clientSecret: string; subscriptionId: string }>;
 	onConfirmPending?: (subscriptionId: string, priceId: string) => Promise<void>;
 	onCheckoutSuccess?: () => void;
 	// -- Docker panel props --
