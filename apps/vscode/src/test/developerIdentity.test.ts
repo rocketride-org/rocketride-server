@@ -24,7 +24,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { DeveloperIdentity, LOOKUP_FAILED_MESSAGE, STATUS_TIMEOUT_MS, makeRegisterDeveloperHandler } from '../appdev/developerIdentity';
+import { DeveloperIdentity, LOOKUP_FAILED_MESSAGE, STATUS_TIMEOUT_MS, makeRegisterDeveloperHandler, toWizardIdentity } from '../appdev/developerIdentity';
 import type { IDeveloperClient, IDeveloperConnection } from '../appdev/developerIdentity';
 import type { NewAppIdentity } from 'shared/tools/appdev/types';
 
@@ -68,13 +68,12 @@ function fake(opts: IFake): { connection: IDeveloperConnection; calls: string[];
 	const client: IDeveloperClient = {
 		getAccountInfo: () => ({ organization: opts.loginId ? { developerId: opts.loginId } : {} }),
 		getOrgId: () => orgId,
-		call: async <T>(command: string, args?: Record<string, unknown>, options?: { timeout?: number }): Promise<T> => {
-			assert.equal(command, 'rrext_deploy_app');
-			assert.equal(args?.subcommand, 'developer_status');
+		developerStatus: async (options?: { timeout?: number }) => {
 			calls.push('status');
 			timeouts.push(options?.timeout);
-			return (await statusReply(opts.status, options?.timeout)) as T;
+			return statusReply(opts.status, options?.timeout);
 		},
+
 		registerDeveloper: async (id) => {
 			calls.push(`register:${id}`);
 			opts.duringRegister?.(setOrg);
@@ -151,9 +150,11 @@ test('resolve: status returns null, so the wizard may register', async () => {
 });
 
 test('resolve: status throws, so local is shown and the form is hidden', async () => {
-	const { connection } = fake({ status: new Error('timeout') });
-	const r = await new DeveloperIdentity(connection).resolve();
+	const why = new Error('timeout');
+	const { connection } = fake({ status: why });
+	const { lookupError, ...r } = await new DeveloperIdentity(connection).resolve();
 	assert.deepEqual(r, { developerId: 'local', source: 'default', canRegisterDeveloper: false, lookupFailed: true });
+	assert.equal(lookupError, why);
 });
 
 test('resolve: disconnected falls back to local without a lookup', async () => {
@@ -190,8 +191,9 @@ test('resolve: the status lookup passes its time limit to the client', async () 
 test('resolve: status hangs, so the lookup times out', async () => {
 	const { connection } = fake({ status: new Promise<string | null>(() => {}) });
 	const started = Date.now();
-	const r = await new DeveloperIdentity(connection, 20).resolve();
+	const { lookupError, ...r } = await new DeveloperIdentity(connection, 20).resolve();
 	assert.deepEqual(r, { developerId: 'local', source: 'default', canRegisterDeveloper: false, lookupFailed: true });
+	assert.match(String(lookupError), /timed out/);
 	assert.ok(Date.now() - started < 1000);
 });
 
@@ -249,4 +251,63 @@ test('register: a server refusal rejects with its message and broadcasts nothing
 	const run = makeRegisterDeveloperHandler({ identity, buildIdentity: async () => ({}) as NewAppIdentity, broadcast: (op) => broadcasts.push(op) });
 	await assert.rejects(run({ developerId: 'acme' }), { message: 'slug taken' });
 	assert.deepEqual(broadcasts, []);
+});
+
+// ── P6 / P7: what the form shows is what Create does; failures stay diagnosable ─
+
+/** Every lookup outcome, each with a fresh identity in that state. */
+async function outcomes(): Promise<[string, DeveloperIdentity][]> {
+	const claimed = new DeveloperIdentity(fake({ status: null, registerReturns: 'acme_labs' }).connection);
+	await claimed.register('acme_labs');
+	return [
+		['login id', new DeveloperIdentity(fake({ loginId: 'acme' }).connection)],
+		['session claim', claimed],
+		['status id', new DeveloperIdentity(fake({ status: 'acme' }).connection)],
+		['no id', new DeveloperIdentity(fake({ status: null }).connection)],
+		['disconnected', new DeveloperIdentity(fake({ connected: false }).connection)],
+		['lookup failed', new DeveloperIdentity(fake({ status: new Error('500') }).connection)],
+	];
+}
+
+test('shown = done: every lookup outcome', async () => {
+	const workspace = { workspaceOpen: true, existingFolders: [] };
+	for (const [name, identity] of await outcomes()) {
+		const shown = toWizardIdentity(await identity.resolve(), workspace);
+		const created = identity.resolveForScaffold().then(
+			(id) => ({ id }),
+			(err: Error) => ({ error: err.message })
+		);
+		if (shown.lookupFailed) {
+			assert.deepEqual(await created, { error: LOOKUP_FAILED_MESSAGE }, `${name}: a failed lookup is shown, and Create refuses`);
+		} else {
+			assert.deepEqual(await created, { id: shown.developerId }, `${name}: Create uses the id the form shows`);
+		}
+	}
+});
+
+test('shown = done: the wizard identity says when the lookup failed', async () => {
+	const failed = await new DeveloperIdentity(fake({ status: new Error('500') }).connection).resolve();
+	const ok = await new DeveloperIdentity(fake({ status: 'acme' }).connection).resolve();
+	assert.equal(toWizardIdentity(failed, { workspaceOpen: true, existingFolders: [] }).lookupFailed, true);
+	assert.equal(toWizardIdentity(ok, { workspaceOpen: true, existingFolders: [] }).lookupFailed, false);
+});
+
+test('scaffold: the lookup error is kept as the cause', async () => {
+	const why = new Error('401 unauthorized');
+	const scaffold = new DeveloperIdentity(fake({ status: why }).connection).resolveForScaffold();
+	await assert.rejects(scaffold, (err: Error) => {
+		assert.equal(err.message, LOOKUP_FAILED_MESSAGE);
+		assert.equal(err.cause, why);
+		return true;
+	});
+});
+
+test('resolve: a failed lookup is logged', async () => {
+	const lines: string[] = [];
+	const identity = new DeveloperIdentity(fake({ status: new Error('500 internal error') }).connection, STATUS_TIMEOUT_MS, (line) => {
+		lines.push(line);
+	});
+	await identity.resolve();
+	assert.equal(lines.length, 1);
+	assert.match(lines[0], /500 internal error/);
 });

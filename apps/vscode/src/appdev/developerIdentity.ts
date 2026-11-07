@@ -14,10 +14,12 @@
 // back to 'local'. A FAILED lookup is different: the id is unknown, not
 // absent, so scaffolding refuses instead of silently creating local.<name>.
 // The lookup is time-limited (STATUS_TIMEOUT_MS, far under the bus's 120 s
-// request timeout) through the client's own per-request timeout, like
-// connect/attach: a silent server counts as a failed lookup, the client drops
-// the pending request, and a reply after the limit cannot let a scaffold
-// go through.
+// request timeout) through the SDK's developerStatus({ timeout }): a silent
+// server counts as a failed lookup, the client drops the pending request, and
+// a reply after the limit cannot let a scaffold go through. A failed lookup
+// keeps its error (logged, and the cause of the scaffold error) and is shown
+// in the wizard up front: toWizardIdentity() feeds the form from the same
+// resolution resolveForScaffold() acts on, so what it shows is what Create does.
 // =============================================================================
 
 import type { NewAppIdentity } from 'shared/tools/appdev/types';
@@ -29,7 +31,7 @@ export const DEFAULT_DEVELOPER_ID = 'local';
 export interface IDeveloperClient {
 	getAccountInfo(): unknown;
 	getOrgId(): string | undefined;
-	call<T>(command: string, args?: Record<string, unknown>, options?: { timeout?: number }): Promise<T>;
+	developerStatus(options?: { timeout?: number }): Promise<{ developerId: string | null } | undefined>;
 	registerDeveloper(developerId: string): Promise<unknown>;
 }
 
@@ -47,6 +49,8 @@ export interface IResolvedDeveloperId {
 	canRegisterDeveloper: boolean;
 	/** The live developer_status lookup failed: the id is unknown, not absent. */
 	lookupFailed: boolean;
+	/** Why the lookup failed (timeout, auth, server error), when it did. */
+	lookupError?: unknown;
 }
 
 /** Longest wait for the developer_status lookup before it counts as failed. */
@@ -65,10 +69,12 @@ export class DeveloperIdentity {
 	/**
 	 * @param connection - The extension's connection manager.
 	 * @param statusTimeoutMs - Limit for the live lookup (tests pass a small one).
+	 * @param log - Receives a line when the lookup fails (the host passes its logger).
 	 */
 	constructor(
 		private readonly connection: IDeveloperConnection,
-		private readonly statusTimeoutMs: number = STATUS_TIMEOUT_MS
+		private readonly statusTimeoutMs: number = STATUS_TIMEOUT_MS,
+		private readonly log?: (message: string) => void
 	) {}
 
 	/**
@@ -90,14 +96,15 @@ export class DeveloperIdentity {
 		}
 
 		try {
-			// Same request the Deploy tab makes (busHost getDeveloperId), bounded.
-			const status = await client.call<{ developerId?: string | null } | undefined>('rrext_deploy_app', { subcommand: 'developer_status' }, { timeout: this.statusTimeoutMs });
+			// Same typed request the Deploy tab makes (busHost getDeveloperId), bounded.
+			const status = await client.developerStatus({ timeout: this.statusTimeoutMs });
 			if (status?.developerId) return { ...fallback, developerId: status.developerId, source: 'organization' };
 			return { ...fallback, canRegisterDeveloper: true };
-		} catch {
-			// OSS servers always carry an id at login, so this is a SaaS
-			// lookup failure or timeout: hide the form, and let scaffolding refuse.
-			return { ...fallback, lookupFailed: true };
+		} catch (err) {
+			// OSS servers always carry an id at login, so this is a SaaS lookup
+			// failure or timeout: keep why, show it up front, and let scaffolding refuse.
+			this.log?.(`developer_status lookup failed: ${err instanceof Error ? err.message : String(err)}`);
+			return { ...fallback, lookupFailed: true, lookupError: err };
 		}
 	}
 
@@ -109,7 +116,7 @@ export class DeveloperIdentity {
 	 */
 	public async resolveForScaffold(): Promise<string> {
 		const resolved = await this.resolve();
-		if (resolved.lookupFailed) throw new Error(LOOKUP_FAILED_MESSAGE);
+		if (resolved.lookupFailed) throw new Error(LOOKUP_FAILED_MESSAGE, { cause: resolved.lookupError });
 		return resolved.developerId;
 	}
 
@@ -132,6 +139,31 @@ export class DeveloperIdentity {
 			this.sessionClaim = { orgId, developerId: res?.developerId || requested };
 		}
 	}
+}
+
+/** The workspace half of the wizard identity (the host knows its folders). */
+export interface IWizardWorkspace {
+	workspaceOpen: boolean;
+	existingFolders: string[];
+}
+
+/**
+ * The identity the wizard shows, built from the same resolution scaffolding
+ * acts on (so what the form shows is what Create does).
+ *
+ * @param resolved - From {@link DeveloperIdentity.resolve}.
+ * @param workspace - The host's scaffold target.
+ * @returns The wizard identity.
+ */
+export function toWizardIdentity(resolved: IResolvedDeveloperId, workspace: IWizardWorkspace): NewAppIdentity {
+	return {
+		developerId: resolved.developerId,
+		source: resolved.source,
+		workspaceOpen: workspace.workspaceOpen,
+		existingFolders: workspace.existingFolders,
+		canRegisterDeveloper: resolved.canRegisterDeveloper,
+		lookupFailed: resolved.lookupFailed,
+	};
 }
 
 /** What the register handler needs from the host. */

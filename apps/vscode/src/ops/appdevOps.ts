@@ -21,7 +21,8 @@ import type { AppDevOpMap } from 'shared/ops/appdevOps';
 import type { NewAppIdentity } from 'shared/tools/appdev/types';
 import type { ConnectionManager } from '../connection/connection';
 import { listAppFolders, scaffoldApp } from '../appdev/scaffolder';
-import { DeveloperIdentity, makeRegisterDeveloperHandler } from '../appdev/developerIdentity';
+import { DeveloperIdentity, STATUS_TIMEOUT_MS, makeRegisterDeveloperHandler, toWizardIdentity } from '../appdev/developerIdentity';
+import { getLogger } from '../shared/util/output';
 
 /** What the registrations need from the host. */
 interface IAppDevOpsDeps {
@@ -42,17 +43,17 @@ export function registerVscodeAppDevOps(bus: IOpBus, deps: IAppDevOpsDeps): void
 	const { context, connectionManager, broadcast, closeWizard } = deps;
 
 	/** Resolves and claims the org's developer id (see appdev/developerIdentity). */
-	const developer = new DeveloperIdentity(connectionManager);
+	const developer = new DeveloperIdentity(connectionManager, STATUS_TIMEOUT_MS, (message) => {
+		getLogger().error(`[appdev] ${message}`);
+	});
 
 	const buildIdentity = async (): Promise<NewAppIdentity> => {
-		const { developerId, source, canRegisterDeveloper } = await developer.resolve();
-		return {
-			developerId,
-			source,
+		// Same resolution scaffolding acts on (resolveForScaffold), so the form
+		// shows what Create will do, including a failed lookup.
+		return toWizardIdentity(await developer.resolve(), {
 			workspaceOpen: (vscode.workspace.workspaceFolders?.length ?? 0) > 0,
 			existingFolders: await listAppFolders(),
-			canRegisterDeveloper,
-		};
+		});
 	};
 
 	const impls: OpImplTable<AppDevOpMap> = {

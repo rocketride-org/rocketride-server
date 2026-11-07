@@ -81,6 +81,7 @@ interface IAppBuilderClient {
 	withdrawApp(appId: string, version: number): Promise<unknown>;
 	replyApp(appId: string, message: string, version?: number): Promise<unknown>;
 	call<T>(command: string, args?: Record<string, unknown>): Promise<T>;
+	developerStatus(options?: { timeout?: number }): Promise<{ developerId: string | null }>;
 	deploy: { history(projectId: string, options?: { page?: number; pageSize?: number }): Promise<unknown> };
 }
 
@@ -189,7 +190,7 @@ export function createBusAppBuilderHost(o: IBusAppBuilderHostOptions): Partial<I
 				}
 			: undefined,
 		getDeveloperId: async () => {
-			const res = await client().call<{ developerId?: string | null } | undefined>('rrext_deploy_app', { subcommand: 'developer_status' });
+			const res = await client().developerStatus();
 			return res?.developerId ?? '';
 		},
 		registerDeveloper: async (developerId) => {

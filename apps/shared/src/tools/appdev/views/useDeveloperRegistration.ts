@@ -114,7 +114,9 @@ export interface IDeveloperRegistration extends IDeveloperRegistrationState {
 export function useDeveloperRegistration<T>(register: ((developerId: string) => Promise<T>) | undefined, isValid?: (slug: string) => boolean, onRegistered?: (result: T) => void): IDeveloperRegistration {
 	const [state, dispatch] = useReducer(developerRegistrationReducer, INITIAL_DEVELOPER_REGISTRATION);
 
-	const setSlug = useCallback((slug: string) => dispatch({ type: 'edit', slug }), []);
+	const setSlug = useCallback((slug: string) => {
+		dispatch({ type: 'edit', slug });
+	}, []);
 
 	const submit = useCallback(async (): Promise<void> => {
 		if (!register) return;

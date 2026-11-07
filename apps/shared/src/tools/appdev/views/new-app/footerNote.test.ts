@@ -30,18 +30,26 @@ import { test } from 'node:test';
 import { footerNote } from './NewAppForm';
 
 test('footer note: no workspace uses the host phrasing, then the default', () => {
-	assert.equal(footerNote({ workspaceOpen: false, noWorkspaceNote: 'Connect first.', canRegister: true, source: 'default' }), 'Connect first.');
-	assert.match(footerNote({ workspaceOpen: false, canRegister: false, source: 'organization' }), /Open a workspace folder first/);
+	assert.equal(footerNote({ workspaceOpen: false, noWorkspaceNote: 'Connect first.', canRegister: true, pendingId: false, lookupFailed: false, source: 'default' }), 'Connect first.');
+	assert.match(footerNote({ workspaceOpen: false, canRegister: false, pendingId: false, lookupFailed: false, source: 'organization' }), /Open a workspace folder first/);
 });
 
 test('footer note: can register points at the field', () => {
-	assert.match(footerNote({ workspaceOpen: true, canRegister: true, source: 'default' }), /Register one above/);
+	assert.match(footerNote({ workspaceOpen: true, canRegister: true, pendingId: false, lookupFailed: false, source: 'default' }), /Register one above/);
 });
 
 test('footer note: default id without the field says local', () => {
-	assert.match(footerNote({ workspaceOpen: true, canRegister: false, source: 'default' }), /"local" default/);
+	assert.match(footerNote({ workspaceOpen: true, canRegister: false, pendingId: false, lookupFailed: false, source: 'default' }), /"local" default/);
 });
 
 test('footer note: organization id says where it comes from', () => {
-	assert.match(footerNote({ workspaceOpen: true, canRegister: false, source: 'organization' }), /organization account profile/);
+	assert.match(footerNote({ workspaceOpen: true, canRegister: false, pendingId: false, lookupFailed: false, source: 'organization' }), /organization account profile/);
+});
+
+test('footer note: an unregistered id asks to register or clear it', () => {
+	assert.equal(footerNote({ workspaceOpen: true, canRegister: true, pendingId: true, lookupFailed: false, source: 'default' }), 'Register the id or clear the field to create the app.');
+});
+
+test('footer note: a failed lookup says the id could not be confirmed', () => {
+	assert.match(footerNote({ workspaceOpen: true, canRegister: false, pendingId: false, lookupFailed: true, source: 'default' }), /Could not confirm your organization's developer id/);
 });

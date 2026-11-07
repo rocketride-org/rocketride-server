@@ -459,6 +459,9 @@ export interface NewAppIdentity {
 	/** True when the org has no developer id yet and this host can claim one
 	 *  from the wizard (host.appdev.registerDeveloper). Omitted = no form. */
 	canRegisterDeveloper?: boolean;
+	/** The host could not confirm the org's developer id (the lookup failed);
+	 *  the wizard says so up front, and Create re-checks before scaffolding. */
+	lookupFailed?: boolean;
 }
 
 // =============================================================================
