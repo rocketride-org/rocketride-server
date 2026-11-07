@@ -21,7 +21,7 @@ import type { AppDevOpMap } from 'shared/ops/appdevOps';
 import type { NewAppIdentity } from 'shared/tools/appdev/types';
 import type { ConnectionManager } from '../connection/connection';
 import { listAppFolders, scaffoldApp } from '../appdev/scaffolder';
-import { DeveloperIdentity, STATUS_TIMEOUT_MS, makeRegisterDeveloperHandler, toWizardIdentity } from '../appdev/developerIdentity';
+import { DeveloperIdentity, IdentityFeed, STATUS_TIMEOUT_MS, makeRegisterDeveloperHandler, toWizardIdentity } from '../appdev/developerIdentity';
 import { getLogger } from '../shared/util/output';
 
 /** What the registrations need from the host. */
@@ -43,9 +43,11 @@ export function registerVscodeAppDevOps(bus: IOpBus, deps: IAppDevOpsDeps): void
 	const { context, connectionManager, broadcast, closeWizard } = deps;
 
 	/** Resolves and claims the org's developer id (see appdev/developerIdentity). */
-	const developer = new DeveloperIdentity(connectionManager, STATUS_TIMEOUT_MS, (message) => {
+	/** Logs an appdev failure to the RocketRide output channel. */
+	const logError = (message: string): void => {
 		getLogger().error(`[appdev] ${message}`);
-	});
+	};
+	const developer = new DeveloperIdentity(connectionManager, STATUS_TIMEOUT_MS, logError);
 
 	const buildIdentity = async (): Promise<NewAppIdentity> => {
 		// Same resolution scaffolding acts on (resolveForScaffold), so the form
@@ -56,8 +58,11 @@ export function registerVscodeAppDevOps(bus: IOpBus, deps: IAppDevOpsDeps): void
 		});
 	};
 
+	/** Stamps each identity with a revision and pushes only the newest. */
+	const feed = new IdentityFeed(buildIdentity, broadcast);
+
 	const impls: OpImplTable<AppDevOpMap> = {
-		'host.appdev.identity': () => buildIdentity(),
+		'host.appdev.identity': () => feed.refresh(false),
 		'host.appdev.scaffold': async (p) => {
 			// Resolve the developer id NOW — the wizard is modeless, so the
 			// form may have been open across a login/logout. scaffoldApp
@@ -72,7 +77,7 @@ export function registerVscodeAppDevOps(bus: IOpBus, deps: IAppDevOpsDeps): void
 			// The real builder is open — retire the untitled document.
 			closeWizard();
 		},
-		'host.appdev.registerDeveloper': makeRegisterDeveloperHandler({ identity: developer, buildIdentity, broadcast }),
+		'host.appdev.registerDeveloper': makeRegisterDeveloperHandler({ identity: developer, feed, log: logError }),
 		'host.appdev.closeWizard': async () => closeWizard(),
 	};
 	registerOpHandlers<AppDevOpMap>(bus, impls);
@@ -80,10 +85,9 @@ export function registerVscodeAppDevOps(bus: IOpBus, deps: IAppDevOpsDeps): void
 	// A login/logout while the modeless wizard sits open changes the linkage
 	// name — push the fresh identity to every realm.
 	const push = (): void => {
-		void buildIdentity().then(
-			(identity) => broadcast('host.appdev.identityChanged', identity),
-			() => { /* best effort — the page can re-pull */ }
-		);
+		feed.refresh(true).catch((err: unknown) => {
+			logError(`identity refresh failed: ${err instanceof Error ? err.message : String(err)}`);
+		});
 	};
 	for (const event of ['shell:statusChange', 'shell:accountUpdate'] as const) {
 		connectionManager.on(event, push);

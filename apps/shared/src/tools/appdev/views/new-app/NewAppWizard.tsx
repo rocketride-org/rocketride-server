@@ -73,6 +73,23 @@ export interface INewAppWizardProps {
 	host: INewAppWizardHost;
 }
 
+/**
+ * Whether `next` may replace the identity a wizard shows. The host stamps
+ * each identity with a revision; an older one (a slow initial pull that
+ * lands after a push) is ignored. Without revisions (hosts that don't stamp
+ * them), every identity applies, as before.
+ *
+ * @param current - The identity shown now (null before the first one).
+ * @param next - The identity that just arrived.
+ * @returns True when `next` should be shown.
+ */
+export function isNewerIdentity(current: NewAppIdentity | null, next: NewAppIdentity): boolean {
+	if (!current || current.revision === undefined || next.revision === undefined) {
+		return true;
+	}
+	return next.revision >= current.revision;
+}
+
 // =============================================================================
 // STYLES
 // =============================================================================
@@ -115,18 +132,27 @@ export const NewAppWizard: React.FC<INewAppWizardProps> = ({ host }) => {
 	/** Error from a failed identity pull, shown in place of the loading text. */
 	const [identityError, setIdentityError] = useState<string | null>(null);
 
+	/** Shows `next` unless an identity at least as new is already shown. */
+	const applyIdentity = useCallback((next: NewAppIdentity) => {
+		setIdentity((current) => {
+			return isNewerIdentity(current, next) ? next : current;
+		});
+	}, []);
+
 	useEffect(() => {
 		let cancelled = false;
 		void host.identity().then(
-			(i) => { if (!cancelled) setIdentity(i); },
+			(i) => { if (!cancelled) applyIdentity(i); },
 			(err: unknown) => { if (!cancelled) setIdentityError(err instanceof Error ? err.message : String(err)); },
 		);
-		const off = host.onIdentityChanged?.((i) => setIdentity(i));
+		const off = host.onIdentityChanged?.((i) => {
+			applyIdentity(i);
+		});
 		return () => {
 			cancelled = true;
 			off?.();
 		};
-	}, [host]);
+	}, [host, applyIdentity]);
 
 	/** One scaffold pass; success retires this document (the host did the
 	 *  transition — stay locked), a rejection re-enables the form. */
@@ -147,9 +173,9 @@ export const NewAppWizard: React.FC<INewAppWizardProps> = ({ host }) => {
 	const handleRegister = useCallback(
 		async (developerId: string): Promise<void> => {
 			if (!host.registerDeveloper) return;
-			setIdentity(await host.registerDeveloper(developerId));
+			applyIdentity(await host.registerDeveloper(developerId));
 		},
-		[host],
+		[host, applyIdentity],
 	);
 
 	if (!identity) {

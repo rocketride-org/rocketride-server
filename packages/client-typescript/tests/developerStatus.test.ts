@@ -39,4 +39,11 @@ describe('RocketRideClient.developerStatus', () => {
 		await client.developerStatus();
 		expect(call).toHaveBeenCalledWith('rrext_deploy_app', { subcommand: 'developer_status' }, undefined);
 	});
+
+	test('registerDeveloper forwards its timeout to the request', async () => {
+		const client = new RocketRideClient();
+		const call = jest.spyOn(client, 'call').mockResolvedValue({ developerId: 'acme' });
+		await client.registerDeveloper('acme', { timeout: 30_000 });
+		expect(call).toHaveBeenCalledWith('rrext_deploy_app', { subcommand: 'developer_register', developerId: 'acme' }, { timeout: 30_000 });
+	});
 });

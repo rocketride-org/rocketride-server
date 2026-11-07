@@ -462,6 +462,9 @@ export interface NewAppIdentity {
 	/** The host could not confirm the org's developer id (the lookup failed);
 	 *  the wizard says so up front, and Create re-checks before scaffolding. */
 	lookupFailed?: boolean;
+	/** Increases with every identity the host builds; a wizard ignores an
+	 *  identity older than the one it shows. Hosts without revisions omit it. */
+	revision?: number;
 }
 
 // =============================================================================

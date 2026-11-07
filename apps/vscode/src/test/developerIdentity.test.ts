@@ -24,7 +24,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { DeveloperIdentity, LOOKUP_FAILED_MESSAGE, STATUS_TIMEOUT_MS, makeRegisterDeveloperHandler, toWizardIdentity } from '../appdev/developerIdentity';
+import { DeveloperIdentity, IdentityFeed, LOOKUP_FAILED_MESSAGE, REGISTER_TIMEOUT_MS, STATUS_TIMEOUT_MS, makeRegisterDeveloperHandler, toWizardIdentity } from '../appdev/developerIdentity';
 import type { IDeveloperClient, IDeveloperConnection } from '../appdev/developerIdentity';
 import type { NewAppIdentity } from 'shared/tools/appdev/types';
 
@@ -37,6 +37,10 @@ interface IFake {
 	registerReturns?: string;
 	/** Runs while the register request is in flight (e.g. a disconnect). */
 	duringRegister?: (setOrg: (orgId: string | undefined) => void) => void;
+	/** The register request rejects with this error... */
+	registerFails?: Error;
+	/** ...although the claim landed on the server as this id (a late timeout). */
+	claimLandsAs?: string;
 }
 
 /**
@@ -58,9 +62,11 @@ function statusReply(status: IFake['status'], timeoutMs: number | undefined): Pr
 }
 
 /** A fake connection plus a log of the server calls (and status time limits) it received. */
-function fake(opts: IFake): { connection: IDeveloperConnection; calls: string[]; timeouts: (number | undefined)[]; setOrg: (orgId: string | undefined) => void } {
+function fake(opts: IFake): { connection: IDeveloperConnection; calls: string[]; timeouts: (number | undefined)[]; registerTimeouts: (number | undefined)[]; setOrg: (orgId: string | undefined) => void } {
 	const calls: string[] = [];
 	const timeouts: (number | undefined)[] = [];
+	const registerTimeouts: (number | undefined)[] = [];
+	let status = opts.status;
 	let orgId: string | undefined = 'orgId' in opts ? opts.orgId : 'org-1';
 	const setOrg = (next: string | undefined): void => {
 		orgId = next;
@@ -71,12 +77,15 @@ function fake(opts: IFake): { connection: IDeveloperConnection; calls: string[];
 		developerStatus: async (options?: { timeout?: number }) => {
 			calls.push('status');
 			timeouts.push(options?.timeout);
-			return statusReply(opts.status, options?.timeout);
+			return statusReply(status, options?.timeout);
 		},
 
-		registerDeveloper: async (id) => {
+		registerDeveloper: async (id, options) => {
 			calls.push(`register:${id}`);
+			registerTimeouts.push(options?.timeout);
 			opts.duringRegister?.(setOrg);
+			if (opts.claimLandsAs) status = opts.claimLandsAs;
+			if (opts.registerFails) throw opts.registerFails;
 			return opts.registerReturns ? { developerId: opts.registerReturns } : {};
 		},
 	};
@@ -84,7 +93,7 @@ function fake(opts: IFake): { connection: IDeveloperConnection; calls: string[];
 		getClient: () => (opts.connected === false ? undefined : client),
 		isConnected: () => opts.connected !== false,
 	};
-	return { connection, calls, timeouts, setOrg };
+	return { connection, calls, timeouts, registerTimeouts, setOrg };
 }
 
 // ── resolve() ────────────────────────────────────────────────────────────────
@@ -209,30 +218,32 @@ test('scaffold: a late status reply does not rescue a timed-out scaffold', async
 
 // ── host.appdev.registerDeveloper handler ────────────────────────────────────
 
-/** The handler wired to a fake connection, recording broadcasts. */
-function handler(opts: IFake): { run: (id: string) => Promise<NewAppIdentity>; broadcasts: [string, unknown][]; calls: string[] } {
-	const { connection, calls } = fake(opts);
+/** The handler wired to a fake connection through an IdentityFeed, recording broadcasts. */
+function handler(opts: IFake): { run: (id: string) => Promise<NewAppIdentity>; broadcasts: [string, NewAppIdentity][]; calls: string[]; registerTimeouts: (number | undefined)[] } {
+	const { connection, calls, registerTimeouts } = fake(opts);
 	const identity = new DeveloperIdentity(connection);
-	const broadcasts: [string, unknown][] = [];
-	const buildIdentity = async (): Promise<NewAppIdentity> => {
-		const r = await identity.resolve();
-		return { developerId: r.developerId, source: r.source, canRegisterDeveloper: r.canRegisterDeveloper, workspaceOpen: true, existingFolders: [] };
-	};
-	const run = makeRegisterDeveloperHandler({ identity, buildIdentity, broadcast: (op, p) => broadcasts.push([op, p]) });
-	return { run: (developerId) => run({ developerId }), broadcasts, calls };
+	const broadcasts: [string, NewAppIdentity][] = [];
+	const feed = new IdentityFeed(
+		async () => toWizardIdentity(await identity.resolve(), { workspaceOpen: true, existingFolders: [] }),
+		(op, p) => {
+			broadcasts.push([op, p as NewAppIdentity]);
+		}
+	);
+	const run = makeRegisterDeveloperHandler({ identity, feed });
+	return { run: (developerId) => run({ developerId }), broadcasts, calls, registerTimeouts };
 }
 
-test('register: not connected rejects and broadcasts nothing', async () => {
+test('register: not connected rejects without calling the server', async () => {
 	const h = handler({ connected: false });
 	await assert.rejects(h.run('acme'), { message: 'Not connected to server' });
-	assert.deepEqual(h.broadcasts, []);
+	assert.deepEqual(h.calls.filter((c) => c.startsWith('register:')), []);
+	assert.equal(h.broadcasts.at(-1)?.[1].developerId, 'local');
 });
 
 test('register: empty id rejects without calling the server', async () => {
 	const h = handler({ status: null });
 	await assert.rejects(h.run('   '), { message: 'Enter a developer id' });
-	assert.deepEqual(h.calls, []);
-	assert.deepEqual(h.broadcasts, []);
+	assert.deepEqual(h.calls.filter((c) => c.startsWith('register:')), []);
 });
 
 test('register: success broadcasts identityChanged with the new id and returns it', async () => {
@@ -244,13 +255,48 @@ test('register: success broadcasts identityChanged with the new id and returns i
 	assert.deepEqual(h.broadcasts, [['host.appdev.identityChanged', identity]]);
 });
 
-test('register: a server refusal rejects with its message and broadcasts nothing', async () => {
-	const { connection } = fake({ status: null });
-	const identity = new DeveloperIdentity({ ...connection, getClient: () => ({ ...connection.getClient()!, registerDeveloper: async () => { throw new Error('slug taken'); } }) });
-	const broadcasts: unknown[] = [];
-	const run = makeRegisterDeveloperHandler({ identity, buildIdentity: async () => ({}) as NewAppIdentity, broadcast: (op) => broadcasts.push(op) });
-	await assert.rejects(run({ developerId: 'acme' }), { message: 'slug taken' });
-	assert.deepEqual(broadcasts, []);
+test('register: a server refusal rejects with its message and refreshes the wizards', async () => {
+	const h = handler({ status: null, registerFails: new Error('slug taken') });
+	await assert.rejects(h.run('acme'), { message: 'slug taken' });
+	assert.equal(h.broadcasts.length, 1);
+	assert.equal(h.broadcasts[0][1].canRegisterDeveloper, true);
+});
+
+test('register: the request passes its time limit to the client', async () => {
+	const h = handler({ status: null, registerReturns: 'acme' });
+	await h.run('acme');
+	assert.deepEqual(h.registerTimeouts, [REGISTER_TIMEOUT_MS]);
+	assert.ok(REGISTER_TIMEOUT_MS < 120_000, 'shorter than the bus request timeout');
+});
+
+test('register: a failed claim still refreshes every wizard', async () => {
+	// The request times out, but the claim landed on the server.
+	const h = handler({ status: null, registerFails: new Error('Request timed out after 30000ms'), claimLandsAs: 'acme' });
+	await assert.rejects(h.run('acme'), { message: /timed out/ });
+	const pushed = h.broadcasts.at(-1)?.[1];
+	assert.equal(pushed?.developerId, 'acme');
+	assert.equal(pushed?.source, 'organization');
+});
+
+// ── P18: the newest identity always wins ───────────────────────────────────
+
+test('identity feed: a slower older refresh never overwrites a newer one', async () => {
+	const builds: ((i: NewAppIdentity) => void)[] = [];
+	const broadcasts: NewAppIdentity[] = [];
+	const feed = new IdentityFeed(
+		() => new Promise<NewAppIdentity>((resolve) => builds.push(resolve)),
+		(_op, p) => {
+			broadcasts.push(p as NewAppIdentity);
+		}
+	);
+	const older = feed.refresh(true); // slow lookup starts first
+	const newer = feed.refresh(true); // e.g. a disconnect, answered at once
+	builds[1]({ developerId: 'local', source: 'default', workspaceOpen: true, existingFolders: [] });
+	const n = await newer;
+	builds[0]({ developerId: 'local', source: 'default', workspaceOpen: true, existingFolders: [], lookupFailed: true });
+	const o = await older;
+	assert.deepEqual(broadcasts, [n], 'only the newest build is pushed');
+	assert.ok((o.revision ?? 0) < (n.revision ?? 0), 'the older build carries the older revision');
 });
 
 // ── P6 / P7: what the form shows is what Create does; failures stay diagnosable ─

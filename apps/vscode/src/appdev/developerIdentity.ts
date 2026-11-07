@@ -20,6 +20,9 @@
 // keeps its error (logged, and the cause of the scaffold error) and is shown
 // in the wizard up front: toWizardIdentity() feeds the form from the same
 // resolution resolveForScaffold() acts on, so what it shows is what Create does.
+// Registering is bounded too (REGISTER_TIMEOUT_MS). Identities are stamped
+// with a revision by IdentityFeed, which pushes only the newest build, so a
+// slow, older refresh never overwrites a newer one.
 // =============================================================================
 
 import type { NewAppIdentity } from 'shared/tools/appdev/types';
@@ -32,7 +35,7 @@ export interface IDeveloperClient {
 	getAccountInfo(): unknown;
 	getOrgId(): string | undefined;
 	developerStatus(options?: { timeout?: number }): Promise<{ developerId: string | null } | undefined>;
-	registerDeveloper(developerId: string): Promise<unknown>;
+	registerDeveloper(developerId: string, options?: { timeout?: number }): Promise<unknown>;
 }
 
 /** What this module needs from the connection manager. */
@@ -55,6 +58,9 @@ export interface IResolvedDeveloperId {
 
 /** Longest wait for the developer_status lookup before it counts as failed. */
 export const STATUS_TIMEOUT_MS = 10_000;
+
+/** Longest wait for a register request (under the bus's 120 s, so the webview never times out first). */
+export const REGISTER_TIMEOUT_MS = 30_000;
 
 /** Shown when scaffolding cannot confirm the org's developer id. */
 export const LOOKUP_FAILED_MESSAGE = "Could not confirm your organization's developer id with the server, so the app was not created. Check your connection and try again.";
@@ -134,7 +140,7 @@ export class DeveloperIdentity {
 		// Read the org BEFORE the request: a disconnect while it is in flight
 		// would blank it, and a blank org must never key a remembered claim.
 		const orgId = client.getOrgId();
-		const res = (await client.registerDeveloper(requested)) as { developerId?: string } | undefined;
+		const res = (await client.registerDeveloper(requested, { timeout: REGISTER_TIMEOUT_MS })) as { developerId?: string } | undefined;
 		if (orgId) {
 			this.sessionClaim = { orgId, developerId: res?.developerId || requested };
 		}
@@ -166,27 +172,69 @@ export function toWizardIdentity(resolved: IResolvedDeveloperId, workspace: IWiz
 	};
 }
 
+/**
+ * Builds the wizard identity, stamped with a revision, and pushes it to every
+ * open wizard. Only the newest build is pushed: a slow, older refresh that
+ * finishes after a newer one is dropped, and wizards ignore any identity
+ * older than the one they show (isNewerIdentity).
+ */
+export class IdentityFeed {
+	/** The revision of the most recently started build. */
+	private revision = 0;
+
+	/**
+	 * @param build - Builds the current identity (may be slow: it waits on the lookup).
+	 * @param broadcast - Fire-and-forget op to every attached realm.
+	 */
+	constructor(
+		private readonly build: () => Promise<NewAppIdentity>,
+		private readonly broadcast: (op: string, params: unknown) => void
+	) {}
+
+	/**
+	 * Builds the identity under a new revision.
+	 *
+	 * @param push - Also push it to every open wizard (if still the newest).
+	 * @returns The identity, stamped with its revision.
+	 */
+	public async refresh(push: boolean): Promise<NewAppIdentity> {
+		const revision = ++this.revision;
+		const identity: NewAppIdentity = { ...(await this.build()), revision };
+		if (push && revision === this.revision) {
+			this.broadcast('host.appdev.identityChanged', identity);
+		}
+		return identity;
+	}
+}
+
 /** What the register handler needs from the host. */
 export interface IRegisterHandlerDeps {
 	identity: DeveloperIdentity;
-	/** Builds the full wizard identity (developer id + workspace state). */
-	buildIdentity: () => Promise<NewAppIdentity>;
-	/** Fire-and-forget op to every attached realm. */
-	broadcast: (op: string, params: unknown) => void;
+	/** Builds and pushes the wizard identity (newest wins). */
+	feed: IdentityFeed;
+	/** Receives a line when the refresh after a failed claim also fails. */
+	log?: (message: string) => void;
 }
 
 /**
  * The host.appdev.registerDeveloper handler: claim the id, then push the
- * fresh identity to every open wizard and return it to the caller.
+ * fresh identity to every open wizard and return it to the caller. A failed
+ * or timed-out claim still refreshes every wizard before it rejects: the
+ * claim may have landed on the server, and the live lookup will show it.
  *
  * @param deps - See {@link IRegisterHandlerDeps}.
  * @returns The op handler.
  */
 export function makeRegisterDeveloperHandler(deps: IRegisterHandlerDeps): (params: { developerId: string }) => Promise<NewAppIdentity> {
 	return async (params) => {
-		await deps.identity.register(params.developerId);
-		const identity = await deps.buildIdentity();
-		deps.broadcast('host.appdev.identityChanged', identity);
-		return identity;
+		try {
+			await deps.identity.register(params.developerId);
+		} catch (err) {
+			await deps.feed.refresh(true).catch((refreshErr: unknown) => {
+				deps.log?.(`identity refresh after a failed claim failed: ${refreshErr instanceof Error ? refreshErr.message : String(refreshErr)}`);
+			});
+			throw err;
+		}
+		return deps.feed.refresh(true);
 	};
 }
