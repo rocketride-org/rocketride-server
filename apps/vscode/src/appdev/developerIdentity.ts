@@ -58,8 +58,9 @@ export const LOOKUP_FAILED_MESSAGE = "Could not confirm your organization's deve
 /** Resolves and claims the org's developer id for one connection. */
 export class DeveloperIdentity {
 	/** A developer id registered from the wizard this session, keyed by org. The
-	 *  login-time account info does not show it until a reconnect. */
-	private sessionClaim: { orgId: string | undefined; developerId: string } | null = null;
+	 *  login-time account info does not show it until a reconnect. Only kept
+	 *  when the org is known, so a session without an org never reuses it. */
+	private sessionClaim: { orgId: string; developerId: string } | null = null;
 
 	/**
 	 * @param connection - The extension's connection manager.
@@ -123,8 +124,13 @@ export class DeveloperIdentity {
 		if (!client || !this.connection.isConnected()) throw new Error('Not connected to server');
 		const requested = developerId.trim();
 		if (!requested) throw new Error('Enter a developer id');
+		// Read the org BEFORE the request: a disconnect while it is in flight
+		// would blank it, and a blank org must never key a remembered claim.
+		const orgId = client.getOrgId();
 		const res = (await client.registerDeveloper(requested)) as { developerId?: string } | undefined;
-		this.sessionClaim = { orgId: client.getOrgId(), developerId: res?.developerId || requested };
+		if (orgId) {
+			this.sessionClaim = { orgId, developerId: res?.developerId || requested };
+		}
 	}
 }
 

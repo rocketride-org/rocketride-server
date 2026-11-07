@@ -35,6 +35,8 @@ interface IFake {
 	orgId?: string;
 	status?: string | null | Error | Promise<string | null>;
 	registerReturns?: string;
+	/** Runs while the register request is in flight (e.g. a disconnect). */
+	duringRegister?: (setOrg: (orgId: string | undefined) => void) => void;
 }
 
 /**
@@ -56,10 +58,13 @@ function statusReply(status: IFake['status'], timeoutMs: number | undefined): Pr
 }
 
 /** A fake connection plus a log of the server calls (and status time limits) it received. */
-function fake(opts: IFake): { connection: IDeveloperConnection; calls: string[]; timeouts: (number | undefined)[]; setOrg: (orgId: string) => void } {
+function fake(opts: IFake): { connection: IDeveloperConnection; calls: string[]; timeouts: (number | undefined)[]; setOrg: (orgId: string | undefined) => void } {
 	const calls: string[] = [];
 	const timeouts: (number | undefined)[] = [];
-	let orgId = opts.orgId ?? 'org-1';
+	let orgId: string | undefined = 'orgId' in opts ? opts.orgId : 'org-1';
+	const setOrg = (next: string | undefined): void => {
+		orgId = next;
+	};
 	const client: IDeveloperClient = {
 		getAccountInfo: () => ({ organization: opts.loginId ? { developerId: opts.loginId } : {} }),
 		getOrgId: () => orgId,
@@ -72,6 +77,7 @@ function fake(opts: IFake): { connection: IDeveloperConnection; calls: string[];
 		},
 		registerDeveloper: async (id) => {
 			calls.push(`register:${id}`);
+			opts.duringRegister?.(setOrg);
 			return opts.registerReturns ? { developerId: opts.registerReturns } : {};
 		},
 	};
@@ -79,7 +85,7 @@ function fake(opts: IFake): { connection: IDeveloperConnection; calls: string[];
 		getClient: () => (opts.connected === false ? undefined : client),
 		isConnected: () => opts.connected !== false,
 	};
-	return { connection, calls, timeouts, setOrg: (next) => (orgId = next) };
+	return { connection, calls, timeouts, setOrg };
 }
 
 // ── resolve() ────────────────────────────────────────────────────────────────
@@ -109,6 +115,26 @@ test('resolve: session claim, different org, is ignored and the server is asked'
 	const r = await identity.resolve();
 	assert.equal(r.developerId, 'local');
 	assert.equal(r.canRegisterDeveloper, true);
+	assert.deepEqual(calls, ['register:acme_labs', 'status']);
+});
+
+test('resolve: register reads the org before the request', async () => {
+	// The org blanks while the request is in flight (a disconnect), then returns.
+	const { connection, calls, setOrg } = fake({ status: null, registerReturns: 'acme_labs', duringRegister: (set) => set(undefined) });
+	const identity = new DeveloperIdentity(connection);
+	await identity.register('acme_labs');
+	setOrg('org-1');
+	const r = await identity.resolve();
+	assert.equal(r.developerId, 'acme_labs');
+	assert.deepEqual(calls, ['register:acme_labs']);
+});
+
+test('resolve: a claim made with no org is never reused', async () => {
+	const { connection, calls } = fake({ orgId: undefined, status: null, registerReturns: 'acme_labs' });
+	const identity = new DeveloperIdentity(connection);
+	await identity.register('acme_labs');
+	const r = await identity.resolve();
+	assert.equal(r.developerId, 'local');
 	assert.deepEqual(calls, ['register:acme_labs', 'status']);
 });
 
