@@ -6,7 +6,7 @@
 
 ## How Component Information Is Organized
 
-When the RocketRide VS Code extension is installed, it populates a `.rocketride/` directory in your workspace:
+The connected server's catalog describes every component. The client's `getServices()` lists each one's name, class, lanes, and `invoke` requirements, and `getService(name)` returns one component's full definition, config schema included (Python: `get_services()` / `get_service(name)`). In a local checkout, the RocketRide VS Code extension also copies both into a `.rocketride/` directory in your workspace:
 
 ```text
 .rocketride/
@@ -19,14 +19,14 @@ When the RocketRide VS Code extension is installed, it populates a `.rocketride/
 └── docs/                    # Documentation files (these files)
 ```
 
-**IMPORTANT:** Always read `.rocketride/services-catalog.json` for the current list of available components. The catalog is the single source of truth: it is generated from the connected server and may contain components not listed in this document.
+**IMPORTANT:** Always check the catalog (`getServices()`, or `.rocketride/services-catalog.json` locally) for the current list of available components. The catalog is the single source of truth: it is generated from the connected server and may contain components not listed in this document.
 
-> **See also:** the two files above are the working pair behind this
-> reference. `.rocketride/services-catalog.json` is the node catalog: every
-> node's class, lanes, and control-plane (`invoke`) requirements.
-> `.rocketride/schema/{component_name}.json` is that node's detailed config
-> model: profiles, required fields, and defaults. Both are explained in the
-> sections below.
+> **See also:** the two files above are local copies of the working pair
+> behind this reference. `.rocketride/services-catalog.json` (`getServices()`)
+> is the node catalog: every node's class, lanes, and control-plane
+> (`invoke`) requirements. `.rocketride/schema/{component_name}.json`
+> (`getService(name)`) is that node's detailed config model: profiles,
+> required fields, and defaults. Both are explained in the sections below.
 
 ### Reading the Catalog
 
@@ -444,7 +444,7 @@ Any string value in `config` can use `${ROCKETRIDE_<name>}` to inject values fro
 }
 ```
 
-**When creating a pipeline with environment variables, you MUST also:**
+**When creating a pipeline with environment variables, you MUST** keep every key value out of the `.pipe` (reference it as `${ROCKETRIDE_*}`) and make sure each name has a value before the pipeline runs. For server-side variables, `account.getEnvironmentKeys()` lists the names already set; ask the user to add any that are missing. **In a local checkout that reads `.env`, also:**
 
 1. **Update `.env`** in the project with all injected variables and their values so the pipeline can run immediately:
 
@@ -461,7 +461,7 @@ Any string value in `config` can use `${ROCKETRIDE_<name>}` to inject values fro
    ROCKETRIDE_QDRANT_PORT=6333
    ```
 
-Only variables prefixed with `ROCKETRIDE_` are substituted. Unknown variables are left unchanged.
+Only variables prefixed with `ROCKETRIDE_` are substituted; any other `${VAR}` reference becomes `<REDACTED>`. A `${ROCKETRIDE_*}` reference with no value stays as literal text.
 
 **For MCP callers**: the `list_integrations` tool reports per-integration
 credential readiness (`configured`/`unconfirmed`/`available`) plus which
@@ -696,17 +696,17 @@ chat → [questions] → embedding_openai → [questions] → qdrant (collection
 **List all available components:**
 
 ```text
-Read .rocketride/services-catalog.json
+client.getServices()        (local copy: .rocketride/services-catalog.json)
 ```
 
 **Get detailed config for a specific component:**
 
 ```text
-Read .rocketride/schema/{component_name}.json
+client.getService('{component_name}')   (local copy: .rocketride/schema/{component_name}.json)
 ```
 
 **Find components by category:**
-Filter `services-catalog.json` entries where `classType` includes the desired category.
+Filter the catalog entries where `classType` includes the desired category.
 
 **Find what lanes a component supports:**
 Check the `lanes` field in the catalog entry. Keys are input lanes, values are output lane arrays.
@@ -716,4 +716,4 @@ Check the `invoke` field in the catalog entry. Each key is a `classType` with `m
 
 ---
 
-**Remember:** The `.rocketride/services-catalog.json` file is the authoritative source. Always consult it for the current list of components available on your connected server.
+**Remember:** The connected server's catalog (`getServices()`, copied locally to `.rocketride/services-catalog.json`) is the authoritative source. Always consult it for the current list of components available on your connected server.

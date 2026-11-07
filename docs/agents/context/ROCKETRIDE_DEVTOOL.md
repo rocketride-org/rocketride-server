@@ -57,13 +57,13 @@ work the user did not ask for.
 
 Two declarations, in the two places an app already has.
 
-**1. The manifest** (`package.json`, under the `rocketride` key) adds
+**1. The manifest** (`package.json`, under the `appManifest` key) adds
 `devTool` to `categories` — this is what makes the host offer it as a tool
 rather than only as a full-screen app:
 
 ```json
 {
-  "rocketride": {
+  "appManifest": {
     "categories": ["tools", "devTool"],
     "mode": "free",
     "authenticated": true,

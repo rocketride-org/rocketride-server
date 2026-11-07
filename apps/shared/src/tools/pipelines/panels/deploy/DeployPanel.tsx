@@ -38,6 +38,7 @@ import { ConfirmDialog } from 'shell';
 import { Card } from 'shell';
 import { formatTime, formatDayTime } from 'shell';
 import { buttonize } from 'shared/utils/buttonize';
+import { SaveDroppedError } from 'shared/modules/agent/host';
 import { SchedulePanel, describeCron, describeTtl } from './SchedulePanel';
 import { VersionRecordPanel } from './VersionRecordPanel';
 import type { IVersionRecordPanelProps } from './VersionRecordPanel';
@@ -432,7 +433,8 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 			setPublishComment('');
 			await refresh();
 		} catch (err) {
-			setError(err instanceof Error ? err.message : String(err));
+			// step: a save the user dropped while it waited its turn stops the publish, and is no failure to show
+			if (!(err instanceof SaveDroppedError)) setError(err instanceof Error ? err.message : String(err));
 		} finally {
 			setBusy(false);
 		}

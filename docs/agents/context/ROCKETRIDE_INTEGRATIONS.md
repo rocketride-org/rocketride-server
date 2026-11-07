@@ -408,7 +408,8 @@ in on typed lanes, and the pipeline's first answer is automatically sent back to
 ### Setup
 
 1. Message `@BotFather` on Telegram, run `/newbot`, and copy the bot token it issues.
-2. Put the token in `.env` as a `ROCKETRIDE_*` variable so it substitutes server-side
+2. Store the token as a `ROCKETRIDE_*` variable (server-side, or in `.env` in a local
+   checkout) and reference it as `${ROCKETRIDE_*}` so it substitutes server-side
    (ROCKETRIDE_PIPELINES.md §Environment variable substitution).
 3. Author the pipeline with a `telegram` source and start it.
 
@@ -686,8 +687,7 @@ Notes for reliable CI runs:
   teardown failures. Per-file upload failures are reported in the output summary
   (`Failed uploads: N`) but do **not** flip the exit code — keep the fixture small and
   known-good, or grep the log if you need a per-file gate.
-- **Output is a TTY monitor** (box-style frames with ANSI codes) — noisy in a CI log but
-  harmless. Do **not** use `status` in CI: it monitors continuously until interrupted.
+- **Output is plain lines.** Every command is one-shot, and the CLI has no monitor command.
   For richer assertions drive the SDK directly (ROCKETRIDE_typescript_API.md §8 Events &
   Monitoring).
 - An alternative HTTP-level smoke for an always-on deployment: `curl` its webhook URL with
@@ -699,8 +699,8 @@ Notes for reliable CI runs:
 
 - **Authoring the pipelines these integrations expose** — ROCKETRIDE_PIPELINES.md
   (file format, lanes, source/response nodes, env substitution) and
-  ROCKETRIDE_COMPONENT_REFERENCE.md (node catalog; per-node schemas live in
-  `.rocketride/schema/<name>.json`).
+  ROCKETRIDE_COMPONENT_REFERENCE.md (node catalog; `getService(name)` returns a node's
+  schema, and a local checkout copies it to `.rocketride/schema/<name>.json`).
 - **Driving pipelines from your own code** — ROCKETRIDE_python_API.md /
   ROCKETRIDE_typescript_API.md, §3 Pipeline Execution and §4 Sending Data; the full CLI
   reference is §15 of the TypeScript doc.

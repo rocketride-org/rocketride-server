@@ -133,6 +133,8 @@ export default defineConfig(({ command }) => {
 					'/api': { target: 'http://localhost:5565', ws: true },
 					// App remotes (/apps/<appId>/v<N>/remoteEntry.js) are engine-served.
 					'/apps/': { target: 'http://localhost:5565' },
+					// /client/docs and /client/shell are engine routes that rocket-ui fetches.
+					'/client/': { target: 'http://localhost:5565' },
 					'/marketplace': { target: 'http://localhost:5565' },
 					// Endpoint UIs and URLs that running pipelines publish as {host}/... links.
 					'/dropper': { target: 'http://localhost:5565' },
