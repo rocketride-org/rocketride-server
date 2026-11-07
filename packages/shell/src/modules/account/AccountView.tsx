@@ -18,6 +18,7 @@
  */
 
 import type { PlanChangeOutcome, PlanChangePreview } from '../billing/components/planChange';
+import { canManageOrganizationBilling } from '../../connection/connection';
 import React, { useMemo, useCallback } from 'react';
 import type { CSSProperties } from 'react';
 import { TabPanel } from '../../components/tab-panel/TabPanel';
@@ -300,7 +301,7 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 	const isOrgAdmin = useMemo(() => {
 		return profile?.organization?.permissions?.includes('org.admin') ?? false;
 	}, [profile]);
-	const isBillingOrgAdmin = authUser?.organization?.permissions?.includes('org.admin') ?? isOrgAdmin;
+	const isBillingOrgAdmin = authUser ? canManageOrganizationBilling(authUser) : isOrgAdmin;
 
 	/**
 	 * Returns true when the current user has team.admin on the given team.

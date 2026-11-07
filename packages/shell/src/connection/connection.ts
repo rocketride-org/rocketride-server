@@ -191,7 +191,8 @@ function advanceAccountTransition(manager: ConnectionManager, change: Partial<Ac
 
 /** Current account permission used by plan changes in the shared billing host. */
 export function canManageOrganizationBilling(account?: ConnectResult | null): boolean {
-	return account?.organization?.permissions?.includes('org.admin') ?? false;
+	const permissions = account?.organization?.permissions;
+	return Array.isArray(permissions) && permissions.includes('org.admin');
 }
 
 function isSameAccountScope(previous: ConnectResult, next: ConnectResult): boolean {
@@ -285,6 +286,7 @@ export class ConnectionManager implements IConnectionManager {
 	}
 
 	private constructor() {
+		Reflect.set(this, accountTransitionKey, idleAccountTransition);
 		this.installMirrorSubscriptions();
 	}
 
@@ -1296,7 +1298,10 @@ export class ConnectionManager implements IConnectionManager {
 		const key = `${RocketRideClient.normalizeUri(this.serverUri)}\u0000${connectionCredentialKey(credential)}`;
 		if (this.connectionOperation?.key === key) return this.connectionOperation.promise;
 
-		if (this.lifecycleOwner) this.lifecycleOwner.cancellationReason = 'superseded';
+		if (this.lifecycleOwner) {
+			if (this.lifecycleOwner.key !== key) advanceAccountTransition(this, { disconnecting: true });
+			this.lifecycleOwner.cancellationReason = 'superseded';
+		}
 		const operation: ShellConnectionOperation = {
 			key,
 			generation: ++this.connectionGeneration,

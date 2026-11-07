@@ -8,10 +8,22 @@ import { test } from 'node:test';
 import { parsePlanChangeOutcome, parsePlanChangePreview, planChangeCompletion } from './planChange';
 
 test('requires a recognized response to complete an authenticated attempt', () => {
-	assert.deepEqual(parsePlanChangeOutcome({ status: 'applied' }), { status: 'applied' });
-	assert.equal(parsePlanChangeOutcome({ status: 'payment_pending' }).status, 'payment_pending');
-	for (const response of [undefined, {}, { type: 'response', success: true }, { status: 'unknown' },
-		{ status: 'requires_action', clientSecret: 7 }]) {
+	for (const status of ['applied', 'upgraded', 'downgrade_scheduled', 'payment_pending']) {
+		assert.deepEqual(parsePlanChangeOutcome({ status }), { status });
+	}
+	const authentication = { status: 'requires_action', timing: 'immediate', clientSecret: 'intent_secret', stripePublishableKey: 'publishable_key' };
+	assert.deepEqual(parsePlanChangeOutcome(authentication), authentication);
+	for (const response of [
+		undefined,
+		{},
+		{ type: 'response', success: true },
+		{ status: 'unknown' },
+		{ status: 'applied', timing: 42 },
+		{ status: 'scheduled', timing: 'immediate' },
+		{ status: 'requires_action' },
+		{ ...authentication, clientSecret: 7 },
+		{ ...authentication, stripePublishableKey: ' ' },
+	]) {
 		assert.throws(() => parsePlanChangeOutcome(response), /invalid plan change result/);
 	}
 });

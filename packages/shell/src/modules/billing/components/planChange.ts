@@ -40,20 +40,34 @@ export function parsePlanChangePreview(value: unknown): PlanChangePreview {
 	throw new Error('The server returned an invalid plan change preview. Try again.');
 }
 
-const planChangeStatuses = new Set([
-	'payment_failed', 'failed', 'requires_payment_method', 'payment_pending', 'requires_action',
-	'downgrade_scheduled', 'scheduled', 'unchanged', 'upgraded', 'applied',
+const planChangeTimings = new Map<string, PlanChangePreview['timing'] | null>([
+	['payment_failed', null],
+	['failed', null],
+	['requires_payment_method', null],
+	['payment_pending', null],
+	['requires_action', null],
+	['downgrade_scheduled', 'next_renewal'],
+	['scheduled', 'next_renewal'],
+	['unchanged', 'unchanged'],
+	['upgraded', 'immediate'],
+	['applied', 'immediate'],
 ]);
 
 /** Validate a server outcome before discarding the recovery attempt. */
 export function parsePlanChangeOutcome(value: unknown): PlanChangeOutcome {
-	if (value && typeof value === 'object' && 'status' in value &&
-		typeof value.status === 'string' && planChangeStatuses.has(value.status)) {
+	if (value && typeof value === 'object' && 'status' in value && typeof value.status === 'string') {
 		const result = value as PlanChangeOutcome;
-		if ((result.clientSecret == null || typeof result.clientSecret === 'string') &&
-			(result.stripePublishableKey === undefined || typeof result.stripePublishableKey === 'string')) {
-			return result;
-		}
+		const expectedTiming = planChangeTimings.get(result.status);
+		const { timing, clientSecret, stripePublishableKey } = result;
+		const validTiming = timing === undefined ||
+			((timing === 'immediate' || timing === 'next_renewal' || timing === 'unchanged') &&
+				(expectedTiming === null || timing === expectedTiming));
+		const validCredentials = (clientSecret == null || typeof clientSecret === 'string') &&
+			(stripePublishableKey === undefined || typeof stripePublishableKey === 'string');
+		const canAuthenticate = result.status !== 'requires_action' ||
+			(typeof clientSecret === 'string' && clientSecret.trim() &&
+				typeof stripePublishableKey === 'string' && stripePublishableKey.trim());
+		if (expectedTiming !== undefined && validTiming && validCredentials && canAuthenticate) return result;
 	}
 	throw new Error('The server returned an invalid plan change result. Try again.');
 }

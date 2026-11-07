@@ -282,15 +282,16 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 			let authenticated = Boolean(paymentToFinish);
 			let result = await onUpgrade(priceId, id, expectedPriceId);
 			if (!mounted.current) return;
-			if (!paymentToFinish && result?.status === 'requires_action' && result.clientSecret && result.stripePublishableKey) {
-				const stripe = await loadStripe(result.stripePublishableKey);
+			const paymentAction = !paymentToFinish && result?.status === 'requires_action' ? parsePlanChangeOutcome(result) : null;
+			if (paymentAction?.clientSecret && paymentAction.stripePublishableKey) {
+				const stripe = await loadStripe(paymentAction.stripePublishableKey);
 				if (!mounted.current) return;
 				if (!stripe) throw new Error('Payment authentication could not be loaded. Try again.');
 				if (paymentSelection.current !== initialSelection) {
 					throw new Error('The subscription or connection changed. Review the plan change before trying again.');
 				}
-				result.assertPaymentScope?.();
-				const confirmation = await stripe.confirmCardPayment(result.clientSecret);
+				paymentAction.assertPaymentScope?.();
+				const confirmation = await stripe.confirmCardPayment(paymentAction.clientSecret);
 				if (!mounted.current) return;
 				if (confirmation.error) throw new Error(confirmation.error.message ?? 'Payment authentication failed.');
 				if (confirmation.paymentIntent?.status === 'succeeded') {
@@ -300,7 +301,11 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 				}
 			}
 			if (!mounted.current) return;
-			const outcome = planChangeCompletion(authenticated ? parsePlanChangeOutcome(result) : result);
+			const validated = authenticated ? parsePlanChangeOutcome(result) : result;
+			if (authenticated && validated?.status === 'requires_action') {
+				throw new Error('Payment is still awaiting confirmation. Try finishing the plan change again.');
+			}
+			const outcome = planChangeCompletion(validated);
 			setPaymentToFinish(null);
 			setCompletion(outcome);
 			if (!outcome.pending) closeTimer.current = setTimeout(onClose, 1500);
