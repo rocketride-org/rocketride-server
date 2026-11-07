@@ -85,6 +85,9 @@ interface IAppBuilderClient {
 	deploy: { history(projectId: string, options?: { page?: number; pageSize?: number }): Promise<unknown> };
 }
 
+/** Longest wait for the developer_status lookup (matches the New App wizard's). */
+const DEVELOPER_STATUS_TIMEOUT_MS = 10_000;
+
 /** Inputs fixed per mounted App Builder surface. */
 export interface IBusAppBuilderHostOptions {
 	/** The realm's ConnectionManager (or any structural equivalent). */
@@ -190,7 +193,9 @@ export function createBusAppBuilderHost(o: IBusAppBuilderHostOptions): Partial<I
 				}
 			: undefined,
 		getDeveloperId: async () => {
-			const res = await client().developerStatus();
+			// Bounded like the New App wizard's lookup: a silent server hides the
+			// banner (the caller's catch) instead of holding the request open.
+			const res = await client().developerStatus({ timeout: DEVELOPER_STATUS_TIMEOUT_MS });
 			return res?.developerId ?? '';
 		},
 		registerDeveloper: async (developerId) => {
