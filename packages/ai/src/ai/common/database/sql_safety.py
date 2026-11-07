@@ -79,10 +79,19 @@ _WRITING_CLAUSE = re.compile(
 # Session-scoped lock functions and MySQL user-variable assignment change state of the
 # session, not of one transaction, so a rollback does not undo them and the pooled
 # connection keeps them. `pg_advisory_xact_lock` is transaction-scoped and stays allowed.
+# PostgreSQL folds a quoted identifier to lower case, so a quoted pg_advisory_lock name
+# is a call; masking blanks the name before the pattern below can see it, so the quoted
+# form is checked on the raw text. A quoted name without a following `(` is a string, not
+# a call, which keeps a literal that names the function out of the rule.
+_QUOTED_CALL = re.compile(r'"([^"]*)"\s*\(')
+_SESSION_FUNCTION_NAMES = frozenset(
+    {'pg_advisory_lock', 'pg_advisory_lock_shared', 'pg_try_advisory_lock', 'pg_try_advisory_lock_shared'}
+)
+
 _SESSION_STATE_CLAUSE = re.compile(
     r'\bpg_(?:try_)?advisory_lock(?:_shared)?\s*\('
     r'|\bget_lock\s*\('
-    r'|@[a-z0-9_$]+\s*:=',
+    r'|@\s*(?:`[^`]*`|\x22[^\x22]*\x22|\x27[^\x27]*\x27|[a-z0-9_$]+(?:\.[a-z0-9_$]+)*)\s*:=',
     re.IGNORECASE,
 )
 
@@ -305,6 +314,18 @@ def _is_read_shaped(masked: str | None) -> bool:
     )
 
 
+def _quoted_session_call(sql: str) -> bool:
+    """True when a quoted identifier PostgreSQL folds to a session-lock function is called.
+
+    Args:
+        sql: The generated SQL, unmasked.
+
+    Returns:
+        Whether a quoted ``pg_advisory_lock`` family name is used as a function.
+    """
+    return any(match.group(1).strip().lower() in _SESSION_FUNCTION_NAMES for match in _QUOTED_CALL.finditer(sql))
+
+
 def is_sql_safe(sql: str) -> bool:
     """Return False unless the SQL is one statement shaped like a read: ``SELECT``, optionally behind ``EXPLAIN``.
 
@@ -331,4 +352,5 @@ def is_sql_safe(sql: str) -> bool:
         _is_read_shaped(_mask_postgres(sql, backslash_strings=False))
         and _is_read_shaped(_mask_postgres(sql, backslash_strings=True))
         and _is_read_shaped(_mask_mysql(sql))
+        and not _quoted_session_call(sql)
     )

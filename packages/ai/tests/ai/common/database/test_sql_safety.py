@@ -406,3 +406,41 @@ def test_session_scoped_state_is_rejected(sql):
 def test_transaction_scoped_lock_and_variable_reads_still_pass(sql):
     """The transaction-scoped lock ends with the rollback, and reading a variable sets nothing."""
     assert is_sql_safe(sql) is True
+
+
+@pytest.mark.parametrize(
+    'sql',
+    [
+        'SELECT "pg_advisory_lock"(42)',
+        'SELECT "PG_ADVISORY_LOCK"(42)',
+        'SELECT "pg_try_advisory_lock_shared"(42)',
+    ],
+)
+def test_a_quoted_lock_function_name_is_rejected(sql):
+    """PostgreSQL folds a quoted identifier to lower case, so quoting does not make it another function."""
+    assert is_sql_safe(sql) is False
+
+
+@pytest.mark.parametrize(
+    'sql',
+    [
+        'SELECT @x.y := 1',
+        "SELECT @'my-var' := 1",
+        'SELECT @`my-var` := 1',
+    ],
+)
+def test_every_mysql_user_variable_name_form_is_rejected(sql):
+    """MySQL accepts dotted and quoted variable names; all of them set session state."""
+    assert is_sql_safe(sql) is False
+
+
+@pytest.mark.parametrize(
+    'sql',
+    [
+        "SELECT 'pg_advisory_lock(42)'",
+        'SELECT "plain identifier" FROM t',
+    ],
+)
+def test_a_literal_or_identifier_that_names_the_function_still_passes(sql):
+    """Only a quoted name used as a call is refused; a string or a plain identifier is not."""
+    assert is_sql_safe(sql) is True
