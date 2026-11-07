@@ -126,4 +126,7 @@ bool isOnRemovableDrive(const Path &path) noexcept {
     return info.value();
 }
 
+// Windows has no kernel pseudo file systems exposed as ordinary files.
+bool isOnPseudoFileSystem(uint64_t) noexcept { return false; }
+
 }  // namespace ap::file
