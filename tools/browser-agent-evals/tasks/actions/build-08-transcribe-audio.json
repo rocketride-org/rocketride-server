@@ -1,5 +1,6 @@
 {
 	"id": "build-08-transcribe-audio",
+	"level": 3,
 	"about": "Builds a pipeline that turns an uploaded meeting recording into a text transcript.",
 	"prompt": "Make me a pipeline, meeting-transcript, where I upload an audio recording of a meeting and get the transcript back as text.",
 	"files": [],

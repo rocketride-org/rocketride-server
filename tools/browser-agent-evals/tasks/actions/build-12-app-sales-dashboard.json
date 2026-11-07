@@ -1,5 +1,6 @@
 {
 	"id": "build-12-app-sales-dashboard",
+	"level": 3,
 	"about": "Creates a dashboard app from the Dashboard template with three fixed cards.",
 	"prompt": "Make a dashboard app called sales (display name Sales) from the Dashboard template. Three cards: Revenue $120,400, Orders 342, Refunds 4. Subtitle \"This month\". Keep the bar chart as it is.",
 	"files": [],

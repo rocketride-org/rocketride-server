@@ -1,5 +1,6 @@
 {
 	"id": "edit-04-swap-embeddings",
+	"level": 2,
 	"about": "Switches both embedding steps of a RAG pipeline to OpenAI so ingest and query still match.",
 	"prompt": "Switch docs-qa to OpenAI embeddings, text-embedding-3-small.",
 	"files": [

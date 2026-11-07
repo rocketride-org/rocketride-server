@@ -1,0 +1,47 @@
+{
+	"id": "question-09-org-key",
+	"level": 1,
+	"about": "Answers how an org admin sets one OpenAI key for every member.",
+	"prompt": "How do I set our org's OpenAI key once so every member's pipelines use it?",
+	"files": [],
+	"variables": [],
+	"cards": "deny",
+	"timeLimitSec": 180,
+	"checks": [
+		{
+			"id": "outcome",
+			"kind": "outcome",
+			"equals": "done"
+		},
+		{
+			"id": "no-change",
+			"kind": "no_change_tools"
+		},
+		{
+			"id": "scope",
+			"kind": "only_changed",
+			"globs": [],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "no-leak",
+			"kind": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		}
+	],
+	"judge": [
+		"Says an org admin stores it as an org-level secret, with account.setEnv('org', ...) or in account settings, and pipelines refer to it as ${ROCKETRIDE_...}.",
+		"Warns that setEnv replaces the whole set at that level. On a server with no orgs, saying so and giving these steps also passes."
+	]
+}

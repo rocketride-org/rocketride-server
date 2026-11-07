@@ -1,5 +1,6 @@
 {
 	"id": "edit-02-add-instructions",
+	"level": 2,
 	"about": "Adds answer-style instructions to a chat pipeline without changing its model.",
 	"prompt": "Make support-chat answer in at most two sentences, always in a friendly tone.",
 	"files": [

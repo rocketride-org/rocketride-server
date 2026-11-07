@@ -1,5 +1,6 @@
 {
 	"id": "build-05-translate-spanish",
+	"level": 3,
 	"about": "Builds a chat pipeline that only translates to Spanish, even when the input is a question.",
 	"prompt": "Set up a pipeline translate-es: I type English in a chat and get the Spanish translation back, using an OpenAI model. It should only translate. If I type a question it should translate the question, not answer it.",
 	"files": [],

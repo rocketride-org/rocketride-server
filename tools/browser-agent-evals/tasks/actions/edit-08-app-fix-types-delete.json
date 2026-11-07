@@ -1,5 +1,6 @@
 {
 	"id": "edit-08-app-fix-types-delete",
+	"level": 2,
 	"about": "Fixes an app's type errors and deletes an unused file without changing what the app does.",
 	"prompt": "The notes app shows type errors. LegacyList.tsx isn't used anywhere any more, so delete it, and fix whatever else is wrong without changing what the app does.",
 	"files": [

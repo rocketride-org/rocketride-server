@@ -1,5 +1,6 @@
 {
 	"id": "build-01-chat-claude",
+	"level": 3,
 	"about": "Builds a simple chat pipeline on Claude Sonnet 4.6 that answers when run.",
 	"prompt": "Build a pipeline called support-chat where I can chat with Claude Sonnet 4.6. My Anthropic key is already in Variables.",
 	"files": [],

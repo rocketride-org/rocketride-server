@@ -1,0 +1,47 @@
+{
+	"id": "question-02-rocketride-folder",
+	"level": 1,
+	"about": "Answers what the .rocketride/ folder holds and that none of it is for editing.",
+	"prompt": "What is the .rocketride/ folder in my workspace, and which parts may I edit?",
+	"files": [],
+	"variables": [],
+	"cards": "deny",
+	"timeLimitSec": 180,
+	"checks": [
+		{
+			"id": "outcome",
+			"kind": "outcome",
+			"equals": "done"
+		},
+		{
+			"id": "no-change",
+			"kind": "no_change_tools"
+		},
+		{
+			"id": "scope",
+			"kind": "only_changed",
+			"globs": [],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "no-leak",
+			"kind": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		}
+	],
+	"judge": [
+		"Says the folder holds the docs and, in a local checkout, the catalog, schemas and vendored shell package.",
+		"Says the platform maintains it, so all of it is read-only and none of it is for editing."
+	]
+}

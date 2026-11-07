@@ -1,5 +1,6 @@
 {
 	"id": "build-13-app-ask-claude",
+	"level": 3,
 	"about": "Creates an app that ships its own chat pipeline and shows Claude's answer.",
 	"prompt": "Build an app called askclaude (display name Ask Claude): a text box and an Ask button. The question goes to Claude Sonnet 4.6 through a pipeline that ships inside the app, and the answer shows under the box. My Anthropic key is in Variables.",
 	"files": [],

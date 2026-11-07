@@ -1,0 +1,154 @@
+{
+	"id": "build-15-echo-minimal",
+	"level": 3,
+	"about": "Builds the smallest working pipeline, with the field order and source config the docs require.",
+	"prompt": "Make me the simplest pipeline you can, called echo: I post text to a webhook and get exactly the same text back. No AI steps.",
+	"files": [],
+	"variables": [],
+	"cards": "approve",
+	"timeLimitSec": 600,
+	"checks": [
+		{
+			"id": "outcome",
+			"kind": "outcome",
+			"equals": "done"
+		},
+		{
+			"id": "scope",
+			"kind": "only_changed",
+			"globs": [
+				"pipelines/echo.pipe"
+			],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "done-means-checked",
+			"kind": "done_implies_checks_pass",
+			"blocker": true,
+			"blocker_name": "done with a failing check"
+		},
+		{
+			"id": "no-leak",
+			"kind": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		},
+		{
+			"id": "parses",
+			"kind": "json_parses",
+			"path": "pipelines/echo.pipe"
+		},
+		{
+			"id": "static-valid",
+			"kind": "pipe_static_valid",
+			"path": "pipelines/echo.pipe"
+		},
+		{
+			"id": "engine-valid",
+			"kind": "engine_validate",
+			"path": "pipelines/echo.pipe"
+		},
+		{
+			"id": "file",
+			"kind": "glob_count",
+			"glob": "pipelines/*.pipe",
+			"n": 1
+		},
+		{
+			"id": "exists",
+			"kind": "file_exists",
+			"path": "pipelines/echo.pipe"
+		},
+		{
+			"id": "providers",
+			"kind": "providers_present",
+			"path": "pipelines/echo.pipe",
+			"all": [
+				"webhook",
+				"response_text"
+			]
+		},
+		{
+			"id": "no-ai",
+			"kind": "providers_absent",
+			"path": "pipelines/echo.pipe",
+			"providers": [
+				"llm_*",
+				"agent_*",
+				"embedding_*",
+				"image_vision_*"
+			]
+		},
+		{
+			"id": "wiring",
+			"kind": "edge",
+			"path": "pipelines/echo.pipe",
+			"from": "webhook",
+			"to": "response_text",
+			"lane": "text"
+		},
+		{
+			"id": "components-first",
+			"kind": "file_matches",
+			"path": "pipelines/echo.pipe",
+			"regex": "^\\s*\\{\\s*\"components\"\\s*:"
+		},
+		{
+			"id": "source-mode",
+			"kind": "config_value",
+			"path": "pipelines/echo.pipe",
+			"provider": "webhook",
+			"pointer": "mode",
+			"equals": "Source"
+		},
+		{
+			"id": "source-type",
+			"kind": "config_value",
+			"path": "pipelines/echo.pipe",
+			"provider": "webhook",
+			"pointer": "type",
+			"equals": "webhook"
+		},
+		{
+			"id": "source-form",
+			"kind": "config_value",
+			"path": "pipelines/echo.pipe",
+			"provider": "webhook",
+			"pointer": "hideForm",
+			"equals": true
+		},
+		{
+			"id": "source-parameters",
+			"kind": "config_value",
+			"path": "pipelines/echo.pipe",
+			"provider": "webhook",
+			"pointer": "parameters",
+			"equals": {}
+		},
+		{
+			"id": "runs",
+			"kind": "run_output",
+			"path": "pipelines/echo.pipe",
+			"send": {
+				"webhook": {
+					"text": "echo check 5521: the quick brown fox",
+					"mimetype": "text/plain"
+				}
+			},
+			"expect": {
+				"text_match": "echo check 5521"
+			}
+		}
+	],
+	"judge": []
+}

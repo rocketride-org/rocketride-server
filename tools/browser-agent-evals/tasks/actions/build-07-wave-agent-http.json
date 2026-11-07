@@ -1,5 +1,6 @@
 {
 	"id": "build-07-wave-agent-http",
+	"level": 3,
 	"about": "Builds a Wave chat agent on Claude with memory and an HTTP tool that can fetch a web page.",
 	"prompt": "Build web-agent: a chat agent using RocketRide Wave with Claude as its model. It should be able to fetch web pages with an HTTP request tool and remember earlier messages in the conversation.",
 	"files": [],

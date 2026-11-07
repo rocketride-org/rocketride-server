@@ -1,0 +1,65 @@
+{
+	"id": "question-06-deploy-schedule",
+	"level": 1,
+	"about": "Answers how to deploy a pipeline, give it a Monday, Wednesday and Friday run window and pause it, all of which need a team.",
+	"prompt": "How do I get a pipeline running on the server so it works without my machine, on a schedule of Monday, Wednesday and Friday from 08:00 to 15:00? And how do I pause that over the holidays without losing the schedule?",
+	"files": [],
+	"variables": [],
+	"cards": "deny",
+	"timeLimitSec": 180,
+	"checks": [
+		{
+			"id": "outcome",
+			"kind": "outcome",
+			"equals": "done"
+		},
+		{
+			"id": "no-change",
+			"kind": "no_change_tools"
+		},
+		{
+			"id": "scope",
+			"kind": "only_changed",
+			"globs": [],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "no-leak",
+			"kind": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		},
+		{
+			"id": "names-deploy-add",
+			"kind": "answer_matches",
+			"regex": "\\bdeploy\\.add\\b",
+			"note": "q-h1: the add method of DeployApi in packages/client-typescript/src/client/deploy.ts, shown as deploy.add. Still there at 31afc048e."
+		},
+		{
+			"id": "names-pause",
+			"kind": "answer_matches",
+			"regex": "\\bpauseSchedule\\b",
+			"note": "q-h6: a DeployApi method in deploy.ts. Still there at 31afc048e."
+		},
+		{
+			"id": "names-resume",
+			"kind": "answer_matches",
+			"regex": "\\bresumeSchedule\\b",
+			"note": "q-h6: a DeployApi method in deploy.ts. Still there at 31afc048e."
+		}
+	],
+	"judge": [
+		"Uses deploy.setSchedule with cron 0 8 * * 1,3,5 and a ttl of 25200 seconds.",
+		"Says the ttl counts from the last data request, so 15:00 is not a fixed stop."
+	]
+}

@@ -1,5 +1,6 @@
 {
 	"id": "edit-06-remove-step",
+	"level": 2,
 	"about": "Removes one step from a pipeline and rewires the rest.",
 	"prompt": "Take the anonymize step out of notes-digest. Keep everything else the same.",
 	"files": [

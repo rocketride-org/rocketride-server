@@ -1,0 +1,48 @@
+{
+	"id": "question-04-schema-check",
+	"level": 1,
+	"about": "Answers how to pull invoice fields as JSON and which node checks them against a JSON schema, which needs a Landing AI key.",
+	"prompt": "How do I pull structured JSON out of invoices and check it against our JSON schema?",
+	"files": [],
+	"variables": [],
+	"cards": "deny",
+	"timeLimitSec": 180,
+	"checks": [
+		{
+			"id": "outcome",
+			"kind": "outcome",
+			"equals": "done"
+		},
+		{
+			"id": "no-change",
+			"kind": "no_change_tools"
+		},
+		{
+			"id": "scope",
+			"kind": "only_changed",
+			"globs": [],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "no-leak",
+			"kind": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		}
+	],
+	"judge": [
+		"Uses extract_data after parse, with an llm control connection.",
+		"Returns the extracted JSON through response_answers.",
+		"Says schema_validate only checks financial fact records, not a general JSON schema, and that landing_ai_extract with strict: true is the node that checks against a JSON schema."
+	]
+}

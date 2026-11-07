@@ -1,0 +1,114 @@
+{
+	"id": "explain-01-app-files",
+	"level": 1,
+	"about": "Explains each file of the user's app without changing anything.",
+	"prompt": "What is each file in my daybook app for?",
+	"files": [
+		{
+			"path": "apps/daybook-ui/.gitignore",
+			"from": "fixtures/daybook-app/.gitignore"
+		},
+		{
+			"path": "apps/daybook-ui/README.md",
+			"from": "fixtures/daybook-app/README.md"
+		},
+		{
+			"path": "apps/daybook-ui/daybook.rrapp",
+			"from": "fixtures/daybook-app/daybook.rrapp"
+		},
+		{
+			"path": "apps/daybook-ui/icon.svg",
+			"from": "fixtures/daybook-app/icon.svg"
+		},
+		{
+			"path": "apps/daybook-ui/package.json",
+			"from": "fixtures/daybook-app/package.json"
+		},
+		{
+			"path": "apps/daybook-ui/rsbuild.config.mts",
+			"from": "fixtures/daybook-app/rsbuild.config.mts"
+		},
+		{
+			"path": "apps/daybook-ui/src/App.tsx",
+			"from": "fixtures/daybook-app/src/App.tsx"
+		},
+		{
+			"path": "apps/daybook-ui/src/AppDescriptor.ts",
+			"from": "fixtures/daybook-app/src/AppDescriptor.ts"
+		},
+		{
+			"path": "apps/daybook-ui/src/global.d.ts",
+			"from": "fixtures/daybook-app/src/global.d.ts"
+		},
+		{
+			"path": "apps/daybook-ui/src/index.ts",
+			"from": "fixtures/daybook-app/src/index.ts"
+		},
+		{
+			"path": "apps/daybook-ui/tsconfig.json",
+			"from": "fixtures/daybook-app/tsconfig.json"
+		}
+	],
+	"variables": [],
+	"cards": "deny",
+	"timeLimitSec": 180,
+	"checks": [
+		{
+			"id": "outcome",
+			"kind": "outcome",
+			"equals": "done"
+		},
+		{
+			"id": "no-change",
+			"kind": "no_change_tools"
+		},
+		{
+			"id": "scope",
+			"kind": "only_changed",
+			"globs": [],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "no-leak",
+			"kind": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		},
+		{
+			"id": "names-files",
+			"kind": "answer_names",
+			"names": [
+				".gitignore",
+				"daybook.rrapp",
+				"icon.svg",
+				"package.json",
+				"README.md",
+				"rsbuild.config.mts",
+				"tsconfig.json",
+				"App.tsx",
+				"AppDescriptor.ts",
+				"global.d.ts",
+				"index.ts"
+			],
+			"at_least": 10,
+			"match": "literal text, exact case",
+			"derive": "Every file in the starting app, by name. The draft took the same 11 from renderTemplate in packages/client-typescript/src/app-scaffold/index.ts, and the starting app has them with the .rrapp named daybook.rrapp. At least 10 is the draft's 0.9 share."
+		}
+	],
+	"judge": [
+		"Says src/index.ts is the async boundary: it only loads AppDescriptor with import(), so shared modules load first.",
+		"Says package.json holds the app's identity in appManifest as well as its build setup.",
+		"Says src/global.d.ts is what lets the app import .pipe files.",
+		"Says daybook.rrapp is an empty file that opens the App Builder."
+	]
+}

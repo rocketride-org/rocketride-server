@@ -1,0 +1,55 @@
+{
+	"id": "question-08-publish-version",
+	"level": 1,
+	"about": "Answers why a deployed version isn't live, how publishing fixes it and how to see where each version is live.",
+	"prompt": "I deployed v3 of my app but my team still sees v2. Why, and how do I get v3 to them? And how can I see where each version of my app is live?",
+	"files": [],
+	"variables": [],
+	"cards": "deny",
+	"timeLimitSec": 180,
+	"checks": [
+		{
+			"id": "outcome",
+			"kind": "outcome",
+			"equals": "done"
+		},
+		{
+			"id": "no-change",
+			"kind": "no_change_tools"
+		},
+		{
+			"id": "scope",
+			"kind": "only_changed",
+			"globs": [],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "no-leak",
+			"kind": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		},
+		{
+			"id": "names-where-app",
+			"kind": "answer_matches",
+			"regex": "\\bwhereApp\\b",
+			"note": "q-n12: the whereApp method of the client in packages/client-typescript/src/client/client.ts. Still there at 31afc048e."
+		}
+	],
+	"judge": [
+		"Says deploying only adds a version and changes nothing users see, and publishing binds a version to an audience.",
+		"The fix is to publish v3 to that rung, and whereApp(appId) shows what is live.",
+		"Uses publishApp(appId, version, '@team/<name>') or the Publish to... row in the App Builder.",
+		"Says the version must be deployed and built first, and publishing moves a pointer without rebuilding. On a server with no teams, saying so and giving these steps also passes."
+	]
+}

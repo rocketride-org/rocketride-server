@@ -1,0 +1,132 @@
+{
+	"id": "edit-09-redact-before-store",
+	"level": 2,
+	"about": "Adds PII masking to a RAG pipeline's ingest path, before the documents are split, embedded and stored.",
+	"prompt": "Make docs-qa mask names, email addresses and phone numbers in the documents before anything gets stored.",
+	"files": [
+		{
+			"path": "pipelines/docs-qa.pipe",
+			"from": "fixtures/docs-qa-minilm.pipe"
+		}
+	],
+	"variables": [
+		"ROCKETRIDE_OPENAI_KEY",
+		"ROCKETRIDE_QDRANT_HOST"
+	],
+	"cards": "approve",
+	"timeLimitSec": 300,
+	"checks": [
+		{
+			"id": "outcome",
+			"kind": "outcome",
+			"equals": "done"
+		},
+		{
+			"id": "scope",
+			"kind": "only_changed",
+			"globs": [
+				"pipelines/docs-qa.pipe"
+			],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "done-means-checked",
+			"kind": "done_implies_checks_pass",
+			"blocker": true,
+			"blocker_name": "done with a failing check"
+		},
+		{
+			"id": "no-leak",
+			"kind": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		},
+		{
+			"id": "parses",
+			"kind": "json_parses",
+			"path": "pipelines/docs-qa.pipe"
+		},
+		{
+			"id": "static-valid",
+			"kind": "pipe_static_valid",
+			"path": "pipelines/docs-qa.pipe"
+		},
+		{
+			"id": "engine-valid",
+			"kind": "engine_validate",
+			"path": "pipelines/docs-qa.pipe"
+		},
+		{
+			"id": "placeholders",
+			"kind": "secrets_are_placeholders",
+			"path": "pipelines/docs-qa.pipe"
+		},
+		{
+			"id": "project-id",
+			"kind": "project_id_unchanged",
+			"path": "pipelines/docs-qa.pipe",
+			"from": "pipelines/docs-qa.pipe"
+		},
+		{
+			"id": "providers",
+			"kind": "providers_present",
+			"path": "pipelines/docs-qa.pipe",
+			"all": [
+				"anonymize_text",
+				"preprocessor_langchain",
+				"qdrant",
+				"llm_openai"
+			]
+		},
+		{
+			"id": "masks-after-parse",
+			"kind": "edge",
+			"path": "pipelines/docs-qa.pipe",
+			"from": "parse",
+			"to": "anonymize_text",
+			"lane": "text"
+		},
+		{
+			"id": "masks-before-split",
+			"kind": "edge",
+			"path": "pipelines/docs-qa.pipe",
+			"from": "anonymize_text",
+			"to": "preprocessor_langchain",
+			"lane": "text"
+		},
+		{
+			"id": "embeddings-kept",
+			"kind": "count",
+			"path": "pipelines/docs-qa.pipe",
+			"provider": "embedding_transformer",
+			"n": 2
+		},
+		{
+			"id": "ingest-path",
+			"kind": "reaches",
+			"path": "pipelines/docs-qa.pipe",
+			"from": "webhook",
+			"to": "qdrant"
+		},
+		{
+			"id": "query-path",
+			"kind": "reaches",
+			"path": "pipelines/docs-qa.pipe",
+			"from": "chat",
+			"to": "response*"
+		}
+	],
+	"judge": [
+		"No path from the webhook reaches qdrant without passing through anonymize_text."
+	]
+}

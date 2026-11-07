@@ -1,5 +1,6 @@
 {
 	"id": "ask-03-where-is-the-data",
+	"level": 1,
 	"about": "Asks where the customer records live before building a pipeline.",
 	"prompt": "Make me a pipeline that pulls our customer records and answers questions about them.",
 	"files": [],

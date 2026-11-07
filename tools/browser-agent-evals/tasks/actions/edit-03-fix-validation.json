@@ -1,5 +1,6 @@
 {
 	"id": "edit-03-fix-validation",
+	"level": 2,
 	"about": "Fixes a pipeline with two validation faults without changing what it does.",
 	"prompt": "faq-bot fails validation. Fix it without changing what it does.",
 	"files": [

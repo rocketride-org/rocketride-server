@@ -1,0 +1,46 @@
+{
+	"id": "question-10-plan-usage",
+	"level": 1,
+	"about": "Answers how to see the plan and usage, which need billing.",
+	"prompt": "How do I see my current plan and usage?",
+	"files": [],
+	"variables": [],
+	"cards": "deny",
+	"timeLimitSec": 180,
+	"checks": [
+		{
+			"id": "outcome",
+			"kind": "outcome",
+			"equals": "done"
+		},
+		{
+			"id": "no-change",
+			"kind": "no_change_tools"
+		},
+		{
+			"id": "scope",
+			"kind": "only_changed",
+			"globs": [],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "no-leak",
+			"kind": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		}
+	],
+	"judge": [
+		"Names account.getOrg() for the plan and billing.getUsageByUser or billing.getUsageByTeam for usage. On a server with no billing, saying so and giving these calls also passes."
+	]
+}

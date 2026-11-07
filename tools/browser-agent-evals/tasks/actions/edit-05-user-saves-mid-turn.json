@@ -1,5 +1,6 @@
 {
 	"id": "edit-05-user-saves-mid-turn",
+	"level": 2,
 	"about": "Keeps the user's own save when it lands while the agent's write is in flight.",
 	"prompt": "Switch translate-bot to Claude Sonnet 4.6.",
 	"files": [

@@ -1,5 +1,6 @@
 {
 	"id": "build-03-rag-chroma",
+	"level": 3,
 	"about": "Builds a document Q&A pipeline that stores chunks in Chroma and answers from them with Claude.",
 	"prompt": "Build a pipeline called docs-qa for our employee handbook. I upload documents with a dropper; they get chunked, embedded with OpenAI text-embedding-3-small and stored in a Chroma collection called handbook. The Chroma host and port are in Variables as ROCKETRIDE_CHROMA_HOST and ROCKETRIDE_CHROMA_PORT. Then I ask questions in a chat and Claude answers from the stored chunks.",
 	"files": [],

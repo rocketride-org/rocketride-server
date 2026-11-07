@@ -1,5 +1,6 @@
 {
 	"id": "build-04-extract-invoice",
+	"level": 3,
 	"about": "Builds a pipeline that pulls four typed fields out of an invoice with OpenAI.",
 	"prompt": "Create a pipeline invoice-fields. I send an invoice file (PDF or plain text) to a webhook and get back four fields: invoice_number, vendor, total as a number and due_date as a date. Use OpenAI to do the extraction.",
 	"files": [],

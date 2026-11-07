@@ -1,5 +1,6 @@
 {
 	"id": "edit-07-app-dirty-buffer",
+	"level": 2,
 	"about": "Edits an app file that has unsaved user changes without losing them.",
 	"prompt": "In daybook, change the heading to \"My Daybook\" and add a \"Clear all\" button next to \"Add entry\" that removes every entry.",
 	"files": [

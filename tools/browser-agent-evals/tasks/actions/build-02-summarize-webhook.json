@@ -1,5 +1,6 @@
 {
 	"id": "build-02-summarize-webhook",
+	"level": 3,
 	"about": "Builds a webhook pipeline that returns a short OpenAI summary of posted text.",
 	"prompt": "Make a pipeline named summarize-text. I post plain text to it over a webhook and get back a short summary, about 80 words. Use OpenAI for the model.",
 	"files": [],

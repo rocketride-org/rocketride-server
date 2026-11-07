@@ -1,5 +1,6 @@
 {
 	"id": "rename-keeps-project",
+	"level": 2,
 	"about": "Renames a pipeline file and keeps its project id.",
 	"prompt": "Rename the notes-intake pipeline to meeting-notes.",
 	"files": [

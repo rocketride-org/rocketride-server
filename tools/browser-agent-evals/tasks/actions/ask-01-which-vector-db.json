@@ -1,5 +1,6 @@
 {
 	"id": "ask-01-which-vector-db",
+	"level": 1,
 	"about": "Asks which vector database the user means before building anything.",
 	"prompt": "Build a pipeline that stores our company documents in our vector database so we can search them later.",
 	"files": [],

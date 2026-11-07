@@ -1,5 +1,6 @@
 {
 	"id": "build-10-compare-two-models",
+	"level": 3,
 	"about": "Builds one pipeline that sends a chat question to both GPT and Claude and returns both answers.",
 	"prompt": "Create compare-answers: one chat question goes to both an OpenAI GPT model and Claude, and I get both answers back together.",
 	"files": [],

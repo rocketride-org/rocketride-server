@@ -1,0 +1,89 @@
+{
+	"id": "question-07-stock-components",
+	"level": 1,
+	"about": "Answers which stock UI components exist and that the gallery is where to browse them.",
+	"prompt": "What stock components exist, and where do I browse them?",
+	"files": [],
+	"variables": [],
+	"cards": "deny",
+	"timeLimitSec": 180,
+	"checks": [
+		{
+			"id": "outcome",
+			"kind": "outcome",
+			"equals": "done"
+		},
+		{
+			"id": "no-change",
+			"kind": "no_change_tools"
+		},
+		{
+			"id": "scope",
+			"kind": "only_changed",
+			"globs": [],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "no-leak",
+			"kind": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		},
+		{
+			"id": "names-components",
+			"kind": "answer_names",
+			"names": [
+				"Banner",
+				"Button",
+				"Card",
+				"ChatView",
+				"MarkdownRenderer",
+				"Chip",
+				"ChipAdd",
+				"ConfirmDialog",
+				"ConnectionCard",
+				"ContentHeader",
+				"DataGrid",
+				"CardDataGrid",
+				"DetailPanel",
+				"PanelTabBody",
+				"DropZone",
+				"EmptyState",
+				"FilterStrip",
+				"InputField",
+				"MiniCard",
+				"MiniContainer",
+				"Modal",
+				"SaveFileDialog",
+				"PopupRow",
+				"RocketRideMark",
+				"Section",
+				"LabelValue",
+				"StatusBadge",
+				"StatusDot",
+				"TabControl",
+				"TabPanel",
+				"ToggleGroup"
+			],
+			"at_least": 16,
+			"match": "token, exact case",
+			"derive": "Every ### heading under ## Content components in docs/agents/context/ROCKETRIDE_UI_COMPONENTS.md, split on / and +, leaving out DataGrid helpers. Rerun at 31afc048e, it gives the same 31 as the draft did at b91a11418. At least 16 is the draft's 0.5 share."
+		},
+		{
+			"id": "names-gallery",
+			"kind": "answer_matches",
+			"regex": "(?i)\\bgallery\\b"
+		}
+	],
+	"judge": []
+}

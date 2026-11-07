@@ -1,0 +1,60 @@
+{
+	"id": "question-03-source-nodes",
+	"level": 1,
+	"about": "Answers what a source node is and names the sources the catalog has.",
+	"prompt": "What's the difference between a source node and a processing node, and which sources exist?",
+	"files": [],
+	"variables": [],
+	"cards": "deny",
+	"timeLimitSec": 180,
+	"checks": [
+		{
+			"id": "outcome",
+			"kind": "outcome",
+			"equals": "done"
+		},
+		{
+			"id": "no-change",
+			"kind": "no_change_tools"
+		},
+		{
+			"id": "scope",
+			"kind": "only_changed",
+			"globs": [],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "no-leak",
+			"kind": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		},
+		{
+			"id": "names-sources",
+			"kind": "answer_names",
+			"names": [
+				"chat",
+				"discord",
+				"dropper",
+				"filestore_source",
+				"telegram",
+				"tools",
+				"webhook"
+			],
+			"at_least": 6,
+			"match": "token, any case",
+			"derive": "Every service in nodes/src/nodes/*/services*.json whose classType includes source, leaving out those with the internal or nosaas capability, named by its protocol without ://. Rerun at 31afc048e, it gives the same 7 as the draft did at b91a11418. At least 6 is the draft's 0.85 share. ROCKETRIDE_PIPELINES.md leaves out discord, so an answer from the docs alone names 6."
+		}
+	],
+	"judge": []
+}

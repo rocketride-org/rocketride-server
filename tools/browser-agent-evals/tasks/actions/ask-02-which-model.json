@@ -1,5 +1,6 @@
 {
 	"id": "ask-02-which-model",
+	"level": 1,
 	"about": "Asks which model \"the one we agreed on\" is instead of guessing.",
 	"prompt": "Switch support-chat to the model we agreed on in the meeting.",
 	"files": [

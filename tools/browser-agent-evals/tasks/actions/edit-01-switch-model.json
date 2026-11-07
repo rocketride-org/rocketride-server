@@ -1,5 +1,6 @@
 {
 	"id": "edit-01-switch-model",
+	"level": 2,
 	"about": "Switches a chat pipeline from GPT to Claude Haiku 4.5 and keeps it working.",
 	"prompt": "Switch support-chat from GPT to Claude Haiku 4.5. The Anthropic key is in Variables.",
 	"files": [

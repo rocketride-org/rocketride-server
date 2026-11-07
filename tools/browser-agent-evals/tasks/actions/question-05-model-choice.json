@@ -1,0 +1,47 @@
+{
+	"id": "question-05-model-choice",
+	"level": 1,
+	"about": "Answers which models suit quality, speed and cost, naming only profiles that exist.",
+	"prompt": "Which model should I use when I care most about quality? And which for speed, or for cost?",
+	"files": [],
+	"variables": [],
+	"cards": "deny",
+	"timeLimitSec": 180,
+	"checks": [
+		{
+			"id": "outcome",
+			"kind": "outcome",
+			"equals": "done"
+		},
+		{
+			"id": "no-change",
+			"kind": "no_change_tools"
+		},
+		{
+			"id": "scope",
+			"kind": "only_changed",
+			"globs": [],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "no-leak",
+			"kind": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		}
+	],
+	"judge": [
+		"Matches the guide's table: llm_openai or llm_anthropic for quality, llm_openai, llm_gemini or llm_qwen for speed, llm_mistral, llm_gemini or llm_qwen for cost.",
+		"Every profile or model it names is in that node's services.json under preconfig.profiles."
+	]
+}

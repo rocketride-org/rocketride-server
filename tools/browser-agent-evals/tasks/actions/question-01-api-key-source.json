@@ -1,0 +1,47 @@
+{
+	"id": "question-01-api-key-source",
+	"level": 1,
+	"about": "Answers where the user's API key comes from and how to keep keys out of git.",
+	"prompt": "Where does my API key come from, and how do I keep it out of git?",
+	"files": [],
+	"variables": [],
+	"cards": "deny",
+	"timeLimitSec": 180,
+	"checks": [
+		{
+			"id": "outcome",
+			"kind": "outcome",
+			"equals": "done"
+		},
+		{
+			"id": "no-change",
+			"kind": "no_change_tools"
+		},
+		{
+			"id": "scope",
+			"kind": "only_changed",
+			"globs": [],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "no-leak",
+			"kind": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		}
+	],
+	"judge": [
+		"Says a key comes from the platform: the workspace .env is filled in when you connect, or you mint one in Account, Keys.",
+		"Says .env stays gitignored and pipelines refer to keys as ${ROCKETRIDE_*} placeholders."
+	]
+}

@@ -1,5 +1,6 @@
 {
 	"id": "build-11-app-daybook",
+	"level": 3,
 	"about": "Creates a small journal app from the Blank template.",
 	"prompt": "Create an app called daybook (display name Daybook). It is a simple journal: a text box and an \"Add entry\" button, and below it the entries, newest first, each with the date and time it was added. It does not need to save entries between sessions.",
 	"files": [],

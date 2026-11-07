@@ -1,5 +1,6 @@
 {
 	"id": "build-14-app-unit-converter",
+	"level": 3,
 	"about": "Creates a kilometers and miles converter app and sets its store description.",
 	"prompt": "Create an app unitconv (display name Unit Converter) that converts kilometers to miles and back, with a swap button. Set its store description to \"Convert kilometers and miles\".",
 	"files": [],

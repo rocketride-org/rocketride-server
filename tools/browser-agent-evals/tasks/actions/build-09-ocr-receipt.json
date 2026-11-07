@@ -1,5 +1,6 @@
 {
 	"id": "build-09-ocr-receipt",
+	"level": 3,
 	"about": "Builds a local OCR pipeline that reads the printed text off a receipt photo.",
 	"prompt": "Build receipt-text: I upload a photo of a paper receipt and get the printed text back. Keep it local, no cloud vision models.",
 	"files": [],

@@ -1,5 +1,6 @@
 {
 	"id": "build-06-redact-pii",
+	"level": 3,
 	"about": "Builds a pipeline that masks names, emails and phone numbers without calling an outside API.",
 	"prompt": "I need a pipeline called redact-pii. I post text to a webhook and get the same text back with names, email addresses and phone numbers masked. It must not send the text to any outside API.",
 	"files": [],
