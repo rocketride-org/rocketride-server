@@ -365,13 +365,19 @@ test('handleStoredTokenFailure keeps the network latch when the probe answers 20
 });
 
 /** Stage browser globals for one test and restore them afterwards; the dev gate recomputes from the staged window. */
-async function withGlobals(globals: Record<string, unknown>, run: () => void | Promise<void>): Promise<void> {
+async function withGlobals(globals: Record<string, unknown>, run: () => void | Promise<void>, opts: { nodeEnv?: string } = {}): Promise<void> {
 	const originals = Object.keys(globals).map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)] as const);
 	for (const [key, value] of Object.entries(globals)) Object.defineProperty(globalThis, key, { configurable: true, value });
+	// The dev gate is a BUILD-TIME constant (NODE_ENV), not something a URL can
+	// switch on: stage the build under test instead of inheriting the runner's
+	// NODE_ENV, so the suite means the same under `NODE_ENV=production`.
+	const originalNodeEnv = process.env.NODE_ENV;
+	process.env.NODE_ENV = opts.nodeEnv ?? 'development';
 	resetDevGateForTests();
 	try {
 		await run();
 	} finally {
+		process.env.NODE_ENV = originalNodeEnv;
 		resetDevGateForTests();
 		for (const [key, original] of originals) {
 			if (original) Object.defineProperty(globalThis, key, original);
@@ -838,6 +844,7 @@ test('auth providers sign out by removing the stored token from localStorage onl
 });
 
 test('token methods use frame-local memory in embedded dev shells', () => {
+	const originalNodeEnv = process.env.NODE_ENV;
 	const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
 	const originalLocalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
 	const originalSessionStorage = Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage');
@@ -852,13 +859,14 @@ test('token methods use frame-local memory in embedded dev shells', () => {
 	// top-level browsing context, so it cannot isolate panels either). The
 	// parent shares this page's origin — the web App Builder flavor — which
 	// is the case where the /apps cookie prime must be suppressed. The gate
-	// cache is reset so it recomputes from this staged environment (the test
-	// runner builds with NODE_ENV=production, so the URL flag is the live
-	// path).
+	// cache is reset so it recomputes from this staged environment (the dev
+	// build is staged explicitly: the gate is a build-time constant).
 	Object.defineProperty(globalThis, 'window', {
 		configurable: true,
 		value: { self: {}, top: {}, parent: { location: { origin: 'https://cloud.test' } }, location: { search: '?rrdev=1', origin: 'https://cloud.test' } },
 	});
+	// The gate is a build-time constant: stage the dev build, whatever the runner's NODE_ENV.
+	process.env.NODE_ENV = 'development';
 	resetDevGateForTests();
 	Object.defineProperty(globalThis, 'localStorage', {
 		configurable: true,
@@ -900,6 +908,7 @@ test('token methods use frame-local memory in embedded dev shells', () => {
 		// injected session must not replace their bundle credentials.
 		assert.deepEqual(fetchCalls, []);
 	} finally {
+		process.env.NODE_ENV = originalNodeEnv;
 		resetDevGateForTests();
 		if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
 		else delete (globalThis as { window?: Window }).window;
@@ -913,6 +922,7 @@ test('token methods use frame-local memory in embedded dev shells', () => {
 });
 
 test('saveToken primes the /apps cookie in a CROSS-origin embedded preview', () => {
+	const originalNodeEnv = process.env.NODE_ENV;
 	const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
 	const originalFetch = Object.getOwnPropertyDescriptor(globalThis, 'fetch');
 	const fetchCalls: string[] = [];
@@ -930,6 +940,8 @@ test('saveToken primes the /apps cookie in a CROSS-origin embedded preview', () 
 		configurable: true,
 		value: { self: {}, top: {}, parent: hostileParent, location: { search: '?rrdev=1', origin: 'http://localhost:3013' } },
 	});
+	// The gate is a build-time constant: stage the dev build, whatever the runner's NODE_ENV.
+	process.env.NODE_ENV = 'development';
 	resetDevGateForTests();
 	Object.defineProperty(globalThis, 'fetch', {
 		configurable: true,
@@ -943,6 +955,7 @@ test('saveToken primes the /apps cookie in a CROSS-origin embedded preview', () 
 		assert.equal(manager.loadToken(), 'rr_proxy-token');
 		assert.deepEqual(fetchCalls, ['/apps/session']);
 	} finally {
+		process.env.NODE_ENV = originalNodeEnv;
 		resetDevGateForTests();
 		if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
 		else delete (globalThis as { window?: Window }).window;
@@ -987,6 +1000,7 @@ test('saveToken primes the /apps cookie for real tabs', () => {
 });
 
 test('initialize ignores cross-context token churn in embedded dev shells', () => {
+	const originalNodeEnv = process.env.NODE_ENV;
 	const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
 	const originalAttach = RocketRideClient.prototype.attach;
 	const listeners = new Map<string, (event: StorageEvent) => void>();
@@ -1008,6 +1022,8 @@ test('initialize ignores cross-context token churn in embedded dev shells', () =
 			addEventListener: (type: string, listener: (event: StorageEvent) => void) => listeners.set(type, listener),
 		},
 	});
+	// The gate is a build-time constant: stage the dev build, whatever the runner's NODE_ENV.
+	process.env.NODE_ENV = 'development';
 	resetDevGateForTests();
 	RocketRideClient.prototype.attach = async () => {};
 
@@ -1026,6 +1042,7 @@ test('initialize ignores cross-context token churn in embedded dev shells', () =
 		assert.equal(tokenCleared, false);
 		assert.equal(reloaded, false);
 	} finally {
+		process.env.NODE_ENV = originalNodeEnv;
 		resetDevGateForTests();
 		RocketRideClient.prototype.attach = originalAttach;
 		if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
@@ -2049,27 +2066,30 @@ for (const delivery of ['live', 'held'] as const) {
 // =============================================================================
 
 test('bootstrap bounces a rrdev-state code to a loopback target via replace() and stops', async () => {
-	const replaced: string[] = [];
-	const win = topLevelWindow({
-		location: {
-			search: '?code=abc&state=rrdev%3Ahttp%3A%2F%2Flocalhost%3A3925',
-			pathname: '/',
-			origin: 'https://shell.example.test',
-			replace: (url: string) => { replaced.push(url); },
-		},
-		history: { state: null, replaceState: () => {} },
-	});
-	await withGlobals({ window: win, sessionStorage: recordingSession().storage }, async () => {
-		const { manager } = createTestManager();
-		manager.client = testClient();
-		// The bounce must fire BEFORE the transport attach — a rejecting
-		// attach here proves the order (a post-attach bounce would throw).
-		manager._attachPromise = Promise.reject(new Error('attach must not be awaited before the bounce'));
-		manager._attachPromise.catch(() => {});
+	// The bounce's whole target set: http://localhost and http://127.0.0.1 (optional port).
+	for (const target of ['http://localhost:3925', 'http://127.0.0.1:3925', 'http://localhost']) {
+		const replaced: string[] = [];
+		const win = topLevelWindow({
+			location: {
+				search: `?code=abc&state=${encodeURIComponent(`rrdev:${target}`)}`,
+				pathname: '/',
+				origin: 'https://shell.example.test',
+				replace: (url: string) => { replaced.push(url); },
+			},
+			history: { state: null, replaceState: () => {} },
+		});
+		await withGlobals({ window: win, sessionStorage: recordingSession().storage }, async () => {
+			const { manager } = createTestManager();
+			manager.client = testClient();
+			// The bounce must fire BEFORE the transport attach — a rejecting
+			// attach here proves the order (a post-attach bounce would throw).
+			manager._attachPromise = Promise.reject(new Error('attach must not be awaited before the bounce'));
+			manager._attachPromise.catch(() => {});
 
-		assert.equal(await manager.bootstrap(), null);
-		assert.deepEqual(replaced, ['http://localhost:3925/?code=abc']);
-	});
+			assert.equal(await manager.bootstrap(), null);
+			assert.deepEqual(replaced, [`${target}/?code=abc`], target);
+		});
+	}
 });
 
 test('bootstrap refuses to bounce to non-loopback or same-origin targets', async () => {
@@ -2079,6 +2099,15 @@ test('bootstrap refuses to bounce to non-loopback or same-origin targets', async
 		['https://shell.example.test', 'rrdev:https://evil.example.test'],
 		// A loopback target that IS this origin: no bounce loops.
 		['http://localhost:3925', 'rrdev:http://localhost:3925'],
+		// Loopback-ish targets OUTSIDE the bounce's set (http://localhost and
+		// http://127.0.0.1 only): https, [::1], *.localhost and look-alike hosts
+		// are refused even though other dev conveniences treat some as loopback.
+		['https://shell.example.test', 'rrdev:https://localhost:3000'],
+		['https://shell.example.test', 'rrdev:http://[::1]:3013'],
+		['https://shell.example.test', 'rrdev:http://evil.localhost:3013'],
+		['https://shell.example.test', 'rrdev:http://localhost.evil.test'],
+		['https://shell.example.test', 'rrdev:http://127.0.0.1.evil.test'],
+		['https://shell.example.test', 'rrdev:http://127.1.2.3:3013'],
 	] as const) {
 		const replaced: string[] = [];
 		const win = topLevelWindow({
@@ -2250,4 +2279,106 @@ test('an EMPTY #rrtoken fragment (--no-auth) clears the remembered session, rese
 		assert.equal(manager.getConnectionStatus().authPhase, AuthPhase.FRESH);
 		assert.deepEqual(stripped, ['/?appid=local.alarm&rrdev=1'], 'the fragment is stripped, the query kept');
 	});
+});
+
+// =============================================================================
+// #rrtoken SEEDING — who may sign a tab in from a URL fragment (rocketride-saas#1020)
+// =============================================================================
+
+/**
+ * Boots a manager on a stubbed top-level (or framed) page whose URL carries a
+ * `#rrtoken=` fragment and reports what the seeding step did.
+ */
+async function bootWithFragment(opts: { origin: string; hash: string; nodeEnv?: string; framed?: boolean }): Promise<{ saved: string[]; cleared: number; stripped: string[]; warned: string[] }> {
+	const stripped: string[] = [];
+	const warned: string[] = [];
+	const warn = console.warn;
+	console.warn = (...args: unknown[]) => { warned.push(args.map(String).join(' ')); };
+	const win: Record<string, unknown> = {
+		location: { search: '?appid=local.alarm&rrdev=1', pathname: '/', origin: opts.origin, hash: opts.hash },
+		history: { state: null, replaceState: (_s: unknown, _t: string, url: string) => { stripped.push(url); } },
+	};
+	win.self = win;
+	win.top = opts.framed ? {} : win;
+	const saved: string[] = [];
+	let cleared = 0;
+	try {
+		await withGlobals({ window: win, sessionStorage: recordingSession().storage }, async () => {
+			const { manager } = createTestManager();
+			manager.client = testClient();
+			manager._attachPromise = Promise.resolve();
+			manager.saveToken = (token: string) => { saved.push(token); };
+			manager.clearToken = () => { cleared++; };
+			manager.loadToken = () => saved[0] ?? '';
+			manager.connectForBootstrap = async () => ({ result: authenticatedResult, appId: '' });
+			await manager.bootstrap();
+		}, { nodeEnv: opts.nodeEnv });
+	} finally {
+		console.warn = warn;
+	}
+	return { saved, cleared, stripped, warned };
+}
+
+test('#rrtoken seeding is honoured by a top-level dev shell on a loopback origin (the launcher\'s own dev server)', async () => {
+	for (const origin of ['http://localhost:3925', 'http://127.0.0.1:3925', 'https://localhost:3000']) {
+		const seeded = await bootWithFragment({ origin, hash: '#rrtoken=rr_seeded_key' });
+		assert.deepEqual(seeded.saved, ['rr_seeded_key'], origin);
+		assert.deepEqual(seeded.stripped, ['/?appid=local.alarm&rrdev=1'], `${origin}: the fragment is stripped`);
+		const signedOut = await bootWithFragment({ origin, hash: '#rrtoken=' });
+		assert.equal(signedOut.cleared >= 1, true, `${origin}: the empty directive (--no-auth) still resets the tab`);
+	}
+});
+
+test('#rrtoken is IGNORED on a dev flavor served from a real origin: a bare link cannot sign the tab in or out', async () => {
+	// The production origin serves the dev flavor behind `?rrdev=1`: this is
+	// the "needs no opener or frame" vector of the issue's 5 Nov update.
+	for (const origin of ['https://cloud.rocketride.example', 'http://cloud.rocketride.example', 'https://localhost.evil.test', 'http://localhost.evil.test:3925', 'https://127.0.0.1.evil.test', 'http://evillocalhost:3925', 'http://notlocalhost:3925']) {
+		const seeded = await bootWithFragment({ origin, hash: '#rrtoken=attacker_credential' });
+		assert.deepEqual(seeded.saved, [], `${origin}: no token was saved`);
+		assert.equal(seeded.cleared, 0, `${origin}: nothing was cleared`);
+		assert.deepEqual(seeded.stripped, ['/?appid=local.alarm&rrdev=1'], `${origin}: the fragment is stripped even though it is ignored (no credential lingers in the URL bar or history)`);
+		assert.ok(seeded.warned.some((w) => w.includes('#rrtoken')), `${origin}: the refusal is logged for the developer`);
+		const signedOut = await bootWithFragment({ origin, hash: '#rrtoken=' });
+		assert.equal(signedOut.cleared, 0, `${origin}: an empty fragment cannot clear the victim's session either`);
+	}
+});
+
+test('#rrtoken is ignored by a PRODUCTION build, even on a loopback origin', async () => {
+	const seeded = await bootWithFragment({ origin: 'http://localhost:3925', hash: '#rrtoken=attacker_credential', nodeEnv: 'production' });
+	assert.deepEqual(seeded.saved, []);
+	assert.equal(seeded.cleared, 0);
+	assert.deepEqual(seeded.stripped, [], 'a production build does not consume the fragment at all');
+	const signedOut = await bootWithFragment({ origin: 'http://localhost:3925', hash: '#rrtoken=', nodeEnv: 'production' });
+	assert.equal(signedOut.cleared, 0);
+});
+
+test('#rrtoken is ignored by a FRAMED shell (previews inherit their embedder\'s session via rrdev:auth)', async () => {
+	const seeded = await bootWithFragment({ origin: 'http://localhost:3925', hash: '#rrtoken=attacker_credential', framed: true });
+	assert.deepEqual(seeded.saved, []);
+	assert.equal(seeded.cleared, 0);
+	assert.deepEqual(seeded.stripped, [], 'a framed shell does not consume the fragment either');
+});
+
+test('the CloudAuthProvider relay redirects through the relay origin only in a top-level dev shell, never in a framed one', async () => {
+	{
+		for (const framed of [false, true]) {
+			const redirects: string[] = [];
+			const win: Record<string, unknown> = { location: { search: '?rrdev=1', pathname: '/', origin: 'http://localhost:3013', assign: (url: string) => redirects.push(url) } };
+			win.self = win;
+			win.top = framed ? {} : win;
+			await withGlobals({ window: win, sessionStorage: recordingSession().storage, localStorage: recordingSession().storage, navigator: {} }, async () => {
+				const provider = CloudAuthProvider.getInstance();
+				provider.initialize({ zitadelUrl: 'https://idp.example.test', clientId: 'test-client', relayOrigin: 'https://rocketride.example' });
+				const { manager } = createTestManager();
+				manager.authProvider = provider;
+				await provider.signIn();
+				assert.equal(redirects.length, 1);
+				const url = new URL(redirects[0]);
+				const relayed = url.searchParams.get('redirect_uri') === 'https://rocketride.example';
+				assert.equal(relayed, !framed, framed ? 'a framed shell keeps its own redirect_uri' : 'a top-level dev shell relays');
+				assert.equal(url.searchParams.get('state')?.startsWith('rrdev:') ?? false, !framed);
+				provider.dispose();
+			});
+		}
+	}
 });

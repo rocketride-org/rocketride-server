@@ -34,6 +34,19 @@
  *     back to the same flavor and the same locked app.
  *   - Everyone else gets the production assets; dev assets are dormant
  *     objects in the bucket that production visitors never fetch.
+ *   - Picking the flavor is NOT the dev-hooks capability: the hooks are a
+ *     build-time property of the dev flavor itself (src/util/devGate.ts —
+ *     the production flavor can never enable them, whatever the URL,
+ *     sessionStorage or injected boot config says). The dev flavor is
+ *     reachable from the production origin by anyone who can link to it
+ *     (`?rrdev=1`), so what it will DO for a caller is restricted in code,
+ *     not here: it answers `rrdev:*` messages only from a verified embedder
+ *     (the VS Code App Builder webview, or the web App Builder on the shell's
+ *     own origin — isTrustedEmbedderMessage) and loads dev remotes only from
+ *     loopback dev servers. The credential-persisting conveniences (a
+ *     `#rrtoken=` fragment, the dev sign-in relay) work only on a shell
+ *     served from loopback, so a bare link to the production origin cannot
+ *     sign a tab in or steer its sign-in.
  *
  * Steps: copy shell-dev's hashed assets into shell (hash-named — no
  * collisions), extract each flavor's script/css tags from its emitted html,

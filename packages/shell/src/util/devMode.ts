@@ -32,10 +32,25 @@
  *     app resolves react/shell/shared to the SAME instances a bundled
  *     app would get from the MF share scope.
  *
- * Everything here is inert unless dev hooks are enabled: a development build
- * (NODE_ENV !== 'production') or an explicit `rrdev=1` URL parameter. The
- * URL form exists so the App Builder previews can enable hooks against a
- * production-built shell served by a local engine.
+ * Everything here is inert unless dev hooks are enabled, and they are a
+ * BUILD-TIME capability only: a development build (NODE_ENV !== 'production'
+ * — `rsbuild dev`, or the dev flavor stitched beside the production assets,
+ * which the App Builder previews select with `?rrdev=1` or an injected
+ * `__rrDevBoot` in index.html's flavor picker). A production build never
+ * enables them from the URL, sessionStorage or an injected boot config (see
+ * devGate.ts).
+ *
+ * Who sends `rrdev:*` messages (the only trusted senders; see
+ * isTrustedEmbedderMessage in devGate.ts, which documents each flow):
+ *   - the VS Code extension's App Builder webview (apps/vscode AppWebview.tsx
+ *     PreviewFrame, origin `vscode-webview://<id>`) — the shell's PARENT;
+ *   - the web App Builder (apps/rocket-ui AppBuilderProvider.tsx), a page of
+ *     the shell's OWN origin — the PARENT of its preview iframe and the OPENER
+ *     of its debug tab (it posts `rrdev:auth`; same-origin only).
+ * Messages from anyone else — a cross-origin window.opener, a foreign framing
+ * page, a loopback page (a loopback origin is never a sender), any other
+ * origin, or an unrelated window — are ignored, and registerRemote entries
+ * must be loopback dev-server URLs.
  */
 
 import React from 'react';
@@ -44,7 +59,7 @@ import * as ReactJsxRuntime from 'react/jsx-runtime';
 import * as ReactJsxDevRuntime from 'react/jsx-dev-runtime';
 import * as rocketride from 'rocketride';
 import { ConnectionManager } from '../connection/connection';
-import { isDevHooksEnabled, isEmbeddedDevShell } from './devGate';
+import { isDevHooksEnabled, isEmbeddedDevShell, isTrustedEmbedderMessage, normalizeDevRemoteEntry, trustedParentOrigin } from './devGate';
 import { registerLocalApp, unregisterLocalApp, invalidateAppDescriptor, registerDevRemote, failDevRemoteWait, isDevPreviewPage, previewLockedAppId } from './appLoader';
 import type { LocalAppMeta } from './appLoader';
 
@@ -157,6 +172,133 @@ export function waitForEmbeddedSession(timeoutMs: number): Promise<string | null
 }
 
 // =============================================================================
+// EMBEDDER MESSAGES (rrdev:*)
+// =============================================================================
+
+/**
+ * Maps a posted workspace manifest (appManifest + top-level version) to
+ * the local registration meta. The icon stays a PATH — it is resolved
+ * under the app's dev prefix, where the proxy serves the app folder.
+ *
+ * @param manifest - The posted manifest payload, when any.
+ * @returns Registration meta, or undefined when nothing was posted.
+ */
+function metaFromManifest(manifest?: Record<string, unknown>): LocalAppMeta | undefined {
+	if (!manifest || typeof manifest !== 'object') return undefined;
+	const appId = typeof manifest.id === 'string' ? manifest.id : '';
+	const contributes = manifest.contributes;
+	const configuration = contributes && typeof contributes === 'object' && !Array.isArray(contributes)
+		? (contributes as Record<string, unknown>).configuration
+		: manifest.configuration;
+	// data:/absolute icons pass through verbatim (the VSCode watcher now
+	// INLINES the workspace icon as a data URI); only bare relative paths
+	// still map under the dev prefix as a legacy fallback.
+	const iconPath = typeof manifest.icon === 'string' && manifest.icon && appId
+		? (/^(data:|https?:)/i.test(manifest.icon)
+			? manifest.icon
+			: `/apps/${encodeURIComponent(appId)}/dev/${manifest.icon.replace(/^\.\//, '')}`)
+		: undefined;
+	return {
+		name: typeof manifest.name === 'string' ? manifest.name : undefined,
+		description: typeof manifest.description === 'string' ? manifest.description : undefined,
+		version: typeof manifest.version === 'string' ? manifest.version : undefined,
+		icon: iconPath,
+		configuration: configuration as LocalAppMeta['configuration'],
+		categories: Array.isArray(manifest.categories) ? (manifest.categories as string[]) : undefined,
+		// The app's REAL auth requirement — the dev entry must behave like
+		// the deployed app would, auth gate included (absent = the
+		// platform default, true).
+		authenticated: manifest.authenticated !== false,
+	};
+}
+
+/** Collaborators of the message handler (injectable so tests need no shell boot). */
+export interface EmbedderMessageDeps {
+	/** Registers a dev-server-hosted MF remote (appLoader.registerDevRemote). */
+	registerRemote: typeof registerDevRemote;
+	/** The token holder (ConnectionManager.getInstance()). */
+	connection: () => Pick<ConnectionManager, 'loadToken' | 'saveToken' | 'clearToken'>;
+	/** Reloads the page into a changed session state. */
+	reload: () => void;
+}
+
+const defaultEmbedderDeps: EmbedderMessageDeps = {
+	registerRemote: registerDevRemote,
+	connection: () => ConnectionManager.getInstance(),
+	reload: () => window.location.reload(),
+};
+
+/**
+ * Handles one window `message` event. ONLY the trusted embedder may drive it
+ * (isTrustedEmbedderMessage: dev build; the sender is this window's parent or
+ * — for the web App Builder's debug tab — its same-origin opener; and its
+ * origin is in the closed embedder set) — everything else, including every
+ * message that carries a token or a remote entry, is dropped without effect.
+ *
+ * The protocol (unchanged):
+ *   - `rrdev:registerRemote` — the embedder KNOWS its rsbuild dev server's
+ *     address and posts it here; this shell wires the remote itself (entry
+ *     vetted: absolute loopback http(s) only). The optional `manifest` is the
+ *     WORKSPACE package.json's appManifest — in dev the workspace is the truth
+ *     for metadata (name, icon path, configuration), not the server registry.
+ *   - `rrdev:auth` — the embedder's DEFINITIVE session state: a token to adopt
+ *     (the VSCode host's own credential) or empty for "no session" (signed
+ *     out, or Inherit Auth off). One message covers grant and revoke — there
+ *     is no separate clear message.
+ *
+ * @param e - The message event.
+ * @param deps - Collaborators; defaults to the live shell.
+ */
+export function handleEmbedderMessage(e: Pick<MessageEvent, 'data' | 'origin' | 'source'>, deps: EmbedderMessageDeps = defaultEmbedderDeps): void {
+	const data = e.data as { type?: string; appId?: string; moduleId?: string; name?: string; entry?: string; token?: string; manifest?: Record<string, unknown> } | undefined;
+	// Cheap shape filter first so unrelated window messages stay silent.
+	if (typeof data?.type !== 'string' || !data.type.startsWith('rrdev:')) return;
+	if (!isTrustedEmbedderMessage(e)) {
+		console.warn(`[devMode] ignoring ${data.type} from untrusted sender (origin ${JSON.stringify(e.origin)})`);
+		return;
+	}
+	if (data.type === 'rrdev:registerRemote') {
+		if (!data.appId || !data.moduleId || !data.entry) {
+			console.warn(`[devMode] ignoring rrdev:registerRemote without appId/moduleId/entry: ${JSON.stringify({ appId: data.appId, moduleId: data.moduleId, entry: data.entry })}`);
+			return;
+		}
+		const entry = normalizeDevRemoteEntry(data.entry);
+		if (entry === null) {
+			console.warn(`[devMode] ignoring rrdev:registerRemote: entry ${JSON.stringify(data.entry)} is not a loopback dev-server URL`);
+			return;
+		}
+		// step: the optional manifest is the WORKSPACE package.json's
+		// appManifest — in dev the workspace is the truth for metadata
+		// (name, icon path, configuration), not the server registry
+		deps.registerRemote(data.appId, data.moduleId, data.name || data.appId, entry, metaFromManifest(data.manifest));
+	} else if (data.type === 'rrdev:auth' && typeof data.token === 'string') {
+		const cm = deps.connection();
+		// loadToken() yields '' when absent, so '' compares as "no session"
+		// on both sides of the protocol.
+		if (cm.loadToken() === data.token) {
+			// Already in the answered state — just release a pending boot
+			// wait; on later re-answers (re-inject, toggle no-op) this is
+			// a no-op.
+			settleBootAnswer(data.token || null);
+			return;
+		}
+		if (data.token) cm.saveToken(data.token); else cm.clearToken();
+		if (settleBootAnswer(data.token || null)) {
+			// Boot-window answer: bootstrap is still holding behind the
+			// loading screen and proceeds straight into the new state —
+			// no reload, no sign-in flash.
+			console.log(`[devMode] embedder session ${data.token ? 'received' : 'empty'} — continuing boot`);
+		} else {
+			// Post-boot change (Inherit Auth toggled, explicit sign-in,
+			// late credential): reboot into the new state exactly once —
+			// after the reload the states match and this is a no-op.
+			console.log(`[devMode] embedder session ${data.token ? 'received' : 'cleared'} — rebooting`);
+			deps.reload();
+		}
+	}
+}
+
+// =============================================================================
 // DEV SHARE SCOPE + WINDOW API INSTALL
 // =============================================================================
 
@@ -221,98 +363,15 @@ export async function installDevHooks(): Promise<void> {
 
 	// Embedded previews: mirror this shell's console + errors to the parent
 	// embedder so hosts without same-origin access (the VSCode webview) can
-	// render them in the App Builder's Console/Errors panes. postMessage is
-	// origin-agnostic, so this is the one channel that works everywhere.
+	// render them in the App Builder's Console/Errors panes. Rows are aimed at
+	// the trusted embedder's origin (see installConsoleForwarding).
 	installConsoleForwarding();
 
 	// Embedded previews: accept dev-remote registrations and session state
-	/**
-	 * Maps a posted workspace manifest (appManifest + top-level version) to
-	 * the local registration meta. The icon stays a PATH — it is resolved
-	 * under the app's dev prefix, where the proxy serves the app folder.
-	 *
-	 * @param manifest - The posted manifest payload, when any.
-	 * @returns Registration meta, or undefined when nothing was posted.
-	 */
-	const metaFromManifest = (manifest?: Record<string, unknown>): LocalAppMeta | undefined => {
-		if (!manifest || typeof manifest !== 'object') return undefined;
-		const appId = typeof manifest.id === 'string' ? manifest.id : '';
-		const contributes = manifest.contributes;
-		const configuration = contributes && typeof contributes === 'object' && !Array.isArray(contributes)
-			? (contributes as Record<string, unknown>).configuration
-			: manifest.configuration;
-		// data:/absolute icons pass through verbatim (the VSCode watcher now
-		// INLINES the workspace icon as a data URI); only bare relative paths
-		// still map under the dev prefix as a legacy fallback.
-		const iconPath = typeof manifest.icon === 'string' && manifest.icon && appId
-			? (/^(data:|https?:)/i.test(manifest.icon)
-				? manifest.icon
-				: `/apps/${encodeURIComponent(appId)}/dev/${manifest.icon.replace(/^\.\//, '')}`)
-			: undefined;
-		return {
-			name: typeof manifest.name === 'string' ? manifest.name : undefined,
-			description: typeof manifest.description === 'string' ? manifest.description : undefined,
-			version: typeof manifest.version === 'string' ? manifest.version : undefined,
-			icon: iconPath,
-			configuration: configuration as LocalAppMeta['configuration'],
-			categories: Array.isArray(manifest.categories) ? (manifest.categories as string[]) : undefined,
-			// The app's REAL auth requirement — the dev entry must behave like
-			// the deployed app would, auth gate included (absent = the
-			// platform default, true).
-			authenticated: manifest.authenticated !== false,
-		};
-	};
-
-	// from the embedder. The App Builder panel KNOWS its rsbuild dev server's
-	// address — it posts it here and this shell wires the remote itself.
-	// rrdev:auth carries the embedder's DEFINITIVE session state: a token to
-	// adopt (the VSCode host's own credential) or empty for "no session"
-	// (signed out, or Inherit Auth off). One message covers grant and revoke —
-	// there is no separate clear message.
-	window.addEventListener('message', (e: MessageEvent) => {
-		// step: registrations and session state are only ever legitimate from
-		// the embedding parent OR the opener (the App Builder's blob-authored
-		// debug tab is opener-embedded) — refuse anything else (no origin
-		// allowlist is possible: the parent is a vscode-webview:// or
-		// app-builder origin)
-		const fromEmbedder = e.source === window.parent || (window.opener != null && e.source === window.opener);
-		if (!fromEmbedder) return;
-		const data = e.data as { type?: string; appId?: string; moduleId?: string; name?: string; entry?: string; token?: string; manifest?: Record<string, unknown> } | undefined;
-		if (data?.type === 'rrdev:registerRemote') {
-			if (!data.appId || !data.moduleId || !data.entry) {
-				console.warn(`[devMode] ignoring rrdev:registerRemote without appId/moduleId/entry: ${JSON.stringify({ appId: data.appId, moduleId: data.moduleId, entry: data.entry })}`);
-				return;
-			}
-			// step: the optional manifest is the WORKSPACE package.json's
-			// appManifest — in dev the workspace is the truth for metadata
-			// (name, icon path, configuration), not the server registry
-			registerDevRemote(data.appId, data.moduleId, data.name || data.appId, data.entry, metaFromManifest(data.manifest));
-		} else if (data?.type === 'rrdev:auth' && typeof data.token === 'string') {
-			const cm = ConnectionManager.getInstance();
-			// loadToken() yields '' when absent, so '' compares as "no session"
-			// on both sides of the protocol.
-			if (cm.loadToken() === data.token) {
-				// Already in the answered state — just release a pending boot
-				// wait; on later re-answers (re-inject, toggle no-op) this is
-				// a no-op.
-				settleBootAnswer(data.token || null);
-				return;
-			}
-			if (data.token) cm.saveToken(data.token); else cm.clearToken();
-			if (settleBootAnswer(data.token || null)) {
-				// Boot-window answer: bootstrap is still holding behind the
-				// loading screen and proceeds straight into the new state —
-				// no reload, no sign-in flash.
-				console.log(`[devMode] embedder session ${data.token ? 'received' : 'empty'} — continuing boot`);
-			} else {
-				// Post-boot change (Inherit Auth toggled, explicit sign-in,
-				// late credential): reboot into the new state exactly once —
-				// after the reload the states match and this is a no-op.
-				console.log(`[devMode] embedder session ${data.token ? 'received' : 'cleared'} — rebooting`);
-				window.location.reload();
-			}
-		}
-	});
+	// from the TRUSTED embedder only: handleEmbedderMessage checks the sender's
+	// window relation AND its origin (the closed set in devGate.ts) before any
+	// message can touch the session token or register a remote.
+	window.addEventListener('message', (e: MessageEvent) => handleEmbedderMessage(e));
 
 	// URL-CONVENTION SELF-REGISTRATION (local-first dev): a tab opened with
 	// ?appid=X&rrdev=1 on a dev origin needs no message channel — the dev
@@ -320,9 +379,11 @@ export async function installDevHooks(): Promise<void> {
 	// /apps/X/dev/ prefix, so the shell registers the app from its own URL.
 	// External browser tabs and F5 sessions work with no panel attached;
 	// the embedded preview gets the same registration as a boot-time
-	// fallback (the parent's push remains the live-update channel). In a
-	// NON-proxy session (cloud with rrdev=1) the fetch 404s and this is a
-	// silent no-op by design.
+	// fallback (the parent's push remains the live-update channel). The
+	// entry is the shell's own origin plus the conventional prefix, and — like
+	// every dev remote — it must be a LOOPBACK dev-server URL (registerDevRemote
+	// refuses anything else): a shell served from a real origin (cloud with
+	// rrdev=1) is not a dev-proxy session, so it neither probes nor registers.
 	void (async () => {
 		// The lock + dev flag come from the URL with the per-tab
 		// sessionStorage fallbacks (previewLockedAppId / isDevPreviewPage) —
@@ -340,6 +401,14 @@ export async function installDevHooks(): Promise<void> {
 		};
 		try {
 			const prefix = `/apps/${encodeURIComponent(appId)}/dev`;
+			// Absolute, vetted entry: the dev-proxy origin is this page's own
+			// origin. A non-loopback shell yields null — fail the hold now
+			// instead of probing an origin that can never register.
+			const entry = normalizeDevRemoteEntry(`${window.location.origin}${prefix}/remoteEntry.js`);
+			if (entry === null) {
+				failHold(`Dev apps load only from a loopback dev server; this shell is served from ${window.location.origin}`);
+				return;
+			}
 			const res = await fetch(`${prefix}/package.json`, { cache: 'no-store' });
 			if (!res.ok) {
 				failHold(`No dev app at ${prefix} (HTTP ${res.status}) — is this the app's dev-proxy origin?`);
@@ -356,7 +425,7 @@ export async function installDevHooks(): Promise<void> {
 				: appId.replace(/[^a-zA-Z0-9_$]/g, '_');
 			const name = typeof manifest.name === 'string' && manifest.name ? manifest.name : appId;
 			console.log(`[devMode] self-registering "${appId}" from ${prefix} (URL convention)`);
-			registerDevRemote(appId, moduleId, name, `${prefix}/remoteEntry.js`, metaFromManifest({
+			registerDevRemote(appId, moduleId, name, entry, metaFromManifest({
 				...manifest,
 				version: typeof pkg.version === 'string' ? pkg.version : undefined,
 			}));
@@ -429,8 +498,13 @@ function installConsoleForwarding(): void {
 
 	/** Posts one row to the embedder; never throws into app code. */
 	const forward = (type: string, payload: Record<string, unknown>): void => {
+		// Console rows carry hrefs (OAuth `?code=` returns included) — aim
+		// them at the trusted embedder's origin only; with no trusted parent
+		// (a foreign framing page, origin unknown) nothing is forwarded.
+		const target = trustedParentOrigin();
+		if (!target) return;
 		try {
-			window.parent.postMessage({ type, ...payload }, '*');
+			window.parent.postMessage({ type, ...payload }, target);
 		} catch { /* embedder gone — drop the row */ }
 	};
 
