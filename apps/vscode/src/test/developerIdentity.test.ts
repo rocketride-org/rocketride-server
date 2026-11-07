@@ -299,6 +299,25 @@ test('identity feed: a slower older refresh never overwrites a newer one', async
 	assert.ok((o.revision ?? 0) < (n.revision ?? 0), 'the older build carries the older revision');
 });
 
+test('identity feed: a pull does not suppress an in-flight push', async () => {
+	const builds: ((i: NewAppIdentity) => void)[] = [];
+	const broadcasts: NewAppIdentity[] = [];
+	const feed = new IdentityFeed(
+		() => new Promise<NewAppIdentity>((resolve) => builds.push(resolve)),
+		(_op, p) => {
+			broadcasts.push(p as NewAppIdentity);
+		}
+	);
+	const push = feed.refresh(true); // a claim landed: every wizard must hear it
+	const pull = feed.refresh(false); // meanwhile another wizard opens and pulls
+	builds[1]({ developerId: 'acme', source: 'organization', workspaceOpen: true, existingFolders: [] });
+	const pulled = await pull;
+	builds[0]({ developerId: 'acme', source: 'organization', workspaceOpen: true, existingFolders: [] });
+	const pushed = await push;
+	assert.deepEqual(broadcasts, [pushed], 'the push still reaches every wizard');
+	assert.ok((pulled.revision ?? 0) > (pushed.revision ?? 0), 'the pulling wizard keeps its newer revision');
+});
+
 // ── P6 / P7: what the form shows is what Create does; failures stay diagnosable ─
 
 /** Every lookup outcome, each with a fresh identity in that state. */

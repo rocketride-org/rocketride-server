@@ -179,8 +179,13 @@ export function toWizardIdentity(resolved: IResolvedDeveloperId, workspace: IWiz
  * older than the one they show (isNewerIdentity).
  */
 export class IdentityFeed {
-	/** The revision of the most recently started build. */
+	/** The revision of the most recently started build (pull or push). */
 	private revision = 0;
+
+	/** The revision of the most recently started push. Only pushes compete to be
+	 *  broadcast: a pull answers one wizard and must not suppress a push the
+	 *  other wizards are waiting for. */
+	private latestPush = 0;
 
 	/**
 	 * @param build - Builds the current identity (may be slow: it waits on the lookup).
@@ -199,8 +204,11 @@ export class IdentityFeed {
 	 */
 	public async refresh(push: boolean): Promise<NewAppIdentity> {
 		const revision = ++this.revision;
+		if (push) {
+			this.latestPush = revision;
+		}
 		const identity: NewAppIdentity = { ...(await this.build()), revision };
-		if (push && revision === this.revision) {
+		if (push && revision === this.latestPush) {
 			this.broadcast('host.appdev.identityChanged', identity);
 		}
 		return identity;
