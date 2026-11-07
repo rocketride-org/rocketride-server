@@ -9,7 +9,9 @@ inside ``patch.dict`` for exactly that reason; this test fails if any module
 leaks one.
 """
 
-import sys
+import importlib
+
+import pytest
 
 
 def test_the_live_dep_bootstrapper_is_the_real_module():
@@ -17,7 +19,12 @@ def test_the_live_dep_bootstrapper_is_the_real_module():
     # own: run alone, pytest would never collect it and the check could pass regardless.
     import tool_git.test_tools  # noqa: F401
 
-    module = sys.modules.get('depends')
-    assert module is not None, 'depends is not importable in this engine runtime'
+    # Import it rather than only looking it up: a run that collects just this file has
+    # no earlier module that loaded the real bootstrapper, and `sys.modules` would be
+    # empty here for a reason that has nothing to do with the leak this test guards.
+    try:
+        module = importlib.import_module('depends')
+    except ImportError:
+        pytest.fail('depends is not importable in this engine runtime')
     assert getattr(module, '__file__', None), 'a test module left a no-op stub in sys.modules["depends"]'
     assert callable(getattr(module, 'load_depends', None)), 'depends.load_depends is not the engine implementation'
