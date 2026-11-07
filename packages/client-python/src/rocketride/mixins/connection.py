@@ -158,7 +158,7 @@ class ConnectionMixin(DAPClient):
         except Exception:
             raise
         if not response.get('success', False):
-            message = response.get('message', 'Authentication failed')
+            message = response.get('message') or 'Authentication failed'
             raise AuthenticationException({'message': message})
 
         auth_body = response.get('body') or {}
@@ -199,7 +199,7 @@ class ConnectionMixin(DAPClient):
 
     def _schedule_reconnect(self) -> None:
         """Schedule a reconnect attempt driven by ``_desired_state``."""
-        self._debug_message(f'Scheduling reconnect in {self._current_reconnect_delay}s')
+        self.debug_message(f'Scheduling reconnect in {self._current_reconnect_delay}s')
         self._reconnect_timer = asyncio.create_task(self._do_reconnect())
 
     async def _do_reconnect(self) -> None:
@@ -220,7 +220,7 @@ class ConnectionMixin(DAPClient):
             # Success — reset backoff
             self._reconnect_timer = None
             self._current_reconnect_delay = 0.25
-            self._debug_message('Reconnect successful')
+            self.debug_message('Reconnect successful')
         except AuthenticationException as e:
             # Auth rejected — downgrade to attached, stop retrying auth
             if self._desired_state == 'detached':
