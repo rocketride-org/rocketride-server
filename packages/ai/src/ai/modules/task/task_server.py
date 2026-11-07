@@ -756,10 +756,10 @@ class TaskServer(DAPBase):
 
     def get_task_control_by_public_key(self, public_auth: str) -> TASK_CONTROL:
         """
-        Retrieve task control structure with a given project/source id.
+        Retrieve the task control structure registered for a public key token.
 
         Args:
-            token (str): The token to retrieve
+            public_auth (str): The public key token to look up
 
         Returns:
             TASK_CONTROL: Complete task control structure with metadata and references
@@ -1554,7 +1554,6 @@ class TaskServer(DAPBase):
         changed during restart. Only the pipeline configuration and provider can be updated.
 
         Args:
-            apikey (str): API key for authentication (must match task's apikey)
             request (Dict[str, Any]): Restart request containing:
                 - arguments: Task configuration including:
                     - token: Task token to restart (required)
@@ -1575,20 +1574,19 @@ class TaskServer(DAPBase):
             ValueError: If pipeline invalid, source not found,
                     project_id/source don't match existing values, or token not provided
             TaskError: Code TASK_NOT_REGISTERED if the token names no live task
-            RuntimeError: If pipeline configuration missing, debugger attached,
-                        apikey mismatch, or connection is not the launch owner
+            RuntimeError: If pipeline configuration is missing, a debugger is attached,
+                        or the connection is not the launch owner
 
         Restart Process:
         1. Parse and validate request parameters
         2. Validate task existence
         3. Verify connection is the launch owner
-        4. Verify apikey matches
-        5. Check that no debugger is attached
-        6. Extract and validate new pipeline configuration
-        7. Verify project_id and source match existing (cannot change)
-        8. Validate source component exists in new pipeline
-        9. Update TASK_CONTROL with new configuration (pipeline, provider)
-        10. Call task.restart_task() to restart engine process
+        4. Check that no debugger is attached
+        5. Extract and validate new pipeline configuration
+        6. Verify project_id and source match existing (cannot change)
+        7. Validate source component exists in new pipeline
+        8. Update TASK_CONTROL with new configuration (pipeline, provider)
+        9. Call task.restart_task() to restart engine process
         11. Optionally wait for running state
         12. Transfer launch ownership to the caller (only once 10-11 succeeded)
         13. Return task information
@@ -1709,9 +1707,8 @@ class TaskServer(DAPBase):
         proper resource cleanup while handling various edge cases gracefully.
 
         Args:
-            request (Dict[str, Any]): Stop request containing:
-                - token: Unique task identifier to stop
-            conn (TaskConn): Connection requesting the task stop
+            token (str): Unique task identifier to stop.
+            reason (str): Why the task is being stopped (default: 'user').
 
         Termination Logic:
         - Only LAUNCH and EXECUTE type tasks are terminated by stop requests

@@ -106,11 +106,9 @@ class DAPBase:
         Initialize the DAP base class with configuration and module identification.
 
         Args:
-            config (Dict[str, Any]): Configuration dictionary for the DAP instance.
-                                    Defaults to empty dict.
-            **kwargs: Additional keyword arguments. The 'module' key is used for
-                    logging prefixes and component identification. If not provided,
-                    defaults to 'UNKNOWN'.
+            module (str): Message type used for logging prefixes and component
+                identification. Defaults to 'UNKNOWN'.
+            **kwargs: Additional keyword arguments forwarded to the transport layer.
         """
         # Message type identifier for logging - helps distinguish different DAP instances
         # This should be set by concrete classes to provide meaningful log prefixes
@@ -180,7 +178,7 @@ class DAPBase:
         aren't available.
 
         Args:
-            request (Dict[str, Any]): The DAP message/request to pass to the method.
+            message (Dict[str, Any]): The DAP message/request to pass to the method.
             method_name (str): Primary method name to attempt (e.g., 'on_initialize').
             default_name (str): Fallback method name if primary doesn't exist (e.g., 'on_request').
 
@@ -470,7 +468,7 @@ class DAPBase:
         'error' field in the response message.
 
         Args:
-            request (Dict[str, Any]): The DAP message to check for error details.
+            message (Dict[str, Any]): The DAP message to check for error details.
                                     Expected to be a response message with
                                     optional 'error' field.
 

@@ -540,13 +540,12 @@ class TaskConn(
 
         Args:
             request (Dict[str, Any]): The command request containing task token
-            token (str): The task token to look up.
 
         Returns:
-            TASK: The task instance corresponding to the token.
+            str | None: The task token for the request, or None when the request carries none.
 
         Raises:
-            KeyError: If the task with the specified token does not exist.
+            PermissionError: If the connection is not authenticated.
         """
         if not self._account_info:
             raise PermissionError('Not authenticated')
@@ -578,15 +577,13 @@ class TaskConn(
             the token pass here must match (no cross task access)
         If a task token is not specfied, we use the initial auth token
 
-        Args:
-            apikey (str): API key for authentication.
-            token (str): The task token to look up.
-
         Returns:
             TASK: The task instance corresponding to the token.
 
         Raises:
-            KeyError: If the task with the specified token does not exist.
+            ValueError: If the request carries no task token.
+            TaskError: Code TASK_NOT_REGISTERED if the token names no live task.
+            PermissionError: If the connection lacks the permission the command requires.
         """
         # Get the token
         token = self.get_task_token(request, permissions)
