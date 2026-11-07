@@ -190,7 +190,7 @@ def test_to_sqlalchemy_text_maps_placeholders():
         ('select 1 -- $1\n, $2', [7, 8], 'select 1 -- $1\n, :b2', {'b2': 8}),
         ('select /* $1 */ $2', [7, 8], 'select /* $1 */ :b2', {'b2': 8}),
         ('select $1, $1', [5], 'select :b1, :b1', {'b1': 5}),
-        ('select $1::int', [5], 'select :b1::int', {'b1': 5}),
+        ('select $1::int', [5], 'select :b1 ::int', {'b1': 5}),
         ("select E'\\' $1' , $1", [9], "select E'\\' $1' , :b1", {'b1': 9}),
     ],
 )
@@ -657,3 +657,11 @@ def test_client_can_recover_a_failed_statement_with_rollback_to_savepoint():
     out = reg.execute(sid2, 'SELECT v FROM t ORDER BY v')
     reg.commit(sid2)
     assert [r['v'] for r in out['rows']] == ['after-recovery', 'keep']
+
+
+def test_a_cast_keeps_the_placeholder_a_bind():
+    """`text(':b1::int')` registers no bind: SQLAlchemy rejects a name followed by `:`."""
+    clause, binds = to_sqlalchemy_text('select $1::int', [5])
+
+    assert binds == {'b1': 5}
+    assert clause.compile().params == {'b1': None}

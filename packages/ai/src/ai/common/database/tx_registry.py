@@ -138,6 +138,12 @@ def _rewrite_placeholders(sql: str, params: list, binds: dict) -> str:
                 key = f'b{idx}'
                 binds[key] = params[idx - 1]
                 out.append(f':{key}')
+                if m.end() < n and sql[m.end()] == ':':
+                    # `:b1::int` is not a bind to SQLAlchemy: its pattern rejects a
+                    # name followed by `:` (`(?<![:\w$]):([\w$]+)(?![\w$:])`), so the
+                    # cast silently drops the parameter. The space changes nothing for
+                    # PostgreSQL and keeps the bind visible to SQLAlchemy.
+                    out.append(' ')
                 i = m.end()
                 continue
             tag = _DOLLAR_TAG_RE.match(sql, i)
