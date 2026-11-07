@@ -696,10 +696,12 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
         The transaction is rolled back, and the session settings the block changed get back the values they
         had before it (which the server, ``init_connect`` or a role may have set, so not the defaults) before
         the connection goes back to the pool. A connection whose reset fails is discarded. What a rollback
-        does not end stays on the pooled connection: a session-level lock that a ``SELECT`` takes
-        (PostgreSQL ``pg_advisory_lock``, MySQL ``GET_LOCK``) and MySQL user variables (``@x``). Reads of
-        server files and signals to other sessions (``pg_read_file``, ``pg_terminate_backend``,
-        ``LOAD_FILE``) are reads to the database: only a role without those privileges stops them.
+        does not end stays on the pooled connection, so ``is_sql_safe`` refuses a ``SELECT`` that takes
+        session-scoped state: PostgreSQL ``pg_advisory_lock`` (and its ``try_``/``_shared`` forms), MySQL
+        ``GET_LOCK``, and a MySQL user-variable assignment (``@x :=``). The transaction-scoped
+        ``pg_advisory_xact_lock`` ends with the rollback and stays allowed. Reads of server files and
+        signals to other sessions (``pg_read_file``, ``pg_terminate_backend``, ``LOAD_FILE``) are reads to
+        the database: only a role without those privileges stops them.
 
         Raises:
             RuntimeError: The engine's dialect has no read-only mode here, so no query is run.
