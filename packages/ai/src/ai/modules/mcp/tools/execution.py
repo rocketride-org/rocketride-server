@@ -32,7 +32,7 @@ from urllib.parse import urlencode
 
 from ..apps import DROPPER_URI
 from ..errors import _bad, _timeout
-from ..tooling import ToolRegistry
+from ..tooling import ToolHints, ToolRegistry
 
 # Default wall-clock budget for a single blocking `use`/`send`/`terminate`/
 # `send_files` seam call. Chosen as a generous-but-bounded default for
@@ -303,6 +303,14 @@ def register(registry: ToolRegistry) -> None:
         'Pass inputs to also send data immediately and get a result back in the same call. '
         'Result includes projectId and source for use with log_traces/log_trace.',
         _RUN_PIPELINE_SCHEMA,
+        hints=ToolHints(
+            read_only=False,
+            destructive=True,
+            open_world=True,
+            reason='Starts a billable task whose nodes run caller-defined logic that can write, delete or send data '
+            'to any service the pipeline names.',
+        ),
+        always_load=True,
     )(_run_pipeline)
 
     registry.register(
@@ -314,18 +322,39 @@ def register(registry: ToolRegistry) -> None:
         'Result includes projectId and source for use with log_traces/log_trace.',
         _RUN_DROPPER_PIPE_SCHEMA,
         ui_resource_uri=DROPPER_URI,
+        hints=ToolHints(
+            read_only=False,
+            destructive=True,
+            open_world=True,
+            reason="Starts a billable task and returns public upload URLs; the pipeline's nodes can reach any "
+            'external service it names.',
+        ),
     )(_run_dropper_pipe)
 
     registry.register(
         'send_data',
         'Send data to a running pipeline task (by task_token) and return its result.',
         _SEND_DATA_SCHEMA,
+        hints=ToolHints(
+            read_only=False,
+            destructive=True,
+            open_world=True,
+            reason='Feeds data into a running pipeline; processing can write, delete or send externally as the '
+            'pipeline defines.',
+        ),
     )(_send_data)
 
     registry.register(
         'terminate',
         'Terminate a running pipeline task by task_token -- also the stop-runaway-task path.',
         _TERMINATE_SCHEMA,
+        hints=ToolHints(
+            read_only=False,
+            destructive=True,
+            open_world=False,
+            reason='Cancels a running task, which counts as destructive; bounded to the tasks the caller is '
+            'authorized to control on this engine.',
+        ),
     )(_terminate)
 
     registry.register(
@@ -338,4 +367,11 @@ def register(registry: ToolRegistry) -> None:
         # deployed engine that is our server, so a caller could probe and
         # upload its files.
         local_engine_only=True,
+        hints=ToolHints(
+            read_only=False,
+            destructive=True,
+            open_world=True,
+            reason="Uploads files from the engine host into a running pipeline (local engines only); the pipeline's "
+            'effects are open-ended.',
+        ),
     )(_send_files)
