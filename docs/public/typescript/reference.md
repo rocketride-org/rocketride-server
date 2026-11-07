@@ -237,6 +237,8 @@ Further public methods, present in both SDKs, in brief:
 | Profiling | `cprofileStart`, `cprofileStop`, `cprofileStatus`, `cprofileReport`, `cprofileReportTree`, `cprofileThreads` |
 | Namespaces | `client.account`, `client.billing` (account and billing APIs) |
 
+`client.billing.createCheckoutSession` and `client.billing.redeemPromoCode` accept an optional `attemptId`. Generate a unique ID for each checkout or redemption and reuse it with the same parameters if you retry. Retry handling depends on the connected server version.
+
 ## DataPipe
 
 Returned by `client.pipe()`. One streaming upload: **open → write (one or more) →

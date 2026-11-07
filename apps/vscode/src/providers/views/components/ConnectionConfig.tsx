@@ -70,7 +70,7 @@ export interface ConnectionConfigProps {
 	isSubscribed?: boolean;
 	/** Checkout callbacks for CloudPanel's embedded CheckoutModal. */
 	onFetchPlans?: () => Promise<any[]>;
-	onCreateCheckout?: (priceId: string) => Promise<{ clientSecret: string; subscriptionId: string }>;
+	onCreateCheckout?: (priceId: string, promotionCode?: string, attemptId?: string) => Promise<{ clientSecret: string; subscriptionId: string }>;
 	onConfirmPending?: (subscriptionId: string, priceId: string) => Promise<void>;
 	onCheckoutSuccess?: () => void;
 

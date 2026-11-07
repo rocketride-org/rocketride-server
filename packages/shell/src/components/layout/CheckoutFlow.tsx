@@ -52,15 +52,14 @@ export interface CheckoutFlowProps {
  * billing API.
  */
 export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, orgId }) => {
-	/** App the user wants to subscribe to; null when modal is closed. */
-	const [checkoutApp, setCheckoutApp] = useState<AppManifestEntry | null>(null);
-	/** Optional plan preselected by the caller (e.g. the web pricing page) to
-	 *  skip the picker and go straight to payment; null = show the picker. */
-	const [presetPlan, setPresetPlan] = useState<CheckoutPlan | null>(null);
-	/** Optional validated discount code passed alongside the preselected plan
-	 *  (e.g. from the web pricing page) so it rides into the auto-advanced
-	 *  checkout; null = no promo. Cleared whenever presetPlan is cleared. */
-	const [presetPromo, setPresetPromo] = useState<PromoValidation | null>(null);
+	const [checkout, setCheckout] = useState<{
+		id: number;
+		orgId: string;
+		app: AppManifestEntry;
+		plan?: CheckoutPlan;
+		promo?: PromoValidation | null;
+	} | null>(null);
+	const checkoutSequence = useRef(0);
 	/** Pending timer that clears the post-purchase welcome status message. */
 	const statusClearTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -70,17 +69,18 @@ export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, orgId }) 
 		if (statusClearTimer.current) clearTimeout(statusClearTimer.current);
 	}, []);
 
-	// --- Listen for subscribe events -----------------------------------------
+	// Bind the checkout to the organization that opened it. A preselected
+	// plan from the previous organization must never auto-start after a switch.
 	useEffect(() => {
+		setCheckout((current) => current?.orgId === orgId ? current : null);
 		return ConnectionManager.getInstance().on(
 			'shell:subscribe',
 			({ app, plan, promo }: { app: unknown; plan?: CheckoutPlan; promo?: PromoValidation | null }) => {
-				setCheckoutApp(app as AppManifestEntry);
-				setPresetPlan(plan ?? null);
-				setPresetPromo(promo ?? null);
+				if (!orgId) return;
+				setCheckout({ id: ++checkoutSequence.current, orgId, app: app as AppManifestEntry, plan, promo });
 			},
 		);
-	}, []);
+	}, [orgId]);
 
 	// --- Listen for unsubscribe events ---------------------------------------
 	useEffect(() => {
@@ -95,7 +95,8 @@ export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, orgId }) 
 	}, [orgId]);
 
 	// --- Don't render if no checkout or missing config -----------------------
-	if (!checkoutApp || !stripeKey || !orgId) return null;
+	if (!checkout || !stripeKey || checkout.orgId !== orgId) return null;
+	const { app: checkoutApp } = checkout;
 
 	// --- Render CheckoutModal ------------------------------------------------
 	// Engine access is the realm's own client, so this flow renders in any
@@ -105,27 +106,30 @@ export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, orgId }) 
 	const needClient = () => {
 		const client = cm.getClient();
 		if (!client || !cm.isConnected()) throw new Error('Not connected to a server.');
+		const currentOrg = cm.getAccountInfo()?.organization?.id;
+		if (currentOrg && currentOrg !== checkout.orgId) throw new Error('The active organization changed. Reopen checkout.');
 		return client;
 	};
 
 	return (
 		<CheckoutModal
+			key={checkout.id}
 			appName={checkoutApp.name}
 			appDescription={checkoutApp.description}
 			stripePublishableKey={stripeKey}
-			preselectedPlan={presetPlan ?? undefined}
-			preselectedPromo={presetPromo ?? undefined}
+			preselectedPlan={checkout.plan}
+			preselectedPromo={checkout.promo}
 			onFetchPlans={async () => {
 				return needClient().billing.getProductPrices(checkoutApp.id) as Promise<CheckoutPlan[]>;
 			}}
-			onCreateCheckout={async (priceId: string, promotionCode?: string) => {
-				return needClient().billing.createCheckoutSession(orgId, checkoutApp.id, priceId, promotionCode);
+			onCreateCheckout={async (priceId, promotionCode, attemptId) => {
+				return needClient().billing.createCheckoutSession(orgId, checkoutApp.id, priceId, promotionCode, attemptId);
 			}}
 			onValidatePromoCode={async (code: string, priceId?: string) => {
 				return needClient().billing.validatePromoCode(orgId, code, priceId) as Promise<PromoValidation>;
 			}}
-			onRedeemPromoCode={async (code: string) => {
-				return needClient().billing.redeemPromoCode(orgId, code) as Promise<never>;
+			onRedeemPromoCode={async (code, attemptId) => {
+				return needClient().billing.redeemPromoCode(orgId, code, attemptId) as Promise<never>;
 			}}
 			onConfirmPending={async (subscriptionId: string, priceId: string) => {
 				// No SDK method exists for confirm_pending (the old direct-client
@@ -134,14 +138,15 @@ export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, orgId }) 
 				await needClient().call('rrext_account_billing', { subcommand: 'confirm_pending', appId: checkoutApp.id, subscriptionId, priceId });
 			}}
 			onSuccess={() => {
+				const currentOrg = cm.getAccountInfo()?.organization?.id;
+				if (checkoutSequence.current !== checkout.id || (currentOrg && currentOrg !== checkout.orgId)) return;
+				checkoutSequence.current += 1;
 				// New purchase complete: drop the user into the app they just bought
 				// and confirm briefly, rather than leaving them on the pricing grid.
 				// (Upgrades keep their own inline confirmation in UpgradeModal.)
 				const appId = checkoutApp.id;
 				const appName = checkoutApp.name;
-				setCheckoutApp(null);
-				setPresetPlan(null);
-				setPresetPromo(null);
+				setCheckout((current) => current === checkout ? null : current);
 				cm.emit('shell:switchApp', { appId });
 				cm.emit('shell:statusMessage', { message: `Welcome to ${appName}. Your plan is now active.` });
 				// Auto-clear so the confirmation doesn't linger in the status bar.
@@ -149,7 +154,11 @@ export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, orgId }) 
 				if (statusClearTimer.current) clearTimeout(statusClearTimer.current);
 				statusClearTimer.current = setTimeout(() => cm.emit('shell:statusMessage', { message: null }), 5000);
 			}}
-			onClose={() => { setCheckoutApp(null); setPresetPlan(null); setPresetPromo(null); }}
+			onClose={() => {
+				if (checkoutSequence.current !== checkout.id) return;
+				checkoutSequence.current += 1;
+				setCheckout((current) => current === checkout ? null : current);
+			}}
 		/>
 	);
 };
