@@ -1150,7 +1150,7 @@ For a no-RAG chat, drop `embedding_transformer_1`, `qdrant_1`, and `prompt_1` an
 ### Driving pipelines from code (pointers)
 
 - Start once with `client.use(filepath='...')` and reuse the returned token; pass
-  `use_existing=True` in long-running services to avoid `Pipeline already running`. A task
+  `use_existing=True` in long-running services to avoid `Pipeline is already running`. A task
   is keyed by owner + `project_id` + source, so to run the same pipe more than once at a
   time give each `use()` its own unguessable `tk_` token.
 - **Never block the async event loop** (`input()`, `readFileSync()`, `time.sleep()`): a
@@ -1213,7 +1213,7 @@ Runtime errors:
 | --- | --- |
 | `Connection closed` / `Connection timeout` | **Blocked async event loop** — async I/O only; see the SDK docs |
 | `KeyError: 'answers'` | Custom `laneName` changed the response key — read keys via `result_types` |
-| `Pipeline already running` | `use()` while running — `use_existing=True`, `terminate()` first, or a distinct `token` per instance |
+| `Pipeline is already running` | `use()` while running — `use_existing=True`, `terminate()` first, or a distinct `token` per instance |
 | `Component not found` / `Lane not supported` | Provider or lane not in the catalog — check spelling and `lanes` |
 | `Connection refused` / `Invalid API key` | External service down, or wrong `.env` values — check hosts, ports, `${ROCKETRIDE_*}` names |
 
