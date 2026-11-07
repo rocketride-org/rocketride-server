@@ -527,19 +527,28 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
     ///		to python strings. This is for nodes to output
     ///		under the DebugOut level
     ///------------------------------------------------------------
-    engLib.PYBIND_FUNCTION(getServiceDefinitions, []() -> py::object {
-        // Get the service type
-        const auto result = IServices::getServiceSchemas();
+    engLib.PYBIND_FUNCTION(
+        getServiceDefinitions,
+        [](py::list custom) -> py::object {
+            // Get the service type, with the caller's custom services
+            auto scope =
+                IServices::withCustomServices(pyjson::dictToJson(custom));
+            if (!scope) {
+                // A custom service that does not parse is the caller's to fix
+                if (custom.size()) throw scope.ccode();
+                return py::none();
+            }
 
-        // Return none or an object
-        if (!result) return py::none();
+            auto result = IServices::getServiceSchemas();
+            if (!result) {
+                if (custom.size()) throw result.ccode();
+                return py::none();
+            }
 
-        // Get a ptr to it
-        const auto services = *result;
-
-        // Return it
-        return pyjson::jsonToDict(services);
-    });
+            // Return it
+            return pyjson::jsonToDict(*result);
+        },
+        py::arg("custom") = py::list());
 
     //-------------------------------------------------------------
     /// @details
@@ -656,12 +665,21 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
     ///		Defines the validatePipeline function which can be
     ///		called by a python to validate a pipeline configuration.
     ///-------------------------------------------------------------
-    engLib.PYBIND_FUNCTION(validatePipeline, [](py::dict config) -> py::dict {
-        auto resConfig = store::pipeline::validatePipelineOrComponent(
-            _mv(pyjson::dictToJson(config)));
-        resConfig.checkThrow();
-        return pyjson::jsonToDict(*resConfig);
-    });
+    engLib.PYBIND_FUNCTION(
+        validatePipeline,
+        [](py::dict config, py::list custom) -> py::dict {
+            // Validated with the caller's custom services
+            auto root = pyjson::dictToJson(config);
+            auto scope =
+                IServices::withCustomServices(pyjson::dictToJson(custom));
+            if (!scope) throw scope.ccode();
+
+            auto result =
+                store::pipeline::validatePipelineOrComponent(_mv(root));
+            if (!result) throw result.ccode();
+            return pyjson::jsonToDict(*result);
+        },
+        py::arg("config"), py::arg("custom") = py::list());
 
     //-------------------------------------------------------------
     /// @details
@@ -1170,8 +1188,16 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
                                   : py::none();
             })
         .PYBIND(endLoad, &ILoader::endLoad)
-        .def_static("getPipeStack", &ILoader::getPipeStack,
-                    py::arg("pipes") = py::dict());
+        .def_static(
+            "getPipeStack",
+            [](const py::dict &pipes, py::list custom) -> py::dict {
+                // Built with the caller's custom services
+                auto scope =
+                    IServices::withCustomServices(pyjson::dictToJson(custom));
+                if (!scope) throw scope.ccode();
+                return ILoader::getPipeStack(pipes);
+            },
+            py::arg("pipes") = py::dict(), py::arg("custom") = py::list());
 
     //-------------------------------------------------------------
     /// @details
