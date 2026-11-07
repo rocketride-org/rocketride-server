@@ -1084,6 +1084,7 @@ describe('RocketRideClient Integration Tests', () => {
 
 				expect(result).toBeDefined();
 				expect(result).toHaveProperty('pipeline');
+				expect(result.errors).toEqual([]);
 			},
 			TEST_CONFIG.timeout
 		);
@@ -1099,6 +1100,7 @@ describe('RocketRideClient Integration Tests', () => {
 
 				expect(result).toBeDefined();
 				expect(result).toHaveProperty('pipeline');
+				expect(result.errors).toEqual([]);
 			},
 			TEST_CONFIG.timeout
 		);
@@ -1128,6 +1130,7 @@ describe('RocketRideClient Integration Tests', () => {
 
 				expect(result).toBeDefined();
 				expect(result).toHaveProperty('pipeline');
+				expect(result.errors).toEqual([]);
 			},
 			TEST_CONFIG.timeout
 		);
@@ -1163,6 +1166,7 @@ describe('RocketRideClient Integration Tests', () => {
 				expect(result).toBeDefined();
 				expect(result.errors).toBeDefined();
 				expect(Array.isArray(result.errors)).toBe(true);
+				expect(result.errors!.length).toBeGreaterThan(0);
 			},
 			TEST_CONFIG.timeout
 		);

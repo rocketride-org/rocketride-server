@@ -472,6 +472,13 @@ def setup_parser() -> argparse.ArgumentParser:
     _add_connection_args(mkdir_parser)
     mkdir_parser.add_argument('path', help='Directory path')
 
+    rmdir_parser = store_subparsers.add_parser('rmdir', help='Remove a directory')
+    _add_connection_args(rmdir_parser)
+    rmdir_parser.add_argument('path', help='Directory path')
+    rmdir_parser.add_argument(
+        '-r', '--recursive', action='store_true', help='Remove directory and its contents recursively'
+    )
+
     stat_parser = store_subparsers.add_parser('stat', help='Get file/directory metadata')
     _add_connection_args(stat_parser)
     stat_parser.add_argument('path', help='File or directory path')
@@ -671,7 +678,7 @@ async def _dispatch(args) -> int:
         return await run_profile(args)
     if args.command == 'store':
         if not getattr(args, 'store_subcommand', None):
-            print('Error: Store subcommand is required (dir, type, write, rm, mkdir, stat)', file=sys.stderr)
+            print('Error: Store subcommand is required (dir, type, write, rm, mkdir, stat, rmdir)', file=sys.stderr)
             return 1
         return await run_store(args)
     if args.command == 'app':

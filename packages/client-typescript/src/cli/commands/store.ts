@@ -189,6 +189,23 @@ export function registerStoreCommands(program: Command): void {
 		});
 	addConnectionOptions(mkdirCmd);
 
+	// ── store rmdir ──────────────────────────────────────────────────────
+	const rmdirCmd = storeCmd
+		.command('rmdir <path>')
+		.description('Remove a directory')
+		.option('-r, --recursive', 'Remove directory and its contents recursively')
+		.action(async (dirPath, options) => {
+			await runCliCommand(options, async (out) => {
+				const client = await connectClient(options);
+				const recursive = Boolean(options.recursive);
+				await client.fsRmdir(dirPath, recursive);
+				out.line(`Removed: ${dirPath}/`);
+				out.result({ path: dirPath, removed: true, recursive });
+				return 0;
+			});
+		});
+	addConnectionOptions(rmdirCmd);
+
 	// ── store stat ───────────────────────────────────────────────────────
 	const statCmd = storeCmd
 		.command('stat <path>')

@@ -903,13 +903,14 @@ class FileStore:
 
     async def delete(self, path: str) -> None:
         """
-        Delete a file.
+        Delete a file (or an empty directory created with mkdir).
 
         Args:
             path: Relative path within the account store.
 
         Raises:
-            StorageError: If file does not exist, delete fails, or file is open for writing.
+            StorageError: If file does not exist, delete fails, target is a
+                non-empty directory, or file is open for writing.
         """
         full_path, kind, rest = self._resolve(path)
         # Root guard: deleting a root — the caller's own account root
@@ -918,6 +919,19 @@ class FileStore:
             raise StorageError('Cannot delete a scope root')
         if full_path in self._write_locks:
             raise StorageError(f'Cannot delete file while it is open for writing: {path}')
+
+        # Check whether the target is a directory rather than a regular file.
+        dir_prefix = full_path.rstrip('/') + '/'
+        listed = await self._store.list_files(dir_prefix)
+        children = [f for f in listed if f != full_path and f.startswith(dir_prefix)]
+        if children and full_path not in listed:
+            own_marker = dir_prefix + DIR_MARKER
+            non_marker = [f for f in children if f != own_marker]
+            if non_marker:
+                raise StorageError(f'Directory not empty: {path}')
+            await self.rmdir(path, recursive=False)
+            return
+
         await self._store.delete_file(full_path)
 
     async def list_dir(self, path: str = '') -> dict:
@@ -1014,17 +1028,22 @@ class FileStore:
         if not rest:
             raise StorageError('rmdir cannot target a scope root')
 
-        full_prefix = self._full_path(validated.rstrip('/') + '/')
+        full_target = _full.rstrip('/')
+        full_prefix = full_target + '/'
 
         # Refuse if any open handle or write-lock lives under this prefix;
         # otherwise the writer's next write_chunk/close would reference a
         # deleted backend path with undefined behavior.
         self._assert_no_active_handles_under(full_prefix)
 
-        all_files = await self._store.list_files(full_prefix)
+        listed = await self._store.list_files(full_prefix)
+        if full_target in listed:
+            raise StorageError(f'Not a directory: {path}')
+        all_files = [f for f in listed if f.startswith(full_prefix)]
 
-        # Ignore the dirmarker sentinel when checking emptiness
-        non_marker = [f for f in all_files if not f.endswith('/' + DIR_MARKER)]
+        # Ignore the target directory's own dirmarker sentinel when checking emptiness
+        own_marker = full_prefix + DIR_MARKER
+        non_marker = [f for f in all_files if f != own_marker]
 
         if not recursive and non_marker:
             raise StorageError(f'Directory not empty: {path}')
