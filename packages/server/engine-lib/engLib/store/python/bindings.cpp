@@ -663,6 +663,22 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
         return pyjson::jsonToDict(*resConfig);
     });
 
+    ///-------------------------------------------------------------
+    /// @details
+    ///		Defines the resolveSecureParameters function which can be
+    ///		called by a python to replace the secure parameter tokens
+    ///		in a pipeline with the values they hold.
+    ///-------------------------------------------------------------
+    engLib.PYBIND_FUNCTION(
+        resolveSecureParameters, [](py::dict pipeline) -> py::dict {
+            json::Value root(json::objectValue);
+            root["pipeline"] = pyjson::dictToJson(pipeline);
+
+            store::pipeline::PipelineConfig config(_mv(root));
+            config.resolveSecureParameters().checkThrow();
+            return pyjson::jsonToDict(config.root()["pipeline"]);
+        });
+
     //-------------------------------------------------------------
     /// @details
     ///		Declare the Entry class. This is used to set virtual
