@@ -71,6 +71,16 @@ test("a page's later watches keep it the newest page", () => {
 	assert.deepEqual(registry.keys(), ['fs-new-1', 'fs-new-2']);
 });
 
+test("an older page's later watch does not become the newest page", () => {
+	const { registry, disposed, watch } = harness();
+	watch('fs-old-1');
+	watch('fs-new-1');
+	watch('fs-old-2'); // the old page adds a watcher after the new page appeared
+	registry.resetForPageBoot();
+	assert.deepEqual(registry.keys(), ['fs-new-1']);
+	assert.deepEqual(disposed, ['fs-old-1', 'fs-old-2']);
+});
+
 test('re-adding a key replaces it and disposes the previous subscription', () => {
 	const { registry, disposed, watch } = harness();
 	watch('fs-p-1');
