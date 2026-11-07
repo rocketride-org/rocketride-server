@@ -76,6 +76,16 @@ _WRITING_CLAUSE = re.compile(
 )
 
 # ClickHouse's SETTINGS clause (SETTINGS name = value), which changes settings for the query, such as its time limit
+# Session-scoped lock functions and MySQL user-variable assignment change state of the
+# session, not of one transaction, so a rollback does not undo them and the pooled
+# connection keeps them. `pg_advisory_xact_lock` is transaction-scoped and stays allowed.
+_SESSION_STATE_CLAUSE = re.compile(
+    r'\bpg_(?:try_)?advisory_lock(?:_shared)?\s*\('
+    r'|\bget_lock\s*\('
+    r'|@[a-z0-9_$]+\s*:=',
+    re.IGNORECASE,
+)
+
 _SETTINGS_CLAUSE = re.compile(r'\bsettings\s+(?:[a-z_][a-z0-9_]*|`[^`]*`|"[^"]*")\s*=', re.IGNORECASE)
 
 
@@ -290,6 +300,7 @@ def _is_read_shaped(masked: str | None) -> bool:
         _ALLOWED_STATEMENT.match(statement)
         and not _WRITING_CLAUSE.search(statement)
         and not _SETTINGS_CLAUSE.search(statement)
+        and not _SESSION_STATE_CLAUSE.search(statement)
         for statement in statements
     )
 
@@ -298,8 +309,10 @@ def is_sql_safe(sql: str) -> bool:
     """Return False unless the SQL is one statement shaped like a read: ``SELECT``, optionally behind ``EXPLAIN``.
 
     A whitelist: anything else (SET, COPY, PREPARE / EXECUTE, DO, HANDLER, WITH, ...) is rejected, and so
-    is a SELECT with ``INTO``, a row lock (``FOR UPDATE``, ``FOR SHARE``, ``LOCK IN SHARE MODE``) or a
-    ClickHouse ``SETTINGS`` clause, which can lift the time limit. So is
+    is a SELECT with ``INTO``, a row lock (``FOR UPDATE``, ``FOR SHARE``, ``LOCK IN SHARE MODE``), a
+    ClickHouse ``SETTINGS`` clause, which can lift the time limit, or session-scoped state that a
+    rollback does not undo: ``pg_advisory_lock`` (and its ``try_``/``_shared`` forms), MySQL
+    ``GET_LOCK``, or a MySQL user-variable assignment (``@x :=``). So is
     a ``;``-chain of more than one statement, reads included: on PostgreSQL a later statement could end
     the read-only transaction or lift its time limit, and a generated query is one statement. A trailing
     ``;`` is fine. The text is read under PostgreSQL rules with ``standard_conforming_strings`` on and off,

@@ -371,3 +371,38 @@ def test_ordinary_reads_with_quotes_and_comments_pass(sql):
         sql: The SQL under test.
     """
     assert is_sql_safe(sql) is True
+
+
+# ---------------------------------------------------------------------------
+# Session state a rollback does not undo
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    'sql',
+    [
+        'SELECT pg_advisory_lock(42)',
+        'select PG_TRY_ADVISORY_LOCK(42)',
+        'SELECT pg_advisory_lock_shared(42)',
+        'SELECT pg_try_advisory_lock_shared(42)',
+        "SELECT GET_LOCK('k', 0)",
+        'SELECT @x := 1',
+        'SELECT id, @x := id FROM t',
+    ],
+)
+def test_session_scoped_state_is_rejected(sql):
+    """A session lock or user variable outlives the rollback, so a generated SELECT may not take one."""
+    assert is_sql_safe(sql) is False
+
+
+@pytest.mark.parametrize(
+    'sql',
+    [
+        'SELECT pg_advisory_xact_lock(42)',
+        'SELECT @x',
+        'SELECT count(*) FROM t',
+    ],
+)
+def test_transaction_scoped_lock_and_variable_reads_still_pass(sql):
+    """The transaction-scoped lock ends with the rollback, and reading a variable sets nothing."""
+    assert is_sql_safe(sql) is True
