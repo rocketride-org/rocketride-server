@@ -665,3 +665,18 @@ def test_a_cast_keeps_the_placeholder_a_bind():
 
     assert binds == {'b1': 5}
     assert clause.compile().params == {'b1': None}
+
+
+def test_rewritten_sql_runs_with_its_binds():
+    """The rewritten text and the bind dict have to execute, not just render."""
+    engine = create_engine('sqlite://')
+    with engine.connect() as conn:
+        clause, binds = to_sqlalchemy_text('select $1 + $2', [2, 3])
+        assert conn.execute(clause, binds).scalar_one() == 5
+
+
+def test_a_placeholder_inside_a_literal_is_still_text():
+    engine = create_engine('sqlite://')
+    with engine.connect() as conn:
+        clause, binds = to_sqlalchemy_text("select '$1' as lit, $2", ['unused', 9])
+        assert tuple(conn.execute(clause, binds).one()) == ('$1', 9)
