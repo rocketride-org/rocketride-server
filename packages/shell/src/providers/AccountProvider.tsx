@@ -38,13 +38,12 @@
 
 import React, { useState, useEffect, useCallback, useRef, CSSProperties } from 'react';
 import AccountView from '../modules/account/AccountView';
-import { parsePlanChangePreview } from '../modules/billing/components/planChange';
-import type { PlanChangeOutcome } from '../modules/billing/components/planChange';
+import { parsePlanChangeOutcome, parsePlanChangePreview } from '../modules/billing/components/planChange';
 import type { IDataGridPageRequest } from '../components/data-grid/DataGrid';
 import type { ConnectResult, AccountSection, ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, ProfileUpdate, BillingDetail, CreditBalance, TransactionsResult, UsageRollup } from 'rocketride';
 import { useShellConnection } from '../connection/ConnectionContext';
 import { useAuthUser, useLogout } from '../hooks/useAuthUser';
-import { ConnectionManager, getAccountTransition } from '../connection/connection';
+import { canManageOrganizationBilling, ConnectionManager, getAccountTransition } from '../connection/connection';
 import { useOptionalWorkspace } from '../components/workspace/WorkspaceContext';
 
 // =============================================================================
@@ -252,7 +251,8 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 	const isCurrentBillingScope = useCallback(() => {
 		const manager = ConnectionManager.getInstance();
 		const account = manager.getAccountInfo();
-		return !getAccountTransition(manager).changingWorkspace &&
+		const transition = getAccountTransition(manager);
+		return !transition.changingWorkspace && !transition.disconnecting &&
 			manager.getClient() === client && account?.organization?.id === orgId && account.userId === userId;
 	}, [client, orgId, userId]);
 
@@ -346,9 +346,13 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 	);
 
 	const requirePlanChangeClient = useCallback(() => {
-		if (!client || !orgId || !ConnectionManager.getInstance().isConnected()) throw new Error('Not connected');
+		const manager = ConnectionManager.getInstance();
+		if (!client || !orgId || !manager.isConnected()) throw new Error('Not connected');
 		if (!isCurrentBillingScope()) {
-			throw new Error('The active organization changed. Reopen the plan change.');
+			throw new Error('The active organization or connection changed. Reopen the plan change.');
+		}
+		if (!canManageOrganizationBilling(manager.getAccountInfo())) {
+			throw new Error('Workspace admin permission is required to change plans.');
 		}
 		return client;
 	}, [client, orgId, isCurrentBillingScope]);
@@ -377,7 +381,7 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 		async (appId: string, newPriceId: string, attemptId?: string, expectedPriceId?: string) => {
 			const manager = ConnectionManager.getInstance();
 			const transition = getAccountTransition(manager);
-			const result = await requirePlanChangeClient().call<PlanChangeOutcome>('rrext_account_billing', {
+			const response = await requirePlanChangeClient().call<unknown>('rrext_account_billing', {
 				subcommand: 'upgrade',
 				orgId,
 				appId,
@@ -386,6 +390,7 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 				...(expectedPriceId ? { expectedPriceId } : {}),
 			});
 			requirePlanChangeClient();
+			const result = parsePlanChangeOutcome(response);
 			if (result.status === 'requires_action') {
 				return {
 					...result,

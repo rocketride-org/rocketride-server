@@ -1200,7 +1200,7 @@ test('onConnected ignores stale callbacks, accepts the active connection, and pr
 	}
 });
 
-test('a background reconnect publishes the new workspace before connected observers', async (t) => {
+test('a background reconnect refreshes workspace and account data before connected observers', async (t) => {
 	const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
 	Object.defineProperty(globalThis, 'window', {
 		configurable: true,
@@ -1228,14 +1228,27 @@ test('a background reconnect publishes the new workspace before connected observ
 		...authenticatedResult,
 		organization: { id: 'current', name: 'Current', permissions: [], teams: [] },
 	};
-	t.mock.method(manager.client, 'getAccountInfo', () => updated);
+	const account = t.mock.method(manager.client, 'getAccountInfo', () => updated);
 	manager.refreshServices = async () => {};
+	const billingEvents = () => emitted.filter(({ event }) => event === 'shell:accountUpdate' || event === 'shell:connected');
 
 	await manager.client._callerOnConnected();
 
 	assert.equal(manager.accountInfo, updated);
-	assert.deepEqual(emitted.filter(({ event }) => event === 'shell:accountUpdate' || event === 'shell:connected'), [
+	assert.deepEqual(billingEvents(), [
 		{ event: 'shell:accountUpdate', payload: updated },
+		{ event: 'shell:connected', payload: {} },
+	]);
+
+	const refreshed = { ...updated, displayName: 'Refreshed account' };
+	account.mock.mockImplementation(() => refreshed);
+	manager.lifecycleOwner.connectedPublished = false;
+	emitted.length = 0;
+	await manager.client._callerOnConnected();
+
+	assert.equal(manager.accountInfo, refreshed);
+	assert.deepEqual(billingEvents(), [
+		{ event: 'shell:accountUpdate', payload: refreshed },
 		{ event: 'shell:connected', payload: {} },
 	]);
 });

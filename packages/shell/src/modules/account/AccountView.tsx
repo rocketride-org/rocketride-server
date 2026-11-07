@@ -300,6 +300,7 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 	const isOrgAdmin = useMemo(() => {
 		return profile?.organization?.permissions?.includes('org.admin') ?? false;
 	}, [profile]);
+	const isBillingOrgAdmin = authUser?.organization?.permissions?.includes('org.admin') ?? isOrgAdmin;
 
 	/**
 	 * Returns true when the current user has team.admin on the given team.
@@ -392,7 +393,7 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 					<>
 						<ContentHeader title="Billing" subtitle="Subscriptions, account balance, and payment methods." />
 						<div style={commonStyles.tabContent}>
-							<BillingPanel key={billingPanelKey} isConnected={isConnected} subscriptions={subscriptions} loading={billingLoading} error={billingError} creditBalance={creditBalance} apps={apps} onCancelSubscription={onCancelSubscription} onOpenPortal={handlePortal} isOrgAdmin={isOrgAdmin} onSubscribe={onSubscribe} transactions={transactions} usageByUser={usageByUser} usageByTeam={usageByTeam} activeTasks={activeTasks} dashboardLoading={dashboardLoading} onTransactionPage={onTransactionPage} fetchTransactions={fetchTransactions} fetchTransactionDistinct={fetchTransactionDistinct} topupPlans={topupPlans} onBuyTopup={onBuyTopup} allPlans={allPlans} onPurchaseTopup={onPurchaseTopup} onUpgradeSubscription={onUpgradeSubscription} onPreviewSubscriptionChange={onPreviewSubscriptionChange} />
+							<BillingPanel key={billingPanelKey} isConnected={isConnected} subscriptions={subscriptions} loading={billingLoading} error={billingError} creditBalance={creditBalance} apps={apps} onCancelSubscription={onCancelSubscription} onOpenPortal={handlePortal} isOrgAdmin={isBillingOrgAdmin} onSubscribe={onSubscribe} transactions={transactions} usageByUser={usageByUser} usageByTeam={usageByTeam} activeTasks={activeTasks} dashboardLoading={dashboardLoading} onTransactionPage={onTransactionPage} fetchTransactions={fetchTransactions} fetchTransactionDistinct={fetchTransactionDistinct} topupPlans={topupPlans} onBuyTopup={onBuyTopup} allPlans={allPlans} onPurchaseTopup={onPurchaseTopup} onUpgradeSubscription={onUpgradeSubscription} onPreviewSubscriptionChange={onPreviewSubscriptionChange} />
 						</div>
 					</>
 				),
@@ -442,7 +443,7 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 				),
 			},
 		}),
-		[sectionError, profile, authUser, billingPanelKey, keys, org, teams, teamDetail, activeTeamId, members, isConnected, subscriptions, billingLoading, billingError, creditBalance, transactions, apps, usageByUser, usageByTeam, activeTasks, dashboardLoading, topupPlans, allPlans, fetchTransactions, fetchTransactionDistinct, onSaveProfile, onSetDevTeam, onSetDefaultOrg, onSubscribe, onTransactionPage, onBuyTopup, onPurchaseTopup, onUpgradeSubscription, onPreviewSubscriptionChange, onSaveOrgName, onResendInvite, onActiveTeamIdChange, onLoadTeamDetail, onCreateKey, onRevokeKey, onInviteMember, onUpdateMemberRole, onRemoveMember, onCancelSubscription, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, handlePortal, isOrgAdmin, isActiveTeamAdmin]
+		[sectionError, profile, authUser, billingPanelKey, keys, org, teams, teamDetail, activeTeamId, members, isConnected, subscriptions, billingLoading, billingError, creditBalance, transactions, apps, usageByUser, usageByTeam, activeTasks, dashboardLoading, topupPlans, allPlans, fetchTransactions, fetchTransactionDistinct, onSaveProfile, onSetDevTeam, onSetDefaultOrg, onSubscribe, onTransactionPage, onBuyTopup, onPurchaseTopup, onUpgradeSubscription, onPreviewSubscriptionChange, onSaveOrgName, onResendInvite, onActiveTeamIdChange, onLoadTeamDetail, onCreateKey, onRevokeKey, onInviteMember, onUpdateMemberRole, onRemoveMember, onCancelSubscription, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, handlePortal, isOrgAdmin, isBillingOrgAdmin, isActiveTeamAdmin]
 	);
 
 	// =========================================================================
@@ -508,7 +509,7 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 						<ContentHeader title="Billing" subtitle="Subscriptions, account balance, and payment methods." />
 						<div style={commonStyles.tabContent}>
 							{chip}
-							<BillingPanel key={billingPanelKey} isConnected={isConnected} subscriptions={subscriptions} loading={billingLoading} error={billingError} creditBalance={creditBalance} apps={apps} onCancelSubscription={onCancelSubscription} onOpenPortal={handlePortal} isOrgAdmin={isOrgAdmin} onSubscribe={onSubscribe} transactions={transactions} usageByUser={usageByUser} usageByTeam={usageByTeam} activeTasks={activeTasks} dashboardLoading={dashboardLoading} onTransactionPage={onTransactionPage} fetchTransactions={fetchTransactions} fetchTransactionDistinct={fetchTransactionDistinct} topupPlans={topupPlans} onBuyTopup={onBuyTopup} allPlans={allPlans} onPurchaseTopup={onPurchaseTopup} onUpgradeSubscription={onUpgradeSubscription} onPreviewSubscriptionChange={onPreviewSubscriptionChange} />
+							<BillingPanel key={billingPanelKey} isConnected={isConnected} subscriptions={subscriptions} loading={billingLoading} error={billingError} creditBalance={creditBalance} apps={apps} onCancelSubscription={onCancelSubscription} onOpenPortal={handlePortal} isOrgAdmin={isBillingOrgAdmin} onSubscribe={onSubscribe} transactions={transactions} usageByUser={usageByUser} usageByTeam={usageByTeam} activeTasks={activeTasks} dashboardLoading={dashboardLoading} onTransactionPage={onTransactionPage} fetchTransactions={fetchTransactions} fetchTransactionDistinct={fetchTransactionDistinct} topupPlans={topupPlans} onBuyTopup={onBuyTopup} allPlans={allPlans} onPurchaseTopup={onPurchaseTopup} onUpgradeSubscription={onUpgradeSubscription} onPreviewSubscriptionChange={onPreviewSubscriptionChange} />
 						</div>
 					</>
 				)}

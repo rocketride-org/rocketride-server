@@ -5,7 +5,16 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { parsePlanChangePreview, planChangeCompletion } from './planChange';
+import { parsePlanChangeOutcome, parsePlanChangePreview, planChangeCompletion } from './planChange';
+
+test('requires a recognized response to complete an authenticated attempt', () => {
+	assert.deepEqual(parsePlanChangeOutcome({ status: 'applied' }), { status: 'applied' });
+	assert.equal(parsePlanChangeOutcome({ status: 'payment_pending' }).status, 'payment_pending');
+	for (const response of [undefined, {}, { type: 'response', success: true }, { status: 'unknown' },
+		{ status: 'requires_action', clientSecret: 7 }]) {
+		assert.throws(() => parsePlanChangeOutcome(response), /invalid plan change result/);
+	}
+});
 
 test('uses neutral copy for legacy callbacks without a result', () => {
 	assert.deepEqual(planChangeCompletion(undefined), { message: 'Plan change requested.', pending: false });

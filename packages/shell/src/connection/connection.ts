@@ -174,21 +174,29 @@ function isConnectResult(body: unknown): body is ConnectResult {
 	);
 }
 
-type AccountTransition = Readonly<{ changingWorkspace: boolean }>;
-const idleAccountTransition: AccountTransition = { changingWorkspace: false };
-const accountTransitions = new WeakMap<ConnectionManager, AccountTransition>();
+type AccountTransition = Readonly<{ changingWorkspace: boolean; disconnecting: boolean }>;
+const idleAccountTransition: AccountTransition = { changingWorkspace: false, disconnecting: false };
+// Federated modules can load independent copies of this file and share one manager.
+const accountTransitionKey = Symbol.for('rocketride.connectionManager.accountTransition');
 
 /** Internal snapshot used to invalidate billing actions before event observers run. */
 export function getAccountTransition(manager: ConnectionManager): AccountTransition {
-	return accountTransitions.get(manager) ?? idleAccountTransition;
+	const transition: AccountTransition | undefined = Reflect.get(manager, accountTransitionKey);
+	return transition ?? idleAccountTransition;
 }
 
-function advanceAccountTransition(manager: ConnectionManager, changingWorkspace = getAccountTransition(manager).changingWorkspace): void {
-	accountTransitions.set(manager, { changingWorkspace });
+function advanceAccountTransition(manager: ConnectionManager, change: Partial<AccountTransition> = {}): void {
+	Reflect.set(manager, accountTransitionKey, { ...getAccountTransition(manager), ...change });
+}
+
+/** Current account permission used by plan changes in the shared billing host. */
+export function canManageOrganizationBilling(account?: ConnectResult | null): boolean {
+	return account?.organization?.permissions?.includes('org.admin') ?? false;
 }
 
 function isSameAccountScope(previous: ConnectResult, next: ConnectResult): boolean {
-	return previous.userId === next.userId && previous.organization?.id === next.organization?.id;
+	return previous.userId === next.userId && previous.organization?.id === next.organization?.id &&
+		canManageOrganizationBilling(previous) === canManageOrganizationBilling(next);
 }
 
 function isVersionResponse(body: unknown): boolean {
@@ -462,7 +470,7 @@ export class ConnectionManager implements IConnectionManager {
 				if (!this.hasCurrentLifecycleOwner()) return;
 				if (!this.client?.isAttached() || !this.client.isAuthenticated()) return;
 				const account = this.client.getAccountInfo();
-				if (this.accountInfo && isConnectResult(account) && !isSameAccountScope(this.accountInfo, account)) {
+				if (this.accountInfo && isConnectResult(account) && this.accountInfo !== account) {
 					this.cacheAccountInfo(account);
 					this.emit('shell:accountUpdate', account);
 				}
@@ -1391,6 +1399,7 @@ export class ConnectionManager implements IConnectionManager {
 	 * Safe to call when already disconnected.
 	 */
 	public async disconnect(): Promise<void> {
+		advanceAccountTransition(this, { disconnecting: true });
 		this.invalidateLifecycle('detached');
 		const generation = this.connectionGeneration;
 		const manager = this.manager;
@@ -1910,9 +1919,12 @@ export class ConnectionManager implements IConnectionManager {
 	 * @param payload - The payload matching the event's type.
 	 */
 	public emit<K extends keyof ShellConnectionEventMap>(event: K, payload: ShellConnectionEventMap[K]): void {
-		if (event === 'shell:workspaceWillChange') advanceAccountTransition(this, true);
-		else if (event === 'shell:workspaceChanged') advanceAccountTransition(this, false);
-		else if (event === 'shell:orgChanged' || event === 'shell:disconnected' || event === 'shell:logout') {
+		if (event === 'shell:workspaceWillChange') advanceAccountTransition(this, { changingWorkspace: true });
+		else if (event === 'shell:workspaceChanged') advanceAccountTransition(this, { changingWorkspace: false });
+		else if (event === 'shell:disconnected' || event === 'shell:logout') advanceAccountTransition(this, { disconnecting: true });
+		else if (event === 'shell:connected' && getAccountTransition(this).disconnecting) {
+			advanceAccountTransition(this, { disconnecting: false });
+		} else if (event === 'shell:orgChanged') {
 			advanceAccountTransition(this);
 		}
 

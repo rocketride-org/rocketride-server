@@ -40,6 +40,24 @@ export function parsePlanChangePreview(value: unknown): PlanChangePreview {
 	throw new Error('The server returned an invalid plan change preview. Try again.');
 }
 
+const planChangeStatuses = new Set([
+	'payment_failed', 'failed', 'requires_payment_method', 'payment_pending', 'requires_action',
+	'downgrade_scheduled', 'scheduled', 'unchanged', 'upgraded', 'applied',
+]);
+
+/** Validate a server outcome before discarding the recovery attempt. */
+export function parsePlanChangeOutcome(value: unknown): PlanChangeOutcome {
+	if (value && typeof value === 'object' && 'status' in value &&
+		typeof value.status === 'string' && planChangeStatuses.has(value.status)) {
+		const result = value as PlanChangeOutcome;
+		if ((result.clientSecret == null || typeof result.clientSecret === 'string') &&
+			(result.stripePublishableKey === undefined || typeof result.stripePublishableKey === 'string')) {
+			return result;
+		}
+	}
+	throw new Error('The server returned an invalid plan change result. Try again.');
+}
+
 /** Describe what the server actually applied after confirmation. */
 export function planChangeCompletion(result: void | PlanChangeOutcome): { message: string; pending: boolean } {
 	switch (result?.status) {

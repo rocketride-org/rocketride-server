@@ -24,7 +24,7 @@ import { commonStyles } from '../../../themes/styles';
 import { Modal } from '../../../components/modal/Modal';
 import { PlanPicker, planAmount } from '../../checkout/PlanPicker';
 import type { CheckoutPlan } from '../../checkout/types';
-import { parsePlanChangePreview, planChangeCompletion } from './planChange';
+import { parsePlanChangeOutcome, parsePlanChangePreview, planChangeCompletion } from './planChange';
 import type { PlanChangeOutcome, PlanChangePreview } from './planChange';
 
 // =============================================================================
@@ -175,10 +175,11 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 	onUpgrade,
 	onClose,
 }) => {
-	const [selectedPlan, setSelectedPlan] = useState<CheckoutPlan | null>(
-		() => (preselectedPriceId && preselectedPriceId !== currentPriceId
-			? plans.find((p) => p.stripePriceId === preselectedPriceId && isVisibleSubscriptionPlan(p)) ?? null
-			: null),
+	const [selectedPlanId, setSelectedPlanId] = useState<string | null>(() =>
+		preselectedPriceId && preselectedPriceId !== currentPriceId &&
+		plans.some((p) => p.stripePriceId === preselectedPriceId && isVisibleSubscriptionPlan(p))
+			? preselectedPriceId
+			: null,
 	);
 	const [upgrading, setUpgrading] = useState(false);
 	const [completion, setCompletion] = useState<{ message: string; pending: boolean } | null>(null);
@@ -211,9 +212,9 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 		[plans],
 	);
 
-	/** Whether the selected plan differs from the current plan. */
-	const isValidSelection = selectedPlan && selectedPlan.stripePriceId !== currentPriceId &&
-		subscriptionPlans.some((plan) => plan.stripePriceId === selectedPlan.stripePriceId);
+	// Resolve the selected card and its interval from the latest catalog.
+	const selectedPlan = subscriptionPlans.find((plan) => plan.stripePriceId === selectedPlanId) ?? null;
+	const isValidSelection = selectedPlan && selectedPlan.stripePriceId !== currentPriceId;
 
 	/**
 	 * When opened with a preselected plan (e.g. from the pricing page), show a
@@ -257,7 +258,7 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 
 	const handleSelect = (plan: CheckoutPlan) => {
 		if (!available || plan.stripePriceId === currentPriceId || inFlight.current) return;
-		setSelectedPlan(plan);
+		setSelectedPlanId(plan.stripePriceId);
 		setError(null);
 	};
 
@@ -278,6 +279,7 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 				operation = attempt.current;
 			}
 			const { priceId, id, expectedPriceId } = operation;
+			let authenticated = Boolean(paymentToFinish);
 			let result = await onUpgrade(priceId, id, expectedPriceId);
 			if (!mounted.current) return;
 			if (!paymentToFinish && result?.status === 'requires_action' && result.clientSecret && result.stripePublishableKey) {
@@ -292,17 +294,20 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 				if (!mounted.current) return;
 				if (confirmation.error) throw new Error(confirmation.error.message ?? 'Payment authentication failed.');
 				if (confirmation.paymentIntent?.status === 'succeeded') {
+					authenticated = true;
 					setPaymentToFinish(operation);
 					result = await onUpgrade(priceId, id, expectedPriceId);
 				}
 			}
 			if (!mounted.current) return;
-			const outcome = planChangeCompletion(result);
+			const outcome = planChangeCompletion(authenticated ? parsePlanChangeOutcome(result) : result);
 			setPaymentToFinish(null);
 			setCompletion(outcome);
 			if (!outcome.pending) closeTimer.current = setTimeout(onClose, 1500);
-		} catch (e: any) {
-			if (mounted.current) setError(e?.message ?? 'Plan change failed. Please try again.');
+		} catch (error: unknown) {
+			if (mounted.current) {
+				setError(error instanceof Error && error.message ? error.message : 'Plan change failed. Please try again.');
+			}
 		} finally {
 			inFlight.current = false;
 			if (mounted.current) setUpgrading(false);
@@ -315,9 +320,9 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 		if (paymentToFinish) return 'Finish plan change';
 		if (previewLoading) return 'Checking plan change...';
 		if (previewError) return 'Retry preview';
-		if (!selectedPlan) return 'Select a plan';
-		if (selectedPlan.stripePriceId === currentPriceId || preview?.timing === 'unchanged') return 'Current plan';
-		if (!isValidSelection) return 'Plan unavailable';
+		if (!selectedPlanId) return 'Select a plan';
+		if (selectedPlanId === currentPriceId || preview?.timing === 'unchanged') return 'Current plan';
+		if (!selectedPlan || !isValidSelection) return 'Plan unavailable';
 		const verb = preview?.direction === 'upgrade' ? 'Upgrade' : preview?.direction === 'downgrade' ? 'Downgrade' : 'Switch';
 		return `${verb} to ${selectedPlan.nickname} (${planAmount(selectedPlan)})`;
 	};
@@ -402,7 +407,7 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 								intervalDisabled={upgrading || !available}
 								onIntervalChange={(interval) => {
 									if (inFlight.current || selectedPlan?.interval === interval) return;
-									setSelectedPlan(null);
+									setSelectedPlanId(null);
 									setError(null);
 								}}
 							/>
