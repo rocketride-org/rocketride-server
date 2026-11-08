@@ -45,6 +45,8 @@ const {
 	execCommand,
 	getBuildBaseEnv,
 	formatSyncStats,
+	removeFiles,
+	removeDirs,
 	PROJECT_ROOT,
 	BUILD_ROOT,
 	DIST_ROOT,
@@ -140,6 +142,12 @@ function makeCompileNodeAction(node, options = {}) {
 			const env = vcpkg.getVcpkgEnv(await getBuildBaseEnv(task));
 
 			if (options.force || !configured) {
+				// Start from a clean cache, as server:configure does. Reconfiguring on
+				// top of a cache whose recorded compiler differs from the one we pass
+				// makes CMake wipe the cache and re-run WITHOUT our -D flags, which
+				// then fails on the missing ROCKETRIDE_PACKAGES_DIR.
+				await removeFiles(nodeBuildDir, ['CMakeCache.txt', 'cmake_install.cmake', 'build.ninja']);
+				await removeDirs([path.join(nodeBuildDir, 'CMakeFiles')]);
 				task.output = `Configuring ${name}...`;
 				const configureArgs = [
 					...(await cmake.getConfigureArgs(nodeDir, nodeBuildDir, cmakeConfig)),
@@ -151,7 +159,14 @@ function makeCompileNodeAction(node, options = {}) {
 				if (OVERLAY_ROOT) {
 					configureArgs.push(`-DROCKETRIDE_OVERLAY_ROOT=${OVERLAY_ROOT}`);
 				}
-				await execCommand('cmake', configureArgs, { task, env, verbose: options.verbose });
+				try {
+					await execCommand('cmake', configureArgs, { task, env, verbose: options.verbose });
+				} catch (error) {
+					// CMake saves the cache before generate, so a failed configure would
+					// otherwise look configured on the next run and wedge the tree.
+					await removeFiles(nodeBuildDir, ['CMakeCache.txt']);
+					throw error;
+				}
 			}
 
 			task.output = `Building ${name}...`;
@@ -265,7 +280,22 @@ async function isNodeConfigured(nodeBuildDir, cmakeConfig, triplet) {
 	const cache = await readFile(cachePath, 'utf8');
 	const cached = (entry, value) => new RegExp(`^${entry}:\\w+=${value}$`, 'm').test(cache);
 
-	return cached('CMAKE_BUILD_TYPE', cmakeConfig) && cached('VCPKG_TARGET_TRIPLET', triplet);
+	// CMAKE_TOOLCHAIN_FILE guards against a cache CMake regenerated on its own
+	// (no -D flags survive that), which exists but cannot build anything.
+	if (
+		!cached('CMAKE_BUILD_TYPE', cmakeConfig) ||
+		!cached('VCPKG_TARGET_TRIPLET', triplet) ||
+		!cached('CMAKE_TOOLCHAIN_FILE', '.+')
+	) {
+		return false;
+	}
+
+	// A configure that failed part-way leaves the cache behind but never reaches
+	// the generate step, so the build files are missing or stale; building on
+	// that fails before cmake can even regenerate ("loading
+	// 'CMakeFiles/rules.ninja': No such file or directory"). TargetDirectories.txt
+	// is written by generate for every generator.
+	return exists(path.join(nodeBuildDir, 'CMakeFiles', 'TargetDirectories.txt'));
 }
 
 /** The library files a built node leaves behind, the symbols one included */
