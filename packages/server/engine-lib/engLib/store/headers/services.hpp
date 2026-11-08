@@ -159,6 +159,13 @@ public:
         ///		that brings nodes of one of them resolves it again
         //---------------------------------------------------------
         std::vector<Text> comboClassTypes;
+
+        //---------------------------------------------------------
+        ///	@details
+        ///		The references its schema expanded to, the schemas
+        ///		its combos copy included
+        //---------------------------------------------------------
+        size_t expanded = 0;
     };
     using ServiceDefinitionPtr = ServiceDefinition *;
     using ServiceDefinitions = std::map<iText, ServiceDefinition>;
@@ -200,6 +207,7 @@ public:
     static ErrorOr<IServices::ServiceDefinitionPtr>
     getServiceDefinitionFromService(const json::Value &service) noexcept;
     static ErrorOr<json::Value> getServiceSchemas() noexcept;
+    static bool isCustomService(const Text &logicalType) noexcept;
 
     static ErrorOr<CustomServicesScope> withCustomServices(
         const json::Value &custom) noexcept;
@@ -234,6 +242,9 @@ private:
         // being resolved, outermost first
         const ServiceDefinitions *scope = nullptr;
         std::vector<iText> chain;
+
+        // References expanded so far for this definition
+        size_t expanded = 0;
     };
 
     //-------------------------------------------------------------

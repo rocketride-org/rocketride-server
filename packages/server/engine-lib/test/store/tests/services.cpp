@@ -137,6 +137,53 @@ TEST_CASE("store::Services") {
         auto badPrefix = customNode("custom_q");
         badPrefix["prefix"] = customList({"x"});
 
+        // Read later as strings or lists, so refused when they are not
+        auto badIcon = customNode("custom_s");
+        badIcon["icon"] = R"({})"_json;
+        auto badTarget = customNode("custom_t");
+        badTarget["lanes"]["text"] = customList({R"({})"_json});
+        auto badInput = customNode("custom_u");
+        badInput["input"] = customList({"text"});
+        auto badInputLane = customNode("custom_v");
+        badInputLane["input"] = customList({R"({"lane": {}})"_json});
+        auto badOutput = customNode("custom_w");
+        badOutput["input"] =
+            customList({R"({"lane": "text", "output": "text"})"_json});
+        auto badTile = customNode("custom_x");
+        badTile["tile"] = customList({R"({})"_json});
+
+        // Each field lists the next one twice: no cycle, 2^16 references
+        auto fanOut = customNode("custom_r");
+        for (int level = 0; level < 15; level++) {
+            auto &field = fanOut["fields"][_ts("custom_r.f", level)];
+            field["section"] = _ts("s", level);
+            field["properties"].append(_ts("custom_r.f", level + 1));
+            field["properties"].append(_ts("custom_r.f", level + 1));
+        }
+        fanOut["fields"]["custom_r.f15"] = R"({"type": "string"})"_json;
+        fanOut["shape"].append("custom_r.f0");
+
+        // 8 layers of 4 nodes, each combo listing the layer below: no
+        // cycle, the top one copies 4^7 schemas
+        json::Value layers = json::arrayValue;
+        for (int layer = 0; layer < 8; layer++)
+            for (int node = 0; node < 4; node++) {
+                const auto name = _ts("custom_w", layer, "_", node);
+                auto def = customNode(name.c_str());
+                def["classType"] = customList({_ts("custom_layer", layer)});
+                const auto pick = _ts(name, ".pick");
+                def["fields"][pick] = R"({"title": "Pick"})"_json;
+                if (layer)
+                    def["fields"][pick]["combo"] =
+                        _ts("custom_layer", layer - 1);
+                else
+                    def["fields"][pick]["type"] = "string";
+                json::Value section = R"({"section": "Pipe"})"_json;
+                section["properties"].append(pick);
+                def["shape"].append(section);
+                layers.append(def);
+            }
+
         // Two combos that each wait for the other never resolve
         auto waitsA = customNode("custom_n");
         waitsA["classType"] = customList({"custom_kind_n"});
@@ -166,6 +213,14 @@ TEST_CASE("store::Services") {
             customList({badLanes}),
             customList({badTitle}),
             customList({badPrefix}),
+            customList({badIcon}),
+            customList({badTarget}),
+            customList({badInput}),
+            customList({badInputLane}),
+            customList({badOutput}),
+            customList({badTile}),
+            customList({fanOut}),
+            layers,
             customList({waitsA, waitsB}),
         };
         for (const auto &custom : refused)
@@ -176,6 +231,14 @@ TEST_CASE("store::Services") {
         REQUIRE_FALSE(colon);
         CHECK(std::string{colon.ccode().message()}.find("No logical type") !=
               std::string::npos);
+
+        // The budget names the definition that went past it
+        for (const auto &custom : {customList({fanOut}), layers}) {
+            auto expanded = IServices::withCustomServices(custom);
+            REQUIRE_FALSE(expanded);
+            CHECK(std::string{expanded.ccode().message()}.find(
+                      "expand to more than") != std::string::npos);
+        }
 
         // A registered type keeps its own definition
         REQUIRE(IServices::getServiceDefinition(registeredType()));
@@ -227,6 +290,49 @@ TEST_CASE("store::Services") {
             CHECK(registeredOffer());
         }
         CHECK_FALSE(registeredOffer());
+
+        // A custom node with no title takes its logical type
+        auto untitled = customNode("custom_untitled");
+        untitled.removeMember("title");
+        {
+            auto scope = IServices::withCustomServices(customList({untitled}));
+            REQUIRE_NO_ERROR(scope);
+            auto def = IServices::getServiceDefinition("custom_untitled");
+            REQUIRE(def);
+            CHECK((*def)->title == "custom_untitled");
+        }
+
+        // A chain of 16 combos resolves one node per pass, the embedding at
+        // its top in the last one: a registered node that lists "embedding"
+        // is still unresolved then, and keeps its start-up definition
+        json::Value chain = json::arrayValue;
+        for (int link = 0; link < 16; link++) {
+            const auto name = _ts("custom_c", link < 10 ? "0" : "", link);
+            auto def = customNode(name.c_str());
+            def["classType"] = customList({_ts("custom_link", link)});
+            if (!link) def["classType"].append("embedding");
+            const auto pick = _ts(name, ".pick");
+            def["fields"][pick] = R"({"title": "Pick"})"_json;
+            if (link < 15)
+                def["fields"][pick]["combo"] = _ts("custom_link", link + 1);
+            else
+                def["fields"][pick]["type"] = "string";
+            json::Value section = R"({"section": "Pipe"})"_json;
+            section["properties"].append(pick);
+            def["shape"].append(section);
+            chain.append(def);
+        }
+        {
+            auto scope = IServices::withCustomServices(chain);
+            REQUIRE_NO_ERROR(scope);
+            auto schemas = IServices::getServiceSchemas();
+            REQUIRE_NO_ERROR(schemas);
+            for (const auto &type : (*schemas)["services"].getMemberNames()) {
+                auto def = IServices::getServiceDefinition(type);
+                REQUIRE(def);
+                CHECK((*def)->isResolved);
+            }
+        }
     }
 
     // The Python surface: the catalogue and validation take the same list
@@ -258,6 +364,14 @@ def pipeline():
 assert 's3cret-key' in json.dumps(rocketlib.validatePipeline(pipeline()))
 validated = json.dumps(rocketlib.validatePipeline(pipeline(), custom=[secret]))
 assert 's3cret-key' not in validated and 'secureParameters' in validated, validated
+
+# The component form too: the node has no factory here, so only the schema
+# checks and the encryption apply
+def component():
+    return {'component': {'id': 'c1', 'provider': 'custom_py', 'config': {'parameters': {'apikey': 's3cret-key'}}}}
+validated = rocketlib.validatePipeline(component(), custom=[secret])
+assert 'errors' not in validated, validated
+assert 's3cret-key' not in json.dumps(validated) and 'secureParameters' in json.dumps(validated), validated
 
 # ILoader.getPipeStack has no rocketlib wrapper; it is reached through engLib directly
 
