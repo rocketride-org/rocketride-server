@@ -92,10 +92,12 @@ def bedrock_startup(monkeypatch):
     load('ai.common.config', 'packages/ai/src/ai/common/config.py')
     load('ai.common.validation', 'packages/ai/src/ai/common/validation.py')
     stub('ai.common.schema', Answer=dict, Question=dict)
-    stub('ai.common.util', ThinkTruncatedError=RuntimeError, parseJson=json.loads)
+    stub('ai.common.util', EmptyResponseError=ValueError, ThinkTruncatedError=RuntimeError, parseJson=json.loads)
     stub(
         'ai.common.llm_native_stream',
+        PROMPT_CACHE_PREFIX_VAR=ContextVar('prompt_cache_prefix', default=None),
         STOP_SEQUENCES_VAR=ContextVar('stop', default=None),
+        apply_prompt_cache_breakpoint=lambda payload, prefix: payload,
         dispatch_native_chat_stream=noop,
     )
     stub('ai.common.llm_adapter', LangChainAdapter=object, NativeOpenAIResponsesAdapter=object, drive_adapter=noop)
@@ -142,6 +144,7 @@ def test_bedrock_startup_uses_selected_profile_limits(bedrock_startup, profile, 
         'region': 'eu-west-1',
         'temperature': 0,
         'max_tokens': limit,
+        'custom_get_token_ids': chat._estimate_token_ids,
     }
 
 
