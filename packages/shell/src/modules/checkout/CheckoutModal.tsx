@@ -481,6 +481,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 }) => {
 	// Initialise Stripe lazily
 	const [stripePromise] = useState(() => loadStripe(stripePublishableKey));
+	const canReplay = useRef(supportsCheckoutReplay).current && supportsCheckoutReplay;
 
 	// ── State ────────────────────────────────────────────────────────────
 	const [plans, setPlans] = useState<CheckoutPlan[]>([]);
@@ -586,6 +587,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 		// still validating/redeeming — it would silently drop the promo.
 		if (!isCurrent() || settled.current || unresolvedGrant.current || !selectedPlan || selectedPlan.metadata?.action ||
 			promoInFlight.current || checkoutInFlight.current) return;
+		if (retryCheckout && !canReplay) return;
 
 		checkoutInFlight.current = true;
 		setLoadingSecret(true);
@@ -628,7 +630,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 		} catch (err: unknown) {
 			if (isCheckoutNotDispatched(err)) {
 				if (mounted.current) setError(err.message);
-			} else if (attempt && !supportsCheckoutReplay) {
+			} else if (attempt && !canReplay) {
 				finishCheckout('pending');
 			} else if (mounted.current) {
 				setError(err instanceof Error ? err.message : 'Failed to start checkout. Please try again.');
@@ -638,7 +640,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 			checkoutInFlight.current = false;
 			setLoadingSecret(false);
 		}
-	}, [selectedPlan, appliedPromo, retryCheckout, isCurrent, supportsCheckoutReplay, onCreateCheckout, onConfirmPending, finishCheckout]);
+	}, [selectedPlan, appliedPromo, retryCheckout, isCurrent, canReplay, onCreateCheckout, onConfirmPending, finishCheckout]);
 
 	/** Resets back to the plan picker. */
 	const handleBack = useCallback(() => {
@@ -656,6 +658,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 		const code = promoInput.trim();
 		if (!code) return;
 		const codeKey = code.toUpperCase();
+		if (unresolvedGrant.current && !canReplay) return;
 		if (unresolvedGrant.current && unresolvedGrant.current !== codeKey) {
 			setPromoError('Retry the previous code before redeeming another.');
 			return;
@@ -689,27 +692,26 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 				redeeming = true;
 				const redemption = await onRedeemPromoCode(attempt.input, attempt.id);
 				if (!mounted.current) return;
-				if (!redemption.redeemed) {
-					if (supportsCheckoutReplay) {
-						unresolvedGrant.current = codeKey;
-						setPromoError('The server did not confirm redemption. Please try again.');
-					} else {
-						finishCheckout('pending');
-					}
+				if (redemption?.redeemed === false && canReplay) {
+					unresolvedGrant.current = codeKey;
+					setPromoError('The server did not confirm redemption. Please try again.');
+					return;
+				}
+				const { redeemed, mode, appId, credits } = redemption ?? {};
+				if (redeemed !== true || (mode !== 'subscribed' && mode !== 'credits_only') ||
+					typeof appId !== 'string' || !appId || !credits || typeof credits !== 'object' ||
+					Array.isArray(credits) || Object.values(credits).some((amount) => !Number.isFinite(amount) || amount < 0)) {
+					finishCheckout('pending');
 					return;
 				}
 				unresolvedGrant.current = null;
 				settled.current = true;
-				setGrantResult({
-					code: attempt.displayCode,
-					credits: redemption.credits ?? {},
-					mode: redemption.mode,
-				});
+				setGrantResult({ code: attempt.displayCode, credits, mode });
 			}
 		} catch (err: unknown) {
 			if (isCheckoutNotDispatched(err)) {
 				if (mounted.current) setPromoError(err.message);
-			} else if (redeeming && !supportsCheckoutReplay) {
+			} else if (redeeming && !canReplay) {
 				finishCheckout('pending');
 			} else if (mounted.current) {
 				if (redeeming) unresolvedGrant.current = codeKey;
@@ -719,7 +721,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 			promoInFlight.current = false;
 			setPromoBusy(false);
 		}
-	}, [promoInput, selectedPlan, isCurrent, supportsCheckoutReplay, onValidatePromoCode, onRedeemPromoCode, finishCheckout]);
+	}, [promoInput, selectedPlan, isCurrent, canReplay, onValidatePromoCode, onRedeemPromoCode, finishCheckout]);
 
 	/** Clears the applied discount code. */
 	const handleRemovePromo = useCallback(() => {
@@ -775,6 +777,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 		};
 	}, []);
 
+	const replayUnavailable = !canReplay && (retryCheckout !== null || unresolvedGrant.current !== null);
+
 	// ── Render ───────────────────────────────────────────────────────────
 	return (
 		/* Backdrop is inert: dismissal is deliberate-only (close button) per the
@@ -814,7 +818,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 							<button style={S.submitBtn(false)} onClick={closeCheckout}>Done</button>
 						</div>
 
-					) : outcome ? (
+					) : outcome || replayUnavailable ? (
 						<div style={S.successBlock}>
 							<p>{outcome === 'complete' ? 'Checkout complete.' : 'The checkout result is unconfirmed. Check your subscriptions and credits before starting again.'}</p>
 							{outcome === 'complete' && <button style={S.submitBtn(false)} onClick={() => void notifySuccess()}>Continue</button>}
@@ -846,6 +850,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 							plans={plans}
 							loading={plansLoading}
 							selectedPlan={selectedPlan}
+							defaultInterval={selectedPlan?.interval === 'year' ? 'year' : 'month'}
 							onSelectPlan={handleSelectPlan}
 							onActionClick={onActionClick}
 							autoSelectDefault

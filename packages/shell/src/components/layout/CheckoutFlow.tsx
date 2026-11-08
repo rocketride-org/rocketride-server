@@ -101,9 +101,9 @@ export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, stripeSer
 				if (!cm.isConnected() || !scope || scope.orgId !== orgId || !checkoutScope || !matchesCheckoutScope(scope, checkoutScope)) return;
 				const entry = app as AppManifestEntry;
 				const current = activeCheckout.current;
-				if (current && matchesCheckoutScope(scope, current.scope) && current.app.id === entry.id &&
-					current.plan?.stripePriceId === plan?.stripePriceId && current.promo?.code === promo?.code) return;
-				const next = { id: ++checkoutSequence.current, scope, app: entry, plan, promo };
+				// A second opening signal cannot replace an unresolved purchase.
+				if (current && matchesCheckoutScope(scope, current.scope)) return;
+				const next = { id: ++checkoutSequence.current, scope: checkoutScope, app: entry, plan, promo };
 				activeCheckout.current = next;
 				setCheckout(next);
 			}),

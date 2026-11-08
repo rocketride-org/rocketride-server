@@ -293,7 +293,7 @@ Further public methods, present in both SDKs, in brief:
 | Profiling | `cprofile_start`, `cprofile_stop`, `cprofile_status`, `cprofile_report`, `cprofile_report_tree`, `cprofile_threads` |
 | Namespaces | `client.account`, `client.billing` (account and billing APIs) |
 
-`client.billing.create_checkout_session` and `client.billing.redeem_promo_code` accept an optional `attempt_id`. Generate a unique ID for each checkout or redemption and reuse it with the same parameters if you retry. Retry handling depends on the connected server version.
+`client.billing.create_checkout_session` and `client.billing.redeem_promo_code` accept an optional `attempt_id`. Generate a unique ID for each checkout or redemption and reuse it with the same parameters if you retry. Retry handling depends on the connected server version. After an ambiguous response, retry only when the connected server advertised the `billing_checkout_replay` capability before the original request and still advertises it. Legacy servers can accept the field without deduplicating the request.
 
 ## Advanced: low-level DAP
 

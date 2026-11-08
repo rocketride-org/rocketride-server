@@ -27,7 +27,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { AuthenticationException, DAPException } from 'rocketride';
+import { AuthenticationException, DAPException, RocketRideClient } from 'rocketride';
 import type { ConnectResult, DAPMessage } from 'rocketride';
 import { RocketRideClientProxy } from './RocketRideClientProxy';
 import type { IProxyTransport } from './RocketRideClientProxy';
@@ -88,7 +88,7 @@ void test('the broker refuses checkout work queued before a root scope change', 
 		organization: { id: 'org-a' },
 		capabilities: ['billing_checkout_replay'],
 	} as ConnectResult;
-	const originalUri = 'https://app.rocketride.ai';
+	const originalUri = new RocketRideClient({ uri: 'https://custom.example:443' }).getConnectionInfo().uri;
 	let rootAccount = account;
 	let rootUri = originalUri;
 	const dispatched: DAPMessage[] = [];
@@ -118,7 +118,8 @@ void test('the broker refuses checkout work queued before a root scope change', 
 	for (const changeScope of [
 		() => { rootAccount = { ...account, organization: { ...account.organization!, id: 'org-b' } }; },
 		() => { rootAccount = { ...account, userId: 'user-b' }; },
-		() => { rootUri = 'https://other.rocketride.ai'; },
+		() => { rootUri = new RocketRideClient({ uri: 'https://other.example:443' }).getConnectionInfo().uri; },
+		() => { rootUri = new RocketRideClient({ uri: 'https://custom.example:5565' }).getConnectionInfo().uri; },
 		() => { rootAccount = { ...account, capabilities: [] }; },
 	]) {
 		rootAccount = account;

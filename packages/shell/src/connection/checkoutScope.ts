@@ -1,5 +1,4 @@
-import { RocketRideClient } from 'rocketride';
-import type { DAPMessage } from 'rocketride';
+import type { DAPMessage, RocketRideClient } from 'rocketride';
 
 export interface CheckoutScope {
 	orgId: string;
@@ -18,7 +17,9 @@ export function getCheckoutScope(client: RocketRideClient | null | undefined): C
 	// The server may advertise this only when an earlier accepted attempt
 	// can be resolved or refused safely on a repeat request.
 	const replaySupported = Array.isArray(account?.capabilities) && account.capabilities.includes('billing_checkout_replay');
-	return { orgId, userId, server: RocketRideClient.normalizeUri(uri), replaySupported };
+	// This URI is already resolved. Running user-input normalization again
+	// can replace the implicit TLS port with RocketRide's custom-server default.
+	return { orgId, userId, server: uri, replaySupported };
 }
 
 export function matchesCheckoutScope(current: CheckoutScope | null, expected: CheckoutScope): boolean {

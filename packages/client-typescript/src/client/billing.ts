@@ -93,7 +93,9 @@ export class BillingApi {
 	 * @param appId         - App being subscribed (e.g. "brandi").
 	 * @param priceId       - Stripe price_* identifier for the plan.
 	 * @param promotionCode - Optional promo code to apply (validated server-side).
-	 * @param attemptId     - Optional checkout identifier. Reuse it for retries of this checkout.
+	 * @param attemptId     - Optional checkout identifier. Replay an ambiguous request only if
+	 * the server advertised billing_checkout_replay before dispatch and still advertises it.
+	 * Legacy servers may accept the field without deduplicating.
 	 * @returns Object with client_secret (or null), subscription_id, and status.
 	 */
 	async createCheckoutSession(orgId: string, appId: string, priceId: string, promotionCode?: string, attemptId?: string): Promise<{ clientSecret: string | null; subscriptionId: string; status: string }> {
@@ -142,7 +144,9 @@ export class BillingApi {
 	 *
 	 * @param orgId - Organisation UUID (context only — server uses the caller's org).
 	 * @param code  - Customer-facing code string (case-insensitive).
-	 * @param attemptId - Optional redemption identifier. Reuse it for retries of this redemption.
+	 * @param attemptId - Optional redemption identifier. Replay an ambiguous request only if
+	 * the server advertised billing_checkout_replay before dispatch and still advertises it.
+	 * Legacy servers may accept the field without deduplicating.
 	 * @returns Redemption result with mode and granted credits.
 	 */
 	async redeemPromoCode(orgId: string, code: string, attemptId?: string): Promise<PromoRedemption> {

@@ -129,7 +129,9 @@ class BillingApi:
             app_id: App being subscribed (e.g. "brandi").
             price_id: Stripe price_* identifier for the plan.
             promotion_code: Optional promo code to apply (validated server-side).
-            attempt_id: Optional checkout identifier. Reuse it for retries of this checkout.
+            attempt_id: Optional checkout identifier. Replay an ambiguous request only
+                if the server advertised billing_checkout_replay before dispatch and still
+                advertises it. Legacy servers may accept the field without deduplicating.
 
         Returns:
             Dict with ``clientSecret`` (or None), ``subscriptionId``, and ``status``.
@@ -192,7 +194,9 @@ class BillingApi:
         Args:
             org_id: Organisation UUID (context only — server uses the caller's org).
             code: Customer-facing code string (case-insensitive).
-            attempt_id: Optional redemption identifier. Reuse it for retries of this redemption.
+            attempt_id: Optional redemption identifier. Replay an ambiguous request only
+                if the server advertised billing_checkout_replay before dispatch and still
+                advertises it. Legacy servers may accept the field without deduplicating.
 
         Returns:
             Redemption result with mode and granted credits.
