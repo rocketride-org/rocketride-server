@@ -40,7 +40,7 @@ import { CONNECT_TIMEOUT_MS, LS_TOKEN } from '../constants';
 import { resetDevGateForTests } from '../util/devGate';
 import { createRetainedRegistry, localRetainedPort } from '../ops/retained';
 import { createOpBus } from '../ops/busOps';
-import { registerClientOps } from '../ops/clientOps';
+import { CLIENT_EVENT_OP, registerClientOps } from '../ops/clientOps';
 import type { IRetainedPort } from '../ops/retained';
 import { TELEMETRY_STORAGE_KEY, type TelemetryFact } from '../util/telemetryChannel';
 import { generatePkce } from '../util/pkce';
@@ -1814,6 +1814,23 @@ test('checkout uses the mirrored SDK endpoint rather than the HTTP asset URL', a
 		{ subcommand: 'promo_redeem', orgId: 'org-7', code: 'CODE' },
 		{ subcommand: 'confirm_pending' },
 	]);
+});
+
+test('a mirrored workspace-change edge reaches checkout before the next account snapshot', async () => {
+	const cm = createMirroredManager();
+	cm.publish('shell:status', { connected: true, status: { state: 'connected', hasCredentials: true } });
+	cm.publish('shell:account', { organization: { id: 'org-a' } });
+	await new Promise((resolve) => setTimeout(resolve, 0));
+	const changes: string[] = [];
+	cm.on('shell:workspaceWillChange', ({ orgId }) => changes.push(orgId));
+
+	await cm.ops().request(CLIENT_EVENT_OP, {
+		message: { type: 'event', seq: 1, event: 'apaext_org_changed', body: { orgId: 'org-b' } },
+	});
+	await Promise.resolve();
+
+	assert.deepEqual(changes, ['org-b']);
+	assert.equal(cm.getClient()?.getOrgId(), 'org-a');
 });
 
 test('a root disconnect moves the realm client with it', async () => {

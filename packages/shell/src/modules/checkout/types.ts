@@ -239,6 +239,9 @@ export interface CheckoutModalBaseProps {
 	/** The server confirmed it can safely resolve an already-used attempt ID. */
 	supportsCheckoutReplay?: boolean;
 
+	/** Require explicit server status before accepting a no-payment response. */
+	requireCheckoutStatus?: boolean;
+
 	/** Called after a successful payment — host should close the modal. */
 	onSuccess: () => void;
 

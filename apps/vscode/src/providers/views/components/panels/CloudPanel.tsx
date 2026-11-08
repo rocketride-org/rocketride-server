@@ -111,7 +111,7 @@ export const CloudPanel: React.FC<CloudPanelProps> = ({ cloudSignedIn, cloudUser
 	const cm = ConnectionManager.getInstance();
 	// Only this panel's full checkout surface needs a publishable key.
 	const stripe = useStripeKey(Boolean(onFetchPlans));
-	const { checkout, checkoutStripeKey, openCheckout, closeCheckout, isCurrent } = useCheckoutSession(stripe);
+	const { checkout, checkoutStripeKey, openCheckout, closeCheckout, isCurrent, replaySupported } = useCheckoutSession(stripe);
 	const cloudUrl = (useCustomServer && customUrl) || defaultCloudUrl || '';
 	const expectedServer = cloudUrl ? serverIdentity(RocketRideClient.normalizeUri(cloudUrl)) : '';
 	const targetsCheckoutServer = useCallback((server: string | undefined) =>
@@ -320,7 +320,8 @@ export const CloudPanel: React.FC<CloudPanelProps> = ({ cloudSignedIn, cloudUser
 					appDescription="Visual AI pipeline editor: run and deploy pipelines on RocketRide Cloud."
 					stripePublishableKey={checkoutStripeKey}
 					isCheckoutCurrent={() => isCurrent(checkout) && targetIsCurrent()}
-					supportsCheckoutReplay={checkout.scope.replaySupported}
+					supportsCheckoutReplay={replaySupported}
+					requireCheckoutStatus
 					onFetchPlans={fetchCheckoutPlans}
 					onCreateCheckout={(...args) => {
 						if (!isCurrent(checkout) || !targetIsCurrent()) return Promise.reject(checkoutNotDispatched());

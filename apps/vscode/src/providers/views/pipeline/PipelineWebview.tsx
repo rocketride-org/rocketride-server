@@ -59,7 +59,7 @@ const PipelineWebview: React.FC = () => {
 	// Server-supplied Stripe publishable key — matches the connected server's
 	// Stripe account instead of a build-time value.
 	const stripe = useStripeKey();
-	const { checkout, checkoutStripeKey, openCheckout, closeCheckout, isCurrent } = useCheckoutSession(stripe);
+	const { checkout, checkoutStripeKey, openCheckout, closeCheckout, isCurrent, replaySupported } = useCheckoutSession(stripe);
 	const [cloudConnectionConfigured, setCloudConnectionConfigured] = useState(false);
 	// Host-pushed env-key updates (the Variables page saved) — delivered into
 	// the shared editor through the seam's feed.
@@ -290,7 +290,7 @@ const PipelineWebview: React.FC = () => {
 	return (
 		<>
 			<PipelineEditor project={project} host={editorHost} />
-			{checkout && checkoutStripeKey && <CheckoutModal key={checkout.id} appName="RocketRide" appDescription="Visual AI pipeline editor: run and deploy pipelines on RocketRide Cloud." stripePublishableKey={checkoutStripeKey} isCheckoutCurrent={() => isCurrent(checkout)} supportsCheckoutReplay={checkout.scope.replaySupported} onFetchPlans={handleFetchPlans} onCreateCheckout={handleCreateCheckout} onConfirmPending={handleConfirmPending} onSuccess={() => closeCheckout(checkout)} onClose={() => closeCheckout(checkout)} onActionClick={(_plan: CheckoutPlan, action: PlanAction) => ConnectionManager.getInstance().emitOp('host.pipeline.openLink', { url: action.type === 'mailto' ? `mailto:${action.url}${action.subject ? `?subject=${encodeURIComponent(action.subject)}` : ''}` : action.url, browser: true })} />}
+			{checkout && checkoutStripeKey && <CheckoutModal key={checkout.id} appName="RocketRide" appDescription="Visual AI pipeline editor: run and deploy pipelines on RocketRide Cloud." stripePublishableKey={checkoutStripeKey} isCheckoutCurrent={() => isCurrent(checkout)} supportsCheckoutReplay={replaySupported} requireCheckoutStatus onFetchPlans={handleFetchPlans} onCreateCheckout={handleCreateCheckout} onConfirmPending={handleConfirmPending} onSuccess={() => closeCheckout(checkout)} onClose={() => closeCheckout(checkout)} onActionClick={(_plan: CheckoutPlan, action: PlanAction) => ConnectionManager.getInstance().emitOp('host.pipeline.openLink', { url: action.type === 'mailto' ? `mailto:${action.url}${action.subject ? `?subject=${encodeURIComponent(action.subject)}` : ''}` : action.url, browser: true })} />}
 			{checkout && !checkoutStripeKey && <CheckoutUnavailableNotice reason={stripe.reason} onClose={() => closeCheckout(checkout)} />}
 		</>
 	);

@@ -22,8 +22,12 @@ export function getCheckoutScope(client: RocketRideClient | null | undefined): C
 	return { orgId, userId, server: uri, replaySupported };
 }
 
+export function sameCheckoutScope(current: CheckoutScope | null, expected: CheckoutScope): boolean {
+	return current !== null && current.orgId === expected.orgId && current.userId === expected.userId && current.server === expected.server;
+}
+
 export function matchesCheckoutScope(current: CheckoutScope | null, expected: CheckoutScope): boolean {
-	return current !== null && current.orgId === expected.orgId && current.userId === expected.userId && current.server === expected.server &&
+	return current !== null && sameCheckoutScope(current, expected) &&
 		(expected.replaySupported === false || (expected.replaySupported === true && current.replaySupported));
 }
 

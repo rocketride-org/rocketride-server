@@ -29,7 +29,7 @@ import { CheckoutModal } from '../../modules/checkout';
 import { checkoutNotDispatched } from '../../modules/checkout/checkoutDispatch';
 import type { CheckoutPlan, PromoValidation } from '../../modules/checkout';
 import { ConnectionManager } from '../../connection/connection';
-import { getCheckoutScope, matchesCheckoutScope } from '../../connection/checkoutScope';
+import { getCheckoutScope, matchesCheckoutScope, sameCheckoutScope } from '../../connection/checkoutScope';
 import type { CheckoutScope } from '../../connection/checkoutScope';
 import type { AppManifestEntry } from '../workspace/types';
 
@@ -65,6 +65,7 @@ export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, stripeSer
 		plan?: CheckoutPlan;
 		promo?: PromoValidation | null;
 	} | null>(null);
+	const [liveReplaySupported, setLiveReplaySupported] = useState(false);
 	const activeCheckout = useRef<typeof checkout>(null);
 	const checkoutSequence = useRef(0);
 	const lastStripeKey = useRef<{ checkoutId: number; key: string } | null>(null);
@@ -85,8 +86,10 @@ export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, stripeSer
 		const checkScope = () => {
 			const current = activeCheckout.current;
 			const scope = getCheckoutScope(cm.getClient());
-			if (current && (current.scope.orgId !== orgId || (scope && !matchesCheckoutScope(scope, current.scope)))) {
+			if (current && (current.scope.orgId !== orgId || (scope && !sameCheckoutScope(scope, current.scope)))) {
 				invalidate();
+			} else if (scope) {
+				setLiveReplaySupported(scope.replaySupported);
 			}
 		};
 		checkScope();
@@ -102,9 +105,10 @@ export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, stripeSer
 				const entry = app as AppManifestEntry;
 				const current = activeCheckout.current;
 				// A second opening signal cannot replace an unresolved purchase.
-				if (current && matchesCheckoutScope(scope, current.scope)) return;
+				if (current && sameCheckoutScope(scope, current.scope)) return;
 				const next = { id: ++checkoutSequence.current, scope: checkoutScope, app: entry, plan, promo };
 				activeCheckout.current = next;
+				setLiveReplaySupported(scope.replaySupported);
 				setCheckout(next);
 			}),
 		];
@@ -153,7 +157,8 @@ export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, stripeSer
 			preselectedPlan={checkout.plan}
 			preselectedPromo={checkout.promo}
 			isCheckoutCurrent={isCheckoutCurrent}
-			supportsCheckoutReplay={checkout.scope.replaySupported}
+			supportsCheckoutReplay={checkout.scope.replaySupported && liveReplaySupported}
+			requireCheckoutStatus
 			onFetchPlans={async () => {
 				return needClient().billing.getProductPrices(checkoutApp.id) as Promise<CheckoutPlan[]>;
 			}}

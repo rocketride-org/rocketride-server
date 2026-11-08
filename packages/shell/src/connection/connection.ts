@@ -2279,7 +2279,12 @@ export class ConnectionManager implements IConnectionManager {
 			// would be dropped, and this is the only thing that wants it.
 			this.ops().handle(CLIENT_EVENT_OP, (params) => {
 				const { message } = (params ?? {}) as { message?: DAPMessage };
-				if (message) void this.mirrorClient?.receiveEvent(message);
+				if (message?.event === 'apaext_org_changed') {
+					const orgId = message.body?.orgId;
+					this.emit('shell:workspaceWillChange', { orgId: typeof orgId === 'string' ? orgId : '' });
+				} else if (message) {
+					void this.mirrorClient?.receiveEvent(message);
+				}
 			});
 		}
 		this.mirrorClient.applyIdentity({

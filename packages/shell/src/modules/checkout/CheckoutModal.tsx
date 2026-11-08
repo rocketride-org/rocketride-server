@@ -376,7 +376,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({ plan, promo, isCurrent, onSuc
 				});
 
 				const status = (error?.payment_intent ?? paymentIntent)?.status;
-				if (error?.type === 'validation_error' || status === 'requires_payment_method') {
+				if ((!status && error?.type === 'validation_error') || status === 'requires_payment_method') {
 					if (isCurrent()) onError(error?.message ?? 'Payment failed. Please try again.');
 					return;
 				}
@@ -477,6 +477,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 	onClose,
 	isCheckoutCurrent,
 	supportsCheckoutReplay = false,
+	requireCheckoutStatus = false,
 	onActionClick,
 }) => {
 	// Initialise Stripe lazily
@@ -496,6 +497,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 	const [loadingSecret, setLoadingSecret] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [retryCheckout, setRetryCheckout] = useState<CheckoutAttempt | null>(null);
+	const [returnedFromPayment, setReturnedFromPayment] = useState(false);
 	const [outcome, setOutcome] = useState<'complete' | 'pending' | null>(null);
 	const checkoutAttempts = useRef(new Map<string, CheckoutAttempt>());
 	const promoAttempts = useRef(new Map<string, { input: string; displayCode: string; id: string }>());
@@ -516,18 +518,11 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 		mounted.current = false;
 		onClose();
 	};
-	const notifySuccess = useCallback(async (acknowledge?: () => Promise<void>) => {
+	const notifySuccess = useCallback(async () => {
 		if (!isCurrent() || notifyingSuccess.current) return;
 		notifyingSuccess.current = true;
 		try {
-			if (acknowledge) {
-				try {
-					await acknowledge();
-				} catch {
-					// A failed notification does not undo payment. The webhook settles it.
-				}
-			}
-			if (isCurrent()) await onSuccess();
+			await onSuccess();
 		} catch {
 			if (isCurrent()) setError('Checkout completed. Try opening the app again.');
 		} finally {
@@ -539,8 +534,18 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 		settled.current = true;
 		setError(null);
 		setOutcome(result);
-		if (result === 'complete') void notifySuccess(acknowledge);
-	}, [notifySuccess]);
+		if (result !== 'complete' || !isCurrent()) return;
+		if (acknowledge) {
+			void (async () => {
+				try {
+					await acknowledge();
+				} catch {
+					// The webhook settles payment even if this notification fails.
+				}
+			})();
+		}
+		void notifySuccess();
+	}, [isCurrent, notifySuccess]);
 
 	// ── Promo code state ─────────────────────────────────────────────────
 	const promoEnabled = Boolean(onValidatePromoCode);
@@ -557,11 +562,13 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
 	// ── Fetch plans on mount ─────────────────────────────────────────────
 	useEffect(() => {
+		if (outcome || clientSecret || retryCheckout || grantResult || unresolvedGrant.current) return;
 		let cancelled = false;
+		setPlansLoading(true);
 		void (async () => {
 			try {
 				const fetched = await onFetchPlans();
-				if (cancelled || !mounted.current) return;
+				if (cancelled || !mounted.current || settled.current || checkoutInFlight.current) return;
 				// Filter out top-up packs (handled by the TopUpModal) and hidden
 				// promo-base plans (only reachable via promo-code redemption)
 				const subscriptionPlans = fetched.filter(
@@ -573,13 +580,17 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 				// ``autoSelectDefault`` so the selection always matches the
 				// interval that is actually shown.
 			} catch (err: unknown) {
-				if (!cancelled && mounted.current) setError(err instanceof Error ? err.message : 'Failed to load subscription plans.');
+				if (!cancelled && mounted.current && !settled.current && !checkoutInFlight.current && !unresolvedGrant.current) {
+					setError(err instanceof Error ? err.message : 'Failed to load subscription plans.');
+				}
 			} finally {
 				if (!cancelled && mounted.current) setPlansLoading(false);
 			}
 		})();
 		return () => { cancelled = true; };
-	}, [onFetchPlans]);
+	}, [onFetchPlans, outcome, clientSecret, retryCheckout, grantResult]);
+
+	const selectionAvailable = !returnedFromPayment || plans.some((plan) => plan.stripePriceId === selectedPlan?.stripePriceId);
 
 	/** Creates a Stripe subscription and advances to payment. */
 	const handleContinue = useCallback(async () => {
@@ -587,7 +598,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 		// still validating/redeeming — it would silently drop the promo.
 		if (!isCurrent() || settled.current || unresolvedGrant.current || !selectedPlan || selectedPlan.metadata?.action ||
 			promoInFlight.current || checkoutInFlight.current) return;
-		if (retryCheckout && !canReplay) return;
+		if ((retryCheckout && !canReplay) || !selectionAvailable) return;
 
 		checkoutInFlight.current = true;
 		setLoadingSecret(true);
@@ -596,7 +607,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 		try {
 			if (!attempt) {
 				const priceId = selectedPlan.stripePriceId;
-				const promotionCode = appliedPromo?.code;
+				const promotionCode = appliedPromo?.code || undefined;
 				const key = JSON.stringify([priceId, promotionCode]);
 				attempt = checkoutAttempts.current.get(key) ?? { id: billingAttemptId(), priceId, promotionCode };
 				checkoutAttempts.current.set(key, attempt);
@@ -616,7 +627,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 				return;
 			}
 			if (res.clientSecret === null) {
-				if (res.status !== undefined && res.status !== 'active' && res.status !== 'trialing') {
+				if ((requireCheckoutStatus || res.status !== undefined) && res.status !== 'active' && res.status !== 'trialing') {
 					finishCheckout('pending');
 					return;
 				}
@@ -640,10 +651,11 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 			checkoutInFlight.current = false;
 			setLoadingSecret(false);
 		}
-	}, [selectedPlan, appliedPromo, retryCheckout, isCurrent, canReplay, onCreateCheckout, onConfirmPending, finishCheckout]);
+	}, [selectedPlan, appliedPromo, retryCheckout, isCurrent, canReplay, selectionAvailable, requireCheckoutStatus, onCreateCheckout, onConfirmPending, finishCheckout]);
 
 	/** Resets back to the plan picker. */
 	const handleBack = useCallback(() => {
+		setReturnedFromPayment(true);
 		setClientSecret(null);
 		setError(null);
 	}, []);
@@ -678,7 +690,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 					setPromoError(validation.reason ?? 'This code is not valid or has expired.');
 					return;
 				}
-				const displayCode = validation.code ?? code.toUpperCase();
+				const displayCode = validation.code || code.toUpperCase();
 				if (!validation.appId || !onRedeemPromoCode) {
 					setAppliedPromo({ ...validation, code: displayCode });
 					return;
@@ -852,8 +864,11 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 							selectedPlan={selectedPlan}
 							defaultInterval={selectedPlan?.interval === 'year' ? 'year' : 'month'}
 							onSelectPlan={handleSelectPlan}
+							onIntervalChange={(interval) => {
+								if (returnedFromPayment && selectedPlan?.interval !== interval) handleSelectPlan(null);
+							}}
 							onActionClick={onActionClick}
-							autoSelectDefault
+							autoSelectDefault={!returnedFromPayment}
 							footer={
 								<>
 									{promoEnabled && (appliedPromo ? (
@@ -897,9 +912,10 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 											{promoError && <p style={S.promoError}>{promoError}</p>}
 										</>
 									))}
+									{!selectionAvailable && <p style={S.status}>Select an available plan to continue.</p>}
 									<button
-										style={S.continueBtn(!selectedPlan || !!selectedPlan.metadata?.action || promoBusy || !!unresolvedGrant.current)}
-										disabled={!selectedPlan || !!selectedPlan.metadata?.action || promoBusy || !!unresolvedGrant.current}
+										style={S.continueBtn(!selectionAvailable || !selectedPlan || !!selectedPlan.metadata?.action || promoBusy || !!unresolvedGrant.current)}
+										disabled={!selectionAvailable || !selectedPlan || !!selectedPlan.metadata?.action || promoBusy || !!unresolvedGrant.current}
 										onClick={handleContinue}
 									>
 										Continue
