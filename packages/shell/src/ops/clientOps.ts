@@ -69,6 +69,7 @@ import type { DAPMessage, RocketRideClient } from 'rocketride';
 import { decodeMessageData, encodeMessageData } from '../connection/binaryWire';
 import { getCheckoutScope, matchesCheckoutScope } from '../connection/checkoutScope';
 import type { CheckoutScope } from '../connection/checkoutScope';
+import { checkoutNotDispatched } from '../modules/checkout/checkoutDispatch';
 import { captureEnvelope } from '../connection/errorWire';
 import type { IWireEnvelope } from '../connection/errorWire';
 
@@ -173,9 +174,13 @@ export function registerClientOps(bus: IOpBus, source: IClientOpsSource, options
 	// only local plumbing; every member reached below is part of the kept,
 	// stateful vocabulary.
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	const client = (): any => {
+	const client = (expected?: CheckoutScope): any => {
 		const c = source.getClient();
-		if (!c || !source.isConnected()) throw new Error('Not connected to server');
+		const connected = c && source.isConnected();
+		if (expected !== undefined && (!connected || !expected || !matchesCheckoutScope(getCheckoutScope(c as RocketRideClient), expected))) {
+			throw checkoutNotDispatched();
+		}
+		if (!connected) throw new Error('Not connected to server');
 		return c;
 	};
 
@@ -198,13 +203,9 @@ export function registerClientOps(bus: IOpBus, source: IClientOpsSource, options
 		// DAP's one binary member is unframed on the way in and re-framed on
 		// the way out: a read returns its bytes in `arguments.data` of the
 		// RESPONSE, which is why `fsRead` bypasses `call()` (`client.ts:2529`).
-		'client.request': (p) => captureEnvelope(async () => {
-			const liveClient: RocketRideClient = client();
-			if (p.checkoutScope !== undefined && (!p.checkoutScope || !matchesCheckoutScope(getCheckoutScope(liveClient), p.checkoutScope))) {
-				throw new Error('The active checkout account changed. Reopen checkout.');
-			}
-			return encodeMessageData(await liveClient.request(decodeMessageData(p.message), p.timeout));
-		}),
+		'client.request': (p) => captureEnvelope(async () => encodeMessageData(
+			await client(p.checkoutScope).request(decodeMessageData(p.message), p.timeout),
+		)),
 
 		'client.addMonitor': (p) => client().addMonitor(p.key, p.types),
 		'client.removeMonitor': (p) => client().removeMonitor(p.key, p.types),

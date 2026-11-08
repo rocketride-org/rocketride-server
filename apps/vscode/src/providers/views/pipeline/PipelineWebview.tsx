@@ -28,6 +28,7 @@ import { PipelineEditor } from 'shared/tools/pipelines/PipelineEditor';
 import type { IPipelineEditorHost } from 'shared/tools/pipelines/PipelineEditor';
 import type { ViewState } from 'shared/tools/pipelines';
 import { CheckoutModal } from 'shell';
+import { checkoutNotDispatched } from 'shell/src/modules/checkout/checkoutDispatch';
 import type { CheckoutPlan, PlanAction } from 'shell';
 import { createMirroredPrefsStore, useGridConfigAnswering, ConnectionManager } from 'shell';
 import { SHELL_PARTITION } from 'shell/src/workspace/workspaceStore';
@@ -57,8 +58,8 @@ const PipelineWebview: React.FC = () => {
 
 	// Server-supplied Stripe publishable key — matches the connected server's
 	// Stripe account instead of a build-time value.
-	const { key: stripeKey, reason: stripeKeyReason } = useStripeKey();
-	const { checkout, checkoutStripeKey, openCheckout, closeCheckout, isCurrent } = useCheckoutSession(stripeKey);
+	const stripe = useStripeKey();
+	const { checkout, checkoutStripeKey, openCheckout, closeCheckout, isCurrent } = useCheckoutSession(stripe);
 	const [cloudConnectionConfigured, setCloudConnectionConfigured] = useState(false);
 	// Host-pushed env-key updates (the Variables page saved) — delivered into
 	// the shared editor through the seam's feed.
@@ -261,8 +262,7 @@ const PipelineWebview: React.FC = () => {
 	const needBillingClient = useCallback(() => {
 		const cm = ConnectionManager.getInstance();
 		const client = cm.getClient();
-		if (!client || !cm.isConnected()) throw new Error('Not connected to server');
-		if (!checkout || !isCurrent(checkout)) throw new Error('The active checkout account changed. Reopen checkout.');
+		if (!client || !checkout || !isCurrent(checkout)) throw checkoutNotDispatched();
 		return client;
 	}, [checkout, isCurrent]);
 
@@ -291,7 +291,7 @@ const PipelineWebview: React.FC = () => {
 		<>
 			<PipelineEditor project={project} host={editorHost} />
 			{checkout && checkoutStripeKey && <CheckoutModal key={checkout.id} appName="RocketRide" appDescription="Visual AI pipeline editor: run and deploy pipelines on RocketRide Cloud." stripePublishableKey={checkoutStripeKey} isCheckoutCurrent={() => isCurrent(checkout)} supportsCheckoutReplay={checkout.scope.replaySupported} onFetchPlans={handleFetchPlans} onCreateCheckout={handleCreateCheckout} onConfirmPending={handleConfirmPending} onSuccess={() => closeCheckout(checkout)} onClose={() => closeCheckout(checkout)} onActionClick={(_plan: CheckoutPlan, action: PlanAction) => ConnectionManager.getInstance().emitOp('host.pipeline.openLink', { url: action.type === 'mailto' ? `mailto:${action.url}${action.subject ? `?subject=${encodeURIComponent(action.subject)}` : ''}` : action.url, browser: true })} />}
-			{checkout && !checkoutStripeKey && <CheckoutUnavailableNotice reason={stripeKeyReason} onClose={() => closeCheckout(checkout)} />}
+			{checkout && !checkoutStripeKey && <CheckoutUnavailableNotice reason={stripe.reason} onClose={() => closeCheckout(checkout)} />}
 		</>
 	);
 };

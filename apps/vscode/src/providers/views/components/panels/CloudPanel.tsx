@@ -20,7 +20,10 @@ import { useTheme } from '../../hooks/useTheme';
 import { useStripeKey } from '../../hooks/useStripeKey';
 import { useCheckoutSession } from '../../hooks/useCheckoutSession';
 import { CheckoutUnavailableNotice } from '../CheckoutUnavailableNotice';
-import { Banner, CheckoutModal } from 'shell';
+import { Banner, CheckoutModal, ConnectionManager } from 'shell';
+import { RocketRideClient } from 'rocketride';
+import { getCheckoutScope } from 'shell/src/connection/checkoutScope';
+import { checkoutNotDispatched } from 'shell/src/modules/checkout/checkoutDispatch';
 import type { CheckoutPlan } from 'shell';
 import type { CheckoutModalProps } from 'shell/src/modules/checkout/types';
 
@@ -94,7 +97,10 @@ export interface CloudPanelProps {
 const serverIdentity = (url: string): string => {
 	const trimmed = url.trim().replace(/\/+$/, '');
 	try {
-		return new URL(trimmed).origin.toLowerCase();
+		const parsed = new URL(trimmed);
+		if (parsed.protocol === 'wss:') parsed.protocol = 'https:';
+		if (parsed.protocol === 'ws:') parsed.protocol = 'http:';
+		return parsed.origin.toLowerCase();
 	} catch {
 		return trimmed.toLowerCase();
 	}
@@ -102,19 +108,24 @@ const serverIdentity = (url: string): string => {
 
 export const CloudPanel: React.FC<CloudPanelProps> = ({ cloudSignedIn, cloudUserName, cloudSignedInUrl, waitlisted, waitlistedName, onCloudSignIn, onCloudSignOut, pending, onUndoPending, idPrefix, simplified, useCustomServer, customUrl, defaultCloudUrl, onUseCustomServerChange, onCustomUrlChange, isSaas, probeUnreachable, onProbeServer, isSubscribed, onFetchPlans, onCreateCheckout, onConfirmPending, onCheckoutSuccess }) => {
 	const theme = useTheme();
+	const cm = ConnectionManager.getInstance();
 	// Only this panel's full checkout surface needs a publishable key.
-	const { key: stripeKey, reason: stripeKeyReason } = useStripeKey(Boolean(onFetchPlans));
-	const { checkout, checkoutStripeKey, openCheckout, closeCheckout, isCurrent } = useCheckoutSession(stripeKey);
+	const stripe = useStripeKey(Boolean(onFetchPlans));
+	const { checkout, checkoutStripeKey, openCheckout, closeCheckout, isCurrent } = useCheckoutSession(stripe);
+	const cloudUrl = (useCustomServer && customUrl) || defaultCloudUrl || '';
+	const expectedServer = cloudUrl ? serverIdentity(RocketRideClient.normalizeUri(cloudUrl)) : '';
+	const targetsCheckoutServer = useCallback((server: string | undefined) =>
+		!expectedServer || (!!server && serverIdentity(server) === expectedServer), [expectedServer]);
+	const targetIsCurrent = useCallback(() => targetsCheckoutServer(getCheckoutScope(cm.getClient())?.server), [cm, targetsCheckoutServer]);
 	const fetchCheckoutPlans = useCallback(async () => {
-		if (!checkout || !onFetchPlans || !isCurrent(checkout)) {
-			throw new Error('The active checkout account changed. Reopen checkout.');
+		if (!checkout || !onFetchPlans || !isCurrent(checkout) || !targetIsCurrent()) {
+			throw checkoutNotDispatched();
 		}
 		return onFetchPlans();
-	}, [checkout, isCurrent, onFetchPlans]);
-
-	// The effective target: the user's custom server when opted in, else the
-	// default cloud from the host. Nothing is baked into this bundle.
-	const cloudUrl = (useCustomServer && customUrl) || defaultCloudUrl || '';
+	}, [checkout, isCurrent, onFetchPlans, targetIsCurrent]);
+	useEffect(() => {
+		if (checkout && !targetsCheckoutServer(checkout.scope.server)) closeCheckout(checkout);
+	}, [checkout, closeCheckout, targetsCheckoutServer]);
 
 	// Probe on mount (and when the target changes) to confirm server is SaaS.
 	useEffect(() => {
@@ -286,14 +297,14 @@ export const CloudPanel: React.FC<CloudPanelProps> = ({ cloudSignedIn, cloudUser
 			    only when the session actually belongs to the targeted server.
 			    Hidden while an auth change is staged: the money path rides the
 			    SAVED session, which is about to change. */}
-			{isSaas && cloudSignedIn && !pending?.signIn && !pending?.signOut && sessionMatchesTarget && isSubscribed === false && onFetchPlans && (
+			{isSaas && cloudSignedIn && !pending?.signIn && !pending?.signOut && sessionMatchesTarget && targetIsCurrent() && isSubscribed === false && onFetchPlans && (
 				<div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '14px 16px', borderRadius: 8, border: '1px solid var(--vscode-input-border, #444)', background: 'var(--vscode-editor-background)' }}>
 					<div style={{ flex: 1, fontSize: 13, lineHeight: 1.5, color: 'var(--rr-text-secondary)' }}>
 						You are currently not subscribed to the RocketRide Cloud. You will be able to run all your pipelines locally, but to run them in the cloud, or deploy pipelines to the cloud, requires a subscription.
 					</div>
 					<button
 						type="button"
-						onClick={openCheckout}
+						onClick={() => { if (targetIsCurrent()) openCheckout(); }}
 						style={{ whiteSpace: 'nowrap', padding: '10px 24px', fontWeight: 600, flexShrink: 0 }}
 					>
 						Subscribe to Pipe Builder
@@ -302,34 +313,32 @@ export const CloudPanel: React.FC<CloudPanelProps> = ({ cloudSignedIn, cloudUser
 			)}
 
 			{/* Checkout modal overlay */}
-			{checkout && checkoutStripeKey && onFetchPlans && onCreateCheckout && onConfirmPending && (
+			{checkout && targetsCheckoutServer(checkout.scope.server) && checkoutStripeKey && onFetchPlans && onCreateCheckout && onConfirmPending && (
 				<CheckoutModal
 					key={checkout.id}
 					appName="Pipe Builder"
 					appDescription="Visual AI pipeline editor: run and deploy pipelines on RocketRide Cloud."
 					stripePublishableKey={checkoutStripeKey}
-					isCheckoutCurrent={() => isCurrent(checkout)}
+					isCheckoutCurrent={() => isCurrent(checkout) && targetIsCurrent()}
 					supportsCheckoutReplay={checkout.scope.replaySupported}
 					onFetchPlans={fetchCheckoutPlans}
 					onCreateCheckout={(...args) => {
-						if (!isCurrent(checkout)) {
-							return Promise.reject(new Error('The active organization changed. Reopen checkout.'));
-						}
+						if (!isCurrent(checkout) || !targetIsCurrent()) return Promise.reject(checkoutNotDispatched());
 						return onCreateCheckout(...args);
 					}}
 					onConfirmPending={async (...args) => {
-						if (!isCurrent(checkout)) return;
+						if (!isCurrent(checkout) || !targetIsCurrent()) return;
 						await onConfirmPending(...args);
 					}}
 					onSuccess={async () => {
-						if (!isCurrent(checkout)) return;
+						if (!isCurrent(checkout) || !targetIsCurrent()) return;
 						await onCheckoutSuccess?.();
 						closeCheckout(checkout);
 					}}
 					onClose={() => closeCheckout(checkout)}
 				/>
 			)}
-			{checkout && !checkoutStripeKey && <CheckoutUnavailableNotice reason={stripeKeyReason} onClose={() => closeCheckout(checkout)} />}
+			{checkout && !checkoutStripeKey && <CheckoutUnavailableNotice reason={stripe.reason} onClose={() => closeCheckout(checkout)} />}
 
 		</>
 	);

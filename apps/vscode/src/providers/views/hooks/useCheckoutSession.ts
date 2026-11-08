@@ -2,13 +2,14 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { ConnectionManager } from 'shell';
 import { getCheckoutScope, matchesCheckoutScope } from 'shell/src/connection/checkoutScope';
 import type { CheckoutScope } from 'shell/src/connection/checkoutScope';
+import type { StripeKeyState } from './useStripeKey';
 
 interface CheckoutSession {
 	id: number;
 	scope: CheckoutScope;
 }
 
-export function useCheckoutSession(stripeKey: string) {
+export function useCheckoutSession(stripe: StripeKeyState) {
 	const cm = ConnectionManager.getInstance();
 	const [checkout, setCheckout] = useState<CheckoutSession | null>(null);
 	const active = useRef<CheckoutSession | null>(null);
@@ -45,12 +46,13 @@ export function useCheckoutSession(stripeKey: string) {
 		return () => off.forEach((unsubscribe) => unsubscribe());
 	}, [cm, closeCheckout]);
 
+	const matchingKey = checkout && stripe.server === checkout.scope.server ? stripe.key : '';
 	useLayoutEffect(() => {
-		if (checkout && stripeKey && isCurrent(checkout)) lastKey.current = { checkout, key: stripeKey };
-	}, [checkout, stripeKey, isCurrent]);
+		if (checkout && matchingKey && isCurrent(checkout)) lastKey.current = { checkout, key: matchingKey };
+	}, [checkout, matchingKey, isCurrent]);
 
 	// A transient disconnect clears useStripeKey. Keep the mounted attempt
 	// and its original key until this checkout's verified scope changes.
-	const checkoutStripeKey = lastKey.current?.checkout === checkout ? lastKey.current.key : stripeKey;
+	const checkoutStripeKey = lastKey.current?.checkout === checkout ? lastKey.current.key : matchingKey;
 	return { checkout, checkoutStripeKey, openCheckout, closeCheckout, isCurrent };
 }

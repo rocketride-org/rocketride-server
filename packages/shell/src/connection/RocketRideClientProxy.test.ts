@@ -131,7 +131,7 @@ void test('the broker refuses checkout work queued before a root scope change', 
 		];
 		changeScope();
 		release();
-		await Promise.all(calls.map((call) => assert.rejects(call, /active checkout account changed/)));
+		await Promise.all(calls.map((call) => assert.rejects(call, { name: 'CheckoutNotDispatched', message: /active checkout account changed/ })));
 	}
 	assert.equal(dispatched.length, 0);
 

@@ -40,6 +40,7 @@ import { CONNECT_TIMEOUT_MS, LS_TOKEN } from '../constants';
 import { resetDevGateForTests } from '../util/devGate';
 import { createRetainedRegistry, localRetainedPort } from '../ops/retained';
 import { createOpBus } from '../ops/busOps';
+import { registerClientOps } from '../ops/clientOps';
 import type { IRetainedPort } from '../ops/retained';
 import { TELEMETRY_STORAGE_KEY, type TelemetryFact } from '../util/telemetryChannel';
 import { generatePkce } from '../util/pkce';
@@ -1773,6 +1774,46 @@ test('the first mirror delivery seeds a real client whose accessors tell the tru
 	assert.equal(client.isAuthenticated(), true);
 	assert.equal(client.getOrgId(), 'org-7');
 	assert.equal(client.getConnectionInfo().uri, 'https://engine.example');
+});
+
+test('checkout uses the mirrored SDK endpoint rather than the HTTP asset URL', async () => {
+	const cm = createMirroredManager();
+	const http = 'https://custom.example:443';
+	const sdk = new RocketRideClient({ uri: http });
+	const sdkUri = sdk.getConnectionInfo().uri;
+	const account: ConnectResult = {
+		...authenticatedResult,
+		organization: { id: 'org-7' } as NonNullable<ConnectResult['organization']>,
+	};
+	const dispatched: unknown[] = [];
+	registerClientOps(cm.ops(), {
+		isConnected: () => true,
+		getClient: () => ({
+			isAuthenticated: () => true,
+			getAccountInfo: () => account,
+			getConnectionInfo: () => sdk.getConnectionInfo(),
+			request: (message: { arguments?: unknown }) => {
+				dispatched.push(message.arguments);
+				return { type: 'response', seq: 1, success: true, body: {} };
+			},
+		}),
+	});
+	cm.publish('shell:status', { connected: true, status: { state: 'connected', hasCredentials: true }, engineHttpUrl: http, sdkUri });
+	cm.publish('shell:account', account);
+	await new Promise((resolve) => setTimeout(resolve, 0));
+
+	const proxy = cm.getClient();
+	assert.ok(proxy);
+	assert.equal(cm.getHttpUrl(), http);
+	assert.equal(proxy.getConnectionInfo().uri, sdkUri);
+	await proxy.billing.createCheckoutSession('org-7', 'app-a', 'price-a');
+	await proxy.billing.redeemPromoCode('org-7', 'CODE');
+	await proxy.call('rrext_account_billing', { subcommand: 'confirm_pending' });
+	assert.deepEqual(dispatched, [
+		{ subcommand: 'subscribe', orgId: 'org-7', appId: 'app-a', priceId: 'price-a' },
+		{ subcommand: 'promo_redeem', orgId: 'org-7', code: 'CODE' },
+		{ subcommand: 'confirm_pending' },
+	]);
 });
 
 test('a root disconnect moves the realm client with it', async () => {

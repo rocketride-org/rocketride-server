@@ -31,6 +31,8 @@ export type StripeKeyReason = 'no-connection' | 'probe-failed' | 'no-billing';
 /** `host.stripeKey` result. */
 export interface StripeKeyInfo {
 	key: string | null;
+	/** SDK endpoint that supplied the key. */
+	server?: string;
 	reason?: StripeKeyReason;
 }
 

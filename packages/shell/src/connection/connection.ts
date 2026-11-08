@@ -1573,6 +1573,7 @@ export class ConnectionManager implements IConnectionManager {
 
 	/** Root-mirrored liveness for socketless realms (null = unmirrored). */
 	private mirrorConnected: boolean | null = null;
+	private mirrorSdkUri: string | undefined;
 
 	/** This realm's brokered client — built on the first mirror delivery,
 	 *  null in a realm that owns a socket (or has not heard from the root). */
@@ -2211,11 +2212,12 @@ export class ConnectionManager implements IConnectionManager {
 			return {};
 		});
 		this.subscribe('shell:status', (snapshot) => {
-			const mirror = snapshot as { connected: boolean; status: ConnectionStatus; engineHttpUrl?: string } | undefined;
+			const mirror = snapshot as { connected: boolean; status: ConnectionStatus; engineHttpUrl?: string; sdkUri?: string } | undefined;
 			if (!mirror || mirror.connected === undefined || mirror.status === undefined) return;
 			// The root's engine HTTP base — so getHttpUrl() answers in
 			// socketless realms (engine-served icons, MF remote entries).
 			if (mirror.engineHttpUrl !== undefined) this.serverUri = mirror.engineHttpUrl;
+			this.mirrorSdkUri = mirror.sdkUri;
 			const wasConnected = this.isConnected();
 			this.mirrorConnected = mirror.connected;
 			// Normalize the root's status onto this realm's enum so every state
@@ -2283,7 +2285,7 @@ export class ConnectionManager implements IConnectionManager {
 		this.mirrorClient.applyIdentity({
 			connected: this.mirrorConnected === true,
 			accountInfo: this.accountInfo,
-			...(this.serverUri ? { uri: this.serverUri } : {}),
+			uri: this.mirrorSdkUri || this.serverUri,
 		});
 	}
 

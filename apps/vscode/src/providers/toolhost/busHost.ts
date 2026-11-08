@@ -299,6 +299,7 @@ export class BusHost {
 			connected: this.connectionManager.isConnected(),
 			status: this.connectionManager.getConnectionStatus(),
 			engineHttpUrl: (this.connectionManager.getHttpUrl() || '').replace(/\/$/, ''),
+			sdkUri: this.connectionManager.getClient()?.getConnectionInfo().uri ?? '',
 			configMode: ConfigManager.getInstance().getConfig().development.connectionMode,
 		};
 	}

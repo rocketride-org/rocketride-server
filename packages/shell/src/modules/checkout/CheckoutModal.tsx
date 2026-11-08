@@ -19,6 +19,7 @@ import type { PaymentWalletsOption } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
 import { commonStyles } from '../../themes/styles';
 import { PlanPicker, planAmount } from './PlanPicker';
+import { isCheckoutNotDispatched } from './checkoutDispatch';
 import type { CheckoutModalProps, CheckoutPlan, PromoValidation } from './types';
 
 // =============================================================================
@@ -454,6 +455,13 @@ const PaymentForm: React.FC<PaymentFormProps> = ({ plan, promo, isCurrent, onSuc
  *
  * All server communication is via callback props — no SDK imports.
  */
+interface CheckoutAttempt {
+	id: string;
+	priceId: string;
+	promotionCode?: string;
+	session?: { clientSecret: string; subscriptionId: string };
+}
+
 export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 	appName,
 	appDescription,
@@ -486,9 +494,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 	const [subscriptionId, setSubscriptionId] = useState<string>('');
 	const [loadingSecret, setLoadingSecret] = useState(false);
 	const [error, setError] = useState<string | null>(null);
-	const [retryCheckout, setRetryCheckout] = useState(false);
+	const [retryCheckout, setRetryCheckout] = useState<CheckoutAttempt | null>(null);
 	const [outcome, setOutcome] = useState<'complete' | 'pending' | null>(null);
-	const checkoutAttempts = useRef(new Map<string, string>());
+	const checkoutAttempts = useRef(new Map<string, CheckoutAttempt>());
 	const promoAttempts = useRef(new Map<string, { input: string; displayCode: string; id: string }>());
 	const unresolvedGrant = useRef<string | null>(null);
 	const selectedPriceId = useRef(preselectedPlan?.stripePriceId);
@@ -582,20 +590,29 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 		checkoutInFlight.current = true;
 		setLoadingSecret(true);
 		setError(null);
-		let started = false;
+		let attempt: CheckoutAttempt | null = retryCheckout;
 		try {
-			const priceId = selectedPlan.stripePriceId;
-			const promotionCode = appliedPromo?.code;
-			const key = JSON.stringify([priceId, promotionCode]);
-			let attemptId = checkoutAttempts.current.get(key);
-			if (!attemptId) {
-				attemptId = billingAttemptId();
-				checkoutAttempts.current.set(key, attemptId);
+			if (!attempt) {
+				const priceId = selectedPlan.stripePriceId;
+				const promotionCode = appliedPromo?.code;
+				const key = JSON.stringify([priceId, promotionCode]);
+				attempt = checkoutAttempts.current.get(key) ?? { id: billingAttemptId(), priceId, promotionCode };
+				checkoutAttempts.current.set(key, attempt);
 			}
-			started = true;
-			const res = await onCreateCheckout(priceId, promotionCode, attemptId);
+			const { priceId, promotionCode, id, session } = attempt;
+			if (session) {
+				setClientSecret(session.clientSecret);
+				setSubscriptionId(session.subscriptionId);
+				return;
+			}
+			const res = await onCreateCheckout(priceId, promotionCode, id);
 			if (!mounted.current) return;
-			setRetryCheckout(false);
+			setRetryCheckout(null);
+			if (!res || typeof res.subscriptionId !== 'string' || !res.subscriptionId ||
+				(res.clientSecret !== null && (typeof res.clientSecret !== 'string' || !res.clientSecret))) {
+				finishCheckout('pending');
+				return;
+			}
 			if (res.clientSecret === null) {
 				if (res.status !== undefined && res.status !== 'active' && res.status !== 'trialing') {
 					finishCheckout('pending');
@@ -605,20 +622,23 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 				finishCheckout('complete', () => onConfirmPending(res.subscriptionId, priceId));
 				return;
 			}
+			attempt.session = { clientSecret: res.clientSecret, subscriptionId: res.subscriptionId };
 			setClientSecret(res.clientSecret);
 			setSubscriptionId(res.subscriptionId);
 		} catch (err: unknown) {
-			if (started && !supportsCheckoutReplay) {
+			if (isCheckoutNotDispatched(err)) {
+				if (mounted.current) setError(err.message);
+			} else if (attempt && !supportsCheckoutReplay) {
 				finishCheckout('pending');
 			} else if (mounted.current) {
 				setError(err instanceof Error ? err.message : 'Failed to start checkout. Please try again.');
-				setRetryCheckout(started);
+				setRetryCheckout(attempt);
 			}
 		} finally {
 			checkoutInFlight.current = false;
 			setLoadingSecret(false);
 		}
-	}, [selectedPlan, appliedPromo, isCurrent, supportsCheckoutReplay, onCreateCheckout, onConfirmPending, finishCheckout]);
+	}, [selectedPlan, appliedPromo, retryCheckout, isCurrent, supportsCheckoutReplay, onCreateCheckout, onConfirmPending, finishCheckout]);
 
 	/** Resets back to the plan picker. */
 	const handleBack = useCallback(() => {
@@ -687,7 +707,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 				});
 			}
 		} catch (err: unknown) {
-			if (redeeming && !supportsCheckoutReplay) {
+			if (isCheckoutNotDispatched(err)) {
+				if (mounted.current) setPromoError(err.message);
+			} else if (redeeming && !supportsCheckoutReplay) {
 				finishCheckout('pending');
 			} else if (mounted.current) {
 				if (redeeming) unresolvedGrant.current = codeKey;
@@ -701,6 +723,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
 	/** Clears the applied discount code. */
 	const handleRemovePromo = useCallback(() => {
+		if (checkoutInFlight.current || unresolvedGrant.current) return;
 		setAppliedPromo(null);
 		setPromoInput('');
 		setPromoError(null);

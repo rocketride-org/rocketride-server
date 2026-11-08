@@ -48,6 +48,7 @@ import { RocketRideClient } from 'rocketride';
 import type { ConnectResult, DAPMessage, DataPipe, PIPELINE_RESULT, RocketRideClientConfig } from 'rocketride';
 import { decodeMessageData, encodeMessageData } from './binaryWire';
 import { getCheckoutScope, isCheckoutMutation } from './checkoutScope';
+import { checkoutNotDispatched } from '../modules/checkout/checkoutDispatch';
 import { isWireError, openEnvelope, rehydrateError } from './errorWire';
 
 /**
@@ -170,7 +171,7 @@ export class RocketRideClientProxy extends RocketRideClient {
 		const timeoutMs = timeout !== undefined ? timeout + BUS_TIMEOUT_SLACK_MS : undefined;
 		try {
 			const checkoutScope = isCheckoutMutation(message) ? getCheckoutScope(this) : undefined;
-			if (checkoutScope === null) throw new Error('Checkout requires a connected organization.');
+			if (checkoutScope === null) throw checkoutNotDispatched();
 			const response = openEnvelope(
 				await this._proxyTransport.request(
 					REQUEST_OP,

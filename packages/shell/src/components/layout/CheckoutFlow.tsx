@@ -24,8 +24,9 @@
 // CHECKOUT FLOW — Stripe subscription checkout wired to shell events
 // =============================================================================
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { CheckoutModal } from '../../modules/checkout';
+import { checkoutNotDispatched } from '../../modules/checkout/checkoutDispatch';
 import type { CheckoutPlan, PromoValidation } from '../../modules/checkout';
 import { ConnectionManager } from '../../connection/connection';
 import { getCheckoutScope, matchesCheckoutScope } from '../../connection/checkoutScope';
@@ -42,6 +43,8 @@ import type { AppManifestEntry } from '../workspace/types';
 export interface CheckoutFlowProps {
 	/** Stripe publishable key from API config. */
 	stripeKey: string;
+	/** Source endpoint when the key is fetched by an embedded host. */
+	stripeServer?: string;
 	/** Organization ID from the authenticated identity. */
 	orgId: string;
 }
@@ -53,7 +56,7 @@ export interface CheckoutFlowProps {
  * Wires up the Stripe checkout flow callbacks to the ConnectionManager's
  * billing API.
  */
-export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, orgId }) => {
+export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, stripeServer, orgId }) => {
 	const cm = ConnectionManager.getInstance();
 	const [checkout, setCheckout] = useState<{
 		id: number;
@@ -64,6 +67,7 @@ export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, orgId }) 
 	} | null>(null);
 	const activeCheckout = useRef<typeof checkout>(null);
 	const checkoutSequence = useRef(0);
+	const lastStripeKey = useRef<{ checkoutId: number; key: string } | null>(null);
 	/** Pending timer that clears the post-purchase welcome status message. */
 	const statusClearTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -119,8 +123,13 @@ export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, orgId }) 
 		});
 	}, [orgId]);
 
-	// --- Don't render if no checkout or missing config -----------------------
-	if (!checkout || !stripeKey || checkout.scope.orgId !== orgId) return null;
+	const matchingKey = checkout && (!stripeServer || stripeServer === checkout.scope.server) ? stripeKey : '';
+	useLayoutEffect(() => {
+		if (checkout && matchingKey) lastStripeKey.current = { checkoutId: checkout.id, key: matchingKey };
+	}, [checkout, matchingKey]);
+	const checkoutStripeKey = checkout && lastStripeKey.current?.checkoutId === checkout.id ? lastStripeKey.current.key : matchingKey;
+
+	if (!checkout || !checkoutStripeKey || checkout.scope.orgId !== orgId) return null;
 	const { app: checkoutApp } = checkout;
 
 	// --- Render CheckoutModal ------------------------------------------------
@@ -131,7 +140,7 @@ export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, orgId }) 
 		matchesCheckoutScope(getCheckoutScope(cm.getClient()), checkout.scope);
 	const needClient = () => {
 		const client = cm.getClient();
-		if (!client || !isCheckoutCurrent()) throw new Error('The active checkout account changed. Reopen checkout.');
+		if (!client || !isCheckoutCurrent()) throw checkoutNotDispatched();
 		return client;
 	};
 
@@ -140,7 +149,7 @@ export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, orgId }) 
 			key={checkout.id}
 			appName={checkoutApp.name}
 			appDescription={checkoutApp.description}
-			stripePublishableKey={stripeKey}
+			stripePublishableKey={checkoutStripeKey}
 			preselectedPlan={checkout.plan}
 			preselectedPromo={checkout.promo}
 			isCheckoutCurrent={isCheckoutCurrent}

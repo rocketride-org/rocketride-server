@@ -25,7 +25,8 @@ import { ConnectionManager, SettingsPage, buildSettingsRegistry, registerSetting
 import type { SettingsRichSection, ISettingsRichContext, AppManifestEntry } from 'shell';
 import { SHELL_PARTITION } from 'shell/src/workspace/workspaceStore';
 import { CheckoutUnavailableNotice } from '../components/CheckoutUnavailableNotice';
-import type { StripeKeyReason } from 'shared/ops/hostOps';
+import { isAppSubscribed } from 'shared/utils/subscriptionGate';
+import { useStripeKey } from '../hooks/useStripeKey';
 import type { ConnectResult } from 'rocketride';
 import { ConnectionSettings } from './ConnectionSettings';
 import { DeploySettings } from './DeploySettings';
@@ -344,7 +345,7 @@ export const Settings: React.FC = () => {
 	// Cloud auth state
 	const [cloudSignedIn, setCloudSignedIn] = useState(false);
 	// Subscription state — defaults to false so the subscribe button shows until the host confirms
-	const [subscribed, setSubscribed] = useState(false);
+	const [hostSubscribed, setHostSubscribed] = useState(false);
 	const [cloudUserName, setCloudUserName] = useState('');
 	// The server the session's token was minted against — CloudPanel's
 	// subscribe gate compares the form's target against it.
@@ -405,20 +406,13 @@ export const Settings: React.FC = () => {
 	useGridConfigAnswering(gridPrefs.store);
 	useEffect(() => gridPrefs.dispose, [gridPrefs]);
 
-	// The Stripe publishable key (host-probed; matches the CONNECTED server).
-	const [stripe, setStripe] = useState<{ key: string | null; reason?: StripeKeyReason } | null>(null);
-	useEffect(() => {
-		void cm.request('host.stripeKey', {}).then(
-			(r) => setStripe(r as { key: string | null; reason?: StripeKeyReason }),
-			() => setStripe({ key: null, reason: 'probe-failed' })
-		);
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, []);
+	const stripe = useStripeKey();
 
 	// Mirrored account info — gates the Account group (no account, no group).
 	const [account, setAccount] = useState<ConnectResult | null>(() => (cm.getAccountInfo() as ConnectResult | undefined) ?? null);
 	useEffect(() => cm.on('shell:accountUpdate', (data) => setAccount(data as ConnectResult)), [cm]);
 	const checkoutOrgId = account?.organization?.id ?? '';
+	const subscribed = account ? isAppSubscribed(account, PIPE_BUILDER_APP_ID) : hostSubscribed;
 
 	// Subscribe entry point: hand off to CheckoutFlow, or explain why not.
 	const [showUnavailable, setShowUnavailable] = useState(false);
@@ -461,7 +455,7 @@ export const Settings: React.FC = () => {
 		// Deep-clone for cancel/reset so future edits don't mutate the snapshot
 		savedSettingsRef.current = JSON.parse(JSON.stringify(payload.settings));
 		setDirty(false);
-		setSubscribed(payload.isSubscribed);
+		setHostSubscribed(payload.isSubscribed);
 	}, []);
 
 	const applyCloudStatus = useCallback((status: CloudAuthStatus): void => {
@@ -1055,7 +1049,7 @@ export const Settings: React.FC = () => {
 			</div>
 
 			{/* ── Checkout (the Billing section's Subscribe → shell:subscribe) ── */}
-			<CheckoutFlow stripeKey={stripe?.key ?? ''} orgId={checkoutOrgId} />
+			<CheckoutFlow stripeKey={stripe.key} stripeServer={stripe.server} orgId={checkoutOrgId} />
 			{showUnavailable && <CheckoutUnavailableNotice reason={stripe?.reason} onClose={() => setShowUnavailable(false)} />}
 		</div>
 	);
