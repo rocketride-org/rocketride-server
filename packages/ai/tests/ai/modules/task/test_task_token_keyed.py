@@ -30,7 +30,8 @@ holding a token requires having been given it. Pinned here:
 - the token is still stable for one identity in one process (the "already
   running" guard and the useExisting reconnect depend on it), across processes
   that share ``RR_TASK_TOKEN_KEY``, and differs across different keys;
-- without ``RR_TASK_TOKEN_KEY`` each process uses its own random key;
+- without ``RR_TASK_TOKEN_KEY`` (unset or empty) each process uses its own
+  random key, and logs that as a warning;
 - a configured key that is too short refuses to mint;
 - ``pk_`` share links are byte-identical to every link ever minted, and a
   ``pk_`` reaches only a run whose source is a public endpoint;
@@ -99,6 +100,13 @@ def _positional_only_log(sink):
 def logs(monkeypatch):
     lines: list[str] = []
     monkeypatch.setattr(task_server_module, 'debug', _positional_only_log(lines))
+    return lines
+
+
+@pytest.fixture
+def warned(monkeypatch):
+    lines: list[str] = []
+    monkeypatch.setattr(task_server_module, 'warning', _positional_only_log(lines))
     return lines
 
 
@@ -248,22 +256,27 @@ async def test_the_same_identity_gets_the_same_keyed_token_in_one_process(logs, 
 
 
 @pytest.mark.asyncio
-async def test_a_shared_key_gives_the_same_token_across_restarts_and_replicas(logs, monkeypatch, no_launch):
+async def test_a_shared_key_gives_the_same_token_across_restarts_and_replicas(logs, warned, monkeypatch, no_launch):
     one = await _start(_server(logs, monkeypatch, key=KEY_A))
     two = await _start(_server(logs, monkeypatch, key=KEY_A))
     other_key = await _start(_server(logs, monkeypatch, key=KEY_B))
 
     assert one['token'] == two['token']
     assert one['token'] != other_key['token']
+    assert warned == []
 
 
 @pytest.mark.asyncio
-async def test_without_a_key_each_process_uses_its_own(logs, monkeypatch, no_launch):
-    one = await _start(_server(logs, monkeypatch, key=None))
-    two = await _start(_server(logs, monkeypatch, key=None))
+@pytest.mark.parametrize('key', [None, ''], ids=['unset', 'empty'])
+async def test_without_a_key_each_process_uses_its_own(logs, warned, monkeypatch, no_launch, key):
+    one = await _start(_server(logs, monkeypatch, key=key))
+    two = await _start(_server(logs, monkeypatch, key=key))
 
     assert one['token'] != two['token']
-    assert any('RR_TASK_TOKEN_KEY' in line for line in logs)
+    # A warning, once per process: on a deployed engine this fallback changes
+    # everyone's tk_ tokens on every restart, so it must not hide at debug.
+    assert len(warned) == 2 and all('RR_TASK_TOKEN_KEY' in line for line in warned)
+    assert not any('RR_TASK_TOKEN_KEY' in line for line in logs)
 
 
 @pytest.mark.asyncio

@@ -102,7 +102,7 @@ from .types import LAUNCH_TYPE, TaskError
 from .pipeline import resolve_implied_source
 from .commands.cmd_monitor import owner_key
 
-from rocketlib import debug
+from rocketlib import debug, warning
 
 
 @dataclass
@@ -654,7 +654,9 @@ class TaskServer(DAPBase):
         Resolved on first use, so a .env loaded after import still counts, and
         then kept for the life of the process: one identity must keep mapping to
         one token, or the "already running" guard and the useExisting reconnect
-        stop working. Unset, the key is random per process.
+        stop working. Unset or empty, the key is random per process, and that
+        is a warning, not debug: on a deployed engine every restart would
+        change everyone's tk_ tokens, so it must show in the default log.
 
         Raises:
             ValueError: If RR_TASK_TOKEN_KEY is set but too short.
@@ -664,8 +666,8 @@ class TaskServer(DAPBase):
             key = resolve_task_token_key(os.environ)
             if key is None:
                 key = secrets.token_bytes(32)
-                debug(
-                    f'{CONST_TASK_TOKEN_KEY_ENV} is not set: task tokens use a key of this process only and '
+                warning(
+                    f'{CONST_TASK_TOKEN_KEY_ENV} is unset or empty: task tokens use a key of this process only and '
                     'change when it restarts. Set it (the same value on every replica) to keep them.'
                 )
             self._tk_key = key
