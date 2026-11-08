@@ -127,7 +127,11 @@ export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, stripeSer
 		});
 	}, [orgId]);
 
-	const matchingKey = checkout && (!stripeServer || stripeServer === checkout.scope.server) ? stripeKey : '';
+	const isCheckoutCurrent = () => checkout !== null && activeCheckout.current === checkout && cm.isConnected() &&
+		matchesCheckoutScope(getCheckoutScope(cm.getClient()), checkout.scope);
+	const replaySupported = checkout?.scope.replaySupported === true && liveReplaySupported;
+	const matchingKey = checkout && (!stripeServer || stripeServer === checkout.scope.server) && isCheckoutCurrent() &&
+		(!checkout.scope.replaySupported || replaySupported) ? stripeKey : '';
 	useLayoutEffect(() => {
 		if (checkout && matchingKey) lastStripeKey.current = { checkoutId: checkout.id, key: matchingKey };
 	}, [checkout, matchingKey]);
@@ -140,8 +144,6 @@ export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, stripeSer
 	// Engine access is the realm's own client, so this flow renders in any
 	// realm (the real client at the cloud root; the realm client — requests
 	// over the bridge — in a page webview).
-	const isCheckoutCurrent = () => activeCheckout.current === checkout && cm.isConnected() &&
-		matchesCheckoutScope(getCheckoutScope(cm.getClient()), checkout.scope);
 	const needClient = () => {
 		const client = cm.getClient();
 		if (!client || !isCheckoutCurrent()) throw checkoutNotDispatched();
@@ -157,7 +159,7 @@ export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, stripeSer
 			preselectedPlan={checkout.plan}
 			preselectedPromo={checkout.promo}
 			isCheckoutCurrent={isCheckoutCurrent}
-			supportsCheckoutReplay={checkout.scope.replaySupported && liveReplaySupported}
+			supportsCheckoutReplay={replaySupported}
 			requireCheckoutStatus
 			onFetchPlans={async () => {
 				return needClient().billing.getProductPrices(checkoutApp.id) as Promise<CheckoutPlan[]>;

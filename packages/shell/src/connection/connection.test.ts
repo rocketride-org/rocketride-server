@@ -1666,6 +1666,35 @@ test('live and buffered checkout intents retain their authenticated origin acros
 	}
 });
 
+test('a known workspace transition cancels deferred and buffered Subscribe intents', async () => {
+	for (const buffered of [false, true]) {
+		const manager: ConnectionManager = Reflect.construct(ConnectionManager, []);
+		const client = new RocketRideClientProxy({ request: async () => { throw new Error('No request expected'); } });
+		manager.getClient = () => client;
+		manager.isConnected = () => true;
+		client.applyIdentity({
+			connected: true,
+			accountInfo: { ...authenticatedResult, organization: { id: 'org-a' } as NonNullable<ConnectResult['organization']> },
+			uri: 'wss://app.rocketride.ai/task/service',
+		});
+		const seen: string[] = [];
+		const listen = () => manager.on('shell:subscribe', ({ app }) => seen.push(app.id));
+		if (!buffered) listen();
+
+		manager.emit('shell:subscribe', { app: { id: 'app-old', name: 'Old checkout' } });
+		manager.emit('shell:workspaceWillChange', { orgId: 'org-b' });
+		manager.emit('shell:subscribe', { app: { id: 'app-transition', name: 'Stale checkout' } });
+		manager.emit('shell:workspaceChanged', { orgId: 'org-a' });
+		if (buffered) listen();
+		await Promise.resolve();
+		assert.equal(seen.length, 0);
+
+		manager.emit('shell:subscribe', { app: { id: 'app-new', name: 'New checkout' } });
+		await Promise.resolve();
+		assert.deepEqual(seen, ['app-new']);
+	}
+});
+
 test('a retained topic replays to EVERY subscriber, not just the one that opened the port', async () => {
 	const cm = createTopicManager();
 	cm.publish('host:connection', { connected: true });
@@ -1737,6 +1766,7 @@ function createMirroredManager(): ConnectionManager {
 		listeners: Map<string, Set<unknown>>;
 		wildcardListeners: Set<unknown>;
 		pendingEvents: Map<string, unknown>;
+		checkoutIntentGeneration: number;
 		debugLog: unknown[];
 		installMirrorSubscriptions(): void;
 	};
@@ -1747,6 +1777,7 @@ function createMirroredManager(): ConnectionManager {
 	fields.listeners = new Map();
 	fields.wildcardListeners = new Set();
 	fields.pendingEvents = new Map();
+	fields.checkoutIntentGeneration = 0;
 	fields.debugLog = [];
 	fields.installMirrorSubscriptions();
 	return manager;

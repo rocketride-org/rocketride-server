@@ -487,6 +487,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 	// ── State ────────────────────────────────────────────────────────────
 	const [plans, setPlans] = useState<CheckoutPlan[]>([]);
 	const [plansLoading, setPlansLoading] = useState(true);
+	const [plansError, setPlansError] = useState<string | null>(null);
+	const [planFetchRetry, setPlanFetchRetry] = useState(0);
 	// Seed the selection from a preselected plan so the payment step can render
 	// its recap immediately (and the picker is skipped — see the auto-advance
 	// effect below).
@@ -565,6 +567,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 		if (outcome || clientSecret || retryCheckout || grantResult || unresolvedGrant.current) return;
 		let cancelled = false;
 		setPlansLoading(true);
+		setPlansError(null);
 		void (async () => {
 			try {
 				const fetched = await onFetchPlans();
@@ -581,14 +584,17 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 				// interval that is actually shown.
 			} catch (err: unknown) {
 				if (!cancelled && mounted.current && !settled.current && !checkoutInFlight.current && !unresolvedGrant.current) {
-					setError(err instanceof Error ? err.message : 'Failed to load subscription plans.');
+					const message = isCheckoutNotDispatched(err)
+						? 'Reconnect to load subscription plans.'
+						: err instanceof Error ? err.message : 'Failed to load subscription plans.';
+					setPlansError(message);
 				}
 			} finally {
 				if (!cancelled && mounted.current) setPlansLoading(false);
 			}
 		})();
 		return () => { cancelled = true; };
-	}, [onFetchPlans, outcome, clientSecret, retryCheckout, grantResult]);
+	}, [onFetchPlans, outcome, clientSecret, retryCheckout, grantResult, planFetchRetry]);
 
 	const selectionAvailable = !returnedFromPayment || plans.some((plan) => plan.stripePriceId === selectedPlan?.stripePriceId);
 
@@ -640,7 +646,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 			setSubscriptionId(res.subscriptionId);
 		} catch (err: unknown) {
 			if (isCheckoutNotDispatched(err)) {
-				if (mounted.current) setError(err.message);
+				if (mounted.current) {
+					setError(retryCheckout ? 'Checkout recovery is unavailable. Check your subscriptions before starting again.' : err.message);
+				}
 			} else if (attempt && !canReplay) {
 				finishCheckout('pending');
 			} else if (mounted.current) {
@@ -722,7 +730,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 			}
 		} catch (err: unknown) {
 			if (isCheckoutNotDispatched(err)) {
-				if (mounted.current) setPromoError(err.message);
+				if (mounted.current) {
+					setPromoError(unresolvedGrant.current ? 'Redemption recovery is unavailable. Check your credits before starting again.' : err.message);
+				}
 			} else if (redeeming && !canReplay) {
 				finishCheckout('pending');
 			} else if (mounted.current) {
@@ -790,6 +800,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 	}, []);
 
 	const replayUnavailable = !canReplay && (retryCheckout !== null || unresolvedGrant.current !== null);
+	const showPlanError = plansError && !outcome && !clientSecret && !retryCheckout && !grantResult && !unresolvedGrant.current;
 
 	// ── Render ───────────────────────────────────────────────────────────
 	return (
@@ -808,6 +819,18 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 				{/* Body */}
 				<div style={S.body}>
 					{error && <p style={S.error}>{error}</p>}
+					{showPlanError && (
+						<>
+							<p style={S.error}>{plansError}</p>
+							<button
+								style={S.continueBtn(plansLoading)}
+								disabled={plansLoading}
+								onClick={() => { if (isCurrent()) setPlanFetchRetry((count) => count + 1); }}
+							>
+								Retry plans
+							</button>
+						</>
+					)}
 
 					{grantResult ? (
 						/* Grant/hackathon code redeemed — no plan, no payment */

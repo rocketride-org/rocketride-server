@@ -49,7 +49,9 @@ export function useCheckoutSession(stripe: StripeKeyState) {
 		return () => off.forEach((unsubscribe) => unsubscribe());
 	}, [cm, closeCheckout]);
 
-	const matchingKey = checkout && stripe.server === checkout.scope.server ? stripe.key : '';
+	const replaySupported = checkout?.scope.replaySupported === true && liveReplaySupported;
+	const matchingKey = checkout && stripe.server === checkout.scope.server && isCurrent(checkout) &&
+		(!checkout.scope.replaySupported || replaySupported) ? stripe.key : '';
 	useLayoutEffect(() => {
 		if (checkout && matchingKey && isCurrent(checkout)) lastKey.current = { checkout, key: matchingKey };
 	}, [checkout, matchingKey, isCurrent]);
@@ -57,6 +59,5 @@ export function useCheckoutSession(stripe: StripeKeyState) {
 	// A transient disconnect clears useStripeKey. Keep the mounted attempt
 	// and its original key until this checkout's verified scope changes.
 	const checkoutStripeKey = lastKey.current?.checkout === checkout ? lastKey.current.key : matchingKey;
-	const replaySupported = checkout?.scope.replaySupported === true && liveReplaySupported;
 	return { checkout, checkoutStripeKey, openCheckout, closeCheckout, isCurrent, replaySupported };
 }

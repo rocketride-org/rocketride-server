@@ -348,6 +348,8 @@ export class ConnectionManager implements IConnectionManager {
 
 	/** Latest buffered payload per replayable event, awaiting a listener. */
 	private pendingEvents = new Map<string, unknown>();
+	private checkoutIntentGeneration = 0;
+	private checkoutWorkspaceChanging = false;
 
 	// =========================================================================
 	// INITIALIZATION
@@ -1884,6 +1886,15 @@ export class ConnectionManager implements IConnectionManager {
 	 * @param payload - The payload matching the event's type.
 	 */
 	public emit<K extends keyof ShellConnectionEventMap>(event: K, payload: ShellConnectionEventMap[K]): void {
+		if (event === 'shell:workspaceWillChange' || event === 'shell:orgChanged' || event === 'shell:logoutRequest') {
+			this.checkoutIntentGeneration += 1;
+			this.checkoutWorkspaceChanging = true;
+			this.pendingEvents.delete('shell:subscribe');
+		} else if (event === 'shell:workspaceChanged' || event === 'shell:connected') {
+			this.checkoutWorkspaceChanging = false;
+		}
+		if (event === 'shell:subscribe' && this.checkoutWorkspaceChanging) return;
+		const checkoutIntentGeneration = this.checkoutIntentGeneration;
 		// A buffered preselection must not start checkout under a different
 		// account when a subscriber eventually receives the event.
 		const eventPayload = event === 'shell:subscribe'
@@ -1895,7 +1906,11 @@ export class ConnectionManager implements IConnectionManager {
 		// leaves an empty Set behind, so check size — not just presence.
 		const handlers = this.listeners.get(event as string);
 		if (handlers && handlers.size > 0) {
-			Promise.resolve().then(() => this.dispatch(handlers, event as string, eventPayload));
+			Promise.resolve().then(() => {
+				if (event !== 'shell:subscribe' || this.checkoutIntentGeneration === checkoutIntentGeneration) {
+					this.dispatch(handlers, event as string, eventPayload);
+				}
+			});
 			return;
 		}
 
