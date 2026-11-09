@@ -239,7 +239,8 @@ def test_a_credential_path_collision_degrades_that_node_instead_of_failing(caplo
     state = creds.evaluate(spec, ['ROCKETRIDE_ODD_CLOUD', 'ROCKETRIDE_ODD_KEY'])
     assert state['status'] == 'unconfirmed'
     assert state['wiring'] is None
-    assert state['candidates'] == ['cloud', 'cloud.apikey']
+    assert state['candidates'] == [], 'candidates are variable names a caller may bind, never paths'
+    assert 'credential paths collide' in state['definition_error']
     assert 'credential paths collide' in caplog.text
 
 

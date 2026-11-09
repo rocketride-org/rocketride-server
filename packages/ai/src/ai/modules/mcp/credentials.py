@@ -206,12 +206,15 @@ def evaluate(spec: Integration, env_keys: Optional[List[str]]) -> dict:
             # cannot be wired as one tree. Report the node unconfirmed instead of
             # failing the whole listing, so every other node stays discoverable.
             logger.warning('%s: credential paths collide, wiring withheld: %s', spec.name, exc)
+            # candidates are VARIABLE names a caller may bind; a definition
+            # defect is reported on its own key, never as a binding proposal
             return {
                 'status': 'unconfirmed',
                 'env_error': False,
                 'missing': [],
-                'candidates': sorted(flat),
+                'candidates': [],
                 'wiring': None,
+                'definition_error': f'credential paths collide in the node definition: {exc}',
             }
         return {'status': 'configured', 'env_error': False, 'missing': [], 'candidates': [], 'wiring': wiring}
     tokens = node_tokens(spec.name)
