@@ -17,6 +17,13 @@ const {
 	checkSilent,
 	parseTime,
 	findCdb,
+	parseElapsed,
+	lockWait,
+	longLockWait,
+	parseLockHolders,
+	selectHolderTargets,
+	claimFile,
+	lockHoldersScript,
 	startStackWatch,
 } = require('./stackwatch');
 
@@ -48,7 +55,7 @@ const IDLE_MAIN =
 	'Thread 0x00002464 (most recent call first):\n' + frame(NODE_PY, 465, 'run') + frame(NODE_PY, 484, '<module>');
 
 // The main thread of a child that waits for the shared install.lock.
-const lockWait = (file) =>
+const lockWaitMain = (file) =>
 	'Thread 0x00002464 (most recent call first):\n' +
 	frame(file, 276, '__enter__') +
 	frame(NODE_PY, 453, 'run') +
@@ -117,7 +124,7 @@ test('a truncated last dump is skipped, in every place it can be cut', () => {
 
 test('a dump without a main thread is incomplete', () => {
 	const parsed = parseStackFile(HEADER + `Timeout (0:00:30)!\n${LOOP_THREAD}`);
-	assert.deepStrictEqual(parsed.dumps, [{ complete: false, frames: [] }]);
+	assert.deepStrictEqual(parsed.dumps, [{ complete: false, frames: [], elapsed: 30 }]);
 });
 
 test('a healthy idle child is not frozen', () => {
@@ -127,13 +134,13 @@ test('a healthy idle child is not frozen', () => {
 
 test('a child waiting for the install lock is not frozen, with Windows and POSIX paths', () => {
 	for (const file of [DEPENDS_WIN, DEPENDS_POSIX]) {
-		const wait = lockWait(file);
+		const wait = lockWaitMain(file);
 		assert.strictEqual(checkFrozen(parseStackFile(HEADER + dump(wait) + dump(wait))).frozen, false, file);
 	}
 	// Another function in depends.py, and __enter__ in another file, still count.
-	const other = lockWait(DEPENDS_WIN).replace('__enter__', 'install');
+	const other = lockWaitMain(DEPENDS_WIN).replace('__enter__', 'install');
 	assert.ok(checkFrozen(parseStackFile(HEADER + dump(other) + dump(other))).frozen);
-	const elsewhere = lockWait(`${WIN}\\Lib\\other.py`);
+	const elsewhere = lockWaitMain(`${WIN}\\Lib\\other.py`);
 	assert.ok(checkFrozen(parseStackFile(HEADER + dump(elsewhere) + dump(elsewhere))).frozen);
 });
 
@@ -247,7 +254,7 @@ test('scan captures a frozen live child once and writes native_<pid>.txt and the
 	assert.ok(!fs.existsSync(path.join(dir, 'native_4336.txt')));
 	const log = fs.readFileSync(path.join(dir, 'stackwatch.log'), 'utf8').split('\n');
 	assert.match(log[0], /started, cdb=/);
-	assert.match(log[1], /captured pid=9280 exit=0/);
+	assert.match(log[1], /captured native_9280\.txt pid=9280 exit=0/);
 });
 
 test('scan skips a dead child, a pid whose header differs and a pid that is not an engine', async () => {
@@ -401,4 +408,104 @@ test('scan logs once and stops when cdb is missing, and never throws', async () 
 	const gone = startStackWatch(missing, { platform: 'win32', ...WITH_CDB, intervalMs: 3_600_000 });
 	await assert.doesNotReject(gone.scan());
 	gone.stop();
+});
+
+test('parseStackFile keeps the elapsed time of each dump', () => {
+	const parsed = parseStackFile(HEADER + dump(FROZEN_MAIN, '0:00:30') + dump(FROZEN_MAIN, '1:02:03'));
+	assert.deepStrictEqual(
+		parsed.dumps.map((d) => d.elapsed),
+		[30, 3723]
+	);
+	assert.strictEqual(parseElapsed('nonsense'), null);
+});
+
+test('lockWait measures the trailing run of install.lock waits', () => {
+	const wait = lockWait(
+		parseStackFile(
+			HEADER +
+				dump(IDLE_MAIN, '0:01:00') +
+				dump(lockWaitMain(DEPENDS_WIN), '0:02:00') +
+				dump(lockWaitMain(DEPENDS_WIN), '0:05:00')
+		)
+	);
+	assert.deepStrictEqual(wait, { waiting: true, seconds: 180 });
+	// A single dump is a wait of unknown length; a child that moved on is not waiting.
+	assert.deepStrictEqual(lockWait(parseStackFile(HEADER + dump(lockWaitMain(DEPENDS_WIN), '0:02:00'))), {
+		waiting: true,
+		seconds: 0,
+	});
+	const moved = HEADER + dump(lockWaitMain(DEPENDS_WIN), '0:01:00') + dump(IDLE_MAIN, '0:02:00');
+	assert.deepStrictEqual(lockWait(parseStackFile(moved)), { waiting: false, seconds: 0 });
+	assert.deepStrictEqual(lockWait(parseStackFile(HEADER)), { waiting: false, seconds: 0 });
+});
+
+test('longLockWait starts the capture at 180 s and picks the longest waiter', () => {
+	assert.strictEqual(longLockWait([]), null);
+	assert.strictEqual(longLockWait([{ pid: 1, seconds: 179 }]), null);
+	assert.deepStrictEqual(
+		longLockWait([
+			{ pid: 1, seconds: 200 },
+			{ pid: 2, seconds: 400 },
+			{ pid: 3, seconds: 10 },
+		]),
+		{ pid: 2, seconds: 400 }
+	);
+	assert.deepStrictEqual(longLockWait([{ pid: 1, seconds: 180 }]), { pid: 1, seconds: 180 });
+});
+
+test('claimFile succeeds once per directory', () => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stackwatch-claim-'));
+	assert.strictEqual(claimFile(dir, 'lockholders.txt', 'pid=1'), true);
+	assert.strictEqual(claimFile(dir, 'lockholders.txt', 'pid=2'), false);
+	assert.match(fs.readFileSync(path.join(dir, 'lockholders.txt'), 'utf8'), /^claimed time=.* pid=1 by watcher \d+\n$/);
+});
+
+test('parseLockHolders reads the lock path and the samples', () => {
+	const lines = [
+		'lock=C:\\e\\cache\\install.lock',
+		'sample 1',
+		'P 10 engine.exe',
+		'sample 2',
+		'sample 3',
+		'P 10 engine.exe',
+		'P 11 python.exe',
+	];
+	const out = parseLockHolders(lines.join('\r\n') + '\r\n');
+	assert.strictEqual(out.lock, 'C:\\e\\cache\\install.lock');
+	assert.deepStrictEqual(
+		out.samples.map((s) => s.map((p) => p.pid)),
+		[[10], [], [10, 11]]
+	);
+	assert.strictEqual(parseLockHolders('lock=none\nexes=\n').lock, null);
+});
+
+test('selectHolderTargets takes the holders, then engines that are not waiters', () => {
+	const p = (...pids) => pids.map((pid) => ({ pid, name: 'x' }));
+	const base = { enginePids: [10, 20, 30, 40], waiterPids: [30, 40], selfPid: 99 };
+	// 10 is open in every sample; 20 and 50 only in some; waiters and the watcher never count.
+	const all = selectHolderTargets({ ...base, samples: [p(10, 20, 30), p(10, 50), p(10, 99)] });
+	assert.deepStrictEqual(all, [
+		{ pid: 10, why: 'open in every sample' },
+		{ pid: 20, why: 'engine.exe, not a waiter' },
+	]);
+	// No process in all samples: every process seen is a candidate.
+	const some = selectHolderTargets({ ...base, samples: [p(50), p(51), p(30)] });
+	assert.deepStrictEqual(
+		some.map((t) => t.pid),
+		[50, 51, 10, 20]
+	);
+	assert.strictEqual(some[0].why, 'open in some samples');
+	// No samples at all (the listing failed): the engines that are not waiters.
+	assert.deepStrictEqual(
+		selectHolderTargets({ ...base, samples: [] }).map((t) => t.pid),
+		[10, 20]
+	);
+	assert.strictEqual(selectHolderTargets({ ...base, samples: [], max: 1 }).length, 1);
+});
+
+test('lockHoldersScript embeds the waiter pid and the sample count', () => {
+	const script = lockHoldersScript(4242, 3);
+	assert.match(script, /Get-Process -Id 4242/);
+	assert.match(script, /\$n -le 3/);
+	assert.match(script, /^'@$/m);
 });
