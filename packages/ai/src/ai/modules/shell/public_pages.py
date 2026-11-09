@@ -54,7 +54,7 @@ from ai.account.app_rows import (
     serving_block_of,
 )
 
-from .contract import Page, check_manifest, is_privileged, may_claim_root
+from .contract import Page, _check_redirects, _with_slash_twin, check_manifest, is_privileged, may_claim_root
 
 
 @dataclass(frozen=True)
@@ -71,6 +71,9 @@ class Published:
 class Aggregate:
     """The immutable page map, keyed by exact path. A rebuild swaps a whole new one (never edited).
 
+    ``redirects`` maps an old path to the page path it 301s to (the root
+    owner's ``site.redirects``).
+
     ``published`` maps each app owning a page to the manifest it was read
     from: what a rebuild keeps when that app cannot be read. Comparisons
     ignore it.
@@ -80,6 +83,7 @@ class Aggregate:
     site: Mapping[str, Any] = field(default_factory=dict)
     published: Mapping[str, Published] = field(default_factory=dict, compare=False, repr=False)
     legacy: bool = False
+    redirects: Mapping[str, str] = field(default_factory=dict)
 
     def pages(self) -> List[Page]:
         """Every claimed page, sorted by path (deterministic output order)."""
@@ -126,9 +130,10 @@ def build_aggregate(
 
     Every manifest is re-validated (``check_manifest``) and only its valid
     pages are kept; a page colliding with an earlier claim is dropped (first
-    claim wins). ``site`` comes only from the app owning ``/``. When no page
-    survives, the aggregate is the legacy page list (a broken manifest falls
-    back instead of removing every page).
+    claim wins). ``site`` and its redirects come only from the app owning
+    ``/``; a redirect whose source (or its slash twin) another app's page
+    serves is dropped. When no page survives, the aggregate is the legacy page
+    list (a broken manifest falls back instead of removing every page).
     """
     exact, sites = _claims(published, live_conflict)
     if not exact:
@@ -137,16 +142,23 @@ def build_aggregate(
     root = exact.get('/')
     if root is not None:
         site = dict(sites.get(root.app_id, {}))
+    redirects = {}
+    for source, target in site.pop('redirects', {}).items():
+        if any(c in exact for c in _with_slash_twin(source)):
+            debug(f'[public_pages] redirect {source} -> {target} collides with a page (redirect skipped)')
+            continue
+        redirects[source] = target
     owners = {page.app_id for page in exact.values()}
     return Aggregate(
         exact=exact,
         site=site,
         published={pub.app_id: pub for pub in published if pub.app_id in owners},
+        redirects=redirects,
     )
 
 
 def legacy_aggregate(live_conflict: Optional[Callable[[str], Optional[str]]] = None) -> Aggregate:
-    """The aggregate of the legacy page list: trusted engine constants.
+    """The aggregate of the legacy page list and its redirects: trusted engine constants.
 
     Filtered through ``live_conflict`` like any claim, when one is given.
     """
@@ -170,7 +182,11 @@ def legacy_aggregate(live_conflict: Optional[Callable[[str], Optional[str]]] = N
             listed=raw['listed'],
             head_title=legacy_head_title(raw['path'], raw['title']),
         )
-    return Aggregate(exact=exact, site=dict(manifest['site']), legacy=True)
+    site = dict(manifest['site'])
+    redirects, errors = _check_redirects(site.pop('redirects'), list(exact.values()), live_conflict)
+    for err in errors:
+        debug(f'[public_pages] legacy {err} (redirect skipped)')
+    return Aggregate(exact=exact, site=site, legacy=True, redirects=redirects)
 
 
 def _skip_unreadable(
@@ -345,10 +361,11 @@ async def gate_errors(app_id: str, manifest: Mapping[str, Any], dist_dir: str, a
     Runs at ``rrext_deploy_app publish`` for the public audience only, the
     one rung the aggregate reads. Checks, each with an actionable message:
     privilege and may-claim-root, path grammar, reserved prefixes and the
-    live route table, data entries, cross-app collisions against every OTHER
-    published platform manifest (first claim wins; ownership is derived from
-    published manifests, so unpublishing releases it, with no table), and
-    snapshot files missing from the built version.
+    live route table, data entries, redirects, cross-app collisions (of page
+    paths and redirect sources) against every OTHER published platform
+    manifest (first claim wins; ownership is derived from published
+    manifests, so unpublishing releases it, with no table), and snapshot
+    files missing from the built version.
 
     The collision check sees only what is already published: two platform
     apps publishing the same path at the same moment can both pass. The
@@ -385,7 +402,7 @@ async def gate_errors(app_id: str, manifest: Mapping[str, Any], dist_dir: str, a
             return [f'{exc}; emit {{"publicPages": [...], "site": {{...}}}} or drop the file']
     if 'publicPages' not in manifest and 'site' not in manifest:
         return []
-    pages, _, errors = check_manifest(app_id, manifest, page_map.live_conflict)
+    pages, site, errors = check_manifest(app_id, manifest, page_map.live_conflict)
     if not pages:
         # Nothing to collide or snapshot (a third party, or every page invalid):
         # never read, or echo a failure of, the other platform apps' storage.
@@ -400,6 +417,16 @@ async def gate_errors(app_id: str, manifest: Mapping[str, Any], dist_dir: str, a
                 f'publicPages path {page.path!r} is already claimed by the published app {owner.app_id} '
                 '(first claim wins; the claim is released when that app unpublishes); choose another path'
             )
+    for source in (site or {}).get('redirects', {}):
+        for candidate in _with_slash_twin(source):
+            owner = exact.get(candidate)
+            if owner is not None:
+                which = '' if candidate == source else f'its slash twin {candidate!r} '
+                errors.append(
+                    f'site.redirects from {source!r}: {which}is a page of the published app {owner.app_id}; '
+                    'a URL is a page or a redirect, not both: drop the entry'
+                )
+                break
     for page in pages:
         if not page.snapshot:
             continue

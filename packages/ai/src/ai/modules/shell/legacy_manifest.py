@@ -25,8 +25,8 @@ The legacy public-page list in the publicPages + site contract shape.
 
 The page aggregate holds it while no published platform app contributes a
 valid page (see ``public_pages.legacy_aggregate``): the pages the shell
-served before home-ui declared its own, filtered against the live route
-table like any claim.
+served before home-ui declared its own, and the old URLs that 301 to them,
+filtered against the live route table like any claim.
 """
 
 from typing import Any, Dict
@@ -187,6 +187,20 @@ _LEGACY_ROUTES = [
 # `unlisted` in routes.ts until the Marketplace relaunches.
 _LEGACY_UNLISTED = frozenset({'/oss', '/mcp-server', '/store', '/marketplace', '/build-publish-earn'})
 
+# Old URLs answered with a 301 to a legacy page: home-ui's src/redirects.ts
+# (rocketride-saas) entries, in its order, except the agreement URLs
+# (/master-saas-agreement, /end-user-license-agreement), which 404 until legal
+# confirms their target: browsers cache a wrong 301. A source matches exactly,
+# so each is listed with and without its trailing slash.
+_LEGACY_REDIRECTS = [
+    ('/terms', '/legal/terms'),
+    ('/terms/', '/legal/terms'),
+    ('/privacy-policy', '/legal/privacy-policy'),
+    ('/privacy-policy/', '/legal/privacy-policy'),
+    ('/privacy', '/legal/privacy-policy'),
+    ('/privacy/', '/legal/privacy-policy'),
+]
+
 # The routes.ts document-title convention, applied to the head <title> only
 # (the page title stays bare).
 _LEGACY_SITE_TITLE = 'RocketRide'
@@ -206,6 +220,7 @@ def legacy_page_manifest() -> Dict[str, Any]:
                 'Fully managed, predictable costs, true portability.'
             ),
             'docsUrl': 'https://docs.rocketride.org/llms.txt',
+            'redirects': [{'from': source, 'to': target} for source, target in _LEGACY_REDIRECTS],
         },
     }
 

@@ -88,6 +88,8 @@ def test_the_saas_emitted_manifest_validates_cleanly():
     pages, site, errors = check_manifest('rocketride.home', _emitted())
     assert errors == []
     assert len(pages) == 25 and site['title'] == 'RocketRide'
+    # The legacy redirect map passes the same validator a manifest's does.
+    assert site['redirects']['/terms'] == '/legal/terms' and len(site['redirects']) == 6
     by_path = {p.path: p for p in pages}
     assert by_path['/pricing'].data == ('plans:rocketride.pipeBuilder',)
     assert by_path['/'].data == ('app:rocketride.pipeBuilder',)
@@ -98,7 +100,10 @@ def test_a_newer_home_ui_manifest_still_validates():
     pages, site, errors = check_manifest('rocketride.home', newer)
     assert errors == []
     assert len(pages) == 26
-    assert site == {k: newer['site'][k] for k in ('title', 'blurb', 'docsUrl')}
+    assert site == {
+        **{k: newer['site'][k] for k in ('title', 'blurb', 'docsUrl')},
+        'redirects': {'/terms': '/legal/terms', '/terms/': '/legal/terms'},
+    }
     launch = {p.path: p for p in pages}['/blog/launch']
     assert dict(launch.extra) == {k: newer['publicPages'][-1][k] for k in ('image', 'published', 'modified', 'authors')}
 

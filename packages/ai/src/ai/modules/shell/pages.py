@@ -26,10 +26,10 @@ The public-page catch-all: one route, every method, answering from the page aggr
 Registered last (``register_public_pages``, at the end of server startup,
 after every module and the account layer): FastAPI matches routes in
 registration order, so every real route wins and only unmatched requests
-reach here. Pages answer GET and HEAD (405 otherwise). A page's
-trailing-slash twin answers GET and HEAD with a 301 to the page; any other
-path the aggregate does not claim answers what the router answered before
-the catch-all existed: 405, 307 or 404.
+reach here. Pages answer GET and HEAD (405 otherwise). A redirect source
+(``site.redirects``) and a page's trailing-slash twin answer GET and HEAD
+with a 301 to the page; any other path the aggregate does not claim answers
+what the router answered before the catch-all existed: 405, 307 or 404.
 
 Auth: the catch-all is not a public route, which would open every path,
 private API routes included, to anonymous callers. The web server consults
@@ -64,8 +64,8 @@ _web_server: Any = None
 # ever collides with it).
 FALLBACK_PATH = '/{public_page_path:path}'
 
-# Bounds how long browsers keep a 301: page paths are manifest data that can
-# change, and an unbounded 301 is cached indefinitely.
+# Bounds how long browsers keep a 301: the redirect map and page paths are
+# manifest data that can change, and an unbounded 301 is cached indefinitely.
 _REDIRECT_CACHE_CONTROL = 'public, max-age=86400'
 
 
@@ -185,12 +185,15 @@ async def public_page(request: Request):
     # HEAD is GET without the body (the server drops it; status and headers
     # stay identical): link checkers and unfurl prefetches send it.
     if request.method not in ('GET', 'HEAD'):
-        # Any other method: pages answer 405; any other path answers what the
-        # router would have without the catch-all.
-        if path == '/' or path in aggregate.exact:
+        # Any other method: pages and redirects answer 405; any other path
+        # answers what the router would have without the catch-all.
+        if path == '/' or path in aggregate.exact or path in aggregate.redirects:
             raise HTTPException(status_code=405, detail='Method Not Allowed', headers={'Allow': 'GET, HEAD'})
         return _router_miss(request) or _not_found()
     public_pages.maybe_refresh()  # schedules only: the swap lands on a later request
+    target = aggregate.redirects.get(path)
+    if target is not None:
+        return _moved(request, target)
     page = aggregate.exact.get(path)
     if page is None:
         if path == '/':

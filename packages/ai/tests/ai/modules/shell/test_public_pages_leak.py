@@ -115,6 +115,20 @@ def test_hidden_platform_pages_are_not_served(world, monkeypatch):
                     assert_no_leak(resp.text)
 
 
+def test_only_the_visible_root_owners_redirects_answer(world):
+    _, client = world
+    assert pp.current().redirects == {'/plans': '/pricing'}
+    for ua in UAS:
+        resp = client.get('/plans?ref=x', headers={'User-Agent': ua}, follow_redirects=False)
+        assert resp.status_code == 301 and resp.headers['location'] == '/pricing?ref=x', ua
+    for marker in LEAK_MARKERS:
+        if marker.islower():
+            resp = client.get(f'/{marker}-old', headers={'User-Agent': GOOGLEBOT}, follow_redirects=False)
+            assert resp.status_code == 404, marker
+            assert_no_leak(str(resp.headers))
+    assert client.get('/terms', follow_redirects=False).status_code == 404  # the squatter's hijack
+
+
 def test_squatter_never_owns_root_or_site(world):
     _, client = world
     root = client.get('/', headers={'User-Agent': GOOGLEBOT}).text
