@@ -435,6 +435,18 @@ is listed in that parent's section, headed by the parent's title without a
 trailing ` | <site.title>`, with dated pages newest first and the rest by
 path; every other page is under `## Pages`, by path.
 
+A server with `RR_INDEXNOW_KEY` (8 to 128 letters, digits and `-`) and an
+`https://` `RR_APP_URL` serves the key at `/<key>.txt` and, whenever the page
+map changes, submits to IndexNow, which shares them with Bing and the other
+participating search engines, the listed pages that are new or whose content
+changed (a field of the page, or its snapshot's bytes; a new version alone
+is no change) and the pages that were listed and are now gone or unlisted.
+Without both settings it serves no key file and submits nothing. The pages
+of an app missing from the page map altogether (unpublished, made
+non-public, or skipped for a moment because its storage could not be read)
+are not submitted as removed: a transient storage error must not look like
+a removal.
+
 Each feed in `site.feeds` answers `GET` and `HEAD` on its `path` with an Atom
 1.0 document (`application/atom+xml`): the listed pages strictly under its
 `prefix` that declare `published`, newest first, at most 50. An entry carries

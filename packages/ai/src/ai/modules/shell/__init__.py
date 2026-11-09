@@ -53,6 +53,8 @@ Routes registered:
     GET  /robots.txt                — robots policy (Disallow-all unless RR_APP_URL is set)
     GET  /llms.txt                  — llmstxt.org index (404 unless RR_APP_URL is set)
                                       (the three crawler files answer HEAD like GET)
+    GET  /<RR_INDEXNOW_KEY>.txt     — the IndexNow key file (only with a valid key and an https
+                                      RR_APP_URL; answers HEAD like GET; see indexnow.py)
     ANY  /{public_page_path:path}   — the public-page catch-all; registered LAST by
                                       ``register_public_pages`` (end of startup), not here
 """
@@ -60,7 +62,7 @@ Routes registered:
 from typing import Any, Dict
 
 from ai.web import WebServer
-from . import pages, public_pages
+from . import indexnow, pages, public_pages
 from .pages import public_page, register_public_pages
 from .shell import shell_static, apps_static, apps_session, sitemap_xml, robots_txt, llms_txt
 
@@ -100,6 +102,17 @@ def initModule(server: WebServer, config: Dict[str, Any]):
     # collide with this server's live routes.
     pages.set_web_server(server)
     public_pages.set_live_conflict(pages.live_route_conflict)
+
+    # ── IndexNow ────────────────────────────────────────────────────────
+    # With a valid RR_INDEXNOW_KEY and an https RR_APP_URL: the key file
+    # (registered here, so ahead of the catch-all) and a submission of the
+    # changed pages after each swap.
+    if indexnow.enabled():
+        for method in ('GET', 'HEAD'):
+            server.add_route(
+                path=f'/{indexnow.key()}.txt', routeHandler=indexnow.key_file, methods=[method], public=True
+            )
+        public_pages.on_swap(indexnow.on_swap)
 
     # ── Shell assets ──────────────────────────────────────────────────
     # Catch-all for everything under /shell/ — JS, CSS, themes, favicon.
