@@ -170,7 +170,7 @@ const DOING_THE_TASK = `- Get oriented first: look around with your tools, then 
 const CHECKING = `- After your last change, you MUST run the check that covers each thing you changed, because the run can't finish until each one passes.
 - Only tool results count as evidence. A file you write, such as a test log, proves nothing, so run the check instead.
 - When a check fails, fix the cause and run it again; keep going past the first failure.
-- If a check names a step it could not run, say plainly what was not checked.
+- If check_app could not run its types or build step, the app is not checked and the run can't finish: do what the result says, and when it needs the user (such as opening the app's Design preview), ask them with ask_user. For any other step a check could not run, say plainly what was not checked.
 - Claim something works only when a tool result shows it, and say plainly what you could not confirm.
 - Leave the "Checked:" line to the system, because it is built from the check results.`;
 
