@@ -54,7 +54,7 @@ def gql_response(payload=None, status=200, headers=None, raw=None):
 @pytest.fixture
 def node(monkeypatch):
     with scoped_stubs():
-        from tool_github import IInstance
+        from tool_github.IInstance import IInstance
         from tool_github import github_client, graphql_guard
 
         inst = IInstance()

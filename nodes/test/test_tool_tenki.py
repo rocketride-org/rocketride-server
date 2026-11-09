@@ -496,10 +496,9 @@ def _global(monkeypatch, cfg, client=None):
     """An IGlobal over ``cfg`` (beginGlobal not yet run), and the kwargs of every Client it builds."""
     built = []
     monkeypatch.setattr(mod, 'Client', lambda **kwargs: built.append(kwargs) or client or _Client())
-    monkeypatch.setattr(mod, 'Config', SimpleNamespace(getNodeConfig=lambda *a: dict(cfg)))
     glb = mod.IGlobal()
-    glb.IEndpoint = SimpleNamespace(endpoint=SimpleNamespace(openMode=object()))
-    glb.glb = SimpleNamespace(logicalType='tool_tenki', connConfig={})
+    # The stored config; self.config resolves it through the engine's schema for tool_tenki.
+    glb.glb = SimpleNamespace(logicalType='tool_tenki', connConfig=dict(cfg))
     return glb, built
 
 
@@ -577,32 +576,53 @@ def test_the_client_gets_the_stripped_key_the_public_endpoint_and_a_deadline(mon
     assert built == [{'auth_token': _KEY, 'base_url': 'https://tenki.example', 'timeout': 60}]
 
 
-def test_the_editor_opens_the_node_without_a_key(monkeypatch, logs):
+def test_a_blank_key_is_a_schema_error_before_a_client_exists(monkeypatch, logs):
+    """The schema requires the key (a ${ROCKETRIDE_TENKI_KEY} reference per call); the resolver names the leaf."""
+    from rocketlib.config import ConfigError
+
     glb, built = _global(monkeypatch, {})
-    glb.IEndpoint.endpoint.openMode = mod.OPEN_MODE.CONFIG
-    glb.beginGlobal()
+    with pytest.raises(ConfigError, match='"apikey" is required'):
+        glb.beginGlobal()
     assert built == []
 
 
 @pytest.mark.parametrize(
-    ('field', 'configured', 'expected'),
+    ('field', 'configured'),
     [
-        ('max_duration_minutes', 100000, 1440),
-        ('pause_retention_hours', 100000, 8760),
-        ('exec_timeout_secs', 99999, 1200),
-        ('exec_timeout_secs', 0, 120),  # config_int: 0 means "not set", not "1 second"
-        ('exec_timeout_secs', 'soon', 120),
-        ('max_output_chars', 10, 1000),
-        ('max_output_chars', 10**9, 1000000),
-        ('cpu_cores', 64, 16),
-        ('memory_mb', 128, 512),
-        ('memory_mb', 4097, 4096),  # Tenki rejects odd sizes
-        ('disk_size_gb', 1, 5),  # the SDK refuses less than 5 before sending
-        ('disk_size_gb', -3, 0),
+        ('max_duration_minutes', 100000),
+        ('pause_retention_hours', 100000),
+        ('exec_timeout_secs', 99999),
+        ('exec_timeout_secs', 0),
+        ('exec_timeout_secs', 'soon'),
+        ('max_output_chars', 10),
+        ('max_output_chars', 10**9),
+        ('cpu_cores', 64),
+        ('disk_size_gb', -3),
     ],
 )
-def test_integer_settings_are_clamped_or_fall_back_to_their_default(monkeypatch, logs, field, configured, expected):
-    assert getattr(_started(monkeypatch, {field: configured})[0], field) == expected
+def test_integer_settings_outside_the_schema_stop_startup(monkeypatch, logs, field, configured):
+    """The schema's type and range checks replace the old clamps: the resolver names the leaf."""
+    from rocketlib.config import ConfigError
+
+    glb, built = _global(monkeypatch, {'apikey': _KEY, field: configured})
+    with pytest.raises(ConfigError, match=f'"{field}"'):
+        glb.beginGlobal()
+    assert built == []
+
+
+@pytest.mark.parametrize(('field', 'configured'), [('memory_mb', 128), ('disk_size_gb', 1), ('cpu_cores', 0)])
+def test_sizes_below_the_sdk_floor_stop_startup_unless_left_to_tenki(monkeypatch, logs, field, configured):
+    """The schema admits 0 (leave it to Tenki) up to the cap; a non-zero value under the SDK's floor is refused here."""
+    if configured == 0:
+        assert getattr(_started(monkeypatch, {field: configured})[0], field) == 0
+        return
+    glb, _ = _global(monkeypatch, {'apikey': _KEY, field: configured})
+    with pytest.raises(ValueError, match=f'tenki.{field} must be 0'):
+        glb.beginGlobal()
+
+
+def test_an_odd_memory_size_is_rounded_down(monkeypatch, logs):
+    assert _started(monkeypatch, {'memory_mb': 4097})[0].memory_mb == 4096  # Tenki rejects odd sizes
 
 
 @pytest.mark.parametrize(('exec_timeout', 'minutes', 'warns'), [(120, 60, False), (60, 1, True), (59, 1, False)])
@@ -610,33 +630,12 @@ def test_a_command_allowed_to_outlive_the_session_is_warned_about(monkeypatch, l
     cfg = {'exec_timeout_secs': exec_timeout, 'max_duration_minutes': minutes}
     _started(monkeypatch, cfg)
     assert any('can never finish' in line for line in logs) is warns
-    logs.clear()
-    _global(monkeypatch, {'apikey': _KEY, **cfg})[0].validateConfig()
-    assert any('can never finish' in line for line in logs) is warns
 
 
-@pytest.mark.parametrize(
-    ('cfg', 'warning'),
-    [
-        ({}, 'apikey is required'),
-        ({'apikey': 'mock-key'}, 'starts with tk_'),
-        ({'toolGroups': ['nope']}, 'will fail to start: tenki.toolGroups matched no known'),
-        ({'toolGroups': ['git', 'nope']}, 'unknown tool group(s): nope'),
-        ({'label': 'My_Agent'}, 'will fail to start: tenki.label must be'),
-        ({'allow_domains': ['https://pypi.org']}, 'will fail to start: tenki.allow_domains'),
-        ({'git_auth_secret': 'GH'}, 'will fail to start: tenki.git_auth_secret is set but'),
-    ],
-)
-def test_the_editor_warns_about_a_setting_that_will_stop_the_pipeline(monkeypatch, logs, cfg, warning):
-    _global(monkeypatch, {'apikey': _KEY, **cfg} if cfg else {})[0].validateConfig()
-    assert any(warning in line for line in logs), logs
-
-
-def test_the_editor_reports_a_config_it_cannot_read(monkeypatch, logs):
-    glb, _ = _global(monkeypatch, {})
-    monkeypatch.setattr(mod, 'Config', SimpleNamespace(getNodeConfig=lambda *a: _raise(KeyError('connConfig'))))
-    glb.validateConfig()
-    assert any('connConfig' in line for line in logs)
+def test_a_key_without_the_tk_prefix_is_used_with_a_warning(monkeypatch, logs):
+    _, built = _started(monkeypatch, {'apikey': 'mock-key'})
+    assert built[0]['auth_token'] == 'mock-key'
+    assert any('starts with tk_' in line for line in logs)
 
 
 @pytest.mark.parametrize(
@@ -645,20 +644,20 @@ def test_the_editor_reports_a_config_it_cannot_read(monkeypatch, logs):
         (None, {'execution', 'filesystem', 'git'}),
         ([], {'execution', 'filesystem', 'git'}),
         (['all'], {'execution', 'filesystem', 'git'}),
-        (['Git', 'filesystem'], {'git', 'filesystem'}),
-        ('execution, git', {'execution', 'git'}),
-        (['git', 'typo'], {'git'}),
+        (['git', 'filesystem'], {'git', 'filesystem'}),
     ],
 )
 def test_tool_groups_choose_what_is_published(monkeypatch, logs, configured, published):
     assert _started(monkeypatch, {'toolGroups': configured})[0].tool_groups == published
-    assert any('ignoring unknown tool group(s): typo' in line for line in logs) is ('typo' in str(configured))
 
 
-@pytest.mark.parametrize('configured', [['typo'], {'git': True}])
-def test_tool_groups_that_match_nothing_stop_startup_instead_of_publishing_everything(monkeypatch, logs, configured):
+@pytest.mark.parametrize('configured', [['typo'], ['git', 'typo'], ['Git'], 'execution, git', {'git': True}])
+def test_tool_groups_outside_the_schema_stop_startup_instead_of_publishing_everything(monkeypatch, logs, configured):
+    """The schema pins every entry to the groups this node implements; a typo or the wrong shape is a hard error."""
+    from rocketlib.config import ConfigError
+
     glb, built = _global(monkeypatch, {'apikey': _KEY, 'toolGroups': configured})
-    with pytest.raises(ValueError, match='toolGroups'):
+    with pytest.raises(ConfigError, match='toolGroups'):
         glb.beginGlobal()
     assert built == []
 
@@ -679,7 +678,7 @@ def test_each_group_publishes_exactly_its_own_tools(monkeypatch, logs, group):
 def test_every_tool_is_in_a_group_the_editor_offers(monkeypatch, logs):
     inst, _ = _instance(monkeypatch)
     assert set(inst._collect_tool_methods()) == set().union(*_GROUP_TOOLS.values())
-    offered = {value for value, _ in _SERVICES['fields']['tenki.toolGroups']['items']['enum']}
+    offered = {value for value, _ in _SERVICES['propertyDefinitions']['tenki.toolGroups']['items']['enum']}
     assert offered == mod.TOOL_GROUPS | {'all'}
 
 
@@ -701,7 +700,7 @@ def test_a_label_outside_lowercase_letters_digits_and_hyphens_stops_startup(monk
 
 
 def test_allowed_domains_are_sent_as_tenki_normalizes_them(monkeypatch, logs):
-    _, client = _used(monkeypatch, _Session(), cfg={'allow_domains': 'PyPI.org., *.github.com, pypi.org'})
+    _, client = _used(monkeypatch, _Session(), cfg={'allow_domains': ['PyPI.org.', '*.github.com', 'pypi.org']})
     assert client.created[0]['allow_domains'] == ['pypi.org', '*.github.com']
 
 
@@ -735,7 +734,7 @@ def test_secret_policies_need_an_allowlist_and_only_their_names_are_sent(monkeyp
     glb, _ = _global(monkeypatch, {'apikey': _KEY, 'secret_policies': ['github']})
     with pytest.raises(ValueError, match='allow_domains is empty'):
         glb.beginGlobal()
-    cfg = {'secret_policies': ['github'], 'allow_domains': ['github.com'], 'secret_files': ['x'], 'tailnet': 'x'}
+    cfg = {'secret_policies': ['github'], 'allow_domains': ['github.com']}
     _, client = _used(monkeypatch, _Session(), cfg=cfg)
     assert client.created[0]['secret_policies'] == ['github'] and 'secret_files' not in client.created[0]
 
@@ -791,7 +790,7 @@ def test_the_private_prefix_is_kept_in_the_form_git_matches(monkeypatch, logs, u
         ({'git_auth_url': 'https://github.com:8443/'}, 'must be an https URL'),
         ({'git_auth_url': 'http://github.com/'}, 'must be an https URL'),
         ({'git_auth_url': 'https://github.com/a/../b'}, 'must be an https URL'),
-        ({'git_auth_url': 7}, 'must be a URL'),
+        ({'git_auth_url': 7}, 'expects string'),
         ({'git_auth_secret': '9lives'}, 'must be the name of a Tenki secret'),
         ({'git_auth_secret': 'ghp_' + 'a' * 36}, 'looks like a credential value'),
         ({'git_auth_secret': 'sk-ant-api03-abcdefgh12345678'}, 'looks like a credential value'),
@@ -1903,9 +1902,15 @@ def test_the_session_field_lists_every_value_the_node_reports():
 
 def test_every_field_the_editor_offers_is_read_by_the_node_and_only_the_key_is_secret():
     source = (_NODES_SRC / 'nodes' / 'tool_tenki' / 'IGlobal.py').read_text()
-    fields = _SERVICES['fields']
-    assert [name for name in fields if f"'{name.removeprefix('tenki.')}'" not in source] == []
-    assert [name for name, field in fields.items() if field.get('secure')] == ['tenki.apikey']
+    fields = _SERVICES['propertyDefinitions']
+    unread = [
+        name
+        for name in fields
+        if f'cfg.{name.removeprefix("tenki.")}' not in source and f"'{name.removeprefix('tenki.')}'" not in source
+    ]
+    assert unread == []
+    assert [name for name, field in fields.items() if field.get('secret')] == ['tenki.apikey']
+    assert fields['tenki.apikey']['required'] is True and fields['tenki.apikey']['env'] == 'ROCKETRIDE_TENKI_KEY'
     arrays = {name for name, field in fields.items() if field['type'] == 'array'}
     assert arrays == {'tenki.secret_policies', 'tenki.allow_domains', 'tenki.toolGroups'}
-    assert set(_SERVICES['shape'][0]['properties']) == {'type', *fields}
+    assert set(_SERVICES['properties']) == {'type', *fields}

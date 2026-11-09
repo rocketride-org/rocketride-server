@@ -27,7 +27,6 @@
 
 from __future__ import annotations
 
-import os
 import sys
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -118,7 +117,6 @@ def _build_import_stubs():
         'ai': MagicMock(),
         'ai.common': MagicMock(),
         'ai.common.utils': ai_common_utils,
-        'ai.common.config': MagicMock(),
     }
 
 
@@ -408,48 +406,37 @@ def test_date_helpers_reject_non_iso_types():
 
 
 # ---------------------------------------------------------------------------
-# IGlobal._get_token credential precedence
+# IGlobal token: the node config only (a ${ROCKETRIDE_OURA_TOKEN} reference per call)
 # ---------------------------------------------------------------------------
 
 
-def test_get_token_node_config_wins_over_all():
+def _begin(conn_config):
+    """Start the node's IGlobal on a stored config; ``self.config`` resolves it through the engine's schema."""
+    glb = glb_mod.IGlobal.__new__(glb_mod.IGlobal)
+    glb.glb = MagicMock(logicalType='tool_oura', connConfig=conn_config)
+    depends_stub = MagicMock()
+    depends_stub.load_depends = lambda *a, **kw: None
+    with patch.dict(sys.modules, {'depends': depends_stub}):
+        glb.beginGlobal()
+    return glb
+
+
+def test_begin_global_reads_and_strips_the_configured_token():
     with patch.dict('os.environ', {'ROCKETRIDE_OURA_TOKEN': 'env-token'}):
-        token = glb_mod.IGlobal._get_token({'token': 'cfg-token'}, {'token': 'conn-token'})
-    assert token == 'cfg-token'
+        assert _begin({'token': '  cfg-token  '}).token == 'cfg-token'
 
 
-def test_get_token_falls_back_to_connection_config():
+def test_begin_global_has_no_process_env_fallback():
+    from rocketlib.config import ConfigError
+
     with patch.dict('os.environ', {'ROCKETRIDE_OURA_TOKEN': 'env-token'}):
-        token = glb_mod.IGlobal._get_token({}, {'token': 'conn-token'})
-    assert token == 'conn-token'
+        with pytest.raises(ConfigError, match='"token" is required'):
+            _begin({})
 
 
-def test_get_token_falls_back_to_environment():
-    with patch.dict('os.environ', {'ROCKETRIDE_OURA_TOKEN': 'env-token'}):
-        token = glb_mod.IGlobal._get_token({}, {})
-    assert token == 'env-token'
-
-
-def test_get_token_empty_when_no_source():
-    with patch.dict('os.environ', {}, clear=False):
-        import os
-
-        os.environ.pop('ROCKETRIDE_OURA_TOKEN', None)
-        token = glb_mod.IGlobal._get_token({}, {})
-    assert token == ''
-
-
-def test_get_token_strips_whitespace_and_skips_blank_values():
-    # A whitespace-only node-config token must not shadow the next source.
-    with patch.dict('os.environ', {'ROCKETRIDE_OURA_TOKEN': ''}):
-        token = glb_mod.IGlobal._get_token({'token': '   '}, {'token': '  conn-token  '})
-    assert token == 'conn-token'
-
-
-def test_get_token_whitespace_only_env_yields_empty():
-    with patch.dict('os.environ', {'ROCKETRIDE_OURA_TOKEN': '   '}):
-        token = glb_mod.IGlobal._get_token({}, {})
-    assert token == ''
+def test_begin_global_rejects_a_whitespace_only_token():
+    with pytest.raises(Exception, match='token is required'):
+        _begin({'token': '   '})
 
 
 # ---------------------------------------------------------------------------
@@ -734,20 +721,14 @@ def test_call_non_json_success_body_raises():
 # ---------------------------------------------------------------------------
 
 
-def test_begin_global_raises_when_no_token_available():
-    """No token from any source fails the pipeline early with a node-specific message."""
+def test_begin_global_installs_depends_before_reading_the_token():
+    """The node imports `depends` lazily in beginGlobal; the bootstrap stubs were removed after import."""
+    calls = []
     glb = glb_mod.IGlobal.__new__(glb_mod.IGlobal)
-    glb.IEndpoint = MagicMock()
-    glb.IEndpoint.endpoint.openMode = object()  # anything but OPEN_MODE.CONFIG
-    glb.glb = MagicMock(logicalType='tool_oura', connConfig={})
-
-    # beginGlobal imports `depends` lazily at call time, and the bootstrap
-    # stubs were removed after import — re-inject one just for this call.
+    glb.glb = MagicMock(logicalType='tool_oura', connConfig={'token': 'cfg-token'})
     depends_stub = MagicMock()
-    depends_stub.load_depends = lambda *a, **kw: None
+    depends_stub.load_depends = lambda *a, **kw: calls.append(a)
 
     with patch.dict(sys.modules, {'depends': depends_stub}):
-        with patch.object(glb_mod.Config, 'getNodeConfig', return_value={}):
-            with patch.dict(os.environ, {'ROCKETRIDE_OURA_TOKEN': ''}, clear=False):
-                with pytest.raises(Exception, match='token is required'):
-                    glb.beginGlobal()
+        glb.beginGlobal()
+    assert len(calls) == 1 and glb.token == 'cfg-token'

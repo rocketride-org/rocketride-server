@@ -42,7 +42,32 @@ _TOOL_ARG_HELPERS = (
     'int_arg',
 )
 
-STUB_MODULE_NAMES = ('rocketlib', 'ai', 'ai.common', 'ai.common.config', 'ai.common.utils')
+STUB_MODULE_NAMES = ('rocketlib', 'ai', 'ai.common', 'ai.common.utils')
+
+# The branch each auth leaf is stored under (plan section 5.6.2): a flat test
+# config names the leaves, ``to_conn_config`` nests them where the resolver reads.
+_BRANCH_OF = {'token': 'pat', 'appId': 'app', 'privateKey': 'app', 'installationId': 'app'}
+
+#: The stored config the current ``install_stubs`` call bound; ``conn_config()`` reads it.
+_CURRENT_CONN_CONFIG: dict = {}
+
+
+def to_conn_config(flat: dict | None) -> dict:
+    """Nest a flat test config into the path-addressed shape the resolver expects."""
+    nested: dict = {}
+    for key, value in (flat or {}).items():
+        branch = _BRANCH_OF.get(key)
+        if branch:
+            nested.setdefault(branch, {})[key] = value
+        else:
+            nested[key] = value
+    return nested
+
+
+def conn_config() -> dict:
+    """The stored config bound by the enclosing ``scoped_stubs``, for ``glb.connConfig``."""
+    return dict(_CURRENT_CONN_CONFIG)
+
 
 if str(_NODES_SRC) not in sys.path:
     sys.path.insert(0, str(_NODES_SRC))
@@ -76,7 +101,18 @@ def _load_real_tool_args():
 
 
 def install_stubs(node_config: dict | None = None) -> None:
+    """Bind ``node_config`` (flat leaves) as the stored config and stub the node's engine-only deps.
+
+    The stub ``rocketlib`` keeps the REAL ``IGlobalBase`` so ``self.config`` resolves
+    through the engine's schema for tool_github; ``warning`` is a Mock the tests inspect.
+    """
+    global _CURRENT_CONN_CONFIG
+    _CURRENT_CONN_CONFIG = to_conn_config(node_config)
+
     mod_rl = types.ModuleType('rocketlib')
+    # The real submodules by their sys.modules entries, so a leaked stub parent cannot hide them.
+    mod_rl.engine = importlib.import_module('rocketlib.engine')
+    mod_rl.config = importlib.import_module('rocketlib.config')
 
     def mock_tool_function(*, input_schema=None, description=None, output_schema=None):
         # Stamp the metadata like rocketlib does, so the node's tool list is the real one.
@@ -101,27 +137,17 @@ def install_stubs(node_config: dict | None = None) -> None:
                 if hasattr(getattr(type(self), name, None), '__tool_meta__')
             }
 
-    class IGlobalBase:
-        pass
+    # The real base: its ``config`` property resolves self.glb.connConfig against
+    # the engine's schema for tool_github (rocketlib.filters is never stubbed).
+    from rocketlib.filters import IGlobalBase
 
     mod_rl.IInstanceBase = IInstanceBase
     mod_rl.IGlobalBase = IGlobalBase
-    mod_rl.OPEN_MODE = types.SimpleNamespace(CONFIG='config')
     mod_rl.warning = Mock()
     sys.modules['rocketlib'] = mod_rl
 
     sys.modules['ai'] = types.ModuleType('ai')
     sys.modules['ai.common'] = types.ModuleType('ai.common')
-
-    mod_ai_common_config = types.ModuleType('ai.common.config')
-
-    class Config:
-        @staticmethod
-        def getNodeConfig(logical_type, conn_config):
-            return node_config if node_config is not None else {}
-
-    mod_ai_common_config.Config = Config
-    sys.modules['ai.common.config'] = mod_ai_common_config
 
     mod_ai_common_utils = types.ModuleType('ai.common.utils')
     tool_args = _load_real_tool_args()

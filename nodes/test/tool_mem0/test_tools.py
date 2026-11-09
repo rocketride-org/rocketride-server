@@ -69,22 +69,12 @@ def _passthrough(args, tool_name=None):
 
 def _ensure_ai_common() -> None:
     """Install fresh ``ai.common.*`` stubs so the node imports without the engine."""
-    for name in ('ai', 'ai.common', 'ai.common.utils', 'ai.common.config'):
+    for name in ('ai', 'ai.common', 'ai.common.utils'):
         sys.modules[name] = types.ModuleType(name)
     # Mark containers as packages so sub-imports resolve even if not pre-inserted.
     sys.modules['ai'].__path__ = []
     sys.modules['ai.common'].__path__ = []
     sys.modules['ai.common.utils'].normalize_tool_input = _passthrough
-
-    class _Config:
-        """Minimal Config stub returning an empty node config."""
-
-        @staticmethod
-        def getNodeConfig(*_a, **_k):
-            """Return an empty config dict."""
-            return {}
-
-    sys.modules['ai.common.config'].Config = _Config
 
 
 def _ensure_requests() -> None:
@@ -126,7 +116,6 @@ _CORE_STUBS = (
     'ai',
     'ai.common',
     'ai.common.utils',
-    'ai.common.config',
     'requests',
     'requests.exceptions',
     'tenacity',

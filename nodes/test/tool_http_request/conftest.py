@@ -32,21 +32,22 @@ def node_modules(monkeypatch: pytest.MonkeyPatch):
     package.__path__ = [str(NODE_DIR)]
     monkeypatch.setitem(sys.modules, package_name, package)
 
+    # The real base: its ``config`` property resolves self.glb.connConfig against
+    # the engine's schema for tool_http_request (rocketlib.filters is never stubbed).
+    from rocketlib.filters import IGlobalBase
+
     rocketlib = types.ModuleType('rocketlib')
-    rocketlib.IGlobalBase = object
+    rocketlib.IGlobalBase = IGlobalBase
     rocketlib.IInstanceBase = object
-    rocketlib.OPEN_MODE = types.SimpleNamespace(CONFIG='config')
+    rocketlib.engine = importlib.import_module('rocketlib.engine')
+    rocketlib.config = importlib.import_module('rocketlib.config')
     rocketlib.warning = Mock()
     rocketlib.tool_function = lambda **_kwargs: lambda function: function
     monkeypatch.setitem(sys.modules, 'rocketlib', rocketlib)
 
-    config_module = types.ModuleType('ai.common.config')
-    config_module.Config = Mock()
     utils_module = types.ModuleType('ai.common.utils')
-    utils_module.config_int = Mock(side_effect=lambda _cfg, _key, default, **_kwargs: default)
     monkeypatch.setitem(sys.modules, 'ai', types.ModuleType('ai'))
     monkeypatch.setitem(sys.modules, 'ai.common', types.ModuleType('ai.common'))
-    monkeypatch.setitem(sys.modules, 'ai.common.config', config_module)
     monkeypatch.setitem(sys.modules, 'ai.common.utils', utils_module)
 
     def load(name: str):

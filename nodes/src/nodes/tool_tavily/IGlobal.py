@@ -1,6 +1,4 @@
 # =============================================================================
-# RocketRide Engine
-# =============================================================================
 # MIT License
 # Copyright (c) 2026 Aparavi Software AG
 #
@@ -26,20 +24,13 @@
 """
 Tavily tool node - global (shared) state.
 
-Reads the Tavily API key and search configuration from the node config.
-Tool logic lives on IInstance via @tool_function.
+Reads the Tavily API key and search configuration from the resolved node
+config. Tool logic lives on IInstance via @tool_function.
 """
 
 from __future__ import annotations
 
-import os
-
-from ai.common.config import Config
-from rocketlib import IGlobalBase, OPEN_MODE, error, warning
-
-# Pipeline env vars must be ROCKETRIDE_-prefixed (only those are substituted,
-# and the node-test framework maps ROCKETRIDE_<PROVIDER>_<ATTR> -> config).
-TAVILY_API_KEY_ENV = 'ROCKETRIDE_TAVILY_KEY'
+from rocketlib import IGlobalBase, error
 
 
 class IGlobal(IGlobalBase):
@@ -51,39 +42,19 @@ class IGlobal(IGlobalBase):
     topic: str = 'general'
 
     def beginGlobal(self) -> None:
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
+        # The resolved config: maxResults within 1-20, the depth and topic pinned
+        # to their enums, the key a required secret (a ${ROCKETRIDE_TAVILY_KEY}
+        # reference resolved per call, no process-env fallback)
+        cfg = self.config
 
-        cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-
-        apikey = str(cfg.get('apikey') or '').strip() or os.environ.get(TAVILY_API_KEY_ENV, '').strip()
-
+        apikey = str(cfg.apikey or '').strip()
         if not apikey:
-            error(f'tool_tavily: apikey is required — set it in node config or the {TAVILY_API_KEY_ENV} env var')
+            error('tool_tavily: apikey is required - set it in the node config (a ${ROCKETRIDE_TAVILY_KEY} reference)')
             raise ValueError('tool_tavily: apikey is required')
-
         self.apikey = apikey
-        raw_max = cfg.get('maxResults', 5)
-        if raw_max is None:
-            raw_max = 5
-        try:
-            self.max_results = max(1, min(20, int(raw_max)))
-        except (ValueError, TypeError):
-            error(f'tool_tavily: maxResults must be a number, got {raw_max!r}; using default 5')
-            self.max_results = 5
-        search_depth = str(cfg.get('searchDepth') or 'advanced').strip()
-        self.search_depth = search_depth if search_depth in ('basic', 'advanced') else 'advanced'
-        topic = str(cfg.get('topic') or 'general').strip()
-        self.topic = topic if topic in ('general', 'news', 'finance') else 'general'
-
-    def validateConfig(self) -> None:
-        try:
-            cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-            apikey = str(cfg.get('apikey') or '').strip() or os.environ.get(TAVILY_API_KEY_ENV, '').strip()
-            if not apikey:
-                warning('apikey is required')
-        except Exception as e:
-            warning(str(e))
+        self.max_results = cfg.maxResults
+        self.search_depth = cfg.searchDepth
+        self.topic = cfg.topic
 
     def endGlobal(self) -> None:
         self.apikey = ''

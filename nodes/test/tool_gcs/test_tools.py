@@ -21,7 +21,7 @@ from unittest.mock import MagicMock
 
 _NODE_DIR = Path(__file__).resolve().parent.parent.parent / 'src' / 'nodes' / 'tool_gcs'
 
-_STUB_MODULE_NAMES = ('rocketlib', 'ai', 'ai.common', 'ai.common.config')
+_STUB_MODULE_NAMES = ('rocketlib', 'ai', 'ai.common')
 
 
 def _tool_function(**meta):
@@ -51,13 +51,9 @@ def _install_stubs() -> None:
 
     ai = types.ModuleType('ai')
     ai_common = types.ModuleType('ai.common')
-    ai_common_config = types.ModuleType('ai.common.config')
-    ai_common_config.Config = type('Config', (), {})
     ai.common = ai_common
-    ai_common.config = ai_common_config
     sys.modules['ai'] = ai
     sys.modules['ai.common'] = ai_common
-    sys.modules['ai.common.config'] = ai_common_config
 
     if 'tool_gcs' not in sys.modules:
         pkg = types.ModuleType('tool_gcs')

@@ -14,20 +14,12 @@
 	"lanes": {
 		"_source": ["tags"]
 	},
-	"preconfig": {
-		"default": "default",
-		"profiles": {
-			"default": {
-				"title": "Default"
-			}
-		}
-	},
-	"fields": {
+	"propertyDefinitions": {
 		"filesystem.path": {
 			"type": "string",
 			"title": "Path",
 			"description": "File or folder to process, relative to the account file store root. A folder processes every file directly inside it.",
-			"default": ""
+			"required": true
 		},
 		"filesystem.recursive": {
 			"type": "boolean",
@@ -38,17 +30,13 @@
 				[true, "Yes"],
 				[false, "No"]
 			]
-		},
-		"Pipe.source.parameters": {
-			"section": "parameters",
-			"properties": ["filesystem.path", "filesystem.recursive"]
 		}
 	},
-	"shape": [
+	"properties": [
+		"type",
 		{
-			"section": "Pipe",
-			"title": "File Store Source",
-			"properties": ["type", "Pipe.source.parameters"]
+			"name": "parameters",
+			"properties": ["filesystem.path", "filesystem.recursive"]
 		}
 	]
 }

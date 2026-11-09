@@ -66,28 +66,40 @@ def _conditional_properties(field):
     return result
 
 
-def test_services_schema_only_shows_relevant_n8n_fields():
-    service = json.loads(_SERVICES_PATH.read_text(encoding='utf-8'))
-    fields = service['fields']
+def _load_services():
+    """services.json without its // comment lines."""
+    text = _SERVICES_PATH.read_text(encoding='utf-8')
+    return json.loads('\n'.join(line for line in text.splitlines() if not line.lstrip().startswith('//')))
 
-    assert service['shape'][0]['ui']['ui:options']['compactDescriptions'] is True
+
+def _selector(service, name):
+    """The inline selector property called ``name``, mapped branch value -> its property specifiers."""
+    for prop in service['properties']:
+        if isinstance(prop, dict) and prop['name'] == name:
+            return {value: body.get('properties', []) for value, body in prop['enum'].items()}
+    raise AssertionError(f'{name} is not a selector in properties')
+
+
+def test_services_schema_only_shows_relevant_n8n_fields():
+    """Each selector branch carries only the leaves that branch needs (plan section 5.6.1)."""
+    service = _load_services()
+    fields = service['propertyDefinitions']
+
     assert fields['tool_n8n.apiKey']['optional'] is True
-    assert _conditional_properties(fields['tool_n8n.mode']) == {
+    assert fields['tool_n8n.apiKey']['env'] == 'ROCKETRIDE_N8N_KEY'
+    assert _selector(service, 'mode') == {
         'sync': ['tool_n8n.syncTimeout'],
         'async': ['tool_n8n.asyncTimeout'],
     }
-    assert _conditional_properties(fields['tool_n8n.webhookAuth']) == {
+    assert _selector(service, 'webhookAuth') == {
         'none': [],
         'header': ['tool_n8n.webhookHeaderName', 'tool_n8n.webhookHeaderValue'],
         'basic': ['tool_n8n.webhookUser', 'tool_n8n.webhookPassword'],
         'bearer': ['tool_n8n.webhookToken'],
         'jwt': ['tool_n8n.webhookToken'],
     }
-    assert all(
-        not isinstance(conditional['value'], list) for conditional in fields['tool_n8n.webhookAuth']['conditional']
-    )
 
-    conditional_fields = {
+    branch_fields = {
         'tool_n8n.syncTimeout',
         'tool_n8n.asyncTimeout',
         'tool_n8n.webhookHeaderName',
@@ -96,9 +108,16 @@ def test_services_schema_only_shows_relevant_n8n_fields():
         'tool_n8n.webhookPassword',
         'tool_n8n.webhookToken',
     }
-    top_level = set(service['shape'][0]['properties'])
-    assert conditional_fields.isdisjoint(top_level)
-    assert all(fields[field].get('optional') is not True for field in conditional_fields)
+    top_level = {prop for prop in service['properties'] if isinstance(prop, str)}
+    assert branch_fields.isdisjoint(top_level)
+    # a credential the selected auth kind sends is required once that branch is selected
+    for field in (
+        'tool_n8n.webhookHeaderName',
+        'tool_n8n.webhookHeaderValue',
+        'tool_n8n.webhookUser',
+        'tool_n8n.webhookToken',
+    ):
+        assert fields[field]['required'] is True, field
 
 
 class _PreventDefault(Exception):
@@ -151,7 +170,6 @@ def _build_import_stubs():
         'ai.common': MagicMock(),
         'ai.common.utils': ai_common_utils,
         'ai.common.schema': ai_common_schema,
-        'ai.common.config': MagicMock(),
         'requests': requests,
     }
 
@@ -179,22 +197,46 @@ for _name in _added_stubs:
 # ---------------------------------------------------------------------------
 
 
-def test_begin_global_uses_workflow_env_when_config_workflow_empty(monkeypatch):
-    monkeypatch.setenv('ROCKETRIDE_N8N_WORKFLOW', 'env-webhook-path')
-    monkeypatch.setattr(
-        global_mod.Config,
-        'getNodeConfig',
-        lambda *a, **kw: {'baseUrl': 'http://n8n:5678', 'workflow': '   '},
-    )
-
+def _begin(conn_config):
+    """Start the node's IGlobal on a stored config; ``self.config`` resolves it through the engine's schema."""
     glb = global_mod.IGlobal()
-    glb.IEndpoint = MagicMock()
-    glb.IEndpoint.endpoint.openMode = object()
-    glb.glb = MagicMock(logicalType='tool_n8n', connConfig={})
-
+    glb.glb = MagicMock(logicalType='tool_n8n', connConfig=conn_config)
     glb.beginGlobal()
+    return glb
 
-    assert glb.default_workflow == 'env-webhook-path'
+
+def test_begin_global_has_no_process_env_fallback(monkeypatch):
+    """The workflow and key arrive through the node config only (${ROCKETRIDE_N8N_*} references per call)."""
+    monkeypatch.setenv('ROCKETRIDE_N8N_WORKFLOW', 'env-webhook-path')
+    monkeypatch.setenv('ROCKETRIDE_N8N_KEY', 'env-key')
+
+    glb = _begin({'baseUrl': 'http://n8n:5678', 'workflow': '   '})
+
+    assert glb.default_workflow == ''
+    assert glb.api_key == ''
+    assert glb.base_url == 'http://n8n:5678'
+
+
+def test_begin_global_reads_the_selected_branches():
+    glb = _begin(
+        {
+            'mode': 'async',
+            'async': {'asyncTimeout': 45},
+            'webhookAuth': 'bearer',
+            'bearer': {'webhookToken': ' tok '},
+            'sync': {'syncTimeout': 7},
+        }
+    )
+    assert (glb.mode, glb.async_timeout) == ('async', 45)
+    assert glb.sync_timeout == 30  # the unselected branch's value is kept in the file, not read
+    assert glb.webhook_auth == {'type': 'bearer', 'value': 'tok'}
+
+
+def test_begin_global_rejects_a_timeout_outside_the_schema():
+    from rocketlib.config import ConfigError
+
+    with pytest.raises(ConfigError, match='"sync.syncTimeout"'):
+        _begin({'sync': {'syncTimeout': 0}})
 
 
 # ---------------------------------------------------------------------------

@@ -39,7 +39,6 @@ _ISOLATED_MODULE_NAMES = (
     'ai',
     'ai.common',
     'ai.common.utils',
-    'ai.common.config',
     'requests',
     'requests.exceptions',
     'tenacity',
@@ -90,7 +89,7 @@ def _passthrough(args, tool_name=None):
 
 def _ensure_ai_common() -> None:
     """Create minimal ``ai.common.*`` stubs only when absent (never overwrite)."""
-    for name in ('ai', 'ai.common', 'ai.common.utils', 'ai.common.config'):
+    for name in ('ai', 'ai.common', 'ai.common.utils'):
         if name not in sys.modules:
             sys.modules[name] = types.ModuleType(name)
     utils = sys.modules['ai.common.utils']
@@ -100,17 +99,6 @@ def _ensure_ai_common() -> None:
         utils.post_with_retry = lambda *a, **k: None
     if not hasattr(utils, 'get_with_retry'):
         utils.get_with_retry = lambda *a, **k: None
-    if not hasattr(sys.modules['ai.common.config'], 'Config'):
-
-        class _Config:
-            """Minimal Config stub returning an empty node config."""
-
-            @staticmethod
-            def getNodeConfig(*_a, **_k):
-                """Return an empty config dict."""
-                return {}
-
-        sys.modules['ai.common.config'].Config = _Config
 
 
 def _ensure_requests() -> None:
@@ -1098,43 +1086,32 @@ def test_instances_interleave_calls_without_mutating_shared_global(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def _configured_global(open_mode='run'):
-    """Create an IGlobal with the minimal engine attributes used by lifecycle methods."""
+def _configured_global(conn_config=None):
+    """Create an IGlobal on a stored config; ``self.config`` resolves it through the engine's schema."""
     glb = IGlobal()
-    glb.IEndpoint = types.SimpleNamespace(endpoint=types.SimpleNamespace(openMode=open_mode))
-    glb.glb = types.SimpleNamespace(logicalType='tool_cognee', connConfig={})
+    glb.glb = types.SimpleNamespace(logicalType='tool_cognee', connConfig=conn_config or {})
     return glb
 
 
-def test_global_config_mode_skips_setup(monkeypatch):
-    """Canvas configuration mode does not load config or initialize runtime state."""
-    monkeypatch.setattr(
-        IGlobalMod.Config,
-        'getNodeConfig',
-        lambda *_args, **_kwargs: pytest.fail('CONFIG mode must skip setup'),
-    )
-    _configured_global(open_mode=IGlobalMod.OPEN_MODE.CONFIG).beginGlobal()
-
-
 def test_global_loads_exact_runtime_configuration(monkeypatch):
-    """Runtime setup loads the shared-memory configuration values."""
+    """Runtime setup loads the shared-memory configuration values from the resolved config."""
     config = {
         'base_url': 'https://cognee.example/',
-        'api_key': '',
+        'api_key': 'ck_config',
         'dataset': 'demo',
         'allow_dataset_override': True,
         'search_type': 'GRAPH_COMPLETION_DECOMPOSITION',
         'top_k': 7,
         'request_timeout': 45,
     }
+    # No process-env fallback: the key arrives through the node config only.
     monkeypatch.setenv('COGNEE_API_KEY', 'env-key')
-    monkeypatch.setattr(IGlobalMod.Config, 'getNodeConfig', lambda *_args: config)
 
-    glb = _configured_global()
+    glb = _configured_global(config)
     glb.beginGlobal()
 
     assert glb.base_url == 'https://cognee.example'
-    assert glb.api_key == 'env-key'
+    assert glb.api_key == 'ck_config'
     assert glb.dataset == 'demo'
     assert glb.allow_dataset_override is True
     assert glb.search_type == 'GRAPH_COMPLETION_DECOMPOSITION'
@@ -1142,17 +1119,26 @@ def test_global_loads_exact_runtime_configuration(monkeypatch):
     assert glb.request_timeout == 45
 
 
-def test_global_validate_config_warns_instead_of_raising(monkeypatch):
-    """Invalid editor-time configuration emits warnings and stays nonfatal."""
-    warnings = []
-    monkeypatch.setattr(
-        IGlobalMod.Config,
-        'getNodeConfig',
-        lambda *_args: {'base_url': ''},
-    )
-    monkeypatch.setattr(IGlobalMod, 'warning', warnings.append)
-    _configured_global().validateConfig()
-    assert any('base_url' in message for message in warnings)
+def test_global_unconfigured_node_runs_on_the_schema_defaults():
+    """An unset key means its declared default; the optional key stays empty."""
+    glb = _configured_global({})
+    glb.beginGlobal()
+
+    assert glb.base_url == 'http://localhost:8000'
+    assert glb.api_key == ''
+    assert glb.dataset == 'main'
+    assert glb.allow_dataset_override is False
+    assert glb.search_type == 'GRAPH_COMPLETION_DECOMPOSITION'
+    assert glb.top_k == 15
+    assert glb.request_timeout == 120
+
+
+def test_global_rejects_an_out_of_range_top_k():
+    """The schema bounds replace the old clamp: a value outside 1..100 is a hard error."""
+    from rocketlib.config import ConfigError
+
+    with pytest.raises(ConfigError, match='top_k'):
+        _configured_global({'top_k': 500}).beginGlobal()
 
 
 def test_global_end_clears_api_key():
@@ -1171,15 +1157,18 @@ def _load_services():
     return json.loads(text)
 
 
-@pytest.mark.parametrize('value', ['true', 1, None])
-def test_global_defaults_non_boolean_dataset_override_to_false(monkeypatch, value):
-    """Only a JSON boolean can enable per-call dataset selection at runtime."""
-    monkeypatch.setattr(
-        IGlobalMod.Config,
-        'getNodeConfig',
-        lambda *_args: {'base_url': 'https://cognee.example', 'allow_dataset_override': value},
-    )
-    glb = _configured_global()
+@pytest.mark.parametrize('value', ['true', 1])
+def test_global_rejects_a_non_boolean_dataset_override(value):
+    """Only a JSON boolean can enable per-call dataset selection: anything else is a schema error."""
+    from rocketlib.config import ConfigError
+
+    with pytest.raises(ConfigError, match='allow_dataset_override'):
+        _configured_global({'base_url': 'https://cognee.example', 'allow_dataset_override': value}).beginGlobal()
+
+
+def test_global_unset_dataset_override_is_false():
+    """None means unset, so the declared default (off) applies."""
+    glb = _configured_global({'base_url': 'https://cognee.example', 'allow_dataset_override': None})
     glb.beginGlobal()
     assert glb.allow_dataset_override is False
 
@@ -1196,7 +1185,7 @@ def test_global_services_expose_dataset_override_boolean_in_profile_and_shape():
     assert '<rect width="2539.97" height="2539.97"' not in icon
     assert 'rx=' not in icon
     assert '<svg' in icon
-    assert set(services['fields']) == {
+    assert set(services['propertyDefinitions']) == {
         'cognee.base_url',
         'cognee.api_key',
         'cognee.dataset',
@@ -1205,10 +1194,11 @@ def test_global_services_expose_dataset_override_boolean_in_profile_and_shape():
         'cognee.top_k',
         'cognee.request_timeout',
     }
-    assert services['fields']['cognee.api_key']['secure'] is True
-    assert services['fields']['cognee.api_key']['ui']['ui:widget'] == 'ApiKeyWidget'
-    override = services['fields']['cognee.allow_dataset_override']
+    api_key = services['propertyDefinitions']['cognee.api_key']
+    assert api_key['secret'] is True
+    assert api_key['env'] == 'ROCKETRIDE_COGNEE_APIKEY'
+    assert 'required' not in api_key, 'a self-hosted server with access control off needs no key'
+    override = services['propertyDefinitions']['cognee.allow_dataset_override']
     assert override['type'] == 'boolean'
     assert override['default'] is False
-    assert services['preconfig']['profiles']['default']['allow_dataset_override'] is False
-    assert 'cognee.allow_dataset_override' in services['shape'][0]['properties']
+    assert 'cognee.allow_dataset_override' in services['properties']

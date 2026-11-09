@@ -22,17 +22,22 @@
 # =============================================================================
 
 """
-File system tool node — global (shared) state.
+File system tool node - global (shared) state.
 
 Resolves the account identity and the storage anchor from the TASK FILE the
 engine published (``rocketlib.getTask()``: the ``identity`` and ``storage``
 blocks, see task_engine._build_task) and builds a single ``FileStore``
-rooted at that anchor — the owning user's tree
+rooted at that anchor - the owning user's tree
 (``users/<userId>/files/``) for development runs, a task-specific team
-subtree (``teams/<teamId>/files/tasks/<projectId>/``) for deployed runs —
+subtree (``teams/<teamId>/files/tasks/<projectId>/``) for deployed runs -
 so node-level paths are identical in both modes. The instance exposes
 per-operation allow-flags and a path whitelist that IInstance enforces before
 every tool call.
+
+One IGlobal serves two definitions: the agent tool (services.tool.json, the
+allow flags) and the pipeline sink (services.store.json, the target directory
+and conflict policy). Each is read with ``get`` and its schema default, since
+the resolved view holds only the keys of the definition in use.
 
 Surfaces ``read_file``, ``write_file``, ``delete_file``, ``list_directory``,
 ``create_directory``, and ``stat_file`` as ``@tool_function`` methods on
@@ -42,10 +47,11 @@ Surfaces ``read_file``, ``write_file``, ``delete_file``, ``list_directory``,
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from enum import IntEnum
 
-from ai.common.config import Config
-from rocketlib import IGlobalBase, OPEN_MODE, warning
+from ai.account.store import Store
+from rocketlib import IGlobalBase, warning
 
 
 class OnConflict(IntEnum):
@@ -78,17 +84,15 @@ class IGlobal(IGlobalBase):
     on_conflict: OnConflict = OnConflict.UNIQUE
 
     def beginGlobal(self) -> None:
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
+        # The resolved config of whichever definition this node runs under
+        cfg = self.config
 
-        cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-
-        self.allow_read = bool(cfg.get('allowRead', True))
-        self.allow_write = bool(cfg.get('allowWrite', True))
-        self.allow_list = bool(cfg.get('allowList', True))
-        self.allow_mkdir = bool(cfg.get('allowMkdir', True))
-        self.allow_stat = bool(cfg.get('allowStat', True))
-        self.allow_delete = bool(cfg.get('allowDelete', False))
+        self.allow_read = cfg.get('allowRead', True)
+        self.allow_write = cfg.get('allowWrite', True)
+        self.allow_list = cfg.get('allowList', True)
+        self.allow_mkdir = cfg.get('allowMkdir', True)
+        self.allow_stat = cfg.get('allowStat', True)
+        self.allow_delete = cfg.get('allowDelete', False)
         self.path_patterns = self._build_path_patterns(cfg)
         (
             self.target_dir,
@@ -100,17 +104,15 @@ class IGlobal(IGlobalBase):
         try:
             # Engine identity: this node runs INSIDE the engine subprocess
             # with no account session, and its paths come from LLM tool
-            # calls — so it gets the most restricted context: plain paths
+            # calls - so it gets the most restricted context: plain paths
             # only, every @/Team, @/Org and @/User path and reserved subtree
             # (.logs, .deployments) rejected by the store. It must never
             # hold an internal identity (that would let a pipeline address
             # any team's storage unchecked). Identity and the storage anchor
             # (the owner's tree for dev runs, a task-specific team subtree
             # for deploy runs) come from the task file the engine published
-            # via rocketlib.getTask() — never the environment — and the
+            # via rocketlib.getTask() - never the environment - and the
             # store resolves them itself, so this node needs no plumbing.
-            from ai.account.store import Store
-
             self.file_store = Store.engine_file_store()
             self.client_id = getattr(self.file_store, '_client_id', None)
         except Exception as e:
@@ -124,21 +126,10 @@ class IGlobal(IGlobalBase):
             )
 
     @staticmethod
-    def _build_path_patterns(cfg: dict) -> list[re.Pattern]:
-        """Parse the repeated ``whitelistPattern`` rows into compiled regexes."""
-        raw = cfg.get('pathWhitelist') or []
-        if not isinstance(raw, list):
-            import json
-
-            try:
-                raw = json.loads(str(raw))
-                if not isinstance(raw, list):
-                    raise ValueError(f'pathWhitelist must be a JSON array, got {type(raw).__name__}')
-            except (json.JSONDecodeError, TypeError, ValueError) as e:
-                raise ValueError(f'pathWhitelist is malformed and cannot be parsed: {e}') from e
-
+    def _build_path_patterns(cfg: Mapping) -> list[re.Pattern]:
+        """Compile the repeated ``whitelistPattern`` rows into regexes; an invalid one is skipped with a warning."""
         patterns: list[re.Pattern] = []
-        for row in raw:
+        for row in cfg.get('pathWhitelist') or []:
             if not hasattr(row, 'get'):
                 continue
             pat_str = str(row.get('whitelistPattern') or '').strip()
@@ -151,33 +142,18 @@ class IGlobal(IGlobalBase):
         return patterns
 
     @staticmethod
-    def _sink_config(cfg: dict) -> tuple[str, bool, int, OnConflict]:
-        """Parse the sink lane config into ``(target_dir, emit_url, url_expires_in, on_conflict)``.
+    def _sink_config(cfg: Mapping) -> tuple[str, bool, int, OnConflict]:
+        """Read the sink lane config as ``(target_dir, emit_url, url_expires_in, on_conflict)``.
 
-        ``url_expires_in`` is clamped to the FileStore range of 1..3600 seconds;
-        non-positive or missing values fall back to the 3600-second default.
-        ``on_conflict`` falls back to :attr:`OnConflict.UNIQUE` on anything that does not
-        name a member, so a mistyped config degrades to the non-destructive outcome.
+        The schema validates the values (``urlExpiresIn`` within 1..3600, the
+        conflict policy one of the enum values); the tool definition declares
+        none of them, so each falls back to the sink's schema default.
         """
-        target_dir = str(cfg.get('targetDir', 'output/'))
-        emit_url = bool(cfg.get('emitUrl', False))
-        try:
-            raw_expires = int(cfg.get('urlExpiresIn', 3600) or 3600)
-        except (TypeError, ValueError):
-            raw_expires = 3600
-        url_expires_in = min(raw_expires, 3600) if raw_expires > 0 else 3600
-        try:
-            on_conflict = OnConflict[str(cfg.get('onConflict', '')).strip().upper()]
-        except KeyError:
-            on_conflict = OnConflict.UNIQUE
+        target_dir = cfg.get('targetDir', 'output/')
+        emit_url = cfg.get('emitUrl', False)
+        url_expires_in = cfg.get('urlExpiresIn', 3600)
+        on_conflict = OnConflict[cfg.get('onConflict', 'unique').upper()]
         return target_dir, emit_url, url_expires_in, on_conflict
-
-    def validateConfig(self) -> None:
-        try:
-            cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-            self._build_path_patterns(cfg)
-        except Exception as e:
-            warning(str(e))
 
     def endGlobal(self) -> None:
         self.client_id = None

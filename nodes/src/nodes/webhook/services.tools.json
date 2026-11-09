@@ -81,41 +81,17 @@
 		"_source": []
 	},
 	//
-	//	Optional:
-	//		Profile section are configuration options used by the driver
-	//		itself
-	//
-	"preconfig": {
-		// Define the values that will be merged into any profile configuration
-		// specified, unless the profile is 'absolute'
-		"default": "default",
-		// Defines profiles used with the "profile": key
-		"profiles": {
-			"default": {}
-		}
-	},
-	//
-	// Optional:
-	//		Local fields definitions - these define fields only for the
-	//		current service. You may specify them here, or directly
-	//		in the shape
-	//
-	"fields": {
-		"parameters": {
-			"object": "parameters",
-			"properties": []
-		}
-	},
-	//
 	// Required:
-	//		Defines the fields (shape) of the service. Either source or target
-	//		map be specified, or both, but at least one is required
+	//		Defines the fields shown in the node's config panel, in order. The empty
+	//		`parameters` group is what the endpoint reads (serviceConfig['parameters']).
 	//
-	"shape": [
+	"properties": [
+		"hideForm",
+		"type",
+		"source.mode",
 		{
-			"section": "Pipe",
-			"title": "Tools",
-			"properties": ["hideForm", "type", "source.mode", "parameters"]
+			"name": "parameters",
+			"properties": []
 		}
 	]
 }

@@ -46,17 +46,9 @@ def _ensure_iglobal_import_stubs():
         rocketlib.warning = lambda *_args, **_kwargs: None
     sys.modules['rocketlib'] = rocketlib
 
-    for name in ('ai', 'ai.common', 'ai.common.config'):
+    for name in ('ai', 'ai.common'):
         if name not in sys.modules:
             sys.modules[name] = types.ModuleType(name)
-    if not hasattr(sys.modules['ai.common.config'], 'Config'):
-
-        class _Config:
-            @staticmethod
-            def getNodeConfig(*_args, **_kwargs):
-                return {}
-
-        sys.modules['ai.common.config'].Config = _Config
 
     if 'tool_mcp_client' not in sys.modules:
         package = types.ModuleType('tool_mcp_client')
@@ -66,7 +58,7 @@ def _ensure_iglobal_import_stubs():
 
 # Stub engine-only deps just long enough to import the node, then restore
 # sys.modules so the stubs never leak to sibling tests (see _sys_modules_guard).
-_CORE_STUBS = ('rocketlib', 'ai', 'ai.common', 'ai.common.config')
+_CORE_STUBS = ('rocketlib', 'ai', 'ai.common')
 _saved_core = {_name: sys.modules.get(_name) for _name in _CORE_STUBS}
 _ensure_iglobal_import_stubs()
 try:

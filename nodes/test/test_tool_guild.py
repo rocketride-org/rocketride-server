@@ -178,27 +178,25 @@ def test_services_declares_a_dual_data_tool_node():
     assert svc['lanes'], 'dual node must declare input lanes'
 
 
-def test_services_marks_both_credential_halves_secure():
-    fields = _services()['fields']
-    for key in ('tool_guild.apiKeyId', 'tool_guild.apiKeySecret'):
-        assert fields[key].get('secure') is True, f'{key} must be secure'
-        assert fields[key]['default'] == '', f'{key} must not ship a real default'
+def test_services_marks_both_credential_halves_secret():
+    fields = _services()['propertyDefinitions']
+    for key, env in (
+        ('tool_guild.apiKeyId', 'ROCKETRIDE_GUILD_KEY_ID'),
+        ('tool_guild.apiKeySecret', 'ROCKETRIDE_GUILD_KEY_SECRET'),
+    ):
+        assert fields[key].get('secret') is True, f'{key} must be secret'
+        assert fields[key]['required'] is True, f'{key} is one half of the Basic credential'
+        assert fields[key]['env'] == env, f'{key} names the account variable that supplies it'
+        assert 'default' not in fields[key], f'{key} must not ship a default'
 
 
-def test_services_profile_and_fields_stay_in_sync():
+def test_services_properties_list_only_declared_definitions():
     svc = _services()
-    profile = set(svc['preconfig']['profiles']['default']) - {'title'}
-    fields = {k.split('.', 1)[1] for k in svc['fields']}
-    assert profile == fields
-
-
-def test_services_shape_lists_only_real_fields():
-    svc = _services()
-    declared = set(svc['fields'])
-    for section in svc['shape']:
-        for prop in section['properties']:
-            if prop != 'type':
-                assert prop in declared, f'{prop} in shape but not in fields'
+    declared = set(svc['propertyDefinitions'])
+    for prop in svc['properties']:
+        if prop != 'type':
+            assert prop in declared, f'{prop} in properties but not in propertyDefinitions'
+    assert declared <= set(svc['properties']), 'every definition is shown'
 
 
 # ---------------------------------------------------------------------------
@@ -500,9 +498,15 @@ def test_timeout_message_carries_the_session_id(monkeypatch):
 
 
 def _build_engine_stubs():
+    # The real base: its ``config`` property resolves self.glb.connConfig against
+    # the engine's schema for tool_guild (rocketlib.filters is never stubbed).
+    from rocketlib.filters import IGlobalBase
+
     rl = types.ModuleType('rocketlib')
     rl.IInstanceBase = object
-    rl.IGlobalBase = object
+    rl.IGlobalBase = IGlobalBase
+    rl.engine = importlib.import_module('rocketlib.engine')
+    rl.config = importlib.import_module('rocketlib.config')
     rl.Entry = object
     rl.tool_function = lambda **kw: lambda f: setattr(f, '__tool_meta__', kw) or f
     rl.debug = rl.error = lambda *a, **k: None
@@ -525,23 +529,6 @@ def _build_engine_stubs():
 
     u.require_str = _require_str
     u.optional_int = lambda args, key, default=None, **k: int(args[key]) if args.get(key) is not None else default
-    u.parse_bool = lambda v, d: bool(v) if v is not None else d
-
-    def _config_int(cfg, key, default, *, min_value=None, max_value=None):
-        try:
-            val = int(cfg.get(key))
-        except (TypeError, ValueError):
-            return default
-        if val <= 0:  # <= 0 means "unspecified" -> default (matches config_int)
-            return default
-        if min_value is not None:
-            val = max(min_value, val)
-        if max_value is not None:
-            val = min(max_value, val)
-        return val
-
-    u.config_int = _config_int
-
     sch = types.ModuleType('ai.common.schema')
 
     class _Answer:
@@ -558,19 +545,6 @@ def _build_engine_stubs():
     sch.Answer = _Answer
     sch.Doc = _Doc
 
-    cfg = types.ModuleType('ai.common.config')
-
-    # A real class, not a MagicMock: since pytest 9.2, monkeypatch reads the
-    # value to restore from the instance __dict__, where a MagicMock's lazily
-    # created attributes never live, so undo() deletes them and every later
-    # patch of getNodeConfig fails with AttributeError.
-    class _Config:
-        @staticmethod
-        def getNodeConfig(*_a, **_k):
-            return {}
-
-    cfg.Config = _Config
-
     ai = types.ModuleType('ai')
     ai_common = types.ModuleType('ai.common')
 
@@ -583,7 +557,6 @@ def _build_engine_stubs():
         'ai.common': ai_common,
         'ai.common.utils': u,
         'ai.common.schema': sch,
-        'ai.common.config': cfg,
         'requests': req,
         'requests.status_codes': types.SimpleNamespace(codes=_Codes()),
     }, rl
@@ -992,111 +965,78 @@ def test_has_more_reads_flag_then_total_count():
 # ---------------------------------------------------------------------------
 
 
-def _run_begin_global(monkeypatch, cfg, *, open_mode=None):
+_FULL_CONFIG = {'apiKeyId': 'kid', 'apiKeySecret': 'ksec', 'owner': 'acme', 'workspace': 'ws'}
+
+
+def _run_begin_global(cfg):
+    """Start the node's IGlobal on a stored config; ``self.config`` resolves it through the engine's schema."""
     g = _gmod.IGlobal()
-    om = _gmod.OPEN_MODE.RUN if open_mode is None else open_mode
-    g.IEndpoint = types.SimpleNamespace(endpoint=types.SimpleNamespace(openMode=om))
-    g.glb = types.SimpleNamespace(logicalType='tool_guild', connConfig={})
-    monkeypatch.setattr(_gmod.Config, 'getNodeConfig', lambda *a, **k: cfg)
+    g.glb = types.SimpleNamespace(logicalType='tool_guild', connConfig=cfg)
     g.beginGlobal()
     return g
 
 
-def test_begin_global_reads_config(monkeypatch):
+def test_begin_global_reads_config():
     g = _run_begin_global(
-        monkeypatch,
         {
+            **_FULL_CONFIG,
             'baseUrl': 'https://self.example.com/',
-            'apiKeyId': 'kid',
-            'apiKeySecret': 'ksec',
-            'owner': 'acme',
-            'workspace': 'ws',
             'agent': 'bot',
             'resultMode': 'wait',
-        },
+        }
     )
     assert g.base_url == 'https://self.example.com'  # trailing slash stripped
     assert (g.key_id, g.key_secret, g.owner, g.workspace, g.default_agent) == ('kid', 'ksec', 'acme', 'ws', 'bot')
 
 
-def test_begin_global_falls_back_to_env(monkeypatch):
+def test_begin_global_has_no_process_env_fallback(monkeypatch):
+    """The credentials arrive through the node config only (a ${ROCKETRIDE_GUILD_*} reference per call)."""
+    from rocketlib.config import ConfigError
+
     for name, val in [
         ('ROCKETRIDE_GUILD_KEY_ID', 'envid'),
         ('ROCKETRIDE_GUILD_KEY_SECRET', 'envsecret'),
         ('ROCKETRIDE_GUILD_OWNER', 'envowner'),
         ('ROCKETRIDE_GUILD_WORKSPACE', 'envws'),
-        ('ROCKETRIDE_GUILD_AGENT', 'envbot'),
     ]:
         monkeypatch.setenv(name, val)
-    g = _run_begin_global(monkeypatch, {})
-    assert (g.key_id, g.key_secret, g.owner, g.workspace, g.default_agent) == (
-        'envid',
-        'envsecret',
-        'envowner',
-        'envws',
-        'envbot',
-    )
+    with pytest.raises(ConfigError, match='"apiKeyId" is required'):
+        _run_begin_global({})
 
 
-def test_begin_global_config_mode_is_an_early_return(monkeypatch):
-    g = _run_begin_global(monkeypatch, {'apiKeyId': 'should-not-be-read'}, open_mode=_gmod.OPEN_MODE.CONFIG)
-    assert g.key_id == ''  # class default, beginGlobal returned before reading
+def test_begin_global_unset_numerics_mean_the_defaults():
+    g = _run_begin_global({**_FULL_CONFIG, 'agent': 'b'})
+    assert g.timeout == _gmod.DEFAULT_TIMEOUT
+    assert g.max_sessions == _gmod.DEFAULT_MAX_SESSIONS
+    assert g.result_mode == 'wait'
+    assert g.verify_tls is True
 
 
-def test_begin_global_clamps_and_defaults_numeric(monkeypatch):
-    g = _run_begin_global(monkeypatch, {'timeout': 99999, 'maxSessions': 0, 'agent': 'b'})
-    assert g.timeout == 3600  # clamped to max
-    assert g.max_sessions == _gmod.DEFAULT_MAX_SESSIONS  # 0 means "unspecified" -> default
-    g2 = _run_begin_global(monkeypatch, {'timeout': 'abc', 'agent': 'b'})
-    assert g2.timeout == _gmod.DEFAULT_TIMEOUT  # non-numeric -> default
+@pytest.mark.parametrize(
+    ('key', 'value'),
+    [('timeout', 99999), ('maxSessions', 0), ('timeout', 'abc'), ('resultMode', 'START'), ('resultMode', 'garbage')],
+)
+def test_begin_global_rejects_values_outside_the_schema(key, value):
+    """The schema bounds replace the old clamps and normalisation: a bad value is a hard error naming the key."""
+    from rocketlib.config import ConfigError
+
+    with pytest.raises(ConfigError, match=f'"{key}"'):
+        _run_begin_global({**_FULL_CONFIG, 'agent': 'b', key: value})
 
 
-def test_begin_global_result_mode_normalises(monkeypatch):
-    assert _run_begin_global(monkeypatch, {'resultMode': 'START', 'agent': 'b'}).result_mode == 'start'
-    assert _run_begin_global(monkeypatch, {'resultMode': 'garbage', 'agent': 'b'}).result_mode == 'wait'
+def test_begin_global_reads_start_mode():
+    assert _run_begin_global({**_FULL_CONFIG, 'resultMode': 'start', 'agent': 'b'}).result_mode == 'start'
 
 
-# ---------------------------------------------------------------------------
-# validateConfig — the canvas warnings a user sees on a misconfig.
-# ---------------------------------------------------------------------------
+def test_begin_global_requires_both_key_halves_owner_and_workspace():
+    """Guild authenticates with HTTP Basic and addresses /api/workspaces/<owner>/<workspace>: all four are required."""
+    from rocketlib.config import ConfigError
 
-
-def _run_validate_config(monkeypatch, cfg):
-    for name in (
-        'ROCKETRIDE_GUILD_KEY_ID',
-        'ROCKETRIDE_GUILD_KEY_SECRET',
-        'ROCKETRIDE_GUILD_OWNER',
-        'ROCKETRIDE_GUILD_WORKSPACE',
-        'ROCKETRIDE_GUILD_AGENT',
-    ):
-        monkeypatch.delenv(name, raising=False)
-    _rl._warnings.clear()
-    g = _gmod.IGlobal()
-    g.glb = types.SimpleNamespace(logicalType='tool_guild', connConfig={})
-    monkeypatch.setattr(_gmod.Config, 'getNodeConfig', lambda *a, **k: cfg)
-    g.validateConfig()
-    return _rl._warnings
-
-
-def test_validate_config_warns_on_half_a_key(monkeypatch):
-    warnings = _run_validate_config(monkeypatch, {'apiKeyId': 'x', 'owner': 'o', 'workspace': 'w', 'agent': 'a'})
-    assert any('half of the API key' in w for w in warnings)
-
-
-def test_validate_config_warns_on_missing_workspace_and_agent(monkeypatch):
-    warnings = _run_validate_config(monkeypatch, {'apiKeyId': 'x', 'apiKeySecret': 'y'})
-    text = '\n'.join(warnings)
-    assert 'owner is empty' in text
-    assert 'Workspace is empty' in text
-    assert 'no Agent configured' in text
-
-
-def test_validate_config_warns_on_start_mode(monkeypatch):
-    warnings = _run_validate_config(
-        monkeypatch,
-        {'apiKeyId': 'x', 'apiKeySecret': 'y', 'owner': 'o', 'workspace': 'w', 'agent': 'a', 'resultMode': 'start'},
-    )
-    assert any('Result mode' in w and 'start' in w for w in warnings)
+    with pytest.raises(ConfigError) as raised:
+        _run_begin_global({'apiKeyId': 'x'})
+    message = str(raised.value)
+    for key in ('apiKeySecret', 'owner', 'workspace'):
+        assert f'"{key}" is required' in message
 
 
 # ---------------------------------------------------------------------------

@@ -68,7 +68,7 @@ connection opens lazily on the first tool call and closes on pipe teardown.
 
 ## Configuration
 
-The **LaserData deployment** dropdown selects a connection mode (a preconfig profile, same
+The **LaserData deployment** dropdown selects a connection mode (a selector branch, same
 pattern as the Qdrant node) and switches the visible fields and defaults:
 
 **Your own Apache Iggy server** (`local`, the default):

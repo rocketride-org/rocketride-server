@@ -12,32 +12,21 @@
 	"description": ["Gives agents a disposable Tenki Sandbox Linux VM for running code and shell commands, editing files and working with git repositories.", "One session, created on first use, is shared by every caller of a running pipeline: its files and installed packages are visible to all of them, so use one pipeline per user or trust boundary."],
 	"tile": [],
 	"lanes": {},
-	"preconfig": {
-		"default": "default",
-		"profiles": {
-			"default": {
-				"title": "Tenki Sandbox",
-				"apikey": ""
-			}
-		}
-	},
-	"fields": {
+	"propertyDefinitions": {
 		"tenki.apikey": {
 			"type": "string",
 			"title": "API Key",
 			"description": "Tenki workspace API key (starts with tk_), from the API Keys screen in the Tenki dashboard.",
-			"default": "",
-			"secure": true,
-			"ui": {
-				"ui:widget": "ApiKeyWidget"
-			}
+			"secret": true,
+			"env": "ROCKETRIDE_TENKI_KEY",
+			"required": true
 		},
 		"tenki.base_url": {
 			"type": "string",
 			"title": "API URL",
-			"description": "Tenki Sandbox API endpoint. Leave empty for the default (https://api.tenki.cloud).",
-			"default": "",
-			"optional": true
+			"description": "Tenki Sandbox API endpoint. The default is Tenki's public endpoint.",
+			"default": "https://api.tenki.cloud",
+			"minLength": 1
 		},
 		"tenki.cpu_cores": {
 			"type": "integer",
@@ -146,7 +135,7 @@
 		"tenki.toolGroups": {
 			"type": "array",
 			"title": "Tool groups",
-			"description": "Which groups of Tenki Sandbox tools this node publishes to the agent: <b>execution</b> (run commands and code), <b>filesystem</b> (write, edit, read and list files, make directories, and delete files or directories) and <b>git</b> (clone, check out, diff and log). <b>Leave this empty to publish all three</b> (12 tools). Naming groups publishes only those (this narrows what the agent is offered; it is not a security boundary, since git can run a command the agent configures inside the VM), and a value that names only unknown groups stops the pipeline at startup.",
+			"description": "Which groups of Tenki Sandbox tools this node publishes to the agent: <b>execution</b> (run commands and code), <b>filesystem</b> (write, edit, read and list files, make directories, and delete files or directories) and <b>git</b> (clone, check out, diff and log). <b>Leave this empty to publish all three</b> (12 tools). Naming groups publishes only those (this narrows what the agent is offered; it is not a security boundary, since git can run a command the agent configures inside the VM).",
 			"uniqueItems": true,
 			"items": {
 				"type": "string",
@@ -161,6 +150,7 @@
 			"optional": true
 		}
 	},
+	"properties": ["type", "tenki.apikey", "tenki.base_url", "tenki.cpu_cores", "tenki.memory_mb", "tenki.disk_size_gb", "tenki.max_duration_minutes", "tenki.pause_retention_hours", "tenki.exec_timeout_secs", "tenki.max_output_chars", "tenki.image", "tenki.label", "tenki.secret_policies", "tenki.allow_domains", "tenki.git_auth_url", "tenki.git_auth_secret", "tenki.toolGroups"],
 	"test": {
 		"profiles": ["default"],
 		"outputs": [],
@@ -170,12 +160,5 @@
 				"text": "test query"
 			}
 		]
-	},
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "Tenki Sandbox",
-			"properties": ["type", "tenki.apikey", "tenki.base_url", "tenki.cpu_cores", "tenki.memory_mb", "tenki.disk_size_gb", "tenki.max_duration_minutes", "tenki.pause_retention_hours", "tenki.exec_timeout_secs", "tenki.max_output_chars", "tenki.image", "tenki.label", "tenki.secret_policies", "tenki.allow_domains", "tenki.git_auth_url", "tenki.git_auth_secret", "tenki.toolGroups"]
-		}
-	]
+	}
 }

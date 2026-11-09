@@ -12,32 +12,20 @@
 	"description": ["Exposes Firecrawl web-scraping operations as agent tools.", "Provides scrape_url (single page) and map_url (site structure discovery)."],
 	"tile": [],
 	"lanes": {},
-	"preconfig": {
-		"default": "default",
-		"profiles": {
-			"default": {
-				"title": "Firecrawl",
-				"apikey": ""
-			}
-		}
-	},
-	"fields": {
+	//
+	// Optional:
+	//		Local property definitions. The API key is a required secret the account
+	//		variable supplies.
+	//
+	"propertyDefinitions": {
 		"tool_firecrawl.apikey": {
 			"type": "string",
 			"title": "API Key",
 			"description": "Firecrawl API key",
-			"default": "",
-			"secure": true,
-			"ui": {
-				"ui:widget": "ApiKeyWidget"
-			}
+			"secret": true,
+			"env": "ROCKETRIDE_FIRECRAWL_APIKEY",
+			"required": true
 		}
 	},
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "Firecrawl",
-			"properties": ["type", "tool_firecrawl.apikey"]
-		}
-	]
+	"properties": ["type", "tool_firecrawl.apikey"]
 }

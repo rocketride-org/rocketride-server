@@ -50,11 +50,27 @@ from rocketlib import IInstanceBase, tool_function
 
 from ai.common.utils import normalize_tool_input, optional_str_list, post_with_retry
 
-from .IGlobal import IGlobal, _coerce_limit
+from .IGlobal import IGlobal
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
+
+
+def _coerce_limit(raw_limit: object, *, default: int = 10) -> int:
+    """Clamp an agent-supplied ``limit`` argument to [1, 1000], falling back to ``default`` on bad input.
+
+    The configured default arrives validated through the schema; this guards the
+    per-call value the agent sends, which can be anything JSON.
+    """
+    if raw_limit is None or isinstance(raw_limit, bool):
+        raw_limit = default
+    try:
+        value = int(raw_limit)
+    except (TypeError, ValueError):
+        value = default
+    return max(1, min(1000, value))
+
 
 CRUSTDATA_BASE_URL = 'https://api.crustdata.com'
 COMPANY_SEARCH_URL = f'{CRUSTDATA_BASE_URL}/company/search'

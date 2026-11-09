@@ -9,13 +9,15 @@ from unittest.mock import patch
 
 import pytest
 
-from ._stubs import scoped_stubs
+from rocketlib.config import ConfigError
+
+from ._stubs import conn_config, scoped_stubs
 
 
 def _make_global(IGlobal):
+    """An IGlobal on the stored config the enclosing ``scoped_stubs`` bound; ``self.config`` resolves it."""
     glb = IGlobal()
-    glb.IEndpoint = types.SimpleNamespace(endpoint=types.SimpleNamespace(openMode='open'))
-    glb.glb = types.SimpleNamespace(logicalType='tool_github', connConfig={})
+    glb.glb = types.SimpleNamespace(logicalType='tool_github', connConfig=conn_config())
     return glb
 
 
@@ -31,11 +33,12 @@ def _app_config(rsa_private_key_pem, **overrides):
 
 
 def test_begin_global_pat_default_missing_token_raises():
+    """The schema requires the PAT branch's token: the resolver names the leaf."""
     with scoped_stubs({'token': ''}):
         from tool_github.IGlobal import IGlobal
 
         glb = _make_global(IGlobal)
-        with pytest.raises(ValueError, match='token is required'):
+        with pytest.raises(ConfigError, match='"pat.token" is required'):
             glb.beginGlobal()
 
 
@@ -51,21 +54,34 @@ def test_begin_global_pat_valid():
 
 @pytest.mark.parametrize('auth_type', ['App', 'github_app', 'PAT', 'oauth'])
 def test_begin_global_unknown_auth_type_raises(rsa_private_key_pem, auth_type):
+    """A selector value with no branch is a schema error naming the options."""
     cfg = _app_config(rsa_private_key_pem, authType=auth_type, token='ghp_abc')
     with scoped_stubs(cfg):
         from tool_github.IGlobal import IGlobal
 
         glb = _make_global(IGlobal)
-        with pytest.raises(ValueError, match=f'unknown authType {auth_type!r}; expected "pat" or "app"'):
+        with pytest.raises(ConfigError, match=f"'{auth_type}', which is not one of its options") as raised:
             glb.beginGlobal()
+        assert "'pat'" in str(raised.value) and "'app'" in str(raised.value)
 
 
 def test_begin_global_app_missing_fields_raises():
+    """The schema requires the App branch's text fields; the resolver names every one."""
     with scoped_stubs({'authType': 'app', 'appId': '', 'privateKey': '', 'installationId': ''}):
         from tool_github.IGlobal import IGlobal
 
         glb = _make_global(IGlobal)
-        with pytest.raises(ValueError, match='App ID, private key, installation ID required'):
+        with pytest.raises(ConfigError, match='"app.appId" is required; "app.installationId" is required'):
+            glb.beginGlobal()
+
+
+def test_begin_global_app_missing_key_upload_raises(rsa_private_key_pem):
+    """The key is an upload the resolver does not check, so the node reports it missing."""
+    with scoped_stubs(_app_config(rsa_private_key_pem, privateKey='')):
+        from tool_github.IGlobal import IGlobal
+
+        glb = _make_global(IGlobal)
+        with pytest.raises(ValueError, match='private key required for GitHub App auth'):
             glb.beginGlobal()
 
 
@@ -150,58 +166,20 @@ def test_begin_global_app_valid_does_not_call_network(rsa_private_key_pem):
 
 
 # ---------------------------------------------------------------------------
-# validateConfig: warns with the same message beginGlobal raises, never raises
+# Stored shape: the auth leaves live under their branch, the other branch survives
 # ---------------------------------------------------------------------------
 
 
-def _validate_warnings(cfg) -> list[str]:
-    with scoped_stubs(cfg):
-        from tool_github.IGlobal import IGlobal, warning
+def test_switching_auth_type_keeps_the_other_branch(rsa_private_key_pem):
+    """A stored App block under a PAT selection is kept, not validated, not read."""
+    with scoped_stubs({'token': 'ghp_abc', 'appId': '', 'installationId': ''}):
+        from tool_github.IGlobal import IGlobal
 
         glb = _make_global(IGlobal)
-        glb.validateConfig()
-        return [call.args[0] for call in warning.call_args_list]
-
-
-def test_validate_config_warns_on_missing_pat():
-    assert _validate_warnings({'token': ''}) == ['tool_github: token is required']
-
-
-def test_validate_config_warns_on_unknown_auth_type():
-    warnings = _validate_warnings({'authType': 'App', 'token': 'ghp_abc'})
-    assert warnings == ['tool_github: unknown authType \'App\'; expected "pat" or "app"']
-
-
-def test_validate_config_warns_on_missing_app_fields():
-    warnings = _validate_warnings({'authType': 'app'})
-    assert warnings == ['tool_github: App ID, private key, installation ID required for GitHub App auth']
-
-
-def test_validate_config_warns_on_malformed_key(rsa_private_key_pem):
-    warnings = _validate_warnings(_app_config(rsa_private_key_pem, privateKey='not a pem'))
-    assert len(warnings) == 1
-    assert warnings[0].startswith('tool_github: invalid GitHub App private key')
-
-
-def test_validate_config_warns_on_corrupt_key_upload(rsa_private_key_pem):
-    warnings = _validate_warnings(
-        _app_config(rsa_private_key_pem, privateKey='data:application/x-pem-file;base64,QUJDRA')
-    )
-    assert len(warnings) == 1
-    assert warnings[0].startswith('tool_github: invalid GitHub App private key upload')
-
-
-def test_validate_config_warns_on_non_numeric_installation_id(rsa_private_key_pem):
-    warnings = _validate_warnings(_app_config(rsa_private_key_pem, installationId='../x'))
-    assert warnings == ['tool_github: installation ID must be numeric for GitHub App auth']
-
-
-def test_validate_config_no_warning_on_valid_app_config(rsa_private_key_pem):
-    assert _validate_warnings(_app_config(rsa_private_key_pem)) == []
-
-
-def test_validate_config_no_warning_on_valid_pat_config():
-    assert _validate_warnings({'token': 'ghp_abc'}) == []
+        glb.beginGlobal()
+        assert glb.auth_type == 'pat'
+        assert glb.token == 'ghp_abc'
+        assert glb.app_id == ''
 
 
 # ---------------------------------------------------------------------------

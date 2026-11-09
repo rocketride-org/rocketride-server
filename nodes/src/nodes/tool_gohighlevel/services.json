@@ -12,35 +12,20 @@
 	"description": ["Exposes the GoHighLevel (LeadConnector) v2 REST API as agent tools.", "Covers contacts, notes, tasks, opportunities, pipelines, conversations, messages,", "calendars, appointments, custom fields, custom values, tags, businesses and users."],
 	"tile": ["GoHighLevel${parameters.gohighlevel.locationId ? ': ' + parameters.gohighlevel.locationId : ''}"],
 	"lanes": {},
-	"preconfig": {
-		"default": "default",
-		"profiles": {
-			"default": {
-				"title": "GoHighLevel",
-				"privateIntegrationToken": "",
-				"locationId": "",
-				"readOnly": false,
-				"toolGroups": [],
-				"allowRawRequest": true
-			}
-		}
-	},
-	"fields": {
+	"propertyDefinitions": {
 		"gohighlevel.privateIntegrationToken": {
 			"type": "string",
 			"title": "Private Integration Token",
 			"description": "Sub-account Private Integration Token (Settings -> Private Integrations), sent as <code>Authorization: Bearer</code>. It starts with <code>pit-</code>. Agency tokens, OAuth access tokens and v1 API keys are not supported: one token reaches exactly one sub-account, so N sub-accounts need N node instances.",
-			"default": "",
-			"secure": true,
-			"ui": {
-				"ui:widget": "ApiKeyWidget"
-			}
+			"secret": true,
+			"env": "ROCKETRIDE_GOHIGHLEVEL_TOKEN",
+			"required": true
 		},
 		"gohighlevel.locationId": {
 			"type": "string",
 			"title": "Location ID",
 			"description": "The sub-account (location) this node operates on, from Settings -> Business Profile. The token is opaque, so the location cannot be derived from it. Without this value GoHighLevel answers <code>403</code> with a message that blames the token rather than the missing parameter.",
-			"default": ""
+			"required": true
 		},
 		"gohighlevel.readOnly": {
 			"type": "boolean",
@@ -55,7 +40,7 @@
 		"gohighlevel.toolGroups": {
 			"type": "array",
 			"title": "Tool groups",
-			"description": "Which groups of GoHighLevel tools this node publishes to the agent. This node implements 101 tools across 18 groups, far more than an LLM can choose between reliably, so only the listed groups are exposed. <b>Leave this empty for the recommended set</b>: the 71 tools marked default below, which is everything an agent needs to run lead nurture and appointment booking end-to-end. Use <b>all</b> to publish all 101. Naming groups replaces the default set rather than adding to it, and a value that names only unknown groups stops the pipeline at startup rather than widening back to the defaults. <b>message_sending</b> (send a message, cancel a scheduled send) is a deliberate opt-in: sends from an unattended pipeline cannot be recalled.",
+			"description": "Which groups of GoHighLevel tools this node publishes to the agent. This node implements 101 tools across 18 groups, far more than an LLM can choose between reliably, so only the listed groups are exposed. <b>Leave this empty for the recommended set</b>: the 71 tools marked default below, which is everything an agent needs to run lead nurture and appointment booking end-to-end. Use <b>all</b> to publish all 101. Naming groups replaces the default set rather than adding to it. <b>message_sending</b> (send a message, cancel a scheduled send) is a deliberate opt-in: sends from an unattended pipeline cannot be recalled.",
 			"uniqueItems": true,
 			"items": {
 				"type": "string",
@@ -95,11 +80,5 @@
 			]
 		}
 	},
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "GoHighLevel",
-			"properties": ["type", "gohighlevel.privateIntegrationToken", "gohighlevel.locationId", "gohighlevel.readOnly", "gohighlevel.toolGroups", "gohighlevel.allowRawRequest"]
-		}
-	]
+	"properties": ["type", "gohighlevel.privateIntegrationToken", "gohighlevel.locationId", "gohighlevel.readOnly", "gohighlevel.toolGroups", "gohighlevel.allowRawRequest"]
 }

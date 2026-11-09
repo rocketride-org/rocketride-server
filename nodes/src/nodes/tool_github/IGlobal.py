@@ -1,6 +1,4 @@
 # =============================================================================
-# RocketRide Engine
-# =============================================================================
 # MIT License
 # Copyright (c) 2026 Aparavi Software AG
 #
@@ -26,10 +24,13 @@
 """
 GitHub tool node - global (shared) state.
 
-Reads auth config (PAT or GitHub App), default_repo, the read_only flag, the
-tool allowlist, the GraphQL response cap and the rate-limit retry policy from
-config. For App auth, mints and caches short-lived installation tokens,
-auto-refreshing them shortly before they expire.
+Reads the resolved node config: the selected auth branch (PAT or GitHub App),
+default_repo, the read_only flag, the tool allowlist, the GraphQL response cap
+and the rate-limit retry policy. The schema validates the scalars (types,
+ranges, the allowlist's names); this module keeps the semantic checks the
+schema cannot express: the PEM upload decodes to an RSA key and the
+installation id is numeric. For App auth, mints and caches short-lived
+installation tokens, auto-refreshing them shortly before they expire.
 """
 
 from __future__ import annotations
@@ -38,9 +39,8 @@ import re
 import threading
 import time
 
-from ai.common.config import Config
 from ai.common.utils import decode_data_url
-from rocketlib import IGlobalBase, OPEN_MODE, warning
+from rocketlib import IGlobalBase, warning
 
 from . import github_client
 from .IInstance import validate_tool_names
@@ -52,7 +52,6 @@ REFRESH_SKEW_SECONDS = 60
 # tool calls do not queue behind a hanging token request while the cached token is valid.
 REFRESH_RETRY_SECONDS = 15
 
-AUTH_TYPES = ('pat', 'app')
 _INSTALLATION_ID_RE = re.compile(r'[0-9]+')
 
 
@@ -69,26 +68,24 @@ def _decode_pem_blob(value: str) -> str:
 
 
 def _read_auth(cfg) -> dict:
-    """Parse and validate the auth fields of a node config.
+    """Read the active auth branch of the resolved config.
 
     Returns ``{'authType': 'pat', 'token': ...}`` or ``{'authType': 'app', 'appId': ...,
-    'privateKeyPem': ..., 'installationId': ...}``. Raises ``ValueError`` with a
-    user-facing message on any missing or malformed field; ``beginGlobal`` and
-    ``validateConfig`` share it so they can never disagree.
+    'privateKeyPem': ..., 'installationId': ...}``. The schema requires the
+    branch's text fields; this adds the checks it cannot express and raises
+    ``ValueError`` with a user-facing message on any missing or malformed field.
     """
-    auth_type = str(cfg.get('authType') or 'pat').strip()
-    if auth_type not in AUTH_TYPES:
-        raise ValueError(f'tool_github: unknown authType {auth_type!r}; expected "pat" or "app"')
+    auth_type = cfg.authType
 
     if auth_type == 'pat':
-        token = str(cfg.get('token') or '').strip()
+        token = str(cfg.token or '').strip()
         if not token:
             raise ValueError('tool_github: token is required')
         return {'authType': 'pat', 'token': token}
 
-    app_id = str(cfg.get('appId') or '').strip()
-    private_key_pem = _decode_pem_blob(cfg.get('privateKey'))
-    installation_id = str(cfg.get('installationId') or '').strip()
+    app_id = str(cfg.appId or '').strip()
+    private_key_pem = _decode_pem_blob(cfg.privateKey)
+    installation_id = str(cfg.installationId or '').strip()
     missing = [
         name
         for name, value in (
@@ -113,52 +110,15 @@ def _read_auth(cfg) -> dict:
     }
 
 
-# (config key, default, minimum, maximum) for the integer options.
-_GRAPHQL_MAX_BYTES = ('graphqlMaxResponseBytes', github_client.DEFAULT_GRAPHQL_MAX_BYTES, 1024, 100 * 1024 * 1024)
-# The call blocks for the whole wait, so the budget is capped at ten minutes.
-_RETRY_BUDGET = ('rateLimitBudgetSeconds', github_client.DEFAULT_RETRY_BUDGET_SECONDS, 0, 600)
-_MAX_RETRIES = ('rateLimitMaxRetries', github_client.DEFAULT_MAX_RETRIES, 0, 10)
-
-
-def _read_int(cfg, option: tuple) -> int:
-    """Read an integer option; blank means the default, anything else out of range fails."""
-    key, default, minimum, maximum = option
-    raw = cfg.get(key)
-    if raw is None or (isinstance(raw, str) and not raw.strip()):
-        return default
-    value = None
-    if isinstance(raw, int) and not isinstance(raw, bool):
-        value = raw
-    elif isinstance(raw, float) and raw.is_integer():
-        value = int(raw)
-    elif isinstance(raw, str) and raw.strip().isdecimal():
-        value = int(raw.strip())
-    if value is None or not minimum <= value <= maximum:
-        raise ValueError(f'tool_github: {key} must be an integer from {minimum} to {maximum}')
-    return value
-
-
-def _read_flag(cfg, key: str, default: bool = False) -> bool:
-    """Read a yes-or-no option; blank means the default, and the strings true and false are accepted."""
-    raw = cfg.get(key)
-    if raw is None or (isinstance(raw, str) and not raw.strip()):
-        return default
-    if isinstance(raw, bool):
-        return raw
-    if isinstance(raw, str) and raw.strip().lower() in ('true', 'false'):
-        return raw.strip().lower() == 'true'
-    raise ValueError(f'tool_github: {key} must be true or false')
-
-
 def _read_tools(raw) -> frozenset:
     """Parse the ``tools`` allowlist into a set of names; empty means every tool.
 
-    Only the shape is checked here; ``validate_tool_names`` checks the names.
+    The schema types the stored value as an array of the known names; this
+    turns it into the set the instance publishes and fails closed on a list
+    of blank entries. ``validate_tool_names`` checks the names.
     """
-    if raw is None or (isinstance(raw, str) and not raw.strip()):
+    if raw is None:
         return frozenset()
-    if isinstance(raw, str):
-        raw = raw.split(',')
     if not isinstance(raw, (list, tuple)) or not all(isinstance(name, str) for name in raw):
         raise ValueError('tool_github: tools must be a list of tool names')
     names = frozenset(name.strip() for name in raw if name.strip())
@@ -171,13 +131,13 @@ def _read_tools(raw) -> frozenset:
 
 
 def _read_options(cfg) -> dict:
-    """Parse the non-auth options; ``beginGlobal`` and ``validateConfig`` share it."""
+    """Read the non-auth options of the resolved config (the scalars arrive validated)."""
     return {
-        'tools': validate_tool_names(_read_tools(cfg.get('tools'))),
-        'graphqlAllowMutations': _read_flag(cfg, 'graphqlAllowMutations'),
-        'graphqlMaxResponseBytes': _read_int(cfg, _GRAPHQL_MAX_BYTES),
-        'rateLimitBudgetSeconds': _read_int(cfg, _RETRY_BUDGET),
-        'rateLimitMaxRetries': _read_int(cfg, _MAX_RETRIES),
+        'tools': validate_tool_names(_read_tools(cfg.tools)),
+        'graphqlAllowMutations': cfg.graphqlAllowMutations,
+        'graphqlMaxResponseBytes': cfg.graphqlMaxResponseBytes,
+        'rateLimitBudgetSeconds': cfg.rateLimitBudgetSeconds,
+        'rateLimitMaxRetries': cfg.rateLimitMaxRetries,
     }
 
 
@@ -202,12 +162,11 @@ class IGlobal(IGlobalBase):
     _lock: threading.Lock
 
     def beginGlobal(self) -> None:
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
-
-        cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-        self.default_repo = str((cfg.get('defaultRepo') or '')).strip()
-        self.read_only = bool(cfg.get('readOnly', False))
+        # The resolved config: the active authType branch flattened beside the
+        # options, every scalar typed and ranged by the schema
+        cfg = self.config
+        self.default_repo = str(cfg.defaultRepo or '').strip()
+        self.read_only = cfg.readOnly
         self._cached_token = ''
         self._cached_expiry = 0.0
         self._refresh_failed_at = 0.0
@@ -230,13 +189,6 @@ class IGlobal(IGlobalBase):
             self.installation_id = auth['installationId']
         else:
             self.token = auth['token']
-
-    def validateConfig(self) -> None:
-        for read in (_read_auth, _read_options):
-            try:
-                read(Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig))
-            except Exception as e:
-                warning(str(e))
 
     def endGlobal(self) -> None:
         self.auth_type = 'pat'

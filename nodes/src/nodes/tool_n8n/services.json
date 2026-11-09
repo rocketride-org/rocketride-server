@@ -19,42 +19,27 @@
 		"audio": ["audio", "text", "answers", "table"],
 		"video": ["video", "text", "answers", "table"]
 	},
-	"preconfig": {
-		"default": "default",
-		"profiles": {
-			"default": {
-				"title": "n8n",
-				"baseUrl": "http://localhost:5678",
-				"apiKey": "",
-				"workflow": "",
-				"mode": "sync",
-				"payloadMode": "simple",
-				"syncTimeout": 30,
-				"asyncTimeout": 120,
-				"webhookAuth": "none",
-				"webhookToken": "",
-				"verifyTls": true,
-				"readOnly": true
-			}
-		}
-	},
-	"fields": {
+	//
+	// Optional:
+	//		Local property definitions. Two selectors: the result mode carries its own
+	//		timeout per branch, the webhook auth carries the credential each kind sends
+	//		(secrets the account variables supply).
+	//
+	"propertyDefinitions": {
 		"tool_n8n.baseUrl": {
 			"type": "string",
 			"title": "n8n Base URL",
 			"default": "http://localhost:5678",
-			"description": "Base URL of your n8n instance, e.g. http://localhost:5678 or https://n8n.example.com. If RocketRide runs in Docker, use http://host.docker.internal:5678 (or the n8n container name) — 'localhost' would point at the container."
+			"minLength": 1,
+			"description": "Base URL of your n8n instance, e.g. http://localhost:5678 or https://n8n.example.com. If RocketRide runs in Docker, use http://host.docker.internal:5678 (or the n8n container name): 'localhost' would point at the container."
 		},
 		"tool_n8n.apiKey": {
 			"type": "string",
 			"title": "API Key (X-N8N-API-KEY)",
-			"default": "",
 			"optional": true,
-			"description": "n8n public API key. Needed only to list/inspect workflows and poll executions — not for triggering webhooks.",
-			"secure": true,
-			"ui": {
-				"ui:widget": "ApiKeyWidget"
-			}
+			"description": "n8n public API key. Needed only to list/inspect workflows and poll executions (async result mode), not for triggering webhooks.",
+			"secret": true,
+			"env": "ROCKETRIDE_N8N_KEY"
 		},
 		"tool_n8n.workflow": {
 			"type": "string",
@@ -67,30 +52,10 @@
 			"title": "Payload shape (pipeline step)",
 			"default": "simple",
 			"enum": [
-				["simple", "Simple — {\"data\": text}"],
-				["structured", "Structured — {text, documents:[{content, metadata}]}"]
+				["simple", "Simple: {\"data\": text}"],
+				["structured", "Structured: {text, documents:[{content, metadata}]}"]
 			],
 			"description": "How lane input is sent to the workflow. 'structured' preserves document boundaries + metadata; 'simple' (default) flattens to a single string for back-compat."
-		},
-		"tool_n8n.mode": {
-			"type": "string",
-			"title": "Result mode",
-			"default": "sync",
-			"enum": [
-				["sync", "Wait for the webhook response"],
-				["async", "Trigger then poll execution"]
-			],
-			"conditional": [
-				{
-					"value": "sync",
-					"properties": ["tool_n8n.syncTimeout"]
-				},
-				{
-					"value": "async",
-					"properties": ["tool_n8n.asyncTimeout"]
-				}
-			],
-			"description": "Sync requires the workflow to end in a 'Respond to Webhook' node. Async polls the execution via the public API (API key required)."
 		},
 		"tool_n8n.syncTimeout": {
 			"type": "integer",
@@ -108,82 +73,41 @@
 			"maximum": 3600,
 			"description": "Max seconds to wait for an async execution to finish before raising an error."
 		},
-		"tool_n8n.webhookAuth": {
-			"type": "string",
-			"title": "Webhook auth",
-			"default": "none",
-			"enum": [
-				["none", "None"],
-				["header", "Header auth"],
-				["basic", "Basic auth"],
-				["bearer", "Bearer token"],
-				["jwt", "JWT (n8n)"]
-			],
-			"conditional": [
-				{
-					"value": "none",
-					"properties": []
-				},
-				{
-					"value": "header",
-					"properties": ["tool_n8n.webhookHeaderName", "tool_n8n.webhookHeaderValue"]
-				},
-				{
-					"value": "basic",
-					"properties": ["tool_n8n.webhookUser", "tool_n8n.webhookPassword"]
-				},
-				{
-					"value": "bearer",
-					"properties": ["tool_n8n.webhookToken"]
-				},
-				{
-					"value": "jwt",
-					"properties": ["tool_n8n.webhookToken"]
-				}
-			],
-			"description": "Authentication on the workflow's Webhook node. Separate from the API key above."
-		},
 		"tool_n8n.webhookHeaderName": {
 			"type": "string",
 			"title": "Header name",
-			"default": "",
+			"required": true,
 			"description": "Header name (when Webhook auth = Header auth)."
 		},
 		"tool_n8n.webhookHeaderValue": {
 			"type": "string",
 			"title": "Header value",
-			"default": "",
 			"description": "Header value (when Webhook auth = Header auth).",
-			"secure": true,
-			"ui": {
-				"ui:widget": "ApiKeyWidget"
-			}
+			"secret": true,
+			"env": "ROCKETRIDE_N8N_WEBHOOK_HEADER_VALUE",
+			"required": true
 		},
 		"tool_n8n.webhookUser": {
 			"type": "string",
 			"title": "Username",
-			"default": "",
+			"required": true,
 			"description": "Username (when Webhook auth = Basic auth)."
 		},
 		"tool_n8n.webhookPassword": {
 			"type": "string",
 			"title": "Password",
-			"default": "",
 			"description": "Password (when Webhook auth = Basic auth).",
-			"secure": true,
-			"ui": {
-				"ui:widget": "password"
-			}
+			"secret": true,
+			"env": "ROCKETRIDE_N8N_WEBHOOK_PASSWORD",
+			"optional": true
 		},
 		"tool_n8n.webhookToken": {
 			"type": "string",
 			"title": "Token",
-			"default": "",
 			"description": "Token sent as 'Authorization: Bearer <token>' (when Webhook auth = Bearer token or JWT).",
-			"secure": true,
-			"ui": {
-				"ui:widget": "ApiKeyWidget"
-			}
+			"secret": true,
+			"env": "ROCKETRIDE_N8N_WEBHOOK_TOKEN",
+			"required": true
 		},
 		"tool_n8n.verifyTls": {
 			"type": "boolean",
@@ -201,11 +125,65 @@
 			"default": true,
 			"description": "When ON, write operations (activate/deactivate workflow) are blocked.",
 			"enum": [
-				[true, "Yes — read only"],
-				[false, "No — allow writes"]
+				[true, "Yes: read only"],
+				[false, "No: allow writes"]
 			]
 		}
 	},
+	"properties": [
+		"type",
+		"tool_n8n.baseUrl",
+		"tool_n8n.apiKey",
+		"tool_n8n.workflow",
+		"tool_n8n.payloadMode",
+		{
+			"name": "mode",
+			"type": "string",
+			"title": "Result mode",
+			"default": "sync",
+			"description": "Sync requires the workflow to end in a 'Respond to Webhook' node. Async polls the execution via the public API (API key required).",
+			"enum": {
+				"sync": {
+					"title": "Wait for the webhook response",
+					"properties": ["tool_n8n.syncTimeout"]
+				},
+				"async": {
+					"title": "Trigger then poll execution",
+					"properties": ["tool_n8n.asyncTimeout"]
+				}
+			}
+		},
+		{
+			"name": "webhookAuth",
+			"type": "string",
+			"title": "Webhook auth",
+			"default": "none",
+			"description": "Authentication on the workflow's Webhook node. Separate from the API key above.",
+			"enum": {
+				"none": {
+					"title": "None"
+				},
+				"header": {
+					"title": "Header auth",
+					"properties": ["tool_n8n.webhookHeaderName", "tool_n8n.webhookHeaderValue"]
+				},
+				"basic": {
+					"title": "Basic auth",
+					"properties": ["tool_n8n.webhookUser", "tool_n8n.webhookPassword"]
+				},
+				"bearer": {
+					"title": "Bearer token",
+					"properties": ["tool_n8n.webhookToken"]
+				},
+				"jwt": {
+					"title": "JWT (n8n)",
+					"properties": ["tool_n8n.webhookToken"]
+				}
+			}
+		},
+		"tool_n8n.verifyTls",
+		"tool_n8n.readOnly"
+	],
 	"test": {
 		"requires": ["ROCKETRIDE_N8N_KEY", "ROCKETRIDE_N8N_WORKFLOW"],
 		"profiles": ["default"],
@@ -218,17 +196,5 @@
 				}
 			}
 		]
-	},
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "n8n",
-			"properties": ["type", "tool_n8n.baseUrl", "tool_n8n.apiKey", "tool_n8n.workflow", "tool_n8n.payloadMode", "tool_n8n.mode", "tool_n8n.webhookAuth", "tool_n8n.verifyTls", "tool_n8n.readOnly"],
-			"ui": {
-				"ui:options": {
-					"compactDescriptions": true
-				}
-			}
-		}
-	]
+	}
 }
