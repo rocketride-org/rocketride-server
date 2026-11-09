@@ -735,8 +735,7 @@ async def sitemap_xml(request: Request):
     """
     Serve ``/sitemap.xml`` — one ``<url>`` per listed public page.
 
-    Pages come from the page aggregate (published manifests, or the legacy
-    list until one declares pages), sorted by path, each with its
+    Pages come from the page aggregate (published manifests), sorted by path, each with its
     ``<lastmod>`` when known. Absolute URLs come exclusively from
     ``RR_APP_URL``. Deployments without it (OSS, self-hosted, desktop) have
     no public marketing site to index, so the endpoint 404s.

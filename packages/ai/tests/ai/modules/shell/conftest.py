@@ -29,7 +29,7 @@ import pytest
 def _public_pages_state(monkeypatch):
     """Every test starts on a fresh page map and an empty store.
 
-    The fresh ``PageMap`` holds the legacy aggregate, runs no rebuild and has
+    The fresh ``PageMap`` holds the empty aggregate, runs no rebuild and has
     its own rebuild lock (a lock binds to the event loop that first waits on
     it). ``_built_at = inf`` keeps the refresh backstop from scheduling a
     rebuild against the real account singleton. No web server is wired, so no

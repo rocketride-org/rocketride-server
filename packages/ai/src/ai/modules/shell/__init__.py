@@ -78,7 +78,7 @@ def _warn_noindex_with_published_pages(old: public_pages.Aggregate, new: public_
 
     Args:
         old: The aggregate swapped out (unused).
-        new: The aggregate swapped in; the legacy list and an empty map publish nothing.
+        new: The aggregate swapped in; an empty map publishes nothing.
     """
     global _warned_noindex
     if _warned_noindex or not new.serves_published_pages():

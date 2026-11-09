@@ -18,6 +18,8 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
+from ..shell.home_ui_fixture import home_ui_manifest
+
 _TOOLS_CALL = {
     'jsonrpc': '2.0',
     'id': 1,
@@ -160,8 +162,11 @@ def test_mcp_paths_are_not_public(monkeypatch, tmp_path):
 # --- the marketing page moved, and still serves publicly -------------------
 
 
+_HOME_MANIFEST = home_ui_manifest('/', '/pricing', '/mcp-server')
+
+
 async def _register_public_pages(monkeypatch, server):
-    """What eaas does after mcp and the account layer: the catch-all last, on the legacy page list (no store here)."""
+    """What eaas does after mcp and the account layer: the catch-all last, then the page list a store would give (no store here)."""
     import ai.modules.shell.public_pages as public_pages
     from ai.modules.shell import register_public_pages
 
@@ -170,6 +175,8 @@ async def _register_public_pages(monkeypatch, server):
 
     monkeypatch.setattr(public_pages.page_map, 'rebuild', no_store)
     await register_public_pages(server)
+    published = public_pages.Published('rocketride.home', _HOME_MANIFEST)
+    public_pages.swap(public_pages.build_aggregate([published], public_pages.live_conflict()))
 
 
 @pytest.mark.asyncio
@@ -227,10 +234,9 @@ async def test_page_paths_on_the_mcp_api_are_rejected_as_reserved_and_live(monke
 async def test_a_page_path_is_rejected_only_while_it_is_a_live_route(monkeypatch, tmp_path):
     import ai.modules.shell.public_pages as public_pages
     from ai.modules.shell.contract import check_manifest
-    from ai.modules.shell.legacy_manifest import legacy_page_manifest
     from ai.modules.shell.shell import shell_static
 
-    manifest = legacy_page_manifest()
+    manifest = _HOME_MANIFEST
     paths = [page['path'] for page in manifest['publicPages']]
 
     # The shell registers no page routes: every home-ui page path is free.

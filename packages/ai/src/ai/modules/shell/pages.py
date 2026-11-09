@@ -924,7 +924,7 @@ async def _render(
     body = await asyncio.to_thread(
         inject_head,
         body,
-        title=page.head_title or page.title,
+        title=page.title,
         description=page.description,
         canonical=canonical,
         noindex=not page.listed,
@@ -948,9 +948,8 @@ async def register_public_pages(server: WebServer) -> None:
     ``add_route`` registers later still match first: it keeps the catch-all last.
 
     Until the first build lands (it is bounded, see
-    ``public_pages.build_at_startup``), the legacy page list serves, filtered
-    against the now-complete route table so no legacy page opens a real
-    route to anonymous callers.
+    ``public_pages.build_at_startup``), the aggregate is empty and only ``/``
+    (the shell) is public.
 
     Args:
         server: The web server, its route table complete.
@@ -969,5 +968,4 @@ async def register_public_pages(server: WebServer) -> None:
     public_pages.on_swap(_clear_rendered)
     data_sources.on_invalidate(_drop_rendered_for)
     server.add_catch_all(route)
-    public_pages.swap(public_pages.legacy_aggregate(public_pages.live_conflict()))
     await public_pages.build_at_startup()

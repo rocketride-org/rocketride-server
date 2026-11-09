@@ -28,10 +28,10 @@ IndexNow is on only with a valid ``RR_INDEXNOW_KEY`` and an ``https://``
 content is its manifest entry plus the sha256 of its snapshot, so a new
 production version alone submits nothing. Pages listed in the last real build
 and now gone or unlisted are submitted too. The first real build is a
-baseline, the legacy list is ignored, and an app missing from one build keeps
-its pages. Submissions run in one background task, bounded by timeouts; any
-failure is a warning. The HTTP client is always a fake: no test reaches the
-network.
+baseline, a build with no page is ignored, and an app missing from one build
+keeps its pages. Submissions run in one background task, bounded by timeouts;
+any failure is a warning. The HTTP client is always a fake: no test reaches
+the network.
 """
 
 from __future__ import annotations
@@ -47,7 +47,7 @@ from fastapi.testclient import TestClient
 
 import ai.modules.shell.indexnow as indexnow
 import ai.modules.shell.public_pages as pp
-from ai.modules.shell.public_pages import Aggregate, Page, legacy_aggregate
+from ai.modules.shell.public_pages import Aggregate, Page
 
 from .hostile_fixtures import FILES, HOME_MANIFEST, dist_of, hostile_account, install, read_file
 
@@ -137,9 +137,9 @@ def _version(version, pricing='<h1>Pricing</h1>', *extra, app_id='rocketride.hom
     ]
 
 
-async def _build(*pages, legacy=False):
+async def _build(*pages):
     """Swap in an aggregate of ``pages`` and wait for IndexNow to finish with it."""
-    indexnow.on_swap(EMPTY, legacy_aggregate() if legacy else Aggregate(exact={p.path: p for p in pages}))
+    indexnow.on_swap(EMPTY, Aggregate(exact={p.path: p for p in pages}))
     if indexnow._worker is not None:
         await indexnow._worker
 
@@ -200,14 +200,20 @@ async def test_pages_gone_or_unlisted_since_the_last_build_are_submitted(sent):
     assert len(sent) == 1
 
 
-async def test_a_build_on_the_legacy_list_is_ignored_and_the_next_real_one_diffs_the_last(sent):
+async def test_a_build_with_no_page_is_ignored_and_the_next_real_one_diffs_the_last(sent):
     await _build(*_version(1))
-    await _build(legacy=True)  # the store failed for the root app: no page survived
+    await _build()  # the store failed for the root app: no page survived
     await _build(*_version(1))  # recovered, unchanged
     assert sent == []
-    await _build(legacy=True)
+    await _build()
     await _build(*_version(2, '<h1>New prices</h1>'))
     assert _urls(sent) == [[f'{BASE}/pricing']]
+
+
+async def test_an_empty_first_build_is_not_the_baseline(sent):
+    await _build()  # the root app could not be read at boot
+    await _build(*_version(1))  # recovered: this is the baseline, not a flood of new pages
+    assert sent == []
 
 
 async def test_an_app_missing_from_one_build_keeps_its_pages(sent):
@@ -452,7 +458,7 @@ def test_a_republish_through_the_real_rebuild_submits_only_its_changes(sent, mon
 
     async def run():
         pp.on_swap(indexnow.on_swap)
-        await publish(1, '<h1>Pricing</h1>')  # legacy -> first real build: the baseline
+        await publish(1, '<h1>Pricing</h1>')  # empty -> first real build: the baseline
         await publish(2, '<h1>Pricing</h1>')  # unchanged republish
         assert sent == []
         home['publicPages'].append({'path': '/blog', 'title': 'Blog'})
