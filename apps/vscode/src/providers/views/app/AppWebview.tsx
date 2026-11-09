@@ -906,6 +906,9 @@ const VscodeAppBuilder: React.FC<{ appId: string }> = ({ appId: stampedAppId }) 
 				await req('host.preview.saveListing', { app: appId, draft });
 			},
 			runPreflight: async () => await req<PreflightCheck[]>('host.preview.preflight', { app: appId }),
+			adoptDeveloperId: async (developerId) => {
+				await req('host.preview.adoptDeveloperId', { app: appId, developerId });
+			},
 			// Package assets: native pick (app-folder-relative result) + text
 			// read for the icon/README previews.
 			pickAppFile: async (kind) => await req<string | null>('host.preview.pickAppFile', { app: appId, kind }),

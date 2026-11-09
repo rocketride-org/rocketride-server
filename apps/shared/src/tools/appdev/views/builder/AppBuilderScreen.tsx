@@ -48,6 +48,8 @@ import { DesignView } from './panels/design/DesignView';
 import { DeployView } from './panels/deploy/DeployView';
 import { PackageView } from './panels/package/PackageView';
 import { StoreView } from './panels/store/StoreView';
+import { NamespaceBanner } from './NamespaceBanner';
+import { withRegistrationReport } from '../../namespaceAdoption';
 import type { AppBuilderStage, AppSummary, IAppBuilderHost } from '../../types';
 
 // =============================================================================
@@ -108,19 +110,6 @@ const styles: Record<string, React.CSSProperties> = {
 		alignSelf: 'center',
 		paddingRight: 4,
 	},
-	// Namespace-mismatch banner above the STORE/DEPLOY views — the pages
-	// below it render read-only.
-	nsBanner: {
-		margin: '12px 26px 0',
-		padding: '10px 14px',
-		border: '1px solid var(--rr-color-warning)',
-		borderRadius: 8,
-		background: 'rgba(232,185,49,0.10)',
-		fontSize: 12.5,
-		color: 'var(--rr-text-primary)',
-		lineHeight: 1.5,
-		flexShrink: 0,
-	},
 };
 
 // =============================================================================
@@ -152,6 +141,9 @@ export const AppBuilderScreen: React.FC<IAppBuilderScreenProps> = ({
 		void host.getDeveloperId().then((id) => setDeveloperId(id || null)).catch(() => setDeveloperId(null));
 	}, [host]);
 	const namespaceMismatch = developerId !== null && app.id.split('.')[0] !== developerId;
+	// A developer id claimed on the Deploy tab updates the gate right away, so
+	// a `local.*` app gets the banner (and its move) without a reopen.
+	const deployHost = useMemo(() => withRegistrationReport(host, (id) => setDeveloperId(id || null)), [host]);
 
 	// The activity views, per the settled UI model — Dashboard lands first;
 	// Package is the complete-app bar, Store is commerce only.
@@ -189,13 +181,12 @@ export const AppBuilderScreen: React.FC<IAppBuilderScreenProps> = ({
 			{/* Namespace-mismatch banner — why the page below is read-only.
 			    STORE/DEPLOY only: DESIGN is local work (always allowed), and the
 			    DASHBOARD is read-only by nature — it disables just its reply box
-			    with an inline hint instead of opening the landing tab on a warning. */}
-			{namespaceMismatch && (stage === 'store' || stage === 'deploy') && (
-				<div style={styles.nsBanner}>
-					<strong>Read-only:</strong> this app&rsquo;s id <code>{app.id}</code> is outside your
-					organization&rsquo;s developer namespace <code>{developerId}</code>. Rename the app id
-					in package.json to <code>{developerId}.&lt;name&gt;</code> to publish it from this org.
-				</div>
+			    with an inline hint instead of opening the landing tab on a warning.
+			    A `local.*` app on a host that can rewrite its files is offered
+			    the move to <developerId>.<name>; anything else keeps the
+			    hand-edit instruction. */}
+			{namespaceMismatch && developerId !== null && (stage === 'store' || stage === 'deploy') && (
+				<NamespaceBanner appId={app.id} developerId={developerId} onAdopt={host.adoptDeveloperId} />
 			)}
 
 			{/* Active view body */}
@@ -208,7 +199,7 @@ export const AppBuilderScreen: React.FC<IAppBuilderScreenProps> = ({
 				)}
 				{/* Package edits LOCAL files (like DESIGN) — never namespace-gated. */}
 				{stage === 'package' && <PackageView host={host} app={app} />}
-				{stage === 'deploy' && <DeployView host={host} app={app} readOnly={namespaceMismatch} />}
+				{stage === 'deploy' && <DeployView host={deployHost} app={app} readOnly={namespaceMismatch} />}
 				{stage === 'store' && <StoreView host={host} app={app} readOnly={namespaceMismatch} onNavigate={selectStage} />}
 			</div>
 		</div>

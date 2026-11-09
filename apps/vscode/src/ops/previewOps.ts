@@ -29,6 +29,7 @@ import { runListingPreflight } from 'shared/tools/appdev/preflight';
 import { probePackage } from 'shared/tools/appdev/compatProbe';
 import { getDevSessionManager } from '../appdev/devSessionManager';
 import { deployApp } from '../appdev/publish';
+import { adoptDeveloperIdInFolder, assertTargetFree, confirmedTargetOf, identityPathsOf } from '../appdev/adoptDeveloperId';
 import { getLogger } from '../shared/util/output';
 import { signInPreview } from '../auth/previewAuth';
 import { ConfigManager } from '../config';
@@ -36,6 +37,10 @@ import { registerOpHandlers } from 'shell/src/ops/busOps';
 import type { IOpBus, OpImplTable } from 'shell/src/ops/busOps';
 import type { IRetainedRegistry } from 'shell/src/ops/retained';
 import type { PreviewHostOpMap, AppBuilderLoadPayload } from 'shared/ops/previewOps';
+
+/** Longest wait for each server check before a move (the developer_status
+ *  bound the New App wizard uses). */
+const SERVER_CHECK_TIMEOUT_MS = 10_000;
 
 /** What the registration needs from the extension. */
 interface IAppBuilderOpsDeps {
@@ -72,6 +77,28 @@ export function registerVscodePreviewOps(bus: IOpBus, deps: IAppBuilderOpsDeps):
 			throw new Error('Path escapes the app folder.');
 		}
 		return abs;
+	};
+
+	/**
+	 * Replaces the App Builder tab of a renamed app with one on its new id.
+	 * The tab's document (the folder's .rrapp trigger) keeps its path, so the
+	 * old tab must close first or VS Code would only reveal it. The old dev
+	 * server stops right away (not after the closed-panel linger) so the new
+	 * one gets the app's port.
+	 */
+	const reopenRenamed = async (folder: string, oldId: string, newId: string): Promise<void> => {
+		await getDevSessionManager()?.stop(oldId, { immediate: true });
+		const folderKey = vscode.Uri.file(folder).fsPath;
+		const tabs = vscode.window.tabGroups.all
+			.flatMap((group) => group.tabs)
+			.filter((tab) => tab.input instanceof vscode.TabInputCustom && tab.input.viewType === 'rocketride.appBuilder' && path.dirname(tab.input.uri.fsPath) === folderKey);
+		const document = tabs.length > 0 ? (tabs[0].input as vscode.TabInputCustom).uri : undefined;
+		if (tabs.length > 0) await vscode.window.tabGroups.close(tabs);
+		if (document) {
+			await vscode.commands.executeCommand('vscode.openWith', document, 'rocketride.appBuilder');
+		} else {
+			await vscode.commands.executeCommand('rocketride.app.open', newId);
+		}
 	};
 
 	/**
@@ -167,6 +194,36 @@ export function registerVscodePreviewOps(bus: IOpBus, deps: IAppBuilderOpsDeps):
 			// next deploy packs it as metadata.manifest).
 			const app = await resolveApp(p.app);
 			saveAppListing(app.folder, p.draft);
+		},
+
+		'host.preview.adoptDeveloperId': async (p) => {
+			// Write the id the user confirmed, and only while the server
+			// still says the org holds it (the page's copy can be stale).
+			const client = connectionManager.getClient();
+			if (!client) throw new Error('Not connected to server');
+			const status = await client.call<{ developerId?: string | null } | undefined>('rrext_deploy_app', { subcommand: 'developer_status' }, { timeout: SERVER_CHECK_TIMEOUT_MS });
+			const newId = confirmedTargetOf(p.app, p.developerId, status?.developerId ?? '');
+			// The new id must be free: in this workspace (the scan keeps one
+			// folder per id) and on the server (deploys would join that app).
+			const apps = await scanWorkspaceApps(hostWorkspaceFs);
+			const app = apps.find((a) => a.id === p.app);
+			if (!app) throw new Error(`App "${p.app}" has no bound folder in this workspace.`);
+			const versions = await client.call<{ versions?: unknown[] } | undefined>('rrext_deploy_app', { subcommand: 'versions', appId: newId }, { timeout: SERVER_CHECK_TIMEOUT_MS });
+			const targets = Object.values(identityPathsOf(app.folder, p.app)).map((f) => vscode.Uri.file(f).fsPath);
+			assertTargetFree(newId, {
+				workspaceIds: apps.map((a) => a.id),
+				deployedVersions: versions?.versions?.length ?? 0,
+				dirtyFiles: vscode.workspace.textDocuments.filter((d) => d.isDirty && targets.includes(d.uri.fsPath)).map((d) => d.uri.fsPath),
+			});
+			const result = adoptDeveloperIdInFolder(app.folder, p.app, p.developerId);
+			for (const line of result.changes) getLogger().output(`[appdev] ${line}`);
+			// After this reply: the panel that asked is the one being replaced.
+			setTimeout(() => {
+				reopenRenamed(app.folder, p.app, result.appId).catch((err) => {
+					void vscode.window.showErrorMessage(`The app is now ${result.appId}, but the App Builder could not reopen: ${err instanceof Error ? err.message : String(err)}`);
+				});
+			}, 0);
+			return { appId: result.appId };
 		},
 
 		'host.preview.preflight': async (p) => {

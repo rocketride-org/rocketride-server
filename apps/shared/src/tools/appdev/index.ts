@@ -39,6 +39,8 @@ export type { WireHistoryRow, WirePin, WireRailEntry } from './wire';
 export { runListingPreflight } from './preflight';
 export type { PreflightIO } from './preflight';
 export { applyListing, projectListing } from './listing';
+export { adoptedAppId, rewriteAppIdentity, withRegistrationReport, LOCAL_NAMESPACE } from './namespaceAdoption';
+export type { AppIdentityFiles, AppIdentityRewrite } from './namespaceAdoption';
 export type { PackageJsonLike } from './listing';
 export { probePackage } from './compatProbe';
 export type { CompatVerdict, ProbeOptions } from './compatProbe';
