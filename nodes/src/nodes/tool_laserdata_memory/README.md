@@ -89,7 +89,7 @@ pattern as the Qdrant node) and switches the visible fields and defaults:
 
 - `connection_string`: `user:password@<deployment-domain>:8090` — the user/password from the
   deployment's **Credentials** tab, the domain and TCP port from its **Overview** tab (secure;
-  same env fallback). TLS is automatic for `*.laserdata.cloud` hosts (the SDK ships LaserData's
+  supplied through the `ROCKETRIDE_LASERDATA_CONNECTION_STRING` account variable). TLS is automatic for `*.laserdata.cloud` hosts (the SDK ships LaserData's
   root CA — no certificate file, no extra flags). There is no separate API token — all auth
   travels in the connection string. The deployment must serve VSR: created on/after 2026-07-31;
   recreate older ones (all verified against a live Cloud deployment).
