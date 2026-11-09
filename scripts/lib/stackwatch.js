@@ -1,12 +1,20 @@
 /**
- * Native stack of a task child that is frozen in startup (Windows only).
+ * Native stack of a task child that is stuck in startup (Windows only).
  *
  * The Python dumps in <dir>/stacks_<pid>.txt (see stackdumps.js) cannot show native
- * frames. The watcher reads those files; when the main thread of a child shows the
- * same stack in two complete dumps in a row, and that stack is not the idle wait of
- * a ready child, it attaches cdb.exe (Debugging Tools for Windows) to the child without
- * suspending it and writes native_<pid>.txt next to the dumps. Events go to
- * <dir>/stackwatch.log.
+ * frames. The watcher reads those files and attaches cdb.exe (Debugging Tools for
+ * Windows) to a live child in two cases, then writes native_<pid>.txt next to the dumps:
+ *   - frozen: the main thread shows the same stack in two complete dumps in a row, and
+ *     that stack is neither the idle wait of a ready child nor a known wait (WAIT_FRAMES);
+ *   - silent: the file has not been written for SILENT_INTERVALS dump intervals, which
+ *     happens when a thread holds the GIL inside native code and the dumper cannot run.
+ * Before attaching, the watcher checks that the pid is an engine.exe that started no
+ * later than the file's header says, so a reused pid is never attached.
+ *
+ * cdb suspends the child only while it reads the threads. It resumes the child when it
+ * detaches (qd); the child stays suspended only if cdb is killed before that. Parallel
+ * watchers claim a pid by creating native_<pid>.txt exclusively, so one cdb runs per pid.
+ * Events go to <dir>/stackwatch.log.
  *
  * The watcher never throws into the builder: every failure is logged and ignored.
  */
@@ -16,20 +24,34 @@ const path = require('path');
 const { execFile } = require('child_process');
 
 const SCAN_MS = 30_000;
-const CDB_TIMEOUT_MS = 120_000;
+// Generous: a capture that downloads symbols takes several seconds, and a killed cdb
+// leaves the child suspended.
+const CDB_TIMEOUT_MS = 300_000;
 const MAX_CAPTURES = 3;
 const SYMBOL_URL = 'https://msdl.microsoft.com/download/symbols';
 const CDB_COMMANDS = '~*kn 80; !locks; lm; qd';
 const CDB_OVERRIDE_VAR = 'ROCKETRIDE_TEST_CDB';
 const CHILD_IMAGE = 'engine.exe';
-// A live child rewrites its file every dump interval; a file older than this many
-// intervals belongs to a dead child, even when its pid was given to a new process.
-const FRESH_INTERVALS = 3;
+// A live child rewrites its file every dump interval; a file left unwritten for this many
+// intervals means the dumper is stuck.
+const SILENT_INTERVALS = 2.5;
 const DEFAULT_INTERVAL_S = 30;
+// A reused pid belongs to a process that started after the file's header was written;
+// this much clock difference is tolerated.
+const START_SLACK_MS = 5_000;
+// PowerShell can take tens of seconds to start on a loaded runner, which is when a capture is needed.
+const START_TIME_TIMEOUT_MS = 60_000;
 
 const THREAD_RE = /^(?:Current thread|Thread) 0x[0-9a-fA-F]+(?: \[.*\])? \(most recent call first\):$/;
 const FRAME_RE = /^ {2}File "(.*)", line (\d+) in (.+)$/;
 const NODE_PY_RE = /[\\/]ai[\\/]node\.py$/;
+// Top frames where a child only waits and reports its status: not a freeze. Each entry
+// matches the file path and the function name.
+const WAIT_FRAMES = [
+	// FileLock.__enter__ polls the shared install.lock once a second.
+	{ file: /[\\/]depends\.py$/, func: '__enter__' },
+];
+const TIME_RE = /^(\d{4}-\d\d-\d\d)T(\d\d:\d\d:\d\d)(?:\.(\d+))?(Z|[+-]\d\d:?\d\d)$/;
 
 /**
  * Parse one faulthandler dump block (the text after a "Timeout" line).
@@ -96,12 +118,37 @@ function isIdleFrame(frames) {
 }
 
 /**
+ * Tell whether the main thread's top frame is a known wait (see WAIT_FRAMES).
+ *
+ * @param {object[]} frames - Main-thread frames, most recent first
+ * @returns {boolean} True when the child is only waiting
+ */
+function isWaitFrame(frames) {
+	const top = frames[0];
+	return !!top && WAIT_FRAMES.some((w) => w.func === top.func && w.file.test(top.file));
+}
+
+/**
+ * Parse a timestamp with a zone, as the dump header writes it (`2026-11-06T18:31:51+0100`)
+ * or as .NET writes it (`2026-11-06T17:31:51.1234567Z`).
+ *
+ * @param {string|null} text - The timestamp
+ * @returns {number} Milliseconds since the epoch, or NaN when the text is not a timestamp with a zone
+ */
+function parseTime(text) {
+	const m = TIME_RE.exec(String(text ?? '').trim());
+	if (!m) return NaN;
+	const zone = m[4] === 'Z' || m[4].includes(':') ? m[4] : `${m[4].slice(0, 3)}:${m[4].slice(3)}`;
+	return Date.parse(`${m[1]}T${m[2]}.${(m[3] ?? '').padEnd(3, '0').slice(0, 3)}${zone}`);
+}
+
+/**
  * Decide whether a child is frozen in startup.
  *
  * @param {{dumps: object[]}} parsed - A parseStackFile result
  * @returns {{frozen: boolean, frames: object[]}} frozen is true when the last two
- *   complete dumps have identical main-thread frames and the top frame is not the
- *   idle wait; frames are those main-thread frames (empty when not frozen)
+ *   complete dumps have identical main-thread frames and the top frame is neither the
+ *   idle wait nor a known wait; frames are those main-thread frames (empty when not frozen)
  */
 function checkFrozen(parsed) {
 	const complete = parsed.dumps.filter((d) => d.complete);
@@ -112,8 +159,24 @@ function checkFrozen(parsed) {
 		return f.file === g.file && f.line === g.line && f.func === g.func;
 	};
 	const same = a.frames.length === b.frames.length && a.frames.every(sameFrame);
-	if (!same || isIdleFrame(b.frames)) return { frozen: false, frames: [] };
+	if (!same || isIdleFrame(b.frames) || isWaitFrame(b.frames)) return { frozen: false, frames: [] };
 	return { frozen: true, frames: b.frames };
+}
+
+/**
+ * Decide whether the dumper of a child has gone silent.
+ *
+ * @param {{interval: number|null, dumps: object[]}} parsed - A parseStackFile result
+ * @param {number} ageMs - Time since the file was last written
+ * @returns {{silent: boolean, seconds: number, frames: object[]}} silent is true when the
+ *   file is older than SILENT_INTERVALS dump intervals (the header's, or the default);
+ *   seconds is the age; frames are the main-thread frames of the last complete dump
+ *   (empty when there is none)
+ */
+function checkSilent(parsed, ageMs) {
+	const limitMs = SILENT_INTERVALS * (parsed.interval ?? DEFAULT_INTERVAL_S) * 1000;
+	const last = parsed.dumps.filter((d) => d.complete).at(-1);
+	return { silent: ageMs > limitMs, seconds: Math.round(ageMs / 1000), frames: last ? last.frames : [] };
 }
 
 /**
@@ -203,6 +266,7 @@ function startStackWatch(dumpDir, opts = {}) {
 	// Outside dumpDir, so the symbols are not uploaded with the dumps.
 	const cacheDir = opts.cacheDir ?? path.join(os.tmpdir(), 'rr-symcache');
 	const attempted = new Set();
+	let captures = 0;
 	let running = null;
 	let busy = false;
 	let stopped = false;
@@ -224,25 +288,48 @@ function startStackWatch(dumpDir, opts = {}) {
 	};
 
 	/**
-	 * Attach cdb to one frozen child and write native_<pid>.txt. The attach is
-	 * noninvasive and suspends no thread (-pvr), so killing cdb on its timeout cannot
-	 * leave the child suspended; the frozen main thread stands still while it is read.
+	 * Claim a pid by creating native_<pid>.txt exclusively. A parallel watcher on the same
+	 * directory that loses the race gets false and leaves the pid alone.
 	 *
 	 * @param {number} pid - The child's process id
-	 * @param {object[]} frames - The main-thread frames that matched
+	 * @returns {boolean} True when this watcher created the file
+	 */
+	const claim = (pid) => {
+		let fd;
+		try {
+			fd = fs.openSync(path.join(dumpDir, `native_${pid}.txt`), 'wx');
+		} catch (err) {
+			if (err.code === 'EEXIST') return false;
+			throw err;
+		}
+		try {
+			fs.writeSync(fd, `claimed time=${new Date().toISOString()} pid=${pid} by watcher ${process.pid}\n`);
+		} finally {
+			fs.closeSync(fd);
+		}
+		return true;
+	};
+
+	/**
+	 * Attach cdb to one stuck child and write native_<pid>.txt over the claim. cdb
+	 * suspends the child while it reads every thread, and resumes it when it detaches
+	 * (qd). The child stays suspended only if cdb is killed first, which happens on the
+	 * timeout or on stop().
+	 *
+	 * @param {number} pid - The child's process id
+	 * @param {string} trigger - Why the child was captured; written to the file
 	 * @returns {Promise<void>}
 	 */
-	const capture = async (pid, frames) => {
+	const capture = async (pid, trigger) => {
 		const sympath = `srv*${cacheDir}*${SYMBOL_URL}`;
 		const started = Date.now();
-		const args = ['-pvr', '-p', String(pid), '-y', sympath, '-c', CDB_COMMANDS];
+		const args = ['-pv', '-p', String(pid), '-y', sympath, '-c', CDB_COMMANDS];
 		const options = { timeout: CDB_TIMEOUT_MS, killSignal: 'SIGKILL' };
 		const res = await run(cdb, args, options, exec, (child) => (running = child));
 		running = null;
-		const trigger = frames.map((f) => `  ${f.file}:${f.line} ${f.func}`).join('\n');
 		const text = [
 			`time=${new Date(started).toISOString()} pid=${pid} cdb=${cdb}`,
-			`trigger: main thread unchanged in the last two dumps, most recent frame first:\n${trigger}`,
+			`trigger: ${trigger}`,
 			`exit=${res.code} signal=${res.signal} error=${res.error} duration_ms=${Date.now() - started}`,
 			'--- stdout ---',
 			res.stdout,
@@ -255,9 +342,8 @@ function startStackWatch(dumpDir, opts = {}) {
 	};
 
 	/**
-	 * Check that a pid still belongs to an engine.exe. A pid can be reused after the
-	 * child exits; this narrows that to another engine.exe, and the few seconds between
-	 * this check and the attach stay a residual risk.
+	 * Check that a pid belongs to an engine.exe. A pid can be reused after the child
+	 * exits; this is the first filter, sameProcess() the precise one.
 	 *
 	 * @param {number} pid - The process id
 	 * @returns {Promise<boolean>} True when the pid belongs to an engine.exe
@@ -265,6 +351,26 @@ function startStackWatch(dumpDir, opts = {}) {
 	const isEngine = async (pid) => {
 		const res = await run('tasklist', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], { timeout: 15_000 }, exec);
 		return res.error === null && res.stdout.toLowerCase().includes(`"${CHILD_IMAGE}"`);
+	};
+
+	/**
+	 * Check that a pid is the process the dump header describes: the process started no
+	 * later than the header's `started=` (plus START_SLACK_MS). A process that started
+	 * after the header was written is a reused pid. An unreadable start time on either
+	 * side counts as no match.
+	 *
+	 * @param {number} pid - The process id
+	 * @param {string|null} headerStarted - The `started=` value of the file header
+	 * @returns {Promise<boolean>} True when the pid is the process of the header
+	 */
+	const sameProcess = async (pid, headerStarted) => {
+		const command = `(Get-Process -Id ${pid}).StartTime.ToUniversalTime().ToString('o')`;
+		const args = ['-NoProfile', '-Command', command];
+		const res = await run('powershell', args, { timeout: START_TIME_TIMEOUT_MS }, exec);
+		if (res.error !== null) return false;
+		const processMs = parseTime(res.stdout);
+		const headerMs = parseTime(headerStarted);
+		return Number.isFinite(processMs) && Number.isFinite(headerMs) && processMs - headerMs <= START_SLACK_MS;
 	};
 
 	const scan = async () => {
@@ -291,13 +397,29 @@ function startStackWatch(dumpDir, opts = {}) {
 				const parsed = parseStackFile(fs.readFileSync(file, 'utf8'));
 				if (parsed.pid !== pid) continue;
 				const ageMs = Date.now() - fs.statSync(file).mtimeMs;
-				if (ageMs > FRESH_INTERVALS * (parsed.interval ?? DEFAULT_INTERVAL_S) * 1000) continue;
-				const verdict = checkFrozen(parsed);
-				if (!verdict.frozen) continue;
-				if (!(await isEngine(pid))) continue;
+				const silent = checkSilent(parsed, ageMs);
+				const list = (frames) => frames.map((f) => `  ${f.file}:${f.line} ${f.func}`).join('\n');
+				let trigger;
+				if (silent.silent) {
+					const last = silent.frames.length
+						? `main thread in the last complete dump, most recent frame first:\n${list(silent.frames)}`
+						: 'no complete dump';
+					trigger = `no dump for ${silent.seconds} s; ${last}`;
+				} else {
+					const verdict = checkFrozen(parsed);
+					if (!verdict.frozen) continue;
+					const head = 'main thread unchanged in the last two dumps, most recent frame first:';
+					trigger = `${head}\n${list(verdict.frames)}`;
+				}
+				if (!(await isEngine(pid)) || !(await sameProcess(pid, parsed.started))) continue;
 				attempted.add(pid);
-				await capture(pid, verdict.frames);
-				if (attempted.size >= MAX_CAPTURES) {
+				// Another watcher may have claimed the pid since the first check of this pass.
+				if (!claim(pid)) {
+					log(`skipped pid=${pid}: claimed by another watcher`);
+					continue;
+				}
+				await capture(pid, trigger);
+				if (++captures >= MAX_CAPTURES) {
 					log(`stopped after ${MAX_CAPTURES} captures`);
 					halt();
 				}
@@ -326,4 +448,14 @@ function startStackWatch(dumpDir, opts = {}) {
 	};
 }
 
-module.exports = { parseDump, parseStackFile, checkFrozen, isIdleFrame, findCdb, startStackWatch };
+module.exports = {
+	parseDump,
+	parseStackFile,
+	checkFrozen,
+	checkSilent,
+	isIdleFrame,
+	isWaitFrame,
+	parseTime,
+	findCdb,
+	startStackWatch,
+};

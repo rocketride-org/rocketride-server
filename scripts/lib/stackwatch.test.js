@@ -10,7 +10,15 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { parseDump, parseStackFile, checkFrozen, findCdb, startStackWatch } = require('./stackwatch');
+const {
+	parseDump,
+	parseStackFile,
+	checkFrozen,
+	checkSilent,
+	parseTime,
+	findCdb,
+	startStackWatch,
+} = require('./stackwatch');
 
 const WIN = 'D:\\a\\rocketride-server\\rocketride-server';
 const NODE_PY = `${WIN}\\packages\\ai\\src\\ai\\node.py`;
@@ -38,6 +46,15 @@ const FROZEN_MAIN =
 // The main thread of a ready child: blocked in processArguments, called from run().
 const IDLE_MAIN =
 	'Thread 0x00002464 (most recent call first):\n' + frame(NODE_PY, 465, 'run') + frame(NODE_PY, 484, '<module>');
+
+// The main thread of a child that waits for the shared install.lock.
+const lockWait = (file) =>
+	'Thread 0x00002464 (most recent call first):\n' +
+	frame(file, 276, '__enter__') +
+	frame(NODE_PY, 453, 'run') +
+	frame(NODE_PY, 484, '<module>');
+const DEPENDS_WIN = `${WIN}\\dist\\server\\Lib\\depends.py`;
+const DEPENDS_POSIX = '/a/rocketride-server/dist/server/Lib/depends.py';
 
 const dump = (main, secs = '0:00:30') => `Timeout (${secs})!\n${LOOP_THREAD}${main}\n`;
 
@@ -108,6 +125,40 @@ test('a healthy idle child is not frozen', () => {
 	assert.strictEqual(checkFrozen(parsed).frozen, false);
 });
 
+test('a child waiting for the install lock is not frozen, with Windows and POSIX paths', () => {
+	for (const file of [DEPENDS_WIN, DEPENDS_POSIX]) {
+		const wait = lockWait(file);
+		assert.strictEqual(checkFrozen(parseStackFile(HEADER + dump(wait) + dump(wait))).frozen, false, file);
+	}
+	// Another function in depends.py, and __enter__ in another file, still count.
+	const other = lockWait(DEPENDS_WIN).replace('__enter__', 'install');
+	assert.ok(checkFrozen(parseStackFile(HEADER + dump(other) + dump(other))).frozen);
+	const elsewhere = lockWait(`${WIN}\\Lib\\other.py`);
+	assert.ok(checkFrozen(parseStackFile(HEADER + dump(elsewhere) + dump(elsewhere))).frozen);
+});
+
+test('the silent limit is 2.5 intervals, from the header or the default, with the last complete dump', () => {
+	const parsed = parseStackFile(HEADER + dump(FROZEN_MAIN) + dump(IDLE_MAIN));
+	assert.strictEqual(checkSilent(parsed, 74_000).silent, false);
+	const silent = checkSilent(parsed, 80_000);
+	assert.strictEqual(silent.silent, true);
+	assert.strictEqual(silent.seconds, 80);
+	assert.strictEqual(silent.frames[0].func, 'run');
+	const noInterval = parseStackFile(HEADER.replace(' interval=30s', ''));
+	assert.strictEqual(checkSilent(noInterval, 74_000).silent, false);
+	assert.deepStrictEqual(checkSilent(noInterval, 76_000), { silent: true, seconds: 76, frames: [] });
+	assert.strictEqual(checkSilent(parseStackFile(HEADER.replace('30s', '60s')), 140_000).silent, false);
+});
+
+test('times are parsed with the header offset and with .NET fractions; a zone is required', () => {
+	const utc = Date.parse('2026-11-06T18:31:51Z');
+	assert.strictEqual(parseTime('2026-11-06T18:31:51+0000'), utc);
+	assert.strictEqual(parseTime('2026-11-06T19:31:51+0100'), utc);
+	assert.strictEqual(parseTime('2026-11-06T13:31:51-05:00'), utc);
+	assert.strictEqual(parseTime('2026-11-06T18:31:51.1234567Z\r\n'), utc + 123);
+	for (const bad of ['', null, 'NATIVE STACK', '2026-11-06T18:31:51']) assert.ok(Number.isNaN(parseTime(bad)), bad);
+});
+
 test('a changing stack is not frozen, whether the line, the function or the depth changes', () => {
 	const moved = FROZEN_MAIN.replace('line 488', 'line 489');
 	const renamed = FROZEN_MAIN.replace('create_module', 'exec_module');
@@ -153,12 +204,15 @@ test('the watcher is a no-op off Windows', async () => {
  * @returns {{dir: string, calls: object[], watch: object}} The directory, the commands run and the watcher
  */
 function makeWatch(files, opts = {}) {
+	// The process start time the fake powershell reports; the header says 18:31:51 UTC.
+	const { startTime = '2026-11-06T18:31:49.5000000Z', ...watchOpts } = opts;
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rr-stackwatch-test-'));
 	for (const [name, text] of Object.entries(files)) fs.writeFileSync(path.join(dir, name), text);
 	const calls = [];
 	const exec = (file, args, options, cb) => {
 		calls.push({ file, args });
 		if (file === 'tasklist') cb(null, `"engine.exe","${args[1].split(' ').pop()}","Console","1","10,000 K"\n`, '');
+		else if (file === 'powershell') cb(null, `${startTime}\r\n`, '');
 		else cb(null, 'NATIVE STACK', '');
 		return { kill() {} };
 	};
@@ -168,7 +222,7 @@ function makeWatch(files, opts = {}) {
 		exec,
 		alive: () => true,
 		intervalMs: 3_600_000,
-		...opts,
+		...watchOpts,
 	});
 	return { dir, calls, watch };
 }
@@ -180,14 +234,16 @@ test('scan captures a frozen live child once and writes native_<pid>.txt and the
 	await watch.scan();
 	await watch.scan();
 	watch.stop();
-	const cdbCalls = calls.filter((c) => c.file !== 'tasklist');
+	const cdbCalls = calls.filter((c) => c.file === __filename);
 	assert.strictEqual(cdbCalls.length, 1);
-	assert.deepStrictEqual(cdbCalls[0].args.slice(0, 3), ['-pvr', '-p', '9280']);
+	assert.deepStrictEqual(cdbCalls[0].args.slice(0, 3), ['-pv', '-p', '9280']);
+	assert.ok(calls.some((c) => c.file === 'powershell' && c.args.join(' ').includes('Get-Process -Id 9280')));
 	assert.ok(cdbCalls[0].args[4].includes('rr-symcache') && cdbCalls[0].args[4].startsWith('srv*'));
 	const native = fs.readFileSync(path.join(dir, 'native_9280.txt'), 'utf8');
 	assert.match(native, /pid=9280/);
 	assert.match(native, /create_module/);
 	assert.match(native, /NATIVE STACK/);
+	assert.match(native, /trigger: main thread unchanged/);
 	assert.ok(!fs.existsSync(path.join(dir, 'native_4336.txt')));
 	const log = fs.readFileSync(path.join(dir, 'stackwatch.log'), 'utf8').split('\n');
 	assert.match(log[0], /started, cdb=/);
@@ -213,28 +269,110 @@ test('scan skips a dead child, a pid whose header differs and a pid that is not 
 	}
 });
 
-test('scan skips a file older than three dump intervals, with or without an interval in its header', async () => {
-	const frozen = HEADER + dump(FROZEN_MAIN) + dump(FROZEN_MAIN);
-	const noInterval = frozen.replace(' interval=30s', '');
-	const slow = frozen.replace('interval=30s', 'interval=60s');
+/**
+ * Age a file's mtime.
+ *
+ * @param {string} file - The file
+ * @param {number} ageS - Seconds to go back from now
+ */
+function age(file, ageS) {
+	const old = new Date(Date.now() - ageS * 1000);
+	fs.utimesSync(file, old, old);
+}
+
+test('scan captures a silent file of a live matching process, even with fewer than two dumps', async () => {
 	const cases = [
-		// [content, age in seconds, captured]
-		[frozen, 80, true],
-		[frozen, 100, false],
-		[noInterval, 80, true],
-		[noInterval, 100, false],
-		[slow, 170, true],
-		[slow, 190, false],
+		[HEADER + dump(FROZEN_MAIN) + dump(IDLE_MAIN), 80, /no dump for 8\d s.*\n\s+\S+node\.py:465 run/s],
+		[HEADER + dump(FROZEN_MAIN), 80, /no dump for 8\d s/],
+		[HEADER, 80, /no dump for 8\d s; no complete dump/],
+		[HEADER.replace(' interval=30s', ''), 80, /no dump for 8\d s/],
+		[HEADER.replace('30s', '60s'), 170, /no dump for 17\d s/],
 	];
-	for (const [text, ageS, captured] of cases) {
+	for (const [text, ageS, expected] of cases) {
 		const { dir, watch } = makeWatch({ 'stacks_9280.txt': text });
-		const old = new Date(Date.now() - ageS * 1000);
-		fs.utimesSync(path.join(dir, 'stacks_9280.txt'), old, old);
+		age(path.join(dir, 'stacks_9280.txt'), ageS);
 		await watch.scan();
 		watch.stop();
-		const native = fs.existsSync(path.join(dir, 'native_9280.txt'));
-		assert.strictEqual(native, captured, `age ${ageS}s: ${text.split('\n')[0]}`);
+		assert.match(fs.readFileSync(path.join(dir, 'native_9280.txt'), 'utf8'), expected, text.split('\n')[0]);
 	}
+});
+
+test('scan does not capture a file that is written in time with changing stacks', async () => {
+	const cases = [
+		[HEADER + dump(FROZEN_MAIN) + dump(IDLE_MAIN), 1],
+		[HEADER + dump(FROZEN_MAIN), 70],
+		[HEADER.replace('30s', '60s') + dump(FROZEN_MAIN), 140],
+	];
+	for (const [text, ageS] of cases) {
+		const { dir, watch } = makeWatch({ 'stacks_9280.txt': text });
+		age(path.join(dir, 'stacks_9280.txt'), ageS);
+		await watch.scan();
+		watch.stop();
+		assert.ok(!fs.existsSync(path.join(dir, 'native_9280.txt')), `age ${ageS}s`);
+	}
+});
+
+test('scan skips a silent file of a dead pid', async () => {
+	const { dir, calls, watch } = makeWatch({ 'stacks_9280.txt': HEADER }, { alive: () => false });
+	age(path.join(dir, 'stacks_9280.txt'), 200);
+	await watch.scan();
+	watch.stop();
+	assert.strictEqual(calls.length, 0);
+	assert.ok(!fs.existsSync(path.join(dir, 'native_9280.txt')));
+});
+
+test('scan skips a reused pid and an unreadable start time, for silent and frozen files', async () => {
+	const frozen = HEADER + dump(FROZEN_MAIN) + dump(FROZEN_MAIN);
+	// The header says 18:31:51 UTC: 60 s later is a new process; 5 s later is within the slack.
+	const starts = [
+		['2026-11-06T18:32:51.0000000Z', false],
+		['2026-11-06T18:31:56.0000000Z', true],
+		['2026-11-06T18:30:00.0000000Z', true],
+		['NATIVE STACK', false],
+		['', false],
+	];
+	for (const [startTime, captured] of starts) {
+		for (const [text, ageS] of [[frozen, 1], [HEADER, 200]]) {
+			const { dir, watch } = makeWatch({ 'stacks_9280.txt': text }, { startTime });
+			age(path.join(dir, 'stacks_9280.txt'), ageS);
+			await watch.scan();
+			watch.stop();
+			assert.strictEqual(fs.existsSync(path.join(dir, 'native_9280.txt')), captured, `${startTime} age ${ageS}`);
+		}
+	}
+	// An unparsable `started=` in the header is a mismatch too.
+	const bad = makeWatch({ 'stacks_9280.txt': frozen.replace('started=2026-11-06T18:31:51+0000', 'started=soon') });
+	await bad.watch.scan();
+	bad.watch.stop();
+	assert.ok(!fs.existsSync(path.join(bad.dir, 'native_9280.txt')));
+});
+
+test('scan claims a pid before cdb runs and leaves a pid another watcher claimed', async () => {
+	const frozen = HEADER + dump(FROZEN_MAIN) + dump(FROZEN_MAIN);
+	const taken = makeWatch({ 'stacks_9280.txt': frozen, 'native_9280.txt': 'claimed by another\n' });
+	await taken.watch.scan();
+	taken.watch.stop();
+	assert.strictEqual(taken.calls.length, 0);
+	assert.strictEqual(fs.readFileSync(path.join(taken.dir, 'native_9280.txt'), 'utf8'), 'claimed by another\n');
+
+	// The claim exists while cdb runs; the capture then replaces it.
+	let during = null;
+	let dirOfRun = null;
+	const exec = (file, args, options, cb) => {
+		if (file === 'tasklist') cb(null, '"engine.exe","9280","Console","1","10,000 K"\n', '');
+		else if (file === 'powershell') cb(null, '2026-11-06T18:31:50.0000000Z', '');
+		else {
+			during = fs.readFileSync(path.join(dirOfRun, 'native_9280.txt'), 'utf8');
+			cb(null, 'NATIVE STACK', '');
+		}
+		return { kill() {} };
+	};
+	const run = makeWatch({ 'stacks_9280.txt': frozen }, { exec });
+	dirOfRun = run.dir;
+	await run.watch.scan();
+	run.watch.stop();
+	assert.match(during, /^claimed time=.* pid=9280 by watcher \d+\n$/);
+	assert.match(fs.readFileSync(path.join(run.dir, 'native_9280.txt'), 'utf8'), /NATIVE STACK/);
 });
 
 test('scan takes at most three captures', async () => {
