@@ -87,7 +87,7 @@ const FILESYSTEM_INSTRUCTIONS = `File tools operate on the workspace virtual fil
 - Read a file before editing or overwriting it. edit_file and write_file refuse a file you have not read. write_file refuses a file that changed since you read it; edit_file then applies your anchor to the current content only when it still matches once. Either way, read the file again before your next change to it.
 - Prefer edit_file (exact-anchor find/replace) for changes; write_file replaces a whole file.
 - Reads see the user's unsaved editor buffers. Changing a file with unsaved changes asks the user first; if they keep their changes, the call is refused: ask them how to proceed instead of retrying.
-- A read shows at most about ${SUMMARY_BUDGET} characters of whole lines; a longer one ends with the offset to read on from.`;
+- A read shows at most about ${SUMMARY_BUDGET} characters of whole lines; a longer one ends with the offset to read on from, and a whole read of a long Markdown file returns its section outline with line ranges.`;
 
 const UNSAVED_TITLE = 'Unsaved changes';
 
@@ -312,6 +312,39 @@ export class FileTracker {
 }
 
 // =============================================================================
+// MARKDOWN OUTLINE — the sections of a file too long for one read
+// =============================================================================
+
+/**
+ * Each `#` to `###` heading outside a code fence, with the lines its section spans: up to the next
+ * heading of the same or a higher level. `###` headings go when the outline would not fit SUMMARY_BUDGET.
+ *
+ * @param note - The read's hidden-secret note, kept in the outline.
+ * @returns The outline, or null when the file has no headings or even its `#` and `##` ones do not fit.
+ */
+function markdownOutline(path: string, lines: string[], note: string): string | null {
+	const headings: Array<{ from: number; level: number; text: string }> = [];
+	let fenced = false;
+	lines.forEach((line, i) => {
+		if (/^\s*```/.test(line)) fenced = !fenced;
+		const level = fenced ? 0 : (/^(#{1,3})\s/.exec(line)?.[1].length ?? 0);
+		if (level > 0) headings.push({ from: i + 1, level, text: line.trimEnd() });
+	});
+	const sections = headings.map((heading, i) => {
+		const next = headings.slice(i + 1).find((later) => later.level <= heading.level);
+		return { ...heading, to: next ? next.from - 1 : lines.length };
+	});
+	for (const deepest of [3, 2]) {
+		const kept = sections.filter((section) => section.level <= deepest);
+		if (kept.length === 0) return null;
+		const rows = kept.map((section) => `${section.from}-${section.to} ${section.text}`);
+		const outline = `[${path} has ${lines.length} lines, more than one read shows. Its sections, with line ranges:]\n${rows.join('\n')}${note}\n[Read a section with offset=<from> and limit=<to-from+1>; you can read several in one step.]`;
+		if (outline.length <= SUMMARY_BUDGET) return outline;
+	}
+	return null;
+}
+
+// =============================================================================
 // FILESYSTEM TOOLKIT
 // =============================================================================
 
@@ -513,7 +546,7 @@ export class FilesystemTools extends AgentToolkit {
 	 *
 	 * @param offset - Optional 1-based first line of a partial read.
 	 * @param limit - Optional line count of a partial read.
-	 * @returns The content or window; one cut to fit ends with the offset to read on from.
+	 * @returns The content or window; one cut to fit ends with the offset to read on from. A whole read of a long Markdown file returns its outline instead.
 	 */
 	private async readFile(rawPath: unknown, offset?: number, limit?: number): Promise<string> {
 		const path = normalizePath(rawPath);
@@ -537,6 +570,8 @@ export class FilesystemTools extends AgentToolkit {
 		const header = (end: number) => `[Lines ${start}-${end} of ${lines.length} in ${path}]\n`;
 		const whole = (offset !== undefined || limit !== undefined ? header(start - 1 + slice.length) : '') + slice.join('\n') + note;
 		if (whole.length <= SUMMARY_BUDGET) return whole;
+		const outline = offset === undefined && limit === undefined && /\.md$/i.test(path) ? markdownOutline(path, lines, note) : null;
+		if (outline) return outline;
 
 		// step: the loop shows the model a longer result with its middle left out, so stop at the last whole line that fits
 		const readOn = (next: number) => `\n[Read on with offset=${next}.]`;
@@ -867,7 +902,7 @@ export class FilesystemTools extends AgentToolkit {
 		return [
 			new AgentTool({
 				name: 'read_file',
-				description: `Read one file as UTF-8 text, or a line window of it via offset/limit (1-based). Reads see unsaved editor buffers. One read shows at most about ${SUMMARY_BUDGET} characters of whole lines; a longer file or window comes back as its first part, ending with the offset to read on from.`,
+				description: `Read one file as UTF-8 text, or a line window of it via offset/limit (1-based). Reads see unsaved editor buffers. One read shows at most about ${SUMMARY_BUDGET} characters of whole lines; a longer file or window comes back as its first part, ending with the offset to read on from, and a whole read of a long Markdown file returns its section outline with line ranges.`,
 				parameters: {
 					type: 'object',
 					properties: {

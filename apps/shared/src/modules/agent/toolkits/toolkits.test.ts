@@ -386,6 +386,31 @@ test('a read too long to show whole comes back as whole lines the model sees in 
 	assert.deepEqual(seen, lines, 'the reads together hold every line once, in order');
 });
 
+test('a whole read of a long Markdown file lists its sections with line ranges, and each range reads from its heading', async () => {
+	const prose = (n: number) => Array.from({ length: n }, (_, i) => `${'some prose '.repeat(8)}${i}`);
+	const lines = ['# Guide', ...prose(10), '## Setup', ...prose(20), '## Usage', '### Basics', '```sh', '# not a heading', '```', ...prose(20), '### Advanced', ...prose(20)];
+	const at = (heading: string) => lines.indexOf(heading) + 1;
+	const ws = new MemoryWorkspace({ 'docs/guide.md': lines.join('\n') });
+	const outline = await run(ws, 'read_file', { path: 'docs/guide.md' });
+	assert.equal(summarize(outline), outline, 'the model is shown the whole outline');
+	const sections = outline
+		.split('\n')
+		.slice(1, -1)
+		.map((row) => /^(\d+)-(\d+) (.+)$/.exec(row)?.slice(1) ?? [row]);
+	const end = lines.length;
+	assert.deepEqual(sections, [
+		['1', `${end}`, '# Guide'],
+		[`${at('## Setup')}`, `${at('## Usage') - 1}`, '## Setup'],
+		[`${at('## Usage')}`, `${end}`, '## Usage'],
+		[`${at('### Basics')}`, `${at('### Advanced') - 1}`, '### Basics'],
+		[`${at('### Advanced')}`, `${end}`, '### Advanced'],
+	]);
+	for (const [from, to, heading] of sections) {
+		const section = await run(ws, 'read_file', { path: 'docs/guide.md', offset: Number(from), limit: Number(to) - Number(from) + 1 });
+		assert.equal(section.split('\n')[1], heading, `${heading} reads from its heading`);
+	}
+});
+
 // =============================================================================
 // THE USER SAYS YES FIRST
 // =============================================================================
