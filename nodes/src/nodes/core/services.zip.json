@@ -38,27 +38,16 @@
 	//
 	"prefix": "Zip",
 	//
-	// Optional:
-	//		Local fields definitions - these define fields only for the
-	//		current service. You may specify them here, or directly
-	//		in the shape
-	//
-	"fields": {
-		"zip.target.parameters": {
-			"object": "parameters",
-			"properties": ["storePath", "url"]
-		}
-	},
-	//
 	// Required:
-	//		Defines the fields (shape) of the service. Either source or target
-	//		map be specified, or both, but at least one is required
+	//		Defines the properties shown in the pipeline builder side panel, in
+	//		order. The stream target lives in the "parameters" group, which is
+	//		where the C++ filter reads it (parameters.url).
 	//
-	"shape": [
+	"properties": [
+		"type",
 		{
-			"section": "Target",
-			"title": "Zip Stream",
-			"properties": ["type", "zip.target.parameters"]
+			"name": "parameters",
+			"properties": ["storePath", "url"]
 		}
 	]
 }

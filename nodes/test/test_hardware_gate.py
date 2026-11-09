@@ -476,7 +476,20 @@ def test_collect_mode_writes_report_file(tmp_path):
 
 
 def _profiled(name, profiles, default=None):
-    return _config(name=name, profiles=list(profiles), preconfig={'default': default, 'profiles': profiles})
+    """A config whose root selector ``profile`` has one branch per entry, each leaf a defaulted string."""
+    definitions = {
+        f'{name}.{branch}.{leaf}': {'type': 'string', 'default': value}
+        for branch, leaves in profiles.items()
+        for leaf, value in leaves.items()
+    }
+    branches = {
+        branch: {'properties': sorted(f'{name}.{branch}.{leaf}' for leaf in leaves)}
+        for branch, leaves in profiles.items()
+    }
+    selector = {'name': 'profile', 'type': 'string', 'enum': branches}
+    if default is not None:
+        selector['default'] = default
+    return _config(name=name, profiles=list(profiles), property_definitions=definitions, properties=[selector])
 
 
 def test_collect_refs():
