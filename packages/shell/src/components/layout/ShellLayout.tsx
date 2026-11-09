@@ -650,7 +650,8 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 	// version rail why. Only the developer org gets rows back; everyone else
 	// keeps the plain "App not found".
 	const [unbuilt, setUnbuilt] = useState<{ appId: string; text: UnbuiltAppText | null } | null>(null);
-	const askRail = activeAppUnresolvable && !devLockedApp && activeAppId !== defaultAppId && !!identity;
+	// isConnected re-runs the lookup when a client arrives after the screen shows.
+	const askRail = activeAppUnresolvable && !devLockedApp && activeAppId !== defaultAppId && !!identity && isConnected;
 	useEffect(() => {
 		const client = askRail ? ConnectionManager.getInstance().getClient() : undefined;
 		if (!client) return;
@@ -660,7 +661,7 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 			.then((rail) => {
 				if (current) setUnbuilt({ appId: activeAppId, text: explainUnbuiltApp(activeAppId, rail) });
 			})
-			.catch(() => undefined);
+			.catch((err) => console.warn(`[shell] cannot read the version rail of "${activeAppId}"`, err));
 		return () => {
 			current = false;
 		};

@@ -33,7 +33,14 @@ test('a failed newest build names the build-log command for that version', () =>
 	]);
 	assert.equal(text?.title, 'No working build of acme.reports');
 	assert.match(text?.message ?? '', /v3, failed its server build/);
-	assert.match(text?.message ?? '', /rocketride app log acme\.reports 3/);
+	assert.match(text?.message ?? '', /rocketride deploy log acme\.reports 3/);
+});
+
+test('a newest version whose upload failed says it never built, without a build log to read', () => {
+	const text = explainUnbuiltApp('acme.reports', [{ registryVersion: 2, buildStatus: 'queued', state: 'failed' }]);
+	assert.equal(text?.title, 'No working build of acme.reports');
+	assert.match(text?.message ?? '', /v2, was not stored completely on the server, so it never built/);
+	assert.doesNotMatch(text?.message ?? '', /deploy log/);
 });
 
 test('a running newest build says it is still building', () => {
