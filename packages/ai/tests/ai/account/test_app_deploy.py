@@ -1760,12 +1760,16 @@ async def test_resolve_publisher_falls_back_to_the_snapshot_without_a_stored_man
         ({'name': 'Brandy'}, {'name': 'Brandy'}),
         ({'name': 'Brandy', 'publisher': '   '}, {'name': 'Brandy', 'publisher': ''}),
         (None, {'name': 'Brandy'}),
+        # The scaffold's no-developer-id placeholder, left behind after the
+        # id was renamed into the org's namespace for deploy.
+        ({'name': 'Brandy', 'publisher': 'local'}, {'name': 'Brandy', 'publisher': 'local'}),
     ],
 )
 async def test_resolve_publisher_falls_back_to_the_developer_namespace(registry, manifest, snapshot):
-    """With no declared publisher anywhere, the listing names the publishing
-    org's developer id: the app id's namespace segment, which deploy and
-    publish guarantee is that org's registered developer id.
+    """With no declared publisher anywhere (or only the reserved 'local'
+    placeholder), the listing names the publishing org's developer id: the
+    app id's namespace segment, which deploy and publish guarantee is that
+    org's registered developer id.
     """
     _public_listing(registry, manifest, snapshot)
 
@@ -1784,8 +1788,15 @@ async def test_resolve_publisher_falls_back_to_the_developer_namespace(registry,
         ('acme', {}, {}, 'acme'),
         ('acme.brandy', {'publisher': '  Acme Labs  '}, {}, 'Acme Labs'),
         ('acme.brandy', {'publisher': None}, {'publisher': 'Acme Labs'}, 'Acme Labs'),
-        # A non-string value is not a name.
+        # A blank manifest value defers to the snapshot.
+        ('acme.brandy', {'publisher': '   '}, {'publisher': 'Acme'}, 'Acme'),
+        # A non-string value is not a name, in the manifest or the snapshot.
         ('acme.brandy', {'publisher': {'name': 'Acme'}}, {}, 'acme'),
+        ('acme.brandy', {}, {'publisher': 42}, 'acme'),
+        # The reserved 'local' placeholder never names a developer, in any case.
+        ('acme.brandy', {'publisher': 'local'}, {}, 'acme'),
+        ('acme.brandy', {'publisher': ' Local '}, {'publisher': 'LOCAL'}, 'acme'),
+        ('acme.brandy', {'publisher': 'local'}, {'publisher': 'Acme Labs'}, 'Acme Labs'),
     ],
 )
 def test_publisher_of_never_returns_empty(app_id, manifest, snapshot, expected):

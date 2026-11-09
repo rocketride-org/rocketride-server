@@ -1331,21 +1331,34 @@ def _holds_required_permissions(row: Dict[str, Any], sys_perms: Any) -> bool:
     return not required or 'sys.admin' in sys_perms or all(p in sys_perms for p in required)
 
 
+# The scaffold's publisher when no developer id is known; a reserved slug no
+# org can register, so a listing treats it as no publisher at all.
+_PLACEHOLDER_PUBLISHER = 'local'
+
+
 def _publisher_of(app_id: str, manifest: Dict[str, Any], snapshot: Dict[str, Any]) -> str:
     """
     The DEVELOPER a listing entry names, never empty (#2977).
 
-    First non-blank string wins: the version's own ``appManifest.publisher``
+    First declared name wins: the version's own ``appManifest.publisher``
     (metadata.manifest, the listing truth on both editions, and present on
     versions deployed before the snapshot kept a publisher), then the binding
     snapshot's copy, then the app id's namespace. Every deployed app id is
     ``<developerId>`` or ``<developerId>.<name>`` inside the publishing org's
     registered developer namespace (``_assert_owns_namespace``), so its first
     segment IS that org's developer id, the same slug the app scaffold writes
-    as ``appManifest.publisher``. Seeded platform apps are ``rocketride.*``.
+    as ``appManifest.publisher``. Seeded platform apps are ``rocketride.*``,
+    and on OSS the org's developer id is ``rocketride``, so an OSS app that
+    declares no publisher lists ``rocketride``.
+
+    Blank and non-string values count as missing, and so does ``local``: the
+    placeholder the scaffold writes (with the id ``local.<slug>``) when no
+    developer id is known. Deploying renames the id into a real namespace but
+    often leaves that publisher behind, and ``local`` is a reserved slug no
+    org can register, so it never names a real developer.
     """
     for value in (manifest.get('publisher'), snapshot.get('publisher')):
-        if isinstance(value, str) and value.strip():
+        if isinstance(value, str) and value.strip() and value.strip().lower() != _PLACEHOLDER_PUBLISHER:
             return value.strip()
     return app_id.split('.', 1)[0]
 
