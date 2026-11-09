@@ -26,6 +26,9 @@ from ..base import BaseLoader, get_model_server_address, ModelClient
 
 logger = logging.getLogger('rocketlib.models.sentence_transformers')
 
+# Support rollback: set before a task starts to keep one local CPU forward per model.
+DISABLE_LOCAL_CPU_CONCURRENCY = 'ROCKETRIDE_DISABLE_LOCAL_CPU_CONCURRENCY'
+
 
 class SentenceTransformerLoader(BaseLoader):
     """
@@ -50,6 +53,7 @@ class SentenceTransformerLoader(BaseLoader):
     # Keep a small per-model bound; custom models (e.g. NomicBert with mutable
     # rotary caches), server calls and accelerators retain exclusive forwards.
     # This is not a process-wide CPU or memory budget.
+    # ROCKETRIDE_DISABLE_LOCAL_CPU_CONCURRENCY=1 restores one forward per model.
     _LOCAL_CPU_FORWARD_SLOTS = 2
     _model_locks: Dict[int, Union[threading.Lock, threading.BoundedSemaphore]] = {}
     # A model's weakref finalizer can run during an allocation in this registry.
@@ -74,7 +78,7 @@ class SentenceTransformerLoader(BaseLoader):
         with cls._locks_lock:
             lock = cls._model_locks.get(model_id)
             if lock is None:
-                slots = cls._local_cpu_forward_slots(model) if local_cpu else 1
+                slots = cls._local_cpu_slots(model) if local_cpu else 1
                 lock = threading.BoundedSemaphore(slots) if slots > 1 else threading.Lock()
                 cls._model_locks[model_id] = lock
                 try:
@@ -84,6 +88,24 @@ class SentenceTransformerLoader(BaseLoader):
                     # the forward pass; correctness never depends on eviction.
                     pass
             return lock
+
+    @classmethod
+    def _local_cpu_slots(cls, model: Any) -> int:
+        """Forwards a model may run at once on the local CPU path, read when its gate is created.
+
+        The support rollback, and any error while checking the model, keep one
+        forward at a time: neither may fail a forward that runs serially today.
+        """
+        disabled = os.environ.get(DISABLE_LOCAL_CPU_CONCURRENCY, '').strip().lower()
+        if disabled not in ('', '0', 'false', 'no', 'off'):
+            if disabled not in ('1', 'true', 'yes', 'on'):
+                logger.warning('Invalid %s; keeping one CPU forward at a time', DISABLE_LOCAL_CPU_CONCURRENCY)
+            return 1
+        try:
+            return cls._local_cpu_forward_slots(model)
+        except Exception as e:
+            logger.warning('Cannot qualify model for concurrent CPU forwards (%s); keeping one at a time', e)
+            return 1
 
     @classmethod
     def _local_cpu_forward_slots(cls, model: Any) -> int:

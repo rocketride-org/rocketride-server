@@ -279,6 +279,8 @@ packages/server/
 
 When extending the engine with Python (custom nodes, filter callbacks), Pydantic models (`Question`, `Answer`, `IInvokeLLM`, `IInvokeTool`, etc.) must be converted to plain dicts via `.model_dump()` before passing to C++ JSON utilities, passing raw `BaseModel` instances causes crashes. See `ROCKETRIDE_PIPELINES.md` for details.
 
+In-process sentence-transformer embeddings on CPU can run two forwards of one model at once; see [Local CPU SentenceTransformer concurrency](local-sentence-transformer-concurrency.md) for which models qualify and how to turn it off.
+
 ---
 
 ## Dependencies

@@ -28,6 +28,12 @@ the qualification check is not a sandbox for arbitrary custom Python code.
 
 - The loader's existing per-model registry owns either a `Lock` or a
   `BoundedSemaphore(2)`. Admission is selected once; a live gate is never resized.
+  If the check itself fails, the model keeps one forward at a time and a warning
+  is logged; the forward does not fail.
+- `ROCKETRIDE_DISABLE_LOCAL_CPU_CONCURRENCY=1` (or `true`, `yes`, `on`) restores
+  one forward at a time per model. It is read when a model's gate is created, at
+  its first local forward, so set it before the task starts. An unrecognized
+  value also keeps one forward at a time and logs a warning.
 - The worker holds its permit around the synchronous forward, under that
   worker's `torch.no_grad()`. The context manager releases it on success or
   exception. A caller timeout or cancellation does not release a running
@@ -41,6 +47,12 @@ the qualification check is not a sandbox for arbitrary custom Python code.
   sharing a loaded instance between local and server execution is unsupported.
 - Existing queue-wait accounting records time waiting for either kind of gate.
   Weak-reference cleanup removes a retired model's registry entry.
+- Two overlapping forwards each take longer than one alone, and each records
+  its own elapsed time in `gpu_compute`, so the summed `gpu_compute` of a run
+  rises even when the run finishes sooner. `gpu_memory` (model size times each
+  call's inference time, queue wait included) can move either way: it falls
+  when overlap removes queueing, and it can rise slightly when two calls that
+  would have waited little overlap and each run longer.
 - There is no new node setting, thread pool, process-wide controller, memory
   sampler or change to PyTorch intra-op/inter-op thread settings.
 
@@ -60,8 +72,10 @@ mixed-size concurrent requests against serial execution and check that shared
 weights and buffers are unchanged. They skip when the optional ML dependencies
 are unavailable; skip counts must be reported.
 
-Before release, run stock versus the candidate on the same corpus with 8, 16
-and 24 allocated CPUs, including two-versus-four-slot diagnostic variants.
+Before release, run stock versus the candidate on the same corpus with 2, 4, 8,
+16 and 24 allocated CPUs, each as a CPU set and as a CPU quota, including
+two-versus-four-slot diagnostic variants. Two and four CPUs matter most: there
+one forward can already fill the machine.
 Keep math-thread settings unchanged and recorded. Measure unprofiled throughput,
 latency, CPU and peak memory; use RocketRide profiling in separate matched
 diagnostic runs. Validate all output vectors and their ordering, mixed OCR plus

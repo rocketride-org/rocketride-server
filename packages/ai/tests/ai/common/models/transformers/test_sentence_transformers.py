@@ -407,6 +407,12 @@ def test_take_lock_wait_resets_between_calls(fake_torch):
     assert SentenceTransformerLoader.take_lock_wait() == 0.0
 
 
+@pytest.fixture(autouse=True)
+def no_support_rollback(monkeypatch):
+    """A rollback set in the developer's shell must not change what these tests see."""
+    monkeypatch.delenv(sentence_transformers_module.DISABLE_LOCAL_CPU_CONCURRENCY, raising=False)
+
+
 @pytest.fixture
 def qualified_cpu(monkeypatch, fake_torch):
     """Isolate admission mechanics from the implementation check tested separately."""
@@ -669,3 +675,45 @@ def test_custom_bert_subclass_remains_serial(native_bert):
 
     native_bert[0].auto_model = CustomBert()
     assert SentenceTransformerLoader._local_cpu_forward_slots(native_bert) == 1
+
+
+def _capacity(gate):
+    """Count how many holders a gate admits at once, then release them all."""
+    held = 0
+    while held < 3 and gate.acquire(blocking=False):
+        held += 1
+    for _ in range(held):
+        gate.release()
+    return held
+
+
+def test_qualification_error_keeps_one_forward(native_bert):
+    """A check that cannot read the model must not fail a forward that runs serially today."""
+    del native_bert[0].auto_model.config.add_cross_attention
+    assert _capacity(SentenceTransformerLoader._get_model_lock(native_bert, local_cpu=True)) == 1
+
+
+@pytest.mark.parametrize('value,expected', [('1', 1), (' TRUE ', 1), ('yes', 1), ('on', 1), ('0', 2), ('off', 2)])
+def test_support_rollback_sets_local_cpu_slots(monkeypatch, native_bert, value, expected):
+    """ROCKETRIDE_DISABLE_LOCAL_CPU_CONCURRENCY restores one forward per model when set."""
+    monkeypatch.setenv(sentence_transformers_module.DISABLE_LOCAL_CPU_CONCURRENCY, value)
+    assert _capacity(SentenceTransformerLoader._get_model_lock(native_bert, local_cpu=True)) == expected
+
+
+def test_invalid_support_rollback_keeps_one_forward(monkeypatch, native_bert, caplog):
+    """An unrecognized rollback value fails closed and says so."""
+    monkeypatch.setenv(sentence_transformers_module.DISABLE_LOCAL_CPU_CONCURRENCY, 'maybe')
+    with caplog.at_level('WARNING', logger='rocketlib.models.sentence_transformers'):
+        assert _capacity(SentenceTransformerLoader._get_model_lock(native_bert, local_cpu=True)) == 1
+    assert sentence_transformers_module.DISABLE_LOCAL_CPU_CONCURRENCY in caplog.text
+
+
+def test_support_rollback_keeps_encoder_forwards_serial(monkeypatch, qualified_cpu):
+    """With the rollback set, eight callers of one local encoder run one forward at a time."""
+    monkeypatch.setenv(sentence_transformers_module.DISABLE_LOCAL_CPU_CONCURRENCY, '1')
+    recorder = _ForwardRecorder(delay=0.01)
+    encoder = _local_encoder(monkeypatch, recorder)
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        list(pool.map(lambda i: encoder.encode([f'document {i}']), range(8)))
+    assert recorder.calls == 8
+    assert recorder.max_active == 1
