@@ -75,10 +75,10 @@ json::Value makePipeline(TextView secret) {
     })"_json;
 
     auto &config = root["pipeline"]["components"][0]["config"];
-    config["default"]["secureParameters"]["token"] =
-        makeToken(R"({"apikey": "example-api-key"})"_json, secret);
-    config["parameters"]["secureParameters"]["token"] =
-        makeToken(R"({"password": "example-password"})"_json, secret);
+    config["default"]["secureParameters"]["token"] = makeToken(
+        R"({"apikey": "example-api-key"})"_json, secret);  // gitleaks:allow
+    config["parameters"]["secureParameters"]["token"] = makeToken(
+        R"({"password": "example-password"})"_json, secret);  // gitleaks:allow
     return root;
 }
 
@@ -123,6 +123,26 @@ TEST_CASE("PipelineConfig::resolveSecureParameters") {
         REQUIRE_ERROR(ccode, Ec::InvalidCipher, "which is not set");
         REQUIRE(ccode.message().contains(crypto::ParamTokenSecretEnv));
         REQUIRE_FALSE(_ts(ccode).contains(Secret));
+    }
+
+    SECTION("altered versioned token") {
+        SecretEnvScope scope(Secret);
+        PipelineConfig pipeline(makePipeline(Secret));
+
+        // Flip a bit in the last byte of the authentication tag
+        auto &secure =
+            pipeline
+                .components()[0]["config"]["parameters"]["secureParameters"];
+        Text encoded = secure["token"].asString();
+        auto token = *crypto::base64Decode(encoded);
+        token[token.size() - 1] ^= 0x01;
+        secure["token"] = crypto::base64Encode(token);
+
+        auto ccode = pipeline.resolveSecureParameters();
+        REQUIRE_ERROR(ccode, Ec::InvalidCipher, "failed authentication");
+        REQUIRE_FALSE(_ts(ccode).contains(Secret));
+        REQUIRE_FALSE(pipeline.components()[0]["config"]["parameters"].isMember(
+            "password"));
     }
 
     SECTION("values already set are kept") {

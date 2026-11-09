@@ -27,8 +27,10 @@ parameters into a token (`secureParameters.token` in the node's config). Set
 `RR_PARAM_TOKEN_SECRET` in the engine's environment to give your deployment its
 own key for these tokens:
 
-- New tokens are encrypted with a key the engine derives from the value
-  (HKDF-SHA256), and are marked with a format version.
+- New tokens are encrypted with AES-256-GCM under a key the engine derives
+  from the value (HKDF-SHA256), and are marked with a format version. A token
+  that was changed after it was written fails to load with an error; it never
+  decrypts into other values.
 - Tokens saved before you set it still load. They move to the new key the
   next time the engine encrypts that pipeline's parameters, for example when
   the pipeline is validated and saved again.

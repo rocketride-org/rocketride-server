@@ -30,10 +30,18 @@ namespace ap::crypto {
 // tokens are encrypted with a key derived from it.
 _const auto ParamTokenSecretEnv = "RR_PARAM_TOKEN_SECRET"_tv;
 
-// A token encrypted with a key derived from the deployment secret starts with
-// this header, "RRPT" and the format version, then the key ID and the IV.
-// A token in the original format starts with the engine key ID and the IV;
-// the first byte of that key ID is not 'R', so no token matches both formats.
+// A token encrypted with a key derived from the deployment secret is laid out
+// as:
+//
+//   "RRPT" | version (2) | key ID (16) | nonce (12) | ciphertext | tag (16)
+//
+// It is AES-256-GCM with a random nonce per token, and the header and key ID
+// are authenticated as additional data, so a token that was altered anywhere
+// fails to decrypt. A token in the original format starts with the engine key
+// ID, then the IV and AES-256-CTR ciphertext; the first byte of that key ID is
+// not 'R', so no token matches both formats.
+_const auto ParamTokenMagic = "RRPT"_tv;
+_const uint8_t ParamTokenVersion = 2;
 _const auto ParamTokenHeader = "RRPT\x02"_tv;
 
 // HKDF-SHA256 info labels that derive the token key and its key ID from the
@@ -41,25 +49,28 @@ _const auto ParamTokenHeader = "RRPT\x02"_tv;
 _const auto ParamTokenKeyLabel = "rocketride parameter token key v2"_tv;
 _const auto ParamTokenKeyIdLabel = "rocketride parameter token key id v2"_tv;
 
-// Length of the key ID derived from the deployment secret
+// Lengths of the key ID, nonce and authentication tag in a versioned token
 _const size_t ParamTokenKeyIdLength = 16;
+_const size_t ParamTokenNonceLength = 12;
+_const size_t ParamTokenTagLength = 16;
 
 // The key a parameter token is encrypted with, and the bytes written ahead of
-// the IV: the engine key ID, or the header and the derived key ID
+// the IV or nonce: the engine key ID, or the header and the derived key ID
 struct ParamTokenKey {
     Key key;
     Buffer prefix;
+    bool versioned = false;
 };
 
 // Read the deployment secret for parameter tokens from the environment
 Text paramTokenSecret() noexcept;
 
 // Get the key for parameter tokens. Without a secret this is the engine key
-// and the original token format; with one, a key derived from it and the
-// versioned token format.
+// and the original token format; with one, an AES-256-GCM key derived from it
+// and the versioned token format.
 ErrorOr<ParamTokenKey> paramTokenKey(TextView secret) noexcept;
 
-// Whether a token is in the versioned format
+// Whether a token is in the versioned format, of any version
 bool isVersionedParamToken(InputData token) noexcept;
 
 // Encrypt parameters into a token with the key for the given secret
