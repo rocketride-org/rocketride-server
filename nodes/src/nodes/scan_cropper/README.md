@@ -62,15 +62,17 @@ There is deliberately no separate "Advanced" scan type. A scan type is what deci
 so an Advanced entry would have nothing to show you but a fixed set of numbers unrelated to the
 preset you had selected a moment earlier.
 
-Writing the config by hand rather than through the form, the settings go **inside an object
-named after the Scan type**, not beside it:
+Writing the config by hand rather than through the form, the Scan type is the `profile` key, the
+settings shared by every scan type (straighten, quality, the area and shape limits) sit beside it,
+and the four values a scan type decides (`detectSize`, `texture`, `minRelative`, `maxDepth`) go
+**inside an object named after the Scan type**:
 
 ```json
-{ "profile": "textured", "textured": { "quality": "auto", "deskew": true } }
+{ "profile": "textured", "quality": "auto", "deskew": true, "textured": { "texture": 12.0 } }
 ```
 
-`Config.getNodeConfig` reads the user's settings from `connConfig[profile]` and ignores every
-top-level key, so a setting written beside `profile` is silently dropped.
+A key the schema does not declare, or a value outside its documented range, fails validation
+with the offending key named; a setting that is left out takes the scan type's default.
 
 ### Every setting
 

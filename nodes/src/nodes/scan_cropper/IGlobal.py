@@ -25,15 +25,14 @@ import os
 from typing import Callable
 
 from rocketlib import IGlobalBase
-from ai.common.config import Config
 
 
 class IGlobal(IGlobalBase):
     """
-    Process-wide setup for the scan cropper: resolve config once, then bind the algorithm.
+    Process-wide setup for the scan cropper: read the resolved config once, then bind the algorithm.
 
     Nothing here touches an image. Its whole job is to make ``split_scan`` available to every
-    instance with the node's tunables already baked in, so per-object work never re-parses
+    instance with the node's tunables already baked in, so per-object work never re-reads the
     config and ``IInstance`` never has to know a tunable exists.
     """
 
@@ -42,7 +41,7 @@ class IGlobal(IGlobalBase):
 
     def beginGlobal(self) -> None:
         """
-        Resolve config, install dependencies, then import the imaging code — in that order.
+        Install the dependencies, then import the imaging code and bind the resolved config to it.
 
         The import order is load-bearing rather than stylistic. ``process``/``detect``/``geometry``
         import cv2 at module scope, so importing any of them before ``depends()`` has run would
@@ -50,8 +49,6 @@ class IGlobal(IGlobalBase):
         import block is also what lets the node's unit tests import ``IInstance`` under the
         engine's bundled Python, which carries neither cv2 nor Pillow.
         """
-        config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-
         from depends import depends
 
         requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
@@ -59,7 +56,8 @@ class IGlobal(IGlobalBase):
 
         from .process import build_split_scan
 
-        self.split_scan = build_split_scan(config)
+        # The resolved config: defaults applied, the selected scan type's values flat
+        self.split_scan = build_split_scan(self.config)
 
     def endGlobal(self) -> None:
         """Release the bound callable; there is no model or handle to tear down."""

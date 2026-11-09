@@ -32,7 +32,7 @@ from depends import depends
 requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
 depends(requirements)
 
-from typing import List, Callable, Dict, Any, cast
+from typing import List, Callable, Dict, Any, Mapping, cast
 import numpy as np
 import re
 import time
@@ -50,7 +50,6 @@ from weaviate.exceptions import UnexpectedStatusCodeError, WeaviateBaseError
 
 from ai.common.schema import Doc, DocFilter, DocMetadata, QuestionText
 from ai.common.store import DocumentStoreBase
-from ai.common.config import Config
 
 
 # How long a trash update pauses after a page that left the number of pending
@@ -89,42 +88,35 @@ class Store(DocumentStoreBase):
         }
     )
 
-    def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
+    def __init__(self, provider: str, config: Mapping, bag: Dict[str, Any]):
         """
         Initialize the weaviate vector store.
+
+        Args:
+            provider: The node's logical type.
+            config: The resolved node config (defaults applied, active branch flattened).
+            bag: The endpoint's shared bag.
         """
         # Init the base
-        super().__init__(provider, connConfig, bag)
-
-        # Get our configuration
-        config = Config.getNodeConfig(provider, connConfig)
+        super().__init__(provider, config, bag)
 
         # Save our parameters
-        self.collection = config.get('collection')
+        self.collection = config['collection']
 
         # Remove leading and trailing spaces, leading http/https and :// and trailing slashes
-        self.host = re.sub(r'^https?://', '', config.get('host').strip()).rstrip('/')
-        self.port = config.get('port', None)
-        self.grpc_port = config.get('grpc_port', None)
-
-        # Strip API key also
-        self.apikey = config.get('apikey', None)
+        self.host = re.sub(r'^https?://', '', (config['host'] or '').strip()).rstrip('/')
+        # The ports exist on the local branch, the key on the cloud branch
+        self.port = config.get('port')
+        self.grpc_port = config.get('grpc_port')
+        self.apikey = config.get('apikey')
         if self.apikey is not None:
             self.apikey = self.apikey.strip()
 
-        self.renderChunkSize = config.get('renderChunkSize', self.renderChunkSize)
-        self.threshold_search = config.get('score', 0.5)
+        self.threshold_search = config['score']
 
-        profile = config.get('mode')
+        profile = config['profile']
 
-        # check if the similarity matches milvus configuration options
-        similarity = config.get('similarity', 'cosine')
-        if similarity in ['cosine', 'dot', 'l2-squared', 'hamming', 'manhattan']:
-            self.similarity = self.similarityDict[similarity]
-        else:
-            raise Exception(
-                'The metric you provided in the config.json does not match required weaviate configurations'
-            )
+        self.similarity = self.similarityDict['cosine']
 
         if profile == 'cloud':
             self.client = weaviate.connect_to_weaviate_cloud(

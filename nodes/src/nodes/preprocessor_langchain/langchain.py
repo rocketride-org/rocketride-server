@@ -30,12 +30,11 @@ requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
 depends(requirements)
 
 # Load what we need
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Mapping
 import langchain_text_splitters
 from langchain_text_splitters import TextSplitter
 from rocketlib import monitorStatus
 
-from ai.common.config import Config
 from ai.common.preprocessor import PreProcessorBase
 
 
@@ -140,27 +139,12 @@ class PreProcessor(PreProcessorBase):
         """
         Dynamically loads the text splitter from LangChain based on the provided configuration.
         """
-        # Extract splitter profile
-        splitter = config.get('splitter', 'RecursiveCharacterTextSplitter')
+        # The splitter class is the selector; its branch holds the class's own options
+        splitter = config['splitter']
 
-        # Get the configuration to pass, excluding 'splitter'. We can't use
-        # pop since it may be an IJson value which is not supported at this time
-        # exclude internal keys that must never reach constructors
+        # The options to pass on: everything but the selector and the size settings
         classConfig = {
-            key: value
-            for key, value in config.items()
-            if key
-            not in {
-                'splitter',
-                'mode',
-                'strlen',
-                'tokens',
-                'hf_tokenizer',
-                'tokenizer',
-                'transform',
-                'max_model_tokens',
-                'bytes_per_token',
-            }
+            key: value for key, value in config.items() if key not in {'splitter', 'mode', 'strlen', 'tokens'}
         }
 
         # Determine the overlap and size
@@ -297,39 +281,24 @@ class PreProcessor(PreProcessorBase):
             monitorStatus(f'Loading preprocessor complete {provider}/{splitter}')
             return splitter_instance
 
-    def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
+    def __init__(self, provider: str, config: Mapping, bag: Dict[str, Any]):
         """
-        Initialize the preprocessor with the provider, connection configuration, and bag.
+        Initialize the preprocessor with the provider, the resolved config, and the bag.
+
+        Args:
+            provider: The node's logical type.
+            config: The resolved node config (splitter, mode, strlen, tokens and the splitter's options).
+            bag: The endpoint's shared bag.
         """
         # Init the base
-        super().__init__(provider, connConfig, bag)
+        super().__init__(provider, config, bag)
 
-        # Get our configuration
-        config = Config.getNodeConfig(provider, connConfig)
+        # The measuring mode decides which size setting applies
+        self._mode = config['mode']
+        self._splitSize = int(config['strlen'] if self._mode == 'strlen' else config['tokens'])
 
-        # Get the measuring mode
-        self._mode = config.get('mode', 'strlen')
-
-        # Based on the mode
-        if self._mode == 'strlen':
-            self._splitSize = config.get('strlen', 512)
-        else:
-            self._splitSize = config.get('tokens', 512)
-
-        # configure conservative token estimator (no transformers import)
-        # You can override via config: bytes_per_token (float), max_model_tokens (int)
-        self._bytes_per_token = float(config.get('bytes_per_token', 3.0))
-        max_model_tokens = config.get('max_model_tokens')  # e.g., 1024, 2048, 4096, etc.
-        safety = int(config.get('token_safety_margin', 32))  # small margin for special tokens later
-        if isinstance(max_model_tokens, int) and max_model_tokens > 0:
-            self._token_limit = max(1, max_model_tokens - safety)
-            if self._mode == 'tokens':
-                # Cap requested chunk size to the model's real max token budget
-                self._splitSize = min(self._splitSize, self._token_limit)
-
-        # Set to none so we bind it on the first call
+        # Bind the splitter
         self._preprocessor = self._getSplitter(provider, config)
-        return
 
     # Process a document by splitting it into chunks
     def process(self, text: str, path: str = None) -> List[str]:

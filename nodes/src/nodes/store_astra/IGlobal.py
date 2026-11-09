@@ -24,7 +24,7 @@
 # ------------------------------------------------------------------------------
 # This class controls the data shared between all threads for the task
 # ------------------------------------------------------------------------------
-from typing import Any, Dict
+from typing import Any, Dict, Mapping
 
 from ai.common.store import StoreGlobalBase
 
@@ -33,12 +33,8 @@ class IGlobal(StoreGlobalBase):
     serverName: str = 'astra'
     credential_fields = ('application_token',)
 
-    def _open_store(self, logical_type: str, conn_config: Dict[str, Any], bag: Dict[str, Any]):
-        """Return the driver's Store, imported lazily so config mode never loads the driver."""
+    def _open_store(self, logical_type: str, config: Mapping, bag: Dict[str, Any]):
+        """Return the driver's Store, imported lazily so the validator path never loads the driver."""
         from .astra_db import Store
 
-        return Store(logical_type, conn_config, bag)
-
-    def _probe_connection(self, config: Dict[str, Any]) -> None:
-        """Astra validates the collection name inside Store.__init__; no save-time probe here."""
-        return
+        return Store(logical_type, config, bag)

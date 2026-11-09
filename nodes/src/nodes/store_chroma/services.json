@@ -60,7 +60,7 @@
 	//  Optional:
 	//      Rendering hints to the UI which indicate which fields of
 	//      the configuration should be used to display information
-	"tile": ["Host/Port: ${parameters.chroma.${profile}.host}:${parameters.chroma.${profile}.port}", "Collection: ${parameters.chroma.${profile}.collection}"],
+	"tile": ["Host/Port: ${parameters.chroma.${profile}.host}:${parameters.chroma.${profile}.port}", "Collection: ${parameters.chroma.collection}"],
 	//
 	// Optional:
 	//      As a pipe component, define what this pipe component takes
@@ -133,69 +133,56 @@
 	},
 	//
 	// Optional:
-	//      Local fields definitions - these define fields only for the
-	//      current service. You may specify them here, or directly
-	//      in the shape
+	//      Local property definitions. The host type is the selector: host,
+	//      port and the cloud-only key, tenant, database and TLS switch are
+	//      branch-specific; the score, collection, retrieval limit and tool
+	//      name are referenced by both branches, so they are shared and
+	//      stored flat.
 	//
-	"preconfig": {
-		// Define the values that will be merged into any profile configuration
-		// specified, unless the profile is 'absolute'
-		"default": "local",
-		// Defines profiles used with the "profile": key
-		"profiles": {
-			"local": {
-				"mode": "local",
-				"title": "Your own ChromaDB server",
-				"host": "localhost",
-				"port": "8000",
-				"collection": "ROCKETRIDE",
-				"serverName": "chroma"
-			},
-			"cloud": {
-				"mode": "cloud",
-				"title": "ChromaDB Cloud Server",
-				"host": "",
-				"port": "443",
-				"apikey": "",
-				"tenant": "",
-				"database": "",
-				"collection": "ROCKETRIDE",
-				"serverName": "chroma"
-			}
-		}
-	},
-	//
-	// Optional:
-	//      Local fields definitions - these define fields only for the
-	//      current service. You may specify them here, or directly
-	//      in the shape
-	//
-	"fields": {
-		"vector.cloud.host": {
-			"description": "Enter the server IP address e.g. <your-instance-url>"
+	"propertyDefinitions": {
+		"chroma.cloud.host": {
+			"base": "vector.host",
+			"description": "Enter the server address e.g. api.trychroma.com",
+			"required": true
 		},
-		"vector.local.host": {
+		"chroma.cloud.port": {
+			"base": "vector.port",
+			"type": "integer",
+			"default": 443,
+			"description": "Port number. Enter a plain integer such as 443, or an env-var placeholder like ${ROCKETRIDE_CHROMA_PORT}."
+		},
+		"chroma.local.host": {
+			"base": "vector.host",
 			"default": "localhost"
 		},
-		"vector.cloud.port": {
-			"type": ["number", "string"],
-			"default": "443",
-			"description": "Port number. Enter a plain integer such as 443, or an env-var placeholder like ${ROCKETRIDE_CHROMA_PORT}. Placeholders resolve to a string at run time, so this field accepts both a number and a string; the node coerces the value to an integer before connecting, so either form works."
+		"chroma.local.port": {
+			"base": "vector.port",
+			"type": "integer",
+			"default": 8000,
+			"description": "Port number. Enter a plain integer such as 8000, or an env-var placeholder like ${ROCKETRIDE_CHROMA_PORT}."
 		},
-		"vector.local.port": {
-			"type": ["number", "string"],
-			"default": "8000",
-			"description": "Port number. Enter a plain integer such as 8000, or an env-var placeholder like ${ROCKETRIDE_CHROMA_PORT}. Placeholders resolve to a string at run time, so this field accepts both a number and a string; the node coerces the value to an integer before connecting, so either form works."
+		"chroma.apikey": {
+			"base": "vector.apikey",
+			"env": "ROCKETRIDE_CHROMA_APIKEY",
+			"required": true
 		},
-		//
-		// Cloud configuration for ChromaDB
-		//
-		"chroma.serverName": {
-			"type": "string",
-			"title": "Tool Server Name",
-			"description": "Label for this store in tool-response messages (for example, a refused write names chroma.delete). Pipeline agents address the available functions as node-id.function; apps use the function name and node ID. Changing this label does not change those addresses. See the node README for the available functions and their tool-exposure and write-permission settings.",
-			"default": "chroma",
-			"minLength": 1
+		"chroma.score": {
+			"base": "vector.score",
+			"default": 0.5,
+			"enum": [
+				[0.0, "All results"],
+				[0.4, "Likely not related"],
+				[0.5, "Loosely related"],
+				[0.6, "Possibly related"],
+				[0.7, "Related"],
+				[0.8, "Strongly related"],
+				[0.9, "Highly relevant"],
+				[1.0, "Almost identical"]
+			]
+		},
+		"chroma.top_k": {
+			"base": "vector.top_k",
+			"type": "integer"
 		},
 		"chroma.tenant": {
 			"title": "Tenant",
@@ -203,84 +190,47 @@
 			"type": "string",
 			"default": ""
 		},
-		"chroma.ssl": {
-			"title": "Use TLS",
-			"description": "Connect over HTTPS. Required for Chroma Cloud, which serves HTTPS only. Turn it off for a self-hosted server reached over plain HTTP.",
-			"type": "boolean",
-			"default": true,
-			"optional": true
-		},
 		"chroma.database": {
 			"title": "Database",
 			"description": "Chroma Cloud database name (required for Chroma Cloud, optional for self-hosted multi-tenant servers)",
 			"type": "string",
 			"default": ""
 		},
-		"chroma.cloud": {
-			"object": "cloud",
-			"properties": ["vector.cloud.host", "vector.cloud.port", "vector.apikey", "chroma.tenant", "chroma.database", "vector.collection", "vector.top_k", "chroma.serverName", "chroma.ssl"]
+		"chroma.ssl": {
+			"title": "Use TLS",
+			"description": "Connect over HTTPS. Required for Chroma Cloud, which serves HTTPS only. Turn it off for a self-hosted server reached over plain HTTP.",
+			"type": "boolean",
+			"default": true
 		},
-		"chroma.local": {
-			"object": "local",
-			"properties": ["vector.local.host", "vector.local.port", "vector.collection", "vector.top_k", "chroma.serverName"]
-		},
-		//
-		// Profile selection for ChromaDB service
-		//
-		"chroma.profile": {
-			"title": "Type of chroma host",
-			"description": "Connect to...",
+		"chroma.serverName": {
 			"type": "string",
-			"default": "local",
-			"enum": ["*>preconfig.profiles.*.title"],
-			"conditional": [
-				{
-					"value": "cloud",
-					"properties": ["chroma.cloud"]
-				},
-				{
-					"value": "local",
-					"properties": ["chroma.local"]
-				}
-			]
-		},
-		"chroma.provider": {
-			"type": "string",
-			"const": "chroma"
-		},
-		"chroma.chroma": {
-			"object": "chroma",
-			"properties": ["chroma.profile"]
-		},
-		"chroma.store": {
-			"object": "store",
-			"title": "Store",
-			"properties": ["chroma.provider", "chroma.chroma"]
-		},
-		"chroma.target.autopipe": {
-			"object": "parameters",
-			"properties": ["remote", "chroma.store", "all.embedding"]
-		},
-		"chroma.target.parameters": {
-			"object": "parameters",
-			"properties": ["chroma.target.autopipe"]
+			"title": "Tool Server Name",
+			"description": "Label for this store in tool-response messages (for example, a refused write names chroma.delete). Pipeline agents address the available functions as node-id.function; apps use the function name and node ID. Changing this label does not change those addresses. See the node README for the available functions and their tool-exposure and write-permission settings.",
+			"default": "chroma",
+			"minLength": 1
 		}
 	},
 	//
 	// Required:
-	//      Defines the fields (shape) of the service. Either source or target
-	//      may be specified, or both, but at least one is required
+	//      Defines the properties shown in the node's config panel, in order
 	//
-	"shape": [
+	"properties": [
 		{
-			"section": "Pipe",
-			"title": "Chroma Vector Store",
-			"properties": ["chroma.profile"]
-		},
-		{
-			"section": "Transform",
-			"title": "Chroma",
-			"properties": ["type", "chroma.target.parameters", "target.mode"]
+			"name": "profile",
+			"title": "Type of chroma host",
+			"description": "Connect to...",
+			"type": "string",
+			"default": "local",
+			"enum": {
+				"local": {
+					"title": "Your own ChromaDB server",
+					"properties": ["chroma.local.host", "chroma.local.port", "chroma.score", "vector.collection", "chroma.top_k", "chroma.serverName"]
+				},
+				"cloud": {
+					"title": "ChromaDB Cloud Server",
+					"properties": ["chroma.cloud.host", "chroma.cloud.port", "chroma.apikey", "chroma.tenant", "chroma.database", "chroma.ssl", "chroma.score", "vector.collection", "chroma.top_k", "chroma.serverName"]
+				}
+			}
 		}
 	]
 }

@@ -29,7 +29,7 @@ from .validate import validate_payload
 
 
 class IInstance(IInstanceBase):
-    IGlobal: IGlobal  # Reference to the global context holding the resolved config
+    IGlobal: IGlobal  # Reference to the global context holding the normalised validation settings
 
     # Validated payloads collected during the object, emitted at closing.
     # Each entry is (expectJson: bool, payload) — see writeAnswers/closing.
@@ -67,7 +67,7 @@ class IInstance(IInstanceBase):
                 payload = None
 
         if isinstance(payload, (dict, list)):
-            self.pending.append((True, validate_payload(payload, self.IGlobal.config)))
+            self.pending.append((True, validate_payload(payload, self.IGlobal.validation)))
         else:
             # Plain text, empty, or non-fact JSON scalar — pass through verbatim.
             self.pending.append((False, answer.getText() if answer is not None else ''))

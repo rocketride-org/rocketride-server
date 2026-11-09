@@ -22,53 +22,35 @@
 # SOFTWARE.
 # =============================================================================
 
-from rocketlib import IGlobalBase, OPEN_MODE, warning
-from ai.common.config import Config
+from rocketlib import IGlobalBase
 
-DEFAULT_PROFILE = 'rtmpose-medium'
-DEFAULT_THRESHOLD = 0.3
-DEFAULT_MAX_PERSONS = 20
+from ai.common.models.base import make_device_lock
+from ai.common.models.vision.pose import PROFILE_TO_MODE, PoseEstimator
 
 
 class IGlobal(IGlobalBase):
     pose_estimator = None
     device_lock = None
-    threshold = DEFAULT_THRESHOLD
+    threshold: float = 0.3
 
     def beginGlobal(self):
-        """Build the shared PoseEstimator facade from node config (profile/threshold/max_persons)."""
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
+        """Build the shared PoseEstimator facade from the resolved config (model, threshold, max_persons).
 
-        from ai.common.models.vision.pose import PoseEstimator, PROFILE_TO_MODE, DEFAULT_MODE
-
-        config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-
-        profile = str(config.get('profile', DEFAULT_PROFILE)).lower().strip()
-        mode = PROFILE_TO_MODE.get(profile, DEFAULT_MODE)
-        if profile not in PROFILE_TO_MODE:
-            warning(f'pose_estimation: unknown profile "{profile}", falling back to {DEFAULT_MODE}.')
-
-        raw_threshold = config.get('threshold', DEFAULT_THRESHOLD)
-        try:
-            self.threshold = float(raw_threshold)
-        except (TypeError, ValueError):
-            self.threshold = None
-        if self.threshold is None or not (0.0 <= self.threshold <= 1.0):
-            warning(f'pose_estimation: invalid threshold {raw_threshold!r}, using default {DEFAULT_THRESHOLD}')
-            self.threshold = DEFAULT_THRESHOLD
-        try:
-            max_persons = int(config.get('max_persons', DEFAULT_MAX_PERSONS))
-        except (TypeError, ValueError):
-            max_persons = DEFAULT_MAX_PERSONS
-        max_persons = min(200, max(1, max_persons))
+        The schema supplies the defaults and the bounds, so the values are
+        read as they are.
+        """
+        config = self.config
+        self.threshold = float(config.threshold)
 
         # device=None -> model server when --modelserver is set, else local.
-        self.pose_estimator = PoseEstimator(mode=mode, device=None, threshold=self.threshold, max_persons=max_persons)
+        self.pose_estimator = PoseEstimator(
+            mode=PROFILE_TO_MODE[config.model],
+            device=None,
+            threshold=self.threshold,
+            max_persons=int(config.max_persons),
+        )
 
         # Local inference must serialize GPU access
-        from ai.common.models.base import make_device_lock
-
         self.device_lock = make_device_lock()
 
     def endGlobal(self):

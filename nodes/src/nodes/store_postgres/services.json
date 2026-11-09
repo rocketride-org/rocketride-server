@@ -31,7 +31,7 @@
 	//     The node is the actual physical node to instantiate - if
 	//     not specified, the protocol will be used
 	//
-	"node": "python", //ai
+	"node": "python", //ai,
 	//
 	// Optional:
 	//     The path is the executable/script code - it is node dependent
@@ -60,7 +60,7 @@
 	//      Rendering hints to the UI which indicate which fields of
 	//      the configuration should be used to display information
 	//
-	"tile": ["Host/Port: ${parameters.postgres.${profile}.host}:${parameters.postgres.${profile}.port}", "Database: ${parameters.postgres.${profile}.database}", "Table: ${parameters.postgres.${profile}.collection}"],
+	"tile": ["Host/Port: ${parameters.postgres.host}:${parameters.postgres.port}", "Database: ${parameters.postgres.database}", "Table: ${parameters.postgres.collection}"],
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes
@@ -125,76 +125,58 @@
 		]
 	},
 	//
-	//	Optional:
-	//		Profile section are configuration optoins used by the driver
-	//		itself
-	//
-	"preconfig": {
-		"default": "local",
-		"profiles": {
-			"local": {
-				"mode": "local",
-				"title": "Your own PostgreSQL server",
-				"host": "your-postgres-host.example.com",
-				"port": 5432,
-				"user": "postgres",
-				"password": "",
-				"database": "rocketride",
-				"collection": "rocketride",
-				"score": 0.5,
-				"similarity": "cosine",
-				"serverName": "postgres"
-			}
-		}
-	},
-	//
 	// Optional:
-	//     Local fields definitions - these define fields only for the
-	//     current service. You may specify them here, or directly
-	//     in the shape
+	//     Local property definitions. PostgreSQL has one host type, so every
+	//     property is stored flat. The password is the credential; a server
+	//     with trust authentication needs none, so it is not required.
 	//
-	"fields": {
-		"vector.collection": {
-			"title": "Table",
-			"description": "Name of the table to store vectors.",
-			"type": "string",
-			"default": "rocketride"
-		},
-		"vector.local.host": {
-			"title": "Host",
+	"propertyDefinitions": {
+		"postgres.host": {
+			"base": "vector.host",
 			"description": "Host name or IP address of the PostgreSQL server",
-			"default": "your-postgres-host.example.com"
+			"default": "localhost"
 		},
-		"vector.local.port": {
-			"title": "Port",
+		"postgres.port": {
+			"base": "vector.port",
+			"type": "integer",
 			"description": "Port number of the PostgreSQL server",
 			"default": 5432
 		},
-		"vector.local.user": {
+		"postgres.user": {
+			"type": "string",
 			"title": "User",
 			"description": "User to connect to the PostgreSQL server",
-			"default": "postgres",
-			"type": "string"
+			"default": "postgres"
 		},
-		"vector.local.password": {
+		"postgres.password": {
+			"type": "string",
 			"title": "Password",
 			"description": "Password to connect to the PostgreSQL server",
-			"type": "string",
-			"format": "password",
-			"secure": true
+			"secret": true,
+			"env": "ROCKETRIDE_POSTGRES_PASSWORD"
 		},
-		"vector.local.database": {
+		"postgres.database": {
+			"type": "string",
 			"title": "Database",
 			"description": "Name of the database",
-			"default": "postgres",
-			"type": "string"
+			"default": "postgres"
 		},
-		"vector.similarity": {
+		"postgres.collection": {
+			"base": "vector.collection",
+			"title": "Table",
+			"description": "Name of the table to store vectors.",
+			"default": "rocketride"
+		},
+		"postgres.similarity": {
+			"type": "string",
 			"title": "Similarity Metric",
 			"description": "The similarity metric to use for vector search",
-			"type": "string",
 			"default": "cosine",
-			"enum": ["cosine", "l2", "inner_product"]
+			"enum": [
+				["cosine", "Cosine"],
+				["l2", "L2 (Euclidean)"],
+				["inner_product", "Inner product"]
+			]
 		},
 		"postgres.serverName": {
 			"type": "string",
@@ -202,65 +184,21 @@
 			"description": "Label for this store in tool-response messages (for example, a refused write names postgres.delete). Pipeline agents address the available functions as node-id.function; apps use the function name and node ID. Changing this label does not change those addresses. See the node README for the available functions and their tool-exposure and write-permission settings.",
 			"default": "postgres",
 			"minLength": 1
-		},
-		"postgres.local": {
-			"object": "local",
-			"properties": ["vector.local.host", "vector.local.port", "vector.local.user", "vector.local.password", "vector.local.database", "vector.collection", "vector.score", "vector.similarity", "postgres.serverName"]
-		},
-		"postgres.profile": {
-			"hidden": true,
-			"title": "Type of PostgreSQL host",
-			"description": "Connect to...",
-			"type": "string",
-			"default": "local",
-			"enum": ["*>preconfig.profiles.*.title"],
-			"conditional": [
-				{
-					"value": "local",
-					"properties": ["postgres.local"]
-				}
-			]
-		},
-		"postgres.provider": {
-			"type": "string",
-			"const": "postgres",
-			"default": "postgres"
-		},
-		"postgres.postgres": {
-			"object": "postgres",
-			"properties": ["postgres.profile"]
-		},
-		"postgres.store": {
-			"object": "store",
-			"title": "Store",
-			"properties": ["postgres.provider", "postgres.postgres"]
-		},
-		"postgres.target.autopipe": {
-			"object": "parameters",
-			"title": "Parameters",
-			"properties": ["remote", "postgres.store", "all.embedding"]
-		},
-		"postgres.target.parameters": {
-			"object": "parameters",
-			"title": "Parameters",
-			"properties": ["postgres.target.autopipe"]
 		}
 	},
 	//
 	// Required:
-	//     Defines the fields (shape) of the service. Either source or target
-	//     map be specified, or both, but at least one is required
+	//     Defines the properties shown in the node's config panel, in order
 	//
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "PostgreSQL Vector Store",
-			"properties": ["postgres.profile"]
-		},
-		{
-			"section": "Transform",
-			"title": "PostgreSQL",
-			"properties": ["type", "postgres.target.parameters"]
-		}
+	"properties": [
+		"postgres.host",
+		"postgres.port",
+		"postgres.user",
+		"postgres.password",
+		"postgres.database",
+		"postgres.collection",
+		"vector.score",
+		"postgres.similarity",
+		"postgres.serverName"
 	]
 }

@@ -28,8 +28,6 @@ from typing import Any, Dict, Mapping
 
 from ai.common.store import StoreGlobalBase
 
-from .IValidator import probe_connection
-
 
 class IGlobal(StoreGlobalBase):
     serverName: str = 'qdrant'
@@ -40,7 +38,3 @@ class IGlobal(StoreGlobalBase):
         from .qdrant import Store
 
         return Store(logical_type, config, bag)
-
-    def _probe_connection(self, config: Mapping) -> None:
-        """Save-time connectivity probe; the one copy lives beside the validator."""
-        probe_connection(config)

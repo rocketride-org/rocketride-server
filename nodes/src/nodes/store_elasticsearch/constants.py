@@ -34,9 +34,6 @@ DEFAULT_SCROLL = '1m'
 DEFAULT_TEXT_BATCH_SIZE = 500
 """Default batch size for scroll/scan text search."""
 
-ELASTICSEARCH_DEFAULT_PORT = 9200
-"""Default Elasticsearch port (self-managed)."""
-
 # -----------------------------------------------------------------------------
 # Backend and mode identifiers (used in config and IGlobal)
 # -----------------------------------------------------------------------------

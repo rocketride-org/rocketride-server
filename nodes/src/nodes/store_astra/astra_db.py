@@ -27,7 +27,7 @@ from depends import depends
 requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
 depends(requirements)
 
-from typing import List, Callable, Dict, Any
+from typing import List, Callable, Dict, Any, Mapping
 from uuid import uuid4
 import re
 
@@ -38,7 +38,6 @@ from astrapy.info import CollectionDefinition, CollectionVectorOptions, Collecti
 
 from ai.common.schema import Doc, DocFilter, DocMetadata, QuestionText
 from ai.common.store import CONTROL_OBJECT_ID, DocumentStoreBase
-from ai.common.config import Config
 
 from rocketlib import warning
 
@@ -70,38 +69,29 @@ class Store(DocumentStoreBase):
     client: DataAPIClient | None = None
     database: Database | None = None
 
-    def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
+    def __init__(self, provider: str, config: Mapping, bag: Dict[str, Any]):
         """
         Initialize the astradb vector store.
+
+        Args:
+            provider: The node's logical type.
+            config: The resolved node config (defaults applied, active branch flattened).
+            bag: The endpoint's shared bag.
         """
         # Init the base
-        super().__init__(provider, connConfig, bag)
-
-        # Get the nodes configuration
-        config = Config.getNodeConfig(provider, connConfig)
+        super().__init__(provider, config, bag)
 
         # Save our parameters
-        self.collection_name = config.get('collection', '')
+        self.collection_name = config['collection']
 
         if not re.match(r'^[A-Za-z0-9][A-Za-z0-9_]*$', self.collection_name):
             raise Exception(f'Invalid collection name: {self.collection_name}')
 
-        # Remove leading and trailing spaces, leading http/https and :// and trailing slashes
-        self.api_endpoint = config.get('api_endpoint')
+        self.api_endpoint = config['api_endpoint']
+        self.threshold_search = config['score']
 
-        # check if the similarity matches astra configuration options
-        similarity = config.get('similarity', 'cosine')
-        if similarity in ['cosine', 'euclidean', 'dot_product']:
-            self.similarity = similarity
-        else:
-            raise Exception(
-                'The similarity metric you provided in the config.json does not match required astra configurations'
-            )
-
-        # Strip API key also
-        self.application_token = config.get('application_token', None)
-        if self.application_token is not None:
-            self.application_token = self.application_token.strip()
+        # Strip the token also
+        self.application_token = (config['application_token'] or '').strip()
 
         # Init the store
         self.client = DataAPIClient()

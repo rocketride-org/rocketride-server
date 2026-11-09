@@ -33,7 +33,7 @@ requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
 depends(requirements)
 
 # Load what we need
-from typing import List, Callable, Dict, Any
+from typing import List, Callable, Dict, Any, Mapping
 import sys
 from uuid import uuid4
 
@@ -42,7 +42,6 @@ from pinecone import ServerlessSpec, PodSpec
 
 from ai.common.schema import Doc, DocFilter, DocMetadata, QuestionText
 from ai.common.store import CONTROL_OBJECT_ID, DocumentStoreBase
-from ai.common.config import Config
 
 """
 Note: a 'collection' as we know it is referred to as an index in pinecone
@@ -68,35 +67,26 @@ class Store(DocumentStoreBase):
     threshhold_search: float = 0.0
     client = None
 
-    def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
+    def __init__(self, provider: str, config: Mapping, bag: Dict[str, Any]):
         """
         Initialize the pinecone vector store. We use our own custom DocumentStoreBase.
+
+        Args:
+            provider: The node's logical type.
+            config: The resolved node config (defaults applied, active branch flattened).
+            bag: The endpoint's shared bag.
         """
         # Init the base
-        super().__init__(provider, connConfig, bag)
-
-        # Get the nodes configuration
-        config = Config.getNodeConfig(provider, connConfig)
+        super().__init__(provider, config, bag)
 
         # Save our parameters
-        self.collection = config.get('collection')  # name of our pinecone index
+        self.collection = config['collection']  # name of our pinecone index
 
         # Strip API key also
-        self.apikey = config.get('apikey', None)
-        if self.apikey is not None:
-            self.apikey = self.apikey.strip()
+        self.apikey = (config['apikey'] or '').strip()
 
-        self.profile = config.get('mode')  # either pod-based or serverless-dense TODO: talk about sparse indexes
-        self.threshold_search = config.get('score', 0.5)
-
-        # check if the similarity matches pinecone configuration options
-        similarity = config.get('similarity', 'cosine')
-        if similarity in ['cosine', 'euclidean', 'dotproduct']:
-            self.similarity = similarity
-        else:
-            raise Exception(
-                'The metric you provided in the config.json does not match required pinecone configurations'
-            )
+        self.profile = config['profile']  # either pod-based or serverless-dense
+        self.threshold_search = config['score']
 
         # Init the store
         self.client = Pinecone(api_key=self.apikey)

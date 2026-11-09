@@ -33,7 +33,7 @@ requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
 depends(requirements)
 
 # Load what we need
-from typing import List, Callable, Dict, Any, cast
+from typing import List, Callable, Dict, Any, Mapping, cast
 import numpy as np
 from pymilvus import MilvusClient, DataType
 
@@ -45,7 +45,6 @@ import engLib
 
 from ai.common.schema import Doc, DocFilter, DocMetadata, QuestionText
 from ai.common.store import DocumentStoreBase
-from ai.common.config import Config
 from nodes.store_milvus.mode import is_local
 
 # Default batch size for bulk upsert operations
@@ -71,41 +70,35 @@ class Store(DocumentStoreBase):
     vectorIndexType: str = 'IVF_FLAT'
     scalarIndexType: str = 'STL_SORT'
 
-    def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
+    def __init__(self, provider: str, config: Mapping, bag: Dict[str, Any]):
         """
         Initialize the milvus vector store.
+
+        Args:
+            provider: The node's logical type.
+            config: The resolved node config (defaults applied, active branch flattened).
+            bag: The endpoint's shared bag.
         """
         # Init the base
-        super().__init__(provider, connConfig, bag)
-
-        # Get our configuration
-        config = Config.getNodeConfig(provider, connConfig)
+        super().__init__(provider, config, bag)
 
         # Save our parameters
-        self.collection = config.get('collection')
+        self.collection = config['collection']
 
         # Remove leading and trailing spaces, leading http/https and :// and trailing slashes
-        self.host = re.sub(r'^https?://', '', config.get('host').strip()).rstrip('/')
-        self.port = config.get('port')
+        self.host = re.sub(r'^https?://', '', (config['host'] or '').strip()).rstrip('/')
+        self.port = config['port']
 
-        # Strip API key also
-        self.apikey = config.get('apikey', None)
+        # The token exists on the cloud branch only
+        self.apikey = config.get('apikey')
         if self.apikey is not None:
             self.apikey = self.apikey.strip()
 
-        self.renderChunkSize = config.get('renderChunkSize', self.renderChunkSize)
-        self.threshold_search = config.get('score', 0.5)
+        self.threshold_search = config['score']
 
-        # Configurable timeout (seconds) and bulk insert batch size
-        self.timeout = max(int(config.get('timeout', DEFAULT_TIMEOUT)), 1)
-        self.bulkInsertBatchSize = max(int(config.get('bulkInsertBatchSize', DEFAULT_BULK_INSERT_BATCH_SIZE)), 1)
-
-        # check if the similarity matches milvus configuration options
-        similarity = config.get('similarity', 'COSINE')
-        if similarity in ['L2', 'IP', 'COSINE', 'JACCARD', 'HAMMING', 'BM25']:
-            self.similarity = similarity
-        else:
-            raise Exception('The metric you provided in the config.json does not match required milvus configurations')
+        # Request timeout (seconds) and bulk insert batch size
+        self.timeout = DEFAULT_TIMEOUT
+        self.bulkInsertBatchSize = DEFAULT_BULK_INSERT_BATCH_SIZE
 
         # Establish a connection to the Milvus instance with configurable timeout
         try:

@@ -1,128 +1,118 @@
 # =============================================================================
 # MIT License
 # Copyright (c) 2026 Aparavi Software AG
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
 # =============================================================================
 
-"""Config parsing: what the node does with a value it was not expecting.
+"""Config resolution: what reaches the algorithm, and what the resolver refuses before it can.
 
-A pipeline config can be hand-edited, so these functions are the boundary where
-arbitrary JSON meets the detector's tunables. Their contract is that a bad value
-falls back and warns — it must not kill the pipeline, and it must not travel on
-either, which is the part that is easy to get wrong: `float` accepts `Infinity`
-and `NaN`, and clamping does not stop them.
+The tunables used to be clamped and defaulted by the node itself. The schema now
+carries every default and range, and the resolver enforces them, so a value the
+algorithm was never tried at never arrives: it fails validation with the key
+named. The quality field stays free text and keeps its own normalisation.
 """
 
 import math
 import sys
-from dataclasses import fields
 from pathlib import Path
 
-NODES_SRC = Path(__file__).parent.parent.parent / 'src' / 'nodes'
-# Move to the front rather than "insert only if absent": another test dir already on
-# sys.path can hold a package with the same name as the node (see #1687).
+import pytest
+import rocketlib
+from rocketlib.config import ConfigError, resolveConfig
+
+NODES_SRC = Path(__file__).resolve().parents[2] / 'src' / 'nodes'
 while str(NODES_SRC) in sys.path:
     sys.path.remove(str(NODES_SRC))
 sys.path.insert(0, str(NODES_SRC))
 
-from scan_cropper.process import _number, _params_from_config, _RANGES, resolve_quality  # noqa: E402
+pytest.importorskip('cv2', reason='process.py imports the imaging stack at module scope')
+
+from scan_cropper.process import _params_from_config, resolve_quality  # noqa: E402
 
 
-class TestNumber:
-    """One numeric field, read out of the config."""
-
-    def test_a_good_value_is_taken_as_given(self):
-        assert _number({'detectSize': 2500}, 'detectSize', 3000, int) == 2500
-
-    def test_a_missing_field_falls_back_to_the_default(self):
-        assert _number({}, 'detectSize', 3000, int) == 3000
-
-    def test_values_are_clamped_to_the_documented_range(self):
-        assert _number({'detectSize': 50}, 'detectSize', 3000, int) == 800
-        assert _number({'detectSize': 99999}, 'detectSize', 3000, int) == 8000
-
-    def test_a_numeric_string_is_accepted(self):
-        """A hand-edited config quotes its numbers as often as not."""
-        assert _number({'texture': '9.0'}, 'texture', 4.0, float) == 9.0
-
-    def test_something_that_is_not_a_number_falls_back(self):
-        assert _number({'texture': 'plenty'}, 'texture', 4.0, float) == 4.0
-        assert _number({'texture': None}, 'texture', 4.0, float) == 4.0
-
-    def test_infinity_on_an_integer_field_falls_back(self):
-        """`int(float('inf'))` raises OverflowError, which is not a ValueError, so it
-        escaped the fallback and failed the node at startup.
-        """
-        assert _number({'detectSize': math.inf}, 'detectSize', 3000, int) == 3000
-
-    def test_infinity_on_a_float_field_falls_back(self):
-        """Nothing raises here, and the clamp yields the ceiling — a different setting
-        from the one the config asked for, so it falls back instead.
-        """
-        assert _number({'texture': math.inf}, 'texture', 4.0, float) == 4.0
-
-    def test_a_boolean_falls_back_rather_than_counting_as_one(self):
-        """`bool` is a subclass of `int`, so `true` casts to 1 without complaint — and
-        `maxDepth: true` would then cut a blob apart once instead of the documented four
-        times, with nothing said.
-        """
-        assert _number({'maxDepth': True}, 'maxDepth', 4, int) == 4
-        assert _number({'texture': False}, 'texture', 4.0, float) == 4.0
-
-    def test_not_a_number_falls_back(self):
-        """The quiet one: every comparison against nan is false, so the clamp returns it
-        untouched and each threshold reading it becomes a no-op.
-        """
-        assert _number({'minArea': math.nan}, 'minArea', 0.005, float) == 0.005
+def _resolve(conn_config):
+    """Resolve a stored config exactly as IGlobal.beginGlobal() would."""
+    return resolveConfig(rocketlib.getServiceSchema('scan_cropper'), conn_config)
 
 
 class TestParamsFromConfig:
-    """The whole tunable set, as the node builds it."""
+    """The whole tunable set, as the node builds it from the resolved config."""
 
     def test_an_empty_config_gives_the_documented_defaults(self):
-        params = _params_from_config({})
+        params = _params_from_config(_resolve({}))
 
         assert params.detect_size == 3000
         assert params.texture == 4.0
         assert params.max_depth == 4
+        assert params.min_relative == 0.4
 
-    def test_one_poisoned_field_does_not_take_the_others_with_it(self):
-        params = _params_from_config({'texture': math.nan, 'maxDepth': 0})
+    def test_a_scan_type_sets_its_own_values(self):
+        """Loose prints never touch, so the seam search is off and smaller leftovers are kept."""
+        params = _params_from_config(_resolve({'profile': 'loose'}))
 
-        assert params.texture == 4.0
-        assert params.max_depth == 0
+        assert (params.max_depth, params.min_relative, params.texture) == (0, 0.2, 4.0)
 
-    def test_every_tunable_survives_a_config_of_rubbish(self):
-        # Both lists are derived: a tunable added later is covered without being added here,
-        # which is how `ratioTolerance` got missed when they were spelled out.
-        params = _params_from_config(dict.fromkeys(_RANGES, 'not a number at all'))
+        params = _params_from_config(_resolve({'profile': 'detail'}))
+        assert (params.detect_size, params.max_depth) == (4500, 6)
 
-        for field in fields(params):
-            assert math.isfinite(getattr(params, field.name)), field.name
-        assert params.skew > 0, 'the seam search divides by this'
+    def test_a_value_stored_under_the_scan_type_wins(self):
+        params = _params_from_config(_resolve({'album': {'detectSize': 800}, 'skew': 3.0}))
+
+        assert (params.detect_size, params.skew) == (800, 3.0)
+
+    def test_a_numeric_string_is_a_config_error(self):
+        """A hand-edited config quotes its numbers as often as not; the resolver names the key."""
+        with pytest.raises(ConfigError, match='texture'):
+            _resolve({'album': {'texture': '9.0'}})
+
+    def test_values_outside_the_documented_range_are_config_errors(self):
+        with pytest.raises(ConfigError, match='detectSize'):
+            _resolve({'album': {'detectSize': 50}})
+        with pytest.raises(ConfigError, match='detectSize'):
+            _resolve({'album': {'detectSize': 99999}})
+        with pytest.raises(ConfigError, match='skew'):
+            _resolve({'skew': 0})
+
+    def test_a_boolean_is_not_a_number(self):
+        """`bool` is a subclass of `int`, so `true` would otherwise cut a blob apart once."""
+        with pytest.raises(ConfigError, match='maxDepth'):
+            _resolve({'album': {'maxDepth': True}})
+
+    def test_a_key_the_schema_does_not_declare_is_an_error(self):
+        with pytest.raises(ConfigError, match='tune'):
+            _resolve({'tune': True})
 
 
 class TestResolveQuality:
-    """The `quality` field is free text, and it does not always arrive as text."""
+    """The JPEG quality field: 'auto' or a number from 1 to 100."""
 
-    def test_auto_is_recognised_whatever_the_casing(self):
+    def test_auto_is_auto(self):
         assert resolve_quality('auto') == 'auto'
-        assert resolve_quality('  AUTO ') == 'auto'
+        assert resolve_quality(' AUTO ') == 'auto'
 
-    def test_a_json_number_is_accepted(self):
-        """`.strip()` on an int raises, so this is not the same path as a string."""
+    def test_a_number_is_clamped_to_the_jpeg_range(self):
+        assert resolve_quality('95') == 95
         assert resolve_quality(95) == 95
-
-    def test_a_numeric_string_is_accepted(self):
-        assert resolve_quality('80') == 80
-
-    def test_values_are_clamped_to_the_jpeg_range(self):
+        assert resolve_quality('250') == 100
         assert resolve_quality(0) == 1
-        assert resolve_quality(500) == 100
 
-    def test_anything_unrecognisable_becomes_auto(self):
-        assert resolve_quality('best') == 'auto'
-        assert resolve_quality(None) == 'auto'
-
-    def test_non_finite_values_become_auto(self):
+    def test_rubbish_falls_back_to_auto(self):
+        assert resolve_quality('plenty') == 'auto'
         assert resolve_quality(math.inf) == 'auto'
-        assert resolve_quality(math.nan) == 'auto'

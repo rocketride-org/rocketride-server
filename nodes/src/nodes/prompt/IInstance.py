@@ -113,15 +113,8 @@ class IInstance(IInstanceBase):
             if not self._received_input():
                 return
 
-            # Get the instructions from configuration via IGlobal
-            config = self.IGlobal.config
-            instructions = config.get(
-                'instructions', ['Please provide a detailed and helpful response to the following question:']
-            )
-
-            # Ensure instructions is a list
-            if isinstance(instructions, str):
-                instructions = [instructions]
+            # The instructions from the resolved config (the schema supplies the default)
+            instructions = list(self.IGlobal.config.instructions)
 
             # Add each instruction to the question
             for i, instruction in enumerate(instructions):

@@ -31,7 +31,7 @@
 	//     The node is the actual physical node to instantiate - if
 	//     not specified, the protocol will be used
 	//
-	"node": "python", //ai
+	"node": "python", //ai,
 	//
 	// Optional:
 	//     The path is the executable/script code - it is node dependent
@@ -60,7 +60,7 @@
 	//      Rendering hints to the UI which indicate which fields of
 	//      the configuration should be used to display information
 	//
-	"tile": ["Host/Port: ${parameters.weaviate.${profile}.host}:${parameters.weaviate.${profile}.port}", "Collection: ${parameters.weaviate.${profile}.collection}"],
+	"tile": ["Host: ${parameters.weaviate.${profile}.host}", "Collection: ${parameters.weaviate.collection}"],
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes
@@ -125,59 +125,36 @@
 		]
 	},
 	//
-	//	Optional:
-	//		Profile section are configuration optoins used by the driver
-	//		itself
-	//
-	"preconfig": {
-		// Define the values that will be merged into any profile configuration
-		// specified, unless the profile is 'absolute'
-		// Must match the "weaviate.profile" field default below: this one is the
-		// fallback for a config that carries no "profile" key, that one is what
-		// the editor writes into a fresh node. They describe the same choice.
-		"default": "local",
-		// Defines profiles used with the "profile": key
-		"profiles": {
-			"local": {
-				"mode": "local",
-				"title": "Your own Weaviate server",
-				"host": "localhost",
-				"port": 8080,
-				"collection": "ROCKETRIDE",
-				"serverName": "weaviate"
-			},
-			"cloud": {
-				"mode": "cloud",
-				"title": "Weaviate cloud server",
-				"host": "",
-				"port": 443,
-				"apikey": "",
-				"collection": "ROCKETRIDE",
-				"serverName": "weaviate"
-			}
-		}
-	},
-	//
 	// Optional:
-	//     Local fields definitions - these define fields only for the
-	//     current service. You may specify them here, or directly
-	//     in the shape
+	//     Local property definitions. The host type is the selector: host,
+	//     ports and the cloud-only key are branch-specific; the score,
+	//     collection and tool name are referenced by both branches, so they
+	//     are shared and stored flat.
 	//
-	"fields": {
-		"vector.cloud.host": {
-			"description": "Enter the server IP address e.g. <your-instance-name>.weaviate.cloud"
+	"propertyDefinitions": {
+		"weaviate.cloud.host": {
+			"base": "vector.host",
+			"description": "Enter the cluster address e.g. <your-instance-name>.weaviate.cloud",
+			"required": true
 		},
-		"vector.cloud.port": {
-			"default": 443
-		},
-		"vector.local.host": {
+		"weaviate.local.host": {
+			"base": "vector.host",
 			"default": "localhost"
 		},
-		"vector.local.port": {
+		"weaviate.local.port": {
+			"base": "vector.port",
+			"type": "integer",
 			"default": 8080
 		},
-		"vector.local.grpc_port": {
+		"weaviate.local.grpc_port": {
+			"base": "vector.local.grpc_port",
+			"type": "integer",
 			"default": 50051
+		},
+		"weaviate.apikey": {
+			"base": "vector.apikey",
+			"env": "ROCKETRIDE_WEAVIATE_APIKEY",
+			"required": true
 		},
 		"weaviate.serverName": {
 			"type": "string",
@@ -185,72 +162,29 @@
 			"description": "Label for this store in tool-response messages (for example, a refused write names weaviate.delete). Pipeline agents address the available functions as node-id.function; apps use the function name and node ID. Changing this label does not change those addresses. See the node README for the available functions and their tool-exposure and write-permission settings.",
 			"default": "weaviate",
 			"minLength": 1
-		},
-		"weaviate.cloud": {
-			"object": "cloud",
-			"properties": ["vector.cloud.host", "vector.apikey", "vector.score", "vector.collection", "weaviate.serverName"]
-		},
-		"weaviate.local": {
-			"object": "local",
-			"properties": ["vector.local.host", "vector.local.port", "vector.local.grpc_port", "vector.score", "vector.collection", "weaviate.serverName"]
-		},
-		"weaviate.profile": {
-			"title": "Type of Weaviate host",
-			"description": "Connect to...",
-			"type": "string",
-			"default": "local",
-			"enum": ["*>preconfig.profiles.*.title"],
-			"conditional": [
-				{
-					"value": "cloud",
-					"properties": ["weaviate.cloud"]
-				},
-				{
-					"value": "local",
-					"properties": ["weaviate.local"]
-				}
-			]
-		},
-		"weaviate.provider": {
-			"type": "string",
-			"const": "weaviate",
-			"default": "weaviate"
-		},
-		"weaviate.weaviate": {
-			"object": "weaviate",
-			"properties": ["weaviate.profile"]
-		},
-		"weaviate.store": {
-			"object": "store",
-			"title": "Store",
-			"properties": ["weaviate.provider", "weaviate.weaviate"]
-		},
-		"weaviate.target.autopipe": {
-			"object": "parameters",
-			"title": "Parameters",
-			"properties": ["remote", "weaviate.store", "all.embedding"]
-		},
-		"weaviate.target.parameters": {
-			"object": "parameters",
-			"title": "Parameters",
-			"properties": ["weaviate.target.autopipe"]
 		}
 	},
 	//
 	// Required:
-	//     Defines the fields (shape) of the service. Either source or target
-	//     map be specified, or both, but at least one is required
+	//     Defines the properties shown in the node's config panel, in order
 	//
-	"shape": [
+	"properties": [
 		{
-			"section": "Pipe",
-			"title": "Weaviate Vector Store",
-			"properties": ["weaviate.profile"]
-		},
-		{
-			"section": "Transform",
-			"title": "Weaviate",
-			"properties": ["type", "weaviate.target.parameters", "target.mode"]
+			"name": "profile",
+			"title": "Type of Weaviate host",
+			"description": "Connect to...",
+			"type": "string",
+			"default": "local",
+			"enum": {
+				"local": {
+					"title": "Your own Weaviate server",
+					"properties": ["weaviate.local.host", "weaviate.local.port", "weaviate.local.grpc_port", "vector.score", "vector.collection", "weaviate.serverName"]
+				},
+				"cloud": {
+					"title": "Weaviate cloud server",
+					"properties": ["weaviate.cloud.host", "weaviate.apikey", "vector.score", "vector.collection", "weaviate.serverName"]
+				}
+			}
 		}
 	]
 }

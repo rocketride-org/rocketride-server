@@ -21,17 +21,15 @@
 # SOFTWARE.
 # =============================================================================
 
-"""Whether a Chroma config talks to a local server, read the same way by the key check and the driver."""
+"""Whether a store config talks to a local server, read the same way by the key check and the driver."""
 
-from typing import Any, Dict
+from typing import Mapping
 
 
-def is_local(config: Dict[str, Any]) -> bool:
-    """True for a local server, which gets no key; False for a cloud or remote one.
+def is_local(config: Mapping) -> bool:
+    """True for a local server, which gets no key; False for a cloud server.
 
-    The merged node config carries the profile selection in 'mode': getNodeConfig
-    consumes the 'profile' key while merging the selected profile's contents, so
-    'profile' is absent when configured through a service config. It stays
-    as a fallback for direct configurations. No profile at all means local.
+    The resolved node config carries the host type in ``profile``, the
+    selector's own value.
     """
-    return (config.get('mode') or config.get('profile') or 'local') == 'local'
+    return config['profile'] == 'local'

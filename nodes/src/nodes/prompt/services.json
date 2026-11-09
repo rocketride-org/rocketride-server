@@ -72,21 +72,23 @@
 		"questions": ["questions"]
 	},
 	//
-	//	Optional:
-	//		Profile section are configuration optoins used by the driver
-	//		itself
+	// Optional:
+	//		Local property definitions. One list of instructions, stored flat.
 	//
-	"preconfig": {
-		// Define the values that will be merged into any profile configuration
-		// specified, unless the profile is 'absolute'
-		"default": "default",
-		// Defines profiles used with the "profile": key
-		"profiles": {
-			"default": {
-				"instructions": ["Please provide a detailed and helpful response to the following question:"]
-			}
+	"propertyDefinitions": {
+		"prompt.instructions": {
+			"type": "array",
+			"title": "Instructions",
+			"description": "Multiple instructions to add to questions before sending to LLM",
+			"default": ["Please provide a detailed and helpful response to the following question:"],
+			"item": { "name": "instruction", "type": "string", "format": "textarea" }
 		}
 	},
+	//
+	// Required:
+	//		Defines the properties shown in the pipeline builder side panel, in order
+	//
+	"properties": ["prompt.instructions"],
 	//
 	//	Test configuration for automated node testing
 	//
@@ -120,34 +122,5 @@
 				}
 			}
 		]
-	},
-	//
-	// Optional:
-	//		Local fields definitions - these define fields only for the
-	//		current service. You may specify them here, or directly
-	//		in the shape
-	//
-	"fields": {
-		"instructions": {
-			"type": "array",
-			"title": "Instructions",
-			"description": "Multiple instructions to add to questions before sending to LLM",
-			"items": {
-				"type": "string",
-				"format": "textarea"
-			}
-		}
-	},
-	//
-	// Required:
-	//		Defines the fields (shape) of the service. Either source or target
-	//		map be specified, or both, but at least one is required
-	//
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "Instructions",
-			"properties": ["instructions"]
-		}
-	]
+	}
 }
