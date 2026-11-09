@@ -22,7 +22,7 @@
 # SOFTWARE.
 # =============================================================================
 
-from rocketlib import IInstanceBase, AVI_ACTION, warning
+from rocketlib import IInstanceBase, AVI_ACTION
 from ai.common.image import ImageProcessor
 from .IGlobal import IGlobal
 
@@ -76,8 +76,7 @@ class IInstance(IInstanceBase):
                 image = ImageProcessor.load_image_from_bytes(self._image_data)
                 self._emit(image)
             except Exception as e:
-                warning(f'caption: inference failed, passing empty: {e}')
-                if self.instance.hasListener('text'):
-                    self.instance.writeText('')
-            self._image_data = None
+                raise RuntimeError('caption failed for the input frame') from e
+            finally:
+                self._image_data = None
             return self.preventDefault()

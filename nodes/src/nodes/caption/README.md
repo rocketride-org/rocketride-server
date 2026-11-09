@@ -30,9 +30,11 @@ With a model server configured, captioning runs there. Otherwise it runs locally
 
 ## Notes
 
-### Empty captions on failure
+### Failures and local timeouts
 
-The node runs captioning only when the `text` lane has a listener. If image decoding or caption inference raises an exception, it logs a warning and writes an empty string to that listener instead of propagating a result from the failed image.
+The node runs captioning only when the `text` lane has a listener. Image decoding and caption inference failures raise an error instead of writing an empty caption as a successful result.
+
+Local inference admits one worker per captioner. Its timeout includes waiting for that worker slot. A timed-out caller does not stop native inference: the worker keeps the slot until it actually finishes, so later requests cannot overlap a still-running model call. Disconnect rejects new local work without revoking the active worker's slot. A permanently stuck native worker requires task-process termination to reclaim it; Python cannot safely kill that thread.
 
 ## Upstream docs
 

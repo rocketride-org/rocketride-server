@@ -1,6 +1,9 @@
 """Unit tests for the caption loader + facade (no torch/transformers needed)."""
 
 import io
+import threading
+
+import pytest
 
 from PIL import Image
 
@@ -84,3 +87,78 @@ def test_facade_proxy_downscales_large_image(monkeypatch):
 
     sent = Image.open(io.BytesIO(captured['args']['data']))
     assert max(sent.size) <= 1024
+
+
+@pytest.fixture
+def local_captioner(monkeypatch):
+    monkeypatch.setattr(capmod, 'get_model_server_address', lambda: None)
+    monkeypatch.setattr(CaptionerLoader, 'load', staticmethod(lambda *a, **kw: ({}, {'device': 'cpu'}, -1)))
+    return Captioner(device='cpu')
+
+
+def test_timeout_does_not_admit_another_native_worker(monkeypatch, local_captioner):
+    monkeypatch.setattr(capmod, 'INFERENCE_TIMEOUT', 0.03)
+    release = threading.Event()
+    started = threading.Event()
+    calls = []
+
+    def infer(image, task):
+        calls.append(image)
+        started.set()
+        assert release.wait(5)
+        return 'done'
+
+    monkeypatch.setattr(local_captioner, '_infer_local', infer)
+    try:
+        for i in range(3):
+            with pytest.raises(TimeoutError):
+                local_captioner._caption_local(i, 'caption')
+        assert started.is_set()
+        assert calls == [0]
+        assert not local_captioner._local_gate.acquire(blocking=False)
+    finally:
+        release.set()
+    assert local_captioner._local_gate.acquire(timeout=5)
+    local_captioner._local_gate.release()
+    monkeypatch.setattr(local_captioner, '_infer_local', lambda *a: 'recovered')
+    assert local_captioner._caption_local(None, 'caption') == 'recovered'
+
+
+def test_forward_exception_releases_worker_slot(monkeypatch, local_captioner):
+    def fail(*args):
+        raise RuntimeError('inference failed')
+
+    monkeypatch.setattr(local_captioner, '_infer_local', fail)
+    with pytest.raises(RuntimeError, match='inference failed'):
+        local_captioner._caption_local(None, 'caption')
+    monkeypatch.setattr(local_captioner, '_infer_local', lambda *a: 'ok')
+    assert local_captioner._caption_local(None, 'caption') == 'ok'
+
+
+def test_worker_start_failure_returns_slot(monkeypatch, local_captioner):
+    def fail_start(*args, **kwargs):
+        raise RuntimeError('cannot start thread')
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(capmod.threading, 'Thread', fail_start)
+        with pytest.raises(RuntimeError, match='cannot start thread'):
+            local_captioner._caption_local(None, 'caption')
+    assert local_captioner._local_gate.acquire(blocking=False)
+    local_captioner._local_gate.release()
+
+
+def test_disconnect_does_not_release_timed_out_worker(monkeypatch, local_captioner):
+    monkeypatch.setattr(capmod, 'INFERENCE_TIMEOUT', 0.02)
+    release = threading.Event()
+    monkeypatch.setattr(local_captioner, '_infer_local', lambda *args: release.wait(5))
+    try:
+        with pytest.raises(TimeoutError):
+            local_captioner._caption_local(None, 'caption')
+        local_captioner.disconnect()
+        with pytest.raises(RuntimeError, match='closed'):
+            local_captioner._caption_local(None, 'caption')
+        assert not local_captioner._local_gate.acquire(blocking=False)
+    finally:
+        release.set()
+    assert local_captioner._local_gate.acquire(timeout=5)
+    local_captioner._local_gate.release()

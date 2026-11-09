@@ -59,7 +59,7 @@ TASKS = {
 }
 
 MAX_NEW_TOKENS = 256
-# Local-mode watchdog: Florence can hang on complex scenes; skip the frame past this.
+# Local-mode watchdog: fail the request past this; the native worker may still run.
 INFERENCE_TIMEOUT = 60
 
 # Long-edge (px) the input is downscaled to before captioning. Florence resizes
@@ -265,6 +265,9 @@ class Captioner:
 
         server_addr = get_model_server_address()
         self._proxy_mode = bool(server_addr) and (device is None or device == 'server')
+        self._local_gate = threading.BoundedSemaphore(1)
+        self._local_state_lock = threading.Lock()
+        self._local_closed = False
 
         if self._proxy_mode:
             self._client = ModelClient(server_addr)
@@ -326,16 +329,34 @@ class Captioner:
         """
         result: List[Optional[str]] = [None]
         error: List[Optional[BaseException]] = [None]
+        deadline = time.monotonic() + INFERENCE_TIMEOUT
+        with self._local_state_lock:
+            if self._local_closed:
+                raise RuntimeError('captioner is closed')
+        # Reserve before spawning: callers waiting behind a timed-out worker do
+        # not create an unbounded collection of watchdog threads.
+        if not self._local_gate.acquire(timeout=max(0.0, deadline - time.monotonic())):
+            raise TimeoutError('caption inference is still busy with a previous request')
 
         def _work():
             try:
                 result[0] = self._infer_local(image, task)
             except BaseException as exc:  # propagated to the caller after join
                 error[0] = exc
+            finally:
+                # Only completion of the actual worker returns this permit.
+                self._local_gate.release()
 
-        worker = threading.Thread(target=_work, daemon=True)
-        worker.start()
-        worker.join(timeout=INFERENCE_TIMEOUT)
+        try:
+            with self._local_state_lock:
+                if self._local_closed:
+                    raise RuntimeError('captioner is closed')
+                worker = threading.Thread(target=_work, daemon=True)
+                worker.start()
+        except BaseException:
+            self._local_gate.release()
+            raise
+        worker.join(timeout=max(0.0, deadline - time.monotonic()))
         if worker.is_alive():
             raise TimeoutError(f'caption inference timed out after {INFERENCE_TIMEOUT}s')
         if error[0] is not None:
@@ -374,7 +395,7 @@ class Captioner:
         return out[0]['caption']
 
     def disconnect(self) -> None:
-        """Release the model-server connection (proxy mode only); no-op locally.
+        """Close the connection or reject further local work without revoking a worker.
 
         Returns:
             None.
@@ -384,3 +405,6 @@ class Captioner:
                 self._client.disconnect()
             except Exception:
                 pass
+        else:
+            with self._local_state_lock:
+                self._local_closed = True
