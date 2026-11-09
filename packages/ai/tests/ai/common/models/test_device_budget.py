@@ -11,8 +11,10 @@ import pytest
 import ai.common.models.device_budget as budgetmod
 from ai.common.models.device_budget import DeviceBudget, _has_neighbour, device_budget
 
-_ENTERS = 5.0  # how long a call that may enter is given to enter
-_STAYS_OUT = 0.3  # how long a call that must wait is watched
+# generous for a starved CI runner: each wait ends as soon as what it waits for happens
+_ENTERS = 30.0  # how long a call is given to enter, to reach the queue, or to leave once let go
+_STAYS_OUT = 0.3  # how long a call waiting in the queue is watched
+_HOLD = 120.0  # a held call leaves on its own only after this, so a slow test never sees it leave
 MARGIN_MB = 512  # the margin the guard keeps; spelled here so a changed margin fails
 
 
@@ -83,7 +85,9 @@ class _Call:
             budget: The guard to enter.
             cost: The call's cost in MB, or ``None``.
         """
+        self._budget = budget
         self.entered = threading.Event()
+        self.out = threading.Event()
         self._leave = threading.Event()
         self._thread = threading.Thread(target=self._run, args=(budget, cost), daemon=True)
         self._thread.start()
@@ -97,37 +101,63 @@ class _Call:
         """
         with budget.reserve(cost):
             self.entered.set()
-            self._leave.wait(10)
+            self._leave.wait(_HOLD)
+        self.out.set()
 
     def enters(self):
         """Return whether the call enters within ``_ENTERS`` seconds."""
         return self.entered.wait(_ENTERS)
 
     def stays_out(self):
-        """Return whether the call is still out after ``_STAYS_OUT`` seconds."""
-        return not self.entered.wait(_STAYS_OUT)
+        """Return whether the call waits in the queue and is still out ``_STAYS_OUT`` seconds later."""
+        # a thread that has not started yet is out too, but not queued: order and drains differ
+        return _wait_for(lambda: self.entered.is_set() or self.waiting) and not self.entered.wait(_STAYS_OUT)
+
+    @property
+    def inside(self):
+        """Return whether the call is inside the guard now."""
+        return self.entered.is_set() and not self.out.is_set()
+
+    @property
+    def waiting(self):
+        """Return whether the call is in the guard's queue: it has waited there and not entered."""
+        return not self.entered.is_set() and self._thread in self._budget._cond.waited
+
+    def let_go(self):
+        """Let the call leave once it is inside, without waiting for it."""
+        self._leave.set()
 
     def leave(self):
         """Let the call leave and wait for its thread."""
-        self._leave.set()
-        self._thread.join(5)
+        self.let_go()
+        self._thread.join(_ENTERS)
+
+
+def _leave_all(calls):
+    """Let every call go before waiting for any: one still queued leaves once those inside are out.
+
+    Args:
+        calls: The calls to end, in any order.
+    """
+    for c in calls:
+        c.let_go()
+    for c in calls:
+        c.leave()
 
 
 def _inside(calls, expected):
-    """How many of ``calls`` are inside once ``expected`` had the time to enter and the rest to wait.
+    """How many of ``calls`` are inside at once, after ``expected`` had the time to enter and the rest to queue.
 
     Args:
         calls: The calls started.
         expected: How many of them should get in.
 
     Returns:
-        How many are inside.
+        How many are inside now; a call that entered and left is not counted.
     """
-    deadline = time.monotonic() + _ENTERS
-    while sum(c.entered.is_set() for c in calls) < expected and time.monotonic() < deadline:
-        time.sleep(0.01)
+    _wait_for(lambda: sum(c.inside for c in calls) >= expected and all(c.inside or c.waiting for c in calls))
     time.sleep(_STAYS_OUT)
-    return sum(c.entered.is_set() for c in calls)
+    return sum(c.inside for c in calls)
 
 
 def _wait_for(condition):
@@ -153,6 +183,75 @@ def _fast_recheck(monkeypatch):
     monkeypatch.setattr(budgetmod, 'IDLE_RELEASE_S', 60.0)  # tests of the idle release set their own
 
 
+class _Timers:
+    """Stands in for ``threading.Timer`` in the guard: records each idle timer; the test ends the idle spells."""
+
+    def __init__(self, monkeypatch):
+        """Route the guard's timers here; build the guard after this.
+
+        Args:
+            monkeypatch: The test's monkeypatch fixture.
+        """
+        self._due = []
+        self.intervals = []
+        monkeypatch.setattr(budgetmod, 'threading', types.SimpleNamespace(**{**vars(threading), 'Timer': self._timer}))
+
+    def _timer(self, interval, function, args=()):
+        """Return a timer whose ``start`` only records it.
+
+        Args:
+            interval: The idle spell the guard asks for; noted in ``intervals``, the test ends it.
+            function: What the timer runs.
+            args: Its arguments.
+
+        Returns:
+            The stand-in timer.
+        """
+        self.intervals.append(interval)
+        return types.SimpleNamespace(daemon=False, start=lambda: self._due.append((function, args)))
+
+    def end_idle_spells(self):
+        """Fire every timer started so far, in the order they started."""
+        due, self._due = self._due, []
+        for function, args in due:
+            function(*args)
+
+
+class _Cond(threading.Condition):
+    """The guard's condition, noting each thread that waited on it."""
+
+    def __init__(self):
+        """Start with no thread noted."""
+        super().__init__()
+        self.waited = set()
+
+    def wait(self, timeout=None):
+        """Note the calling thread, then wait as ``threading.Condition`` does.
+
+        Args:
+            timeout: How long to wait at most, in seconds; ``None`` waits for a notify.
+
+        Returns:
+            False if the wait timed out, True otherwise.
+        """
+        # the thread object, not its id: the OS hands a finished thread's id to a new one
+        self.waited.add(threading.current_thread())
+        return super().wait(timeout)
+
+
+def _watched(budget):
+    """Let tests see which calls wait in a new guard's queue.
+
+    Args:
+        budget: A guard no call has used yet.
+
+    Returns:
+        The same guard, on a condition that notes the threads that wait.
+    """
+    budget._cond = _Cond()
+    return budget
+
+
 def _gpu(probe, neighbours=None, release=None):
     """Build a GPU guard on fakes.
 
@@ -164,7 +263,7 @@ def _gpu(probe, neighbours=None, release=None):
     Returns:
         The guard of ``cuda:0``.
     """
-    return DeviceBudget('cuda:0', probe, neighbours or _Neighbours(), release or _Release())
+    return _watched(DeviceBudget('cuda:0', probe, neighbours or _Neighbours(), release or _Release()))
 
 
 def test_first_call_enters_whatever_it_costs():
@@ -238,8 +337,7 @@ def test_at_most_four_calls_on_a_gpu():
     budget = _gpu(_Probe(free=1e6))
     calls = [_Call(budget, 1) for _ in range(budgetmod.MAX_CONCURRENT + 1)]
     assert _inside(calls, budgetmod.MAX_CONCURRENT) == budgetmod.MAX_CONCURRENT
-    for c in calls:
-        c.leave()
+    _leave_all(calls)
 
 
 def test_calls_enter_in_arrival_order():
@@ -277,11 +375,10 @@ def test_unknown_cost_runs_alone():
 
 def test_cpu_slots():
     """A CPU guard admits ``CPU_SLOTS`` calls."""
-    budget = DeviceBudget('cpu')
+    budget = _watched(DeviceBudget('cpu'))
     calls = [_Call(budget, 1) for _ in range(budgetmod.CPU_SLOTS + 1)]
     assert _inside(calls, budgetmod.CPU_SLOTS) == budgetmod.CPU_SLOTS
-    for c in calls:
-        c.leave()
+    _leave_all(calls)
 
 
 def test_a_failed_call_leaves_the_guard():
@@ -350,34 +447,32 @@ def test_the_cache_is_kept_for_a_waiting_call(monkeypatch):
 
 def test_back_to_back_calls_keep_the_cache(monkeypatch):
     """Calls in quick succession keep the cache; one release follows the last."""
-    monkeypatch.setattr(budgetmod, 'IDLE_RELEASE_S', 0.5)
+    timers = _Timers(monkeypatch)
     release = _Release()
     budget = _gpu(_Probe(free=1e6), release=release)
     for _ in range(3):
         with budget.reserve(100):
             pass
-    assert release.count == 0
-    assert _wait_for(lambda: release.count >= 1)
-    time.sleep(0.6)  # past every earlier spell's timer
-    assert release.count == 1  # only the last idle spell releases
+    assert release.count == 0  # nothing goes back while the spells last
+    assert timers.intervals == [budgetmod.IDLE_RELEASE_S] * 3  # one spell per drain
+    timers.end_idle_spells()  # each drain's spell ends; only the last saw no call after it
+    assert release.count == 1
 
 
 def test_a_call_inside_when_the_idle_spell_ends_keeps_the_cache(monkeypatch):
     """A call that entered during the idle spell is not robbed of its cache when the timer fires."""
-    monkeypatch.setattr(budgetmod, 'IDLE_RELEASE_S', 1.0)
+    timers = _Timers(monkeypatch)
     budget = None
     release = _Release(lambda: budget)
     budget = _gpu(_Probe(free=1e6), release=release)
     with budget.reserve(100):
-        pass  # the device goes idle: a release is due in 1 s
-    drained = time.monotonic()
+        pass  # the device goes idle: a release is due
     call = _Call(budget, 100)
     assert call.enters()
-    assert time.monotonic() - drained < 1.0, 'the call must enter within the idle spell'
-    time.sleep(max(0.0, drained + 1.3 - time.monotonic()))
+    timers.end_idle_spells()  # the spell ends with the call inside
     assert release.count == 0
     call.leave()
-    assert _wait_for(lambda: release.count == 1)
+    timers.end_idle_spells()
     assert release.inside_at == [0]
 
 
