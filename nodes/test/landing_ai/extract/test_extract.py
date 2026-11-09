@@ -194,12 +194,12 @@ def test_extract_raises_on_deferred_schema_error() -> None:
 
 def test_resolve_api_key_reads_the_config_only(monkeypatch) -> None:
     """resolve_api_key uses the config key and never the process environment."""
-    monkeypatch.setenv('ROCKETRIDE_LANDING_AI_KEY', 'env-key')
+    monkeypatch.setenv('ROCKETRIDE_LANDING_AI_APIKEY', 'env-key')
     assert resolve_api_key({'api_key': 'cfg-key'}) == 'cfg-key'
     assert resolve_api_key({'api_key': '   '}) is None
     assert resolve_api_key({}) is None
 
-    monkeypatch.delenv('ROCKETRIDE_LANDING_AI_KEY', raising=False)
+    monkeypatch.delenv('ROCKETRIDE_LANDING_AI_APIKEY', raising=False)
     assert resolve_api_key({}) is None
 
 

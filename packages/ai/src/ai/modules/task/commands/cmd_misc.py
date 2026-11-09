@@ -85,8 +85,16 @@ def _config_errors(components: List[Any]) -> List[Dict[str, Any]]:
         schema = node_schema(provider) if provider else None
         if schema is None:
             continue
+        config = component.get('config')
+        if config is None:
+            config = {}
+        if not isinstance(config, dict):
+            # The same rule on_rrext_resolve_config applies: a config that is
+            # not an object is malformed, not empty
+            errors.append({'id': component.get('id') or provider, 'message': f'{provider}: config must be an object'})
+            continue
         try:
-            resolveConfig(schema, component.get('config') or {})
+            resolveConfig(schema, config)
         except ConfigError as e:
             errors.append({'id': component.get('id') or provider, 'message': f'{provider}: {e}'})
     return errors

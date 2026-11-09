@@ -1127,6 +1127,19 @@ async def test_on_rrext_validate_reports_config_errors_on_the_engine_list(monkey
 
 
 @pytest.mark.asyncio
+async def test_on_rrext_validate_rejects_a_config_that_is_not_an_object(monkeypatch):
+    """A falsy non-dict config ([]) is malformed, not empty: reported, never validated as {}."""
+    _schemas(monkeypatch)
+    monkeypatch.setattr(cmd_misc, 'validatePipeline', lambda payload: {})
+
+    conn = _make_conn()
+    pipeline = {'source': 'q1', 'components': [{'id': 'q1', 'provider': 'store_qdrant', 'config': []}]}
+    result = await MiscCommands.on_rrext_validate(conn, {'arguments': {'pipeline': pipeline}})
+
+    assert result['body']['errors'] == [{'id': 'q1', 'message': 'store_qdrant: config must be an object'}]
+
+
+@pytest.mark.asyncio
 async def test_on_rrext_validate_adds_no_errors_key_when_every_config_fits(monkeypatch):
     """A clean pipeline comes back exactly as the engine answered it."""
     _schemas(monkeypatch)

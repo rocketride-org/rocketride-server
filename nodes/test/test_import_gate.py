@@ -63,8 +63,10 @@ def _python_node_packages() -> List[str]:
         if '__pycache__' in service_file.parts:
             continue
         data = _parse_service_json(str(service_file))
-        if not data:
-            continue
+        if data is None:
+            # A definition this gate cannot read is a definition it cannot
+            # check: fail, like the other malformed-definition branches
+            pytest.fail(f'{service_file.relative_to(NODES_SRC)}: could not be parsed')
         path = data.get('path')
         if data.get('node') != 'python':
             # A C++ node names its directory in `path`; a python package path
