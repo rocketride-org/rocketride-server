@@ -31,18 +31,23 @@ def _public_pages_state(monkeypatch):
 
     The fresh ``PageMap`` holds the legacy aggregate, runs no rebuild and has
     its own rebuild lock (a lock binds to the event loop that first waits on
-    it). It keeps the swap listeners registered at import; the ones a test
-    adds are dropped with it. The artifact store is the hostile fixture's
-    in-memory ``FILES`` (empty unless a test seeds it), so unit tests never
-    touch a real store.
+    it). ``_built_at = inf`` keeps the refresh backstop from scheduling a
+    rebuild against the real account singleton. No web server is wired, so no
+    live route check is installed. The page map keeps the swap listeners
+    registered at import; the ones a test adds are dropped with it. The
+    artifact store is the hostile fixture's in-memory ``FILES`` (empty unless
+    a test seeds it), so unit tests never touch a real store.
     """
+    import ai.modules.shell.pages as pages
     import ai.modules.shell.public_pages as pp
 
     from .hostile_fixtures import FILES, file_info, read_file
 
     fresh = pp.PageMap()
+    fresh._built_at = float('inf')
     fresh.listeners.extend(pp.page_map.listeners)
     monkeypatch.setattr(pp, 'page_map', fresh)
+    monkeypatch.setattr(pages, '_web_server', None)
     FILES.clear()
     monkeypatch.setattr(pp, 'read_artifact_file', read_file)
     monkeypatch.setattr(pp, 'artifact_file_info', file_info)

@@ -66,7 +66,7 @@ from ai.web import oauth_resource
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.routing import compile_path
-from rocketlib import debug
+from rocketlib import debug, warning
 from rocketride import CONST_WS_PING_INTERVAL, CONST_WS_PING_TIMEOUT
 from ai.constants import CONST_DEFAULT_WEB_PORT, CONST_DEFAULT_WEB_HOST, CONST_WEB_WS_MAX_SIZE
 from ai.web import exception, error, Result
@@ -243,6 +243,9 @@ class WebServer:
         self._public_paths = ['/redoc', '/openapi.json']
         self._compiled_public_paths = None
         self._compiled_private_paths = None
+        # Dynamic public-path predicates (data-driven routes, e.g. the shell's
+        # public pages), consulted after the static patterns.
+        self._public_predicates: List[Callable[[str], bool]] = []
 
         # Add our metrics middleware to the app
         self.app.add_middleware(AuthMiddleware)
@@ -911,8 +914,32 @@ class WebServer:
             if regex.match(path):
                 return True
 
+        # Data-driven public paths (e.g. the shell's public pages). A predicate
+        # that raises fails closed: the path stays private.
+        for predicate in self._public_predicates:
+            try:
+                if predicate(path):
+                    return True
+            except Exception as exc:
+                warning(f'public-path predicate failed for {path!r}: {exc}')
+
         # Path did not match any public pattern — treat as private by default
         return False
+
+    def add_public_predicate(self, predicate: Callable[[str], bool]) -> None:
+        """
+        Register a dynamic ``path -> bool`` public-route predicate.
+
+        For routes whose public paths are data, not registrations (one
+        catch-all serving a changing set of paths): registering the
+        catch-all ``public=True`` would make every path public, private API
+        routes included. A predicate marks only the paths it claims.
+        Private routes still override it.
+
+        Args:
+            predicate: Called with the request path; True means no auth required.
+        """
+        self._public_predicates.append(predicate)
 
     def add_authenticator(
         self,

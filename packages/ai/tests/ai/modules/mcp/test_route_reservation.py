@@ -64,11 +64,20 @@ def _web_server(monkeypatch, tmp_path, built):
     """
     pytest.importorskip('rocketlib')  # WebServer needs the engine env
     import ai.modules.mcp as mcp_module
+    import ai.modules.shell.pages as pages
+    import ai.modules.shell.public_pages as public_pages
     import ai.modules.shell.shell as shell_mod
     from ai.web.server import WebServer
 
     (tmp_path / 'index.html').write_text(_SHELL_HTML)
     monkeypatch.setattr(shell_mod, '_shell_root', str(tmp_path))
+    # Loading the shell wires the page map to this server: restore it after
+    # the test, and keep the refresh backstop away from the real store.
+    monkeypatch.setattr(pages, '_web_server', None)
+    fresh = public_pages.PageMap()
+    fresh._built_at = float('inf')
+    fresh.listeners.extend(public_pages.page_map.listeners)
+    monkeypatch.setattr(public_pages, 'page_map', fresh)
     monkeypatch.setattr(mcp_module, 'make_engine_client', _recording_factory(built))
 
     server = WebServer()
@@ -148,17 +157,94 @@ def test_mcp_paths_are_not_public(monkeypatch, tmp_path):
 # --- the marketing page moved, and still serves publicly -------------------
 
 
+async def _register_public_pages(monkeypatch, server):
+    """What eaas does after mcp and the account layer: the catch-all last, on the legacy page list (no store here)."""
+    import ai.modules.shell.public_pages as public_pages
+    from ai.modules.shell import register_public_pages
+
+    async def no_store(acct=None):
+        return False
+
+    monkeypatch.setattr(public_pages.page_map, 'rebuild', no_store)
+    await register_public_pages(server)
+
+
 @pytest.mark.asyncio
 async def test_mcp_server_page_is_public_and_served(monkeypatch, tmp_path):
     server = _web_server(monkeypatch, tmp_path, [])
     _eaas_order(server)
+    await _register_public_pages(monkeypatch, server)
 
     assert server.is_public_route('/mcp-server') is True
     async with _serve(server) as app:
         resp = await app.get('/mcp-server')
 
     assert resp.status_code == 200
-    assert '<title>shell</title>' in resp.text
+    # The shell document, with the page's head metadata injected.
+    assert '<title>MCP | RocketRide</title>' in resp.text
+
+
+@pytest.mark.asyncio
+async def test_the_catch_all_never_opens_the_mcp_paths(monkeypatch, tmp_path):
+    built = []
+    server = _web_server(monkeypatch, tmp_path, built)
+    _eaas_order(server)
+    await _register_public_pages(monkeypatch, server)
+
+    for path in ('/mcp', '/mcp/', '/mcp/anything'):
+        assert server.is_public_route(path) is False, path
+    async with _serve(server) as app:
+        resp = await app.post('/mcp', json=_TOOLS_CALL, headers=_HEADERS)
+    assert resp.status_code == 401 and 'resource_metadata=' in resp.headers.get('www-authenticate', '')
+    assert built == []
+
+
+# --- the page validator against the real route table ------------------------
+
+
+@pytest.mark.asyncio
+async def test_page_paths_on_the_mcp_api_are_rejected_as_reserved_and_live(monkeypatch, tmp_path):
+    import ai.modules.shell.public_pages as public_pages
+    from ai.modules.shell.contract import check_manifest
+
+    server = _web_server(monkeypatch, tmp_path, [])
+    _eaas_order(server)
+    await _register_public_pages(monkeypatch, server)
+
+    live = public_pages.live_conflict()
+    for path in ('/mcp', '/mcp/x'):
+        assert live(path) is not None, path  # the MCP endpoint and its Mount
+        manifest = {'publicPages': [{'path': '/', 'title': 'Home'}, {'path': path, 'title': 'MCP'}]}
+        pages, _, errors = check_manifest('rocketride.home', manifest, live)
+        assert [p.path for p in pages] == ['/'], path
+        assert len(errors) == 1 and "reserved prefix '/mcp'" in errors[0], path
+
+
+@pytest.mark.asyncio
+async def test_a_page_path_is_rejected_only_while_it_is_a_live_route(monkeypatch, tmp_path):
+    import ai.modules.shell.public_pages as public_pages
+    from ai.modules.shell.contract import check_manifest
+    from ai.modules.shell.legacy_manifest import _legacy_manifest
+    from ai.modules.shell.shell import shell_static
+
+    manifest = _legacy_manifest()
+    paths = [page['path'] for page in manifest['publicPages']]
+
+    # The shell registers no page routes: every home-ui page path is free.
+    server = _web_server(monkeypatch, tmp_path, [])
+    _eaas_order(server)
+    await _register_public_pages(monkeypatch, server)
+    pages, _, errors = check_manifest('rocketride.home', manifest, public_pages.live_conflict())
+    assert errors == [] and [p.path for p in pages] == paths
+
+    # A page path a real route serves (as the shell's per-page routes did) is refused.
+    server = _web_server(monkeypatch, tmp_path, [])
+    _eaas_order(server)
+    server.add_route(path='/pricing', routeHandler=shell_static, methods=['GET'], public=True)
+    await _register_public_pages(monkeypatch, server)
+    pages, _, errors = check_manifest('rocketride.home', manifest, public_pages.live_conflict())
+    assert '/pricing' not in [p.path for p in pages]
+    assert len(errors) == 1 and 'collides with the live server route GET /pricing' in errors[0]
 
 
 # --- authenticated callers reach the handler on both path forms -----------
