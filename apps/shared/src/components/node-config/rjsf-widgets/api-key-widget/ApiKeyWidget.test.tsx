@@ -59,4 +59,6 @@ test('an already-saved API key keeps its existing masked read-only display', () 
 	const markup = renderToStaticMarkup(<WidgetForTest {...baseProps} value="sk-abc123xyz" />);
 	assert.match(markup, /type="text"/);
 	assert.doesNotMatch(markup, /type="password"/);
+	assert.doesNotMatch(markup, /sk-abc123xyz/);
+	assert.match(markup, /<input\b[^>]*\sreadonly(?:\s|=|\/?>)/i);
 });

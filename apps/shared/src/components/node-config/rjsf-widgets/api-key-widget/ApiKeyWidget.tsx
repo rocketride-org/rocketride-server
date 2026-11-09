@@ -186,9 +186,9 @@ const ApiKeyWidget: FC<WidgetProps> = ({ id, value, label, required, autofocus, 
 										/>
 									</Tooltip>
 								) : (
-									<Tooltip title={showRawValue ? t('form.apiKeyHideTooltip') : t('form.apiKeyShowTooltip')}>
+									<Tooltip title={showRawValue ? t('form.apiKeyHideTooltip', 'Hide API key') : t('form.apiKeyShowTooltip', 'Show API key')}>
 										<IconButton
-											aria-label={showRawValue ? t('form.apiKeyHideTooltip') : t('form.apiKeyShowTooltip')}
+											aria-label={showRawValue ? t('form.apiKeyHideTooltip', 'Hide API key') : t('form.apiKeyShowTooltip', 'Show API key')}
 											onClick={() => setShowRawValue((prev) => !prev)}
 											edge="end"
 											size="small"
