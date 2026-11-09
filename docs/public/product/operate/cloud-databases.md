@@ -83,9 +83,12 @@ cut, and a run that needs it fails at start. Its data is kept for 30 days.
   of one database. There is no restore of one organization's, team's or
   member's database, and no self-service restore. The 30-day retention above is
   the only undo for a single database.
-- A database the cleanup deleted stays in the backups until they are pruned
-  after 30 days. The storage keeps pruned backup files for up to 35 more days,
-  so its data can survive for about 65 days in all.
+- After a member, team or organization is removed, its data remains in
+  separate places, each with its own clock:
+  1. The database itself: kept 30 days after the removal.
+  2. Backups that hold it: kept 30 days after the database is deleted.
+  3. Backup files pruned after that: kept up to 35 more days.
+  4. The final copy taken before deletion: no expiry is set today.
 
 ## Export
 
