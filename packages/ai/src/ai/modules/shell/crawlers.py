@@ -44,16 +44,29 @@ CRAWLERS: Tuple[str, ...] = (
     'Googlebot',
     'Bingbot',
     'DuckDuckBot',
+    'GoogleOther',
+    # Search Console's URL Inspection and live test: without it the inspector
+    # renders the human path and never shows what Googlebot is served.
+    'Google-InspectionTool',
+    'Amazonbot',
     # AI
     'GPTBot',
     'OAI-SearchBot',
     'ChatGPT-User',
     'ClaudeBot',
     'Claude-User',
+    'Claude-SearchBot',
     'PerplexityBot',
     'Perplexity-User',
     'CCBot',
     'Google-Extended',
+    'Google-CloudVertexBot',
+    'DuckAssistBot',
+    'Meta-ExternalAgent',
+    'meta-externalfetcher',
+    'MistralAI-User',
+    # Robots-only token (Apple's AI-training opt-out); never in a UA.
+    'Applebot-Extended',
     # Unfurlers
     'facebookexternalhit',
     'Twitterbot',
