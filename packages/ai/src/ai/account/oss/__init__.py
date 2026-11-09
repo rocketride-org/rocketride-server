@@ -502,14 +502,16 @@ class Account(AccountBase):
                     elif value != ENV_MASK:
                         env[name] = value
 
-                # A value the process environment cannot hold (a non-ASCII one under
-                # an ASCII locale) is refused before anything is written
+                # A name or value the process environment cannot hold (a non-ASCII
+                # one under an ASCII locale) is refused before anything is written
                 try:
-                    for value in env.values():
+                    for name, value in env.items():
+                        os.environ.encodekey(name)
                         os.environ.encodevalue(value)
                 except UnicodeError:
                     return conn.build_error(
-                        request, "A value cannot be held in this engine's environment (its locale); nothing was saved."
+                        request,
+                        "A name or value cannot be held in this engine's environment (its locale); nothing was saved.",
                     )
 
                 # Step 1: Persist to the .env file first, so a file that cannot be

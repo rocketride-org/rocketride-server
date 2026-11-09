@@ -15,6 +15,7 @@
 import React, { useState, useCallback } from 'react';
 import { EnvironmentView } from '../modules/environment';
 import type { EnvironmentSlotConfig, EnvironmentScope } from '../modules/environment';
+import { savedEnv } from '../modules/account/components/envChanges';
 import { useShellConnection } from '../connection/ConnectionContext';
 import { useAuthUser } from '../hooks/useAuthUser';
 
@@ -101,8 +102,8 @@ const EnvironmentProvider: React.FC = () => {
 
 	// ── Save callback ───────────────────────────────────────────────────
 	/**
-	 * Persists env changes for a scope, then reloads the masked names so the
-	 * cache never holds a typed value.
+	 * Persists env changes for a scope; the cache then holds the saved names,
+	 * each masked, so it never holds a typed value.
 	 *
 	 * @param slotId - Slot identifier (always 'default' in shell).
 	 * @param scope - Env scope: 'org', 'team', or 'user'.
@@ -113,10 +114,10 @@ const EnvironmentProvider: React.FC = () => {
 		async (slotId: string, scope: EnvironmentScope, env: Record<string, string | null>, scopeId?: string) => {
 			if (!client) return;
 			await client.account.setEnv(scope, env, scopeId);
-			// The save is done; a reload that fails shows its own error
-			handleLoadEnv(slotId, scope, scopeId);
+			const cacheKey = `${slotId}:${scope}:${scopeId ?? ''}`;
+			setEnvs((prev) => ({ ...prev, [cacheKey]: savedEnv(env) }));
 		},
-		[client, handleLoadEnv]
+		[client]
 	);
 
 	// ── Render ───────────────────────────────────────────────────────────

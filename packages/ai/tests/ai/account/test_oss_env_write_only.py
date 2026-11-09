@@ -213,6 +213,24 @@ def test_a_value_the_process_environment_cannot_hold_writes_nothing(env_file, mo
     assert not env_file.exists()
 
 
+def test_a_name_the_process_environment_cannot_hold_writes_nothing(env_file, monkeypatch):
+    """Under an ASCII locale os.environ cannot hold a non-ASCII name: refused before memory or file change."""
+    monkeypatch.setenv('ROCKETRIDE_A', 'kept')
+    encode = os.environ.encodekey
+
+    def ascii_locale(name):
+        name.encode('ascii')
+        return encode(name)
+
+    monkeypatch.setattr(os.environ, 'encodekey', ascii_locale)
+
+    resp = _call('update_env', env={'ROCKETRIDE_CL\u00c9': 'v'})
+
+    assert resp['ok'] is False and 'nothing was saved' in resp['message']
+    assert os.environ['ROCKETRIDE_A'] == 'kept' and all(k != 'ROCKETRIDE_CL\u00c9' for k in os.environ)
+    assert not env_file.exists()
+
+
 @pytest.mark.parametrize(
     'name',
     [

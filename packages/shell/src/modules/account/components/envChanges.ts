@@ -3,6 +3,9 @@
 // Copyright (c) 2026 Aparavi Software AG
 // =============================================================================
 
+/** What the server answers in place of each stored value. */
+export const ENV_MASK = '••••••••';
+
 /**
  * The changes a saved draft makes to a scope's environment.
  *
@@ -24,4 +27,19 @@ export function envChanges(draft: [string, string][], stored: Record<string, str
 		if (!(key in changes)) changes[key] = null;
 	}
 	return changes;
+}
+
+/**
+ * The names a scope holds once the server confirmed a save: each name set or
+ * kept shows the mask, and a deleted one is gone.
+ *
+ * @param changes - What the save sent (from envChanges).
+ * @returns The saved names, each mapped to the mask.
+ */
+export function savedEnv(changes: Record<string, string | null>): Record<string, string> {
+	const saved: Record<string, string> = {};
+	for (const [key, value] of Object.entries(changes)) {
+		if (value !== null) saved[key] = ENV_MASK;
+	}
+	return saved;
 }
