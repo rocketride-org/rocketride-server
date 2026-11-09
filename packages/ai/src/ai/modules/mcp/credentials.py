@@ -198,7 +198,21 @@ def evaluate(spec: Integration, env_keys: Optional[List[str]]) -> dict:
     have = set(env_keys)
     missing = [f.suggests for f in required if f.suggests not in have]
     if not missing:
-        wiring = nest_wiring({f.path: '${' + f.suggests + '}' for f in spec.fields if f.required or f.suggests in have})
+        flat = {f.path: '${' + f.suggests + '}' for f in spec.fields if f.required or f.suggests in have}
+        try:
+            wiring = nest_wiring(flat)
+        except ValueError as exc:
+            # A definition declaring a credential on both a group and its child
+            # cannot be wired as one tree. Report the node unconfirmed instead of
+            # failing the whole listing, so every other node stays discoverable.
+            logger.warning('%s: credential paths collide, wiring withheld: %s', spec.name, exc)
+            return {
+                'status': 'unconfirmed',
+                'env_error': False,
+                'missing': [],
+                'candidates': sorted(flat),
+                'wiring': None,
+            }
         return {'status': 'configured', 'env_error': False, 'missing': [], 'candidates': [], 'wiring': wiring}
     tokens = node_tokens(spec.name)
     # Match on name *parts*, not raw substrings: a part must start with the

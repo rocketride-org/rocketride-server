@@ -222,6 +222,27 @@ def test_nest_wiring_rejects_a_leaf_that_is_also_a_group():
         creds.nest_wiring({'cloud.apikey': '${B}', 'cloud': '${A}'})
 
 
+def test_a_credential_path_collision_degrades_that_node_instead_of_failing(caplog):
+    # A group and its child both carrying env: the tree cannot hold both; the
+    # node is reported unconfirmed, the listing survives
+    spec = creds.Integration(
+        name='odd_node',
+        title='Odd',
+        docs='',
+        fields=(
+            creds.CredField(path='cloud', title='Cloud', kind='text', required=True, suggests='ROCKETRIDE_ODD_CLOUD'),
+            creds.CredField(
+                path='cloud.apikey', title='Key', kind='secret', required=True, suggests='ROCKETRIDE_ODD_KEY'
+            ),
+        ),
+    )
+    state = creds.evaluate(spec, ['ROCKETRIDE_ODD_CLOUD', 'ROCKETRIDE_ODD_KEY'])
+    assert state['status'] == 'unconfirmed'
+    assert state['wiring'] is None
+    assert state['candidates'] == ['cloud', 'cloud.apikey']
+    assert 'credential paths collide' in caplog.text
+
+
 def test_configured_wiring_is_nested_where_the_resolver_and_encrypt_walk_read():
     """A caller copying `wiring` into config.parameters must land the secret at
     its nested path: that is where the engine's encrypt walk looks for it.
