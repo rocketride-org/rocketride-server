@@ -14,17 +14,15 @@ import time
 import json
 import contextvars
 from typing import Dict, Any, Callable, Optional
-from rocketlib import debug, getServiceDefinition, warning
+from rocketlib import debug, warning
 from ai.common.schema import Answer, Question
-from ai.common.config import Config, check_credential_resolved
+from ai.common.config import check_credential_resolved
 from ai.common.util import EmptyResponseError, ThinkTruncatedError, parseJson
 from ai.common.validation import (
     validate_model_name,
     validate_max_tokens,
     sanitize_prompt,
     validate_prompt,
-    check_output_token_config,
-    hand_supplied_token_fields,
 )
 from ai.common.llm_native_stream import PROMPT_CACHE_PREFIX_VAR, STOP_SEQUENCES_VAR, dispatch_native_chat_stream
 from ai.common.llm_adapter import LangChainAdapter, NativeOpenAIResponsesAdapter, drive_adapter
@@ -111,47 +109,28 @@ class ChatBase:
         Raises:
             ConfigurationError: If the provider configuration is invalid or missing
         """
-        # A converted node (its definition has no "preconfig") passes the
-        # resolver's view as connConfig: defaults applied, the active branch
-        # flattened, keys read by path. An unconverted node keeps the preconfig
-        # merge until common/config.py is deleted (plan Step 2 item 5).
-        definition = getServiceDefinition(provider)
-        converted = definition is not None and 'preconfig' not in definition
-        config = connConfig if converted else Config.getNodeConfig(provider, connConfig)
-        # The resolved config, for the provider subclasses: they read their own
-        # keys (serverbase, region, temperature, ...) from here, never resolving again.
+        # connConfig is the resolver's view of the node's config (the IGlobal's
+        # self.config): defaults applied, the active branch flattened, keys read
+        # by path. The provider subclasses read their own keys (serverbase,
+        # region, temperature, ...) from here, never resolving again.
+        config = connConfig
         self._config = config
 
         # A key still written as ${ROCKETRIDE_...} would go to the provider as the key,
         # and the user would see an "invalid API key" reply instead of the missing name.
-        check_credential_resolved(provider, 'apikey', config.get('apikey'), None if converted else connConfig)
+        check_credential_resolved(provider, 'apikey', config.get('apikey'))
 
         # Extract model configuration - these are the core settings that control
-        # how the chat driver behaves with respect to token limits. A converted
-        # definition's model selector may have a "custom" branch whose free-text id
-        # lives in customModel; that leaf is reachable only on that branch, so its
+        # how the chat driver behaves with respect to token limits. A model
+        # selector may have a "custom" branch whose free-text id lives in
+        # customModel; that leaf is reachable only on that branch, so its
         # presence (not the selector value) says the id lives there.
         model = config.get('customModel') or config.get('model')
         self._model = validate_model_name(model)
         # An unset optional leaf resolves to None in the view (defaults are never
-        # written), so "or" keeps the node's fallback for both config shapes.
+        # written), so "or" keeps the node's fallback.
         self._modelTotalTokens = config.get('modelTotalTokens') or 16384  # Default to 16K if not specified
         self._modelOutputTokens = config.get('modelOutputTokens') or 4096  # Default to 4K if not specified
-
-        # Check what the author wrote, before the clamp below rewrites it — a value the
-        # provider would reject can be clamped into a plausible-looking one, and then
-        # there is nothing left to report. Only when a token field was hand-supplied:
-        # catalogue profiles are checked by the model sync, and warning about those on
-        # every run would be noise. Hand-written config is what the sync never sees.
-        if not converted and hand_supplied_token_fields(connConfig):
-            problem = check_output_token_config(
-                self._model,
-                self._modelOutputTokens,
-                self._modelTotalTokens,
-                Config.getNodeProfiles(provider),
-            )
-            if problem:
-                warning(f'{provider}: {problem}')
 
         # Validate and clamp output tokens against known safe maximums
         self._modelOutputTokens = validate_max_tokens(self._modelOutputTokens, self._modelTotalTokens)
@@ -166,10 +145,9 @@ class ChatBase:
         debug(f'    Total tokens             : {self._modelTotalTokens}')
         debug(f'    Output tokens            : {self._modelOutputTokens}')
 
-        # Reasoning capability comes from services.json (stamped by the model sync): a
-        # converted definition pins it as the branch constant "reasoning", an
-        # unconverted profile carries it under "capabilities".
-        self._is_reasoning = bool(config.get('reasoning')) or bool((config.get('capabilities') or {}).get('reasoning'))
+        # Reasoning capability comes from services.json (stamped by the model sync),
+        # pinned as the model branch's constant "reasoning".
+        self._is_reasoning = bool(config.get('reasoning'))
 
     def _ensure_openai_compat_reasoning_stream(self) -> None:
         """Lazily build the raw openai client used to stream reasoning for

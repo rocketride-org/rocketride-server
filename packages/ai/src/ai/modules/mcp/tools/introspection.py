@@ -175,14 +175,15 @@ async def _resolve_config(client, tasks, args: Dict[str, Any]) -> dict:
         return err
 
     result = resolved or {}
-    # Surface the discard rather than leaving it to be inferred from an absence:
-    # a key written beside 'profile' instead of inside it never reaches the node.
-    dropped = result.get('dropped') or []
+    # A per-call parameter is not fixed by the config: the value shown is the
+    # default a caller sees unless it passes its own. Say so rather than leaving
+    # the author to read it as the node's setting.
+    param_keys = result.get('paramKeys') or []
     out = {'ok': True, **result}
-    if dropped:
+    if param_keys:
         out['hint'] = (
-            f'{len(dropped)} config key(s) were discarded because a profile is set: {", ".join(dropped)}. '
-            f'Move them inside the "{result.get("profile")}" object to take effect.'
+            f'{len(param_keys)} key(s) are per-call parameters: {", ".join(param_keys)}. '
+            'The resolved value is the default a caller gets unless it passes its own.'
         )
     return out
 
@@ -252,8 +253,10 @@ def register(registry: ToolRegistry) -> None:
 
     registry.register(
         'resolve_config',
-        'Show what a component config resolves to at load: the engine applies profile and default '
-        'merging, so the .pipe rarely says what the node receives. Reports discarded keys.',
+        'Show what a component config resolves to at load: the engine applies the schema defaults and '
+        'flattens the selected branch, so the .pipe rarely says what the node receives. A config that '
+        'does not fit the schema (unknown key, bad value) is an error naming the key. Also reports each '
+        "key's stored path and which keys are per-call parameters.",
         {
             'type': 'object',
             'properties': {

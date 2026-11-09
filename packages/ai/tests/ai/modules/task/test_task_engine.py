@@ -969,13 +969,14 @@ async def test_subprocess_env_hosted_missing_broker_warns_and_directs_to_operato
 # _build_subprocess_env — per-scope authorization and the DSN map (SDD 4.6)
 # ---------------------------------------------------------------------------
 
-# One component per node type, in the shapes the canvas saves: nested under
-# the profile name (sql 'default', vector 'cloud'), or flat.
+# One component per node type, in the shape the canvas saves: a tree addressed
+# by the schema paths (these nodes' properties all live at the root), with the
+# unset keys left to their defaults (sql: the org database).
 _SCOPED_PIPELINE = {
     'components': [
         {'id': 'chat_1', 'provider': 'chat', 'config': {'mode': 'Source'}},
-        {'id': 'sql_1', 'provider': 'rocketride_sql', 'config': {'profile': 'default', 'default': {'table': 't'}}},
-        {'id': 'vec_1', 'provider': 'rocketride_vector', 'config': {'profile': 'cloud', 'cloud': {'scope': 'team'}}},
+        {'id': 'sql_1', 'provider': 'rocketride_sql', 'config': {'table': 't'}},
+        {'id': 'vec_1', 'provider': 'rocketride_vector', 'config': {'scope': 'team'}},
         {'id': 'graph_1', 'provider': 'rocketride_graph', 'config': {'scope': 'user', 'target': 'user-2'}},
     ]
 }
@@ -1135,9 +1136,10 @@ async def test_the_engine_resolves_the_database_the_decision_named(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_malformed_scope_fails_task_start(monkeypatch):
+    """The resolver refuses the value against the schema's enum before the DB layer sees it."""
     calls = _fake_db_account(monkeypatch)
     pipeline = {'components': [{'id': 'sql_1', 'provider': 'rocketride_sql', 'config': {'scope': 'everyone'}}]}
-    with pytest.raises(ValueError, match='sql_1: scope must be one of org, team, user'):
+    with pytest.raises(ValueError, match="sql_1: \"scope\" must be one of \\['org', 'team', 'user'\\], got 'everyone'"):
         await _build_env(_env_task(pipeline=pipeline))
     assert calls['authorize'] == []
 
@@ -2195,16 +2197,17 @@ def _get_service(provider):
 
 
 def _mcp_node_config(provider, config):
-    """Stand-in for Config.getNodeConfig: profile defaults under the component config."""
-    profiles = {
-        'default': {'transport': _DEFAULT_TRANSPORT[provider.lower()]},
-        'RocketRide': {'transport': 'stdio'},
-        'sse': {'transport': 'sse'},
-    }
-    profile = config.get('profile', 'default')
-    if profile not in profiles:
-        raise Exception(f'Profile {profile} is not defined in {provider}')
-    return {**profiles[profile], **{k: v for k, v in config.items() if k != 'profile'}}
+    """Stand-in for resolve_node_config: schema defaults under the component config.
+
+    Like the resolver, a key the schema does not declare is a ConfigError.
+    """
+    from rocketlib import ConfigError
+
+    defaults = {'transport': _DEFAULT_TRANSPORT[provider.lower()], 'commandLine': ''}
+    unknown = sorted(set(config) - set(defaults))
+    if unknown:
+        raise ConfigError(f'unknown config key "{unknown[0]}"')
+    return {**defaults, **{k: v for k, v in config.items() if v is not None}}
 
 
 def _violation(*components):
@@ -2214,7 +2217,7 @@ def _violation(*components):
 def test_saas_gate_allows_ordinary_nodes_and_http_mcp():
     assert _violation({'id': 'a', 'provider': 'llm_openai'}) is None
     assert _violation({'id': 'm', 'provider': 'mcp_client', 'config': {'transport': 'streamable-http'}}) is None
-    assert _violation({'id': 'm', 'provider': 'mcp_client', 'config': {'profile': 'sse'}}) is None
+    assert _violation({'id': 'm', 'provider': 'mcp_client', 'config': {'transport': 'sse'}}) is None
     assert _violation({'id': 'b', 'provider': 'tool_butterbase', 'config': {}}) is None  # HTTP by default
 
 
@@ -2225,12 +2228,11 @@ def test_saas_gate_refuses_nosaas_nodes():
 @pytest.mark.parametrize(
     'config',
     [
-        {},  # default profile is stdio
-        {'profile': 'RocketRide'},
+        {},  # the schema default is stdio
         {'transport': 'stdio'},
         {'transport': 'STDIO '},
-        {'profile': 'sse', 'transport': 'stdio'},  # component value wins over the profile
-        {'profile': 'nope'},  # unresolvable -> refused
+        {'transport': None},  # unset means the default, which is stdio
+        {'profile': 'sse'},  # the old profile shape is an unknown key: unresolvable -> refused
     ],
 )
 def test_saas_gate_refuses_stdio_mcp(config):

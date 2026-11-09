@@ -23,7 +23,7 @@ the MCP `is_error` flag mirrors it, and `structured_content` mirrors the text JS
 |---|---|---|
 | `list_components` | — | `{ok, components: [{name, category, summary, wiring?}], note?}`. **No `lanes`/`invoke`** — wire from the bundled L1 index. Components whose integration isn't configured are **hidden**, with `note` pointing at `list_integrations`. |
 | `describe_component` | `{name}` | Full service definition (the L2 schema). |
-| `resolve_config` | `{provider, config?}` | `{ok, ...engine resolution, hint?}` — what a component config actually becomes at load, after profile and default merging; omit `config` for defaults. Discarded keys come back as `dropped` plus a `hint` naming the profile they belong inside. |
+| `resolve_config` | `{provider, config?}` | `{ok, provider, resolved, paths, params, paramKeys, envKeys, hint?}` — what a component config actually becomes at load: schema defaults applied, the selected branch flattened; omit `config` for defaults. `paths` maps each key to where it is stored; `paramKeys` (with a `hint`) names the per-call parameters. A config that does not fit the schema is an error naming the key. |
 | `validate_pipeline` | `{pipeline}` (inline object) | `{ok, errors, warnings}` — the compiler. Zero errors before any run. |
 | `describe_pipeline` | `{pipeline}` | Static per-node summary (preflight aid, not a gate). |
 

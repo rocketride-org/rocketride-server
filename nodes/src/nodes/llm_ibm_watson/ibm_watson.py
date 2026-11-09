@@ -24,7 +24,6 @@
 import re
 from typing import Any, Dict
 from ai.common.chat import ChatBase
-from ai.common.config import Config
 from ai.common.llm_adapter import report_llm_tokens
 from ibm_watsonx_ai import Credentials
 from ibm_watsonx_ai.foundation_models import ModelInference
@@ -116,8 +115,8 @@ class Chat(ChatBase):
         """
         super().__init__(provider, connConfig, bag)
 
-        # Get the configuration
-        config = Config.getNodeConfig(provider, connConfig)
+        # The resolved configuration view (ChatBase keeps it)
+        config = self._config
 
         location = config.get('location')
         url = _validate_location(location)

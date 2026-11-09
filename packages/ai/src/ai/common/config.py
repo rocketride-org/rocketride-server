@@ -1,15 +1,9 @@
-import json
 import json5
 import re
 import sys
 import os
-import difflib
-from typing import Dict, Any, Optional
-from rocketlib import getServiceDefinition, IJson, warning
-
-# Token limits. Several pipeline shapes can hold them (see getNodeConfig), and a
-# value written in two places with two values is worth a warning.
-_LIMIT_FIELDS = ('modelTotalTokens', 'modelOutputTokens')
+from typing import Dict, Any
+from rocketlib import warning
 
 # A ${...} left in a config value means no variable had that name when the task
 # started (ai.modules.task.pipeline.resolve_pipeline_env keeps unknown ones as-is).
@@ -22,7 +16,7 @@ class UnresolvedCredentialError(ValueError):
     """A credential still holds a ``${...}`` or ``<REDACTED>`` placeholder that no variable filled."""
 
 
-def check_credential_resolved(logicalType: str, field: str, value: Any, connConfig: Any = None) -> None:
+def check_credential_resolved(logicalType: str, field: str, value: Any) -> None:
     """Raise a clear error when a credential still holds a placeholder no variable filled.
 
     Without this the placeholder text is sent to the provider as the credential, and
@@ -34,11 +28,6 @@ def check_credential_resolved(logicalType: str, field: str, value: Any, connConf
         logicalType: The node's logical type, for the message (e.g. 'llm_openai').
         field: The config field that holds the credential (e.g. 'apikey').
         value: The resolved config value. Anything but a string passes.
-        connConfig: The node's config as the pipeline wrote it, when known. A
-            placeholder that the pipeline did not write for this field (top level,
-            or in the active profile's block) came from a profile default, which
-            the task does not fill from saved variables (only the pipeline's own
-            text is resolved), so the message says how to fix that instead.
 
     Raises:
         UnresolvedCredentialError: The value still contains ``${NAME}`` or ``<REDACTED>``.
@@ -48,15 +37,6 @@ def check_credential_resolved(logicalType: str, field: str, value: Any, connConf
     unresolved = _UNRESOLVED_PLACEHOLDER.search(value)
     if unresolved:
         name = unresolved.group(1)
-        written = None
-        if connConfig is not None:
-            written = _written_value(logicalType, connConfig, field)
-        if written is not None and unresolved.group(0) not in written:
-            raise UnresolvedCredentialError(
-                f'{logicalType}: {field} is the profile default {unresolved.group(0)}, and a profile default '
-                f'is not filled from saved variables. Set {field} to {unresolved.group(0)} in the node settings '
-                'so it is filled from your variable, or enter the key there.'
-            )
         raise UnresolvedCredentialError(
             f'{logicalType}: {field} is set to {unresolved.group(0)}, but no variable named {name} was found. '
             f'Add {name} to the org, team or user environment variables, or enter the key in the node settings.'
@@ -69,54 +49,18 @@ def check_credential_resolved(logicalType: str, field: str, value: Any, connConf
         )
 
 
-def warn_if_credential_unresolved(logicalType: str, field: str, value: Any, connConfig: Any = None) -> bool:
+def warn_if_credential_unresolved(logicalType: str, field: str, value: Any) -> bool:
     """For a save-time check: warn and return True when the credential is an unfilled placeholder.
 
     The caller returns without its probe request, which would send the placeholder to
     the provider as the key. Arguments are those of ``check_credential_resolved``.
     """
     try:
-        check_credential_resolved(logicalType, field, value, connConfig)
+        check_credential_resolved(logicalType, field, value)
     except UnresolvedCredentialError as e:
         warning(str(e))
         return True
     return False
-
-
-def _written_value(logicalType: str, connConfig: Any, field: str) -> Optional[str]:
-    """What the pipeline wrote for ``field`` where getNodeConfig reads it, as text.
-
-    A top-level value wins over the active profile's block, and the active profile is
-    the config's "profile" or the service's default (as in getNodeConfig). Another
-    profile's block is not read: its value is not the one in use. Empty when the
-    pipeline wrote nothing there; None when the config or its active block is not a
-    mapping, so the caller does not guess where the placeholder came from.
-    """
-    source = IJson.toDict(connConfig)
-    if not isinstance(source, dict):
-        return None
-    value = source.get(field)
-    if value is None:
-        profile = source.get('profile')
-        if not profile:
-            service = getServiceDefinition(logicalType) or {}
-            profile = (service.get('preconfig') or {}).get('default')
-        block = {}
-        if profile:
-            block = source.get(profile) or {}
-        if not isinstance(block, dict):
-            return None
-        value = block.get(field)
-    if value is None:
-        return ''
-    if isinstance(value, str):
-        return value
-    return json.dumps(value, default=str)
-
-
-# Fields the catalogue keeps about a profile, which a pipeline never sets. Kept out
-# of the known-key set so a near-miss cannot be answered with one of them.
-_CATALOGUE_METADATA = frozenset({'title', 'modelSource', 'deprecated', 'deprecatedBy', 'deprecatedSince', 'migration'})
 
 
 class Config:
@@ -180,260 +124,3 @@ class Config:
 
         # Return the config
         return Config._config
-
-    @staticmethod
-    def getNodeProfiles(logicalType: str) -> Dict:
-        """
-        Get the preconfig.profiles mapping for a node, or {} if it has none.
-
-        Lets callers look a model name up in the catalogue without going through
-        profile resolution.
-        """
-        service = getServiceDefinition(logicalType)
-        if service is None or 'preconfig' not in service:
-            return {}
-        return service['preconfig'].get('profiles') or {}
-
-    @staticmethod
-    def _knownConfigKeys(service: Dict) -> set:
-        """
-        Collect every config key this node legitimately accepts.
-
-        Two sources, unioned: the keys declared across all of the node's profiles
-        (so a key present on any profile counts, even one the "custom" placeholder
-        omits), and the names in the node's "fields" block, with any "<prefix>."
-        stripped.
-        """
-        keys: set = set()
-        preconfig = service.get('preconfig') or {}
-        for profile in (preconfig.get('profiles') or {}).values():
-            if isinstance(profile, (dict, IJson)):
-                keys.update(key for key in profile.keys() if key not in _CATALOGUE_METADATA)
-        for field in service.get('fields') or {}:
-            keys.add(field.split('.')[-1] if '.' in field else field)
-        return keys
-
-    @staticmethod
-    def _suggestKey(unknown: str, knownKeys: set) -> str | None:
-        """
-        Return the key ``unknown`` was probably meant to be, or None.
-
-        Deliberately narrow. A near-miss is reported only when it is nearly
-        certain, because an unrecognised key is not proof of a mistake: several
-        nodes read config keys their services.json never declares, and warning
-        about those on every run would train people to ignore the message.
-
-        Three signals qualify:
-          - a key that matches except for casing. merge() keys off the exact
-            spelling, so "MODELOUTPUTTOKENS" overrides nothing at all.
-          - a known key that ENDS with the unknown one ("outputTokens" ->
-            "modelOutputTokens"), the dropped-prefix mistake this exists for.
-            Not the reverse, which fires on unrelated names sharing a suffix.
-          - a very close spelling (difflib at 0.9), for a plain typo.
-        """
-        lowered = unknown.lower()
-        if unknown in knownKeys:
-            return None
-        for key in sorted(knownKeys):
-            if key.lower() == lowered:
-                return key
-        for key in sorted(knownKeys):
-            candidate = key.lower()
-            if len(candidate) > len(lowered) and candidate.endswith(lowered):
-                return key
-        matches = difflib.get_close_matches(unknown, [k for k in knownKeys if k.lower() != lowered], n=1, cutoff=0.9)
-        return matches[0] if matches else None
-
-    @staticmethod
-    def _warnMisnamedKeys(logicalType: str, service: Dict, userConfig: Dict) -> None:
-        """
-        Warn about a config key that is almost, but not quite, a real one.
-
-        Such a key is copied into the merged config and then never read, so the
-        node runs with a default the author believes they overrode. Nothing else
-        reports it: the pipeline publishes, runs, and produces output.
-        """
-        knownKeys = Config._knownConfigKeys(service)
-        if not knownKeys:
-            return
-        for key in userConfig:
-            # The editor supplies these structural/display fields even when
-            # services.json does not declare them. They are not truncated
-            # authType/serverName/etc. Keep them in the merged config.
-            if key in ('name', 'type'):
-                continue
-            suggestion = Config._suggestKey(key, knownKeys)
-            if suggestion:
-                warning(
-                    f'{logicalType}: unknown config key "{key}" - did you mean "{suggestion}"? '
-                    f'"{key}" is ignored, so the node runs with the default.'
-                )
-
-    @staticmethod
-    def getNodeConfig(logicalType: str, connConfig: Dict):
-        """
-        Get the configuration for a connector.
-
-        On entry, connConfig is of the following forms:
-
-                {
-                        "profile": "myProfile",     a profile from the services preconfig.profiles section
-                                                                                any additional keys to override the section like:
-                        "myProfile": {
-                                "model": "myModel"
-                        }
-                }
-
-        or
-                {
-                        the direct configuration like:
-                        "model": "myModel"
-                }
-
-        * If a "profile" key is not specified, the default values are taken from
-        preconfig.profiles[preconfig.default]. The defaults are then merged into
-        the connConfig that is provided. If keys are in connConfig, they will not
-        be overriden by the defaults
-
-        * If a "profile" key is specified, the default values are taken from
-        preconfig.profiles[profile]. The defaults are then merged into the
-        connConfig that is provided. If keys are in connConfig, they will not
-        be overriden by the defaults
-        """
-
-        def merge(userConfig: Dict[str, Any], defaultConfig: Dict[str, Any]) -> Dict[str, Any]:
-            """
-            Recursively merge userConfig with defaultConfig.
-
-            - Unspecified or None values in userConfig are replaced with those in defaultConfig.
-            - If both values are dictionaries, merge them recursively.
-            """
-            merged = defaultConfig.copy()
-
-            for key, userValue in userConfig.items():
-                defaultValue = defaultConfig.get(key)
-
-                if isinstance(defaultValue, (dict, IJson)) and isinstance(userValue, (dict, IJson)):
-                    # Recursively merge nested dictionaries. Both sides must be
-                    # dict-like: a scalar written over an object-valued default
-                    # (e.g. schema_validate's "category_metric_map" given a JSON
-                    # string) otherwise reaches .items() and raises AttributeError.
-                    merged[key] = merge(userValue, defaultValue)
-                elif userValue is not None:
-                    # Override with user value if it's not None
-                    merged[key] = userValue
-
-            return merged
-
-        def overlay_top_level(nested_key: str) -> Dict[str, Any]:
-            """
-            Combine connConfig[nested_key] with connConfig's own top-level keys,
-            with real (non-None) top-level values winning over the nested block.
-            Some UIs nest a node's fields under a sub-object named after the
-            profile (e.g. connConfig["claude-sonnet-4-6"] = {"apikey": "..."})
-            instead of writing them at the top level; without this, whichever
-            shape a given branch didn't check for was silently dropped. Shared
-            by both branches below so they agree on where configuration can
-            live, regardless of whether "profile" was set explicitly.
-            """
-            # Normalize before inspecting. rocketlib's IJson is a *subclass* of
-            # the engLib IJson the engine actually constructs, so
-            # isinstance(value, IJson) is False for every real engine value --
-            # type-testing here silently dropped the whole nested block (and with
-            # it a node's credentials). IJson.toDict tests against the correct
-            # base class and is a no-op on already-native values.
-            source = IJson.toDict(connConfig)
-            if not isinstance(source, dict):
-                return {}
-
-            nested = source.get(nested_key)
-            combined = dict(nested) if isinstance(nested, dict) else {}
-
-            for key, value in source.items():
-                # "profile" is the branch selector, not a node field, and must
-                # never leak into the resolved config; a None placeholder must
-                # not clobber a populated nested value.
-                if key in (nested_key, 'profile'):
-                    continue
-                if value is not None:
-                    if key in _LIMIT_FIELDS and combined.get(key) is not None and combined[key] != value:
-                        # The form edits the nested value, so an edit there would
-                        # change nothing. Typically a limit written into the
-                        # pipeline by hand before the form offered the field.
-                        warning(
-                            f'{logicalType}: {key} is set twice: {value} at the top level of the node config, '
-                            f'which is used, and {combined[key]} in the "{nested_key}" settings the form edits. '
-                            "Remove the top-level value to use the form's."
-                        )
-                    combined[key] = value
-
-            return combined
-
-        # Output the requested configuration
-        service = getServiceDefinition(logicalType)
-
-        # If we couldn't get it, error out
-        if service is None:
-            raise Exception(f'The service {logicalType} was not found')
-
-        # Make sure it has a preconfig section
-        if 'preconfig' not in service:
-            raise Exception(f'The service {logicalType} does not have a preconfig section')
-
-        # See if there is a profile key in the configuration
-        profile = connConfig.get('profile', None)
-
-        # Get the entire preconfig section
-        preconfig = service['preconfig']
-
-        if profile is None:
-            # Get the default configuration
-            profile = preconfig.get('default')
-
-            if not profile or profile not in preconfig['profiles']:
-                raise Exception(f'Default profile {profile} is not defined in {logicalType}')
-
-            # Get the settings for this default name
-            profileConfig = preconfig['profiles'].get(profile)
-
-            # Check if default profile is deprecated
-            if isinstance(profileConfig, (dict, IJson)) and profileConfig.get('deprecated'):
-                migration_msg = profileConfig.get('migration', 'Please use a current profile instead.')
-                warning(f'Default profile "{profile}" is deprecated. {migration_msg}')
-
-            defaultConfig = profileConfig
-
-        else:
-            # Make sure it is a valid profile
-            if profile not in preconfig['profiles']:
-                raise Exception(f'Profile {profile} is not defined in {logicalType}')
-
-            # Get the profile config
-            profileConfig = preconfig['profiles'][profile]
-
-            # Check if profile is deprecated
-            if isinstance(profileConfig, (dict, IJson)) and profileConfig.get('deprecated'):
-                migration_msg = profileConfig.get('migration', 'Please use a current profile instead.')
-                warning(f'Profile "{profile}" is deprecated. {migration_msg}')
-
-            # Get the default from the profile
-            defaultConfig = profileConfig
-
-        # Overlay the nested (profile-named) block under real top-level keys,
-        # then merge the profile defaults underneath the result. Identical for
-        # both branches, so a key a caller wrote at the top level is honoured
-        # whether or not "profile" was set explicitly.
-        userConfig = overlay_top_level(profile)
-
-        Config._warnMisnamedKeys(logicalType, service, userConfig)
-
-        config = merge(userConfig, defaultConfig)
-
-        # Output the computed configuration. Array/object values arrive from
-        # the engine as IJson, not list/dict (see #1839 defect 2), so a node
-        # that does isinstance(value, list) on its own declared field falls
-        # through to its default and silently ignores what was configured.
-        # IJson.toDict recursively normalizes to native list/dict and is a
-        # no-op on values that are already native, so this is safe to apply
-        # unconditionally rather than pushing the conversion onto every node.
-        return IJson.toDict(config)

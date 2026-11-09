@@ -60,17 +60,20 @@ integration.
 
 ### resolve_config
 
-Show what a component config resolves to at load — the engine applies profile
-and default merging, so the `.pipe` rarely says what the node actually
-receives.
+Show what a component config resolves to at load — the engine applies the
+schema defaults and flattens the selected branch, so the `.pipe` rarely says
+what the node actually receives.
 
 - **Parameters:** `provider` (string, required) — a provider from
   `list_components`; `config` (object, optional) — the component's config
   block, omitted for pure defaults.
-- **Returns:** the resolved config the node would receive, plus `ok: true`.
-- **Notable:** keys the resolver discarded (for example a key written beside
-  `profile` instead of inside it) are reported with a `hint` explaining where
-  to move them — a silent drop a schema cannot express.
+- **Returns:** `resolved` (the config the node would receive, by key), `paths`
+  (where each key is stored in the config tree), `params`, `paramKeys` and
+  `envKeys`, plus `ok: true`.
+- **Notable:** a config that does not fit the schema (an unknown key, a value
+  out of range, a selector set to an option that does not exist) is an error
+  naming the key — the same check that stops the node at start. Per-call
+  parameters come with a `hint`: their resolved value is only the default.
 
 ### list_integrations
 

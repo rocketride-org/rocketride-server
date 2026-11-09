@@ -47,8 +47,7 @@ Architecture:
 import time
 from typing import TYPE_CHECKING, Dict, Any, List, Tuple
 from rocketride import EVENT_TYPE
-from rocketlib import getServiceDefinition, validatePipeline
-from ai.common.config import Config
+from rocketlib import ConfigError, IJson, getServiceSchema, resolveConfig, validatePipeline
 from ai.common.dap import DAPConn, TransportBase
 from ai.common.list_rows import paginate_rows
 from ai.account.models import resolve_run_permissions
@@ -61,30 +60,54 @@ if TYPE_CHECKING:
     from ..task_server import TaskServer
 
 
-# Component-level keys that are not node configuration. The engine validates and
-# consumes these itself, so a profile does not discard them and an author must not be
-# told to move them inside one.
-_STRUCTURAL_CONFIG_KEYS = frozenset({'profile', 'parameters', 'secureParameters', 'name'})
-
-
-def _service_profile_names(provider: str) -> frozenset:
-    """Return every profile name the service declares, or an empty set.
-
-    A config saved by an editor carries one sub-object per profile, so an unselected
-    profile's own block would otherwise read as a key the resolver threw away.
+def _resolve_node_config(provider: str, config: Dict[str, Any]):
+    """Resolve a component's stored config exactly as the node does at start.
 
     Args:
         provider: Component provider, e.g. 'llm_openai'.
+        config: The component's config block as the pipeline stores it.
 
     Returns:
-        The declared profile names. Empty when the service or its preconfig is
-        unavailable, which leaves the caller reporting the key rather than hiding it.
+        ConfigView: Defaults + stored values, validated and flattened to the
+        active branch - what ``IGlobalBase.config`` serves the node.
+
+    Raises:
+        ConfigError: The service is unknown, or the config does not fit its schema.
     """
-    try:
-        service = getServiceDefinition(provider)
-        return frozenset((service or {}).get('preconfig', {}).get('profiles', {}) or {})
-    except Exception:
-        return frozenset()
+    schema = getServiceSchema(provider)
+    if schema is None:
+        raise ConfigError(f'The service {provider} was not found')
+    return resolveConfig(IJson.toDict(schema), IJson.toDict(config))
+
+
+def _config_errors(components: List[Any]) -> List[Dict[str, Any]]:
+    """Resolve every component's config; one error entry per component that does not fit.
+
+    The entries follow the engine's own ``errors`` shape (``id`` + ``message``) so
+    a client reads them off the same list. A component without a provider, or
+    with one the engine does not know, is the engine's structural error and is
+    not repeated here.
+
+    Args:
+        components: The pipeline's ``components`` list, or ``[component]``.
+
+    Returns:
+        The hard config errors: unknown keys, type/min/max/enum/required
+        violations, stale selector values. Keys under an unreachable branch and
+        the editor-owned ``name`` are tolerated by the resolver.
+    """
+    errors: List[Dict[str, Any]] = []
+    for component in components:
+        if not isinstance(component, dict):
+            continue
+        provider = component.get('provider')
+        if not provider or getServiceSchema(provider) is None:
+            continue
+        try:
+            _resolve_node_config(provider, component.get('config') or {})
+        except ConfigError as e:
+            errors.append({'id': component.get('id') or provider, 'message': f'{provider}: {e}'})
+    return errors
 
 
 class MiscCommands(DAPConn):
@@ -281,6 +304,7 @@ class MiscCommands(DAPConn):
             # wrapped as a full pipeline rather than passed through.
             if 'component' in pipeline and 'components' not in pipeline:
                 data = validatePipeline(pipeline)
+                components = [pipeline['component']]
             else:
                 # Resolve source: explicit arg > pipeline field > implied from components
                 source = args.get('source', None) or pipeline.get('source', None)
@@ -300,6 +324,15 @@ class MiscCommands(DAPConn):
                 # Same envelope pipe_Validate (modules/pipe) builds — the version
                 # rides INSIDE the wrapped config (see the FILE-form note above).
                 data = validatePipeline({'pipeline': inner})
+                components = pipeline.get('components') or []
+
+            # Config values are validated by the resolver the node itself runs at
+            # start, so what fails here is exactly what would fail the run: hard
+            # errors, on the engine's own errors list.
+            config_errors = _config_errors(components)
+            if config_errors:
+                data = dict(data)
+                data['errors'] = list(data.get('errors') or []) + config_errors
 
             # Return the results
             return self.build_response(request, body=data)
@@ -312,11 +345,11 @@ class MiscCommands(DAPConn):
         """
         Handle DAP 'rrext_resolve_config' to resolve a component config as a node sees it.
 
-        Runs the config through the same ``Config.getNodeConfig`` a node calls at
-        load, so an author can see what the node actually receives rather than
-        what the .pipe appears to say. This has to happen engine-side: the
-        service catalog does not carry ``preconfig``, so profile resolution
-        cannot be reproduced from ``rrext_services``.
+        Runs the config through ``rocketlib.resolveConfig`` on the engine-resolved
+        schema, the same pass ``IGlobalBase.config`` runs at start, so an author
+        sees what the node actually receives rather than what the .pipe appears
+        to say: defaults applied, the active selector branch flattened, keys
+        under an unselected branch left out.
 
         Args:
             request (Dict[str, Any]): DAP request containing:
@@ -327,13 +360,18 @@ class MiscCommands(DAPConn):
         Returns:
             Dict[str, Any]: DAP response whose body carries:
                 - provider (str): The provider that was resolved.
-                - profile (str): The profile that applied, named or default.
-                - resolved (Dict[str, Any]): What the node receives.
-                - dropped (List[str]): Top-level config keys the resolver discarded.
+                - resolved (Dict[str, Any]): What the node receives, by short key.
+                - paths (Dict[str, str]): Each resolved key's dotted schema path,
+                  which is where the value is stored in the config tree.
+                - params (List[Dict[str, Any]]): The node's ``params`` descriptors.
+                - paramKeys (List[str]): Resolved keys that are per-call parameters.
+                - envKeys (List[str]): Resolved keys still holding a ``${ROCKETRIDE_*}``
+                  placeholder, filled from the caller's environment at run time.
 
         Raises:
             ValueError: If provider is missing or config is not an object.
-            Exception: If the service is unknown or has no preconfig section.
+            ConfigError: If the service is unknown or the config does not fit its
+                schema (unknown key, stale selector value, type/range violation).
         """
         try:
             args = request.get('arguments', {})
@@ -349,33 +387,18 @@ class MiscCommands(DAPConn):
             if not isinstance(config, dict):
                 raise ValueError('config must be an object')
 
-            resolved = Config.getNodeConfig(provider, config)
-            profile = config.get('profile')
+            view = _resolve_node_config(provider, config)
 
-            # Report the keys the resolver discarded rather than leaving the author
-            # to infer it from an absence. With a profile set, getNodeConfig reads
-            # the user layer only from the sub-object named after that profile, so
-            # sibling top-level keys never reach the node (#1839).
-            dropped = []
-            if profile:
-                # Every sibling of the selected profile is discarded, so the value is
-                # not worth comparing: one that happens to match the profile's own is
-                # still a line the resolver never read.
-                #
-                # Two kinds of sibling are not user config and must not be reported.
-                # The structural keys below belong to the component, not the node, and
-                # the engine consumes them on its own path (pipeline_config.cpp Rule 5
-                # and Rule 6); telling an author to move them inside the profile would
-                # break the component. An unselected profile's own sub-object is the
-                # other: an editor-saved config keeps one per profile.
-                profiles = _service_profile_names(provider)
-                dropped = [k for k in config if k != profile and k not in _STRUCTURAL_CONFIG_KEYS and k not in profiles]
-
+            # The view plus the schema facts an author cannot read off the values:
+            # where each key lives in the stored tree, and which keys a caller can
+            # set per call or that the caller's environment fills at run time.
             body = {
                 'provider': provider,
-                'profile': profile or 'default',
-                'resolved': resolved,
-                'dropped': dropped,
+                'resolved': view.to_dict(),
+                'paths': {key: view.path_of(key) for key in view},
+                'params': view.params,
+                'paramKeys': sorted(view.param_keys),
+                'envKeys': sorted(view.env_keys),
             }
             return self.build_response(request, body=body)
 

@@ -20,7 +20,6 @@ from typing import Any, Dict, List, Optional, Union
 
 from rocketlib import debug, error, warning
 from ai.common.schema import Answer, Question
-from ai.common.config import Config
 from ai.common.llm_adapter import turn_usage
 
 from ai.common.utils import parse_bool, safe_str
@@ -81,20 +80,12 @@ class AgentBase(ABC):
         # Get the logical type (nodeId) of our invoker
         self._node_id = self._iGlobal.glb.logicalType
 
-        # A converted node (its definition has no "preconfig") reads the
-        # resolver's view: defaults applied, the active branch flattened, keys
-        # read by path. An unconverted node keeps the preconfig merge until
-        # common/config.py is deleted (plan Step 2 item 5).
-        from rocketlib import getServiceDefinition
-
-        definition = getServiceDefinition(self._node_id)
-        if definition is not None and 'preconfig' not in definition:
-            config = self._iGlobal.config
-        else:
-            config = Config.getNodeConfig(self._iGlobal.glb.logicalType, self._iGlobal.glb.connConfig)
+        # The resolver's view of the node's config: defaults applied, the active
+        # branch flattened, keys read by path.
+        config = self._iGlobal.config
 
         # Keep the resolved config so subclasses can read their own extra fields
-        # without re-resolving (and without re-implementing shape handling).
+        # without re-resolving.
         self._config = config
 
         # And save any specific instructions

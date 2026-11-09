@@ -4,9 +4,10 @@
 The literals here follow the tree rather than the docs, because the documented
 contract is wrong in three places:
 
-- ``preconfig`` is marked optional in README-node-schema.md, but
-  ``Config.getNodeConfig`` raises without it and nearly every ``IGlobal`` calls
-  that at load, so a node without it hard-fails.
+- A service definition must declare ``propertyDefinitions`` and ``properties``
+  (the property model): the engine refuses the old ``fields``/``shape`` format
+  at load, and ``IGlobalBase.config`` resolves the node's config against the
+  schema built from them.
 - ``depends()`` is documented as running in ``__init__.py``. The real nodes call
   it from ``IGlobal.beginGlobal``, and third-party imports must follow it.
 - The "Adding a New Node" example shows a plain class with a ``process()``
@@ -15,6 +16,9 @@ contract is wrong in three places:
 Two the docs omit: a ``services.json`` without ``protocol`` is not registered as
 a service at all, and ``register`` must be ``filter`` or ``endpoint`` or the node
 loads but can never be instantiated.
+
+The package contract: the engine imports ``<path>.IGlobal`` and
+``<path>.IInstance`` as submodules, so ``__init__.py`` is empty.
 """
 
 import keyword
@@ -52,25 +56,12 @@ _SERVICES_JSON = """{{
 \t"lanes": {{
 \t\t"{lane_in}": ["{lane_out}"]
 \t}},
-\t"preconfig": {{
-\t\t"default": "default",
-\t\t"profiles": {{
-\t\t\t"default": {{}}
-\t\t}}
-\t}},
-\t"fields": {{}},
-\t"shape": []
+\t"propertyDefinitions": {{}},
+\t"properties": []
 }}
 """
 
-_INIT_PY = """from .IGlobal import IGlobal
-from .IInstance import IInstance
-
-__all__ = [
-    'IGlobal',
-    'IInstance',
-]
-"""
+_INIT_PY = '# Empty by contract: the engine loads local_nodes.{name}.IGlobal and .IInstance as submodules.\n'
 
 _PARENT_INIT_PY = '# Marks local_nodes as a package so the engine can import local_nodes.<name>.\n'
 
@@ -78,20 +69,14 @@ _REQUIREMENTS = '# One pinned dependency per line, installed by depends() in IGl
 
 _IGLOBAL_PY = '''import os
 
-from rocketlib import IGlobalBase, OPEN_MODE
-
-from ai.common.config import Config
+from rocketlib import IGlobalBase
 
 
 class IGlobal(IGlobalBase):
     """Per-pipeline state for the {name} node."""
 
     def beginGlobal(self):
-        """Install dependencies and resolve config once per pipeline run."""
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            # Config mode only asks for the schema, so the driver is not needed.
-            return
-
+        """Install dependencies once per pipeline run; self.config is the resolved config."""
         from depends import depends  # type: ignore
 
         # depends() runs here rather than in __init__.py, and any third-party
@@ -99,11 +84,12 @@ class IGlobal(IGlobalBase):
         requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
         depends(requirements)
 
-        self.config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
+        # Read settings from self.config: the defaults in services.json with the
+        # pipeline's values applied, by property name (self.config.limit once
+        # "limit" is declared in propertyDefinitions and listed in properties).
 
     def endGlobal(self):
         """Release whatever beginGlobal acquired."""
-        self.config = None
 '''
 
 _IINSTANCE_PY = '''from rocketlib import IInstanceBase
@@ -215,7 +201,7 @@ async def _scaffold_node(client, tasks, args: Dict[str, Any]) -> dict:
 
     files = {
         'local_nodes/__init__.py': _PARENT_INIT_PY,
-        f'local_nodes/{name}/__init__.py': _INIT_PY,
+        f'local_nodes/{name}/__init__.py': _INIT_PY.format(name=name),
         f'local_nodes/{name}/services.json': _SERVICES_JSON.format(
             title=title, name=name, class_type=class_type, lane_in=lane_in, lane_out=lane_out
         ),
