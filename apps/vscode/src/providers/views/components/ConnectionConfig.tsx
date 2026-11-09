@@ -15,7 +15,7 @@
 
 import React from 'react';
 import { LocalPanel } from './panels/LocalPanel';
-import { CloudPanel } from './panels/CloudPanel';
+import { CloudPanel, type CloudPanelProps } from './panels/CloudPanel';
 import { OnPremPanel } from './panels/OnPremPanel';
 import { DockerPanel } from './panels/DockerPanel';
 import { ServicePanel } from './panels/ServicePanel';
@@ -70,7 +70,7 @@ export interface ConnectionConfigProps {
 	isSubscribed?: boolean;
 	/** Checkout callbacks for CloudPanel's embedded CheckoutModal. */
 	onFetchPlans?: () => Promise<any[]>;
-	onCreateCheckout?: (priceId: string) => Promise<{ clientSecret: string; subscriptionId: string }>;
+	onCreateCheckout?: CloudPanelProps['onCreateCheckout'];
 	onConfirmPending?: (subscriptionId: string, priceId: string) => Promise<void>;
 	onCheckoutSuccess?: () => void;
 

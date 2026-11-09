@@ -47,6 +47,8 @@
 import { RocketRideClient } from 'rocketride';
 import type { ConnectResult, DAPMessage, DataPipe, PIPELINE_RESULT, RocketRideClientConfig } from 'rocketride';
 import { decodeMessageData, encodeMessageData } from './binaryWire';
+import { getCheckoutScope, isCheckoutMutation } from './checkoutScope';
+import { checkoutNotDispatched } from '../modules/checkout/checkoutDispatch';
 import { isWireError, openEnvelope, rehydrateError } from './errorWire';
 
 /**
@@ -168,6 +170,8 @@ export class RocketRideClientProxy extends RocketRideClient {
 		// server's own timeout fails with a bus timeout and loses the reason.
 		const timeoutMs = timeout !== undefined ? timeout + BUS_TIMEOUT_SLACK_MS : undefined;
 		try {
+			const checkoutScope = isCheckoutMutation(message) ? getCheckoutScope(this) : undefined;
+			if (checkoutScope === null) throw checkoutNotDispatched();
 			const response = openEnvelope(
 				await this._proxyTransport.request(
 					REQUEST_OP,
@@ -177,6 +181,7 @@ export class RocketRideClientProxy extends RocketRideClient {
 						// turns bytes into an index-keyed object. See
 						// binaryWire.ts.
 						message: encodeMessageData(message),
+						...(checkoutScope && { checkoutScope }),
 						...(timeout !== undefined ? { timeout } : {}),
 					},
 					timeoutMs

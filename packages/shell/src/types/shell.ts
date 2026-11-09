@@ -35,6 +35,7 @@
 import type { ConnectResult, DAPMessage, SignupProperties } from 'rocketride';
 import type { ConnectionStatus } from './connection';
 import type { CheckoutPlan, PromoValidation } from '../modules/checkout/types';
+import type { CheckoutScope } from '../connection/checkoutScope';
 import type { TelemetryFact } from '../util/telemetryChannel';
 
 // =============================================================================
@@ -283,8 +284,9 @@ export interface ShellConnectionEventMap {
 	 * to payment (used by the web pricing page); omit it to show the picker.
 	 * The optional `promo` carries a discount code already validated on the
 	 * pricing page, so the skipped-picker checkout still applies the discount.
+	 * The manager captures checkoutScope before deferring delivery.
 	 */
-	'shell:subscribe': { app: ShellAppEntry; plan?: CheckoutPlan; promo?: PromoValidation | null };
+	'shell:subscribe': { app: ShellAppEntry; plan?: CheckoutPlan; promo?: PromoValidation | null; checkoutScope?: CheckoutScope | null };
 
 	/**
 	 * User cancelled a subscription for an app from the account/billing UI.

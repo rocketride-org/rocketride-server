@@ -31,6 +31,7 @@ import { AuthenticationException, LoginAttemptCancelledError, RocketRideClient, 
 import { ConnectionState, AuthPhase } from '../types/connection';
 import type { ConnectionStatus } from '../types/connection';
 import { ConnectionManager } from './connection';
+import { RocketRideClientProxy } from './RocketRideClientProxy';
 import { ConnectionFailure, withTimeout } from './errors';
 import { RemoteManager } from './remote-manager';
 import { ApiKeyAuthProvider } from '../auth/ApiKeyAuthProvider';
@@ -39,6 +40,7 @@ import { CONNECT_TIMEOUT_MS, LS_TOKEN } from '../constants';
 import { resetDevGateForTests } from '../util/devGate';
 import { createRetainedRegistry, localRetainedPort } from '../ops/retained';
 import { createOpBus } from '../ops/busOps';
+import { CLIENT_EVENT_OP, registerClientOps } from '../ops/clientOps';
 import type { IRetainedPort } from '../ops/retained';
 import { TELEMETRY_STORAGE_KEY, type TelemetryFact } from '../util/telemetryChannel';
 import { generatePkce } from '../util/pkce';
@@ -1638,6 +1640,61 @@ function createTopicManager(): ConnectionManager {
 	return manager;
 }
 
+test('live and buffered checkout intents retain their authenticated origin across deferred delivery', async () => {
+	for (const buffered of [false, true]) {
+		const manager: ConnectionManager = Reflect.construct(ConnectionManager, []);
+		const client = new RocketRideClientProxy({ request: async () => { throw new Error('No request expected'); } });
+		manager.getClient = () => client;
+		manager.isConnected = () => true;
+		const uri = 'https://app.rocketride.ai';
+		const identity = (orgId: string): ConnectResult => ({
+			...authenticatedResult,
+			organization: { id: orgId } as NonNullable<ConnectResult['organization']>,
+		});
+		client.applyIdentity({ connected: true, accountInfo: identity('org-a'), uri });
+		const seen: Array<string | undefined> = [];
+		const listen = () => manager.on('shell:subscribe', ({ checkoutScope }) => seen.push(checkoutScope?.orgId));
+		if (!buffered) listen();
+
+		manager.emit('shell:subscribe', { app: { id: 'app-a', name: 'App A' } });
+		client.applyIdentity({ connected: true, accountInfo: identity('org-b'), uri });
+		if (buffered) listen();
+		await Promise.resolve();
+
+		assert.deepEqual(seen, ['org-a']);
+		assert.equal(client.getOrgId(), 'org-b');
+	}
+});
+
+test('a known workspace transition cancels deferred and buffered Subscribe intents', async () => {
+	for (const buffered of [false, true]) {
+		const manager: ConnectionManager = Reflect.construct(ConnectionManager, []);
+		const client = new RocketRideClientProxy({ request: async () => { throw new Error('No request expected'); } });
+		manager.getClient = () => client;
+		manager.isConnected = () => true;
+		client.applyIdentity({
+			connected: true,
+			accountInfo: { ...authenticatedResult, organization: { id: 'org-a' } as NonNullable<ConnectResult['organization']> },
+			uri: 'wss://app.rocketride.ai/task/service',
+		});
+		const seen: string[] = [];
+		const listen = () => manager.on('shell:subscribe', ({ app }) => seen.push(app.id));
+		if (!buffered) listen();
+
+		manager.emit('shell:subscribe', { app: { id: 'app-old', name: 'Old checkout' } });
+		manager.emit('shell:workspaceWillChange', { orgId: 'org-b' });
+		manager.emit('shell:subscribe', { app: { id: 'app-transition', name: 'Stale checkout' } });
+		manager.emit('shell:workspaceChanged', { orgId: 'org-a' });
+		if (buffered) listen();
+		await Promise.resolve();
+		assert.equal(seen.length, 0);
+
+		manager.emit('shell:subscribe', { app: { id: 'app-new', name: 'New checkout' } });
+		await Promise.resolve();
+		assert.deepEqual(seen, ['app-new']);
+	}
+});
+
 test('a retained topic replays to EVERY subscriber, not just the one that opened the port', async () => {
 	const cm = createTopicManager();
 	cm.publish('host:connection', { connected: true });
@@ -1709,6 +1766,7 @@ function createMirroredManager(): ConnectionManager {
 		listeners: Map<string, Set<unknown>>;
 		wildcardListeners: Set<unknown>;
 		pendingEvents: Map<string, unknown>;
+		checkoutIntentGeneration: number;
 		debugLog: unknown[];
 		installMirrorSubscriptions(): void;
 	};
@@ -1719,6 +1777,7 @@ function createMirroredManager(): ConnectionManager {
 	fields.listeners = new Map();
 	fields.wildcardListeners = new Set();
 	fields.pendingEvents = new Map();
+	fields.checkoutIntentGeneration = 0;
 	fields.debugLog = [];
 	fields.installMirrorSubscriptions();
 	return manager;
@@ -1746,6 +1805,63 @@ test('the first mirror delivery seeds a real client whose accessors tell the tru
 	assert.equal(client.isAuthenticated(), true);
 	assert.equal(client.getOrgId(), 'org-7');
 	assert.equal(client.getConnectionInfo().uri, 'https://engine.example');
+});
+
+test('checkout uses the mirrored SDK endpoint rather than the HTTP asset URL', async () => {
+	const cm = createMirroredManager();
+	const http = 'https://custom.example:443';
+	const sdk = new RocketRideClient({ uri: http });
+	const sdkUri = sdk.getConnectionInfo().uri;
+	const account: ConnectResult = {
+		...authenticatedResult,
+		organization: { id: 'org-7' } as NonNullable<ConnectResult['organization']>,
+	};
+	const dispatched: unknown[] = [];
+	registerClientOps(cm.ops(), {
+		isConnected: () => true,
+		getClient: () => ({
+			isAuthenticated: () => true,
+			getAccountInfo: () => account,
+			getConnectionInfo: () => sdk.getConnectionInfo(),
+			request: (message: { arguments?: unknown }) => {
+				dispatched.push(message.arguments);
+				return { type: 'response', seq: 1, success: true, body: {} };
+			},
+		}),
+	});
+	cm.publish('shell:status', { connected: true, status: { state: 'connected', hasCredentials: true }, engineHttpUrl: http, sdkUri });
+	cm.publish('shell:account', account);
+	await new Promise((resolve) => setTimeout(resolve, 0));
+
+	const proxy = cm.getClient();
+	assert.ok(proxy);
+	assert.equal(cm.getHttpUrl(), http);
+	assert.equal(proxy.getConnectionInfo().uri, sdkUri);
+	await proxy.billing.createCheckoutSession('org-7', 'app-a', 'price-a');
+	await proxy.billing.redeemPromoCode('org-7', 'CODE');
+	await proxy.call('rrext_account_billing', { subcommand: 'confirm_pending' });
+	assert.deepEqual(dispatched, [
+		{ subcommand: 'subscribe', orgId: 'org-7', appId: 'app-a', priceId: 'price-a' },
+		{ subcommand: 'promo_redeem', orgId: 'org-7', code: 'CODE' },
+		{ subcommand: 'confirm_pending' },
+	]);
+});
+
+test('a mirrored workspace-change edge reaches checkout before the next account snapshot', async () => {
+	const cm = createMirroredManager();
+	cm.publish('shell:status', { connected: true, status: { state: 'connected', hasCredentials: true } });
+	cm.publish('shell:account', { organization: { id: 'org-a' } });
+	await new Promise((resolve) => setTimeout(resolve, 0));
+	const changes: string[] = [];
+	cm.on('shell:workspaceWillChange', ({ orgId }) => changes.push(orgId));
+
+	await cm.ops().request(CLIENT_EVENT_OP, {
+		message: { type: 'event', seq: 1, event: 'apaext_org_changed', body: { orgId: 'org-b' } },
+	});
+	await Promise.resolve();
+
+	assert.deepEqual(changes, ['org-b']);
+	assert.equal(cm.getClient()?.getOrgId(), 'org-a');
 });
 
 test('a root disconnect moves the realm client with it', async () => {

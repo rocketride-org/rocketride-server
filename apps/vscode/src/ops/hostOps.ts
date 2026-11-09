@@ -17,6 +17,7 @@
 import * as vscode from 'vscode';
 // Deep imports on purpose — ext-host-safe .ts leaves (see busHost.ts).
 import { registerOpHandlers } from 'shell/src/ops/busOps';
+import { getCheckoutScope } from 'shell/src/connection/checkoutScope';
 import type { IOpBus, OpImplTable } from 'shell/src/ops/busOps';
 import { assertExternalUrl } from 'shared/ops/hostOps';
 import type { HostOpMap, EnvSlotsPayload, EnvSlotState } from 'shared/ops/hostOps';
@@ -48,8 +49,13 @@ export function registerVscodeHostOps(bus: IOpBus, deps: IVscodeHostOpsDeps): vo
 		'host.stripeKey': async () => {
 			const client = connectionManager.getClient();
 			if (!client || !connectionManager.isConnected()) return { key: null, reason: 'no-connection' };
+			const server = getCheckoutScope(client)?.server;
+			if (!server) return { key: null, reason: 'no-connection' };
 			const res = await getStripePublishableKey(client);
-			return { key: res.key || null, ...(res.key ? {} : { reason: res.probed ? 'no-billing' : 'probe-failed' }) };
+			if (!connectionManager.isConnected() || getCheckoutScope(connectionManager.getClient())?.server !== server) {
+				return { key: null, reason: 'no-connection' };
+			}
+			return { key: res.key || null, server, ...(res.key ? {} : { reason: res.probed ? 'no-billing' : 'probe-failed' }) };
 		},
 		// Stripe portal/checkout return target: the webview's own origin is
 		// never valid, so the HOST decides — the public site.

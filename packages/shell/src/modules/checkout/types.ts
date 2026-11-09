@@ -172,9 +172,9 @@ export type CheckoutModalPromoProps =
 
 		/**
 		 * Redeems a credit-grant (hackathon) code — $0 subscription plus
-		 * immediate credits, no plan selection or payment step.
+		 * immediate credits, no plan selection or payment step. Forward the attempt ID on retries.
 		 */
-		onRedeemPromoCode: (code: string) => Promise<PromoRedemption>;
+		onRedeemPromoCode: (code: string, attemptId?: string) => Promise<PromoRedemption>;
 	}
 	| {
 		onValidatePromoCode?: undefined;
@@ -218,19 +218,29 @@ export interface CheckoutModalBaseProps {
 
 	/**
 	 * Creates a Stripe subscription on the server and returns the
-	 * client secret needed by Stripe Elements to confirm the payment.
+	 * client secret needed by Stripe Elements to confirm the payment. Forward the
+	 * attempt ID so the connected server can recognize a retry.
 	 *
 	 * `clientSecret` is `null` when the first invoice is $0 (e.g. a 100%-off
 	 * promotion code) — the subscription is already active and the payment
 	 * step is skipped entirely.
 	 */
-	onCreateCheckout: (priceId: string, promotionCode?: string) => Promise<{ clientSecret: string | null; subscriptionId: string; status?: string }>;
+	onCreateCheckout: (priceId: string, promotionCode?: string, attemptId?: string) => Promise<{ clientSecret: string | null; subscriptionId: string; status?: string }>;
 
 	/**
 	 * Notifies the server that payment was confirmed client-side.
 	 * The server writes 'incomplete' status; the webhook later flips to 'active'.
 	 */
 	onConfirmPending: (subscriptionId: string, priceId: string) => Promise<void>;
+
+	/** Whether the checkout still belongs to the host's current session and modal. */
+	isCheckoutCurrent?: () => boolean;
+
+	/** The server confirmed it can safely resolve an already-used attempt ID. */
+	supportsCheckoutReplay?: boolean;
+
+	/** Require explicit server status before accepting a no-payment response. */
+	requireCheckoutStatus?: boolean;
 
 	/** Called after a successful payment — host should close the modal. */
 	onSuccess: () => void;

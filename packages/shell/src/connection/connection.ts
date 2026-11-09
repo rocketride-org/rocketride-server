@@ -52,6 +52,7 @@ import type { ConnectionMode, ConnectionStatus } from '../types/connection';
 import { BaseManager } from './base-manager';
 import { RemoteManager } from './remote-manager';
 import { RocketRideClientProxy } from './RocketRideClientProxy';
+import { getCheckoutScope } from './checkoutScope';
 import { AUTH_REJECTED_MESSAGE, ConnectionFailure } from './errors';
 import { shouldReloadForTokenStorageUpdate } from './tokenStorageUpdate';
 import { createOpBus } from '../ops/busOps';
@@ -347,6 +348,8 @@ export class ConnectionManager implements IConnectionManager {
 
 	/** Latest buffered payload per replayable event, awaiting a listener. */
 	private pendingEvents = new Map<string, unknown>();
+	private checkoutIntentGeneration = 0;
+	private checkoutWorkspaceChanging = false;
 
 	// =========================================================================
 	// INITIALIZATION
@@ -1572,6 +1575,7 @@ export class ConnectionManager implements IConnectionManager {
 
 	/** Root-mirrored liveness for socketless realms (null = unmirrored). */
 	private mirrorConnected: boolean | null = null;
+	private mirrorSdkUri: string | undefined;
 
 	/** This realm's brokered client — built on the first mirror delivery,
 	 *  null in a realm that owns a socket (or has not heard from the root). */
@@ -1882,14 +1886,31 @@ export class ConnectionManager implements IConnectionManager {
 	 * @param payload - The payload matching the event's type.
 	 */
 	public emit<K extends keyof ShellConnectionEventMap>(event: K, payload: ShellConnectionEventMap[K]): void {
-		// Push into debug log
-		this.logDebug(event as string, payload);
+		if (event === 'shell:workspaceWillChange' || event === 'shell:orgChanged' || event === 'shell:logoutRequest') {
+			this.checkoutIntentGeneration += 1;
+			this.checkoutWorkspaceChanging = true;
+			this.pendingEvents.delete('shell:subscribe');
+		} else if (event === 'shell:workspaceChanged' || event === 'shell:connected') {
+			this.checkoutWorkspaceChanging = false;
+		}
+		if (event === 'shell:subscribe' && this.checkoutWorkspaceChanging) return;
+		const checkoutIntentGeneration = this.checkoutIntentGeneration;
+		// A buffered preselection must not start checkout under a different
+		// account when a subscriber eventually receives the event.
+		const eventPayload = event === 'shell:subscribe'
+			? { ...(payload as ShellConnectionEventMap['shell:subscribe']), checkoutScope: this.isConnected() ? getCheckoutScope(this.getClient()) : null }
+			: payload;
+		this.logDebug(event as string, eventPayload);
 
 		// Dispatch to registered handlers via microtask. An unsubscribed handler
 		// leaves an empty Set behind, so check size — not just presence.
 		const handlers = this.listeners.get(event as string);
 		if (handlers && handlers.size > 0) {
-			Promise.resolve().then(() => this.dispatch(handlers, event as string, payload));
+			Promise.resolve().then(() => {
+				if (event !== 'shell:subscribe' || this.checkoutIntentGeneration === checkoutIntentGeneration) {
+					this.dispatch(handlers, event as string, eventPayload);
+				}
+			});
 			return;
 		}
 
@@ -1898,7 +1919,7 @@ export class ConnectionManager implements IConnectionManager {
 		// Without this, a click whose listener isn't yet/no-longer mounted is
 		// silently swallowed — the prod "Get Started does nothing" symptom.
 		if (ConnectionManager.REPLAYABLE_EVENTS.has(event as string)) {
-			this.pendingEvents.set(event as string, payload);
+			this.pendingEvents.set(event as string, eventPayload);
 			console.warn(
 				`[ConnectionManager] '${event as string}' emitted with no listener — buffered for replay.`,
 			);
@@ -2206,11 +2227,12 @@ export class ConnectionManager implements IConnectionManager {
 			return {};
 		});
 		this.subscribe('shell:status', (snapshot) => {
-			const mirror = snapshot as { connected: boolean; status: ConnectionStatus; engineHttpUrl?: string } | undefined;
+			const mirror = snapshot as { connected: boolean; status: ConnectionStatus; engineHttpUrl?: string; sdkUri?: string } | undefined;
 			if (!mirror || mirror.connected === undefined || mirror.status === undefined) return;
 			// The root's engine HTTP base — so getHttpUrl() answers in
 			// socketless realms (engine-served icons, MF remote entries).
 			if (mirror.engineHttpUrl !== undefined) this.serverUri = mirror.engineHttpUrl;
+			this.mirrorSdkUri = mirror.sdkUri;
 			const wasConnected = this.isConnected();
 			this.mirrorConnected = mirror.connected;
 			// Normalize the root's status onto this realm's enum so every state
@@ -2222,6 +2244,11 @@ export class ConnectionManager implements IConnectionManager {
 			else if (!mirror.connected && wasConnected) this.emit('shell:disconnected', { reason: 'root disconnected', hasError: false } as never);
 		});
 		this.subscribe('shell:account', (snapshot) => {
+			if (snapshot === null) {
+				this.accountInfo = undefined;
+				this.seedMirrorClient();
+				return;
+			}
 			if (!snapshot) return;
 			this.accountInfo = snapshot as ConnectResult;
 			this.seedMirrorClient();
@@ -2267,13 +2294,18 @@ export class ConnectionManager implements IConnectionManager {
 			// would be dropped, and this is the only thing that wants it.
 			this.ops().handle(CLIENT_EVENT_OP, (params) => {
 				const { message } = (params ?? {}) as { message?: DAPMessage };
-				if (message) void this.mirrorClient?.receiveEvent(message);
+				if (message?.event === 'apaext_org_changed') {
+					const orgId = message.body?.orgId;
+					this.emit('shell:workspaceWillChange', { orgId: typeof orgId === 'string' ? orgId : '' });
+				} else if (message) {
+					void this.mirrorClient?.receiveEvent(message);
+				}
 			});
 		}
 		this.mirrorClient.applyIdentity({
 			connected: this.mirrorConnected === true,
 			accountInfo: this.accountInfo,
-			...(this.serverUri ? { uri: this.serverUri } : {}),
+			uri: this.mirrorSdkUri || this.serverUri,
 		});
 	}
 

@@ -723,6 +723,8 @@ export class ConnectionManager extends EventEmitter {
 				// Reconnect; the new session resolves the new default org and
 				// the CONNECTED status fan-out re-syncs every provider.
 				if (message.event === 'apaext_org_changed') {
+					this.updateConnectionStatus({ state: ConnectionState.CONNECTING });
+					this.emit('shell:event', message);
 					this.logger.output(`${icons.info} Default org changed — reconnecting to adopt the new org`);
 					// Deferred: disconnect() tears down the client that is
 					// dispatching this very callback.

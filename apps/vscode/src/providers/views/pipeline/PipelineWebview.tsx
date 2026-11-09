@@ -28,6 +28,7 @@ import { PipelineEditor } from 'shared/tools/pipelines/PipelineEditor';
 import type { IPipelineEditorHost } from 'shared/tools/pipelines/PipelineEditor';
 import type { ViewState } from 'shared/tools/pipelines';
 import { CheckoutModal } from 'shell';
+import { checkoutNotDispatched } from 'shell/src/modules/checkout/checkoutDispatch';
 import type { CheckoutPlan, PlanAction } from 'shell';
 import { createMirroredPrefsStore, useGridConfigAnswering, ConnectionManager } from 'shell';
 import { SHELL_PARTITION } from 'shell/src/workspace/workspaceStore';
@@ -35,6 +36,7 @@ import { isAppSubscribed } from 'shared/utils/subscriptionGate';
 import { PIPE_BUILDER_APP_ID } from '../../../shared/types';
 import { useMessaging } from '../hooks/useMessaging';
 import { useStripeKey } from '../hooks/useStripeKey';
+import { useCheckoutSession } from '../hooks/useCheckoutSession';
 import { CheckoutUnavailableNotice } from '../components';
 import type { PipelineHostToWebview, PipelineWebviewToHost } from '../../types/pipelineTypes';
 
@@ -53,10 +55,11 @@ const PipelineWebview: React.FC = () => {
 	const [isNew, setIsNew] = useState(false);
 	const [subscribed, setSubscribed] = useState(true);
 	const [isReadonly, setIsReadonly] = useState(false);
-	const [showCheckout, setShowCheckout] = useState(false);
+
 	// Server-supplied Stripe publishable key — matches the connected server's
 	// Stripe account instead of a build-time value.
-	const { key: stripeKey, reason: stripeKeyReason } = useStripeKey();
+	const stripe = useStripeKey();
+	const { checkout, checkoutStripeKey, openCheckout, closeCheckout, isCurrent, replaySupported } = useCheckoutSession(stripe);
 	const [cloudConnectionConfigured, setCloudConnectionConfigured] = useState(false);
 	// Host-pushed env-key updates (the Variables page saved) — delivered into
 	// the shared editor through the seam's feed.
@@ -142,14 +145,15 @@ const PipelineWebview: React.FC = () => {
 			// The host's run gate asks for the Subscribe overlay — a SIGNAL
 			// (one-shot): replaying it after a later subscribe would reopen it.
 			cm.subscribe(`pipeline:doc:${doc}:checkout`, (payload) => {
-				if ((payload as { required?: boolean } | undefined)?.required) setShowCheckout(true);
+				if ((payload as { required?: boolean } | undefined)?.required) openCheckout();
 			}),
 			// Subscription state follows the MIRRORED account — the host no
 			// longer pushes it (every realm can derive the same answer).
 			cm.on('shell:accountUpdate', () => {
-				const sub = isAppSubscribed(cm.getAccountInfo(), PIPE_BUILDER_APP_ID);
+				const account = cm.getAccountInfo();
+				const sub = isAppSubscribed(account, PIPE_BUILDER_APP_ID);
 				setSubscribed(sub);
-				if (sub) setShowCheckout(false);
+				if (sub) closeCheckout();
 			}),
 			cm.subscribe('pipeline:env', (snap) => {
 				const keys = (snap as { envKeys?: string[] } | undefined)?.envKeys;
@@ -230,7 +234,7 @@ const PipelineWebview: React.FC = () => {
 			isSubscribed: subscribed,
 			// The host's run gate also signals the overlay; the lock icon's own
 			// click opens it directly.
-			promptSubscribe: () => setShowCheckout(true),
+			promptSubscribe: openCheckout,
 			openLink: (url, displayName) => ConnectionManager.getInstance().emitOp('host.pipeline.openLink', { url, displayName }),
 			openCloudSetup: () => {
 				// Focus the Development tab only — the prompt must not stage a
@@ -250,7 +254,7 @@ const PipelineWebview: React.FC = () => {
 				};
 			},
 		}),
-		[isDirty, isNew, isReadonly, viewState, subscribed, cloudConnectionConfigured, oauthReturnUrl, pendingOAuthTokens, handleContentChanged, handleViewStateChange]
+		[isDirty, isNew, isReadonly, viewState, subscribed, cloudConnectionConfigured, oauthReturnUrl, pendingOAuthTokens, handleContentChanged, handleViewStateChange, openCheckout]
 	);
 
 	// --- Checkout callbacks — the realm client's billing surface --------------
@@ -258,19 +262,18 @@ const PipelineWebview: React.FC = () => {
 	const needBillingClient = useCallback(() => {
 		const cm = ConnectionManager.getInstance();
 		const client = cm.getClient();
-		if (!client || !cm.isConnected()) throw new Error('Not connected to server');
+		if (!client || !checkout || !isCurrent(checkout)) throw checkoutNotDispatched();
 		return client;
-	}, []);
+	}, [checkout, isCurrent]);
 
 	const handleFetchPlans = useCallback((): Promise<CheckoutPlan[]> => {
 		return needBillingClient().billing.getProductPrices(PIPE_BUILDER_APP_ID) as Promise<CheckoutPlan[]>;
 	}, [needBillingClient]);
 
-	const handleCreateCheckout = useCallback((priceId: string): Promise<{ clientSecret: string; subscriptionId: string }> => {
-		const orgId = ConnectionManager.getInstance().getAccountInfo()?.organization?.id;
-		if (!orgId) return Promise.reject(new Error('No organisation found'));
-		return needBillingClient().billing.createCheckoutSession(orgId, PIPE_BUILDER_APP_ID, priceId) as Promise<{ clientSecret: string; subscriptionId: string }>;
-	}, [needBillingClient]);
+	const handleCreateCheckout = useCallback((priceId: string, promotionCode?: string, attemptId?: string) => {
+		if (!checkout) return Promise.reject(new Error('No checkout session found'));
+		return needBillingClient().billing.createCheckoutSession(checkout.scope.orgId, PIPE_BUILDER_APP_ID, priceId, promotionCode, attemptId);
+	}, [needBillingClient, checkout]);
 
 	const handleConfirmPending = useCallback(async (subscriptionId: string, priceId: string): Promise<void> => {
 		// No SDK method exists for confirm_pending; wrap the public call()
@@ -287,8 +290,8 @@ const PipelineWebview: React.FC = () => {
 	return (
 		<>
 			<PipelineEditor project={project} host={editorHost} />
-			{showCheckout && stripeKey && <CheckoutModal appName="RocketRide" appDescription="Visual AI pipeline editor: run and deploy pipelines on RocketRide Cloud." stripePublishableKey={stripeKey} onFetchPlans={handleFetchPlans} onCreateCheckout={handleCreateCheckout} onConfirmPending={handleConfirmPending} onSuccess={() => { setShowCheckout(false); setSubscribed(true); }} onClose={() => setShowCheckout(false)} onActionClick={(_plan: CheckoutPlan, action: PlanAction) => ConnectionManager.getInstance().emitOp('host.pipeline.openLink', { url: action.type === 'mailto' ? `mailto:${action.url}${action.subject ? `?subject=${encodeURIComponent(action.subject)}` : ''}` : action.url, browser: true })} />}
-			{showCheckout && !stripeKey && <CheckoutUnavailableNotice reason={stripeKeyReason} onClose={() => setShowCheckout(false)} />}
+			{checkout && checkoutStripeKey && <CheckoutModal key={checkout.id} appName="RocketRide" appDescription="Visual AI pipeline editor: run and deploy pipelines on RocketRide Cloud." stripePublishableKey={checkoutStripeKey} isCheckoutCurrent={() => isCurrent(checkout)} supportsCheckoutReplay={replaySupported} requireCheckoutStatus onFetchPlans={handleFetchPlans} onCreateCheckout={handleCreateCheckout} onConfirmPending={handleConfirmPending} onSuccess={() => closeCheckout(checkout)} onClose={() => closeCheckout(checkout)} onActionClick={(_plan: CheckoutPlan, action: PlanAction) => ConnectionManager.getInstance().emitOp('host.pipeline.openLink', { url: action.type === 'mailto' ? `mailto:${action.url}${action.subject ? `?subject=${encodeURIComponent(action.subject)}` : ''}` : action.url, browser: true })} />}
+			{checkout && !checkoutStripeKey && <CheckoutUnavailableNotice reason={stripe.reason} onClose={() => closeCheckout(checkout)} />}
 		</>
 	);
 };

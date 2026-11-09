@@ -21,7 +21,8 @@
 
 import { useEffect, useState } from 'react';
 import { ConnectionManager } from 'shell';
-import type { StripeKeyReason as StripeKeyUnavailableReason } from 'shared/ops/hostOps';
+import { getCheckoutScope } from 'shell/src/connection/checkoutScope';
+import type { StripeKeyInfo, StripeKeyReason as StripeKeyUnavailableReason } from 'shared/ops/hostOps';
 
 // =============================================================================
 // CONSTANTS
@@ -43,6 +44,7 @@ const BASE_RETRY_MS = 1000;
 export interface StripeKeyState {
 	/** The server's publishable key, or '' while loading / unavailable. */
 	key: string;
+	server?: string;
 	/** Why `key` is empty — mirrors the host's last reply. Undefined while
 	 *  loading, once a key resolves, or when the hook is disabled. */
 	reason?: StripeKeyUnavailableReason;
@@ -74,18 +76,25 @@ export function useStripeKey(enabled = true): StripeKeyState {
 
 		const request = (): void => {
 			const gen = generation;
+			const expected = getCheckoutScope(cm.getClient())?.server;
 			void cm.request('host.stripeKey', {} as never).then(
-				(r) => { if (gen === generation) apply(r as { key: string | null; reason?: StripeKeyUnavailableReason }); },
+				(r) => {
+					if (gen !== generation) return;
+					const result = r as StripeKeyInfo;
+					const current = getCheckoutScope(cm.getClient())?.server;
+					const server = result.server ?? expected;
+					apply(result.key && (!server || current !== server) ? { key: null, reason: 'probe-failed' } : { ...result, server });
+				},
 				() => { if (gen === generation) apply({ key: null, reason: 'probe-failed' }); }
 			);
 		};
 
-		const apply = (info: { key: string | null; reason?: StripeKeyUnavailableReason }): void => {
+		const apply = (info: StripeKeyInfo): void => {
 			if (disposed) return;
 			if (info.key) {
 				settled = true;
 				if (retryTimer) clearTimeout(retryTimer);
-				setState({ key: info.key });
+				setState({ key: info.key, server: info.server });
 				return;
 			}
 			// The server answered and has no billing — terminal, retrying

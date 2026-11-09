@@ -174,11 +174,8 @@ export class BusHost {
 		// current state reads the retained topics; a realm that needs the
 		// stream subscribes and gets it from the moment it asked.
 		//
-		// `apaext_account` and `apaext_org_changed` never reach here — the CM
-		// handles both and returns early. Neither is a loss: the account
-		// rides the retained `shell:account` topic (more reliable, since it
-		// replays) and an org change reconnects the root, which the status
-		// topic carries.
+		// Account state rides the retained shell:account topic. Workspace
+		// transitions also reach realms as an edge before the root reconnects.
 		const pushEvent = (message: DAPMessage): void => {
 			this.broadcastEmitOp(CLIENT_EVENT_OP, { message: encodeMessageData(message) });
 		};
@@ -299,6 +296,7 @@ export class BusHost {
 			connected: this.connectionManager.isConnected(),
 			status: this.connectionManager.getConnectionStatus(),
 			engineHttpUrl: (this.connectionManager.getHttpUrl() || '').replace(/\/$/, ''),
+			sdkUri: this.connectionManager.getClient()?.getConnectionInfo().uri ?? '',
 			configMode: ConfigManager.getInstance().getConfig().development.connectionMode,
 		};
 	}
