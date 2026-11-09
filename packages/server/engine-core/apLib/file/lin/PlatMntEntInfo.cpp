@@ -107,9 +107,11 @@ SharedPtr<MntEntInfoCache> refreshMounting(
     return result;
 }
 
-// Obtain refreshed information about the mounted file systems
+// Obtain refreshed information about the mounted file systems. /etc/mtab
+// normally links to the kernel's mount table but can be missing, for example
+// in minimal containers, so fall back to reading that table.
 SharedPtr<MntEntInfoCache> refreshMounting() noexcept {
-    return refreshMounting({_PATH_MOUNTED});
+    return refreshMounting({_PATH_MOUNTED, "/proc/self/mounts"});
 }
 
 }  // namespace ap::file
