@@ -34,3 +34,4 @@ langchain-anthropic         # llm_anthropic: test_prompt_cache.py
 langchain-core              # agent_langchain, agent_deepagent: test_tool_builder.py; test_real_langchain.py
 astrapy                     # store_astra: test_active_paths.py
 pymilvus                    # store_milvus: test_store_milvus_live.py
+langchain-text-splitters    # summarization: test_summarization.py

@@ -76,7 +76,7 @@ chapters/console but **empty traces**.
 | `deploy_set_schedule` | `{project_id, source_id, schedule, team_id, ttl?}` → `{ok, deployment}`. Cron per source (`"manual"` clears); `source_id` must be a source component of the deployed version; schedules fire only while enabled. |
 | `deploy_enable` | `{project_id, team_id}` → `{ok, deployment}`. Re-arms a disabled deployment's schedules. |
 | `deploy_disable` | `{project_id, team_id}` → `{ok, deployment}`. The kill switch: schedules stop, manual runs refused. |
-| `deploy_remove` | `{project_id, team_id}` → `{ok, deployment}`. Soft remove: leaves listings and stops running; versions and audit history are kept. |
+| `deploy_remove` | `{project_id, team_id}` → `{ok, deployment}`. Soft remove: leaves listings and its schedules stop firing (running tasks are not terminated); versions and audit history are kept. |
 
 ## Node authoring
 
