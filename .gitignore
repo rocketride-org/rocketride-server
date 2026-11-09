@@ -23,6 +23,9 @@ out/
 # -----------------------------------------------------------------------------
 .claude/*
 !.claude/CLAUDE.md
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/browser-agent-test/
 .cursor/
 .windsurf/
 # Agent stubs planted by the RocketRide VS Code extension's agent installer
