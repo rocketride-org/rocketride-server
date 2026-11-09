@@ -26,6 +26,8 @@
 from types import SimpleNamespace
 
 import pytest
+import rocketlib
+from rocketlib.config import resolveConfig
 
 from ai.common.config import UnresolvedCredentialError
 from nodes.store_chroma.IGlobal import IGlobal
@@ -54,3 +56,10 @@ def test_a_cloud_server_checks_the_key(glb):
 
 def test_a_cloud_server_with_a_filled_key_passes(glb):
     glb._check_credentials({'profile': 'cloud', 'apikey': 'a-real-token'})
+
+
+def test_a_cloud_server_without_a_key_is_allowed(glb):
+    """A self-hosted TLS server takes no token: the key is optional on the cloud branch and nothing is checked."""
+    config = resolveConfig(rocketlib.getServiceSchema('chroma'), {'profile': 'cloud', 'cloud': {'host': 'h'}})
+    assert config['apikey'] is None
+    glb._check_credentials(config)

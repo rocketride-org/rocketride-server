@@ -157,7 +157,8 @@
 		"questions": ["text", "answers", "documents"]
 	},
 	"test": {
-		"profiles": ["local"],
+		// "none" is the auth selector's token-less branch: the test server has no password
+		"profiles": ["none"],
 		"cases": [
 			{
 				"name": "Add document to store",

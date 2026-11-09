@@ -163,8 +163,8 @@
 		},
 		"chroma.apikey": {
 			"base": "vector.apikey",
-			"env": "ROCKETRIDE_CHROMA_APIKEY",
-			"required": true
+			"description": "Enter your API key. Leave it empty for a self-hosted TLS server without token authentication.",
+			"env": "ROCKETRIDE_CHROMA_APIKEY"
 		},
 		"chroma.score": {
 			"base": "vector.score",
