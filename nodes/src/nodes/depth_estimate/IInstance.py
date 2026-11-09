@@ -25,7 +25,7 @@
 import json
 import time
 
-from rocketlib import IInstanceBase, AVI_ACTION, debug, warning
+from rocketlib import IInstanceBase, AVI_ACTION, debug
 from ai.common.image import ImageProcessor
 from ai.common.image.dense_resize import resize_for_inference, restore_dense_output
 from ai.common.utils import colorize_depth
@@ -101,7 +101,7 @@ class IInstance(IInstanceBase):
                 image = ImageProcessor.load_image_from_bytes(self._image_data)
                 self._emit(image)
             except Exception as exc:
-                warning(f'depth_estimate: dropping frame due to inference error: {exc}')
+                raise RuntimeError('depth_estimate failed to process the input frame') from exc
             finally:
                 self._image_data = None
             return self.preventDefault()

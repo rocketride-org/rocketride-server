@@ -25,7 +25,7 @@
 import json
 import time
 
-from rocketlib import IInstanceBase, AVI_ACTION, debug, warning
+from rocketlib import IInstanceBase, AVI_ACTION, debug
 from ai.common.image import ImageProcessor
 from ai.common.avi.descriptor import descriptor_from_payload, forward_enriched_image
 from .IGlobal import IGlobal
@@ -116,7 +116,7 @@ class IInstance(IInstanceBase):
                     f'emit={t_emit:.0f}ms total={t_decode + t_detect + t_emit:.0f}ms'
                 )
             except Exception as exc:
-                warning(f'detect: dropping frame due to inference error: {exc}')
+                raise RuntimeError('detect failed to process the input frame') from exc
             finally:
                 self._image_data = None
             return self.preventDefault()

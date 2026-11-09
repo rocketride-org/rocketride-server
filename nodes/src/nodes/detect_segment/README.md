@@ -50,7 +50,7 @@ This node declares GPU capability and uses its configured transformer engine thr
 
 ### Output and failures
 
-The text and image outputs are produced only when those lanes have listeners. If image decoding or segmentation raises an error for a frame, the node logs a warning, drops that frame, and suppresses normal image forwarding rather than emitting a partial result.
+The text and image outputs are produced only when those lanes have listeners. Image decoding or segmentation failures raise an error to the engine instead of silently dropping a frame. Outputs already written before a downstream failure cannot be retracted; a failed frame must not be counted as a successful result. Individual overlay-rendering failures still log a warning and skip that overlay.
 
 ## Upstream docs
 

@@ -50,7 +50,7 @@ With a model server configured, detection runs there. Otherwise it runs locally 
 
 ### Output and failures
 
-The image output draws lime rectangles and labels containing each detection's label and score. If image decoding, detection, or output generation fails for a frame, the node logs a warning, drops that frame, and emits no image or text output for it.
+The image output draws lime rectangles and labels containing each detection's label and score. Image decoding, detection, and output-generation failures raise an error to the engine instead of silently dropping a frame. Outputs already written before a downstream failure cannot be retracted; a failed frame must not be counted as a successful result.
 
 ## Upstream docs
 

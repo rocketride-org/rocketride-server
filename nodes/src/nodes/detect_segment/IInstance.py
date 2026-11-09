@@ -227,7 +227,7 @@ class IInstance(IInstanceBase):
                 debug(f'segment: infer={(time.perf_counter() - t0) * 1000:.0f}ms')
                 self._emit(image, result)
             except Exception as exc:
-                warning(f'detect_segment: dropping frame due to inference error: {exc}')
+                raise RuntimeError('detect_segment failed to process the input frame') from exc
             finally:
                 self._image_data = None
             return self.preventDefault()
