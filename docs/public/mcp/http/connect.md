@@ -27,6 +27,10 @@ connector** and enter the endpoint URL. Complete the OAuth flow on first use.
 claude mcp add --transport http rocketride https://api.rocketride.ai/mcp
 ```
 
+The server sends MCP `instructions`, and `list_components`, `describe_component`,
+`validate_pipeline` and `run_pipeline` ask Claude Code to load them upfront under
+tool search; the other tools load on demand.
+
 ### Cursor
 
 Add to `.cursor/mcp.json` in your workspace:
