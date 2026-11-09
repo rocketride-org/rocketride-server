@@ -4,7 +4,7 @@
 
 What exists so far:
 
-- The task format, the loader that validates a task set, and the 30 breadth tasks converted from the drafted scenarios.
+- The task format, the loader that validates a task set, and the 30 breadth tasks converted from the drafted scenarios. Those scenarios are at commit 51bd59d2c7, on the branch [`backup/browser-agent-30-scenarios`](https://github.com/rocketride-org/rocketride-server/tree/backup/browser-agent-30-scenarios); this README and the code cite that commit by its hash.
 - The browser driver: `run` starts the local dev stack, runs each task in a real browser, and writes a trial folder with the traffic, the final files, a trial record and its grade.
 - Grading (`grade.ts`): the task's checks on the trial, with 51bd59d2c7's check kinds, a check every task gets (`keys-not-leaked`), and path resolution for renamed files. Reruns of failures and the flake rate (`schedule.ts`), written to `results.json` and `report.md`.
 - `check`: grades a hand-made workspace, such as a task's reference solution, against the engine with no agent.
@@ -172,7 +172,7 @@ Not supported, because a browser trial grades the end state and these read the a
 
 ## The 30 breadth tasks
 
-`src/convert-scenarios.ts` converted the 30 drafted scenarios at commit 51bd59d2c7 (`apps/shared/src/modules/agent/eval/data`) once: `node --import tsx src/convert-scenarios.ts 51bd59d2c7`. A trial is one turn that nobody answers, so the conversion:
+`src/convert-scenarios.ts` converted the 30 drafted scenarios at commit 51bd59d2c7 (`apps/shared/src/modules/agent/eval/data`, on the branch `backup/browser-agent-30-scenarios`) once: `git fetch origin backup/browser-agent-30-scenarios`, then `node --import tsx src/convert-scenarios.ts 51bd59d2c7`. A trial is one turn that nobody answers, so the conversion:
 
 - drops the scripted follow-up replies;
 - keeps only the first turn of each ASK task, which should end `needs_input` with nothing changed: its `after_turn_1` checks stay, as do the scope, leak and done-means-checked guards, and the checks on the state after the follow-up answer go;
