@@ -98,8 +98,8 @@ test('a retry after a move that stopped before package.json finishes it', () => 
 	for (const [rel, content] of Object.entries(snapshot(folder))) assert.doesNotMatch(content, OLD_ID_RE, rel);
 });
 
-// Root ignores file modes, so the failed write cannot be staged there.
-test('a write that fails part way leaves package.json on the old id and no temp file', { skip: process.getuid?.() === 0 }, () => {
+// Root ignores file modes, and Windows ignores directory modes, so the failed write cannot be staged there.
+test('a write that fails part way leaves package.json on the old id and no temp file', { skip: process.platform === 'win32' || process.getuid?.() === 0 }, () => {
 	const folder = scaffoldLocalApp();
 	const src = path.join(folder, 'src');
 	fs.chmodSync(src, 0o555);
