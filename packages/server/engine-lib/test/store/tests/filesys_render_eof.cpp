@@ -24,6 +24,9 @@
 #include "filesys_render_fixture.hpp"
 
 #if ROCKETRIDE_PLAT_UNX
+/// A file truncated after its stream begins made every read return zero
+/// bytes, so the renderer sent empty data tags forever. It must stop, save
+/// Ec::Read on the entry, and still end the stream.
 TEST_CASE("store::filesys reports unexpected EOF without empty data tags") {
     using namespace filesys_render_test;
     const auto size = GENERATE(size_t(6), size_t(1024 * 1024));
@@ -52,6 +55,7 @@ TEST_CASE("store::filesys reports unexpected EOF without empty data tags") {
     REQUIRE(entry.objectFailed());
     REQUIRE(entry.completionCode().code() == Ec::Read);
 }
+/// Control case: an unchanged file streams all of its bytes and completes.
 TEST_CASE("store::filesys completes a file that does not shrink") {
     using namespace filesys_render_test;
     const auto size = GENERATE(size_t(6), size_t(1024 * 1024));

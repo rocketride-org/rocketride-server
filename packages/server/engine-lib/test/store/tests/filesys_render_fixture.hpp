@@ -38,6 +38,8 @@ using namespace engine::store;
 struct File {
     char path[64] = "/tmp/rocketride-render-XXXXXX";
     int fd = ::mkstemp(path);
+    /// Creates a temporary file of `size` bytes. A sparse file only has its
+    /// size set (no data written); otherwise it is filled with 'x' bytes.
     explicit File(size_t size, bool sparse = false) {
         REQUIRE(fd >= 0);
         if (sparse) {
@@ -48,12 +50,15 @@ struct File {
                     static_cast<ssize_t>(bytes.size()));
         }
     }
+    /// Closes the descriptor and removes the temporary file.
     ~File() {
         if (fd >= 0) ::close(fd);
         ::unlink(path);
     }
+    /// Not copyable: the object owns the descriptor and the file on disk.
     File(const File &) = delete;
     File &operator=(const File &) = delete;
+    /// Returns a filesys entry whose URL points at this file.
     Entry entry() const {
         Text url{"filesys://test"};
         url += path;
@@ -70,6 +75,10 @@ struct Sink : IServiceFilterInstance {
     size_t bytes = 0;
     bool allZero = true;
     size_t emptyDataTags = 0;
+    /// Records every tag the renderer sends. Data tags also update `bytes`,
+    /// `allZero` and `emptyDataTags`, and an empty data tag fails at once so a
+    /// zero-progress loop cannot hang the test. Otherwise returns the result
+    /// of `onTag`, or no error when it is unset.
     Error sendTag(ServicePipe &, const TAG *tag) noexcept override {
         tags.push_back(tag->tagId);
         if (tag->tagId == TAG_OBJECT_STREAM_DATA::ID) {
@@ -86,11 +95,16 @@ struct Sink : IServiceFilterInstance {
         }
         return onTag ? onTag(tag) : Error{};
     }
+    /// Returns how many tags with the given id were received.
     size_t count(TAG_ID id) const {
         return std::count(tags.begin(), tags.end(), id);
     }
 };
 
+/// Renders `entry` through the real filesys source endpoint with a Sink
+/// spliced in directly below the renderer to capture its output. `configure`
+/// runs before rendering (for example to set Sink::onTag) and `verify` runs on
+/// the Sink afterwards. Returns the renderer's result.
 inline Error render(Entry &entry,
                     const std::function<void(Sink &)> &configure,
                     const std::function<void(const Sink &)> &verify) {
