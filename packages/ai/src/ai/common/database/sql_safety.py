@@ -98,10 +98,17 @@ _WRITING_CLAUSE = re.compile(
     re.IGNORECASE,
 )
 
-# ClickHouse's SETTINGS clause (SETTINGS name = value), which changes settings for the query, such as its time limit;
-# a quoted name needs no space after the keyword, and a $ right after it makes it part of a longer name. A setting
-# without '= value' can only be a Bool set to true, and the time limit is not a Bool.
-_SETTINGS_CLAUSE = re.compile(r'\bsettings(?![\w$])\s*(?:[a-z0-9_$]+|`[^`]*`|"[^"]*")\s*=', re.IGNORECASE)
+# ClickHouse's SETTINGS clause, which changes settings for the query, such as its time limit (ParserSetQuery.cpp): the
+# keyword, then names separated by commas, each with an optional '= value'. A name without a value can only set a Bool
+# to true, and the time limit is not a Bool, so the clause counts once any name gets a value. A quoted name needs no
+# space after the keyword, a $ right after the keyword makes it part of a longer name, and a name may be compound (a.b).
+_SETTINGS_KEYWORD = re.compile(r'\bsettings(?![\w$])', re.IGNORECASE)
+_SETTING_NAME = r'(?:[a-z0-9_$]+|`[^`]*`|"[^"]*")(?:\s*\.\s*(?:[a-z0-9_$]+|`[^`]*`|"[^"]*"))*'
+_SETTINGS_ASSIGNMENT = re.compile(rf'\s*(?:{_SETTING_NAME}\s*,\s*)*{_SETTING_NAME}\s*=', re.IGNORECASE)
+
+# Right after the statement's first SELECT (and DISTINCT), a comma or an opening parenthesis, the word settings is a
+# column for ClickHouse too. Elsewhere select and distinct can be aliases, and a clause can follow them.
+_COLUMN_POSITION = re.compile(r'(?:^\s*(?:explain\s+)?select(?:\s+distinct)?|[,(])\s*$', re.IGNORECASE)
 
 
 def _mask_quoted(sql: str, i: int, quote: str, backslash: bool, out: list[str]) -> int:
@@ -388,6 +395,24 @@ def _mask_clickhouse(sql: str) -> str:
     return ''.join(out)
 
 
+def _has_settings_clause(statement: str) -> bool:
+    """Return True if the statement holds a ClickHouse SETTINGS clause that gives a setting a value.
+
+    Each ``settings`` keyword is checked on its own, so a column named settings cannot hide a clause after it.
+
+    Args:
+        statement: One statement with literals and comments blanked.
+
+    Returns:
+        Whether a keyword outside a column position starts a list in which some name gets a value.
+    """
+    return any(
+        _SETTINGS_ASSIGNMENT.match(statement, keyword.end())
+        and not _COLUMN_POSITION.search(statement, 0, keyword.start())
+        for keyword in _SETTINGS_KEYWORD.finditer(statement)
+    )
+
+
 def _is_read_shaped(masked: str | None) -> bool:
     """Return True if the masked text holds at most one statement, a SELECT that does not write, lock or change settings.
 
@@ -406,7 +431,7 @@ def _is_read_shaped(masked: str | None) -> bool:
     return all(
         _ALLOWED_STATEMENT.match(statement)
         and not _WRITING_CLAUSE.search(statement)
-        and not _SETTINGS_CLAUSE.search(statement)
+        and not _has_settings_clause(statement)
         for statement in statements
     )
 

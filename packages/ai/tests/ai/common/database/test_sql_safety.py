@@ -317,6 +317,24 @@ def test_select_that_writes_or_locks_is_rejected(sql):
         'SELECT 1 SETTINGS `max_execution_time` = 0',
         'SELECT 1 SETTINGS "max_execution_time" = 0',
         'EXPLAIN SELECT 1 SETTINGS max_execution_time = 0',
+        # A setting without a value (a Bool set to true) may come first in the list
+        'SELECT 1 SETTINGS force_index_by_date, max_execution_time = 0',
+        'SELECT 1 SETTINGS force_index_by_date, use_query_cache, max_execution_time = 0',
+        'SELECT 1 SETTINGS "force_index_by_date", max_execution_time = 0',
+        'SELECT 1 SETTINGS`force_index_by_date`,max_execution_time=0',
+        'SELECT * FROM (SELECT 1 SETTINGS force_index_by_date, max_execution_time = 0)',
+        'SELECT 1 FORMAT TSV SETTINGS force_index_by_date, max_execution_time = 0',
+        'SELECT 1 SETTINGS max_execution_time = DEFAULT',
+        'SELECT 1 SETTINGS x.max_execution_time = 0',
+        # 1. is a number, so the keyword after it starts the clause
+        'SELECT 1. SETTINGS max_execution_time = 0',
+        # A column named settings earlier in the query does not hide the clause
+        'SELECT settings a, b = 1 FROM t SETTINGS force_index_by_date, max_execution_time = 0',
+        # select and distinct can be aliases: only the statement's first SELECT [DISTINCT] makes settings a column
+        'SELECT 1 AS select SETTINGS max_execution_time = 0',
+        'SELECT 1 select SETTINGS max_execution_time = 0',
+        'SELECT 1 AS distinct SETTINGS force_index_by_date, max_execution_time = 0',
+        "SELECT 'f'DISTINCT SETTINGS max_execution_time = 0",
     ],
 )
 def test_a_clickhouse_settings_clause_is_rejected(sql):
@@ -339,10 +357,19 @@ def test_a_clickhouse_settings_clause_is_rejected(sql):
         "SELECT 'SETTINGS max_execution_time = 0' AS q",
         'SELECT 1 -- SETTINGS max_execution_time = 0',
         'SELECT my_settings x FROM t',
+        # Right after the first SELECT (and DISTINCT), a comma or an opening parenthesis, settings is a column there too
+        'SELECT settings a, b = 1 FROM t',
+        'SELECT DISTINCT settings a, b = 1 FROM t',
+        'SELECT x, settings a, b = 1 FROM t',
+        'SELECT (settings a, b = 1) FROM t',
+        'SELECT /* c */ settings a, b = 1 FROM t',
+        # A setting without a value can only set a Bool to true, which cannot lift the time limit
+        'SELECT 1 SETTINGS force_index_by_date',
+        'SELECT 1 SETTINGS force_index_by_date, use_query_cache',
     ],
 )
 def test_the_word_settings_alone_is_not_a_settings_clause(sql):
-    """A table, column or text named settings is not the clause.
+    """A table, column or text named settings is not the clause, and neither is a list that gives no value.
 
     Args:
         sql: The SQL under test.
@@ -392,6 +419,7 @@ def test_the_clickhouse_reading_sees_what_clickhouse_runs(sql):
         "SELECT x'1F', b'01'",
         'SELECT * FROM settings s',
         'SELECT a$settings = 1, settings$b = 2 FROM t',
+        'SELECT a FROM t WHERE settings$b = 2',
         # PostgreSQL and MySQL read a letter glued to settings as part of one name
         'SELECT \u00e9settings x = 1',
     ],

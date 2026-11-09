@@ -1021,7 +1021,8 @@ def test_live_clickhouse_profiles_run_read_only(monkeypatch, profile, limit, war
         admin.dispose()
 
 
-# Queries whose SETTINGS clause the PostgreSQL and MySQL readings take for a literal or a comment; {get} reads the limit
+# SETTINGS clauses that ClickHouse runs and is_sql_safe once missed: behind a quote or comment only ClickHouse reads,
+# or after a setting given without a value; {get} reads the limit
 _CLICKHOUSE_HIDDEN_SETTINGS = [
     pytest.param("SELECT \u2018'\u2019 AS s, {get} SETTINGS max_execution_time = 7 --'", id='curly-string'),
     pytest.param('SELECT {get} SETTINGS \u201cmax_execution_time\u201d = 7', id='curly-name'),
@@ -1031,11 +1032,15 @@ _CLICKHOUSE_HIDDEN_SETTINGS = [
     pytest.param(
         "SELECT $1$'$1$ AS s, {get} SETTINGS max_execution_time = 7 --'", id='heredoc-tag-starting-with-a-digit'
     ),
+    pytest.param(
+        'SELECT {get} SETTINGS force_index_by_date, max_execution_time = 7', id='after-a-setting-without-value'
+    ),
+    pytest.param('SELECT {get} SETTINGS "force_index_by_date", max_execution_time = 7', id='after-a-quoted-setting'),
 ]
 
 
 @pytest.mark.parametrize('template', _CLICKHOUSE_HIDDEN_SETTINGS)
-def test_live_clickhouse_runs_a_settings_clause_the_other_readings_miss(template):
+def test_live_clickhouse_runs_each_settings_clause_is_sql_safe_refuses(template):
     """A readonly=2 user lifts the node's time limit with each of these, so is_sql_safe must refuse them.
 
     The query runs on the node's read-only connection: without the clause it gets the node's limit, with it the
