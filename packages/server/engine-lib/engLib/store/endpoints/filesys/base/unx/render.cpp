@@ -195,13 +195,19 @@ Error IBaseSysInstance<LvlT>::sendTagEndStream(ServicePipe &target) noexcept {
 
 //-------------------------------------------------------------------------
 /// @details
-///		Store a standard file
-///	@param[in]	channel
-///		The channel to store it to
+///		Render a standard file: send its metadata and, for a regular file,
+///		stream its contents as begin, data and end stream tags. Directories
+///		are skipped and symbolic links send metadata only.
+///	@param[in]	target
+///		The pipe to render the object to
 ///	@param[in]	osPath
 ///		The local path to the object
+///	@param[in,out]	object
+///		The entry being rendered. Failures of the object itself (stat, open,
+///		read) are saved on it as its completion code.
 ///	@returns
-///		Error
+///		Error. Callers check object.objectFailed() to tell an object failure,
+///		which lets them continue with other objects, from a pipe failure.
 //-------------------------------------------------------------------------
 template <log::Lvl LvlT>
 Error IBaseSysInstance<LvlT>::renderStandardFile(ServicePipe &target,

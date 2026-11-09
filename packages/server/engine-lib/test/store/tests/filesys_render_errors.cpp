@@ -24,6 +24,9 @@
 #include "filesys_render_fixture.hpp"
 
 #if ROCKETRIDE_PLAT_UNX
+/// A destination error returned (not saved on the entry) while sending data
+/// was overwritten by the stream-end result. It must survive both a
+/// successful and a failing stream end.
 TEST_CASE("store::filesys preserves a return-only data error during stream cleanup") {
     using namespace filesys_render_test;
     const auto size = GENERATE(size_t(6), size_t(1024 * 1024));
@@ -47,6 +50,7 @@ TEST_CASE("store::filesys preserves a return-only data error during stream clean
     REQUIRE_FALSE(entry.objectFailed());
 }
 
+/// A stream-end failure is still returned when no earlier error occurred.
 TEST_CASE("store::filesys returns a stream-end error when data succeeded") {
     using namespace filesys_render_test;
     File file(6);
