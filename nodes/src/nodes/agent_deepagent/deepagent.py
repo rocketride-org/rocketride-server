@@ -147,6 +147,17 @@ def _build_deepagent_llm(agent_base: AgentBase, context: AgentContext) -> Any:
     return RocketRideToolCallingChatModel()
 
 
+def _with_schema_text(desc: str, input_schema: Any) -> str:
+    """Return the description with the input schema pasted after it, or unchanged when there is no schema to paste."""
+    if not isinstance(input_schema, dict):
+        return desc
+    try:
+        schema_text = json.dumps(input_schema, ensure_ascii=False)
+    except Exception:
+        return desc
+    return f'{desc}\n\nTool input schema (JSON): {schema_text}'
+
+
 def _build_deepagent_tools(
     agent_base: AgentBase,
     context: AgentContext,
@@ -237,20 +248,14 @@ def _build_deepagent_tools(
             continue
         desc = td.get('description') if isinstance(td.get('description'), str) else f'Invoke host tool: {name}'
         input_schema = td.get('inputSchema')
-        if isinstance(input_schema, dict):
-            try:
-                schema_text = json.dumps(input_schema, ensure_ascii=False)
-            except Exception:
-                schema_text = ''
-            if schema_text:
-                desc = f'{desc}\n\nTool input schema (JSON): {schema_text}'
-
         schema_cls = _make_args_schema(input_schema if isinstance(input_schema, dict) else None)
         tool = HostTool(name=name, description=desc, args_schema=schema_cls)
         try:
             setattr(tool, '_rr_input_schema', input_schema)
         except Exception:
-            pass
+            # The protocol prompt shows the original schema from _rr_input_schema (normalize_bound_tools). Without it
+            # the model would see only the generated one, which types every field Any, so paste the original instead.
+            tool = HostTool(name=name, description=_with_schema_text(desc, input_schema), args_schema=schema_cls)
         tools.append(tool)
     return tools
 
@@ -705,6 +710,15 @@ def _parse_failure_hint(raw: str) -> str:
     return 'Your last output parsed, but was not one of the allowed shapes.'
 
 
+def _prompt_tools(bound_tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """One entry per tool with one schema: the original input schema when the tool carries it, else the generated one."""
+    out = []
+    for t in bound_tools:
+        schema = t.get('input_schema') if isinstance(t.get('input_schema'), dict) else t.get('args_schema')
+        out.append({'name': t.get('name', ''), 'description': t.get('description', ''), 'args_schema': schema})
+    return out
+
+
 def _tool_call_protocol_prompt(bound_tools: List[Dict[str, Any]]) -> str:
     """
     Build the system-prompt preamble that instructs the LLM to output a JSON envelope.
@@ -728,7 +742,7 @@ def _tool_call_protocol_prompt(bound_tools: List[Dict[str, Any]]) -> str:
     envelope instead of the answer. ``{"type":"final",...}`` is still accepted by the
     parser for anything that emits it; it is no longer what we ask for.
     """
-    tools_json = json.dumps(bound_tools, ensure_ascii=False)
+    tools_json = json.dumps(_prompt_tools(bound_tools), ensure_ascii=False)
     return '\n'.join(
         [
             'system: To CALL A TOOL, respond with exactly one JSON object and nothing else.',
