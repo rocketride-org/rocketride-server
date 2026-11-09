@@ -6,8 +6,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { adoptedAppId, rewriteAppIdentity, withRegistrationReport } from './namespaceAdoption';
-import type { IAppBuilderHost } from './types';
+import { adoptedAppId, rewriteAppIdentity } from './namespaceAdoption';
 
 /** package.json as the scaffold writes it for `local.brandy` (two-space indent). */
 const scaffoldPkg = `${JSON.stringify(
@@ -84,28 +83,12 @@ test('rewriteAppIdentity: a package.json that is not JSON gets a plain reason, n
 	assert.throws(() => rewriteAppIdentity({ packageJson: '{ "name": ' }, 'local.brandy', 'acme.brandy'), /^Error: package\.json is not valid JSON, so the app id cannot be changed/);
 });
 
-test('withRegistrationReport: a claim on the Deploy tab reports the id the server assigned', async () => {
-	const reported: string[] = [];
-	const host = { capabilities: { hasNativeFiles: true, canDebug: false, hasReviewLadder: true }, registerDeveloper: async (id: string) => `${id}_assigned` } as IAppBuilderHost;
-	const wrapped = withRegistrationReport(host, (id) => reported.push(id));
-	assert.equal(await wrapped.registerDeveloper?.('acme'), 'acme_assigned');
-	assert.deepEqual(reported, ['acme_assigned']);
-	assert.equal(wrapped.capabilities, host.capabilities);
-});
-
-test('withRegistrationReport: a refused claim reports nothing; a host that cannot register is returned as is', async () => {
-	const reported: string[] = [];
-	const refusing = {
-		capabilities: { hasNativeFiles: true, canDebug: false, hasReviewLadder: true },
-		registerDeveloper: async () => {
-			throw new Error('taken');
-		},
-	} as IAppBuilderHost;
-	await assert.rejects(() => withRegistrationReport(refusing, (id) => reported.push(id)).registerDeveloper!('acme'), /taken/);
-	assert.deepEqual(reported, []);
-	const plain = { capabilities: refusing.capabilities } as IAppBuilderHost;
-	assert.equal(
-		withRegistrationReport(plain, () => undefined),
-		plain
-	);
+test("rewriteAppIdentity: CRLF line endings and the trigger's own indentation are kept", () => {
+	const crlfPkg = scaffoldPkg.replace(/\n/g, '\r\n');
+	const trigger = '{\r\n\t"id": "local.brandy"\r\n}\r\n';
+	const result = rewriteAppIdentity({ packageJson: crlfPkg, trigger }, 'local.brandy', 'acme.brandy');
+	assert.equal(result.files.packageJson?.includes('\n'), true);
+	assert.doesNotMatch(result.files.packageJson as string, /[^\r]\n/);
+	assert.match(result.files.packageJson as string, /\r\n$/);
+	assert.equal(result.files.trigger, '{\r\n\t"id": "acme.brandy"\r\n}\r\n');
 });

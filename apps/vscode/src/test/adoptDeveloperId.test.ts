@@ -9,7 +9,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { renderTemplate } from 'rocketride/app-scaffold';
-import { adoptDeveloperIdInFolder, assertTargetFree, confirmedTargetOf, identityPathsOf } from '../appdev/adoptDeveloperId';
+import { adoptDeveloperId, adoptDeveloperIdInFolder, assertTargetFree, confirmedTargetOf, identityPathsOf } from '../appdev/adoptDeveloperId';
+import type { AdoptDeveloperIdDeps } from '../appdev/adoptDeveloperId';
 
 /** Writes the scaffold's real Blank template for `local.brandy` into a temp folder. */
 function scaffoldLocalApp(): string {
@@ -40,6 +41,9 @@ function snapshot(folder: string): Record<string, string> {
 	return out;
 }
 
+/** Every form the old id takes in a scaffold: the id, the package name, the module id. */
+const OLD_ID_RE = /local[._-]brandy/;
+
 test('a freshly scaffolded local app moves into the namespace everywhere it names its id', () => {
 	const folder = scaffoldLocalApp();
 	const before = snapshot(folder);
@@ -55,7 +59,7 @@ test('a freshly scaffolded local app moves into the namespace everywhere it name
 	assert.match(after['src/AppDescriptor.ts'], /id: 'acme\.brandy'/);
 	assert.equal(JSON.parse(after['brandy.rrapp']).id, 'acme.brandy');
 	// No file still names the old id, and only the three id carriers changed.
-	for (const [rel, content] of Object.entries(after)) assert.doesNotMatch(content, /local\.brandy|local-brandy/, rel);
+	for (const [rel, content] of Object.entries(after)) assert.doesNotMatch(content, OLD_ID_RE, rel);
 	const changed = Object.keys(after)
 		.filter((rel) => after[rel] !== before[rel])
 		.sort();
@@ -91,22 +95,36 @@ test('a retry after a move that stopped before package.json finishes it', () => 
 	const result = adoptDeveloperIdInFolder(folder, 'local.brandy', 'acme');
 
 	assert.deepEqual(result.changes, ['package.json: app id local.brandy -> acme.brandy', 'package.json: publisher local -> acme', 'package.json: package name local-brandy -> acme-brandy']);
-	for (const [rel, content] of Object.entries(snapshot(folder))) assert.doesNotMatch(content, /local\.brandy|local-brandy/, rel);
+	for (const [rel, content] of Object.entries(snapshot(folder))) assert.doesNotMatch(content, OLD_ID_RE, rel);
 });
 
 // Root ignores file modes, so the failed write cannot be staged there.
-test('a write that fails part way leaves package.json on the old id', { skip: process.getuid?.() === 0 }, () => {
+test('a write that fails part way leaves package.json on the old id and no temp file', { skip: process.getuid?.() === 0 }, () => {
 	const folder = scaffoldLocalApp();
-	const descriptorPath = path.join(folder, 'src', 'AppDescriptor.ts');
-	fs.chmodSync(descriptorPath, 0o444);
+	const src = path.join(folder, 'src');
+	fs.chmodSync(src, 0o555);
 	try {
 		assert.throws(() => adoptDeveloperIdInFolder(folder, 'local.brandy', 'acme'));
 		assert.equal(JSON.parse(fs.readFileSync(path.join(folder, 'package.json'), 'utf8')).appManifest.id, 'local.brandy');
+		assert.deepEqual(
+			Object.keys(snapshot(folder)).filter((rel) => rel.endsWith('.tmp')),
+			[]
+		);
 	} finally {
-		fs.chmodSync(descriptorPath, 0o644);
+		fs.chmodSync(src, 0o755);
 	}
 	assert.equal(adoptDeveloperIdInFolder(folder, 'local.brandy', 'acme').appId, 'acme.brandy');
-	for (const [rel, content] of Object.entries(snapshot(folder))) assert.doesNotMatch(content, /local\.brandy|local-brandy/, rel);
+	for (const [rel, content] of Object.entries(snapshot(folder))) assert.doesNotMatch(content, OLD_ID_RE, rel);
+});
+
+test('package.json is replaced in one step, keeping its mode', { skip: process.platform === 'win32' }, () => {
+	const folder = scaffoldLocalApp();
+	const pkgPath = path.join(folder, 'package.json');
+	fs.chmodSync(pkgPath, 0o640);
+	const inode = fs.statSync(pkgPath).ino;
+	adoptDeveloperIdInFolder(folder, 'local.brandy', 'acme');
+	assert.notEqual(fs.statSync(pkgPath).ino, inode, 'a rename puts a new file in place');
+	assert.equal(fs.statSync(pkgPath).mode & 0o777, 0o640);
 });
 
 test('the move goes only to the developer id the user confirmed and the server still reports', () => {
@@ -131,4 +149,61 @@ test('identityPathsOf names the files a move may rewrite', () => {
 		trigger: path.join(folder, 'brandy.rrapp'),
 		descriptor: path.join(folder, 'src', 'AppDescriptor.ts'),
 	});
+});
+
+/** Host stand-ins for {@link adoptDeveloperId}: a free target by default. */
+function deps(folder: string, over: Partial<AdoptDeveloperIdDeps> = {}): AdoptDeveloperIdDeps {
+	return {
+		developerStatus: async () => 'acme',
+		versionsOf: async () => 0,
+		scan: async () => [{ id: 'local.brandy', folder }],
+		dirtyPaths: () => [],
+		...over,
+	};
+}
+
+test('adoptDeveloperId moves the app once every check passes', async () => {
+	const folder = scaffoldLocalApp();
+	const asked: string[] = [];
+	const result = await adoptDeveloperId('local.brandy', 'acme', deps(folder, { versionsOf: async (id) => (asked.push(id), 0) }));
+	assert.equal(result.appId, 'acme.brandy');
+	assert.equal(result.folder, folder);
+	assert.deepEqual(asked, ['acme.brandy']);
+	for (const [rel, content] of Object.entries(snapshot(folder))) assert.doesNotMatch(content, OLD_ID_RE, rel);
+});
+
+test('adoptDeveloperId: every refusal leaves the app folder byte for byte as it was', async () => {
+	const cases: Array<[string, (folder: string) => Partial<AdoptDeveloperIdDeps>, RegExp]> = [
+		['no developer id on the server', () => ({ developerStatus: async () => '' }), /has no developer id yet/],
+		['a different developer id on the server', () => ({ developerStatus: async () => 'acme_labs' }), /is now "acme_labs"/],
+		['the app is not in the workspace', () => ({ scan: async () => [] }), /has no bound folder/],
+		[
+			'another workspace app has the new id',
+			(folder) => ({
+				scan: async () => [
+					{ id: 'local.brandy', folder },
+					{ id: 'acme.brandy', folder: path.join(folder, 'x') },
+				],
+			}),
+			/Another app in this workspace/,
+		],
+		['the server holds versions under the new id', () => ({ versionsOf: async () => 3 }), /already has an app "acme\.brandy" on the server/],
+		['package.json has unsaved edits', () => ({ dirtyPaths: (paths) => paths.filter((p) => p.endsWith('package.json')) }), /Save or revert your changes to package\.json/],
+		['src/AppDescriptor.ts has unsaved edits', () => ({ dirtyPaths: (paths) => paths.filter((p) => p.endsWith('AppDescriptor.ts')) }), /AppDescriptor\.ts first/],
+		[
+			'the server check times out',
+			() => ({
+				versionsOf: async () => {
+					throw new Error('Request timed out');
+				},
+			}),
+			/timed out/,
+		],
+	];
+	for (const [name, over, reason] of cases) {
+		const folder = scaffoldLocalApp();
+		const before = snapshot(folder);
+		await assert.rejects(() => adoptDeveloperId('local.brandy', 'acme', deps(folder, over(folder))), reason, name);
+		assert.deepEqual(snapshot(folder), before, name);
+	}
 });

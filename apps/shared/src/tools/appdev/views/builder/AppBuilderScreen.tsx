@@ -49,7 +49,6 @@ import { DeployView } from './panels/deploy/DeployView';
 import { PackageView } from './panels/package/PackageView';
 import { StoreView } from './panels/store/StoreView';
 import { NamespaceBanner } from './NamespaceBanner';
-import { withRegistrationReport } from '../../namespaceAdoption';
 import type { AppBuilderStage, AppSummary, IAppBuilderHost } from '../../types';
 
 // =============================================================================
@@ -141,9 +140,6 @@ export const AppBuilderScreen: React.FC<IAppBuilderScreenProps> = ({
 		void host.getDeveloperId().then((id) => setDeveloperId(id || null)).catch(() => setDeveloperId(null));
 	}, [host]);
 	const namespaceMismatch = developerId !== null && app.id.split('.')[0] !== developerId;
-	// A developer id claimed on the Deploy tab updates the gate right away, so
-	// a `local.*` app gets the banner (and its move) without a reopen.
-	const deployHost = useMemo(() => withRegistrationReport(host, (id) => setDeveloperId(id || null)), [host]);
 
 	// The activity views, per the settled UI model — Dashboard lands first;
 	// Package is the complete-app bar, Store is commerce only.
@@ -199,7 +195,7 @@ export const AppBuilderScreen: React.FC<IAppBuilderScreenProps> = ({
 				)}
 				{/* Package edits LOCAL files (like DESIGN) — never namespace-gated. */}
 				{stage === 'package' && <PackageView host={host} app={app} />}
-				{stage === 'deploy' && <DeployView host={deployHost} app={app} readOnly={namespaceMismatch} />}
+				{stage === 'deploy' && <DeployView host={host} app={app} readOnly={namespaceMismatch} />}
 				{stage === 'store' && <StoreView host={host} app={app} readOnly={namespaceMismatch} onNavigate={selectStage} />}
 			</div>
 		</div>

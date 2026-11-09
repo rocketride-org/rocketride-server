@@ -7,7 +7,7 @@
  * The read-only banner above STORE and DEPLOY when the app's id is outside
  * the org's developer namespace. For a `local.<name>` app on a host that can
  * rewrite its files, it offers to move the app to `<developerId>.<name>`,
- * asking first; otherwise it keeps the hand-edit instruction.
+ * asking first; otherwise it says which files to edit by hand.
  *
  * Imports nothing from the shell, so node:test can render it.
  */
@@ -44,6 +44,8 @@ const styles: Record<string, React.CSSProperties> = {
 		cursor: 'pointer',
 		whiteSpace: 'nowrap',
 	},
+	// A disabled button must not look clickable.
+	disabledBtn: { cursor: 'default', opacity: 0.6 },
 	secondaryBtn: {
 		padding: '4px 10px',
 		fontSize: 11.5,
@@ -98,7 +100,7 @@ export const NamespaceBannerView: React.FC<INamespaceBannerViewProps> = ({ appId
 				</>
 			) : (
 				<>
-					Rename the app id in package.json to <code>{developerId}.&lt;name&gt;</code> to publish it from this org.
+					Change the app id to <code>{developerId}.&lt;name&gt;</code> in package.json, and in the .rrapp file and src/AppDescriptor.ts where they carry it, to publish it from this org.
 				</>
 			)}
 		</div>
@@ -112,13 +114,13 @@ export const NamespaceBannerView: React.FC<INamespaceBannerViewProps> = ({ appId
 		{targetId && (phase === 'confirm' || phase === 'busy') && (
 			<>
 				<div style={styles.note}>
-					This changes the app id to <code>{targetId}</code> in package.json (and the publisher and package name, if they are still the ones the app was created with), and in the .rrapp file and src/AppDescriptor.ts when they carry it. The App Builder then reopens on the new id. Nothing on the server changes. Settings saved for you under <code>{appId}</code>, including the App Builder&rsquo;s layout and the preview&rsquo;s saved state, stay under the old id.
+					This changes the app id to <code>{targetId}</code> in package.json (and the publisher and package name, if they are still the ones the app was created with), and in the .rrapp file and src/AppDescriptor.ts when they carry it. The App Builder then reopens on the new id. Nothing on the server is renamed. Your saved settings for this app, in the App Builder and the preview, start fresh; the old ones stay on the server under <code>{appId}</code>.
 				</div>
 				<div style={styles.row}>
-					<button style={styles.primaryBtn} disabled={phase === 'busy'} onClick={onConfirm}>
+					<button style={phase === 'busy' ? { ...styles.primaryBtn, ...styles.disabledBtn } : styles.primaryBtn} disabled={phase === 'busy'} onClick={onConfirm}>
 						{phase === 'busy' ? 'Moving…' : 'Move app'}
 					</button>
-					<button style={styles.secondaryBtn} disabled={phase === 'busy'} onClick={onCancel}>
+					<button style={phase === 'busy' ? { ...styles.secondaryBtn, ...styles.disabledBtn } : styles.secondaryBtn} disabled={phase === 'busy'} onClick={onCancel}>
 						Cancel
 					</button>
 				</div>
