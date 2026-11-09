@@ -29,6 +29,8 @@ from typing import Any, Dict
 from ai.common.chat import ChatBase
 from langchain_openai import ChatOpenAI
 
+from .deepseek_endpoint import is_deepseek_api
+
 
 class Chat(ChatBase):
     """
@@ -57,7 +59,7 @@ class Chat(ChatBase):
 
         # The API key belongs to the cloud endpoint; a local server takes any token
         apikey = (config.get('apikey') or '').strip()
-        if 'api.deepseek' in serverbase:
+        if is_deepseek_api(serverbase):
             if not apikey:
                 raise ValueError('DeepSeek API key is required for the DeepSeek API endpoint.')
             if not apikey.startswith('sk-'):

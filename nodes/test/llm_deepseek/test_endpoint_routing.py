@@ -30,6 +30,7 @@ sys.path.insert(0, str(NODES_SRC))
 
 from llm_deepseek import IValidator as deepseek_validator  # noqa: E402
 from llm_deepseek import deepseek  # noqa: E402
+from llm_deepseek.deepseek_endpoint import is_deepseek_api  # noqa: E402
 
 _LOGICAL_TYPE = 'llm_deepseek'
 _CLOUD = 'https://api.deepseek.com/v1'
@@ -108,6 +109,32 @@ def test_a_local_model_builds_without_a_key():
     assert chat._llm.kwargs['base_url'] == _LOCAL
     assert chat._llm.kwargs['model'] == 'deepseek-r1:7b'
     assert chat._llm.kwargs['api_key'] == 'sk-local-dummy-key'
+
+
+@pytest.mark.parametrize(
+    'url, expected',
+    [
+        ('https://api.deepseek.com/v1', True),
+        ('https://API.DEEPSEEK.COM/v1', True),
+        ('http://ollama.lan/api.deepseek/v1', False),
+        ('http://localhost:11434/v1?upstream=api.deepseek.com', False),
+        ('https://api.deepseek.com.evil.example/v1', False),
+        ('http://localhost:11434/v1', False),
+    ],
+)
+def test_the_endpoint_is_judged_by_its_host(url, expected):
+    assert is_deepseek_api(url) is expected
+
+
+def test_a_local_url_mentioning_the_api_in_its_path_is_still_local(monkeypatch):
+    """The host decides: the key stays optional and the probe stays off for such a server."""
+    conn = {'model': 'deepseek-r1:7b', 'deepseek-r1:7b': {'serverbase': 'http://ollama.lan/api.deepseek/v1'}}
+    chat = deepseek.Chat(_LOGICAL_TYPE, _resolve(conn), {})
+    assert chat._llm.kwargs['api_key'] == 'sk-local-dummy-key'
+    assert chat._llm.kwargs['base_url'] == 'http://ollama.lan/api.deepseek/v1'
+    validator, requests, warnings = _validator(monkeypatch, conn)
+    validator.validateConfig()
+    assert (requests, warnings) == ([], [])
 
 
 def test_a_cloud_model_requires_the_key():

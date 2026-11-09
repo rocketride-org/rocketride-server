@@ -36,6 +36,8 @@ import re
 from rocketlib import IValidatorBase, warning
 from ai.common.config import warn_if_credential_unresolved
 
+from .deepseek_endpoint import is_deepseek_api
+
 VALIDATION_PROMPT = 'Hi'
 
 
@@ -78,7 +80,7 @@ class IValidator(IValidatorBase):
             # The probe follows the branch's endpoint: the local (Ollama-served)
             # branches are not probed, the DeepSeek API needs the key first
             serverbase = config.serverbase
-            if 'api.deepseek' not in serverbase:
+            if not is_deepseek_api(serverbase):
                 return
             if not apikey:
                 warning('DeepSeek API key is required for the DeepSeek API endpoint.')
