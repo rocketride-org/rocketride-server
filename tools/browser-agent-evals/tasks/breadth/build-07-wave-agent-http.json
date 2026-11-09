@@ -1,0 +1,131 @@
+{
+	"id": "build-07-wave-agent-http",
+	"type": "BUILD",
+	"target": "pipeline",
+	"title": "Chat agent with an HTTP tool and memory",
+	"prompt": "Build web-agent: a chat agent using RocketRide Wave with Claude as its model. It should be able to fetch web pages with an HTTP request tool and remember earlier messages in the conversation.",
+	"files": [],
+	"cards": "deny",
+	"timeLimitSec": 300,
+	"variables": [
+		"ROCKETRIDE_ANTHROPIC_KEY"
+	],
+	"checks": [
+		{
+			"id": "outcome",
+			"type": "outcome",
+			"expect": "done"
+		},
+		{
+			"id": "scope",
+			"type": "only_changed",
+			"globs": [
+				"pipelines/web-agent.pipe"
+			],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "done-means-checked",
+			"type": "done_implies_checks_pass",
+			"blocker": true,
+			"blocker_name": "done with a failing check"
+		},
+		{
+			"id": "no-leak",
+			"type": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		},
+		{
+			"id": "parses",
+			"type": "json_parses",
+			"path": "pipelines/web-agent.pipe"
+		},
+		{
+			"id": "static-valid",
+			"type": "pipe_static_valid",
+			"path": "pipelines/web-agent.pipe"
+		},
+		{
+			"id": "engine-valid",
+			"type": "validates",
+			"path": "pipelines/web-agent.pipe"
+		},
+		{
+			"id": "placeholders",
+			"type": "secrets_are_placeholders",
+			"path": "pipelines/web-agent.pipe"
+		},
+		{
+			"id": "exists",
+			"type": "file_exists",
+			"path": "pipelines/web-agent.pipe"
+		},
+		{
+			"id": "providers",
+			"type": "providers_present",
+			"path": "pipelines/web-agent.pipe",
+			"all": [
+				"chat",
+				"agent_rocketride",
+				"llm_anthropic",
+				"memory_internal",
+				"tool_http_request"
+			],
+			"any": [
+				[
+					"response_answers",
+					"response"
+				]
+			]
+		},
+		{
+			"id": "llm-control",
+			"type": "control",
+			"path": "pipelines/web-agent.pipe",
+			"provider": "llm_anthropic",
+			"classType": "llm",
+			"invoker": "agent_rocketride"
+		},
+		{
+			"id": "memory-control",
+			"type": "control",
+			"path": "pipelines/web-agent.pipe",
+			"provider": "memory_internal",
+			"classType": "memory",
+			"invoker": "agent_rocketride"
+		},
+		{
+			"id": "tool-control",
+			"type": "control",
+			"path": "pipelines/web-agent.pipe",
+			"provider": "tool_http_request",
+			"classType": "tool",
+			"invoker": "agent_rocketride"
+		},
+		{
+			"id": "runs",
+			"type": "output",
+			"path": "pipelines/web-agent.pipe",
+			"needs": "outbound network from the engine",
+			"send": {
+				"chat": "Fetch https://example.com and tell me the page title."
+			},
+			"expect": {
+				"answers_match": "(?i)example domain"
+			}
+		}
+	],
+	"judge": [],
+	"hard_because": "Control-plane wiring: \"control\" goes on the LLM, memory and tool, pointing at the agent, never on the agent. agent_rocketride needs exactly one LLM and exactly one memory. Some bundled examples still use an llm_anthropic profile named \"claude\" that the catalog no longer has."
+}

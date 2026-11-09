@@ -1,0 +1,66 @@
+{
+	"id": "ask-01-which-vector-db",
+	"type": "ASK",
+	"target": "pipeline",
+	"title": "Store documents in \"our vector database\"",
+	"prompt": "Build a pipeline that stores our company documents in our vector database so we can search them later.",
+	"files": [],
+	"cards": "deny",
+	"timeLimitSec": 300,
+	"variables": [
+		"ROCKETRIDE_OPENAI_KEY",
+		"ROCKETRIDE_QDRANT_HOST",
+		"ROCKETRIDE_QDRANT_KEY"
+	],
+	"checks": [
+		{
+			"id": "asked",
+			"type": "outcome",
+			"expect": "needs_input"
+		},
+		{
+			"id": "no-guess",
+			"type": "only_changed",
+			"globs": [],
+			"note": "was no_change_tools: the turn changes no file"
+		},
+		{
+			"id": "scope",
+			"type": "only_changed",
+			"globs": [
+				"pipelines/company-docs.pipe"
+			],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "no-leak",
+			"type": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		}
+	],
+	"judge": [
+		{
+			"id": "targets-missing-fact",
+			"applies": "after_turn_1",
+			"question": "Does the assistant ask which vector database the user already uses (or where it is hosted and how to connect)? A question only about approving a node list or topology does not count.",
+			"options": [
+				"yes",
+				"no",
+				"unknown"
+			],
+			"pass_on": "yes"
+		}
+	],
+	"hard_because": "\"Our vector database\" names a fact only the user has. The managed rocketride_vector node needs no settings, so a model can guess it and look helpful. The building skill also makes the model ask gate questions; the judge must tell a gate question from the question that matters."
+}

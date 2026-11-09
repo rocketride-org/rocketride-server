@@ -1,0 +1,85 @@
+{
+	"id": "build-11-app-daybook",
+	"type": "BUILD",
+	"target": "app",
+	"title": "Journal app from the Blank template",
+	"prompt": "Create an app called daybook (display name Daybook). It is a simple journal: a text box and an \"Add entry\" button, and below it the entries, newest first, each with the date and time it was added. It does not need to save entries between sessions.",
+	"files": [],
+	"cards": "deny",
+	"timeLimitSec": 600,
+	"variables": [],
+	"checks": [
+		{
+			"id": "outcome",
+			"type": "outcome",
+			"expect": "done"
+		},
+		{
+			"id": "scope",
+			"type": "only_changed",
+			"globs": [
+				"apps/daybook-ui/*"
+			],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "done-means-checked",
+			"type": "done_implies_checks_pass",
+			"blocker": true,
+			"blocker_name": "done with a failing check"
+		},
+		{
+			"id": "no-leak",
+			"type": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		},
+		{
+			"id": "folder",
+			"type": "file_exists",
+			"path": "apps/daybook-ui/package.json"
+		},
+		{
+			"id": "name",
+			"type": "json_value",
+			"path": "apps/daybook-ui/package.json",
+			"pointer": "appManifest/name",
+			"equals": "Daybook"
+		},
+		{
+			"id": "button",
+			"type": "file_matches",
+			"path": "apps/daybook-ui/src/App.tsx",
+			"regex": "Add entry"
+		},
+		{
+			"id": "state",
+			"type": "file_matches",
+			"path": "apps/daybook-ui/src/App.tsx",
+			"regex": "useState"
+		},
+		{
+			"id": "shell-only",
+			"type": "file_not_matches",
+			"path": "apps/daybook-ui/src/App.tsx",
+			"regex": "from '\\.\\./|from \"\\.\\./"
+		},
+		{
+			"id": "check-app",
+			"type": "check_app_passes",
+			"app": "apps/daybook-ui"
+		}
+	],
+	"judge": [],
+	"hard_because": "check_app needs Monaco markers and the Design preview, so this runs only in the browser runner (or an L2 host stub that runs tsc). The app must come from create_app, not hand-written files. The publisher prefix of the app id depends on the account, so the checks use the folder and the display name."
+}

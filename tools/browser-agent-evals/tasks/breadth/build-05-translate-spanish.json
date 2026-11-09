@@ -1,0 +1,110 @@
+{
+	"id": "build-05-translate-spanish",
+	"type": "BUILD",
+	"target": "pipeline",
+	"title": "Chat translator to Spanish",
+	"prompt": "Set up a pipeline translate-es: I type English in a chat and get the Spanish translation back, using an OpenAI model. It should only translate. If I type a question it should translate the question, not answer it.",
+	"files": [],
+	"cards": "deny",
+	"timeLimitSec": 300,
+	"variables": [
+		"ROCKETRIDE_OPENAI_KEY"
+	],
+	"checks": [
+		{
+			"id": "outcome",
+			"type": "outcome",
+			"expect": "done"
+		},
+		{
+			"id": "scope",
+			"type": "only_changed",
+			"globs": [
+				"pipelines/translate-es.pipe"
+			],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "done-means-checked",
+			"type": "done_implies_checks_pass",
+			"blocker": true,
+			"blocker_name": "done with a failing check"
+		},
+		{
+			"id": "no-leak",
+			"type": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		},
+		{
+			"id": "parses",
+			"type": "json_parses",
+			"path": "pipelines/translate-es.pipe"
+		},
+		{
+			"id": "static-valid",
+			"type": "pipe_static_valid",
+			"path": "pipelines/translate-es.pipe"
+		},
+		{
+			"id": "engine-valid",
+			"type": "validates",
+			"path": "pipelines/translate-es.pipe"
+		},
+		{
+			"id": "placeholders",
+			"type": "secrets_are_placeholders",
+			"path": "pipelines/translate-es.pipe"
+		},
+		{
+			"id": "exists",
+			"type": "file_exists",
+			"path": "pipelines/translate-es.pipe"
+		},
+		{
+			"id": "providers",
+			"type": "providers_present",
+			"path": "pipelines/translate-es.pipe",
+			"all": [
+				"chat",
+				"llm_openai"
+			],
+			"any": [
+				[
+					"response_answers",
+					"response"
+				]
+			]
+		},
+		{
+			"id": "instruction",
+			"type": "any_config_matches",
+			"path": "pipelines/translate-es.pipe",
+			"matches": "spanish|español"
+		},
+		{
+			"id": "runs",
+			"type": "output",
+			"path": "pipelines/translate-es.pipe",
+			"send": {
+				"chat": "Good morning. What time does the library open?"
+			},
+			"expect": {
+				"answers_match": "(?i)buen(os)? d[ií]as",
+				"answers_not_match": "(?i)\\b(9|nine) ?(am|a\\.m\\.)"
+			}
+		}
+	],
+	"judge": [],
+	"hard_because": "The LLM nodes have no system-prompt field, so the instruction must go in a prompt node between chat and the LLM. The run check catches a pipeline that answers the question instead of translating it."
+}

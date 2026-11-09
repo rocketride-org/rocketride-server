@@ -41,6 +41,9 @@ packages:
   # Examples
   - 'examples/*'
 
+  # Browser agent evals (./builder browser-agent:eval)
+  - 'tools/browser-agent-evals'
+
 # Workspace-wide dependency overrides — the SINGLE source of overrides (never
 # add a pnpm.overrides section to package.json: it silently supersedes this
 # whole block). shell and rocketride resolve IN-TREE to their workspace

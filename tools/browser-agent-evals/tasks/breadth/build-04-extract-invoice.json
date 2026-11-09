@@ -1,0 +1,143 @@
+{
+	"id": "build-04-extract-invoice",
+	"type": "BUILD",
+	"target": "pipeline",
+	"title": "Invoice field extraction",
+	"prompt": "Create a pipeline invoice-fields. I send an invoice file (PDF or plain text) to a webhook and get back four fields: invoice_number, vendor, total as a number and due_date as a date. Use OpenAI to do the extraction.",
+	"files": [],
+	"cards": "deny",
+	"timeLimitSec": 300,
+	"variables": [
+		"ROCKETRIDE_OPENAI_KEY"
+	],
+	"checks": [
+		{
+			"id": "outcome",
+			"type": "outcome",
+			"expect": "done"
+		},
+		{
+			"id": "scope",
+			"type": "only_changed",
+			"globs": [
+				"pipelines/invoice-fields.pipe"
+			],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "done-means-checked",
+			"type": "done_implies_checks_pass",
+			"blocker": true,
+			"blocker_name": "done with a failing check"
+		},
+		{
+			"id": "no-leak",
+			"type": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		},
+		{
+			"id": "parses",
+			"type": "json_parses",
+			"path": "pipelines/invoice-fields.pipe"
+		},
+		{
+			"id": "static-valid",
+			"type": "pipe_static_valid",
+			"path": "pipelines/invoice-fields.pipe"
+		},
+		{
+			"id": "engine-valid",
+			"type": "validates",
+			"path": "pipelines/invoice-fields.pipe"
+		},
+		{
+			"id": "placeholders",
+			"type": "secrets_are_placeholders",
+			"path": "pipelines/invoice-fields.pipe"
+		},
+		{
+			"id": "exists",
+			"type": "file_exists",
+			"path": "pipelines/invoice-fields.pipe"
+		},
+		{
+			"id": "providers",
+			"type": "providers_present",
+			"path": "pipelines/invoice-fields.pipe",
+			"all": [
+				"webhook",
+				"extract_data",
+				"llm_openai"
+			],
+			"any": [
+				[
+					"response_answers",
+					"response_json",
+					"response_table",
+					"response"
+				]
+			]
+		},
+		{
+			"id": "llm-control",
+			"type": "control",
+			"path": "pipelines/invoice-fields.pipe",
+			"provider": "llm_openai",
+			"classType": "llm",
+			"invoker": "extract_data"
+		},
+		{
+			"id": "fields",
+			"type": "extract_fields",
+			"path": "pipelines/invoice-fields.pipe",
+			"columns": [
+				"invoice_number",
+				"vendor",
+				"total",
+				"due_date"
+			],
+			"types": {
+				"total": [
+					"decimal",
+					"int"
+				],
+				"due_date": [
+					"date",
+					"datetime"
+				]
+			}
+		},
+		{
+			"id": "runs",
+			"type": "output",
+			"path": "pipelines/invoice-fields.pipe",
+			"send": {
+				"webhook": {
+					"file": "inputs/invoice-2041.txt",
+					"mimetype": "text/plain"
+				}
+			},
+			"expect": {
+				"answers_match_all": [
+					"INV-2041",
+					"(?i)northwind",
+					"1,?250(\\.00)?",
+					"2026-11-15|11/15/2026|15 Nov"
+				]
+			}
+		}
+	],
+	"judge": [],
+	"hard_because": "The field list lives under the profile ({profile}/fields) and the types use the schema enum (decimal, date), which the model has to read from describe_component. extract_data needs an LLM on its control plane."
+}

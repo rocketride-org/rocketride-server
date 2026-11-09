@@ -1,0 +1,115 @@
+{
+	"id": "edit-06-remove-step",
+	"type": "EDIT",
+	"target": "pipeline",
+	"title": "Remove a step and rewire",
+	"prompt": "Take the anonymize step out of notes-digest. Keep everything else the same.",
+	"files": [
+		{
+			"path": "pipelines/notes-digest.pipe",
+			"from": "fixtures/notes-digest/pipelines/notes-digest.pipe"
+		}
+	],
+	"cards": "deny",
+	"timeLimitSec": 300,
+	"variables": [
+		"ROCKETRIDE_OPENAI_KEY"
+	],
+	"checks": [
+		{
+			"id": "outcome",
+			"type": "outcome",
+			"expect": "done"
+		},
+		{
+			"id": "scope",
+			"type": "only_changed",
+			"globs": [
+				"pipelines/notes-digest.pipe"
+			],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "done-means-checked",
+			"type": "done_implies_checks_pass",
+			"blocker": true,
+			"blocker_name": "done with a failing check"
+		},
+		{
+			"id": "no-leak",
+			"type": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		},
+		{
+			"id": "parses",
+			"type": "json_parses",
+			"path": "pipelines/notes-digest.pipe"
+		},
+		{
+			"id": "static-valid",
+			"type": "pipe_static_valid",
+			"path": "pipelines/notes-digest.pipe"
+		},
+		{
+			"id": "engine-valid",
+			"type": "validates",
+			"path": "pipelines/notes-digest.pipe"
+		},
+		{
+			"id": "placeholders",
+			"type": "secrets_are_placeholders",
+			"path": "pipelines/notes-digest.pipe"
+		},
+		{
+			"id": "project-id",
+			"type": "project_id_unchanged",
+			"path": "pipelines/notes-digest.pipe",
+			"from": "pipelines/notes-digest.pipe"
+		},
+		{
+			"id": "gone",
+			"type": "providers_absent",
+			"path": "pipelines/notes-digest.pipe",
+			"providers": [
+				"anonymize_text"
+			]
+		},
+		{
+			"id": "rewired",
+			"type": "edge",
+			"path": "pipelines/notes-digest.pipe",
+			"from": "webhook",
+			"to": "summarization",
+			"lane": "text"
+		},
+		{
+			"id": "llm-kept",
+			"type": "control",
+			"path": "pipelines/notes-digest.pipe",
+			"provider": "llm_openai",
+			"classType": "llm",
+			"invoker": "summarization"
+		},
+		{
+			"id": "summary-config-kept",
+			"type": "config_value",
+			"path": "pipelines/notes-digest.pipe",
+			"provider": "summarization",
+			"pointer": "{profile}/numberOfSummaryWords",
+			"equals": 80
+		}
+	],
+	"judge": [],
+	"hard_because": "Removing a component leaves a dangling input unless the next component is rewired. The LLM is attached by control, not by a lane, and must survive the edit."
+}

@@ -1,0 +1,116 @@
+{
+	"id": "build-08-transcribe-audio",
+	"type": "BUILD",
+	"target": "pipeline",
+	"title": "Audio upload to transcript",
+	"prompt": "Make me a pipeline, meeting-transcript, where I upload an audio recording of a meeting and get the transcript back as text.",
+	"files": [],
+	"cards": "deny",
+	"timeLimitSec": 300,
+	"variables": [],
+	"checks": [
+		{
+			"id": "outcome",
+			"type": "outcome",
+			"expect": "done"
+		},
+		{
+			"id": "scope",
+			"type": "only_changed",
+			"globs": [
+				"pipelines/meeting-transcript.pipe"
+			],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "done-means-checked",
+			"type": "done_implies_checks_pass",
+			"blocker": true,
+			"blocker_name": "done with a failing check"
+		},
+		{
+			"id": "no-leak",
+			"type": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		},
+		{
+			"id": "parses",
+			"type": "json_parses",
+			"path": "pipelines/meeting-transcript.pipe"
+		},
+		{
+			"id": "static-valid",
+			"type": "pipe_static_valid",
+			"path": "pipelines/meeting-transcript.pipe"
+		},
+		{
+			"id": "engine-valid",
+			"type": "validates",
+			"path": "pipelines/meeting-transcript.pipe"
+		},
+		{
+			"id": "placeholders",
+			"type": "secrets_are_placeholders",
+			"path": "pipelines/meeting-transcript.pipe"
+		},
+		{
+			"id": "exists",
+			"type": "file_exists",
+			"path": "pipelines/meeting-transcript.pipe"
+		},
+		{
+			"id": "providers",
+			"type": "providers_present",
+			"path": "pipelines/meeting-transcript.pipe",
+			"all": [
+				"parse",
+				"audio_transcribe"
+			],
+			"any": [
+				[
+					"dropper",
+					"webhook"
+				],
+				[
+					"response_text",
+					"response"
+				]
+			]
+		},
+		{
+			"id": "audio-lane",
+			"type": "edge",
+			"path": "pipelines/meeting-transcript.pipe",
+			"from": "parse",
+			"to": "audio_transcribe",
+			"lane": "audio"
+		},
+		{
+			"id": "runs",
+			"type": "output",
+			"path": "pipelines/meeting-transcript.pipe",
+			"pending": "inputs/meeting-30s.wav is not recorded yet",
+			"send": {
+				"dropper": {
+					"file": "inputs/meeting-30s.wav"
+				}
+			},
+			"expect": {
+				"text_match": "(?i)budget"
+			}
+		}
+	],
+	"judge": [],
+	"hard_because": "parse turns tags into an audio lane; the model has to pick that lane rather than text. The live input file still has to be recorded."
+}

@@ -1,0 +1,128 @@
+{
+	"id": "build-09-ocr-receipt",
+	"type": "BUILD",
+	"target": "pipeline",
+	"title": "Receipt photo to text",
+	"prompt": "Build receipt-text: I upload a photo of a paper receipt and get the printed text back. Keep it local, no cloud vision models.",
+	"files": [],
+	"cards": "deny",
+	"timeLimitSec": 300,
+	"variables": [],
+	"checks": [
+		{
+			"id": "outcome",
+			"type": "outcome",
+			"expect": "done"
+		},
+		{
+			"id": "scope",
+			"type": "only_changed",
+			"globs": [
+				"pipelines/receipt-text.pipe"
+			],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "done-means-checked",
+			"type": "done_implies_checks_pass",
+			"blocker": true,
+			"blocker_name": "done with a failing check"
+		},
+		{
+			"id": "no-leak",
+			"type": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		},
+		{
+			"id": "parses",
+			"type": "json_parses",
+			"path": "pipelines/receipt-text.pipe"
+		},
+		{
+			"id": "static-valid",
+			"type": "pipe_static_valid",
+			"path": "pipelines/receipt-text.pipe"
+		},
+		{
+			"id": "engine-valid",
+			"type": "validates",
+			"path": "pipelines/receipt-text.pipe"
+		},
+		{
+			"id": "placeholders",
+			"type": "secrets_are_placeholders",
+			"path": "pipelines/receipt-text.pipe"
+		},
+		{
+			"id": "exists",
+			"type": "file_exists",
+			"path": "pipelines/receipt-text.pipe"
+		},
+		{
+			"id": "providers",
+			"type": "providers_present",
+			"path": "pipelines/receipt-text.pipe",
+			"all": [
+				"parse",
+				"ocr"
+			],
+			"any": [
+				[
+					"dropper",
+					"webhook"
+				],
+				[
+					"response_text",
+					"response"
+				]
+			]
+		},
+		{
+			"id": "no-cloud-vision",
+			"type": "providers_absent",
+			"path": "pipelines/receipt-text.pipe",
+			"providers": [
+				"image_vision_*",
+				"llm_*",
+				"reducto",
+				"llamaparse",
+				"landing_ai_*"
+			]
+		},
+		{
+			"id": "image-lane",
+			"type": "edge",
+			"path": "pipelines/receipt-text.pipe",
+			"from": "parse",
+			"to": "ocr",
+			"lane": "image"
+		},
+		{
+			"id": "runs",
+			"type": "output",
+			"path": "pipelines/receipt-text.pipe",
+			"pending": "inputs/receipt.png is not made yet",
+			"send": {
+				"dropper": {
+					"file": "inputs/receipt.png"
+				}
+			},
+			"expect": {
+				"text_match": "(?i)total"
+			}
+		}
+	],
+	"judge": [],
+	"hard_because": "Several components can read images (ocr, accessibility_describe, the vision LLMs); \"keep it local\" rules out the vision models. OCR has two output lanes (text, table); the reference uses text."
+}

@@ -1,0 +1,97 @@
+{
+	"id": "build-13-app-ask-claude",
+	"type": "BUILD",
+	"target": "app",
+	"title": "App with its own chat pipeline",
+	"prompt": "Build an app called askclaude (display name Ask Claude): a text box and an Ask button. The question goes to Claude Sonnet 4.6 through a pipeline that ships inside the app, and the answer shows under the box. My Anthropic key is in Variables.",
+	"files": [],
+	"cards": "deny",
+	"timeLimitSec": 600,
+	"variables": [
+		"ROCKETRIDE_ANTHROPIC_KEY"
+	],
+	"checks": [
+		{
+			"id": "outcome",
+			"type": "outcome",
+			"expect": "done"
+		},
+		{
+			"id": "scope",
+			"type": "only_changed",
+			"globs": [
+				"apps/askclaude-ui/*"
+			],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "done-means-checked",
+			"type": "done_implies_checks_pass",
+			"blocker": true,
+			"blocker_name": "done with a failing check"
+		},
+		{
+			"id": "no-leak",
+			"type": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		},
+		{
+			"id": "pipe-in-app",
+			"type": "glob_count",
+			"glob": "apps/askclaude-ui/src/*.pipe",
+			"n": 1
+		},
+		{
+			"id": "pipe-imported",
+			"type": "file_matches",
+			"path": "apps/askclaude-ui/src/App.tsx",
+			"regex": "import \\w+ from '\\./[\\w-]+\\.pipe'"
+		},
+		{
+			"id": "uses-client",
+			"type": "file_matches",
+			"path": "apps/askclaude-ui/src/App.tsx",
+			"regex": "useShellConnection"
+		},
+		{
+			"id": "use-pipeline-object",
+			"type": "file_matches",
+			"path": "apps/askclaude-ui/src/App.tsx",
+			"regex": "use\\(\\{\\s*pipeline"
+		},
+		{
+			"id": "no-filepath",
+			"type": "file_not_matches",
+			"path": "apps/askclaude-ui/src/App.tsx",
+			"regex": "filepath"
+		},
+		{
+			"id": "chat-call",
+			"type": "file_matches",
+			"path": "apps/askclaude-ui/src/App.tsx",
+			"regex": "\\.chat\\("
+		},
+		{
+			"id": "pipe-placeholder",
+			"type": "secrets_are_placeholders"
+		},
+		{
+			"id": "check-app",
+			"type": "check_app_passes",
+			"app": "apps/askclaude-ui"
+		}
+	],
+	"judge": [],
+	"hard_because": "Crosses both halves: the app must import the .pipe as an object and pass pipeline:, never filepath:; keep the token from use() instead of starting the pipeline per question; and build a Question for chat(). The checks are regexes over the source, so the browser run is what proves it."
+}

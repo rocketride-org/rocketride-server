@@ -1,0 +1,148 @@
+{
+	"components": [
+		{
+			"id": "dropper_1",
+			"provider": "dropper",
+			"config": {
+				"hideForm": true,
+				"mode": "Source",
+				"parameters": {},
+				"type": "dropper"
+			},
+			"ui": {
+				"position": {
+					"x": 20,
+					"y": 200
+				},
+				"measured": {
+					"width": 150,
+					"height": 66
+				},
+				"nodeType": "default",
+				"formDataValid": true
+			}
+		},
+		{
+			"id": "parse_1",
+			"provider": "parse",
+			"config": {},
+			"input": [
+				{
+					"lane": "tags",
+					"from": "dropper_1"
+				}
+			],
+			"ui": {
+				"position": {
+					"x": 240,
+					"y": 200
+				},
+				"measured": {
+					"width": 150,
+					"height": 66
+				},
+				"nodeType": "default",
+				"formDataValid": true
+			}
+		},
+		{
+			"id": "preprocessor_langchain_1",
+			"provider": "preprocessor_langchain",
+			"config": {
+				"profile": "default",
+				"default": {
+					"mode": "strlen",
+					"splitter": "RecursiveCharacterTextSplitter",
+					"strlen": 512
+				},
+				"parameters": {}
+			},
+			"input": [
+				{
+					"lane": "text",
+					"from": "parse_1"
+				}
+			],
+			"ui": {
+				"position": {
+					"x": 460,
+					"y": 200
+				},
+				"measured": {
+					"width": 150,
+					"height": 66
+				},
+				"nodeType": "default",
+				"formDataValid": true
+			}
+		},
+		{
+			"id": "embedding_openai_1",
+			"provider": "embedding_openai",
+			"config": {
+				"profile": "text-embedding-3-small",
+				"text-embedding-3-small": {
+					"apikey": "${ROCKETRIDE_OPENAI_KEY}"
+				},
+				"parameters": {}
+			},
+			"input": [
+				{
+					"lane": "documents",
+					"from": "preprocessor_langchain_1"
+				}
+			],
+			"ui": {
+				"position": {
+					"x": 680,
+					"y": 200
+				},
+				"measured": {
+					"width": 150,
+					"height": 66
+				},
+				"nodeType": "default",
+				"formDataValid": true
+			}
+		},
+		{
+			"id": "qdrant_1",
+			"provider": "qdrant",
+			"config": {
+				"profile": "cloud",
+				"cloud": {
+					"host": "${ROCKETRIDE_QDRANT_HOST}",
+					"port": 6333,
+					"apikey": "${ROCKETRIDE_QDRANT_KEY}",
+					"collection": "company-docs"
+				},
+				"parameters": {}
+			},
+			"input": [
+				{
+					"lane": "documents",
+					"from": "embedding_openai_1"
+				}
+			],
+			"ui": {
+				"position": {
+					"x": 900,
+					"y": 200
+				},
+				"measured": {
+					"width": 150,
+					"height": 66
+				},
+				"nodeType": "default",
+				"formDataValid": true
+			}
+		}
+	],
+	"project_id": "705bb379-6463-5386-a0e3-5ff393f0934f",
+	"viewport": {
+		"x": 0,
+		"y": 0,
+		"zoom": 1
+	},
+	"version": 1
+}

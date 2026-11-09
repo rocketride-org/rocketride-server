@@ -1,0 +1,5 @@
+{
+	"edit-08-app-fix-types-delete": [
+		"apps/notes-ui/src/LegacyList.tsx"
+	]
+}

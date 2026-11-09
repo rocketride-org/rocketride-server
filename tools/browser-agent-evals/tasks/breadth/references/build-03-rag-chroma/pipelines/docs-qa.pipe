@@ -1,0 +1,315 @@
+{
+	"components": [
+		{
+			"id": "dropper_1",
+			"provider": "dropper",
+			"config": {
+				"hideForm": true,
+				"mode": "Source",
+				"parameters": {},
+				"type": "dropper"
+			},
+			"ui": {
+				"position": {
+					"x": 20,
+					"y": 200
+				},
+				"measured": {
+					"width": 150,
+					"height": 66
+				},
+				"nodeType": "default",
+				"formDataValid": true
+			}
+		},
+		{
+			"id": "parse_1",
+			"provider": "parse",
+			"config": {},
+			"input": [
+				{
+					"lane": "tags",
+					"from": "dropper_1"
+				}
+			],
+			"ui": {
+				"position": {
+					"x": 240,
+					"y": 200
+				},
+				"measured": {
+					"width": 150,
+					"height": 66
+				},
+				"nodeType": "default",
+				"formDataValid": true
+			}
+		},
+		{
+			"id": "preprocessor_langchain_1",
+			"provider": "preprocessor_langchain",
+			"config": {
+				"profile": "default",
+				"default": {
+					"mode": "strlen",
+					"splitter": "RecursiveCharacterTextSplitter",
+					"strlen": 512
+				},
+				"parameters": {}
+			},
+			"input": [
+				{
+					"lane": "text",
+					"from": "parse_1"
+				}
+			],
+			"ui": {
+				"position": {
+					"x": 460,
+					"y": 200
+				},
+				"measured": {
+					"width": 150,
+					"height": 66
+				},
+				"nodeType": "default",
+				"formDataValid": true
+			}
+		},
+		{
+			"id": "embedding_openai_1",
+			"provider": "embedding_openai",
+			"config": {
+				"profile": "text-embedding-3-small",
+				"text-embedding-3-small": {
+					"apikey": "${ROCKETRIDE_OPENAI_KEY}"
+				},
+				"parameters": {}
+			},
+			"input": [
+				{
+					"lane": "documents",
+					"from": "preprocessor_langchain_1"
+				}
+			],
+			"ui": {
+				"position": {
+					"x": 680,
+					"y": 200
+				},
+				"measured": {
+					"width": 150,
+					"height": 66
+				},
+				"nodeType": "default",
+				"formDataValid": true
+			}
+		},
+		{
+			"id": "chroma_1",
+			"provider": "chroma",
+			"config": {
+				"profile": "local",
+				"local": {
+					"host": "${ROCKETRIDE_CHROMA_HOST}",
+					"port": "${ROCKETRIDE_CHROMA_PORT}",
+					"collection": "handbook"
+				},
+				"parameters": {}
+			},
+			"input": [
+				{
+					"lane": "documents",
+					"from": "embedding_openai_1"
+				}
+			],
+			"ui": {
+				"position": {
+					"x": 900,
+					"y": 200
+				},
+				"measured": {
+					"width": 150,
+					"height": 66
+				},
+				"nodeType": "default",
+				"formDataValid": true
+			}
+		},
+		{
+			"id": "chat_1",
+			"provider": "chat",
+			"config": {
+				"hideForm": true,
+				"mode": "Source",
+				"parameters": {},
+				"type": "chat"
+			},
+			"ui": {
+				"position": {
+					"x": 20,
+					"y": 500
+				},
+				"measured": {
+					"width": 150,
+					"height": 66
+				},
+				"nodeType": "default",
+				"formDataValid": true
+			}
+		},
+		{
+			"id": "embedding_openai_2",
+			"provider": "embedding_openai",
+			"config": {
+				"profile": "text-embedding-3-small",
+				"text-embedding-3-small": {
+					"apikey": "${ROCKETRIDE_OPENAI_KEY}"
+				},
+				"parameters": {}
+			},
+			"input": [
+				{
+					"lane": "questions",
+					"from": "chat_1"
+				}
+			],
+			"ui": {
+				"position": {
+					"x": 240,
+					"y": 500
+				},
+				"measured": {
+					"width": 150,
+					"height": 66
+				},
+				"nodeType": "default",
+				"formDataValid": true
+			}
+		},
+		{
+			"id": "chroma_2",
+			"provider": "chroma",
+			"config": {
+				"profile": "local",
+				"local": {
+					"host": "${ROCKETRIDE_CHROMA_HOST}",
+					"port": "${ROCKETRIDE_CHROMA_PORT}",
+					"collection": "handbook"
+				},
+				"parameters": {}
+			},
+			"input": [
+				{
+					"lane": "questions",
+					"from": "embedding_openai_2"
+				}
+			],
+			"ui": {
+				"position": {
+					"x": 460,
+					"y": 500
+				},
+				"measured": {
+					"width": 150,
+					"height": 66
+				},
+				"nodeType": "default",
+				"formDataValid": true
+			}
+		},
+		{
+			"id": "prompt_1",
+			"provider": "prompt",
+			"config": {
+				"instructions": [
+					"Answer from the provided handbook excerpts only. If they do not cover the question, say so."
+				],
+				"parameters": {}
+			},
+			"input": [
+				{
+					"lane": "documents",
+					"from": "chroma_2"
+				},
+				{
+					"lane": "questions",
+					"from": "chroma_2"
+				}
+			],
+			"ui": {
+				"position": {
+					"x": 680,
+					"y": 500
+				},
+				"measured": {
+					"width": 150,
+					"height": 66
+				},
+				"nodeType": "default",
+				"formDataValid": true
+			}
+		},
+		{
+			"id": "llm_anthropic_1",
+			"provider": "llm_anthropic",
+			"config": {
+				"profile": "claude-sonnet-4-6",
+				"claude-sonnet-4-6": {
+					"apikey": "${ROCKETRIDE_ANTHROPIC_KEY}"
+				},
+				"parameters": {}
+			},
+			"input": [
+				{
+					"lane": "questions",
+					"from": "prompt_1"
+				}
+			],
+			"ui": {
+				"position": {
+					"x": 900,
+					"y": 500
+				},
+				"measured": {
+					"width": 150,
+					"height": 66
+				},
+				"nodeType": "default",
+				"formDataValid": true
+			}
+		},
+		{
+			"id": "response_answers_1",
+			"provider": "response_answers",
+			"config": {
+				"laneName": "answers"
+			},
+			"input": [
+				{
+					"lane": "answers",
+					"from": "llm_anthropic_1"
+				}
+			],
+			"ui": {
+				"position": {
+					"x": 1120,
+					"y": 500
+				},
+				"measured": {
+					"width": 150,
+					"height": 66
+				},
+				"nodeType": "default",
+				"formDataValid": true
+			}
+		}
+	],
+	"project_id": "621c5fca-7115-59fb-bbb9-4c1f434d2a31",
+	"viewport": {
+		"x": 0,
+		"y": 0,
+		"zoom": 1
+	},
+	"version": 1
+}
