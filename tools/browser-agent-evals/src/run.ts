@@ -71,7 +71,8 @@ Commands:
                   ended done. --workspace <dir> grades that folder; by
                   default each task's reference solution.
   stack           Start the local stack (engine, rocket-ui dev remote, shell
-                  dev server) and keep it up until Ctrl-C; run --url uses it.
+                  dev server) and keep it up until Ctrl-C; run --url
+                  <its shell URL> --allow-wipe uses it.
   smoke           Ask each model one question the way the Agent tab does
                   (task 0.2), on the engine alone. Prints a table: model,
                   answered, seconds, whether the engine lists the key name.
@@ -83,13 +84,16 @@ Options:
   --table         validate: print the tasks as a Markdown table.
   --model <p/m>   run: provider/model to pick (default: ${DEFAULT_MODEL}).
   --url <url>     run: use the shell at this URL instead of starting a stack.
+                  Needs --allow-wipe.
   --apikey-env <name>
                   run: the environment variable holding the API key the page
                   signs in with (default: RR_EVAL_APIKEY with --url when it is
                   set, else the local engine's ${LOCAL_APIKEY}).
-  --allow-remote-wipe
-                  run: allow --url on another machine. Every trial empties the
-                  workspace and sessions of the API key's account there.
+  --allow-wipe    run: allow --url. Every trial empties the workspace, the
+                  agent sessions and the saved layouts of the API key's
+                  account on that stack, local or not. A stack the stack
+                  command started is safe to empty; a dev stack holds your
+                  own work.
   --out <dir>     run: where trial folders go (default: .verify/browser-agent/<time>).
   --reruns <n>    run: how many times to rerun a task whose first run failed
                   (default: 2). Flaky: a rerun passed. Failing: every run failed.
@@ -117,13 +121,13 @@ interface Args {
 	headed: boolean;
 	models: string[];
 	workspace: string | null;
-	allowRemoteWipe: boolean;
+	allowWipe: boolean;
 	noPreview: boolean;
 	help: boolean;
 }
 
 function parseArgs(argv: string[]): Args {
-	const args: Args = { command: null, tasks: DATA_DIR, only: [], table: false, model: DEFAULT_MODEL, url: null, apikeyEnv: null, out: null, reruns: 2, headed: false, models: [], workspace: null, allowRemoteWipe: false, noPreview: false, help: false };
+	const args: Args = { command: null, tasks: DATA_DIR, only: [], table: false, model: DEFAULT_MODEL, url: null, apikeyEnv: null, out: null, reruns: 2, headed: false, models: [], workspace: null, allowWipe: false, noPreview: false, help: false };
 	for (let i = 0; i < argv.length; i++) {
 		const a = argv[i];
 		const value = () => {
@@ -144,7 +148,7 @@ function parseArgs(argv: string[]): Args {
 			if (!Number.isInteger(args.reruns) || args.reruns < 0) throw new Error('--reruns needs a whole number of 0 or more');
 		} else if (a === '--headed') args.headed = true;
 		else if (a === '--workspace') args.workspace = path.resolve(value());
-		else if (a === '--allow-remote-wipe') args.allowRemoteWipe = true;
+		else if (a === '--allow-wipe') args.allowWipe = true;
 		else if (a === '--no-preview') args.noPreview = true;
 		else if (a === '--models') args.models.push(...value().split(',').filter(Boolean));
 		else if (a.startsWith('-')) throw new Error(`unknown option ${a}`);
@@ -195,8 +199,8 @@ async function run(args: Args): Promise<number> {
 		console.error(err instanceof Error ? err.message : String(err));
 		return 2;
 	}
-	if (args.url && !isLocalUrl(args.url) && !args.allowRemoteWipe) {
-		console.error(`every trial empties the workspace (.projects), the agent sessions and the saved layouts of the account the API key belongs to on ${new URL(args.url).host}. Pass --allow-remote-wipe if that account is the eval account and nothing in it needs keeping.`);
+	if (args.url && !args.allowWipe) {
+		console.error(`every trial empties the workspace (.projects), the agent sessions and the saved layouts of the account the API key signs in to on ${new URL(args.url).host}. On your dev stack that is your own work. Pass --allow-wipe only when nothing there needs keeping, such as a stack the stack command started, which keeps its store in its own run folder.`);
 		return 2;
 	}
 	let apiKey: string;
@@ -325,11 +329,6 @@ function apiKeyOf(args: Args): string {
 	const v = process.env[name];
 	if (!v) throw new Error(`--apikey-env ${name}: that variable is not set`);
 	return v;
-}
-
-/** Whether a URL is this machine, where the runner's own stack or a dev stack runs. */
-export function isLocalUrl(url: string): boolean {
-	return ['127.0.0.1', 'localhost', '[::1]', '::1'].includes(new URL(url).hostname);
 }
 
 /** The keys to scrub: the engine's, plus the API key when it comes from a variable. */

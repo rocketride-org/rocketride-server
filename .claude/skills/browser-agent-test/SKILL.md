@@ -23,13 +23,13 @@ EVAL_ARGS="run --model openai/gpt-6-luna" ./builder browser-agent:eval --pattern
 EVAL_ARGS="run --model anthropic/claude-haiku-5-5 --reruns 0 --headed" ./builder browser-agent:eval --pattern=edit-01   # no reruns, watch the browser
 EVAL_ARGS="run --no-preview" ./builder browser-agent:eval --pattern=edit-08                              # leave every Design preview closed
 EVAL_ARGS="stack" ./builder browser-agent:eval                             # hold a local stack until Ctrl-C ...
-EVAL_ARGS="run --url http://127.0.0.1:3000" ./builder browser-agent:eval --pattern=edit-01                # ... and run against it
+EVAL_ARGS="run --url http://127.0.0.1:3000 --allow-wipe" ./builder browser-agent:eval --pattern=edit-01   # ... and run against it
 EVAL_ARGS="check" ./builder browser-agent:eval --pattern=edit-01           # grade the task's reference solution, no agent
 EVAL_ARGS="check --workspace <dir>" ./builder browser-agent:eval --pattern=edit-01                       # grade a folder, no agent
 EVAL_ARGS="smoke" ./builder browser-agent:eval                             # ask each eval model one question
 ```
 
-`run` reruns each failure twice (`--reruns`). A run against another machine (`--url https://...`) takes its API key from `RR_EVAL_APIKEY` and needs `--allow-remote-wipe`, because every trial empties that account's workspace and sessions.
+`run` reruns each failure twice (`--reruns`). Every `run --url` needs `--allow-wipe`, local or not, because every trial empties the workspace and sessions of the API key's account on that stack. A stack the `stack` command started is safe to empty; never point it at a dev stack that holds real work. A run against another machine (`--url https://...`) takes its API key from `RR_EVAL_APIKEY`.
 
 ## Reading a run
 

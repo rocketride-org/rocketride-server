@@ -121,7 +121,7 @@ async function startLocal(opts: StackOptions): Promise<Stack> {
 		throw new Error(`no engine in ${ENGINE_DIR}. Build one for this checkout first (README: the engine), or pass --url to use a running stack`);
 	}
 	for (const port of opts.engineOnly ? [ENGINE_PORT] : [ENGINE_PORT, UI_PORT, SHELL_PORT]) {
-		if (await portInUse(port)) throw new Error(`port ${port} is in use by something this run did not start. Stop it yourself, or pass --url to use it`);
+		if (await portInUse(port)) throw new Error(`port ${port} is in use by something this run did not start, such as a dev stack. Stop it and run again. Running against that stack with --url and --allow-wipe would empty its account's workspace and agent sessions`);
 	}
 	fs.mkdirSync(opts.dir, { recursive: true });
 	const store = path.join(opts.dir, 'store');
