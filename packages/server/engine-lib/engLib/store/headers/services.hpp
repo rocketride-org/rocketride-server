@@ -159,13 +159,6 @@ public:
         ///		that brings nodes of one of them resolves it again
         //---------------------------------------------------------
         std::vector<Text> comboClassTypes;
-
-        //---------------------------------------------------------
-        ///	@details
-        ///		The JSON values its schema expanded to, the schemas
-        ///		its combos copy included
-        //---------------------------------------------------------
-        size_t expanded = 0;
     };
     using ServiceDefinitionPtr = ServiceDefinition *;
     using ServiceDefinitions = std::map<iText, ServiceDefinition>;

@@ -1557,7 +1557,6 @@ Error IServices::updateDefinitions(ServiceDefinitions &services) {
 
         // Save the schema
         def.serviceSchema = _mv(schema);
-        def.expanded = context.expanded;
         return {};
     };
 

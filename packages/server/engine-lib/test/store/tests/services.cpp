@@ -196,6 +196,26 @@ TEST_CASE("store::Services") {
             heavySection["properties"].append("custom_y.big");
         heavy["shape"].append(heavySection);
 
+        // Sections written inline in a provider: no reference pays for
+        // them, but every combo that lists the provider copies them
+        auto inlineBig = customNode("custom_z");
+        inlineBig["classType"] = customList({"custom_kind_z"});
+        json::Value bigSection = R"({"section": "Pipe"})"_json;
+        for (int part = 0; part < 1000; part++) {
+            json::Value inner;
+            inner["section"] = _ts("s", part);
+            inner["properties"] = json::arrayValue;
+            bigSection["properties"].append(inner);
+        }
+        inlineBig["shape"].append(bigSection);
+        auto picks = customNode("custom_za");
+        picks["fields"]["custom_za.pick"] =
+            R"({"title": "Pick", "combo": "custom_kind_z"})"_json;
+        json::Value pickSection = R"({"section": "Pipe"})"_json;
+        for (int copy = 0; copy < 1000; copy++)
+            pickSection["properties"].append("custom_za.pick");
+        picks["shape"].append(pickSection);
+
         // Two combos that each wait for the other never resolve
         auto waitsA = customNode("custom_n");
         waitsA["classType"] = customList({"custom_kind_n"});
@@ -234,6 +254,7 @@ TEST_CASE("store::Services") {
             customList({fanOut}),
             layers,
             customList({heavy}),
+            customList({inlineBig, picks}),
             customList({waitsA, waitsB}),
         };
         for (const auto &custom : refused)
@@ -247,7 +268,8 @@ TEST_CASE("store::Services") {
 
         // The budget names the definition that went past it
         for (const auto &custom :
-             {customList({fanOut}), layers, customList({heavy})}) {
+             {customList({fanOut}), layers, customList({heavy}),
+              customList({inlineBig, picks})}) {
             auto expanded = IServices::withCustomServices(custom);
             REQUIRE_FALSE(expanded);
             CHECK(std::string{expanded.ccode().message()}.find(
