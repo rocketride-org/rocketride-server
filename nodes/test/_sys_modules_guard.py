@@ -20,7 +20,12 @@ inside a collection hook gives pytest INTERNALERROR and kills the run.
 Pinned modules (``_PINNED_MODULES``) are imported once, when this module loads,
 and must stay the same object for the whole session: numpy's C core initialises
 once per process, so a numpy dropped from sys.modules cannot be imported again,
-and a stub left in its place reaches every later importer. They are checked at
+and a stub left in its place reaches every later importer. A stub ``depends``
+left in its place turns every later ``depends()`` / ``load_depends()`` call into
+a no-op, so a package installed on first use (torch, through
+``ai.common.torch``) is never installed and its import fails. A stub ``engLib``
+(the engine's C++ binding) reaches every module that first imports it later,
+such as ``ai.common.ssl`` and ``ai.node``. They are checked at
 collection time with the core modules and again after every test, once its
 fixtures are torn down; a test that replaced or dropped one fails in teardown,
 and the module is put back.
@@ -29,6 +34,7 @@ and the module is put back.
 from __future__ import annotations
 
 import importlib
+import importlib.machinery
 import sys
 from typing import Any, Dict, List, Tuple
 
@@ -58,9 +64,16 @@ def _is_stub_module(mod) -> bool:
     """True when mod is a hand-built stub/MagicMock, not the real imported module.
 
     A real module (or non-empty namespace package) is loaded from disk and carries
-    a __file__ or a non-empty __path__. Hand-built stubs — types.ModuleType (even
-    ones marked with __path__ = [] or built via module_from_spec), or MagicMock —
-    carry neither.
+    a __file__ or a non-empty __path__, or is compiled into the interpreter (engLib
+    inside the engine) and was loaded by BuiltinImporter. Hand-built stubs —
+    types.ModuleType (even ones marked with __path__ = [] or built via
+    module_from_spec), or MagicMock — have none of these.
+
+    Args:
+        mod (object): the sys.modules entry to classify.
+
+    Returns:
+        bool: True for a stub; False for a real module or None.
     """
     if mod is None:
         return False
@@ -68,11 +81,13 @@ def _is_stub_module(mod) -> bool:
         return True
     if getattr(mod, '__file__', None) is not None:
         return False
+    if getattr(getattr(mod, '__spec__', None), 'loader', None) is importlib.machinery.BuiltinImporter:
+        return False
     return not getattr(mod, '__path__', None)
 
 
 # Imported here, once, so every test module and every test sees the same object.
-_PINNED_MODULES = ('numpy',)
+_PINNED_MODULES = ('numpy', 'depends', 'engLib')
 
 
 def _import_pinned() -> Dict[str, Any]:
