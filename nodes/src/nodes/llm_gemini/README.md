@@ -98,15 +98,12 @@ tokens; set both to the actual limits of the model you select.
 
 ## Authentication
 
-Provide a Google AI Developer API key in the `apikey` field of the chosen profile
-(create one in Google AI Studio). The key is stored as a secure field. Key format
-validation is delegated to the google-genai library; a blank key is rejected when the
-node's configuration is resolved (`"apikey" is required`), before any Gemini call.
-
-Gotcha: the engine derives a profile sub-key from the segment after the first
-underscore of the profile name (e.g. `gemini-2_5-pro` is stored under `5-pro`). The
-node transparently falls back to that sub-key when reading the API key, so keys saved
-under either layout work.
+Provide a Google AI Developer API key in the node's **API Key** field, normally as a
+`${ROCKETRIDE_LLM_GEMINI_APIKEY}` reference to an account variable (create the key in
+Google AI Studio). The key is a single root-level property shared by every model
+branch, stored as a secure field, and required: a blank key fails configuration
+resolution (`"apikey" is required`) before the save-time probe and before any Gemini
+call. Key format validation is delegated to the google-genai library.
 
 Vertex AI is not used by this node; it targets the Gemini Developer API only. (The
 google-genai client also supports Vertex AI via `genai.Client(vertexai=True, ...)`; a

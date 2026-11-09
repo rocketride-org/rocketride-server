@@ -79,7 +79,7 @@ class IValidator(IValidatorBase):
 
             # The probe follows the branch's endpoint: the local (Ollama-served)
             # branches are not probed, the DeepSeek API needs the key first
-            serverbase = config.serverbase
+            serverbase = (config.serverbase or '').strip()
             if not is_deepseek_api(serverbase):
                 return
             if not apikey:

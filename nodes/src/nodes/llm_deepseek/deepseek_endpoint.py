@@ -43,5 +43,7 @@ def is_deepseek_api(serverbase: str) -> bool:
     Args:
         serverbase: The resolved branch serverbase URL.
     """
-    host = (urlparse(serverbase).hostname or '').lower()
+    # Stripped here so the client (which strips before building) and the
+    # validator judge a padded URL the same way
+    host = (urlparse((serverbase or '').strip()).hostname or '').lower()
     return host == DEEPSEEK_API_HOST or host.endswith('.' + DEEPSEEK_API_HOST)
