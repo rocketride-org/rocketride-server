@@ -25,7 +25,9 @@ Shell module — serves the web shell SPA and built-in app bundles.
 
 Registers public HTTP routes so the shell can be loaded by browsers
 without authentication. The shell itself handles auth in the browser
-(APIKEY for OSS, Zitadel OIDC for SaaS).
+(APIKEY for OSS, Zitadel OIDC for SaaS). Public pages (``/pricing``,
+``/legal/terms``, ...) are data, not routes: published platform apps
+declare them (``public_pages``) and one catch-all serves them (``pages``).
 
 Static files:
   - ``static/shell/index.html``           — SPA entry point
@@ -38,8 +40,7 @@ Static files:
                                             versioned, never from this tree
 
 Routes registered:
-    GET  /                          — shell SPA entry point (index.html)
-    GET  /pricing, /store, ...      — shell SPA deep links (see PUBLIC_ROUTES)
+    GET  /                          — the root public page (or the shell SPA entry point)
     GET  /shell/{file_path:path}    — shell assets (JS, CSS, themes)
     POST /apps/session              — mint the /apps auth cookie
     GET  /apps/{file_path:path}     — app serving, three shapes:
@@ -48,15 +49,22 @@ Routes registered:
                                       would serve THIS caller (the deploy
                                       smoke-test / ops probe)
         anything else               — the static assets tree
-    GET  /sitemap.xml               — sitemap from PUBLIC_ROUTES (404 unless RR_APP_URL is set)
+    GET  /sitemap.xml               — listed public pages (404 unless RR_APP_URL is set)
     GET  /robots.txt                — robots policy (Disallow-all unless RR_APP_URL is set)
     GET  /llms.txt                  — llmstxt.org index (404 unless RR_APP_URL is set)
+                                      (the three crawler files answer HEAD like GET)
+    ANY  /{public_page_path:path}   — the public-page catch-all; registered LAST by
+                                      ``register_public_pages`` (end of startup), not here
 """
 
 from typing import Any, Dict
 
 from ai.web import WebServer
-from .shell import PUBLIC_ROUTES, shell_static, apps_static, apps_session, sitemap_xml, robots_txt, llms_txt
+from . import pages, public_pages
+from .pages import public_page, register_public_pages
+from .shell import shell_static, apps_static, apps_session, sitemap_xml, robots_txt, llms_txt
+
+__all__ = ['initModule', 'register_public_pages']
 
 
 def initModule(server: WebServer, config: Dict[str, Any]):
@@ -70,18 +78,28 @@ def initModule(server: WebServer, config: Dict[str, Any]):
         server: The WebServer instance where routes will be registered.
         config: Configuration settings (currently unused).
     """
-    # ── Shell SPA entry point + public deep links ────────────────────────
-    # Every path in PUBLIC_ROUTES serves index.html: bare "/" is the
-    # shell's HTML entry point, and deep links like /pricing must resolve
-    # server-side so hard reloads don't 404 before the client-side router
-    # takes over. New public pages only need a PUBLIC_ROUTES entry.
-    for route in PUBLIC_ROUTES:
-        server.add_route(
-            path=route,
-            routeHandler=shell_static,
-            methods=['GET'],
-            public=True,
-        )
+    # ── Shell SPA entry point + public pages ────────────────────────────
+    # "/" keeps a dedicated route (the shell's HTML entry point). Every other
+    # public page is served by ONE catch-all that consults the page aggregate
+    # (pages.py), registered LAST by register_public_pages after every module
+    # and account route, so real routes always win. Pages are data (published
+    # app manifests), not registrations: a publish changes them without a
+    # restart.
+    server.add_route(
+        path='/',
+        routeHandler=public_page,
+        methods=['GET'],
+        public=True,
+    )
+
+    # Only paths the catch-all answers skip authentication; the catch-all
+    # itself is NOT public (that would open every private API path).
+    server.add_public_predicate(pages.is_public_path)
+
+    # The publish gate and the aggregate builder reject page paths that
+    # collide with this server's live routes.
+    pages._web_server = server
+    public_pages.set_live_conflict(pages.live_route_conflict)
 
     # ── Shell assets ──────────────────────────────────────────────────
     # Catch-all for everything under /shell/ — JS, CSS, themes, favicon.
@@ -126,23 +144,9 @@ def initModule(server: WebServer, config: Dict[str, Any]):
     # hosted SaaS — where RR_APP_URL pins the public origin — serves
     # sitemap/llms content; OSS, self-hosted, and desktop engines get 404s
     # and a Disallow-all robots policy instead of marketing SEO endpoints.
-    server.add_route(
-        path='/sitemap.xml',
-        routeHandler=sitemap_xml,
-        methods=['GET'],
-        public=True,
-    )
-
-    server.add_route(
-        path='/robots.txt',
-        routeHandler=robots_txt,
-        methods=['GET'],
-        public=True,
-    )
-
-    server.add_route(
-        path='/llms.txt',
-        routeHandler=llms_txt,
-        methods=['GET'],
-        public=True,
-    )
+    #
+    # HEAD answers like GET (crawlers and link checkers send it). One route
+    # per method keeps each OpenAPI operation id unique.
+    for path, handler in (('/sitemap.xml', sitemap_xml), ('/robots.txt', robots_txt), ('/llms.txt', llms_txt)):
+        for method in ('GET', 'HEAD'):
+            server.add_route(path=path, routeHandler=handler, methods=[method], public=True)

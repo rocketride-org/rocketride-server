@@ -25,11 +25,13 @@ Public pages: the page map of the app origin and the gate that guards it.
 
 The aggregate is one immutable map of the public pages that published platform
 apps declare in their manifests (the contract is ``contract.py``): what the
-pages are lives in the owning app's manifest, not in the engine. It is built
-at startup, rebuilt in the background on every platform app's publish,
-unpublish or rung repoint, and kept as it was when the store cannot be read.
-Until a published manifest contributes a valid page, it holds the legacy page
-list (``legacy_manifest.py``).
+pages are lives in the owning app's manifest, not in the engine. The public
+pages, ``/sitemap.xml`` and ``/llms.txt`` are served from it (``pages.py``,
+``shell.py``). It is built at startup, rebuilt in the background on every
+platform app's publish, unpublish or rung repoint (and at least every
+``REFRESH_SECONDS`` on traffic), and kept as it was when the store cannot be
+read. Until a published manifest contributes a valid page, it holds the legacy
+page list (``legacy_manifest.py``).
 
 The publish gate (``gate_errors``) refuses a public publish whose page claims
 are invalid. The aggregate re-checks every manifest anyway: seeded platform
@@ -38,6 +40,7 @@ rows never pass the gate.
 
 import asyncio
 import json
+import time
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Tuple
 
@@ -341,11 +344,11 @@ async def gate_errors(app_id: str, manifest: Mapping[str, Any], dist_dir: str, a
 
     Runs at ``rrext_deploy_app publish`` for the public audience only, the
     one rung the aggregate reads. Checks, each with an actionable message:
-    privilege and may-claim-root, path grammar, reserved prefixes, data
-    entries, cross-app collisions against every OTHER published platform
-    manifest (first claim wins; ownership is derived from published
-    manifests, so unpublishing releases it, with no table), and snapshot
-    files missing from the built version.
+    privilege and may-claim-root, path grammar, reserved prefixes and the
+    live route table, data entries, cross-app collisions against every OTHER
+    published platform manifest (first claim wins; ownership is derived from
+    published manifests, so unpublishing releases it, with no table), and
+    snapshot files missing from the built version.
 
     The collision check sees only what is already published: two platform
     apps publishing the same path at the same moment can both pass. The
@@ -424,8 +427,12 @@ STARTUP_BUILD_SECONDS = 10.0
 # One build (the store listing and every read) may take at most this long. A
 # slow store needs a few seconds; a hung read must not hold the rebuild lock and
 # freeze the map. On timeout the previous aggregate stays, the lock is released,
-# and the next platform app deploy event retries.
+# and the next platform app deploy event (or the backstop) retries.
 BUILD_SECONDS = 60.0
+
+# Convergence backstop: deploy events are in-process only, so a pod that did
+# not handle a publish learns of it from the first request after this age.
+REFRESH_SECONDS = 300.0
 
 
 class PageMap:
@@ -441,6 +448,8 @@ class PageMap:
         self.live_conflict: Optional[Callable[[str], Optional[str]]] = None
         self.listeners: List[Callable[[Aggregate, Aggregate], None]] = []
         self._current: Optional[Aggregate] = None
+        # time.monotonic() of the last swap or backstop rebuild.
+        self._built_at = 0.0
         # One per instance: a lock binds to the event loop that first waits on it.
         self._rebuild_lock = asyncio.Lock()
         self._rebuild_task: Optional[asyncio.Task] = None
@@ -461,6 +470,18 @@ class PageMap:
                 'starting on the legacy page list'
             )
         return bool(done)
+
+    def maybe_refresh(self) -> None:
+        """Schedule a background rebuild when the last one is older than ``REFRESH_SECONDS``.
+
+        Called on every public page and crawler file request; never waits for the
+        build (the swap lands on a later request). The clock restarts when the
+        rebuild is scheduled, not when it swaps: an unchanged map is not swapped,
+        and a failing store must not be retried on every request.
+        """
+        if time.monotonic() - self._built_at > REFRESH_SECONDS:
+            self._built_at = time.monotonic()
+            self.schedule_rebuild()
 
     def schedule_rebuild(self) -> None:
         """Coalesced background rebuild: the publish/unpublish/rung-repoint hook.
@@ -530,6 +551,7 @@ class PageMap:
         """
         old = self.current()
         self._current = aggregate
+        self._built_at = time.monotonic()
         for callback in list(self.listeners):
             try:
                 callback(old, aggregate)
@@ -622,6 +644,11 @@ async def build_at_startup() -> bool:
         the legacy page list and the build carries on in the background.
     """
     return await page_map.build_at_startup()
+
+
+def maybe_refresh() -> None:
+    """Schedule a background rebuild when the last one is older than ``REFRESH_SECONDS`` (``PageMap.maybe_refresh``)."""
+    page_map.maybe_refresh()
 
 
 def app_changed(app_id: str) -> None:

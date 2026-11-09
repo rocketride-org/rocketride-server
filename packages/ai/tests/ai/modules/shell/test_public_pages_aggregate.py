@@ -145,12 +145,12 @@ def test_legacy_fallback_when_every_declared_page_is_invalid():
     assert agg.legacy
 
 
-def test_the_legacy_aggregate_is_the_shell_route_list_with_its_unlisted_pages():
-    import ai.modules.shell.shell as shell_mod
+def test_the_legacy_aggregate_is_the_legacy_page_list_with_its_unlisted_pages():
+    from ai.modules.shell.legacy_manifest import _LEGACY_ROUTES
 
     agg = legacy_aggregate()
-    assert [(p.path, p.title, p.description) for p in agg.exact.values()] == shell_mod.PUBLIC_ROUTE_MANIFEST
-    assert {p.path for p in agg.pages() if not p.listed} == shell_mod.UNLISTED_ROUTES
+    assert [(p.path, p.title, p.description) for p in agg.exact.values()] == _LEGACY_ROUTES
+    assert len(agg.exact) == 25
     assert {p.path for p in agg.pages() if not p.listed} == {
         '/oss',
         '/mcp-server',
@@ -545,6 +545,36 @@ async def test_a_hung_store_read_times_out_and_a_later_rebuild_lands(monkeypatch
     assert pp.current().exact['/'].title == 'Fixed'
 
 
+async def test_rebuild_drops_pages_on_the_installed_live_routes():
+    pp.set_live_conflict(lambda p: 'GET /pricing' if p == '/pricing' else None)
+    assert await pp.rebuild(hostile_account())
+    assert '/pricing' not in pp.current().exact and '/marketplace' in pp.current().exact
+    assert pp.live_conflict()('/pricing') == 'GET /pricing'
+
+
+async def test_maybe_refresh_schedules_at_most_one_rebuild_per_period(monkeypatch):
+    scheduled = []
+    monkeypatch.setattr(pp.page_map, 'schedule_rebuild', lambda: scheduled.append(1))
+    monkeypatch.setattr(pp.page_map, '_built_at', pp.time.monotonic())
+    pp.maybe_refresh()
+    assert scheduled == []
+    monkeypatch.setattr(pp.page_map, '_built_at', pp.time.monotonic() - pp.REFRESH_SECONDS - 1)
+    pp.maybe_refresh()
+    # The clock restarted when it scheduled: an unchanged map is never swapped,
+    # and a failing store must not be retried on every request.
+    pp.maybe_refresh()
+    assert scheduled == [1]
+
+
+async def test_a_swap_restarts_the_refresh_clock(monkeypatch):
+    scheduled = []
+    monkeypatch.setattr(pp.page_map, 'schedule_rebuild', lambda: scheduled.append(1))
+    monkeypatch.setattr(pp.page_map, '_built_at', pp.time.monotonic() - pp.REFRESH_SECONDS - 1)
+    pp.swap(pp.legacy_aggregate())
+    pp.maybe_refresh()
+    assert scheduled == []
+
+
 async def test_a_failing_build_keeps_the_previous_aggregate(monkeypatch):
     before = pp.current()
 
@@ -568,9 +598,14 @@ def _boot(monkeypatch, load):
 
     events = []
 
+    class Routes(list):
+        def append(self, route):
+            events.append(('route', route.path))
+            super().append(route)
+
     class Server:
         def __init__(self, config, standardEndpoints):
-            pass
+            self.app = SimpleNamespace(router=SimpleNamespace(routes=Routes()))
 
         def use(self, module):
             events.append('module')
@@ -600,7 +635,8 @@ def test_the_engine_builds_the_page_map_before_it_serves(monkeypatch):
 
     events = _boot(monkeypatch, home)
     modules = events.count('module')
-    assert modules and events[:-1] == ['module'] * modules + ['account', 'build']
+    catch_all = ('route', '/{public_page_path:path}')
+    assert modules and events[:-1] == ['module'] * modules + ['account', catch_all, 'build']
     serve, served = events[-1]
     assert serve == 'serve' and not served.legacy and served.exact['/'].title == 'Home'
 

@@ -360,3 +360,24 @@ def hostile_account() -> HostileAccount:
     squatter['site']['redirects'].append({'from': '/terms', 'to': '/'})
     acct.add('org-evil', 'evil.squatter', squatter)
     return acct
+
+
+def install(monkeypatch, acct: HostileAccount) -> HostileAccount:
+    """Patch ``acct``'s storage surface over the account singleton.
+
+    The loaders read the singleton when no account is passed, exactly as the
+    serving path does in production.
+    """
+    from ai.account import account as singleton
+
+    for name in ('publish_list', 'deployments_artifact'):
+        monkeypatch.setattr(singleton, name, getattr(acct, name), raising=False)
+    monkeypatch.setattr(singleton, 'capabilities', acct.capabilities, raising=False)
+    monkeypatch.setattr(singleton, 'review_ladder', acct.review_ladder, raising=False)
+    return acct
+
+
+def assert_no_leak(text: str) -> None:
+    """Fail when any leak marker appears in a crawler-visible output."""
+    for marker in LEAK_MARKERS:
+        assert marker not in text, f'leaked {marker!r}'

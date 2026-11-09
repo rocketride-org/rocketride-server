@@ -286,8 +286,9 @@ publish fails with a message naming the field):
 - Paths under a root route the engine serves itself (`/api`, `/apps`, `/auth`,
   `/mcp`, `/shell`, `/status`, `/task`, `/.well-known` and the rest of the
   engine's routes) or the three crawler files (`/sitemap.xml`, `/robots.txt`,
-  `/llms.txt`) are rejected, as is a path another published platform app
-  already claims (first claim wins; unpublishing releases it).
+  `/llms.txt`) are rejected, as is a path a server route already serves, or one
+  another published platform app already claims (first claim wins; unpublishing
+  releases it).
 - Each `data` entry is `plans`, `plans:<appId>` or `app:<appId>`, and a page
   names each source (`plans`, `app`) at most once.
 - `snapshot` must be a relative `.html` path that exists in the built version.
@@ -299,6 +300,15 @@ the server's built-in page list instead. A published app whose storage cannot
 be read keeps the pages of its last readable build while the server runs;
 after a restart it has none until its storage can be read again. Kept pages
 still compete with other apps' claims under the same first-claim rule.
+
+The server answers `GET` and `HEAD` on each page with the shell's document
+(the route's prerendered capture when the shell build carries one, else
+`index.html`), its head carrying the page's `title`, `description`, a
+canonical URL on `RR_APP_URL`, and `noindex` for an unlisted page.
+`/sitemap.xml` and `/llms.txt` list the listed pages, and `/llms.txt` takes
+its heading, blurb and docs link from `site`. `GET` and `HEAD` on `/x/`
+answer `301` to `/x` when `/x` is a page (query kept), and any path that is
+neither a page nor a server route answers `404`.
 
 ### Settings
 
