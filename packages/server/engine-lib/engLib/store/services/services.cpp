@@ -40,10 +40,21 @@ static application::Opt NodePath{"--node_path"};
 
 //-------------------------------------------------------------------------
 /// @details
-///		The most references one definition may expand to, the schemas
-///		its combos copy included
+///		The most JSON values one definition may expand to: each
+///		reference copies its field, and each combo its providers' schemas
 //-------------------------------------------------------------------------
-static constexpr size_t MaxExpanded = 10000;
+static constexpr size_t MaxExpanded = 100000;
+
+//-------------------------------------------------------------------------
+/// @details
+///		The JSON values one more expansion of this field copies
+//-------------------------------------------------------------------------
+static size_t weigh(const json::Value &value) noexcept {
+    size_t total = 1;
+    if (value.isObject() || value.isArray())
+        for (const auto &item : value) total += weigh(item);
+    return total;
+}
 
 //-------------------------------------------------------------------------
 //
@@ -619,14 +630,14 @@ ErrorOr<IServices::ServiceSchema> IServices::getField(
         if (ui.size()) info.ui = ui;
     };
 
-    // Counts references and copied combo schemas against the budget: a
-    // field listed many times expands again each time, with no cycle
+    // Counts the JSON values each reference and combo copies: a field
+    // listed many times is copied again each time, with no cycle
     const auto expand = localfcn(size_t count)->Error {
         context.expanded += count;
         if (context.expanded <= MaxExpanded) return {};
         return APERR(Ec::InvalidParam, "The fields of",
                      context.def.logicalType, "expand to more than",
-                     MaxExpanded, "references");
+                     MaxExpanded, "JSON values");
     };
 
     // Process a reference
@@ -645,11 +656,11 @@ ErrorOr<IServices::ServiceSchema> IServices::getField(
             context.chain.end())
             return APERR(Ec::InvalidParam, "Field", fieldId,
                          "refers to itself");
-        if (auto ccode = expand(1)) return ccode;
 
         // Get the field def from the global/private field list
         auto refField = lookupField(context, fieldId);
         if (!refField) return refField.ccode();
+        if (auto ccode = expand(weigh(*refField))) return ccode;
 
         // Parse it and process the field
         context.chain.push_back(id);

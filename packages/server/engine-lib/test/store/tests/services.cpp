@@ -163,10 +163,10 @@ TEST_CASE("store::Services") {
         fanOut["fields"]["custom_r.f15"] = R"({"type": "string"})"_json;
         fanOut["shape"].append("custom_r.f0");
 
-        // 8 layers of 4 nodes, each combo listing the layer below: no
-        // cycle, the top one copies 4^7 schemas
+        // 9 layers of 4 nodes, each combo listing the layer below: no
+        // cycle, the top one copies 4^8 schemas
         json::Value layers = json::arrayValue;
-        for (int layer = 0; layer < 8; layer++)
+        for (int layer = 0; layer < 9; layer++)
             for (int node = 0; node < 4; node++) {
                 const auto name = _ts("custom_w", layer, "_", node);
                 auto def = customNode(name.c_str());
@@ -183,6 +183,18 @@ TEST_CASE("store::Services") {
                 def["shape"].append(section);
                 layers.append(def);
             }
+
+        // A big field listed many times: few references, a large copy
+        // each time (1000 references, about 10^6 JSON values)
+        auto heavy = customNode("custom_y");
+        auto &big = heavy["fields"]["custom_y.big"];
+        big["type"] = "string";
+        for (int value = 0; value < 1000; value++)
+            big["enum"].append(_ts("v", value));
+        json::Value heavySection = R"({"section": "Pipe"})"_json;
+        for (int copy = 0; copy < 1000; copy++)
+            heavySection["properties"].append("custom_y.big");
+        heavy["shape"].append(heavySection);
 
         // Two combos that each wait for the other never resolve
         auto waitsA = customNode("custom_n");
@@ -221,6 +233,7 @@ TEST_CASE("store::Services") {
             customList({badTile}),
             customList({fanOut}),
             layers,
+            customList({heavy}),
             customList({waitsA, waitsB}),
         };
         for (const auto &custom : refused)
@@ -233,7 +246,8 @@ TEST_CASE("store::Services") {
               std::string::npos);
 
         // The budget names the definition that went past it
-        for (const auto &custom : {customList({fanOut}), layers}) {
+        for (const auto &custom :
+             {customList({fanOut}), layers, customList({heavy})}) {
             auto expanded = IServices::withCustomServices(custom);
             REQUIRE_FALSE(expanded);
             CHECK(std::string{expanded.ccode().message()}.find(

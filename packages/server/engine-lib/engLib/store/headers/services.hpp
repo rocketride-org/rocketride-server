@@ -162,7 +162,7 @@ public:
 
         //---------------------------------------------------------
         ///	@details
-        ///		The references its schema expanded to, the schemas
+        ///		The JSON values its schema expanded to, the schemas
         ///		its combos copy included
         //---------------------------------------------------------
         size_t expanded = 0;
@@ -243,7 +243,7 @@ private:
         const ServiceDefinitions *scope = nullptr;
         std::vector<iText> chain;
 
-        // References expanded so far for this definition
+        // JSON values expanded so far for this definition
         size_t expanded = 0;
     };
 
