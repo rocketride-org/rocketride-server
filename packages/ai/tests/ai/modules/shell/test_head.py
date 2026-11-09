@@ -24,7 +24,10 @@
 
 from __future__ import annotations
 
-from ai.modules.shell.head import inject_head
+import json
+import re
+
+from ai.modules.shell.head import inject_head, jsonld_script
 
 DOC = (
     '<!doctype html><html lang="en"><head><meta charset="utf-8">'
@@ -102,6 +105,21 @@ def test_only_head_tags_are_replaced():
 def test_headless_documents_only_lose_tags_before_body():
     out = inject_head('<title>old</title><body><svg><title>keep</title></svg></body>', title='New')
     assert out.count('<title>') == 2 and '<title>keep</title>' in out and 'old' not in out
+
+
+def test_jsonld_cannot_break_out_of_its_script():
+    payload = {'name': '</script><script>alert(1)</script>', 'd': 'a & b   '}
+    script = jsonld_script(payload)
+    inner = re.match(r'^<script type="application/ld\+json">(.*)</script>$', script, re.S).group(1)
+    assert '<' not in inner and '>' not in inner and '&' not in inner
+    assert ' ' not in inner and ' ' not in inner
+    assert json.loads(inner) == payload
+
+
+def test_jsonld_blocks_land_in_head():
+    out = inject_head(DOC, title='T', jsonld=[{'@type': 'Organization'}, {'@type': 'WebSite'}])
+    head = out[: out.index('</head>')]
+    assert head.count('application/ld+json') == 2
 
 
 def test_the_charset_declaration_stays_within_the_first_1024_bytes():

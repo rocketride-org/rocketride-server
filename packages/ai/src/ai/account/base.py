@@ -210,6 +210,25 @@ class AccountBase(ABC):
         """
         return []
 
+    async def get_public_plans(self, app_id: str) -> list:
+        """
+        Return one app's public subscription plans (the ``plans`` page data source).
+
+        Shape (append-only): ``[{id, name, price, currency, period, features[]}]``,
+        the prices the app's live pricing page shows, with ``price`` a decimal
+        string (``"29"``, ``"29.50"``). OSS has no billing and returns []. The
+        SaaS edition serves its plan table and calls
+        ``ai.modules.shell.data_sources.invalidate('plans')`` after every
+        price change.
+
+        Args:
+            app_id: The app whose plans to list.
+
+        Returns:
+            List of plan dicts.
+        """
+        return []
+
     async def get_apps_for_user(self, user_id: str, organizations: list) -> list:
         """
         Return all apps the authenticated user is entitled to see.
