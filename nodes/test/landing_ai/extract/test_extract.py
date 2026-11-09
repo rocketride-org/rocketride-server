@@ -192,12 +192,12 @@ def test_extract_raises_on_deferred_schema_error() -> None:
 # --- credential resolution ------------------------------------------------
 
 
-def test_resolve_api_key_prefers_config_then_env(monkeypatch) -> None:
-    """resolve_api_key should use the config key, else ROCKETRIDE_LANDING_AI_KEY."""
+def test_resolve_api_key_reads_the_config_only(monkeypatch) -> None:
+    """resolve_api_key uses the config key and never the process environment."""
     monkeypatch.setenv('ROCKETRIDE_LANDING_AI_KEY', 'env-key')
     assert resolve_api_key({'api_key': 'cfg-key'}) == 'cfg-key'
-    assert resolve_api_key({'api_key': '   '}) == 'env-key'
-    assert resolve_api_key({}) == 'env-key'
+    assert resolve_api_key({'api_key': '   '}) is None
+    assert resolve_api_key({}) is None
 
     monkeypatch.delenv('ROCKETRIDE_LANDING_AI_KEY', raising=False)
     assert resolve_api_key({}) is None

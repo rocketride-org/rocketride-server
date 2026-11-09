@@ -336,10 +336,10 @@ _SERVICES_JSON = Path(__file__).resolve().parents[5] / 'nodes' / 'src' / 'nodes'
 
 
 def _enum_models() -> list:
-    """Extract every non-empty profile model id from the node's services.json."""
+    """Extract every model id the node's services.json lists: the branches of its model selector."""
     spec = json5.loads(_SERVICES_JSON.read_text())
-    profiles = spec['preconfig']['profiles']
-    return sorted({p['model'] for p in profiles.values() if p.get('model')})
+    selector = next(p for p in spec['properties'] if isinstance(p, dict) and p.get('name') == 'model')
+    return sorted(model for model in selector['enum'] if model != 'custom')
 
 
 def test_services_json_exists():

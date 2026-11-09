@@ -110,12 +110,6 @@ IGlobal = _iglobal_mod.IGlobal
 IInstance = _iinstance_mod.IInstance
 
 
-class _Config:
-    @staticmethod
-    def getNodeConfig(*_a: object, **_kw: object) -> dict:
-        return {}
-
-
 class _StubReader:
     """Stand-in for ``ocr.Reader``; ``on_read`` runs inside every ``read`` call."""
 
@@ -163,7 +157,6 @@ def make_global(monkeypatch):
     def _make(model_server: bool) -> IGlobal:
         argv = ['node.py'] + (['--modelserver=5590'] if model_server else [])
         monkeypatch.setattr(sys, 'argv', argv)
-        monkeypatch.setattr(_iglobal_mod, 'Config', _Config)
         monkeypatch.setitem(sys.modules, _PKG, _pkg(_PKG))
         monkeypatch.setitem(sys.modules, f'{_PKG}.ocr', _mk(f'{_PKG}.ocr', Reader=_StubReader, SCRIPT_FAMILIES={}))
         monkeypatch.setitem(sys.modules, 'img2table', _pkg('img2table'))

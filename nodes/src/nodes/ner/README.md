@@ -33,7 +33,7 @@ Default: **BERT Large (English) - High accuracy for English text** (`bertLarge`)
 
 ## Configuration
 
-Start with the profile that matches the language or domain of the input, then adjust confidence and output handling only when the default behavior does not fit the pipeline. Select `custom` when a compatible model identifier is required; the other profiles preconfigure their model value.
+Start with the profile that matches the language or domain of the input, then adjust confidence and output handling only when the default behavior does not fit the pipeline. Select `custom` when a compatible model identifier is required; the other profiles pin their model value.
 
 ### Model
 

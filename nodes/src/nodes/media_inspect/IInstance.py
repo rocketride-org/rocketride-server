@@ -140,7 +140,7 @@ class IInstance(MediaInstance):
             debug(f'{NODE}: no image descriptor for {name}: {exc}')
             payload = b''
         mime = 'image/jpeg'
-        chunk_bytes = self.IGlobal.config['chunk_bytes']
+        chunk_bytes = self.IGlobal.chunk_bytes
         self.instance.writeImage(AVI_ACTION.BEGIN, mime, payload)
         try:
             for at in range(0, len(data), chunk_bytes):

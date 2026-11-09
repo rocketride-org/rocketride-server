@@ -27,7 +27,7 @@ from typing import Any, Dict, Optional
 
 from rocketlib import debug, warning, error
 
-from ..landing_ai_base import build_client, get_node_config, load_schema_from_data_url, resolve_api_key
+from ..landing_ai_base import build_client, load_schema_from_data_url, resolve_api_key
 
 
 class Extractor:
@@ -35,19 +35,18 @@ class Extractor:
 
     def __init__(self, provider: str, connConfig: Dict[str, Any]):
         """Build the extractor from config; a bad/missing schema is deferred to ``extract()``."""
-        config = get_node_config(provider, connConfig)
+        # The resolved node config: region is a schema enum with a default, strict a boolean
+        config = connConfig
         self._api_key: Optional[str] = resolve_api_key(config)
-        self._region: str = config.get('region') or 'production'
-        if self._region not in ('production', 'eu'):
-            self._region = 'production'
-        self._strict: bool = bool(config.get('strict', False))
+        self._region: str = config['region']
+        self._strict: bool = bool(config['strict'])
 
         # Capture (don't raise) a schema error here so beginGlobal doesn't crash the
         # whole pipeline on a bad upload; extract() raises it at run time instead.
         self._schema: Dict[str, Any] = {}
         self._schema_error: Optional[str] = None
         try:
-            self._schema = load_schema_from_data_url(config.get('schema_file', ''))
+            self._schema = load_schema_from_data_url(config.get('schema_file') or '')
         except ValueError as e:
             self._schema_error = str(e)
 

@@ -27,7 +27,6 @@ Ollame binding for the ChatLLM.
 
 from typing import Any, Dict
 from ai.common.chat import ChatBase
-from ai.common.config import Config
 from langchain_openai import ChatOpenAI
 
 
@@ -50,13 +49,13 @@ class Chat(ChatBase):
         super().__init__(provider, connConfig, bag)
 
         # Get the nodes configuration
-        config = Config.getNodeConfig(provider, connConfig)
+        config = self._config
 
         # Get the api key, don't save it
         apikey = config.get('apikey', 'dummy-key')
 
         # Get the api key, don't save it
-        serverbase = config.get('serverbase', None)
+        serverbase = config['serverbase']
 
         if not serverbase.rstrip('/').endswith('/v1'):
             serverbase = serverbase.rstrip('/') + '/v1'
@@ -70,11 +69,11 @@ class Chat(ChatBase):
         model_name = (self._model or '').lower()
         is_reasoning = bool(self._is_reasoning) or any(hint in model_name for hint in self.REASONING_HINTS)
 
-        temperature = config['temperature'] if 'temperature' in config else (1.0 if is_reasoning else 0)
-        if 'reasoning_effort' in config:
-            reasoning_effort = config.get('reasoning_effort')
-        else:
-            reasoning_effort = 'low' if is_reasoning else None
+        # Both leaves have no schema default on purpose: unset means model-dependent.
+        temperature = config.get('temperature')
+        if temperature is None:
+            temperature = 1.0 if is_reasoning else 0
+        reasoning_effort = config.get('reasoning_effort') or ('low' if is_reasoning else None)
         model_kwargs = {'reasoning_effort': reasoning_effort} if reasoning_effort else {}
 
         # Get the llm

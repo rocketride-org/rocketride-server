@@ -1,146 +1,42 @@
 {
-	//
-	// Required:
-	//		The displayable name of this node
-	//
 	"title": "LlamaParse",
-	//
-	// Required:
-	//		The protocol is the endpoint protocol
-	//
 	"protocol": "llamaparse://",
-	//
-	// Required:
-	//		Class type of the node - what it does
-	//
 	"classType": ["data"],
-	//
-	// Required:
-	//		Capabilities are flags that change the behavior of the underlying
-	//		engine
-	//
 	"capabilities": ["gpu"],
-	//
-	// Optional:
-	//		Register is either filter, endpoint or ignored if not specified. If the
-	//		type is specified, a factory is registered of that given type
-	//
 	"register": "filter",
-	//
-	// Optional:
-	//		The node is the actual physical node to instantiate - if
-	//		not specified, the protocol will be used
-	//
 	"node": "python",
-	//
-	// Optional:
-	//		The path is the executable/script code - it is node dependent
-	// 		and is optional for most node
-	//
 	"path": "nodes.llamaparse",
-	//
-	// Required:
-	//		The prefix map when added/removed when convertting URLs <=> paths
-	//
 	"prefix": "llamaparse",
-	//
-	// Optional:
-	//		Description to of this driver
-	//
-	"description": ["A document parsing component that uses LlamaParse to extract text and structured data ", "from various document formats including PDFs, images, Word documents, Excel spreadsheets, ", "and other formats. It provides high-quality text extraction with support for tables, ", "layout preservation, and markdown output formatting. ", "Note: output is flattened to Markdown and does not preserve cell-level provenance ", "(page boundaries, bbox coordinates, or the table-HTML cell grid), so it is not suitable ", "for audit-grade or provenance-bearing extraction; use the datalab_parse node for ", "structure-preserving parsing with page and coordinate data."],
-	//
-	// Optional:
-	//	  The icon is the icon to display in the UI for this node
-	//
+	"description": [
+		"A document parsing component that uses LlamaParse to extract text and structured data ",
+		"from various document formats including PDFs, images, Word documents, Excel spreadsheets, ",
+		"and other formats. It provides high-quality text extraction with support for tables, ",
+		"layout preservation, and markdown output formatting. ",
+		"Note: output is flattened to Markdown and does not preserve cell-level provenance ",
+		"(page boundaries, bbox coordinates, or the table-HTML cell grid), so it is not suitable ",
+		"for audit-grade or provenance-bearing extraction; use the datalab_parse node for ",
+		"structure-preserving parsing with page and coordinate data."
+	],
 	"icon": "llamaindex_icon.svg",
 	"documentation": "https://docs.rocketride.org/nodes/llamaparse",
-
-	//
-	//  Optional:
-	//      Rendering hints to the UI which indicate which fields of
-	//      the configuration should be used to display information
-	//
 	"tile": [],
-	//
-	//	Optional:
-	//		As a pipe component, define what this pipe component takes
-	//		and what it produces
-	//
 	"lanes": {
 		"tags": ["text", "table"]
 	},
 	//
-	//	Optional:
-	//		Profile section are configuration options used by the driver
-	//		itself
-	//
-	"preconfig": {
-		"default": "default",
-		"profiles": {
-			"default": {}
-		}
-	},
 	// Optional:
-	//		Local fields definitions - these define fields only for the
-	//		current service. You may specify them here, or directly
-	//		in the shape
+	//		Local property definitions. The configuration mode is the selector:
+	//		the simple mode exposes the parse options, the advanced mode a raw JSON
+	//		block. The API key is shared and stored flat.
 	//
-	"fields": {
-		"llamaparse.use_advanced_config": {
-			"type": "boolean",
-			"title": "Advanced Configuration",
-			"description": "Check to use advanced JSON configuration instead of simple options.",
-			"default": false,
-			"enum": [
-				[true, "Yes"],
-				[false, "No"]
-			],
-			"conditional": [
-				{
-					"value": true,
-					"properties": ["llamaparse.advanced_config"]
-				},
-				{
-					"value": false,
-					"properties": ["llamaparse.parse_mode", "llamaparse.use_system_prompt_append", "llamaparse.spreadsheet_extract_sub_tables"]
-				}
-			]
-		},
+	"propertyDefinitions": {
 		"llamaparse.api_key": {
 			"type": "string",
 			"title": "API Key",
 			"description": "Your LlamaIndex API key for LlamaParse service",
-			"secure": true,
-			"ui": {
-				"ui:widget": "ApiKeyWidget"
-			}
-		},
-		"llamaparse.parse_mode": {
-			"type": "string",
-			"title": "Parse Mode",
-			"description": "The parse mode to use for chosing complexity of the parse",
-			"default": "parse_page_with_lvm",
-			"enum": [
-				["cost_effective (LLM)", "Cost-effective - Text-heavy documents"],
-				["agentic", "Agentic - Documents with diagrams and images"],
-				["agentic_plus", "Agentic Plus - Complex layouts and multi-page tables"],
-
-				["parse_page_with_lvm", "Parse with LVM (Legacy)"]
-			],
-			"conditional": [
-				{
-					"value": "parse_page_with_lvm",
-					"properties": ["llamaparse.lvm_model"]
-				},
-				{
-					"value": "agentic",
-					"properties": ["llamaparse.lvm_model"]
-				},
-				{
-					"value": "agentic_plus",
-					"properties": ["llamaparse.lvm_model"]
-				}
-			]
+			"secret": true,
+			"env": "ROCKETRIDE_LLAMAPARSE_APIKEY",
+			"required": true
 		},
 		"llamaparse.lvm_model": {
 			"type": "string",
@@ -154,68 +50,77 @@
 				["gpt-4o-mini", "GPT-4o Mini"]
 			]
 		},
-
-		"llamaparse.use_system_prompt_append": {
-			"type": "boolean",
-			"title": "Use Additional Instructions",
-			"description": "Check to add custom instructions to the system prompt for LlamaParse.",
-			"default": false,
-			"enum": [
-				[true, "Yes"],
-				[false, "No"]
-			],
-			"conditional": [
-				{
-					"value": true,
-					"properties": ["llamaparse.system_prompt_append"]
-				}
-			]
-		},
 		"llamaparse.system_prompt_append": {
 			"type": "string",
 			"title": "Additional Instructions",
-			"description": "Additional instructions to append to the system prompt for LlamaParse.",
-			"format": "textarea"
+			"description": "Additional instructions appended to the system prompt for LlamaParse. Leave empty for none.",
+			"format": "textarea",
+			"default": ""
 		},
-
 		"llamaparse.spreadsheet_extract_sub_tables": {
 			"type": "boolean",
 			"title": "Extract Sub Tables",
 			"description": "Extract sub-tables from spreadsheets for better table parsing.",
-			"default": false,
-			"enum": [
-				[true, "Yes"],
-				[false, "No"]
-			]
+			"default": false
 		},
 		"llamaparse.advanced_config": {
 			"type": "string",
 			"title": "Advanced Configuration (JSON)",
 			"description": "Enter configuration options in JSON format. For more information, see: <a href='https://developers.llamaindex.ai/llamaparse/parse/v1/presets_and_modes/advance_parsing_modes/' target='_blank'>LlamaParse Documentation</a>",
 			"format": "textarea",
-			"default": "{\n  \"parse_mode\": \"parse_page_with_llm\",\n  \"spreadsheet_extract_sub_tables\": false,\n  \"system_prompt_append\": \"\",\n  \"lvm_model\": \"anthropic-sonnet-4.0\"\n}",
-			"ui": {
-				"ui:widget": "textarea",
-				"ui:options": {
-					"rows": 10
-				}
-			}
-		},
-		"llamaparse.default": {
-			"object": "default",
-			"properties": ["llamaparse.api_key", "llamaparse.use_advanced_config"]
+			"default": "{\n  \"parse_mode\": \"parse_page_with_llm\",\n  \"spreadsheet_extract_sub_tables\": false,\n  \"system_prompt_append\": \"\",\n  \"lvm_model\": \"anthropic-sonnet-4.0\"\n}"
 		}
 	},
 	//
 	// Required:
-	//		Defines the fields (shape) of the service. Either source or target
-	//		map be specified, or both, but at least one is required
+	//		Defines the properties shown in the pipeline builder side panel, in order
 	//
-	"shape": [
+	"properties": [
+		"llamaparse.api_key",
 		{
-			"section": "Pipe",
-			"title": "LlamaParse",
-			"properties": ["llamaparse.default"]
+			"name": "configMode",
+			"type": "string",
+			"title": "Configuration",
+			"description": "Simple options, or a raw JSON configuration passed to LlamaParse.",
+			"default": "simple",
+			"enum": {
+				"simple": {
+					"title": "Simple options",
+					"properties": [
+						{
+							"name": "parse_mode",
+							"type": "string",
+							"title": "Parse Mode",
+							"description": "The parse mode to use for choosing the complexity of the parse",
+							"default": "parse_page_with_lvm",
+							"enum": {
+								"cost_effective": {
+									"title": "Cost-effective - Text-heavy documents",
+									"properties": ["llamaparse.lvm_model"]
+								},
+								"agentic": {
+									"title": "Agentic - Documents with diagrams and images",
+									"properties": ["llamaparse.lvm_model"]
+								},
+								"agentic_plus": {
+									"title": "Agentic Plus - Complex layouts and multi-page tables",
+									"properties": ["llamaparse.lvm_model"]
+								},
+								"parse_page_with_lvm": {
+									"title": "Parse with LVM (Legacy)",
+									"properties": ["llamaparse.lvm_model"]
+								}
+							}
+						},
+						"llamaparse.system_prompt_append",
+						"llamaparse.spreadsheet_extract_sub_tables"
+					]
+				},
+				"advanced": {
+					"title": "Advanced JSON configuration",
+					"properties": ["llamaparse.advanced_config"]
+				}
+			}
 		}
 	]
 }

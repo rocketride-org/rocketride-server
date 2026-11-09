@@ -1,147 +1,161 @@
 {
+	//
+	// Required:
+	//		The displayable name of this node
+	//
 	"title": "Mistral Vision",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
 	"protocol": "image_vision_mistral://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
 	"classType": ["image"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
 	"capabilities": ["invoke"],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the
+	//		type is specified, a factory is registered of that given type
+	//
 	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate - if
+	//		not specified, the protocol will be used
+	//
 	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	//		and is optional for most node
+	//
 	"path": "nodes.llm_vision_mistral",
+	//
+	// Required:
+	//		The prefix map when added/removed when converting URLs <=> paths
+	//
 	"prefix": "image_vision_mistral",
-	"description": ["A component that connects to Mistral AI's vision-capable models for image analysis, ", "OCR, and visual understanding tasks. Supports all Mistral vision models including ", "Mistral Large 3, Medium 3.1, Small 3.2, and Ministral models. Features robust error ", "handling, automatic image processing, and flexible prompt configuration for various use cases."],
+	//
+	// Optional:
+	//		Description of this driver
+	//
+	"description": [
+		"A component that connects to Mistral AI's vision-capable models for image analysis, ",
+		"OCR, and visual understanding tasks. Supports all Mistral vision models including ",
+		"Mistral Large 3, Medium 3.1, Small 3.2, and Ministral models. Features robust error ",
+		"handling, automatic image processing, and flexible prompt configuration for various use cases."
+	],
+	//
+	// Optional:
+	//		The icon is the icon to display in the UI for this node
+	//
 	"icon": "mistral-vision.svg",
 	"documentation": "https://docs.rocketride.org/nodes/llm_vision_mistral",
-	"tile": ["Model: ${parameters.image_vision_mistral.profile}"],
+	//
+	// Optional:
+	//		Rendering hints to the UI which indicate which fields of
+	//		the configuration should be used to display information
+	//
+	"tile": ["Model: ${parameters.llm_vision_mistral.model}"],
+	//
+	// Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
 	"lanes": {
 		"image": ["text"],
 		"documents": ["documents"]
 	},
-	"preconfig": {
-		"default": "mistral-large-3",
-		"profiles": {
-			"mistral-large-3": {
-				"title": "Mistral Large 3 - Premier Vision (256k tokens)",
-				"model": "mistral-large-2512",
-				"modelTotalTokens": 256000,
-				"apikey": ""
-			},
-			"mistral-medium-3.1": {
-				"title": "Mistral Medium 3.1 - Balanced Vision (128k tokens)",
-				"model": "mistral-medium-2508",
-				"modelTotalTokens": 128000,
-				"apikey": ""
-			},
-			"mistral-small-3.2": {
-				"title": "Mistral Small 3.2 - Fast & Cheap Vision (128k tokens)",
-				"model": "mistral-small-2506",
-				"modelTotalTokens": 128000,
-				"apikey": ""
-			},
-			"ministral-14b-3": {
-				"title": "Ministral 3 14B - High Performance Vision (256k tokens)",
-				"model": "ministral-14b-2512",
-				"modelTotalTokens": 256000,
-				"apikey": ""
-			},
-			"ministral-8b-3": {
-				"title": "Ministral 3 8B - Balanced Vision (256k tokens)",
-				"model": "ministral-8b-2512",
-				"modelTotalTokens": 256000,
-				"apikey": ""
-			},
-			"ministral-3b-3": {
-				"title": "Ministral 3 3B - Efficient Vision (256k tokens)",
-				"model": "ministral-3b-2512",
-				"modelTotalTokens": 256000,
-				"apikey": ""
-			}
+	//
+	// Optional:
+	//		Local property definitions. The model is the selector (one branch per
+	//		model, the branch value is the model id); each branch pins its context
+	//		window and capabilities as constants, and the leaves every model shares
+	//		(credentials, generation settings) sit at the root and are stored flat.
+	//		The "custom" branch takes a model id the catalog does not list.
+	//
+	"propertyDefinitions": {
+		"llm_vision_mistral.apikey": {
+			"base": "llm.cloud.apikey",
+			"description": "Mistral AI API key",
+			"env": "ROCKETRIDE_LLM_VISION_MISTRAL_APIKEY",
+			"required": true
+		},
+		"llm_vision_mistral.systemPrompt": {
+			"type": "string",
+			"format": "textarea",
+			"title": "System prompt",
+			"description": "Instructions that frame how the model describes images.",
+			"default": ""
+		},
+		"llm_vision_mistral.prompt": {
+			"type": "string",
+			"format": "textarea",
+			"title": "Prompt",
+			"description": "The question asked about every image.",
+			"default": "Describe this image in detail."
 		}
 	},
-	"fields": {
-		"model": {
+	//
+	// Required:
+	//		Defines the properties shown in the pipeline builder side panel, in order
+	//
+	"properties": [
+		{
+			"name": "model",
 			"type": "string",
 			"title": "Model",
-			"description": "Mistral Vision model"
-		},
-		"modelTotalTokens": {
-			"type": "number",
-			"title": "Tokens",
-			"description": "Maximum context length in tokens"
-		},
-		"vision.systemPrompt": {
-			"type": "string",
-			"format": "textarea",
-			"title": "System Instructions",
-			"description": "Define the model's role and behavior for image analysis"
-		},
-		"vision.prompt": {
-			"type": "string",
-			"format": "textarea",
-			"title": "Analysis Prompt",
-			"description": "Describe what you want to analyze or extract from the image"
-		},
-		"image_vision_mistral.mistral-large-3": {
-			"object": "mistral-large-3",
-			"properties": ["llm.cloud.apikey", "vision.systemPrompt", "vision.prompt"]
-		},
-		"image_vision_mistral.mistral-medium-3.1": {
-			"object": "mistral-medium-3.1",
-			"properties": ["llm.cloud.apikey", "vision.systemPrompt", "vision.prompt"]
-		},
-		"image_vision_mistral.mistral-small-3.2": {
-			"object": "mistral-small-3.2",
-			"properties": ["llm.cloud.apikey", "vision.systemPrompt", "vision.prompt"]
-		},
-		"image_vision_mistral.ministral-14b-3": {
-			"object": "ministral-14b-3",
-			"properties": ["llm.cloud.apikey", "vision.systemPrompt", "vision.prompt"]
-		},
-		"image_vision_mistral.ministral-8b-3": {
-			"object": "ministral-8b-3",
-			"properties": ["llm.cloud.apikey", "vision.systemPrompt", "vision.prompt"]
-		},
-		"image_vision_mistral.ministral-3b-3": {
-			"object": "ministral-3b-3",
-			"properties": ["llm.cloud.apikey", "vision.systemPrompt", "vision.prompt"]
-		},
-		"image_vision_mistral.profile": {
-			"title": "Vision Model",
 			"description": "Select the Mistral vision model to use",
-			"type": "string",
-			"default": "mistral-large-3",
-			"enum": ["*>preconfig.profiles.*.title"],
-			"conditional": [
-				{
-					"value": "mistral-large-3",
-					"properties": ["image_vision_mistral.mistral-large-3"]
+			"default": "mistral-large-2512",
+			"enum": {
+				"mistral-large-2512": {
+					"title": "Mistral Large 3 - Premier Vision (256k tokens)",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 256000 }
+					]
 				},
-				{
-					"value": "mistral-medium-3.1",
-					"properties": ["image_vision_mistral.mistral-medium-3.1"]
+				"mistral-medium-2508": {
+					"title": "Mistral Medium 3.1 - Balanced Vision (128k tokens)",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 128000 }
+					]
 				},
-				{
-					"value": "mistral-small-3.2",
-					"properties": ["image_vision_mistral.mistral-small-3.2"]
+				"mistral-small-2506": {
+					"title": "Mistral Small 3.2 - Fast & Cheap Vision (128k tokens)",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 128000 }
+					]
 				},
-				{
-					"value": "ministral-14b-3",
-					"properties": ["image_vision_mistral.ministral-14b-3"]
+				"ministral-14b-2512": {
+					"title": "Ministral 3 14B - High Performance Vision (256k tokens)",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 256000 }
+					]
 				},
-				{
-					"value": "ministral-8b-3",
-					"properties": ["image_vision_mistral.ministral-8b-3"]
+				"ministral-8b-2512": {
+					"title": "Ministral 3 8B - Balanced Vision (256k tokens)",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 256000 }
+					]
 				},
-				{
-					"value": "ministral-3b-3",
-					"properties": ["image_vision_mistral.ministral-3b-3"]
+				"ministral-3b-2512": {
+					"title": "Ministral 3 3B - Efficient Vision (256k tokens)",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 256000 }
+					]
 				}
-			]
-		}
-	},
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "Mistral Vision",
-			"properties": ["image_vision_mistral.profile"]
-		}
+			}
+		},
+		"llm_vision_mistral.apikey",
+		"llm_vision_mistral.systemPrompt",
+		"llm_vision_mistral.prompt"
 	]
 }

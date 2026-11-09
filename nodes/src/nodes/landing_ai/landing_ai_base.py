@@ -24,10 +24,8 @@
 """Shared helpers for the Landing.ai ADE sub-nodes (parse, extract)."""
 
 import json
-import os
 from typing import Any, Dict, Optional
 
-from ai.common.config import Config
 from ai.common.utils import decode_data_url
 
 _MAX_SCHEMA_BYTES = 2 * 1024 * 1024
@@ -41,17 +39,12 @@ def ensure_dependencies() -> None:
 
 
 def resolve_api_key(config: Dict[str, Any]) -> Optional[str]:
-    """Return the config api_key, else the ``ROCKETRIDE_LANDING_AI_KEY`` env var, else None."""
-    return (config.get('api_key') or '').strip() or (os.environ.get('ROCKETRIDE_LANDING_AI_KEY') or '').strip() or None
+    """Return the config api_key, stripped, or None when it is blank.
 
-
-def get_node_config(logical_type: str, conn_config: Dict[str, Any]) -> Dict[str, Any]:
-    """Read this node's config, unwrapping the nested ``default`` profile (always a dict)."""
-    config = Config.getNodeConfig(logical_type, conn_config)
-    if not isinstance(config, dict):
-        return {}
-    inner = config.get('default')
-    return inner if isinstance(inner, dict) else config
+    The key arrives through the node config (a ${ROCKETRIDE_*} reference resolved
+    per call); there is no process-environment fallback.
+    """
+    return (config.get('api_key') or '').strip() or None
 
 
 def build_client(api_key: Optional[str], environment: Optional[str] = None):

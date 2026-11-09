@@ -1,0 +1,196 @@
+# =============================================================================
+# MIT License
+# Copyright (c) 2026 Aparavi Software AG
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+# =============================================================================
+
+
+"""
+GMI Cloud save-time validation.
+
+The engine imports this module alone in CONFIG mode: the schema check is the
+resolver (``self.config``), the endpoint URL is held to HTTPS on the GMI
+domain (shared with IGlobal, which refuses to start on any other host), and
+the semantic check is a one-token probe against the provider. The provider
+SDK is imported inside the probe so this module stays import-light.
+"""
+
+import os
+import re
+from typing import Optional
+from urllib.parse import urlparse
+
+from rocketlib import IValidatorBase, warning
+from ai.common.config import warn_if_credential_unresolved
+
+_VALIDATION_PROMPT = 'Hi'
+_ALLOWED_DOMAIN = 'gmi-serving.com'
+# Substrings that indicate a vision/multimodal model (case-insensitive).
+# Used to warn the user when a custom model name looks like a vision model.
+_VISION_HINTS = ('vl', 'vision', 'visual', 'multimodal')
+
+
+def validate_serverbase(url: str) -> Optional[str]:
+    """Return an error message if url is not a valid GMI Cloud endpoint, else None.
+
+    Enforces HTTPS and restricts the hostname to *.gmi-serving.com to
+    prevent SSRF via user-supplied endpoint URLs.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme != 'https':
+        return 'Endpoint URL must use HTTPS.'
+    host = parsed.hostname or ''
+    if host != _ALLOWED_DOMAIN and not host.endswith('.' + _ALLOWED_DOMAIN):
+        return f'Endpoint URL must be a {_ALLOWED_DOMAIN} address.'
+    return None
+
+
+class IValidator(IValidatorBase):
+    """Schema check through the resolver, then the endpoint and provider probes."""
+
+    def validateConfig(self, syntaxOnly: bool = False):
+        """Validate GMI Cloud models at save time.
+
+        For named profiles the model ID is pre-verified. For the custom
+        profile the user-entered model name is checked: vision/multimodal
+        model names trigger a warning and skip the API probe; all other
+        non-empty names are probed with a 1-token request to confirm both
+        the API key and model existence.
+        """
+        # The schema check: a config that does not fit raises ConfigError here,
+        # before any probe. syntaxOnly asks for that check alone.
+        config = self.config
+        if syntaxOnly:
+            return
+
+        from depends import depends  # type: ignore
+
+        requirements = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'requirements.txt')
+        depends(requirements)
+
+        try:
+            from openai import OpenAI
+            from openai import APIStatusError, OpenAIError, AuthenticationError, RateLimitError, APIConnectionError
+
+            apikey = config.get('apikey')
+
+            # Do not send a ${...} the engine left unfilled to the provider as the key:
+            # its reply would say the key is wrong, not which variable is missing.
+            if warn_if_credential_unresolved(self.glb.logicalType, 'apikey', apikey):
+                return
+
+            model = config.get('customModel') if config.model == 'custom' else config.model
+            serverbase = config.get('serverbase')
+
+            # Nothing to validate if model or API key is not set yet.
+            if not model or not apikey:
+                return
+
+            # Deploy-on-demand profiles (Llama, Qwen) require the user to supply their
+            # deployment endpoint URL. Say so now: the run would otherwise fail at pipe
+            # start, where the message arrives far from the field that is missing.
+            if not serverbase:
+                warning(
+                    'Endpoint URL is required for this model. Deploy it in the GMI Cloud console '
+                    'and paste the endpoint URL here.'
+                )
+                return
+
+            err = validate_serverbase(serverbase)
+            if err:
+                warning(err)
+                return
+
+            # Vision heuristic: warn and skip probe if model looks like a vision model
+            model_lower = model.lower()
+            if any(hint in model_lower for hint in _VISION_HINTS):
+                warning(
+                    'This model appears to be a vision/multimodal model. For image input, use a vision node instead.'
+                )
+                # Skip the probe — vision models may reject text-only requests,
+                # which would produce a misleading error on top of this warning.
+                return
+
+            # Probe with a 1-token request to validate key + model existence
+            try:
+                client = OpenAI(api_key=apikey, base_url=serverbase)
+                client.chat.completions.create(
+                    model=model,
+                    messages=[{'role': 'user', 'content': _VALIDATION_PROMPT}],
+                    max_tokens=1,
+                )
+            except RateLimitError:
+                # 429 during validation means the API key is accepted — the probe
+                # just hit the rate limit. Treat as valid; no warning needed.
+                return
+            except APIStatusError as e:
+                status = getattr(e, 'status_code', None) or getattr(e, 'status', None)
+                # 429 via APIStatusError: same as RateLimitError — key is valid.
+                if status == 429:
+                    return
+                try:
+                    resp = getattr(e, 'response', None)
+                    data = resp.json() if resp is not None else None
+                    if isinstance(data, dict):
+                        api_err = data.get('error')
+                        if isinstance(api_err, dict):
+                            etype = api_err.get('type')
+                            emsg = api_err.get('message') or data.get('message')
+                        else:
+                            etype = None
+                            emsg = data.get('message')
+                        message = self._format_error(status, etype, emsg, str(e))
+                    else:
+                        message = self._format_error(status, None, None, str(e))
+                except Exception:
+                    message = self._format_error(status, None, None, str(e))
+                warning(message)
+                return
+            except (AuthenticationError, APIConnectionError, OpenAIError) as e:
+                message = self._format_error(None, None, None, str(e))
+                warning(message)
+                return
+
+        except Exception as e:
+            warning(str(e))
+
+    def _format_error(self, status, etype, emsg, fallback: str) -> str:
+        """Compose a user-facing error string.
+
+        If a numeric HTTP status is available, prefix it as 'Error <status>:'.
+        Then include provider error type and message when present.
+        If no structured fields are available, return the fallback message as-is.
+        Whitespace is normalized to a single line.
+        """
+        parts: list[str] = []
+        if status is not None:
+            parts.append(f'Error {status}:')
+        if etype:
+            parts.append(str(etype))
+        if emsg:
+            if etype:
+                parts.append('-')
+            parts.append(str(emsg))
+        # If we only have a status code with no detail, append the raw fallback
+        # so the user sees the full provider message rather than "Error 404:" alone.
+        if parts and not etype and not emsg and fallback:
+            parts.append(fallback)
+        message = ' '.join(parts) if parts else fallback
+        return re.sub(r'\s+', ' ', message).strip()

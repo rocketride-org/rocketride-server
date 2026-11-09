@@ -772,24 +772,28 @@ class TestInMemoryBounds:
 class TestIGlobalLifecycle:
     """Tests for IGlobal initialization and teardown."""
 
-    def test_iglobal_config_mode_skips_store(self):
-        """In CONFIG mode, store should not be created."""
-        iglobal = IGlobal.__new__(IGlobal)
-        iglobal.IEndpoint = MagicMock()
-        from rocketlib import OPEN_MODE
+    def test_beginglobal_builds_the_store_from_the_resolved_config(self, monkeypatch):
+        """The in-memory backend (the schema default) is built with the resolved settings."""
+        import sys
+        import types
 
-        iglobal.IEndpoint.endpoint.openMode = OPEN_MODE.CONFIG
-
+        monkeypatch.setitem(sys.modules, 'depends', types.SimpleNamespace(depends=lambda *_: None))
+        iglobal = IGlobal()
+        iglobal.glb = types.SimpleNamespace(logicalType='memory_persistent', connConfig={'max_history': 7})
         iglobal.beginGlobal()
+        try:
+            assert isinstance(iglobal.store.backend, InMemoryBackend)
+            assert iglobal.store.max_history == 7
+            assert iglobal.store.session_ttl_hours == 0
+        finally:
+            iglobal.endGlobal()
         assert iglobal.store is None
 
     def test_endglobal_clears_store(self):
         iglobal = IGlobal.__new__(IGlobal)
         iglobal.store = MagicMock()
-        iglobal.config = {'some': 'config'}
         iglobal.endGlobal()
         assert iglobal.store is None
-        assert iglobal.config is None
 
 
 # =============================================================================
@@ -1001,11 +1005,9 @@ class TestIGlobalResourceCleanup:
         mock_store = MagicMock()
         mock_store.backend = mock_backend
         g.store = mock_store
-        g.config = {'some': 'config'}
 
         with contextlib.suppress(RuntimeError):
             g.endGlobal()
 
         assert g.store is None, 'endGlobal must null store in finally block'
-        assert g.config is None, 'endGlobal must null config in finally block'
         mock_backend.close.assert_called_once()
