@@ -935,27 +935,6 @@ and the published version on the same server and user therefore read
 and write the same files, and a file both pages write follows the same
 last-save-wins rule.
 
-### Data in the RocketRide cloud databases
-
-Tables your app's pipelines write with `rocketride_sql`, `rocketride_vector`
-or `rocketride_graph` belong to the organization, team or member the run
-belongs to, never to the app:
-
-- Each organization has one database shared by its members, plus one per
-  team and one personal database per member. A store app's pipelines run in
-  the organization of the person using the app, so its data lands in that
-  organization's databases, not the publisher's.
-- There is no database or schema per app: every app using the same database
-  shares its `public` schema, so prefix your table names.
-- Uninstalling the app, or ending its subscription, leaves its tables in
-  place. Only a member leaving, a team being deleted or an organization being
-  deleted retains a database; after 30 days it is dumped and deleted.
-- Each database runs at most 6 transactions at once on RocketRide Cloud;
-  there are no storage, table or query-rate quotas. Backups restore the whole
-  cluster only, and there is no export: read data out through the nodes.
-
-Full rules, including staging: https://docs.rocketride.org/operate/cloud-databases
-
 ### Prefs — small UI preferences
 
 `prefs` is a shell-managed bag (active view, theme, sidebar state, plus any
@@ -990,6 +969,28 @@ updateAppState((prev) => ({ ...prev, lastQuery: 'foo' }));
 
 The Documents system can bind to it for automatic persistence of open
 documents and layout — see [The Documents System](#the-documents-system).
+
+### Data in the RocketRide cloud databases
+
+Tables your app's pipelines write with `rocketride_sql`, `rocketride_vector`
+or `rocketride_graph` belong to the organization, team or member the run
+belongs to, never to the app:
+
+- Each organization has one database shared by its members, plus one per
+  team and one personal database per member. A store app's pipelines run in
+  the organization of the person using the app, so its data lands in that
+  organization's databases, not the publisher's.
+- There is no database or schema per app: every app using the same database
+  can read, change and drop the other apps' tables in its `public` schema, so
+  prefix your table names.
+- Uninstalling the app, or ending its subscription, leaves its tables in
+  place. Only a member leaving, a team being deleted or an organization being
+  deleted retains a database; after 30 days it is dumped and deleted.
+- Each database runs up to 6 transactions at once on RocketRide Cloud; there
+  are no storage, table or query-rate quotas. Backups cover the whole cluster
+  only, and there is no export: read data out through the nodes.
+
+Full rules: https://docs.rocketride.org/operate/cloud-databases
 
 ### The two-phase startup: `seeded` vs `loaded`
 
