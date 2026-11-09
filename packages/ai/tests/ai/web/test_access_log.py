@@ -21,7 +21,9 @@ from ai.web.access_log import (
     WEBSOCKET_TEMPLATE_PREFIX,
     RequestTargetRedactor,
     install_access_log_redaction,
+    is_sensitive_param,
     redact_request_target,
+    redact_text,
     request_target_index,
 )
 
@@ -109,6 +111,16 @@ class TestRedactRequestTarget:
             ('//task/fetch/eyJ.abc.def/x', '//task/fetch/[redacted]/x'),
             ('/task/fetch/eyJ.abc.def', '/task/fetch/[redacted]'),
             ('/task/fetch/eyJ.abc.def/x?token=t&a=1', '/task/fetch/[redacted]/x?token=[redacted]&a=1'),
+            # Userinfo in an absolute-form target, plain and as h11 logs it
+            ('http%3A//user%3Apass%40localhost/x?a=1', 'http%3A//[redacted]%40localhost/x?a=1'),
+            ('http%3A//user:pass@host/x', 'http%3A//[redacted]@host/x'),
+            ('ws%3A//user@host/x', 'ws%3A//[redacted]@host/x'),
+            (
+                'http%3A//u%3Ap%40h%3A5565/task/fetch/T/x?token=T&x=1',
+                'http%3A//[redacted]%40h%3A5565/task/fetch/[redacted]/x?token=[redacted]&x=1',
+            ),
+            ('http%3A//host/a@b', 'http%3A//host/a@b'),
+            ('/x@y', '/x@y'),
             # Not a path token
             ('/task/fetch', '/task/fetch'),
             ('/task/fetch/', '/task/fetch/'),
@@ -185,16 +197,15 @@ class TestFilterOnRecords:
         assert RequestTargetRedactor().filter(record) is True
         assert record.args == args
 
-    def test_http_template_with_wrong_arity_is_untouched(self):
-        args = ('127.0.0.1:1', 'GET', '/x?code=1', '1.1')
-        record = _record('uvicorn.access', HTTP_ACCESS_TEMPLATE, args)
+    def test_http_template_with_wrong_arity_fails_closed(self):
+        record = _record('uvicorn.access', HTTP_ACCESS_TEMPLATE, ('127.0.0.1:1', 'GET', '/x?code=1', '1.1'))
         RequestTargetRedactor().filter(record)
-        assert record.args == args
+        assert record.args == ('127.0.0.1:1', 'GET', '/x?code=[redacted]', '1.1')
 
-    def test_dict_args_are_left_alone(self):
+    def test_dict_args_fail_closed(self):
         record = _record('uvicorn.access', '%(a)s', ({'a': '/x?code=1'},))
         RequestTargetRedactor().filter(record)
-        assert record.args == {'a': '/x?code=1'}
+        assert record.args == {'a': '/x?code=[redacted]'}
 
     def test_rendered_message_has_no_secret(self):
         record = _record('uvicorn.access', HTTP_ACCESS_TEMPLATE, ORIGIN_FORM_ARGS)
@@ -252,6 +263,113 @@ class TestFilterOnRecords:
             assert template in text, source
             checked.add(source.name)
         assert {'h11_impl.py', 'httptools_impl.py', 'websockets_impl.py', 'wsproto_impl.py'} <= checked
+
+
+class TestFailClosed:
+    """A record in any other shape on these loggers still has its credentials redacted."""
+
+    def test_unknown_template_with_a_token_argument(self):
+        record = _record('uvicorn.access', '%s %s %s', ('GET', '/x?token=SECRET&keep=1', 'later-uvicorn'))
+        RequestTargetRedactor().filter(record)
+        assert record.getMessage() == 'GET /x?token=[redacted]&keep=1 later-uvicorn'
+
+    @pytest.mark.parametrize(
+        'text,expected',
+        [
+            ('GET /x?auth=SECRET HTTP/1.1 200', 'GET /x?auth=[redacted] HTTP/1.1 200'),
+            (
+                'fetched http://u:SECRET@h/task/fetch/T/x?a=1 ok',
+                'fetched http://[redacted]@h/task/fetch/[redacted]/x?a=1 ok',
+            ),
+            ('retrying with token=SECRET and x=1', 'retrying with token=[redacted] and x=1'),
+            ('{"url": "http://x/y?api-key=SECRET"}', '{"url": "http://x/y?api-key=[redacted]"}'),
+        ],
+    )
+    def test_preformatted_message(self, text, expected):
+        record = _record('uvicorn.error', text, None)
+        RequestTargetRedactor().filter(record)
+        assert record.getMessage() == expected
+
+    def test_bytes_and_objects_are_redacted_and_numbers_keep_their_type(self):
+        class Url:
+            def __str__(self):
+                return 'http://h/x?jwt=SECRET'
+
+        record = _record('uvicorn.error', '%s %s %d %.1f %s', (b'token=SECRET', Url(), 7, 0.5, None))
+        RequestTargetRedactor().filter(record)
+        assert record.getMessage() == "b'token=[redacted]' http://h/x?jwt=[redacted] 7 0.5 None"
+
+    @pytest.mark.parametrize(
+        'msg,args',
+        [
+            ('Uvicorn running on %s://%s:%d (Press CTRL+C to quit)', ('http', '127.0.0.1', 5565)),
+            ('Started server process [%d]', (1234,)),
+            ('Application startup complete.', None),
+            ('connection open', None),
+        ],
+    )
+    def test_ordinary_messages_are_untouched(self, msg, args):
+        record = _record('uvicorn.error', msg, args)
+        before = record.getMessage()
+        RequestTargetRedactor().filter(record)
+        assert record.getMessage() == before
+
+    def test_installed_filter_redacts_an_unknown_record_on_the_real_logger(self):
+        install_access_log_redaction()
+        collector = _Collect()
+        logger = logging.getLogger('uvicorn.error')
+        logger.addHandler(collector)
+        logger.setLevel(logging.INFO)
+        logger.info('%s - "Websocket %s" new-template', '127.0.0.1:1', '/ws?auth=SECRET')
+        assert [r.getMessage() for r in collector.records] == [
+            '127.0.0.1:1 - "Websocket /ws?auth=[redacted]" new-template'
+        ]
+
+
+class TestParamNames:
+    @pytest.mark.parametrize(
+        'name',
+        [
+            'api-key',
+            'API_KEY',
+            'Api.Key',
+            'access-token',
+            'refresh-token',
+            'id-token',
+            'client-secret',
+            'authorization',
+            'Bearer',
+            'jwt',
+            'session',
+            'session_id',
+            'JSESSIONID',
+            'key',
+            'sig',
+            'X-Amz-Signature',
+            'github_token',
+            'db-password',
+            'aws_secret_access_key',
+        ],
+    )
+    def test_variants_are_sensitive(self, name):
+        assert is_sensitive_param(name), name
+        assert redact_request_target(f'/x?{name}=SECRET&a=1') == f'/x?{name}={REDACTED}&a=1'
+
+    def test_ordinary_params_and_paths_are_untouched(self):
+        ordinary = (
+            'scheme=vscode&x=1&page=2&sort_key=a&primary_key=1&keyword=k&monkey=1&tokenizer=bpe&max_tokens=5'
+            '&token_type=bearer&state_name=CA&code_challenge=c&code_challenge_method=S256&client_id=i'
+            '&redirect_uri=https%3A%2F%2Fh&response_type=code&scope=openid&scopes=a&org_id=o&pipe=p&error=e'
+        )
+        for target in (
+            f'/version?{ordinary}',
+            f'http%3A//localhost%3A5565/version?{ordinary}',
+            '/chat/index.html',
+            '/task/fetching/x',
+            '/auth/vscode/google',
+        ):
+            assert redact_request_target(target) == target
+            assert redact_text(f'GET {target} 200') == f'GET {target} 200'
 
 
 def _optional_backend(name, module):
@@ -335,26 +453,29 @@ class TestLiveUvicorn:
             for target in (
                 '/oauth/callback?code=SECRET&state=ST&x=1',
                 'http://localhost/oauth/callback?code=SECRET&state=ST&x=1',
+                'http://user:SECRET@localhost/oauth/callback?code=SECRET&state=ST&x=1',
                 '/task/fetch/SECRET/remoteEntry.js',
                 'http://localhost/task/fetch/SECRET/remoteEntry.js',
             ):
                 live.request(f'GET {target} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n')
 
         # The app saw the real values every time.
-        assert [query for _path, query in seen] == [b'code=SECRET&state=ST&x=1'] * 2 + [b''] * 2
-        assert all('SECRET' in path for path, _query in seen[2:])
+        assert [query for _path, query in seen] == [b'code=SECRET&state=ST&x=1'] * 3 + [b''] * 2
+        assert all('SECRET' in path for path, _query in seen[3:])
 
         records = live.collector.records
         lines = [r.getMessage() for r in records]
-        assert len(lines) == 4, lines
+        assert len(lines) == 5, lines
         fmt = AccessFormatter(fmt=uvicorn.config.LOGGING_CONFIG['formatters']['access']['fmt'], use_colors=False)
         for record, line in zip(records, lines):
             assert 'SECRET' not in line and 'state=ST' not in line, line
             assert ' 200' in line, line
             rendered = fmt.format(record)
             assert 'SECRET' not in rendered and '200 OK' in rendered, rendered
-        assert all('code=[redacted]&state=[redacted]&x=1' in line for line in lines[:2]), lines
-        assert all('/task/fetch/[redacted]/remoteEntry.js' in line for line in lines[2:]), lines
+        assert all('code=[redacted]&state=[redacted]&x=1' in line for line in lines[:3]), lines
+        assert all('/task/fetch/[redacted]/remoteEntry.js' in line for line in lines[3:]), lines
+        if http == 'h11':  # h11 logs the absolute form, userinfo included; httptools logs the path only
+            assert 'http%3A//[redacted]%40localhost/oauth/callback' in lines[2], lines
 
     @pytest.mark.parametrize(
         'ws',
