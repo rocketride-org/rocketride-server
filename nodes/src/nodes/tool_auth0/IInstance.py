@@ -193,6 +193,8 @@ class IInstance(IInstanceBase):
         description='Find users by exact email, ignoring case. Requires read:users.',
     )
     def search_users(self, args):
+        """Return matching users and count using read:users."""
+
         def op():
             data = _input(args, 'search_users')
             email = data.get('email')
@@ -245,6 +247,8 @@ class IInstance(IInstanceBase):
         description='Get sign-in profile and administrative block state; requires read:users.',
     )
     def get_user(self, args):
+        """Return a sign-in profile using read:users."""
+
         def op():
             user_id = _identifier(_input(args, 'get_user'), 'user_id')
             data = _object(self.IGlobal.client.request('get_user', identifier=user_id))
@@ -275,6 +279,8 @@ class IInstance(IInstanceBase):
         description='Get recent sanitized user authentication events; configure read:logs_users and read:logs.',
     )
     def get_user_logs(self, args):
+        """Return sanitized events and count using read:logs_users and read:logs."""
+
         def op():
             data = _input(args, 'get_user_logs')
             user_id, limit = _identifier(data, 'user_id'), _limit(data, 50)
@@ -294,6 +300,8 @@ class IInstance(IInstanceBase):
         description='Get an event with allowlisted authentication diagnostics; requires read:logs.',
     )
     def get_log_event(self, args):
+        """Return an event and sanitized diagnostics using read:logs."""
+
         def op():
             log_id = _identifier(_input(args, 'get_log_event'), 'log_id')
             data = _object(self.IGlobal.client.request('get_log_event', identifier=log_id))
@@ -314,6 +322,8 @@ class IInstance(IInstanceBase):
         description='Inspect brute-force protection blocks, not administrative blocks; requires read:users.',
     )
     def get_user_blocks(self, args):
+        """Return brute-force blocks and their count using read:users."""
+
         def op():
             user_id = _identifier(_input(args, 'get_user_blocks'), 'user_id')
             blocks = _blocks(self.IGlobal.client, user_id)
@@ -334,6 +344,8 @@ class IInstance(IInstanceBase):
         description='Clear brute-force blocks using separately enabled write credentials; requires update:users.',
     )
     def unblock_user(self, args):
+        """Return the unblock outcome using enabled write credentials and update:users."""
+
         def op():
             user_id = _identifier(_input(args, 'unblock_user'), 'user_id')
             client = self.IGlobal.client

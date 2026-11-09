@@ -39,6 +39,7 @@ class IGlobal(IGlobalBase):
     client = None
 
     def beginGlobal(self) -> None:
+        """Validate configuration and create the shared client outside config mode."""
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
             return
         cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
@@ -49,6 +50,7 @@ class IGlobal(IGlobalBase):
         self.client = Auth0Client(cfg)
 
     def validateConfig(self) -> None:
+        """Warn when the node configuration is invalid."""
         cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
         try:
             validate_config(cfg)
@@ -56,6 +58,7 @@ class IGlobal(IGlobalBase):
             warning(str(exc))
 
     def endGlobal(self) -> None:
+        """Close and release the shared client."""
         if self.client is not None:
             self.client.close()
         self.client = None

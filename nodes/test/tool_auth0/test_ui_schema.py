@@ -39,10 +39,13 @@ const cases = [
   [{allowWrite:true,clientSecret:readSecret,writeClientId:'id',secureParameters:{secure:['writeClientSecret']}}, true, ['writeClientId']],
   [{allowWrite:true,clientSecret:readSecret,writeClientId:' ',writeClientSecret:' '}, false, ['writeClientId','writeClientSecret']],
 ];
-for (const [data, valid, required] of cases) {
+for (const [index, [data, valid, required]] of cases.entries()) {
   const result = validator.validateFormData(data, schema);
   const resolved = createSchemaUtils(validator, schema).retrieveSchema(schema, data);
   if ((result.errors.length === 0) !== valid || JSON.stringify(resolved.required || []) !== JSON.stringify(required)) {
+    console.error(`Case ${index}: expected valid=${valid}, required=${JSON.stringify(required)}; ` +
+      `actual valid=${result.errors.length === 0}, required=${JSON.stringify(resolved.required || [])}; ` +
+      `errors=${JSON.stringify(result.errors)}`);
     process.exitCode = 1;
   }
 }

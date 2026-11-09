@@ -93,6 +93,8 @@ The tools return only selected profile and event fields; raw metadata, log descr
 ## Dependencies
 
 - `requests` `>=2.34.2`
+- `certifi` `>=2026.10.19`
+- `idna` `>=3.15`
 
 ## Source
 
