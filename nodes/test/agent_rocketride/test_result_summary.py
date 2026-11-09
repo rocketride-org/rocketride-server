@@ -1088,20 +1088,105 @@ def test_a_key_with_a_colon_or_a_dot_is_quoted_on_the_last_line():
     assert 'job.part.run.exit_code: 9' in dotted_line
 
 
-def test_a_wide_flat_dict_costs_a_bounded_walk():
+# Characters the executor's regexes may scan per field of a flat dict: the field name is all they should see.
+_SCANNED_CHARS_PER_FIELD = 64
+
+
+class _ScanCounter:
+    """Counts the characters the executor's regexes are asked to scan."""
+
+    def __init__(self):
+        self.chars = 0
+
+    def note(self, args):
+        """Add the length of the string arguments to the total.
+
+        Args:
+            args (tuple): Positional arguments of a regex call; every str or bytes one counts.
+        """
+        self.chars += sum(len(arg) for arg in args if isinstance(arg, (str, bytes)))
+
+
+class _CountingPattern:
+    """Stands in for a compiled pattern and counts the characters each call scans."""
+
+    _SCANNERS = ('search', 'match', 'fullmatch', 'findall', 'finditer', 'sub', 'subn', 'split')
+
+    def __init__(self, pattern, counter: _ScanCounter):
+        """Wrap a compiled pattern.
+
+        Args:
+            pattern (re.Pattern): The pattern to forward calls to.
+            counter (_ScanCounter): Receives the length of every scanned string.
+        """
+        self._pattern = pattern
+        self._counter = counter
+
+    def __getattr__(self, name):
+        """Forward an attribute; the scanning methods count first.
+
+        Args:
+            name (str): Attribute of the wrapped pattern.
+
+        Returns:
+            The attribute, wrapped when it scans a string.
+        """
+        target = getattr(self._pattern, name)
+        if name not in self._SCANNERS:
+            return target
+
+        def counted(*args, **kwargs):
+            self._counter.note(args)
+            return target(*args, **kwargs)
+
+        return counted
+
+
+def _count_scanned_chars(executor, monkeypatch) -> _ScanCounter:
+    """Route every regex the executor module can reach through a character counter.
+
+    Wraps each compiled pattern held in the executor's globals, and the scanning
+    functions of the `re` module it uses.
+
+    Args:
+        executor (module): The loaded executor module.
+        monkeypatch (pytest.MonkeyPatch): Restores everything at test end.
+
+    Returns:
+        _ScanCounter: The running total.
+    """
+    counter = _ScanCounter()
+    for name, value in list(vars(executor).items()):
+        if isinstance(value, re.Pattern):
+            monkeypatch.setattr(executor, name, _CountingPattern(value, counter))
+    for fn_name in _CountingPattern._SCANNERS:
+        original = getattr(executor.re, fn_name)
+
+        def counted(*args, _original=original, **kwargs):
+            # The first argument is the pattern; the strings after it are what gets scanned.
+            counter.note(args[1:])
+            return _original(*args, **kwargs)
+
+        monkeypatch.setattr(executor.re, fn_name, counted)
+    return counter
+
+
+def test_a_wide_flat_dict_costs_a_bounded_walk(monkeypatch):
     """Finding 15: a regex per short field over the whole summary took 0.8 s for 5,000 fields."""
-    import time
-
     executor = _load_executor()
-    result = {f'k{i:06d}': i for i in range(5000)}
 
-    start = time.perf_counter()
-    summary = executor._describe(result)
-    elapsed = time.perf_counter() - start
+    # The summary is capped, so 500 fields already fill it and a run time cannot see a per-field rescan of it.
+    # Count what the regexes scan instead: a regex per short field over the whole summary is about
+    # 5,000 x _SUMMARY_HARD_CAP characters; a bounded walk scans only the field names.
+    fields = 5000
+    counter = _count_scanned_chars(executor, monkeypatch)
+    summary = executor._describe({f'k{i:06d}': i for i in range(fields)})
 
     assert len(summary) <= executor._SUMMARY_HARD_CAP
     assert 'k000000: 0' in summary
-    assert elapsed < 0.5, f'{elapsed:.3f}s for 5,000 fields'
+    assert counter.chars <= fields * _SCANNED_CHARS_PER_FIELD, (
+        f'regexes scanned {counter.chars} characters for {fields} fields'
+    )
 
 
 def test_a_list_given_all_it_wants_shows_a_last_row_shorter_than_the_notice():

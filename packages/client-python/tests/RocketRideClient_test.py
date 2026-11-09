@@ -1809,8 +1809,12 @@ Line 3: random data {random.random()}"""
             await pipe.write('Mixed streaming content'.encode())
             stream_result = await pipe.close()
 
-            # Small delay to ensure events are processed
-            await asyncio.sleep(0.5)
+            # Wait for the status events to arrive
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline and not any(
+                e.get('event') in ('apaevt_status_update', 'apaevt_task') for e in received_events
+            ):
+                await asyncio.sleep(0.05)
 
             # Validate results
             results = [send_result, upload_result, stream_result]

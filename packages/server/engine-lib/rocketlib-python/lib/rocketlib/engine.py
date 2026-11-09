@@ -281,6 +281,16 @@ def validatePipeline(config: dict) -> dict:
 globals()['validatePipeline'] = engLib.validatePipeline  # noqa
 
 
+def resolveSecureParameters(pipeline: dict) -> dict:
+    """
+    Replace the secure parameter tokens in a pipeline with the values they hold.
+    """
+    pass
+
+
+globals()['resolveSecureParameters'] = engLib.resolveSecureParameters  # noqa
+
+
 def getServiceDefinition(logicalType: str) -> Dict:
     """
     Return a service definition given a logical name.

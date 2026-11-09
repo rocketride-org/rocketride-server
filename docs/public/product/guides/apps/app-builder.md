@@ -131,7 +131,10 @@ Two verbs, and they are not the same:
 A deploy returns as soon as the server accepts the upload; the version
 can be published, and served, only once its server build finishes. The
 version card shows the build's progress (`queued`, `building`, …) until
-then. Once you publish, **Where this app is live** on the Deploy tab shows
+then. If the build fails, the Dashboard says so, and its **View build log**
+button opens the server's build log with the reason at the end. From the
+terminal, run `rocketride deploy log <appId> <version>`. Once you publish,
+**Where this app is live** on the Deploy tab shows
 what a browser in each audience actually gets: `serving`, or why not
 (`not serving: still building`, `not serving: build failed`, `disabled`,
 `in review`). The dashboard says which version you would get right now.
