@@ -92,8 +92,8 @@
 				"title": "MiniMax M2",
 				"model": "MiniMax-M2",
 				"modelSource": "provider",
-				"modelTotalTokens": 204800, // sync_models.config.json
-				"modelOutputTokens": 65536, // sync_models.config.json
+				"modelTotalTokens": 204800, // manual
+				"modelOutputTokens": 65536, // manual
 				"serverbase": "https://api.minimax.io/v1",
 				"apikey": "",
 				"capabilities": {
@@ -104,8 +104,8 @@
 				"title": "MiniMax M2.1",
 				"model": "MiniMax-M2.1",
 				"modelSource": "provider",
-				"modelTotalTokens": 204800, // sync_models.config.json
-				"modelOutputTokens": 65536, // sync_models.config.json
+				"modelTotalTokens": 204800, // manual
+				"modelOutputTokens": 65536, // manual
 				"serverbase": "https://api.minimax.io/v1",
 				"apikey": "",
 				"capabilities": {
@@ -203,8 +203,11 @@
 				"title": "MiniMax: MiniMax-01",
 				"model": "minimax-01",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 1000192, // openrouter
-				"modelOutputTokens": 900172, // openrouter
+				"modelTotalTokens": 1000192, // manual
+				"modelOutputTokens": 900172, // manual
+				"deprecated": true,
+				"deprecatedBy": "openrouter",
+				"migration": "Model no longer listed in OpenRouter. Please select a current model.",
 				"apikey": ""
 			},
 			"minimax-m1": {
@@ -222,16 +225,19 @@
 				"title": "MiniMax: MiniMax M2-her",
 				"model": "minimax-m2-her",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 65536, // openrouter
-				"modelOutputTokens": 2048, // openrouter
+				"modelTotalTokens": 65536, // manual
+				"modelOutputTokens": 2048, // manual
+				"deprecated": true,
+				"deprecatedBy": "openrouter",
+				"migration": "Model no longer listed in OpenRouter. Please select a current model.",
 				"apikey": ""
 			},
 			"minimax-m2-7-free": {
 				"title": "MiniMax: MiniMax M2.7 (free)",
 				"model": "minimax-m2.7:free",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 196608, // openrouter
-				"modelOutputTokens": 176947, // openrouter
+				"modelTotalTokens": 196608, // manual
+				"modelOutputTokens": 176947, // manual
 				"deprecated": true,
 				"migration": "OpenRouter free routing alias — the MiniMax API serves no model with this ID. Please use 'MiniMax-M2.7' instead.",
 				"capabilities": {
@@ -243,8 +249,8 @@
 				"title": "MiniMax: MiniMax M3 (batch)",
 				"model": "minimax-m3:batch",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 524288, // openrouter
-				"modelOutputTokens": 471859, // openrouter
+				"modelTotalTokens": 524288, // manual
+				"modelOutputTokens": 471859, // manual
 				"deprecated": true,
 				"migration": "OpenRouter batch routing alias — the MiniMax API serves no model with this ID. Please use 'MiniMax-M3' instead.",
 				"capabilities": {
@@ -256,10 +262,21 @@
 				"title": "MiniMax: MiniMax M3 (free)",
 				"model": "minimax-m3:free",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 1048576, // openrouter
-				"modelOutputTokens": 943718, // openrouter
+				"modelTotalTokens": 1048576, // manual
+				"modelOutputTokens": 943718, // manual
 				"deprecated": true,
 				"migration": "OpenRouter free routing alias — the MiniMax API serves no model with this ID. Please use 'MiniMax-M3' instead.",
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"minimax-m3-1-flash": {
+				"title": "MiniMax: MiniMax M3.1 Flash",
+				"model": "minimax-m3.1-flash",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1048576, // openrouter
+				"modelOutputTokens": 524288, // openrouter
 				"capabilities": {
 					"reasoning": true
 				},
@@ -491,6 +508,12 @@
 					"properties": [
 						"minimax.minimax-m3-free"
 					]
+				},
+				{
+					"value": "minimax-m3-1-flash",
+					"properties": [
+						"minimax.minimax-m3-1-flash"
+					]
 				}
 			]
 		},
@@ -538,6 +561,13 @@
 		},
 		"minimax.minimax-m3-free": {
 			"object": "minimax-m3-free",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"minimax.minimax-m3-1-flash": {
+			"object": "minimax-m3-1-flash",
 			"properties": [
 				"llm.cloud.apikey",
 				"llm.cloud.modelSource"
