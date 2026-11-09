@@ -51,7 +51,7 @@ test('10 tasks, 3 first-run failures, 1 passes on rerun: 70% first-run pass, 10%
 		ids,
 		async (id, n) => {
 			calls.push(`${id}#${n}`);
-			return fake(id, n, script[id]?.[n - 1] ?? 'pass');
+			return { ...fake(id, n, script[id]?.[n - 1] ?? 'pass'), knownGood: { model: 'anthropic/claude-haiku-5-5', answered: true, seconds: 2, detail: 'answered' } };
 		},
 		(r) => r.status
 	);
@@ -70,6 +70,8 @@ test('10 tasks, 3 first-run failures, 1 passes on rerun: 70% first-run pass, 10%
 	const tasks = new Map(ids.map((id) => [id, { id, type: 'BUILD', target: 'pipeline', judge: [] } as unknown as Task]));
 	const results = buildResults(runs, tasks, dir, { startedAt: 't0', finishedAt: 't1', model: 'anthropic/claude-haiku-5-5', taskSet: 'tasks/breadth', engine: null, checkout: { commit: 'abc', branch: 'b', dirtyFiles: 0 } });
 	assert.equal(results.tasks.find((t) => t.id === 'task-06')?.trials.length, 3);
+	// every trial carries its known-good call, a passing one too
+	assert.ok(results.tasks.every((t) => t.trials.every((r) => r.knownGood?.answered === true)));
 	const report = fs.readFileSync(writeRunReport(dir, results), 'utf8');
 	assert.match(report, /\| 70% \(7 of 10\) \| 10% \(1 of 10\) \| 10 \|/);
 	assert.match(report, /Flaky: task-06\./);

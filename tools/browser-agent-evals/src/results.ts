@@ -53,6 +53,8 @@ export interface ResultsTrial {
 	guides: { reads: number; files: string[]; catalogCalls: number } | null;
 	/** A failed trial's label (cause.ts): agent, environment or runner, with the evidence. */
 	cause: TrialResult['cause'];
+	/** The known-good call made right after the trial (smoke-models.ts), or null when none was made. */
+	knownGood: TrialResult['knownGood'];
 	/** Checks that read another file than the one they name (resolve.ts). */
 	substitutions: TrialResult['substitutions'];
 	/** The trial folder's record.json and result.json, relative to results.json. */
@@ -104,6 +106,7 @@ export function buildResults(runs: Array<TaskRuns<TrialResult>>, tasks: Map<stri
 		why: r.why,
 		checks: r.checks.map((c) => ({ id: c.id, type: c.kind, status: c.status, detail: c.detail, blocker: c.blocker, ...(c.soft ? { soft: true } : {}) })),
 		cause: r.cause ?? null,
+		knownGood: r.knownGood ?? null,
 		substitutions: r.substitutions,
 		record: rel(r.record),
 		result: rel(r.record ? path.join(path.dirname(r.record), 'result.json') : null),

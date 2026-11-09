@@ -243,11 +243,10 @@ async function run(args: Args): Promise<number> {
 				const task = byId.get(id) as Task;
 				const dir = path.join(out, task.id, `trial-${n}`);
 				const { record: r, result: raw } = await runTrial({ task, tasksDir: args.tasks, trial: n, model, stack, dir, headed: args.headed, previews: !args.noPreview, keys, engineKeys, scrubber });
-				// step: a failed trial gets its cause; the known-good call tells the model's fault from the agent's
-				if (raw.status !== 'pass' && raw.status !== 'pending') {
-					const kg = r.endReason === 'not_supported' ? null : ((await smokeModels(stack.engineUri, apiKey, [model], scrubber).catch(() => null))?.[0] ?? null);
-					raw.cause = causeOf(raw, r, kg);
-				}
+				// step: the known-good call after every trial the runner drove, recorded with it; a failed trial gets its cause from it too
+				const kg = r.endReason === 'not_supported' ? null : ((await smokeModels(stack.engineUri, apiKey, [model], scrubber).catch(() => null))?.[0] ?? null);
+				raw.knownGood = kg ? { model: kg.model, answered: kg.answered, seconds: kg.seconds, detail: kg.detail } : null;
+				if (raw.status !== 'pass' && raw.status !== 'pending') raw.cause = causeOf(raw, r, kg);
 				// step: from here on the grade is scrubbed: the log, result.json, results.json and the report all read this copy
 				const result = JSON.parse(scrubber.scrub(JSON.stringify(raw))) as typeof raw;
 				fs.writeFileSync(path.join(dir, 'result.json'), `${JSON.stringify(result, null, '\t')}\n`);

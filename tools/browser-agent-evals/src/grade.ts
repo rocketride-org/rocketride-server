@@ -67,7 +67,7 @@ export interface GradeContext {
 }
 
 /** A graded trial: #2885's ScenarioResult, plus the task type and the path substitutions. */
-export type TrialResult = ScenarioResult & { type: string; substitutions: Substitution[]; cause?: Cause | null };
+export type TrialResult = ScenarioResult & { type: string; substitutions: Substitution[]; cause?: Cause | null; knownGood?: Cause['knownGood'] | null };
 
 function* allStrings(obj: unknown): Generator<string> {
 	if (typeof obj === 'string') yield obj;

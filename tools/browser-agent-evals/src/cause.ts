@@ -31,7 +31,7 @@
  *   reset or sign-in, a task it cannot drive yet), or a key reached its evidence;
  * - environment: the model could not be used. The known-good call failed (one
  *   question through the same one-node pipeline the Agent tab runs, made
- *   right after the trial, smoke-models.ts), the picker said the key was
+ *   right after every trial and recorded in its result, smoke-models.ts), the picker said the key was
  *   missing, or the turn's error is a provider's;
  * - agent: everything else.
  *
