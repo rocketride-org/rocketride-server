@@ -38,8 +38,9 @@ class IGlobal(IGlobalBase):
             'label_field': config.label_field,
             'value_field': config.value_field,
             # Written verbatim into normalized.currency, which downstream currency
-            # conversion matches on, so it is stored upper-cased.
-            'default_currency': config.default_currency.strip().upper(),
+            # conversion matches on; the schema holds it to three letters, the
+            # case is normalised here.
+            'default_currency': config.default_currency.upper(),
             'decimal_format': config.decimal_format,
             # Pre-merge the built-in mapping with the user overrides once per run.
             'mapping': build_mapping(config.label_to_metric),

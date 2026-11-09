@@ -67,7 +67,7 @@ class IValidator(IValidatorBase):
             )
 
             apikey = config.get('apikey')
-            model = config.get('customModel') if config.model == 'custom' else config.model
+            model = config.get('customModel') or config.model
             base_url = config.get('base_url') or None
             modelTotalTokens = config.get('modelTotalTokens')
 

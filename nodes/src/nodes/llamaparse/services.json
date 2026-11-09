@@ -68,7 +68,7 @@
 			"title": "Advanced Configuration (JSON)",
 			"description": "Enter configuration options in JSON format. For more information, see: <a href='https://developers.llamaindex.ai/llamaparse/parse/v1/presets_and_modes/advance_parsing_modes/' target='_blank'>LlamaParse Documentation</a>",
 			"format": "textarea",
-			"default": "{\n  \"parse_mode\": \"parse_page_with_llm\",\n  \"spreadsheet_extract_sub_tables\": false,\n  \"system_prompt_append\": \"\",\n  \"lvm_model\": \"anthropic-sonnet-4.0\"\n}"
+			"default": "{\n  \"parse_mode\": \"parse_page_with_llm\",\n  \"spreadsheet_extract_sub_tables\": false,\n  \"system_prompt_append\": \"\",\n  \"vendor_multimodal_model_name\": \"anthropic-sonnet-4.0\"\n}"
 		}
 	},
 	//

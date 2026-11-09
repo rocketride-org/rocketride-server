@@ -96,7 +96,7 @@ class IValidator(IValidatorBase):
             if warn_if_credential_unresolved(self.glb.logicalType, 'apikey', apikey):
                 return
 
-            model = config.get('customModel') if config.model == 'custom' else config.model
+            model = config.get('customModel') or config.model
             serverbase = config.get('serverbase')
 
             # Nothing to validate if model or API key is not set yet.

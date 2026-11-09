@@ -128,11 +128,10 @@ class ChatBase:
 
         # Extract model configuration - these are the core settings that control
         # how the chat driver behaves with respect to token limits. A converted
-        # definition's model selector has a "custom" branch whose free-text id
-        # lives in customModel; the selector value itself is never a model id then.
-        model = config.get('model')
-        if converted and model == 'custom':
-            model = config.get('customModel')
+        # definition's model selector may have a "custom" branch whose free-text id
+        # lives in customModel; that leaf is reachable only on that branch, so its
+        # presence (not the selector value) says the id lives there.
+        model = config.get('customModel') or config.get('model')
         self._model = validate_model_name(model)
         # An unset optional leaf resolves to None in the view (defaults are never
         # written), so "or" keeps the node's fallback for both config shapes.

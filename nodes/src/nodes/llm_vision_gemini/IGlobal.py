@@ -32,8 +32,6 @@ class IGlobal(IGlobalBase):
 
     _chat: Optional[ChatBase] = None
 
-    VALIDATION_PROMPT = 'Hi'
-
     def beginGlobal(self):
         """Initialize the global chat instance."""
         from depends import depends  # type: ignore

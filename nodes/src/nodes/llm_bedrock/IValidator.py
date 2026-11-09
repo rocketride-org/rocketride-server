@@ -74,7 +74,7 @@ class IValidator(IValidatorBase):
                 return
 
             region = config.get('region')
-            model = config.get('customModel') if config.model == 'custom' else config.model
+            model = config.get('customModel') or config.model
             modelTotalTokens = config.get('modelTotalTokens')
 
             # Lower-bound token check (UI shows tokens only for custom models)

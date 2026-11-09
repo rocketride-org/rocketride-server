@@ -39,6 +39,10 @@ from rocketlib import IValidatorBase, warning
 from ai.common.config import warn_if_credential_unresolved
 
 
+#: The one-token probe request sent to confirm the key and the model.
+VALIDATION_PROMPT = 'Hi'
+
+
 class IValidator(IValidatorBase):
     """Schema check through the resolver, then the provider probe."""
 
@@ -78,7 +82,7 @@ class IValidator(IValidatorBase):
             if warn_if_credential_unresolved(self.glb.logicalType, 'apikey', apikey):
                 return
 
-            model = config.get('customModel') if config.model == 'custom' else config.model
+            model = config.get('customModel') or config.model
             modelTotalTokens = config.get('modelTotalTokens')
 
             # Minimal explicit check: custom model must have positive token limit
@@ -89,7 +93,7 @@ class IValidator(IValidatorBase):
             # Minimal probe; UI handles required fields
             try:
                 client = ChatXAI(model=model, api_key=apikey, temperature=0)
-                client.invoke(self.VALIDATION_PROMPT)
+                client.invoke(VALIDATION_PROMPT)
             except Exception as e:
                 # SDK-first: HTTP status errors carry response and status code
                 if httpx is not None and isinstance(e, getattr(httpx, 'HTTPStatusError', ())):

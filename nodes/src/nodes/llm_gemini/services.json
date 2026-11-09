@@ -211,6 +211,7 @@
 				"models/gemini-2.0-flash-lite": {
 					"title": "Gemini 2.0 Flash Lite (deprecated)",
 					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 1048576 },
 						{ "name": "modelOutputTokens", "type": "constant", "default": 65536 }
 					]
 				},

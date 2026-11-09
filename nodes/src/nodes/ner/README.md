@@ -37,7 +37,7 @@ Start with the profile that matches the language or domain of the input, then ad
 
 ### Model
 
-The profile selector defaults to `bertLarge`. Its preset supplies the model identifier, aggregation strategy, and confidence threshold. Use a named profile when it matches the input domain, or select `custom` to enter a model name yourself; the recognizer otherwise falls back to `dbmdz/bert-large-cased-finetuned-conll03-english` when no model value reaches it. A custom model must work with the NER pipeline and the selected aggregation strategy.
+The profile selector defaults to `bertLarge`. A named profile pins only the model identifier; the aggregation strategy, confidence threshold and metadata flag are the shared settings below (`biomedical` starts its threshold at `0.85`). Select `custom` to enter a model name yourself; the field is required, there is no fallback model. A custom model must work with the NER pipeline and the selected aggregation strategy.
 
 ### Entity aggregation strategy
 

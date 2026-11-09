@@ -31,17 +31,23 @@ only one is '/', which is also the separator, so it is up to the user); Windows
 refuses a set of characters, and a path carrying one of them fails here.
 """
 
+import re
 from sys import platform
 
 from rocketlib import IValidatorBase
 
-#: Characters a Windows path component may not carry ('/' is the wrong separator).
-WINDOWS_INVALID_CHARACTERS = ('<', '>', ':', '"', '/', '|', '?', '*')
+#: Characters a Windows path COMPONENT may not carry. The separators ('\\' and
+#: '/') split the components and the drive prefix ('C:') is taken off first, so
+#: neither is ever tested.
+WINDOWS_INVALID_CHARACTERS = ('<', '>', ':', '"', '|', '?', '*')
+
+#: A drive prefix ('C:') or a UNC prefix ('\\\\server\\share') at the start of a path.
+_WINDOWS_PREFIX = re.compile(r'^(?:[A-Za-z]:|[\\/]{2}[^\\/]+[\\/][^\\/]+)')
 
 
 def windows_path_problem(value: object, what: str) -> str | None:
     """
-    Return the message for a Windows path holding a forbidden character, else None.
+    Return the message for a Windows path with a forbidden character in a component, else None.
 
     Args:
         value: The configured path (anything but a string passes).
@@ -49,8 +55,10 @@ def windows_path_problem(value: object, what: str) -> str | None:
     """
     if not isinstance(value, str) or value == 'N/A':
         return None
-    if any(char in value for char in WINDOWS_INVALID_CHARACTERS):
-        return f'Invalid {what}: {value}'
+    rest = _WINDOWS_PREFIX.sub('', value, count=1)
+    for component in re.split(r'[\\/]+', rest):
+        if any(char in component for char in WINDOWS_INVALID_CHARACTERS):
+            return f'Invalid {what}: {value}'
     return None
 
 

@@ -48,9 +48,10 @@
 		"normalize_facts.default_currency": {
 			"type": "string",
 			"title": "Default currency",
-			"description": "3-letter ISO code to tag when none is detected in the label or value (anything else is ignored with a warning). Leave empty to keep facts untagged.",
+			"description": "3-letter ISO 4217 code to tag when none is detected in the label or value (stored upper-case). Leave empty to keep facts untagged.",
 			"default": "",
-			"maxLength": 16
+			"minLength": 3,
+			"maxLength": 3
 		},
 		"normalize_facts.decimal_format": {
 			"type": "string",

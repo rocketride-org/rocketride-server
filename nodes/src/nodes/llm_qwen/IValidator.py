@@ -80,7 +80,7 @@ class IValidator(IValidatorBase):
             if warn_if_credential_unresolved(self.glb.logicalType, 'apikey', apikey):
                 return
 
-            model = config.get('customModel') if config.model == 'custom' else config.model
+            model = config.get('customModel') or config.model
             modelTotalTokens = config.get('modelTotalTokens')
 
             # Validate API key format
@@ -94,9 +94,11 @@ class IValidator(IValidatorBase):
                     warning('Token limit must be greater than 0')
                     return
 
-            # Resolve regional endpoint
-            region = config.get('region', 'us')
-            base_url = DASHSCOPE_REGIONS.get(region, DASHSCOPE_REGIONS['us'])
+            # Resolve the endpoint the way the runtime does: an explicit base_url
+            # wins over the regional map
+            base_url = (config.get('base_url') or '').strip()
+            if not base_url:
+                base_url = DASHSCOPE_REGIONS.get(config.region, DASHSCOPE_REGIONS['us'])
 
             # Simple API validation using provider-driven exceptions
             try:

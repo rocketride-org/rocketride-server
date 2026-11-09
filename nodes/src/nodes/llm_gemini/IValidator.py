@@ -39,6 +39,10 @@ from rocketlib import IValidatorBase, warning
 from ai.common.config import warn_if_credential_unresolved
 
 
+#: The one-token probe request sent to confirm the key and the model.
+VALIDATION_PROMPT = 'Hi'
+
+
 class IValidator(IValidatorBase):
     """Schema check through the resolver, then the provider probe."""
 
@@ -93,7 +97,7 @@ class IValidator(IValidatorBase):
             if warn_if_credential_unresolved(self.glb.logicalType, 'apikey', apikey):
                 return
 
-            model = config.get('customModel') if config.model == 'custom' else config.model
+            model = config.get('customModel') or config.model
 
             # Minimal probe; secure fields are not decrypted at validate time
             if not apikey:
@@ -101,7 +105,7 @@ class IValidator(IValidatorBase):
 
             try:
                 client = genai.Client(api_key=apikey)
-                client.models.generate_content(model=model, contents=self.VALIDATION_PROMPT)
+                client.models.generate_content(model=model, contents=VALIDATION_PROMPT)
             except (
                 BadRequest,
                 Unauthorized,

@@ -29,8 +29,6 @@ from ai.common.chat import ChatBase
 class IGlobal(IGlobalBase):
     chat: ChatBase | None = None
 
-    VALIDATION_PROMPT = 'Hi'
-
     def beginGlobal(self):
         from depends import depends  # type: ignore
 

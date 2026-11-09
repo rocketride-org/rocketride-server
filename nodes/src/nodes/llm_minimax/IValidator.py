@@ -70,7 +70,7 @@ class IValidator(IValidatorBase):
             if warn_if_credential_unresolved(self.glb.logicalType, 'apikey', apikey):
                 return
 
-            model = config.get('customModel') if config.model == 'custom' else config.model
+            model = config.get('customModel') or config.model
             serverbase = config['serverbase']
 
             # UI handles missing key prompts; skip the probe when the key is absent
