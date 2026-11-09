@@ -45,25 +45,34 @@ prerendered capture when the shell build carries one, else ``index.html``),
 so the shell boots and routes as before. A crawler (``crawlers.classify``)
 gets the page's ``snapshot`` instead: that file of the production version's
 build output, rendered by the restricted template engine (``template.py``)
-with ``assets``, the version's URL base. A page without a snapshot, or with
-one that cannot be read or rendered, serves crawlers the shell document too.
-Either way the page's head metadata (title, description, canonical URL,
-robots) is injected. Every page response carries ``Vary: User-Agent``. A
-rendered snapshot is ``public, max-age=3600`` (plan section 7); the shell
-document names the current build's bundles, so it is ``private, no-cache``.
-A shared cache put in front would have to honor that ``Vary`` (CloudFront
-ignores it by default), or it would hand people a crawler's snapshot.
+with ``assets``, the version's URL base, and the page's bound data sources
+(``data_sources.py``). A page without a snapshot, or with one that cannot be
+read or rendered, serves crawlers the shell document too. Either way the
+page's head metadata (title, description, canonical URL, robots) is injected,
+plus, for crawlers, the JSON-LD of its data sources. A source that cannot be
+read leaves the page without its data, uncached. Every page response carries
+``Vary: User-Agent``. A rendered snapshot is ``public, max-age=3600`` (plan
+section 7); the shell document names the current build's bundles, so it is
+``private, no-cache``. A shared cache put in front would have to honor that
+``Vary`` (CloudFront ignores it by default), or it would hand people a
+crawler's snapshot.
 
 Rendered responses are cached per (path, UA class) under a byte budget and
-dropped on every aggregate swap; snapshot bytes, immutable per version, are
-cached by store path under its own byte budget. A snapshot over
-``MAX_SNAPSHOT_BYTES`` (sized by a stat) is never read. Concurrent misses
-on one snapshot share one store read, and after a storage failure the store
-is not asked for that snapshot again for ``_STORAGE_BACKOFF_SECONDS``.
+dropped on every aggregate swap; a crawler response bound to a data source is
+also dropped when that source is invalidated, and expires after
+``data_sources.TTL_SECONDS``. The crawler may keep such a response only for
+what is left of that time, so the TTL bounds staleness end to end. Snapshot
+bytes, immutable per version, are cached by store path under their own byte
+budget. A snapshot over ``MAX_SNAPSHOT_BYTES`` (sized by a stat) is never read.
+Concurrent misses on one snapshot share one store read, and after a storage
+failure the store is not asked for that snapshot again for
+``_STORAGE_BACKOFF_SECONDS``.
 """
 
 import asyncio
+import math
 import sys
+import time
 from functools import partial
 from pathlib import Path
 from time import monotonic
@@ -79,7 +88,7 @@ from ai.web.middleware import route_path
 
 from rocketlib import error, warning
 
-from . import public_pages
+from . import data_sources, public_pages
 from .contract import MAX_SNAPSHOT_BYTES, Page, reserved_error, snapshot_error, with_slash_twin
 from .crawlers import CRAWLER, classify
 from .head import inject_head
@@ -288,9 +297,9 @@ class _FifoCache:
         """Store ``value`` (``size`` bytes), evicting the oldest entries until it fits."""
         if size > self.max_bytes:
             return
-        self._drop(key)
+        self.discard(key)
         while self._entries and (self.total + size > self.max_bytes or len(self._entries) >= self.max_entries):
-            self._drop(next(iter(self._entries)))
+            self.discard(next(iter(self._entries)))
         self._entries[key] = (value, size)
         self.total += size
 
@@ -299,15 +308,16 @@ class _FifoCache:
         self._entries.clear()
         self.total = 0
 
-    def _drop(self, key: Any) -> None:
+    def discard(self, key: Any) -> None:
         hit = self._entries.pop(key, None)
         if hit is not None:
             self.total -= hit[1]
 
 
 # Rendered page responses: (path, UA class, shell document, its mtime and size,
-# RR_APP_URL) -> (body bytes, headers). Cleared on every aggregate swap, so
-# the shell file is read and rewritten once per page, UA class and build.
+# RR_APP_URL) -> (data entries bound, expiry on the monotonic clock, body
+# bytes, headers). Cleared on every aggregate swap; an entry bound to a data
+# source is dropped when that source is invalidated.
 _RENDER_CACHE_MAX_BYTES = 32 * 1024 * 1024
 _RENDER_CACHE_MAX = 4096
 _render_cache = _FifoCache(_RENDER_CACHE_MAX_BYTES, _RENDER_CACHE_MAX)
@@ -320,7 +330,8 @@ _render_cache = _FifoCache(_RENDER_CACHE_MAX_BYTES, _RENDER_CACHE_MAX)
 # by the page map and cleared on every swap.
 _documents: Dict[Tuple[str, bool], Tuple[Path, int, int, Optional[Path]]] = {}
 
-# Bumped by every swap: a render that started before one is served, not cached.
+# Bumped by every swap and data-source invalidation: a render that started
+# before one is served, not cached.
 _generation = 0
 
 
@@ -330,6 +341,14 @@ def _clear_rendered(old: Any, new: Any) -> None:
     _generation += 1
     _render_cache.clear()
     _documents.clear()
+
+
+def _drop_rendered_for(source: str) -> None:
+    global _generation
+    _generation += 1
+    for key in _render_cache.keys():
+        if any(data_sources.source_name(entry) == source for entry in _render_cache.get(key)[0]):
+            _render_cache.discard(key)
 
 
 # Snapshot bytes by store path. A version's build output never changes, so
@@ -546,13 +565,26 @@ def _read_finished(page: Page, path: str, read: 'asyncio.Task[bytes]') -> None:
     error(f'[public_pages] reading snapshot {path} failed: {failure!r}')
 
 
+async def _page_data(page: Page, canonical: str) -> Tuple[Dict[str, Any], bool]:
+    """The page's bound data sources: ``(context, complete)``.
+
+    A source that cannot be read is logged as a warning and leaves the page
+    without any of its data, uncached, so the next request tries again.
+    """
+    try:
+        return await data_sources.bind(page, canonical), True
+    except Exception as exc:
+        warning(f'[public_pages] {page.path}: data {list(page.data)} unavailable, serving without it: {exc}')
+    return {}, False
+
+
 def _warn_fallback(page: Page, reason: Any) -> None:
     """Log that crawlers get the shell document in place of the page's snapshot."""
     warning(f'[public_pages] {page.path}: snapshot {page.snapshot!r} unavailable, serving the shell document: {reason}')
 
 
-async def _crawler_snapshot(page: Page) -> Tuple[Optional[str], bool]:
-    """The page's rendered snapshot for crawlers, or None for the shell document: ``(html, cacheable)``.
+async def _crawler_snapshot(page: Page, context: Dict[str, Any]) -> Tuple[Optional[str], bool]:
+    """The page's snapshot rendered with ``context``, or None for the shell document: ``(html, cacheable)``.
 
     A fallback is cacheable when it is final for the page's version: no
     snapshot, a malformed snapshot path or no production version, a snapshot
@@ -567,6 +599,7 @@ async def _crawler_snapshot(page: Page) -> Tuple[Optional[str], bool]:
 
     Args:
         page: A page of the aggregate.
+        context: The page's bound data sources (``_page_data``).
 
     Returns:
         ``(html, cacheable)``: the rendered snapshot, or None when crawlers
@@ -586,7 +619,9 @@ async def _crawler_snapshot(page: Page) -> Tuple[Optional[str], bool]:
     try:
         raw = await _snapshot_bytes(page, path)
         # A 2 MiB snapshot takes tens of milliseconds to render: off the event loop.
-        html = await asyncio.to_thread(render, raw.decode('utf-8', errors='replace'), {'assets': assets_base(page)})
+        html = await asyncio.to_thread(
+            render, raw.decode('utf-8', errors='replace'), {**context, 'assets': assets_base(page)}
+        )
         return html, True
     except _SnapshotTooLarge:
         # The read remembered it as unusable and warned (_read_finished).
@@ -793,17 +828,18 @@ async def _render_page(request: Request, path: str, page: Page) -> Response:
     crawler = classify(request.headers.get('user-agent', '')) == CRAWLER
     document, mtime_ns, size = _shell_document(request, path)
     key = (path, crawler, document, mtime_ns, size, app_url())
+    now = time.monotonic()
     cached = _render_cache.get(key)
-    if cached is None:
+    if cached is None or cached[1] <= now:
         generation = _generation
-        snapshot = None
-        cacheable = True
-        if crawler:
-            snapshot, cacheable = await _crawler_snapshot(page)
-        cached = await asyncio.to_thread(_render, path, page, document, snapshot)
+        cached, cacheable = await _render(path, page, crawler, document, now)
         if cacheable and generation == _generation:
-            _render_cache.put(key, cached, len(cached[0]))
-    return HTMLResponse(cached[0], headers=dict(cached[1]))
+            _render_cache.put(key, cached, len(cached[2]))
+    headers = dict(cached[3])
+    if cached[0] and headers['Cache-Control'] == _SNAPSHOT_CACHE_CONTROL:
+        # The crawler keeps bound data no longer than this server would.
+        headers['Cache-Control'] = f'private, max-age={math.ceil(cached[1] - now)}'
+    return HTMLResponse(cached[2], headers=headers)
 
 
 def _shell_document(request: Request, path: str) -> Tuple[Path, int, int]:
@@ -860,34 +896,55 @@ def _file_version(document: Path) -> Optional[Tuple[int, int]]:
     return stat.st_mtime_ns, stat.st_size
 
 
-def _render(path: str, page: Page, document: Path, snapshot: Optional[str]) -> Tuple[bytes, Dict[str, str]]:
-    """Render one page as the render cache holds it: ``(body, headers)``.
+async def _render(
+    path: str, page: Page, crawler: bool, document: Path, now: float
+) -> Tuple[Tuple[Tuple[str, ...], float, bytes, Dict[str, str]], bool]:
+    """Render one page: ``((sources, expires, body, headers), cacheable)``, the entry as the render cache holds it.
 
-    The body is a crawler's rendered ``snapshot`` (``_crawler_snapshot``), or
-    the shell document when it is None, people's always. Either way the
-    page's head metadata is injected.
+    People get the shell document; crawlers get the page's snapshot rendered
+    with its bound data sources (``_crawler_snapshot``), or the shell document
+    when there is none to serve. Either way the page's head metadata is
+    injected, plus the sources' JSON-LD for crawlers; reading the shell
+    document and rewriting the head run off the event loop. A render bound to
+    a source expires ``data_sources.TTL_SECONDS`` after ``now``. ``cacheable``
+    is False for a fallback the next request should retry.
     """
+    canonical = canonical_url(path)
+    # Only crawlers bind data: people get the shell document, which the
+    # app renders itself.
+    sources = page.data if crawler else ()
+    context, cacheable = await _page_data(page, canonical) if sources else ({}, True)
+    snapshot = None
+    if crawler:
+        snapshot, rendered = await _crawler_snapshot(page, context)
+        cacheable = cacheable and rendered
+    # Only a rendered snapshot this server keeps may be kept by the crawler:
+    # the shell document names the current build's bundles, so it is
+    # revalidated on every use.
     body = snapshot
-    cache_control = _SNAPSHOT_CACHE_CONTROL
+    cache_control = 'private, no-cache'
     if body is None:
-        body = document.read_text(encoding='utf-8')
-        # The shell document names the current build's bundles: revalidated on every use.
-        cache_control = 'private, no-cache'
-    body = inject_head(
+        body = await asyncio.to_thread(document.read_text, encoding='utf-8')
+    elif cacheable:
+        cache_control = _SNAPSHOT_CACHE_CONTROL
+    body = await asyncio.to_thread(
+        inject_head,
         body,
         title=page.head_title or page.title,
         description=page.description,
-        canonical=canonical_url(path),
+        canonical=canonical,
         noindex=not page.listed,
+        jsonld=data_sources.jsonld(context, canonical),
     )
     headers = {'Vary': 'User-Agent', 'Cache-Control': cache_control}
     if not page.listed:
         headers['X-Robots-Tag'] = 'noindex'
-    return body.encode('utf-8'), headers
+    expires = now + data_sources.TTL_SECONDS if sources else math.inf
+    return (sources, expires, body.encode('utf-8'), headers), cacheable
 
 
 async def register_public_pages(server: WebServer) -> None:
-    """Register the catch-all last, drop renders on every swap, and build the first aggregate.
+    """Register the catch-all last, drop renders on every swap and data-source invalidation, and build the first aggregate.
 
     Call once, at the end of server startup, after every module's initModule
     and the account layer's init_account, and before serving. Routes that
@@ -916,6 +973,7 @@ async def register_public_pages(server: WebServer) -> None:
     route.methods = None
     # Before the first swap, so no render outlives the page map it came from.
     public_pages.on_swap(_clear_rendered)
+    data_sources.on_invalidate(_drop_rendered_for)
     server.add_catch_all(route)
     public_pages.swap(public_pages.legacy_aggregate(public_pages.live_conflict()))
     await public_pages.build_at_startup()

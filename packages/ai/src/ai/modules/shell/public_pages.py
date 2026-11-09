@@ -54,6 +54,7 @@ from ai.account.app_rows import (
     serving_block_of,
 )
 
+from . import data_sources
 from .contract import (
     MAX_SNAPSHOT_BYTES,
     Page,
@@ -790,11 +791,14 @@ def maybe_refresh() -> None:
 def app_changed(app_id: str) -> None:
     """The app deployment-change hook (``broadcast_app_changed``).
 
-    Only a platform app's publish, unpublish or rung repoint can change the
-    page claims; any other app's is ignored.
+    Any app's change can change what a page naming it (``plans:<appId>``,
+    ``app:<appId>``) may show, so the data sources are invalidated. Only a
+    platform app's publish, unpublish or rung repoint can change the page
+    claims, so only those rebuild the aggregate.
 
     Args:
         app_id: The id of the app whose deployment changed.
     """
+    data_sources.invalidate('app')
     if is_privileged(app_id):
         schedule_rebuild()
