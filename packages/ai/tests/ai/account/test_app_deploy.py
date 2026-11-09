@@ -1814,3 +1814,116 @@ async def test_resolve_publisher_falls_back_to_the_developer_namespace(registry,
 def test_publisher_of_never_returns_empty(app_id, manifest, snapshot, expected):
     """The publisher resolver's order and its namespace floor."""
     assert _publisher_of(app_id, manifest, snapshot) == expected
+
+
+# =============================================================================
+# PUBLIC-PAGES GATE: publicPages/site validated on the public rung only
+# =============================================================================
+
+
+def _platform_request(subcommand, **args):
+    """An rrext_deploy_app request for the platform's home app."""
+    return {'command': 'rrext_deploy_app', 'arguments': {'subcommand': subcommand, 'appId': 'rocketride.home', **args}}
+
+
+@pytest.fixture
+def no_published_pages(monkeypatch):
+    """No other platform app holds page claims (the gate's collision feed),
+    and the version's build output carries no app-manifest.json: the
+    manifest under test is metadata.manifest.
+
+    A platform app's publish schedules a page-map rebuild: it is a no-op
+    here, and the rebuild state is restored after the test, so nothing
+    reaches the real account or store.
+    """
+    import ai.modules.shell.public_pages as pp
+    from ai.account.store import StorageNotFoundError
+
+    async def load_published(acct=None, strict=False, exclude=''):
+        return []
+
+    async def no_files(path):
+        raise StorageNotFoundError(path)
+
+    async def no_rebuild(acct=None):
+        return True
+
+    monkeypatch.setattr(pp, 'load_published', load_published)
+    monkeypatch.setattr(pp, 'read_artifact_file', no_files)
+    monkeypatch.setattr(pp, 'rebuild', no_rebuild)
+    monkeypatch.setattr(pp, '_rebuild_task', None)
+    monkeypatch.setattr(pp, '_rebuild_pending', False)
+
+
+@pytest.mark.asyncio
+async def test_public_publish_accepts_valid_public_pages(registry, quiet_push, no_published_pages, monkeypatch):
+    monkeypatch.setenv('RR_PUBLIC_ROOT_APPS', 'rocketride.home')
+    manifest = {'name': 'Home', 'publicPages': [{'path': '/', 'title': 'Home'}, {'path': '/pricing', 'title': 'P'}]}
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready', manifest=manifest)
+    dev = _FakeConn(teams=_TEAMS, developer_id='rocketride')
+    result = await handle_deploy_app(dev, _platform_request('publish', version=1, target='@public'))
+    assert result['success'] is True
+    assert len(registry.set_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_public_publish_rejects_invalid_public_pages(registry, quiet_push, no_published_pages, monkeypatch):
+    monkeypatch.setenv('RR_PUBLIC_ROOT_APPS', 'rocketride.home')
+    manifest = {'name': 'Home', 'publicPages': [{'path': '/Pricing', 'title': 'P'}, {'path': '/api/x', 'title': 'A'}]}
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready', manifest=manifest)
+    dev = _FakeConn(teams=_TEAMS, developer_id='rocketride')
+    result = await handle_deploy_app(dev, _platform_request('publish', version=1, target='@public'))
+    assert result['success'] is False
+    assert 'Version 1 of rocketride.home cannot go public: ' in result['message']
+    assert 'must be lowercase' in result['message'] and "reserved prefix '/api'" in result['message']
+    assert registry.set_calls == []  # no binding was created
+
+
+@pytest.mark.asyncio
+async def test_internal_rungs_skip_the_public_pages_gate(registry, quiet_push, no_published_pages):
+    # The aggregate reads the public rung only: a team pin of a work-in-progress
+    # manifest (pre-release) is the developer's business.
+    manifest = {'name': 'Home', 'publicPages': [{'path': '/Bad', 'title': 'P'}]}
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready', manifest=manifest)
+    dev = _FakeConn(teams=_TEAMS, developer_id='rocketride')
+    result = await handle_deploy_app(dev, _platform_request('publish', version=1, target='@team/Development'))
+    assert result['success'] is True
+
+
+@pytest.mark.asyncio
+async def test_third_party_public_pages_rejected_at_publish(registry, quiet_push, no_published_pages):
+    manifest = {'name': 'Brandy', 'publicPages': [{'path': '/brandy', 'title': 'B'}]}
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready', manifest=manifest)
+    dev = _FakeConn(teams=_TEAMS, developer_id='acme')
+    result = await handle_deploy_app(dev, _request('publish', version=1, target='@public'))
+    assert result['success'] is False and 'platform capability' in result['message']
+    assert registry.set_calls == []
+
+
+@pytest.mark.asyncio
+async def test_public_pages_gate_fails_closed_on_storage_errors(registry, quiet_push, no_published_pages, monkeypatch):
+    import ai.modules.shell.public_pages as pp
+
+    async def broken(acct=None, strict=False, exclude=''):
+        raise RuntimeError('store down')
+
+    monkeypatch.setattr(pp, 'load_published', broken)
+    monkeypatch.setenv('RR_PUBLIC_ROOT_APPS', 'rocketride.home')
+    manifest = {'name': 'Home', 'publicPages': [{'path': '/', 'title': 'Home'}]}
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready', manifest=manifest)
+    dev = _FakeConn(teams=_TEAMS, developer_id='rocketride')
+    result = await handle_deploy_app(dev, _platform_request('publish', version=1, target='@public'))
+    assert result['success'] is False
+    assert result['message'] == 'Could not verify the publicPages claims of rocketride.home: store down'
+    assert registry.set_calls == []
+
+
+@pytest.mark.asyncio
+async def test_public_pages_gate_fails_closed_without_an_artifact_path(registry, quiet_push, no_published_pages):
+    # An empty artifactPath would map the version to the store's root dist/.
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready', manifest={'name': 'Home'})
+    registry.versions[-1]['artifactPath'] = ''
+    dev = _FakeConn(teams=_TEAMS, developer_id='rocketride')
+    result = await handle_deploy_app(dev, _platform_request('publish', version=1, target='@public'))
+    assert result['success'] is False and 'no artifact path' in result['message']
+    assert registry.set_calls == []

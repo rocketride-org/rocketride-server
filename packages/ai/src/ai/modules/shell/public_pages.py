@@ -277,6 +277,80 @@ async def read_artifact_file(path: str) -> bytes:
 
 
 # =============================================================================
+# THE PUBLISH GATE: called where kind:'app' publishes are validated
+# =============================================================================
+
+
+async def gate_errors(app_id: str, manifest: Mapping[str, Any], dist_dir: str, acct: Any = None) -> List[str]:
+    """Why publishing this version to the public rung must be refused ([] = allowed).
+
+    Runs at ``rrext_deploy_app publish`` for the public audience only, the
+    one rung the aggregate reads. Checks, each with an actionable message:
+    privilege and may-claim-root, path grammar, reserved prefixes, data
+    entries, cross-app collisions against every OTHER published platform
+    manifest (first claim wins; ownership is derived from published
+    manifests, so unpublishing releases it, with no table), and snapshot
+    files missing from the built version.
+
+    The sections come from the version's build-emitted ``app-manifest.json``
+    when present, else ``manifest`` (``metadata.manifest``): the same
+    resolution the aggregate uses. Only platform apps' build output is read
+    (a third party's sections can never take effect, so its
+    ``metadata.manifest`` alone decides how loudly it is refused); a version
+    without either section derives no claims.
+
+    Args:
+        app_id: The publishing app's id.
+        manifest: The version's ``metadata.manifest``.
+        dist_dir: The version's store ``dist/`` tree; empty when the version
+            has no artifact path.
+        acct: The account layer (the singleton when None).
+
+    Raises:
+        Exception: the build output of a platform app cannot be located, or a
+            storage failure while reading it or deriving claims; the caller
+            refuses the publish (fail closed).
+    """
+    from ai.account.store import StorageNotFoundError
+
+    if is_privileged(app_id):
+        if not dist_dir:
+            raise ValueError('the version has no artifact path, so its build output cannot be read')
+        try:
+            manifest = await page_manifest(manifest, dist_dir)
+        except ValueError as exc:
+            return [f'{exc}; emit {{"publicPages": [...], "site": {{...}}}} or drop the file']
+    if 'publicPages' not in manifest and 'site' not in manifest:
+        return []
+    pages, _, errors = check_manifest(app_id, manifest)
+    if not pages:
+        # Nothing to collide or snapshot (a third party, or every page invalid):
+        # never read, or echo a failure of, the other platform apps' storage.
+        return errors
+    # The publishing app's own current version is being replaced: never read it.
+    others = await load_published(acct, strict=True, exclude=app_id)
+    exact, _ = _claims(others)
+    for page in pages:
+        owner = exact.get(page.path)
+        if owner is not None:
+            errors.append(
+                f'publicPages path {page.path!r} is already claimed by the published app {owner.app_id} '
+                '(first claim wins; the claim is released when that app unpublishes); choose another path'
+            )
+    for page in pages:
+        if not page.snapshot:
+            continue
+        try:
+            await read_artifact_file(f'{dist_dir}/{page.snapshot}')
+        except StorageNotFoundError:
+            errors.append(
+                f'publicPages path {page.path!r}: snapshot {page.snapshot!r} is not in the built version; '
+                'emit it into the build output or drop the field'
+            )
+    return errors
+
+
+# =============================================================================
 # CURRENT AGGREGATE + ATOMIC REBUILD
 # =============================================================================
 

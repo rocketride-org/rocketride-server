@@ -818,6 +818,27 @@ async def handle_deploy_app(conn: Any, request: Dict[str, Any]) -> Dict[str, Any
         # the pointer would mint URLs to an empty directory.
         if not _is_built(entry):
             return conn.build_error(request, _not_built_error(app_id, version, entry))
+        # PUBLIC-PAGES gate (the trust boundary of the public-page surface):
+        # the public rung is the only one the page aggregate reads, so a
+        # manifest declaring publicPages/site is validated here, before the
+        # binding exists: privilege, path grammar, reserved prefixes,
+        # cross-app claims, data entries, snapshot files. A manifest without
+        # either section costs nothing.
+        if audience['type'] == 'public':
+            from ai.modules.shell.public_pages import gate_errors
+
+            metadata = entry.get('metadata') if isinstance(entry.get('metadata'), dict) else {}
+            manifest = metadata.get('manifest') if isinstance(metadata.get('manifest'), dict) else {}
+            # No artifact path, no build output: an empty path would name the store's root dist/.
+            artifact_path = str(entry.get('artifactPath') or '')
+            try:
+                page_errors = await gate_errors(app_id, manifest, _dist_dir_of(artifact_path) if artifact_path else '')
+            except Exception as exc:
+                return conn.build_error(request, f'Could not verify the publicPages claims of {app_id}: {exc}')
+            if page_errors:
+                return conn.build_error(
+                    request, f'Version {version} of {app_id} cannot go public: ' + '; '.join(page_errors)
+                )
 
         row = await account.publish_set(
             home, 'app', app_id, audience, version, manifest_snapshot(entry, artifact), _actor_of(conn)

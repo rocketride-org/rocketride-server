@@ -236,8 +236,61 @@ interface AppManifest {
   appStatus?: string;
   /** Whether the app is available on the desktop (non-cloud) platform. */
   onDesktop?: boolean;
+  /** Platform apps only: public pages on the app origin (see Public pages). */
+  publicPages?: PublicPage[];
+  /** Platform apps only, honored from the app owning '/': the site's title, blurb and docs link. */
+  site?: { title?: string; blurb?: string; docsUrl?: string };
 }
 ```
+
+### Public pages (platform apps)
+
+The server builds the app origin's public page map from the `publicPages`
+and `site` sections of published platform apps' manifests. A build can ship
+both sections in `app-manifest.json` at the root of its output, next to the
+page snapshots; the server reads that file in preference to the registered
+manifest. Both sections are optional and append-only: fields are never
+repurposed or removed, and the server ignores keys it does not know, so an
+older server accepts a newer manifest.
+
+```typescript
+interface PublicPage {
+  /** One exact path: '/pricing'. */
+  path: string;
+  /** The page title (at most 300 characters). */
+  title: string;
+  /** The page description (at most 1000 characters). */
+  description?: string;
+  /** Default true. false marks the page unlisted: not meant to be advertised or indexed. */
+  listed?: boolean;
+  /** Crawler document inside the app's build output, e.g. 'pages/pricing.html'. */
+  snapshot?: string;
+  /** Server data the page names: 'plans' (this app's plans), 'plans:<appId>' or 'app:<appId>'. */
+  data?: string[];
+}
+```
+
+Rules, enforced when a version is published to the public store rung (the
+publish fails with a message naming the field):
+
+- Only platform apps (ids in the `rocketride` developer namespace) may declare
+  either section, and only a root app (`RR_PUBLIC_ROOT_APPS`, default
+  `rocketride.home`) may declare pages. `site` is honored only from the app
+  that declares the `/` page.
+- `path` is absolute and lowercase, with no query, fragment, trailing slash,
+  empty or dot segment. Wildcard pages are not supported.
+- Paths under `/api`, `/shell`, `/apps`, `/task`, `/mcp` or the three crawler
+  files (`/sitemap.xml`, `/robots.txt`, `/llms.txt`) are rejected, as is a
+  path another published platform app already claims (first claim wins;
+  unpublishing releases it).
+- Each `data` entry is `plans`, `plans:<appId>` or `app:<appId>`, and a page
+  names each source (`plans`, `app`) at most once.
+- `snapshot` must be a relative `.html` path that exists in the built version.
+- `site.docsUrl` must be an `https://` URL.
+
+Until a published platform app contributes a valid page, the page map holds
+the server's built-in page list instead. A published app whose storage cannot
+be read keeps the pages of its last readable build.
 
 ### Settings
 

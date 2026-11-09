@@ -33,6 +33,8 @@ must still validate here: unknown keys are ignored, never rejected.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 import ai.modules.shell.public_pages as pp
@@ -134,3 +136,14 @@ async def test_store_errors_other_than_not_found_skip_the_app_or_fail_the_gate(m
     assert await load_published(acct) == []  # aggregate: skipped, never a partial manifest
     with pytest.raises(RuntimeError, match='rocketride.home: store down'):
         await load_published(acct, strict=True)  # the gate: fail closed, naming the app
+
+
+async def test_a_newer_home_ui_manifest_still_publishes():
+    # The emitted file of a later home-ui build, gated on this engine: the
+    # fields it does not know cost nothing, and the snapshot it names exists.
+    from ai.modules.shell.public_pages import gate_errors
+
+    dist = dist_of(PLATFORM, 'rocketride.home')
+    FILES[f'{dist}/app-manifest.json'] = json.dumps(_newer()).encode()
+    FILES[f'{dist}/pages/pricing.html'] = b'<html></html>'
+    assert await gate_errors('rocketride.home', {'name': 'Home'}, dist, HostileAccount()) == []
