@@ -82,15 +82,23 @@ export function verdictOf(first: RunStatus, reruns: RunStatus[]): TaskVerdict {
  * @param ids - The task ids, in run order.
  * @param trial - Runs one trial of a task: its id and the trial number (1 for the first run, 2 and up for reruns).
  * @param statusOf - A trial's status.
+ * @param errored - The value of a trial that threw: its id, its number and what it threw. The schedule goes on with the next trial.
  * @param reruns - How many times to rerun a failure (default 2).
  * @returns Each task's runs, in the order given.
  */
-export async function runSchedule<T>(ids: string[], trial: (id: string, n: number) => Promise<T>, statusOf: (t: T) => RunStatus, reruns = 2): Promise<Array<TaskRuns<T>>> {
+export async function runSchedule<T>(ids: string[], trial: (id: string, n: number) => Promise<T>, statusOf: (t: T) => RunStatus, errored: (id: string, n: number, err: unknown) => T, reruns = 2): Promise<Array<TaskRuns<T>>> {
+	const one = async (id: string, n: number): Promise<T> => {
+		try {
+			return await trial(id, n);
+		} catch (err) {
+			return errored(id, n, err);
+		}
+	};
 	const runs: Array<TaskRuns<T>> = [];
 	// step: the first pass over every task, before any rerun, so the first-run rate is one sitting
-	for (const id of ids) runs.push({ id, first: await trial(id, 1), reruns: [], verdict: 'pending' });
+	for (const id of ids) runs.push({ id, first: await one(id, 1), reruns: [], verdict: 'pending' });
 	for (const r of runs) {
-		if (RERUN_ON.has(statusOf(r.first))) for (let n = 2; n <= reruns + 1; n++) r.reruns.push(await trial(r.id, n));
+		if (RERUN_ON.has(statusOf(r.first))) for (let n = 2; n <= reruns + 1; n++) r.reruns.push(await one(r.id, n));
 		r.verdict = verdictOf(statusOf(r.first), r.reruns.map(statusOf));
 	}
 	return runs;

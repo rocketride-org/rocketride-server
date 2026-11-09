@@ -53,7 +53,8 @@ test('10 tasks, 3 first-run failures, 1 passes on rerun: 70% first-run pass, 10%
 			calls.push(`${id}#${n}`);
 			return { ...fake(id, n, script[id]?.[n - 1] ?? 'pass'), knownGood: { model: 'anthropic/claude-haiku-5-5', answered: true, seconds: 2, detail: 'answered' } };
 		},
-		(r) => r.status
+		(r) => r.status,
+		() => assert.fail('no trial throws here')
 	);
 	// the first pass runs every task once before any rerun
 	assert.deepEqual(

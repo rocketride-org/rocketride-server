@@ -447,3 +447,13 @@ export function gradeTrial(task: Task, record: BrowserTrialRecord, ctx: GradeCon
 		substitutions,
 	};
 }
+
+/**
+ * The grade of a trial that threw before it could be graded: an error with no record and no checks.
+ *
+ * @param error - What it threw, one line, scrubbed.
+ */
+export function erroredTrial(task: Task, trial: number, model: string, error: string): TrialResult {
+	const why = `runner_error: ${error}`;
+	return { scenario: task.id, type: task.type, layer: 'L3', trial, model, status: 'error', why, checks: [], blockersFired: [], counted: { passed: 0, total: 0, pending: 0, notInLayer: 0 }, diagnostics: { endReason: 'runner_error' }, record: null, substitutions: [], cause: { label: 'runner', evidence: why } };
+}

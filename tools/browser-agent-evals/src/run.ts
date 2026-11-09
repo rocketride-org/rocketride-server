@@ -36,7 +36,8 @@ import path from 'node:path';
 
 import { DATA_DIR, REPO_ROOT } from './catalog';
 import { modelTitles, parseModel, type ModelPick } from './driver';
-import { heldKeys, Scrubber, type HeldKey } from './evidence';
+import { findLeaks, heldKeys, Scrubber, type HeldKey } from './evidence';
+import { erroredTrial } from './grade';
 import { LOCAL_APIKEY, openStack, type Stack } from './stack';
 import { Store } from './store';
 import { loadTasks, type Task } from './task';
@@ -260,6 +261,16 @@ async function run(args: Args): Promise<number> {
 				return result;
 			},
 			(r) => r.status,
+			// a trial that threw past its own catch has no record to grade; nothing is written here, since a write may be what failed
+			(id, n, err) => {
+				const task = byId.get(id) as Task;
+				const leaks = findLeaks(path.join(out, task.id, `trial-${n}`), keys);
+				const leaked = leaks.length ? `; a held key is in the trial folder: ${leaks.map((l) => `${l.key} in ${l.file}`).join(', ')}` : '';
+				const result = erroredTrial(task, n, `${model.provider}/${model.model}`, `${scrubber.scrub((err instanceof Error ? err.message : String(err)).split('\n')[0] ?? '')}${leaked}`);
+				log(`${task.id} trial ${n}${n > 1 ? ' (rerun)' : ''}: ${result.status.toUpperCase()}: ${result.why.slice(0, 200)}`);
+				failedToRun++;
+				return result;
+			},
 			args.reruns
 		);
 		const results = buildResults(runs, byId, out, {
