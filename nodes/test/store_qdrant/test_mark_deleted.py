@@ -67,7 +67,6 @@ except ImportError:
     pass
 
 for name, mock in {
-    'numpy': MagicMock(),
     'qdrant_client': MagicMock(),
     'qdrant_client.models': MagicMock(),
     'qdrant_client.http': MagicMock(),

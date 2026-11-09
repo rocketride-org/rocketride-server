@@ -40,6 +40,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from ai.web.metrics import metrics
 from ai.common.utils.cuda_utils import model_gpu_gb
 from ..base import BaseLoader, get_model_server_address, ModelClient
+from ..device_budget import device_budget
 from .utils import preprocess_image_transparency, group_words_into_lines, raise_on_error, with_error_field
 
 logger = logging.getLogger('rocketlib.models.easyocr')
@@ -275,6 +276,26 @@ class EasyOCRLoader(BaseLoader):
         }
 
     @staticmethod
+    def inference_cost_mb(preprocessed: Dict[str, Any]) -> Optional[float]:
+        """Peak device memory of ``inference``, set by detection on the largest image.
+
+        Measured (torch 2.10, easyocr 1.7.2): about 32 MB plus 600 MB per megapixel the
+        detector sees (long side capped at ``canvas_size``, 2560), x1.25 for the caching
+        allocator. Recognition batches do not move the peak.
+
+        Args:
+            preprocessed: The output of ``preprocess``; its ``dimensions`` give each image's size.
+
+        Returns:
+            The cost in MB.
+        """
+        megapixels = 0.0
+        for height, width in preprocessed.get('dimensions', []):
+            scale = min(1.0, 2560 / max(height, width, 1))
+            megapixels = max(megapixels, height * width * scale * scale / 1e6)
+        return 1.25 * (32 + 600 * megapixels)
+
+    @staticmethod
     def inference(
         model: Any,
         preprocessed: Dict[str, Any],
@@ -468,16 +489,26 @@ class EasyOCR:
         return results[0] if single_input else results
 
     def _read_local(self, images: List[bytes]) -> List[Dict]:
-        """Execute local OCR with perf timing."""
+        """Run OCR in this process and report its timings; inference waits in its device's ``device_budget``.
+
+        Args:
+            images: Encoded images.
+
+        Returns:
+            One result per image, as ``read`` returns them.
+        """
         # Preprocess phase — decode images and prepare for model
         t0 = time.perf_counter()
         preprocessed = EasyOCRLoader.preprocess(self._model, images, self._metadata)
         t_pre = (time.perf_counter() - t0) * 1000
 
-        # GPU inference phase — run OCR detection and recognition
+        # GPU inference phase — wait for room on the device, then run OCR detection and recognition
         t0 = time.perf_counter()
-        raw_output = EasyOCRLoader.inference(self._model, preprocessed, self._metadata)
-        t_gpu = (time.perf_counter() - t0) * 1000
+        with device_budget(self._model['device']).reserve(EasyOCRLoader.inference_cost_mb(preprocessed)):
+            t_wait = (time.perf_counter() - t0) * 1000
+            t0 = time.perf_counter()
+            raw_output = EasyOCRLoader.inference(self._model, preprocessed, self._metadata)
+            t_gpu = (time.perf_counter() - t0) * 1000
 
         # Postprocess phase — extract text and bounding boxes
         t0 = time.perf_counter()
@@ -491,7 +522,7 @@ class EasyOCR:
                 'gpu_preprocess': t_pre,
                 'gpu_compute': t_gpu,
                 'gpu_postprocess': t_post,
-                'gpu_queue_wait': 0,
+                'gpu_queue_wait': t_wait,
                 'gpu_memory': model_gpu_gb(self._model) * inference_sec,
             }
         )

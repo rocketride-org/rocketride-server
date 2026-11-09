@@ -153,7 +153,8 @@ rollback tools can run raw SQL without LLM translation or SQL safety checks.
 Enable it only for a trusted application that needs write statements or
 explicit transactions; otherwise keep it off so those tools fail rather than
 executing input. It does not change the questions lane, which only ever runs
-LLM-generated, safety-checked SELECT statements.
+LLM-generated, safety-checked SELECT statements, in a read-only transaction
+with a 60-second statement timeout.
 
 ### Database
 

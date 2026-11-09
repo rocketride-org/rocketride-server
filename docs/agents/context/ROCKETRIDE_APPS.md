@@ -1086,7 +1086,7 @@ your app calls `use()`, the owner is the signed-in **user**. So every user
 of your app gets their own instance of the pipeline, automatically.
 `useExisting` does not change that: it attaches to *that user's* own
 already-running instance (a reload, a second tab, a second component)
-instead of failing with 'Pipeline is already running.' — with the default
+instead of failing with 'Pipeline is already running' — with the default
 token it never crosses user boundaries. (A custom token is looked up by its
 value alone; see below.)
 
@@ -1783,6 +1783,10 @@ While the server works, the version card shows a live build ticker
 (`uploaded`, `installing`, `checking`, `building`, ...). On success it
 clears; on failure the card gets a **failed** badge that is a door — click
 it to open the full phase-by-phase build log, failure reason at the end.
+The Dashboard's status card opens the same log with **View build log**. An
+app whose builds have all failed is missing from the shell, so opening it
+shows your organization a screen that names
+`rocketride deploy log <appId> <version>` instead of "App not found".
 
 A fresh deployment is born **private**: it exists in your org's registry,
 can be published internally, and is invisible to everyone else.
