@@ -83,7 +83,13 @@ def _walk_properties(properties: Any, out: List[CredField]) -> None:
 
         env = prop.get('env')
         name = prop.get('name')
-        if env and name:
+        path = prop.get('path')
+        # The engine stamps every leaf with a string path and env name; a
+        # leaf that does not is left out rather than allowed to break the
+        # whole listing later (nest_wiring splits the path). Groups and
+        # branches carry no env and are still walked below.
+        well_typed = isinstance(env, str) and isinstance(name, str) and (path is None or isinstance(path, str))
+        if env and name and well_typed:
             # The schema stamps every leaf with its resolved `path`
             # (`cloud.apikey` for a leaf inside the `cloud` branch); that is
             # where the resolver reads the value, so that is what a caller
@@ -91,7 +97,7 @@ def _walk_properties(properties: Any, out: List[CredField]) -> None:
             # a top-level leaf, so it is the fallback, not the rule.
             out.append(
                 CredField(
-                    path=prop.get('path') or name,
+                    path=path or name,
                     title=prop.get('title') or name,
                     kind='secret' if prop.get('secret') else 'text',
                     required=bool(prop.get('required', True)),

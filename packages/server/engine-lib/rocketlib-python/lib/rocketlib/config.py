@@ -122,6 +122,11 @@ class _Schema:
     leaves: Dict[str, _Leaf] = field(default_factory=dict)
     selectors: Dict[str, _Selector] = field(default_factory=dict)
     prefixes: set = field(default_factory=set)
+    # parent path ('' for the root) -> the OWN names of its children (groups,
+    # branches, leaves) as the schema declares them, so a stored key can be
+    # checked as a single segment: "gpt-5.2" is a declared branch name while
+    # "cloud.apikey" is two segments written flat
+    children: Dict[str, set] = field(default_factory=dict)
 
     def branch_of(self, path: str) -> Optional[Tuple[_Selector, str]]:
         """
@@ -169,6 +174,8 @@ def _walk(properties: Any, prefix: str, schema: _Schema) -> None:
 
         if isinstance(children, list) and not isinstance(enum, dict):
             group_prefix = f'{prefix}{name}.' if name else prefix
+            if name:
+                schema.children.setdefault(prefix.rstrip('.'), set()).add(name)
             _walk(children, group_prefix, schema)
             continue
 
@@ -177,12 +184,15 @@ def _walk(properties: Any, prefix: str, schema: _Schema) -> None:
         path = prop.get('path') or f'{prefix}{name}'
         if path not in schema.leaves:
             schema.leaves[path] = _Leaf(path, prop)
+        own = name or path.rsplit('.', 1)[-1]
+        schema.children.setdefault(_parent_prefix(path).rstrip('.'), set()).add(own)
 
         if isinstance(enum, dict):
             level = _parent_prefix(path)
             schema.selectors.setdefault(path, _Selector(path, level, tuple(enum.keys())))
             for branch, body in enum.items():
                 if isinstance(body, dict):
+                    schema.children.setdefault(level.rstrip('.'), set()).add(branch)
                     _walk(body.get('properties'), f'{level}{branch}.', schema)
 
 
@@ -572,16 +582,17 @@ def _flatten_conn_config(
         return
     for key, value in conn_config.items():
         path = f'{prefix}{key}'
+        if '.' in key and key not in indexed.children.get(prefix.rstrip('.'), ()):
+            # Several segments written as one flat dotted key ("cloud.apikey":
+            # ..., or "cloud.auth": {...}) would resolve like the nested tree,
+            # but the engine's encrypt walk descends object by object and
+            # would never find a secret beneath it, so it would stay plaintext.
+            # Only the nested shape is accepted; a dotted key that IS a declared
+            # child name (a branch block such as "gpt-5.2") is a single segment
+            # and passes.
+            problems.append(f'config key "{path}" must be written nested, not as one dotted key')
+            continue
         if path in indexed.leaves:
-            if '.' in key:
-                # A leaf written as one flat dotted key ("cloud.apikey": ...)
-                # would resolve like the nested tree, but the engine's encrypt
-                # walk descends object by object and would never find it, so a
-                # secret written that way stays plaintext. Only the nested shape
-                # is accepted. (A dotted KEY is fine when it names a branch
-                # block such as "gpt-5.2": that path is a prefix, not a leaf.)
-                problems.append(f'config key "{path}" must be written nested, not as one dotted key')
-                continue
             out[path] = value
         elif path in indexed.prefixes:
             if value is None:

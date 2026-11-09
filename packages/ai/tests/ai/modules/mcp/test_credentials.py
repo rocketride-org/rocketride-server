@@ -222,6 +222,20 @@ def test_nest_wiring_rejects_a_leaf_that_is_also_a_group():
         creds.nest_wiring({'cloud.apikey': '${B}', 'cloud': '${A}'})
 
 
+def test_a_leaf_with_a_non_string_path_or_env_is_left_out_not_fatal():
+    out = []
+    creds._walk_properties(
+        [
+            {'name': 'ok', 'env': 'ROCKETRIDE_OK', 'path': 'ok'},
+            {'name': 'bad_path', 'env': 'ROCKETRIDE_BAD', 'path': 7},
+            {'name': 'bad_env', 'env': ['ROCKETRIDE_LIST'], 'path': 'bad_env'},
+            {'name': 'group', 'properties': [{'name': 'inner', 'env': 'ROCKETRIDE_INNER', 'path': 'group.inner'}]},
+        ],
+        out,
+    )
+    assert [f.path for f in out] == ['ok', 'group.inner']
+
+
 def test_a_credential_path_collision_degrades_that_node_instead_of_failing(caplog):
     # A group and its child both carrying env: the tree cannot hold both; the
     # node is reported unconfirmed, the listing survives

@@ -54,7 +54,14 @@ class IValidator(IValidatorBase):
         if syntaxOnly:
             return
 
-        from nodes.core.gcp_auth import GCPAuthError, get_gcp_credentials
+        try:
+            from nodes.core.gcp_auth import GCPAuthError, get_gcp_credentials
+        except ImportError as e:
+            # CONFIG mode installs no node requirements; google-auth arrives
+            # with the node's first start. Say so instead of reporting a
+            # credential problem that does not exist.
+            warning(f'Credential check skipped: {e}. It runs once the node has started and installed its requirements.')
+            return
 
         try:
             get_gcp_credentials(config, scopes=_GCS_SCOPES)

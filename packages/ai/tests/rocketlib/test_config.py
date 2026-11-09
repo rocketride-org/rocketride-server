@@ -196,6 +196,15 @@ class TestHardErrors:
         assert '"maxEdge" must be >= 64' in str(info.value)
         assert 'unknown config key "bogus"' in str(info.value)
 
+    def test_a_flat_dotted_group_key_is_refused(self):
+        # "cloud.apikey" written as one key with the leaf beneath it: the
+        # encrypt walk would never reach the secret, so the shape is refused
+        with pytest.raises(ConfigError, match='"cloud.apikey" must be written nested'):
+            resolveConfig(QDRANT, {'mode': 'cloud', 'cloud.apikey': {'key': 'abcd'}})
+        with pytest.raises(ConfigError, match='"cloud.apikey.key" must be written nested'):
+            resolveConfig(QDRANT, {'mode': 'cloud', 'cloud': {'apikey.key': 'abcd'}})
+        assert resolveConfig(QDRANT, {'mode': 'cloud', 'cloud': {'apikey': {'key': 'abcd'}}}).key == 'abcd'
+
     def test_array_items_validated(self):
         with pytest.raises(ConfigError, match=r'"tuning.tags\[1\]" expects string'):
             resolveConfig(DEPTH_ESTIMATE, {'tuning': {'tags': ['ok', 2]}})

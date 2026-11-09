@@ -100,6 +100,15 @@ def test_credentials_are_built_with_the_node_scopes(validator, monkeypatch):
     assert seen['scopes'] == [_SCOPE]
 
 
+def test_a_missing_google_auth_is_reported_not_mistaken_for_a_bad_key(validator, monkeypatch):
+    # CONFIG mode installs no node requirements: an absent google-auth is a
+    # skipped check, not a credential problem
+    instance, warnings = validator
+    monkeypatch.setitem(sys.modules, 'nodes.core.gcp_auth', None)
+    instance.validateConfig()
+    assert len(warnings) == 1 and warnings[0].startswith('Credential check skipped:')
+
+
 def test_syntax_only_skips_the_credential_build(validator, monkeypatch):
     instance, warnings = validator
 
