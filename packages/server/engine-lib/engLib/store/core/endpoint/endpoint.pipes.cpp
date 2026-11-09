@@ -409,10 +409,20 @@ int IServiceEndpoint::getPipeCount() noexcept {
 ///		Gets a pipe for the endpoint - the pipe is a stacked set
 ///		of filters that we can read from/write to. If no pipes
 ///		are available, one will be created
+///		The pipe comes back as a new BINDING: a fresh, never-reused
+///		bindingId, a rootBindingId and a trace level. Opened from inside
+///		a live binding (parentBindingId != 0) it joins that binding's
+///		tree - the parent's root and the parent's trace level - so a
+///		sub-pipeline's trace reaches the caller that caused it.
+///	@param[in]	traceLevel
+///		The trace level of this binding (ignored when a parent is given)
+///	@param[in]	parentBindingId
+///		The live binding this one is opened from, or 0 for a root
 ///	@returns
 ///		ErrorOr<ServicePipe>
 //-------------------------------------------------------------------------
-ErrorOr<ServicePipe> IServiceEndpoint::getPipe() noexcept {
+ErrorOr<ServicePipe> IServiceEndpoint::getPipe(
+    PIPELINE_TRACE_LEVEL traceLevel, uint64_t parentBindingId) noexcept {
     // If we are not open, stop
     if (config.openMode == OPEN_MODE::NONE)
         return APERR(Ec::InvalidCommand,
@@ -422,11 +432,33 @@ ErrorOr<ServicePipe> IServiceEndpoint::getPipe() noexcept {
     if (pipeGate)
         if (auto ccode = pipeGate()) return ccode;
 
+    // What the new binding inherits - its own id as root and the requested
+    // level, unless a parent binding is named
+    uint64_t rootBindingId = 0;
+
     // Find a pipe
+    ServicePipe pipe;
     _block() {
         // Lock the pipes - we are manipulating the pipe stacks
         util::Guard stackGuard{[&] { m_stackLock.lock(); },
                                [&] { m_stackLock.unlock(); }};
+
+        // A parent must be a live binding on this endpoint
+        if (parentBindingId) {
+            bool found = false;
+            for (auto &stack : m_instanceStacks) {
+                ServicePipe &parent = (ServicePipe &)stack[0];
+                if (!parent->busy || parent->bindingId != parentBindingId)
+                    continue;
+                rootBindingId = parent->rootBindingId;
+                traceLevel = parent->traceLevel;
+                found = true;
+                break;
+            }
+            if (!found)
+                return APERR(Ec::NotFound, "Parent binding is not live",
+                             parentBindingId);
+        }
 
         // Loop through them
         for (int i = 0; i < m_instanceStacks.size(); i++) {
@@ -435,27 +467,51 @@ ErrorOr<ServicePipe> IServiceEndpoint::getPipe() noexcept {
 
             // Get a reference to the head - should be "pipe"
             ServiceInstance &filter = stack[0];
-            ServicePipe &pipe = (ServicePipe &)filter;
+            ServicePipe &candidate = (ServicePipe &)filter;
 
             // If it is busy, skip it
-            if (pipe->busy) continue;
+            if (candidate->busy) continue;
 
             // Mark as busy
-            pipe->busy = true;
+            candidate->busy = true;
 
-            // Return the pipe
-            return pipe;
+            // Take the pipe
+            pipe = candidate;
+            break;
         }
     }
 
     // We don't have any available pipes, create one
-    auto result = buildInstancePipe();
+    if (!pipe) {
+        auto result = buildInstancePipe();
 
-    // If we got an error
-    if (!result) return result.ccode();
+        // If we got an error
+        if (!result) return result.ccode();
 
-    // Return the pipe we just created
-    return *result;
+        pipe = _mv(*result);
+    }
+
+    // Stamp the binding - the id is minted from the process-wide counter
+    // and never comes back; the slot (pipeId) does
+    pipe->bindingId = s_nextBindingId.fetch_add(1, std::memory_order_relaxed);
+    pipe->rootBindingId = rootBindingId ? rootBindingId : pipe->bindingId;
+    pipe->traceLevel = traceLevel;
+    pipe->bindDepth = 0;
+
+    // Return the bound pipe
+    return pipe;
+}
+
+//-------------------------------------------------------------------------
+/// @details
+///		Gets a pipe bound at the endpoint's default trace level - the
+///		task file's pipelineTraceLevel. This is the binding C++-driven
+///		work (sources, scans) takes.
+///	@returns
+///		ErrorOr<ServicePipe>
+//-------------------------------------------------------------------------
+ErrorOr<ServicePipe> IServiceEndpoint::getPipe() noexcept {
+    return getPipe(config.pipelineTraceLevel);
 }
 
 //-------------------------------------------------------------------------

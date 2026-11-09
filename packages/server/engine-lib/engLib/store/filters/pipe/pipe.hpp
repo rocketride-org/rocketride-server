@@ -145,9 +145,69 @@ public:
     SharedPtr<IFilterGlobal> global;
 
     //-----------------------------------------------------------------
-    /// @details
-    ///		Debugger support
+    // Binding identity - set by IServiceEndpoint::getPipe() each time
+    // this pipe is handed out. The slot `pipeId` is reused; the binding
+    // id never is.
     //-----------------------------------------------------------------
-    Debugger debugger;
+
+    //-----------------------------------------------------------------
+    /// @details
+    ///		Monotonic id of the current binding of this pipe; 0 when the
+    ///		pipe has never been handed out
+    //-----------------------------------------------------------------
+    uint64_t bindingId = 0;
+
+    //-----------------------------------------------------------------
+    /// @details
+    ///		The root of the binding tree: this binding's own id, or the
+    ///		root of the parent binding it was opened from
+    //-----------------------------------------------------------------
+    uint64_t rootBindingId = 0;
+
+    //-----------------------------------------------------------------
+    /// @details
+    ///		Trace level of the current binding - every trace gate on the
+    ///		pipe reads this, never the endpoint default
+    //-----------------------------------------------------------------
+    PIPELINE_TRACE_LEVEL traceLevel = PIPELINE_TRACE_LEVEL::NONE;
+
+    //-----------------------------------------------------------------
+    /// @details
+    ///		Nesting depth of Binder::callMethods on this pipe - the
+    ///		recursion guard (CONST_MAX_BIND_DEPTH)
+    //-----------------------------------------------------------------
+    std::atomic<int> bindDepth{0};
+
+    //-----------------------------------------------------------------
+    /// @details
+    ///		Emit one `>DBG` trace line for this binding, gated on
+    ///		traceLevel >= METADATA. Fields, '*'-separated:
+    ///		kind, pipeId, totalPipes, componentId, bindingId,
+    ///		rootBindingId, trace json
+    ///	@param[in]	kind
+    ///		BEGIN / END / ENTER / LEAVE
+    ///	@param[in]	componentId
+    ///		The component the line refers to (the entry name for
+    ///		BEGIN/END)
+    ///	@param[in]	trace
+    ///		The trace payload
+    //-----------------------------------------------------------------
+    void emitTrace(TextView kind, TextView componentId,
+                   const json::Value &trace) noexcept;
+
+    //-----------------------------------------------------------------
+    /// @details
+    ///		Emit a trace line for a filter instance (its pipeType.id is
+    ///		the component)
+    //-----------------------------------------------------------------
+    void emitTrace(TextView kind, IServiceFilterInstance *pInstance,
+                   const json::Value &trace) noexcept;
 };
+
+//-------------------------------------------------------------------------
+/// @details
+///		Maximum nesting of Binder::callMethods on one pipe before the
+///		call fails with Ec::Recursion
+//-------------------------------------------------------------------------
+_const int CONST_MAX_BIND_DEPTH = 64;
 }  // namespace engine::store::filter::pipe

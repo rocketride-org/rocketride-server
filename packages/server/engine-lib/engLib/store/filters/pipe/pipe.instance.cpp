@@ -32,6 +32,39 @@ IFilterInstance::~IFilterInstance() noexcept {}
 
 //-------------------------------------------------------------------------
 /// @details
+///		Emit one `>DBG` trace line for the current binding of this pipe.
+///		Gated on the BINDING's trace level, so a NONE binding sharing the
+///		engine with a FULL one emits nothing.
+//-------------------------------------------------------------------------
+void IFilterInstance::emitTrace(TextView kind, TextView componentId,
+                                const json::Value &trace) noexcept {
+    if (traceLevel < PIPELINE_TRACE_LEVEL::METADATA) return;
+    if (!::engine::config::monitor()->isAppMonitor()) return;
+
+    // A null payload renders as an empty object so the parser always
+    // sees json
+    Text payload = trace.isNull() ? Text("{}") : trace.stringify();
+
+    // Format it - ints render as hex, fields are '*'-separated
+    StackText msg;
+    _tsbo(msg, {Format::HEX, {}, '*'}, kind, this->pipeId,
+          this->endpoint->getPipeCount(), componentId, this->bindingId,
+          this->rootBindingId, payload);
+
+    ::engine::config::monitor()->other("DBG", msg);
+}
+
+//-------------------------------------------------------------------------
+/// @details
+///		Emit a trace line for a filter instance, named by its component id
+//-------------------------------------------------------------------------
+void IFilterInstance::emitTrace(TextView kind, IServiceFilterInstance *pInstance,
+                                const json::Value &trace) noexcept {
+    emitTrace(kind, pInstance->pipeType.id, trace);
+}
+
+//-------------------------------------------------------------------------
+/// @details
 ///		This will track when an object is opened. It becomes available
 ///		via the entry member
 ///	@param[in]	entry
@@ -46,21 +79,8 @@ Error IFilterInstance::open(Entry &entry) noexcept {
         return APERR(Ec::InvalidCommand, "Object is already open on pipe",
                      pipeId);
 
-    // Update our monitor
-    if (::engine::config::monitor()->isAppMonitor()) {
-        auto traceLevel = this->endpoint->config.pipelineTraceLevel;
-        if (traceLevel >= PIPELINE_TRACE_LEVEL::METADATA) {
-            // Get the name of the entry
-            auto name = entry.url().fileName();
-
-            // Format it
-            StackText msg;
-            _tsbo(msg, {Format::HEX, {}, '*'}, "BEGIN", this->pipeId,
-                  this->endpoint->getPipeCount(), name, "{}");
-
-            ::engine::config::monitor()->other("DBG", msg);
-        }
-    }
+    // Trace the object begin for this binding
+    emitTrace("BEGIN", entry.url().fileName(), json::Value());
 
     if (m_openMode == OPEN_MODE::PIPELINE) {
         // Get our pipe id and call it
@@ -105,23 +125,12 @@ Error IFilterInstance::close() noexcept {
         ccode = global->endObjectMetrics(pipeId, *object) || ccode;
     }
 
-    // Update our monitor
-    if (::engine::config::monitor()->isAppMonitor()) {
-        auto traceLevel = this->endpoint->config.pipelineTraceLevel;
-        if (traceLevel >= PIPELINE_TRACE_LEVEL::METADATA) {
-            // Serialize response at SUMMARY level, fall back to empty object
-            auto responseStr = (traceLevel >= PIPELINE_TRACE_LEVEL::SUMMARY && object->response)
-                ? object->response().stringify(false)
-                : std::string("{}");
-
-            // Format it
-            StackText msg;
-            _tsbo(msg, {Format::HEX, {}, '*'}, "END", this->pipeId,
-                  this->endpoint->getPipeCount(), name, responseStr.c_str());
-
-            ::engine::config::monitor()->other("DBG", msg);
-        }
-    }
+    // Trace the object end for this binding - the response rides along
+    // from SUMMARY up
+    json::Value trace;
+    if (traceLevel >= PIPELINE_TRACE_LEVEL::SUMMARY && object->response)
+        trace = object->response();
+    emitTrace("END", name, trace);
 
     return ccode;
 }

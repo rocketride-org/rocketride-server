@@ -274,18 +274,57 @@ Error IServiceEndpoint::setConfig(const json::Value &_jobConfig,
     else
         config.exportUpdateBehavior = EXPORT_UPDATE_BEHAVIOR::UNKNOWN;
 
-    // Lookup the pipeline trace level
+    // Lookup the pipeline trace level - this is the endpoint DEFAULT, the
+    // level a binding gets when getPipe() names none (C++-driven work);
+    // every Python binding passes its own
     Text traceLevelStr;
     config.taskConfig.lookupAssign("pipelineTraceLevel", traceLevelStr);
-    if (traceLevelStr == "metadata"_tv)
-        config.pipelineTraceLevel = PIPELINE_TRACE_LEVEL::METADATA;
-    else if (traceLevelStr == "summary"_tv)
-        config.pipelineTraceLevel = PIPELINE_TRACE_LEVEL::SUMMARY;
-    else if (traceLevelStr == "full"_tv)
-        config.pipelineTraceLevel = PIPELINE_TRACE_LEVEL::FULL;
+    parseTraceLevel(traceLevelStr, config.pipelineTraceLevel);
 
     // Done
     return ccode;
+}
+
+//-------------------------------------------------------------------------
+/// @details
+///		Parses a trace level name as it travels on the wire
+///	@param[in]	name
+///		none / metadata / summary / full (case-insensitive)
+///	@param[out]	level
+///		Set only when the name is one of the four
+///	@returns
+///		true when the name was recognized
+//-------------------------------------------------------------------------
+bool IServiceEndpoint::parseTraceLevel(TextView name,
+                                       PIPELINE_TRACE_LEVEL &level) noexcept {
+    if (name == "none"_tv)
+        level = PIPELINE_TRACE_LEVEL::NONE;
+    else if (name == "metadata"_tv)
+        level = PIPELINE_TRACE_LEVEL::METADATA;
+    else if (name == "summary"_tv)
+        level = PIPELINE_TRACE_LEVEL::SUMMARY;
+    else if (name == "full"_tv)
+        level = PIPELINE_TRACE_LEVEL::FULL;
+    else
+        return false;
+    return true;
+}
+
+//-------------------------------------------------------------------------
+/// @details
+///		The wire name of a trace level
+//-------------------------------------------------------------------------
+TextView IServiceEndpoint::traceLevelName(PIPELINE_TRACE_LEVEL level) noexcept {
+    switch (level) {
+        case PIPELINE_TRACE_LEVEL::METADATA:
+            return "metadata"_tv;
+        case PIPELINE_TRACE_LEVEL::SUMMARY:
+            return "summary"_tv;
+        case PIPELINE_TRACE_LEVEL::FULL:
+            return "full"_tv;
+        default:
+            return "none"_tv;
+    }
 }
 
 //-------------------------------------------------------------------------

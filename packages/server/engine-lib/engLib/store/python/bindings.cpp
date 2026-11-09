@@ -816,34 +816,6 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
 
     //-------------------------------------------------------------
     /// @details
-    ///		Declare the debugger class
-    ///------------------------------------------------------------
-    py::class_<Debugger>(engLib, "Debugger")
-        .PYBIND(getTaskId, &Debugger::getTaskId)
-        .PYBIND(taskStop, &Debugger::taskStop)
-        .PYBIND(taskBreak, &Debugger::taskBreak)
-        .PYBIND(taskResume, &Debugger::taskResume)
-        .PYBIND(taskStep, &Debugger::taskStep)
-        .PYBIND(taskStepOver, &Debugger::taskStepOver)
-        .PYBIND(taskStepIn, &Debugger::taskStepIn)
-        .PYBIND(taskBreakpointList, &Debugger::taskBreakpointList)
-        .PYBIND(taskBreakpointAdd, &Debugger::taskBreakpointAdd,
-                py::arg("from_id"), py::arg("to_id") = py::none(),
-                py::arg("lane") = py::none())
-        .PYBIND(taskBreakpointRemove, &Debugger::taskBreakpointRemove,
-                py::arg("from_id"), py::arg("to_id") = py::none(),
-                py::arg("lane") = py::none())
-        .PYBIND(taskBreakpointEnable, &Debugger::taskBreakpointEnable,
-                py::arg("from_id"), py::arg("to_id") = py::none(),
-                py::arg("lane") = py::none())
-        .PYBIND(taskBreakpointDisable, &Debugger::taskBreakpointDisable,
-                py::arg("from_id"), py::arg("to_id") = py::none(),
-                py::arg("lane") = py::none())
-        .def_static("listDebuggers", &Debugger::listDebuggers)
-        .def_static("getDebugger", &Debugger::getDebugger, py::arg("taskId"));
-
-    //-------------------------------------------------------------
-    /// @details
     ///		Declare the raw class and its python wrapper
     ///------------------------------------------------------------
     py::class_<IServiceEndpoint>(engLib, "IServiceEndpoint")
@@ -886,7 +858,18 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
 
         .PYBIND_FUNCTION(
             getPipe,
-            [](IServiceEndpoint &self) -> IServiceFilterInstance & {
+            [](IServiceEndpoint &self, std::optional<std::string> traceLevel,
+               uint64_t parentBindingId) -> IServiceFilterInstance & {
+                // The binding's level: the wire name given, or the endpoint
+                // default when none
+                auto level = self.config.pipelineTraceLevel;
+                if (traceLevel
+                    && !IServiceEndpoint::parseTraceLevel(*traceLevel, level))
+                    throw APERR(Ec::InvalidParam,
+                                "Unknown trace level - expected none, "
+                                "metadata, summary or full",
+                                *traceLevel);
+
                 // Keep a refusal from the pipe gate to re-raise it as raised
                 std::optional<py::error_already_set> refusal;
                 pipeRefusal = &refusal;
@@ -894,7 +877,7 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
                 // Retrieve the pipe, letting others run meanwhile
                 auto result = [&] {
                     engine::python::UnlockPython unlock;
-                    return self.getPipe();
+                    return self.getPipe(level, parentBindingId);
                 }();
                 pipeRefusal = nullptr;
                 if (refusal) throw *refusal;
@@ -906,6 +889,7 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
                 // Return a reference to it
                 return *pipe;
             },
+            py::arg("traceLevel") = py::none(), py::arg("parentBindingId") = 0,
             py::return_value_policy::reference)
 
         .PYBIND_FUNCTION(
@@ -927,11 +911,6 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
                 if (auto ccode = obj.isKeyStoreInitialized()) throw ccode;
                 return obj.getKeyStore();
             })
-
-        .PYBIND_PROP_READONLY_CUSTOM(
-            debugger,
-            [](engine::store::IServiceEndpoint &self)
-                -> engine::store::Debugger & { return self.debugger; })
 
         .PYBIND_FUNCTION(
             getToken,
@@ -971,6 +950,19 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
     ///------------------------------------------------------------
     py::class_<IServiceFilterInstance>(engLib, "IServiceFilterInstance")
         .PYBIND_PROP_READONLY(IServiceFilterInstance, uint32_t, pipeId, pipeId)
+
+        // The binding this instance is serving - every instance of one
+        // getPipe() shares the pipe object, so they all report the same ids
+        .PYBIND_PROP_READONLY(IServiceFilterInstance, uint64_t, bindingId,
+                              pipe->bindingId)
+        .PYBIND_PROP_READONLY(IServiceFilterInstance, uint64_t, rootBindingId,
+                              pipe->rootBindingId)
+        .PYBIND_PROP_READONLY_CUSTOM(
+            traceLevel,
+            [](IServiceFilterInstance &self) -> std::string {
+                auto name = IServiceEndpoint::traceLevelName(self.pipe->traceLevel);
+                return std::string(name.data(), name.length());
+            })
         .PYBIND_PROP_READONLY(IServiceFilterInstance, IServiceFilterInstance *,
                               next, pDown.get())
         .PYBIND_PROP_READONLY(IServiceFilterInstance, const IPipeType &,

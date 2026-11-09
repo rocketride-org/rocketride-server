@@ -158,7 +158,16 @@ class IServiceEndpoint(Protocol):
     def setToken(self, serviceConfig: IServiceEndpoint_ServiceConfig, key: str, value: str) -> None:  #
         ...
 
-    def getPipe(self) -> 'IServiceFilterInstance':  #
+    def getPipe(self, traceLevel: Optional[str] = None, parentBindingId: int = 0) -> 'IServiceFilterInstance':  #
+        """
+        Take a pipe as a new binding.
+
+        Args:
+            traceLevel: 'none' / 'metadata' / 'summary' / 'full'; None binds at the
+                endpoint default (the task file's pipelineTraceLevel).
+            parentBindingId: The live binding this one is opened from; the child
+                joins its tree (same rootBindingId) and inherits its trace level.
+        """
         ...
 
     def putPipe(self, pipe: 'IServiceFilterInstance'):  #
@@ -522,7 +531,10 @@ class IServiceFilterInstance(Protocol):
 
     currentObject: Entry
     pipeType: IServiceFilterInstance_PipeType
-    pipeId: int
+    pipeId: int  #: The pipe SLOT (0..n, reused).
+    bindingId: int  #: The binding this instance is serving (monotonic, never reused).
+    rootBindingId: int  #: The root of the binding tree (= bindingId for a root binding).
+    traceLevel: str  #: The binding's trace level: 'none' / 'metadata' / 'summary' / 'full'.
     next: 'IServiceFilterInstance | None'
 
     """
@@ -961,6 +973,46 @@ def _avi_close_wrapper(method: Callable) -> Callable:
     return wrapper
 
 
+class BindingLogger:
+    """
+    A node's message channel bound to ONE binding.
+
+    Taken with ``IInstanceBase.logger()`` inside a call, it keeps emitting under
+    that binding from a worker thread or asyncio task after the pipe has moved on
+    to the next holder. ``debug`` / ``warning`` / ``error`` go to the engine log
+    like the module-level functions; ``sendSSE`` tags the captured ids.
+    """
+
+    def __init__(self, pipe_id: int, binding_id: int, root_binding_id: int):
+        self.pipeId = pipe_id  #: The pipe slot at capture.
+        self.bindingId = binding_id  #: The binding at capture.
+        self.rootBindingId = root_binding_id  #: The binding tree at capture.
+
+    def debug(self, *args) -> None:
+        """Output a debug message under this binding."""
+        from .engine import debug
+
+        debug(*args)
+
+    def warning(self, *args) -> None:
+        """Output a warning under this binding."""
+        from .engine import warning
+
+        warning(*args)
+
+    def error(self, *args) -> None:
+        """Output an error under this binding."""
+        from .engine import error
+
+        error(*args)
+
+    def sendSSE(self, type: str, **data) -> None:
+        """Send a real-time SSE event tagged with the captured binding."""
+        from .engine import monitorSSE
+
+        monitorSSE(self.pipeId, type, data or None, self.bindingId, self.rootBindingId)
+
+
 class IInstanceBase:
     """
     Base class for all IInstances.
@@ -1026,6 +1078,73 @@ class IInstanceBase:
             params = (caller.get('params') or {}).get(self.instance.pipeType.id)
             self._settings = self._iglobal._resolved().expand_env(caller.get('env')).overlay(params)
         return self._settings
+
+    # ------------------------------------------------------------------
+    # Binding identity
+    #
+    # Every instance of one getPipe() shares one pipe object, so the ids
+    # below are the same for the whole chain. The slot (pipeId) is reused;
+    # the binding id never is.
+    # ------------------------------------------------------------------
+
+    @property
+    def bindingId(self) -> int:
+        """The binding this instance is serving."""
+        return self.instance.bindingId
+
+    @property
+    def rootBindingId(self) -> int:
+        """The root of this binding's tree: its own id, or the caller's root when opened from inside a binding."""
+        return self.instance.rootBindingId
+
+    def getPipe(self, traceLevel: Optional[str] = None) -> IServiceFilterPipe:
+        """
+        Open a sub-pipe from inside this binding.
+
+        The sub-pipe is a child binding: it reports this binding's ``rootBindingId``
+        and inherits its trace level, so its trace and SSE reach the same control as
+        the request that caused them. The caller context (``_caller``) is stamped
+        down the sub-pipe's chain so its nodes read this call's ``settings``.
+
+        Args:
+            traceLevel: Ignored when inside a binding (the child inherits); kept for
+                the root case where the instance has no binding yet.
+
+        Returns:
+            IServiceFilterPipe: The bound pipe; return it with ``putPipe``.
+        """
+        pipe = self.IEndpoint.endpoint.getPipe(traceLevel, self.bindingId)
+        self._stamp_caller(pipe, self._caller)
+        return pipe
+
+    def putPipe(self, pipe: IServiceFilterPipe) -> None:
+        """Return a sub-pipe taken with ``getPipe`` and clear the caller stamp from its chain."""
+        self._stamp_caller(pipe, None)
+        self.IEndpoint.endpoint.putPipe(pipe)
+
+    @staticmethod
+    def _stamp_caller(pipe: IServiceFilterPipe, caller: Optional[Dict[str, Any]]) -> None:
+        """Set ``_caller`` on every Python instance of the pipe's chain, invalidating cached settings."""
+        node = pipe
+        while node is not None:
+            py_instance = node.pyInstance
+            if py_instance is not None:
+                py_instance._caller = caller
+                py_instance._settings = None
+            node = node.next
+
+    def logger(self) -> 'BindingLogger':
+        """
+        Capture this binding for a worker thread or asyncio task.
+
+        The engine tags a node's messages with the binding that is CURRENT on the
+        pipe; a thread the node spawns outlives that and would tag the next holder.
+        Take the logger inside the call and use it from the worker instead.
+
+        Returns:
+            BindingLogger: debug / warning / error / sendSSE bound to this binding.
+        """
+        return BindingLogger(self.instance.pipeId, self.bindingId, self.rootBindingId)
 
     # ------------------------------------------------------------------
     # Media lane normalization
@@ -1698,7 +1817,7 @@ def _patch_classes():
     def sendSSE(self, type: str, **data) -> None:
         from .engine import monitorSSE
 
-        monitorSSE(self.pipeId, type, data or None)
+        monitorSSE(self.pipeId, type, data or None, self.bindingId, self.rootBindingId)
 
     # Add to the actual C++ class
     from engLib import IFilterInstance as Impl_IFilterInstance

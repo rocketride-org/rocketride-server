@@ -31,9 +31,6 @@ namespace engine::store {
 IServiceEndpoint::~IServiceEndpoint() {
     LOGPIPE();
 
-    // Remove it if we are registered
-    Debugger::deregisterDebugger(taskId);
-
     // Stop
     endEndpoint();
 };
@@ -73,9 +70,6 @@ Error IServiceEndpoint::beginEndpoint(OPEN_MODE _openMode) noexcept {
         // We have now finalized all of our stack components, so we
         // can build the connection list
         if (ccode = buildConnections()) return ccode;
-
-        // Build the breakpoint list
-        if (ccode = buildBreakpoints()) return ccode;
     }
 
     // And done
@@ -299,12 +293,6 @@ ErrorOr<ServiceEndpoint> IServiceEndpoint::getEndpoint(
 
     // Save the request to the get pipe stack only - not begin it
     endpoint->m_stackOnly = param.stackOnly;
-
-    // If we are in debug mode, bind the debugger
-    if (param.debug) {
-        // Bind it to this endpoint
-        Debugger::registerDebugger(endpoint);
-    }
 
     // If an open mode was specified, open it
     if (param.openMode != OPEN_MODE::NONE) {
