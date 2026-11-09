@@ -37,8 +37,16 @@
 import { RocketRideClient, ConnectResult, AuthenticationException, LoginAttemptCancelledError } from 'rocketride';
 import type { ManagerInfo } from '../types/connection';
 import { BaseManager, ShellConnectionConfig } from './base-manager';
-import { AUTH_REJECTED_MESSAGE, ConnectionFailure, withTimeout } from './errors';
+import { AUTH_REJECTED_MESSAGE, ConnectionFailure, KEY_REQUIRED_MESSAGE, withTimeout } from './errors';
 import { CONNECT_TIMEOUT_MS } from '../constants';
+
+/**
+ * Credential sent for "Connect without a key". The server treats an empty
+ * credential as "no authorization", so the blank key needs a non-empty stand-in
+ * that only an OSS server without ROCKETRIDE_APIKEY (which accepts any key)
+ * will accept.
+ */
+export const KEYLESS_CREDENTIAL = 'rocketride-keyless';
 
 // =============================================================================
 // REMOTE MANAGER
@@ -71,17 +79,26 @@ export class RemoteManager extends BaseManager {
 	 * @throws Error if connection times out or credential is rejected.
 	 */
 	async connect(client: RocketRideClient, config: ShellConnectionConfig): Promise<void> {
-		// Validate that we have something to connect with
-		if (!config.credential) {
+		// Validate that we have something to connect with. A blank API key
+		// ("Connect without a key") is a valid choice, not a missing credential.
+		if (config.credential === undefined || config.credential === null) {
 			throw new ConnectionFailure('No credential provided for connection.', 'auth');
 		}
+
+		// The server's auth handler rejects an empty credential outright (an
+		// empty `auth` means deauth), so a blank key goes over the wire as a
+		// fixed placeholder. An OSS server without ROCKETRIDE_APIKEY accepts any
+		// non-empty credential and echoes it back as the session token; a
+		// key-protected server rejects it and the user is told a key is needed.
+		const keyless = config.credential === '' || config.credential === KEYLESS_CREDENTIAL;
+		const credential = config.credential === '' ? KEYLESS_CREDENTIAL : config.credential;
 
 		// login() also waits for post-auth monitor resubscription, so bound the
 		// entire operation and detach before surfacing a timeout.
 		let result: ConnectResult;
 		try {
 			result = await withTimeout(
-				client.login(config.credential as string | { code: string; verifier: string; redirectUri: string }),
+				client.login(credential as string | { code: string; verifier: string; redirectUri: string }),
 				CONNECT_TIMEOUT_MS,
 				new ConnectionFailure(`Connection timed out after ${CONNECT_TIMEOUT_MS}ms`, 'network'),
 				async () => {
@@ -94,6 +111,9 @@ export class RemoteManager extends BaseManager {
 			if (error instanceof LoginAttemptCancelledError) throw error;
 			if (error instanceof ConnectionFailure) throw error;
 			if (error instanceof AuthenticationException) {
+				// The server's own 401 text ("Invalid API key") reads as if a
+				// wrong key was typed; say plainly that this server needs one.
+				if (keyless) throw new ConnectionFailure(KEY_REQUIRED_MESSAGE, 'auth');
 				throw new ConnectionFailure(error.message, 'auth');
 			}
 			throw new ConnectionFailure(error instanceof Error ? error.message : String(error), 'network');

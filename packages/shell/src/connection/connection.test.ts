@@ -32,7 +32,7 @@ import { ConnectionState, AuthPhase } from '../types/connection';
 import type { ConnectionStatus } from '../types/connection';
 import { ConnectionManager } from './connection';
 import { ConnectionFailure, withTimeout } from './errors';
-import { RemoteManager } from './remote-manager';
+import { KEYLESS_CREDENTIAL, RemoteManager } from './remote-manager';
 import { ApiKeyAuthProvider } from '../auth/ApiKeyAuthProvider';
 import { CloudAuthProvider } from '../auth/CloudAuthProvider';
 import { CONNECT_TIMEOUT_MS, LS_TOKEN } from '../constants';
@@ -2250,4 +2250,49 @@ test('an EMPTY #rrtoken fragment (--no-auth) clears the remembered session, rese
 		assert.equal(manager.getConnectionStatus().authPhase, AuthPhase.FRESH);
 		assert.deepEqual(stripped, ['/?appid=local.alarm&rrdev=1'], 'the fragment is stripped, the query kept');
 	});
+});
+
+test('a blank API key connects keyless when the server does not require one', async () => {
+	const loginCalls: unknown[][] = [];
+	const client = testClient({
+		login: async (...args: unknown[]) => {
+			loginCalls.push(args);
+			return authenticatedResult;
+		},
+	}) as unknown as RocketRideClient;
+
+	await new RemoteManager().connect(client, { uri: 'https://shell.example.test', credential: '' });
+	// The server rejects an empty `auth` outright, so the blank key travels as
+	// the keyless placeholder an unprotected OSS server accepts.
+	assert.deepEqual(loginCalls, [[KEYLESS_CREDENTIAL]]);
+	assert.notEqual(KEYLESS_CREDENTIAL, '');
+
+	const { manager } = createTestManager();
+	manager.serverUri = 'https://shell.example.test';
+	manager.client = testClient({ login: async () => authenticatedResult });
+	assert.deepEqual(await manager.connect(''), authenticatedResult);
+	assert.equal(manager.connectionStatus.state, ConnectionState.CONNECTED);
+});
+
+test('a blank API key rejected by a key-protected server says a key is required', async () => {
+	const client = testClient({
+		login: async () => { throw new AuthenticationException({ message: 'Invalid API key' }); },
+	}) as unknown as RocketRideClient;
+
+	await assert.rejects(
+		new RemoteManager().connect(client, { uri: 'https://shell.example.test', credential: '' }),
+		(error: unknown) => error instanceof ConnectionFailure && error.kind === 'auth' && /requires an API key/.test(error.message),
+	);
+
+	// A reload replays the saved keyless session token; same guidance if the server now needs a key.
+	await assert.rejects(
+		new RemoteManager().connect(client, { uri: 'https://shell.example.test', credential: KEYLESS_CREDENTIAL }),
+		(error: unknown) => error instanceof ConnectionFailure && error.kind === 'auth' && /requires an API key/.test(error.message),
+	);
+
+	// A non-empty key that is rejected keeps the server's own message.
+	await assert.rejects(
+		new RemoteManager().connect(client, { uri: 'https://shell.example.test', credential: 'wrong-key' }),
+		(error: unknown) => error instanceof ConnectionFailure && error.kind === 'auth' && error.message === 'Invalid API key',
+	);
 });
