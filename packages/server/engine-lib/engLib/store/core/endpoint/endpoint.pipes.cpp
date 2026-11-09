@@ -432,9 +432,13 @@ ErrorOr<ServicePipe> IServiceEndpoint::getPipe(
     if (pipeGate)
         if (auto ccode = pipeGate()) return ccode;
 
-    // What the new binding inherits - its own id as root and the requested
-    // level, unless a parent binding is named
+    // What the new binding inherits - its own id as root, the requested
+    // level and depth zero, unless a parent binding is named: then the
+    // parent's root and level, and the parent's depth plus one, so the
+    // recursion guard counts the whole binding TREE (a node opening a
+    // sub-pipe that opens the node again...) and not each pipe alone
     uint64_t rootBindingId = 0;
+    int bindDepth = 0;
 
     // Stamps the binding onto a pipe that is busy for us. Runs UNDER
     // m_stackLock: the parent lookup above reads these fields of every busy
@@ -446,7 +450,7 @@ ErrorOr<ServicePipe> IServiceEndpoint::getPipe(
             s_nextBindingId.fetch_add(1, std::memory_order_relaxed);
         bound->rootBindingId = rootBindingId ? rootBindingId : bound->bindingId;
         bound->traceLevel = traceLevel;
-        bound->bindDepth = 0;
+        bound->bindDepth = bindDepth;
     };
 
     // Find a pipe
@@ -464,12 +468,21 @@ ErrorOr<ServicePipe> IServiceEndpoint::getPipe(
                     continue;
                 rootBindingId = parent->rootBindingId;
                 traceLevel = parent->traceLevel;
+                bindDepth = parent->bindDepth.load() + 1;
                 found = true;
                 break;
             }
             if (!found)
                 return APERR(Ec::NotFound, "Parent binding is not live",
                              parentBindingId);
+
+            // Refuse the child BEFORE a pipe (a whole filter stack) is
+            // built or handed out for it: the tree is already at the limit
+            if (bindDepth > filter::pipe::CONST_MAX_BIND_DEPTH)
+                return APERR(Ec::Recursion,
+                             "Pipeline binding depth exceeded",
+                             filter::pipe::CONST_MAX_BIND_DEPTH,
+                             "opening a child binding of", parentBindingId);
         }
 
         // Loop through them

@@ -24,6 +24,9 @@
 
 #include <engLib/eng.h>
 
+#include <algorithm>
+#include <cctype>
+
 namespace engine::store {
 namespace {
 //---------------------------------------------------------------------
@@ -297,13 +300,18 @@ Error IServiceEndpoint::setConfig(const json::Value &_jobConfig,
 //-------------------------------------------------------------------------
 bool IServiceEndpoint::parseTraceLevel(TextView name,
                                        PIPELINE_TRACE_LEVEL &level) noexcept {
-    if (name == "none"_tv)
+    // Compare in lower case so "Full" and "SUMMARY" name the same levels
+    std::string lower(name.data(), name.length());
+    std::transform(lower.begin(), lower.end(), lower.begin(),
+                   [](unsigned char c) { return (char)std::tolower(c); });
+
+    if (lower == "none")
         level = PIPELINE_TRACE_LEVEL::NONE;
-    else if (name == "metadata"_tv)
+    else if (lower == "metadata")
         level = PIPELINE_TRACE_LEVEL::METADATA;
-    else if (name == "summary"_tv)
+    else if (lower == "summary")
         level = PIPELINE_TRACE_LEVEL::SUMMARY;
-    else if (name == "full"_tv)
+    else if (lower == "full")
         level = PIPELINE_TRACE_LEVEL::FULL;
     else
         return false;

@@ -226,6 +226,75 @@ TEST_CASE("store::bindings") {
         REQUIRE_NO_ERROR(endpoint->putPipe(*quiet));
     }
 
+    SECTION("child bindings inherit the tree depth and stop at the limit") {
+        // Each child starts one level deeper than its parent, so a node
+        // that opens a sub-pipe of itself is bounded by the same limit as
+        // in-pipe recursion. Open a chain of children from one root.
+        std::vector<ServicePipe> chain;
+        auto root = endpoint->getPipe(PIPELINE_TRACE_LEVEL::NONE);
+        REQUIRE_NO_ERROR(root);
+        REQUIRE((*root)->bindDepth == 0);
+        chain.push_back(*root);
+
+        for (int depth = 1; depth <= filter::pipe::CONST_MAX_BIND_DEPTH;
+             depth++) {
+            auto child = endpoint->getPipe(PIPELINE_TRACE_LEVEL::NONE,
+                                           chain.back()->bindingId);
+            REQUIRE_NO_ERROR(child);
+            REQUIRE((*child)->bindDepth == depth);
+            REQUIRE((*child)->rootBindingId == (*root)->bindingId);
+            chain.push_back(*child);
+        }
+
+        // The next child would stand past the limit: refused before any
+        // pipe is built for it, and the engine keeps serving
+        auto pipesBefore = endpoint->getPipeCount();
+        REQUIRE_ERROR(endpoint->getPipe(PIPELINE_TRACE_LEVEL::NONE,
+                                        chain.back()->bindingId),
+                      Ec::Recursion, "Pipeline binding depth exceeded");
+        REQUIRE(endpoint->getPipeCount() == pipesBefore);
+
+        // A sibling of the deepest child, from one level up, is still fine
+        auto sibling = endpoint->getPipe(PIPELINE_TRACE_LEVEL::NONE,
+                                         chain[chain.size() - 2]->bindingId);
+        REQUIRE_NO_ERROR(sibling);
+        REQUIRE((*sibling)->bindDepth == filter::pipe::CONST_MAX_BIND_DEPTH);
+        REQUIRE_NO_ERROR(endpoint->putPipe(*sibling));
+
+        // The deepest child cannot even serve one callback on its own pipe
+        auto entry = test.getDummyEntry("deepest.txt");
+        REQUIRE_ERROR(chain.back()->open(entry), Ec::Recursion,
+                      "Pipeline binding depth exceeded");
+        REQUIRE(entry.objectFailed());
+
+        // Release the whole chain; a fresh root starts at zero again
+        for (auto it = chain.rbegin(); it != chain.rend(); ++it)
+            REQUIRE_NO_ERROR(endpoint->putPipe(*it));
+        auto fresh = endpoint->getPipe(PIPELINE_TRACE_LEVEL::NONE);
+        REQUIRE_NO_ERROR(fresh);
+        REQUIRE((*fresh)->bindDepth == 0);
+        REQUIRE_NO_ERROR(endpoint->putPipe(*fresh));
+    }
+
+    SECTION("trace level names parse in any case") {
+        PIPELINE_TRACE_LEVEL level = PIPELINE_TRACE_LEVEL::NONE;
+        REQUIRE(IServiceEndpoint::parseTraceLevel("Full"_tv, level));
+        REQUIRE(level == PIPELINE_TRACE_LEVEL::FULL);
+        REQUIRE(IServiceEndpoint::parseTraceLevel("SUMMARY"_tv, level));
+        REQUIRE(level == PIPELINE_TRACE_LEVEL::SUMMARY);
+        REQUIRE(IServiceEndpoint::parseTraceLevel("metadata"_tv, level));
+        REQUIRE(level == PIPELINE_TRACE_LEVEL::METADATA);
+        REQUIRE(IServiceEndpoint::parseTraceLevel("None"_tv, level));
+        REQUIRE(level == PIPELINE_TRACE_LEVEL::NONE);
+
+        // An unknown name is reported and leaves the level alone
+        level = PIPELINE_TRACE_LEVEL::FULL;
+        REQUIRE_FALSE(IServiceEndpoint::parseTraceLevel("verbose"_tv, level));
+        REQUIRE(level == PIPELINE_TRACE_LEVEL::FULL);
+        REQUIRE_FALSE(IServiceEndpoint::parseTraceLevel(""_tv, level));
+        REQUIRE(level == PIPELINE_TRACE_LEVEL::FULL);
+    }
+
     SECTION("the recursion guard fails the entry at the depth limit") {
         auto pipe = endpoint->getPipe(PIPELINE_TRACE_LEVEL::NONE);
         REQUIRE_NO_ERROR(pipe);
