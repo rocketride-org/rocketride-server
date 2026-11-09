@@ -568,7 +568,8 @@ export class FilesystemTools extends AgentToolkit {
 		const slice = lines.slice(start - 1, start - 1 + count);
 		if (slice.length === 0) return `[EMPTY WINDOW: ${path} has ${lines.length} lines; requested from line ${start}]`;
 		const header = (end: number) => `[Lines ${start}-${end} of ${lines.length} in ${path}]\n`;
-		const whole = (offset !== undefined || limit !== undefined ? header(start - 1 + slice.length) : '') + slice.join('\n') + note;
+		// The header also keeps a JSON file (a .pipe, package.json) from being shown as a structural summary that cuts its strings
+		const whole = header(start - 1 + slice.length) + slice.join('\n') + note;
 		if (whole.length <= SUMMARY_BUDGET) return whole;
 		const outline = offset === undefined && limit === undefined && /\.md$/i.test(path) ? markdownOutline(path, lines, note) : null;
 		if (outline) return outline;

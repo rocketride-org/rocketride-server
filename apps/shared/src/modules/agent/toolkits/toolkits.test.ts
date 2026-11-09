@@ -533,9 +533,9 @@ test('read_file and search_files put a marker, never the key, in the next questi
 	await run(ws, 'edit_file', { path: 'pipelines/a.pipe', oldString: `"apikey": "${marker}"`, newString: `"apikey": "${marker}", "model": "gpt-5"` });
 	assert.deepEqual(config(), { apikey: pipeKey, model: 'gpt-5', fallback: '${ROCKETRIDE_OPENAI_KEY}' });
 
-	// step: the whole read, without the note it ends with, goes back with the key in it
+	// step: the whole read, without its header line and the note it ends with, goes back with the key in it
 	const again = await run(ws, 'read_file', { path: 'pipelines/a.pipe' });
-	await run(ws, 'write_file', { path: 'pipelines/a.pipe', content: again.slice(0, again.lastIndexOf('\n[')).replace('gpt-5', 'gpt-5-mini') });
+	await run(ws, 'write_file', { path: 'pipelines/a.pipe', content: again.slice(again.indexOf('\n') + 1, again.lastIndexOf('\n[')).replace('gpt-5', 'gpt-5-mini') });
 	assert.deepEqual(config(), { apikey: pipeKey, model: 'gpt-5-mini', fallback: '${ROCKETRIDE_OPENAI_KEY}' });
 });
 
