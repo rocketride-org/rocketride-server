@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **nodes**: every node lives in the engine's one `nodes/` folder, and `nodes` is a namespace package. Breaking: the engine no longer reads `--node_path` or a `local_nodes/` folder (EaaS still accepts `--node_path` and warns that it is ignored); put a custom node in `nodes/<name>/`. `scaffold_node` writes there, with the `nodes.<name>` module prefix (#2765)
 
 ### Fixed
+- **shell**: crawlers got the same empty shell document for every public page. A page can now name a pre-rendered `snapshot`, which crawlers get, rendered by a restricted template engine that escapes every value.
 - **shell**: unknown public paths, `/terms` and trailing-slash twins such as `/pricing/` answered 401. Unknown paths now answer 404; legacy and trailing-slash URLs answer 301.
 - **ai**: validating a full pipeline that has no source (none given, none at the top level, none implied by a component with `mode: Source`) now returns a warning saying so, because starting it would be refused; passing a source when starting also works. The reply stays valid and the CLIs' exit code does not change
 - **shell**: the checkout modal's button after a grant or hackathon code is redeemed said "Start building", RocketRide's own wording, inside every store app. A store app's checkout now names the app the user goes back to, for example "Continue to Judge Hack"; the pipeline builder keeps "Start building" (#3133)
