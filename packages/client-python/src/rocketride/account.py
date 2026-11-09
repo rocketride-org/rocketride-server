@@ -581,8 +581,8 @@ class AccountApi:
         A name with a value is set, a name with ``None`` is deleted, and a
         name whose value is the mask from ``get_env`` keeps its stored value.
         Names not in ``env`` are left as they are. A name outside
-        ``ROCKETRIDE_*`` rejects the whole write, and so does a server too old
-        to merge.
+        ``ROCKETRIDE_*``, or with whitespace, ``=``, ``#``, a quote or NUL in
+        it, rejects the whole write, and so does a server too old to merge.
 
         Args:
             scope: One of 'org', 'team', 'user'.

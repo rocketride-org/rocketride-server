@@ -61,8 +61,20 @@ from ..base import AccountBase
 # The SaaS service (extension/saas/account_service.py) uses the same string.
 ENV_MASK = '••••••••'
 
-# The names accepted: a .env line and the process environment both hold them
-ENV_NAME = re.compile(r'ROCKETRIDE_[A-Za-z0-9_]+')
+# The names accepted: a .env key ends at whitespace, '=' or '#', a quote is
+# stripped from it, and the process environment ends at a NUL
+ENV_NAME = re.compile(r'ROCKETRIDE_[^\s=#\'"\0]+')
+
+
+def _env_line(name: str, value: str) -> str:
+    """
+    A .env line that load_dotenv reads back as the same value.
+
+    Single quotes keep '#', spaces and double quotes literal; inside them a
+    backslash and a single quote are escaped. '${' is refused before this.
+    """
+    escaped = value.replace('\\', '\\\\').replace("'", "\\'")
+    return f"{name}='{escaped}'\n"
 
 
 class Account(AccountBase):
@@ -466,13 +478,16 @@ class Account(AccountBase):
                         request,
                         'Unsupported environment variable name(s): '
                         + ', '.join(rejected)
-                        + ". Only names of 'ROCKETRIDE_' followed by letters, digits and underscores are accepted;"
+                        + ". Names begin with 'ROCKETRIDE_' and hold no whitespace, '=', '#', quote or NUL;"
                         ' nothing was saved.',
                     )
-                # A .env line ends at a line break, and the environment at a NUL
-                if any(v is not None and any(c in v for c in '\0\r\n') for v in changes.values()):
+                # A .env line ends at a line break, the environment at a NUL, and
+                # load_dotenv expands '${', quoted or not
+                if any(v is not None and (any(c in v for c in '\0\r\n') or '${' in v) for v in changes.values()):
                     return conn.build_error(
-                        request, 'Environment values cannot contain a line break or NUL; nothing was saved.'
+                        request,
+                        "Environment values cannot contain a line break, NUL or '${' (the .env loader expands it);"
+                        ' nothing was saved.',
                     )
                 env = {k: v for k, v in os.environ.items() if k.startswith('ROCKETRIDE_')}
                 unmasked = sorted(k for k, v in changes.items() if v == ENV_MASK and k not in env)
@@ -543,7 +558,7 @@ class Account(AccountBase):
                         key = stripped.split('=', 1)[0].strip()
                         if key.startswith('ROCKETRIDE_'):
                             if key in env:
-                                lines.append(f'{key}={env[key]}\n')
+                                lines.append(_env_line(key, env[key]))
                                 written_keys.add(key)
                             continue
                     lines.append(line)
@@ -552,7 +567,7 @@ class Account(AccountBase):
 
         for k, v in sorted(env.items()):
             if k not in written_keys:
-                lines.append(f'{k}={v}\n')
+                lines.append(_env_line(k, v))
 
         # Written whole to a temporary file, then swapped in: a failed write
         # leaves the old .env as it was

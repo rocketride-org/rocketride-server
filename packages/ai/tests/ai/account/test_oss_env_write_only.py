@@ -17,6 +17,7 @@ import asyncio
 import os
 
 import pytest
+from dotenv import dotenv_values
 
 from ai.account.oss import ENV_MASK, Account
 
@@ -48,10 +49,8 @@ def env_file(monkeypatch, tmp_path):
 
 
 def _env_file_dict(path):
-    if not path.exists():
-        return {}
-    lines = [line.strip() for line in path.read_text().splitlines()]
-    return dict(line.split('=', 1) for line in lines if line and not line.startswith('#'))
+    """The .env as load_dotenv reads it at start-up."""
+    return dict(dotenv_values(path)) if path.exists() else {}
 
 
 def test_get_env_masks_every_value(env_file, monkeypatch):
@@ -138,7 +137,7 @@ def test_the_env_file_is_written_as_utf8_on_any_locale(env_file, monkeypatch):
 
     Account._write_env_file(str(env_file), {'ROCKETRIDE_A': 'cl\u00e9-\u00f1'})
 
-    assert env_file.read_text(encoding='utf-8') == 'ROCKETRIDE_A=cl\u00e9-\u00f1\n'
+    assert env_file.read_text(encoding='utf-8') == "ROCKETRIDE_A='cl\u00e9-\u00f1'\n"
 
 
 def test_env_keys_lists_names_only(env_file, monkeypatch):
@@ -215,7 +214,16 @@ def test_a_value_the_process_environment_cannot_hold_writes_nothing(env_file, mo
 
 
 @pytest.mark.parametrize(
-    'name', ['ROCKETRIDE_A=B', 'ROCKETRIDE_', 'ROCKETRIDE_A B', 'ROCKETRIDE_A\nX', 'ROCKETRIDE_A\0']
+    'name',
+    [
+        'ROCKETRIDE_A=B',
+        'ROCKETRIDE_',
+        'ROCKETRIDE_A B',
+        'ROCKETRIDE_A\nX',
+        'ROCKETRIDE_A\0',
+        'ROCKETRIDE_A#B',
+        "ROCKETRIDE_'A'",
+    ],
 )
 def test_a_name_the_environment_cannot_hold_writes_nothing(env_file, monkeypatch, name):
     monkeypatch.setenv('ROCKETRIDE_A', 'kept')
@@ -226,7 +234,7 @@ def test_a_name_the_environment_cannot_hold_writes_nothing(env_file, monkeypatch
     assert os.environ['ROCKETRIDE_A'] == 'kept' and not env_file.exists()
 
 
-@pytest.mark.parametrize('value', ['a\nROCKETRIDE_INJECTED=1', 'a\rb', 'a\0b'])
+@pytest.mark.parametrize('value', ['a\nROCKETRIDE_INJECTED=1', 'a\rb', 'a\0b', 'x${HOME}y'])
 def test_a_value_that_ends_a_env_line_writes_nothing(env_file, monkeypatch, value):
     monkeypatch.setenv('ROCKETRIDE_A', 'kept')
 
@@ -264,3 +272,26 @@ def test_a_rewritten_env_file_keeps_its_permissions(env_file, monkeypatch):
 
     assert env_file.stat().st_mode & 0o777 == 0o640
     assert _env_file_dict(env_file) == {'ROCKETRIDE_A': 'a', 'ROCKETRIDE_B': 'b'}
+
+
+@pytest.mark.parametrize('name', ['ROCKETRIDE_my-key', 'ROCKETRIDE_a.b'])
+def test_a_name_any_rocketride_scope_takes_is_saved(env_file, monkeypatch, name):
+    assert _call('update_env', env={name: 'v'})['ok'] is True
+
+    assert os.environ[name] == 'v' and _env_file_dict(env_file) == {name: 'v'}
+
+
+def test_a_saved_value_reads_back_the_same_at_start_up(env_file, monkeypatch):
+    """load_dotenv cuts an unquoted value at ' #' and strips its quotes and spaces."""
+    values = {
+        'ROCKETRIDE_A': 'abc #def',
+        'ROCKETRIDE_B': 'x$HOME y',
+        'ROCKETRIDE_C': '"quoted"',
+        'ROCKETRIDE_D': "it's",
+        'ROCKETRIDE_E': "back\\slash \\' end",
+        'ROCKETRIDE_F': ' padded ',
+    }
+
+    assert _call('update_env', env=values)['ok'] is True
+
+    assert _env_file_dict(env_file) == values

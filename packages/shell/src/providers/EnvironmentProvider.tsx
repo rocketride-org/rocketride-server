@@ -113,11 +113,10 @@ const EnvironmentProvider: React.FC = () => {
 		async (slotId: string, scope: EnvironmentScope, env: Record<string, string | null>, scopeId?: string) => {
 			if (!client) return;
 			await client.account.setEnv(scope, env, scopeId);
-			const stored = await client.account.getEnv(scope, scopeId);
-			const cacheKey = `${slotId}:${scope}:${scopeId ?? ''}`;
-			setEnvs((prev) => ({ ...prev, [cacheKey]: stored }));
+			// The save is done; a reload that fails shows its own error
+			handleLoadEnv(slotId, scope, scopeId);
 		},
-		[client]
+		[client, handleLoadEnv]
 	);
 
 	// ── Render ───────────────────────────────────────────────────────────
