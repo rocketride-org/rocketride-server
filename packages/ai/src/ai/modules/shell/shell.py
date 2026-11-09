@@ -53,6 +53,7 @@ request headers.
 """
 
 import hashlib
+import math
 import mimetypes
 import os
 import posixpath
@@ -683,10 +684,10 @@ def _md(text: str) -> str:
 def own_title(title: str, site_title: str) -> str:
     """A page title without the trailing `` | <site title>`` the site brands it with.
 
-    For where the title names the page by itself, as an article headline
-    does: search engines and readers then see the article's own title. The
-    title stays whole when there is no site title, or when the suffix is all
-    there is.
+    For where the title names the page by itself, as an article headline, a
+    feed entry or an llms.txt section heading does: search engines and
+    readers then see the article's own title. The title stays whole when
+    there is no site title, or when the suffix is all there is.
     """
     own = title.removesuffix(f' | {site_title}') if site_title else title
     return own if own.strip() else title
@@ -800,8 +801,13 @@ async def llms_txt(request: Request):
     The header from the root owner's ``site`` block (the heading falls back
     to the origin's host: llms.txt requires one), one bullet per listed page
     (title and description from the aggregate), and a final link to
-    ``site.docsUrl``. Same gating as the sitemap: absolute URLs come
-    exclusively from ``RR_APP_URL``, and the endpoint 404s when it is unset.
+    ``site.docsUrl``. A listed page whose parent path (``/blog`` for
+    ``/blog/x``) is a listed page goes in that parent's section, headed by
+    its title without the trailing `` | <site.title>``; every other page is
+    under ``## Pages``, by path. Sections follow by parent path, each with its
+    dated pages newest first, then the rest by path. Same gating as the
+    sitemap: absolute URLs come exclusively from ``RR_APP_URL``, and the
+    endpoint 404s when it is unset.
 
     Args:
         request: Incoming HTTP request.
@@ -812,6 +818,7 @@ async def llms_txt(request: Request):
     Raises:
         HTTPException: 404 when ``RR_APP_URL`` is not configured.
     """
+    from .contract import page_instant
     from .public_pages import current, maybe_refresh
 
     maybe_refresh()
@@ -823,13 +830,25 @@ async def llms_txt(request: Request):
     lines = [f'# {_md(site.get("title", "")) or urlsplit(base_url).netloc}', '']
     if site.get('blurb'):
         lines += [f'> {_md(site["blurb"])}', '']
-    lines += ['## Pages', '']
-    for path, page in sitemap_entries():
-        bullet = f'- [{_md(page.title)}]({base_url}{path})'
-        description = _md(page.description)
-        if description:
-            bullet = f'{bullet}: {description}'
-        lines.append(bullet)
+    listed = dict(sitemap_entries())
+    sections: dict = {'': []}
+    for path, page in listed.items():
+        parent = path.rpartition('/')[0]
+        sections.setdefault(parent if parent in listed else '', []).append(page)
+    for parent in sorted(sections):
+        pages = sections[parent]
+        if parent:
+            lines += ['', f'## {_md(own_title(listed[parent].title, site.get("title", "")))}', '']
+            # Dated pages newest first, then the rest; the stable sort keeps path order within each.
+            pages.sort(key=lambda p: -page_instant(p.published).timestamp() if p.published else math.inf)
+        else:
+            lines += ['## Pages', '']
+        for page in pages:
+            bullet = f'- [{_md(page.title)}]({base_url}{page.path})'
+            description = _md(page.description)
+            if description:
+                bullet = f'{bullet}: {description}'
+            lines.append(bullet)
     if site.get('docsUrl'):
         lines += ['', '## Documentation', '', f'- [Docs]({_md(site["docsUrl"])})']
     return PlainTextResponse(

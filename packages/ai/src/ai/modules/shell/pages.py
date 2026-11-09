@@ -26,15 +26,18 @@ The public-page catch-all: one route, every method, answering from the page aggr
 Registered last (``register_public_pages``, at the end of server startup,
 after every module and the account layer): FastAPI matches routes in
 registration order, so every real route wins and only unmatched requests
-reach here. Pages answer GET and HEAD (405 otherwise). A redirect source
-(``site.redirects``) and a page's trailing-slash twin answer GET and HEAD
-with a 301 to the page; any other path the aggregate does not claim answers
-what the router answered before the catch-all existed: 405, 307 or 404.
+reach here. Pages and feeds (``site.feeds``, ``feeds.py``) answer GET and
+HEAD (405 otherwise); a feed is Atom with absolute URLs on ``RR_APP_URL``,
+404 without it, cached by shared caches like the SEO files. A redirect
+source (``site.redirects``) and a page's trailing-slash twin answer GET and
+HEAD with a 301 to the page; any other path the aggregate does not claim
+answers what the router answered before the catch-all existed: 405, 307 or
+404.
 
 Auth: the catch-all is not a public route, which would open every path,
 private API routes included, to anonymous callers. The web server consults
 ``is_public_path`` per request instead: only paths no real route matches
-(the catch-all answers them with a page, a redirect or a 404) skip
+(the catch-all answers them with a page, a feed, a redirect or a 404) skip
 authentication; a path any real route matches still needs credentials.
 
 A page answers people with the document the shell boots from (the route's
@@ -47,11 +50,12 @@ with ``assets``, the version's URL base, and the page's bound data sources
 read or rendered, serves crawlers the shell document too. Either way the
 page's head metadata (title, description, canonical URL, robots, and the
 link-preview tags: ``og:type``, ``og:site_name``, ``og:image``, the Twitter
-card, article times) is injected, plus, for crawlers, the JSON-LD of its data
-sources and, for a page with ``published``, its BlogPosting (``articles.py``).
-A source that cannot be read leaves the page without its data, uncached. Only
-a rendered snapshot may sit in shared caches; the shell document names the
-current build's bundles, so it is ``private, no-cache`` for everyone.
+card, article times, and a link to each feed whose prefix it is or is under)
+is injected, plus, for crawlers, the JSON-LD of its data sources and, for a
+page with ``published``, its BlogPosting (``articles.py``). A source that
+cannot be read leaves the page without its data, uncached. Only a rendered
+snapshot may sit in shared caches; the shell document names the current
+build's bundles, so it is ``private, no-cache`` for everyone.
 
 Rendered responses are cached per (path, UA class) under a byte budget and
 dropped on every aggregate swap; a crawler response bound to a data source is
@@ -84,7 +88,8 @@ from . import data_sources, public_pages
 from .articles import blogposting
 from .contract import MAX_SNAPSHOT_BYTES, Page, snapshot_error, with_slash_twin
 from .crawlers import CRAWLER, classify
-from .head import inject_head, social_tags
+from .feeds import atom
+from .head import feed_links, inject_head, social_tags
 from .settings import app_url
 from .shell import CACHE_CONTROL, shell_document_path, shell_static
 from .template import TemplateError, render
@@ -143,10 +148,10 @@ def is_public_path(path: str) -> bool:
 
     True when the first route whose pattern matches the path is a page
     handler (``/`` or the catch-all). Those answer only public outcomes (a
-    page, a redirect or a 404), so an anonymous caller gets those instead of
-    a 401. A path any real route's pattern matches stays private, whatever
-    the aggregate claims. A route the check cannot reason about (no path
-    pattern) fails closed.
+    page, a feed, a redirect or a 404), so an anonymous caller gets those
+    instead of a 401. A path any real route's pattern matches stays private,
+    whatever the aggregate claims. A route the check cannot reason about (no
+    path pattern) fails closed.
 
     Args:
         path: The path the router matches (``route_path``: ``root_path`` stripped).
@@ -553,6 +558,26 @@ def _storage_warning_due(path: str) -> bool:
     return True
 
 
+def _feed(aggregate: Any, feed: Any) -> Response:
+    """The Atom document of ``feed``; 404 without ``RR_APP_URL``, the only source of its absolute URLs."""
+    base = app_url()
+    if not base:
+        raise HTTPException(status_code=404, detail='Not Found')
+    return Response(
+        atom(feed, aggregate, base),
+        media_type='application/atom+xml; charset=utf-8',
+        headers={'Cache-Control': CACHE_CONTROL},
+    )
+
+
+def _feeds_of(aggregate: Any, path: str) -> List[Tuple[str, str]]:
+    """``(title, absolute URL)`` of every feed whose prefix page ``path`` is or is under ([] without RR_APP_URL)."""
+    base = app_url()
+    if not base:
+        return []
+    return [(f['title'], base + f['path']) for f in aggregate.feeds.values() if (path + '/').startswith(f['prefix'])]
+
+
 def _moved(request: Request, path: str) -> Response:
     """301 to ``path`` on this origin with the request's query kept.
 
@@ -569,21 +594,21 @@ async def public_page(request: Request) -> Response:
     """Serve one public page, or the router's own answer for a path no page claims; also mounted on ``/``.
 
     One helper per outcome, in order: a method other than GET and HEAD, a
-    redirect, a path no page claims, then the page itself. ``/`` keeps its
-    dedicated route: when the aggregate does not claim it, it serves the
-    shell exactly as ``shell_static`` does.
+    redirect, a feed, a path no page claims, then the page itself. ``/``
+    keeps its dedicated route: when the aggregate does not claim it, it
+    serves the shell exactly as ``shell_static`` does.
 
     Args:
         request: The request. Its path as the router matched it (``root_path``
             stripped) is the one the auth middleware decided on.
 
     Returns:
-        The page, a 301 to a page, the shell on an unclaimed ``/``, or the
-        router's 307 to a served trailing-slash twin.
+        The page, a feed, a 301 to a page, the shell on an unclaimed ``/``,
+        or the router's 307 to a served trailing-slash twin.
 
     Raises:
         HTTPException: 404 for a path nothing serves; 405, with ``Allow``, for
-            a method the page, redirect or real route does not take; 503
+            a method the page, feed, redirect or real route does not take; 503
             (from ``shell_document_path``) when the shell is not built.
     """
     path = route_path(request.scope) or '/'
@@ -596,6 +621,9 @@ async def public_page(request: Request) -> Response:
     moved = _redirect(request, path, aggregate)
     if moved is not None:
         return moved
+    feed = aggregate.feeds.get(path)
+    if feed is not None:
+        return _feed(aggregate, feed)
     page = aggregate.exact.get(path)
     if page is None:
         return await _unclaimed(request, path)
@@ -603,16 +631,17 @@ async def public_page(request: Request) -> Response:
 
 
 def _other_method(request: Request, path: str, aggregate: public_pages.Aggregate) -> Response:
-    """A method other than GET and HEAD: pages and redirects refuse it; any other path gets the router's answer.
+    """A method other than GET and HEAD: pages, feeds and redirects refuse it; any other path gets the router's answer.
 
     Returns:
         The router's 307 to a served trailing-slash twin.
 
     Raises:
-        HTTPException: 405 with ``Allow: GET, HEAD`` on ``/``, a page or a
-            redirect source; the router's 405 on a real route's path; else 404.
+        HTTPException: 405 with ``Allow: GET, HEAD`` on ``/``, a page, a feed
+            or a redirect source; the router's 405 on a real route's path;
+            else 404.
     """
-    if path == '/' or path in aggregate.exact or path in aggregate.redirects:
+    if path == '/' or path in aggregate.exact or path in aggregate.redirects or path in aggregate.feeds:
         raise HTTPException(status_code=405, detail='Method Not Allowed', headers={'Allow': 'GET, HEAD'})
     miss = _router_miss(request)
     if miss is None:
@@ -723,10 +752,10 @@ async def _render(
 
     People get the shell document; crawlers get the page's snapshot rendered
     with its bound data sources (``_crawler_snapshot``), or the shell document
-    when there is none to serve. Either way the page's head metadata and
-    link-preview tags are injected, plus, for crawlers, the sources' JSON-LD
-    and a dated page's BlogPosting; reading the shell document and rewriting
-    the head run off the event loop.
+    when there is none to serve. Either way the page's head metadata,
+    link-preview tags and feed links are injected, plus, for crawlers, the
+    sources' JSON-LD and a dated page's BlogPosting; reading the shell
+    document and rewriting the head run off the event loop.
     A render bound to a source expires ``data_sources.TTL_SECONDS`` after
     ``now``. ``cacheable`` is False for a fallback the next request should
     retry.
@@ -769,7 +798,8 @@ async def _render(
         jsonld=jsonld,
         extra=social_tags(
             site_name=site.get('title', ''), image=image, published=page.published, modified=page.modified
-        ),
+        )
+        + feed_links(_feeds_of(aggregate, path)),
     )
     headers = {'Vary': 'User-Agent', 'Cache-Control': cache_control}
     if not page.listed:

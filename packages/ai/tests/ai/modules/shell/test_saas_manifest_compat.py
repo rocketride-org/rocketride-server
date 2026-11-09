@@ -103,6 +103,7 @@ def test_a_newer_home_ui_manifest_still_validates():
     assert site == {
         **{k: newer['site'][k] for k in ('title', 'blurb', 'docsUrl', 'image')},
         'redirects': {'/terms': '/legal/terms', '/terms/': '/legal/terms'},
+        'feeds': {'/blog/feed.xml': {'path': '/blog/feed.xml', 'prefix': '/blog/', 'title': 'RocketRide blog'}},
     }
     launch = {p.path: p for p in pages}['/blog/launch']
     assert (launch.image, launch.published, launch.modified) == ('/og/launch.png', '2026-11-09', '2026-11-10T09:00:00Z')

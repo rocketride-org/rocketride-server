@@ -238,7 +238,7 @@ interface AppManifest {
   onDesktop?: boolean;
   /** Platform apps only: public pages on the app origin (see Public pages). */
   publicPages?: PublicPage[];
-  /** Platform apps only, honored from the app owning '/': the site's title, blurb, docs link, redirects and image. */
+  /** Platform apps only, honored from the app owning '/': the site's title, blurb, docs link, redirects, image and feeds. */
   site?: {
     title?: string;
     blurb?: string;
@@ -247,6 +247,8 @@ interface AppManifest {
     redirects?: { from: string; to: string }[];
     /** The link-preview image of pages that declare none (same forms as a page's image). */
     image?: string;
+    /** Atom feeds of the dated pages under a prefix: { path: '/blog/feed.xml', prefix: '/blog/', title: 'Blog' }. */
+    feeds?: { path: string; prefix: string; title: string }[];
   };
 }
 ```
@@ -328,6 +330,12 @@ publish fails with a message naming the field):
   may be a server route or a page any published app serves; it appears once.
   List both forms of an old URL to redirect both. Each `to` is the exact path
   of one of the manifest's own pages.
+- `site.feeds` (at most 5): each `path` is one exact path in the `path` grammar
+  ending in `.xml`; it may not be reserved, and neither it nor its slash twin
+  may be a page any published app serves, a redirect's `from` or a server
+  route; it appears once. `prefix` is a page path ending in `/` (`/blog/`, or
+  `/` for every page), and `title` a non-empty string of at most 300
+  characters.
 
 Until a published platform app contributes a valid page, the page map holds
 the server's built-in page list instead. A published app whose storage cannot
@@ -409,7 +417,23 @@ cannot be read, crawlers get the page without it.
 `/sitemap.xml` and `/llms.txt` list the listed pages, and `/llms.txt` takes
 its heading, blurb and docs link from `site`; redirects never appear in
 either. Each sitemap entry's `<lastmod>` is the date of the page's `modified`,
-else `published`, else the time its app's production version went live. `GET` and `HEAD` on a redirect's `from` answer `301` with
+else `published`, else the time its app's production version went live. In
+`/llms.txt`, a page whose parent path (`/blog` for `/blog/x`) is a listed page
+is listed in that parent's section, headed by the parent's title without a
+trailing ` | <site.title>`, with dated pages newest first and the rest by
+path; every other page is under `## Pages`, by path.
+
+Each feed in `site.feeds` answers `GET` and `HEAD` on its `path` with an Atom
+1.0 document (`application/atom+xml`): the listed pages strictly under its
+`prefix` that declare `published`, newest first, at most 50. An entry carries
+the page's canonical URL, its title without a trailing ` | <site.title>`,
+`published`, `updated` (`modified`, else `published`; a date alone is
+midnight UTC), its description as the summary and its authors; the feed's
+own author is `site.title`. Like the sitemap, a feed answers `404` without
+`RR_APP_URL`. The prefix page and every page under it link to the feed from
+their head (`<link rel="alternate" type="application/atom+xml">`).
+
+`GET` and `HEAD` on a redirect's `from` answer `301` with
 `Location: <to>?<query>`, and on `/x/` answer `301` to `/x` when `/x` is a
 page (query kept). Any path that is neither a page, a redirect nor a server
 route answers `404`.

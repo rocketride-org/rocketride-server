@@ -33,7 +33,7 @@ platform-origin document, so escaping is a security boundary.
 import html
 import json
 import re
-from typing import Any, Iterable, List, Mapping
+from typing import Any, Iterable, List, Mapping, Tuple
 
 _FLAGS = re.IGNORECASE | re.DOTALL
 
@@ -121,6 +121,13 @@ def social_tags(*, site_name: str = '', image: str = '', published: str = '', mo
         tags.append(f'<meta property="article:published_time" content="{_attr(published)}">')
         tags.append(f'<meta property="article:modified_time" content="{_attr(modified or published)}">')
     return tags
+
+
+def feed_links(feeds: Iterable[Tuple[str, str]]) -> List[str]:
+    """One ``<link rel="alternate">`` per Atom feed ``(title, href)``, escaped, for ``inject_head``'s ``extra``."""
+    return [
+        f'<link rel="alternate" type="application/atom+xml" title="{_attr(t)}" href="{_attr(h)}">' for t, h in feeds
+    ]
 
 
 def inject_head(

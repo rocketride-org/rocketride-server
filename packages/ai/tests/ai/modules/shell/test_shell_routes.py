@@ -425,6 +425,63 @@ def test_llms_docs_link_is_neutralised_like_every_manifest_string(app_url):
     assert text.endswith('- [Docs](https://docs.example/x\\](https://evil))\n')
 
 
+def test_llms_groups_children_under_parent(app_url):
+    home = 'rocketride.home'
+    _use(
+        Page('/', home, 'RocketRide', 'Home.'),
+        Page('/pricing', home, 'Pricing | RocketRide', 'Plans.'),
+        Page('/blog', home, 'Blog | RocketRide', 'News.'),
+        Page('/blog/b', home, 'B post', 'Bee.', published='2026-10-01'),
+        Page('/blog/a', home, 'A post', 'Ay.', published='2026-11-09T10:00:00+05:00'),
+        Page('/blog/c', home, 'C post', published='2026-11-09T06:00:00Z'),
+        Page('/blog/z', home, 'Z undated'),
+        Page('/blog/m', home, 'M undated'),
+        Page('/blog/hidden', home, 'Hidden', published='2026-12-01', listed=False),
+        Page('/docs', home, 'Guides | Other', 'Docs.'),
+        Page('/docs/x', home, 'X', 'Ex.'),
+        Page('/docs/x/y', home, 'Y'),
+        Page('/drafts', home, 'Drafts', listed=False),
+        Page('/drafts/one', home, 'One', published='2026-11-01'),
+        Page('/news/orphan', home, 'Orphan', published='2026-11-01'),
+        site={'title': 'RocketRide'},
+    )
+    assert _client().get('/llms.txt').text == (
+        '# RocketRide\n\n## Pages\n\n'
+        f'- [RocketRide]({BASE}/): Home.\n'
+        f'- [Blog | RocketRide]({BASE}/blog): News.\n'
+        f'- [Guides | Other]({BASE}/docs): Docs.\n'
+        f'- [One]({BASE}/drafts/one)\n'
+        f'- [Orphan]({BASE}/news/orphan)\n'
+        f'- [Pricing | RocketRide]({BASE}/pricing): Plans.\n'
+        '\n## Blog\n\n'
+        f'- [C post]({BASE}/blog/c)\n'
+        f'- [A post]({BASE}/blog/a): Ay.\n'
+        f'- [B post]({BASE}/blog/b): Bee.\n'
+        f'- [M undated]({BASE}/blog/m)\n'
+        f'- [Z undated]({BASE}/blog/z)\n'
+        '\n## Guides | Other\n\n'
+        f'- [X]({BASE}/docs/x): Ex.\n'
+        '\n## X\n\n'
+        f'- [Y]({BASE}/docs/x/y)\n'
+    )
+
+
+def test_llms_group_headings_are_neutralised_like_every_manifest_string(app_url):
+    _use(
+        Page('/', 'rocketride.home', 'R'),
+        Page('/a', 'rocketride.home', 'A\n## [x](https://evil) | R'),
+        Page('/a/b', 'rocketride.home', 'B'),
+        Page('/c', 'rocketride.home', ' | R'),
+        Page('/c/d', 'rocketride.home', 'D'),
+        site={'title': 'R', 'docsUrl': 'https://docs.example/llms.txt'},
+    )
+    text = _client().get('/llms.txt').text
+    assert '\n## A ## \\[x\\](https://evil)\n\n- [B]' in text
+    # A title that is only the suffix stays whole.
+    assert '\n## | R\n\n- [D]' in text
+    assert text.endswith('\n\n## Documentation\n\n- [Docs](https://docs.example/llms.txt)\n')
+
+
 def test_llms_sets_cache_control(app_url):
     resp = _client().get('/llms.txt')
     assert resp.headers['cache-control'] == 'public, max-age=3600'

@@ -33,7 +33,8 @@ from the app owning ``/``, the site facts the SEO files carry:
                      "authors": [{"name": "...", "url": "https://..."}]}],
     "site": {"title": "...", "blurb": "...", "docsUrl": "https://.../llms.txt",
              "redirects": [{"from": "/terms", "to": "/legal/terms"}],
-             "image": "og/site.png"}
+             "image": "og/site.png",
+             "feeds": [{"path": "/blog/feed.xml", "prefix": "/blog/", "title": "..."}]}
 
 ``check_manifest`` is the single validator: the publish gate refuses on any
 error it reports, and the aggregate builder re-runs it on every published
@@ -125,6 +126,7 @@ _MAX_DESCRIPTION = 1000
 _MAX_URL = 2048
 _MAX_REDIRECTS = 100
 _MAX_AUTHORS = 5
+_MAX_FEEDS = 5
 
 # The largest snapshot the publish gate accepts and the server reads. A crawler
 # request is cheap to send and its UA trivially spoofed, so every snapshot must
@@ -556,6 +558,86 @@ def check_redirects(
     return out, errors
 
 
+def _feed_path_error(
+    path: Any, pages: List[Page], redirects: Mapping[str, str], live_conflict: Optional[Callable[[str], Optional[str]]]
+) -> Optional[str]:
+    """Why ``path`` cannot serve a feed, or None.
+
+    One exact path in the page grammar ending in ``.xml``, not reserved, and
+    neither it nor its slash twin is a page, a redirect source or a live
+    route.
+    """
+    if not isinstance(path, str):
+        return 'must be a string'
+    err = path_error(path)
+    if err:
+        return err
+    err = _reserved_error(path)
+    if err:
+        return err
+    if not path.endswith('.xml'):
+        return 'must end in .xml'
+    paths = {p.path for p in pages}
+    for candidate in with_slash_twin(path):
+        which = '' if candidate == path else f'its slash twin {candidate!r} '
+        if candidate in paths:
+            return f'{which}is a publicPages path'
+        if candidate in redirects:
+            return f'{which}is a site.redirects source'
+        conflict = live_conflict(candidate) if live_conflict else None
+        if conflict:
+            return f'{which}collides with the live server route {conflict}'
+    return None
+
+
+def _prefix_error(prefix: Any) -> Optional[str]:
+    if prefix == '/':
+        return None
+    if isinstance(prefix, str) and prefix.endswith('/') and prefix[:-1] != '/' and not path_error(prefix[:-1]):
+        return None
+    return 'must be a page path ending in "/" ("/blog/", or "/" for every page)'
+
+
+def _check_feeds(
+    raw: Any,
+    pages: List[Page],
+    redirects: Mapping[str, str],
+    live_conflict: Optional[Callable[[str], Optional[str]]],
+) -> Tuple[Dict[str, Dict[str, str]], List[str]]:
+    """``site.feeds`` as ``({path: {path, prefix, title}}, errors)``; a bad entry drops only itself."""
+    if not isinstance(raw, list) or len(raw) > _MAX_FEEDS:
+        return {}, [f'site.feeds: must be a list of at most {_MAX_FEEDS} {{"path", "prefix", "title"}} objects']
+    out: Dict[str, Dict[str, str]] = {}
+    errors: List[str] = []
+    for i, entry in enumerate(raw):
+        where = f'site.feeds[{i}]'
+        if not isinstance(entry, dict):
+            errors.append(
+                f'{where}: must be an object {{"path": "/blog/feed.xml", "prefix": "/blog/", "title": "..."}}'
+            )
+            continue
+        path, prefix, title = entry.get('path'), entry.get('prefix'), entry.get('title')
+        err = _feed_path_error(path, pages, redirects, live_conflict)
+        if err is None and path in out:
+            err = 'duplicate feed path in this manifest'
+        if err:
+            errors.append(f'{where}.path {path!r}: {err}; choose another path')
+            continue
+        err = _prefix_error(prefix)
+        if err:
+            errors.append(f'{where}.prefix {prefix!r}: {err}')
+            continue
+        if not isinstance(title, str) or not title.strip() or len(title) > _MAX_TITLE:
+            errors.append(f'{where}.title: required, a non-empty string of at most {_MAX_TITLE} characters')
+            continue
+        err = _surrogate_error(title)
+        if err:
+            errors.append(f'{where}.title: {err}')
+            continue
+        out[path] = {'path': path, 'prefix': prefix, 'title': title}
+    return out, errors
+
+
 def check_manifest(
     app_id: str,
     manifest: Mapping[str, Any],
@@ -573,10 +655,11 @@ def check_manifest(
     Returns:
         ``(pages, site, errors)``: the valid pages (stamped with ``app_id``),
         the validated site block (None when absent or invalid; its
-        ``redirects``, when declared, maps each valid ``from`` to its ``to``),
-        and one actionable message per problem. A manifest without either
-        section returns ``([], None, [])``, and so does a non-platform app's
-        manifest without ``publicPages``: its ``site`` is ignored.
+        ``redirects``, when declared, maps each valid ``from`` to its ``to``,
+        and its ``feeds`` each valid feed's path to the feed), and one
+        actionable message per problem. A manifest without either section
+        returns ``([], None, [])``, and so does a non-platform app's manifest
+        without ``publicPages``: its ``site`` is ignored.
     """
     raw_pages = manifest.get('publicPages')
     raw_site = manifest.get('site')
@@ -621,9 +704,15 @@ def check_manifest(
             site, err = _check_site(raw_site)
             if err:
                 errors.append(err)
+            redirects: Dict[str, str] = {}
             if isinstance(raw_site, dict) and 'redirects' in raw_site:
                 redirects, redirect_errors = check_redirects(raw_site['redirects'], pages, live_conflict)
                 errors.extend(redirect_errors)
                 if site is not None:
                     site['redirects'] = redirects
+            if isinstance(raw_site, dict) and 'feeds' in raw_site:
+                feeds, feed_errors = _check_feeds(raw_site['feeds'], pages, redirects, live_conflict)
+                errors.extend(feed_errors)
+                if site is not None:
+                    site['feeds'] = feeds
     return pages, site, errors
