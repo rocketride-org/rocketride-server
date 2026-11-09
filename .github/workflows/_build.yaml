@@ -326,6 +326,9 @@ jobs:
 
       - name: Test
         if: inputs.codeql == false && inputs.test
+        # A hung step fails here, before the job's 90-minute limit cancels the job,
+        # so the log and artifact steps below still run.
+        timeout-minutes: 45
         # Integration tests boot a local server on :5565 and connect a test
         # client. Both sides need the same shared secret to authenticate;
         # without ROCKETRIDE_APIKEY the server raises AuthenticationException
