@@ -9,6 +9,8 @@ the allowlist, the masking of literals and comments under PostgreSQL and MySQL
 rules, multi-statement input, and the clauses that make a SELECT write.
 """
 
+import time
+
 import pytest
 
 from ai.common.database.sql_safety import _mask_clickhouse, is_sql_safe
@@ -503,3 +505,44 @@ def test_ordinary_reads_with_quotes_and_comments_pass(sql):
         sql: The SQL under test.
     """
     assert is_sql_safe(sql) is True
+
+
+# ---------------------------------------------------------------------------
+# Time
+# ---------------------------------------------------------------------------
+
+
+def _fastest_check(sql):
+    """Return the fastest of three runs of is_sql_safe on ``sql``, in seconds; the fastest is the least disturbed.
+
+    Args:
+        sql: The SQL to check.
+
+    Returns:
+        The shortest time of three runs.
+    """
+    best = float('inf')
+    for _ in range(3):
+        start = time.perf_counter()
+        is_sql_safe(sql)
+        best = min(best, time.perf_counter() - start)
+    return best
+
+
+@pytest.mark.parametrize(
+    ('make', 'parts'),
+    [
+        pytest.param(
+            lambda n: 'SELECT ' + ', '.join(['settings a, b = 1'] * n) + ' FROM t', 1000, id='settings-columns'
+        ),
+        pytest.param(lambda n: 'SELECT ' + ' '.join(f'$x{i}$' for i in range(n)), 4000, id='unclosed-heredoc-tags'),
+    ],
+)
+def test_the_check_grows_linearly_with_the_input(make, parts):
+    """Four times the input takes about four times as long; rescanning the text for each part would take sixteen.
+
+    Args:
+        make: Builds an input from a number of repeated parts.
+        parts: How many parts the smaller input has.
+    """
+    assert _fastest_check(make(4 * parts)) / _fastest_check(make(parts)) < 9

@@ -108,7 +108,7 @@ _SETTINGS_ASSIGNMENT = re.compile(rf'\s*(?:{_SETTING_NAME}\s*,\s*)*{_SETTING_NAM
 
 # Right after the statement's first SELECT (and DISTINCT), a comma or an opening parenthesis, the word settings is a
 # column for ClickHouse too. Elsewhere select and distinct can be aliases, and a clause can follow them.
-_COLUMN_POSITION = re.compile(r'(?:^\s*(?:explain\s+)?select(?:\s+distinct)?|[,(])\s*$', re.IGNORECASE)
+_FIRST_COLUMN = re.compile(r'\s*(?:explain\s+)?select\b(?:\s+distinct\b)?\s*', re.IGNORECASE)
 
 
 def _mask_quoted(sql: str, i: int, quote: str, backslash: bool, out: list[str]) -> int:
@@ -303,12 +303,33 @@ def _mask_mysql(sql: str) -> str | None:
     return ''.join(out)
 
 
-def _clickhouse_heredoc_tag(sql: str, i: int) -> str | None:
+def _clickhouse_tag_starts(sql: str) -> dict[str, list[int]]:
+    """Return where each text that could open or close a ClickHouse heredoc occurs in ``sql``.
+
+    A tag holds no ``$``, so it runs from one ``$`` to the next: the pairs of neighbouring ``$`` signs give every
+    occurrence in one pass, and finding a closing tag never searches the rest of the text again.
+
+    Args:
+        sql: The statement text.
+
+    Returns:
+        ``{'$tag$': [start, ...]}`` with the starts in ascending order.
+    """
+    dollars = [i for i, c in enumerate(sql) if c == '$']
+    starts: dict[str, list[int]] = {}
+    for start, end in zip(dollars, dollars[1:]):
+        if _CLICKHOUSE_TAG.fullmatch(sql, start + 1, end):
+            starts.setdefault(sql[start : end + 1], []).append(start)
+    return starts
+
+
+def _clickhouse_heredoc_tag(sql: str, i: int, tag_starts: dict[str, list[int]]) -> str | None:
     """Return the heredoc tag that starts at ``sql[i]``, or None when ClickHouse reads no heredoc there.
 
     Args:
         sql: The statement text.
         i: Index of a ``$``.
+        tag_starts: Where each tag occurs in ``sql``, from ``_clickhouse_tag_starts``.
 
     Returns:
         ``$tag$`` when the tag holds only ASCII letters, digits and ``_`` and the same tag appears again later
@@ -318,7 +339,7 @@ def _clickhouse_heredoc_tag(sql: str, i: int) -> str | None:
     if tag_end == -1 or not _CLICKHOUSE_TAG.fullmatch(sql, i + 1, tag_end):
         return None
     tag = sql[i : tag_end + 1]
-    return tag if sql.find(tag, tag_end + 1) != -1 else None
+    return tag if tag_starts[tag][-1] > tag_end else None
 
 
 def _mask_curly_quoted(sql: str, i: int, out: list[str]) -> int:
@@ -345,13 +366,14 @@ def _mask_curly_quoted(sql: str, i: int, out: list[str]) -> int:
     return end + 1
 
 
-def _clickhouse_token(sql: str, i: int, out: list[str]) -> int:
+def _clickhouse_token(sql: str, i: int, out: list[str], tag_starts: dict[str, list[int]]) -> int:
     """Copy the ClickHouse token that starts at ``sql[i]`` to ``out``, blanked if it is a literal, quoted name or comment.
 
     Args:
         sql: The statement text.
         i: Where the token starts.
         out: Receives the token, or its blanked form.
+        tag_starts: Where each heredoc tag occurs in ``sql``, from ``_clickhouse_tag_starts``.
 
     Returns:
         The index after the token.
@@ -365,7 +387,7 @@ def _clickhouse_token(sql: str, i: int, out: list[str]) -> int:
         return _mask_to(sql, i, _line_end(sql, i, '\n'), out)
     if sql.startswith('/*', i):
         return _mask_to(sql, i, _block_comment_end(sql, i), out)
-    tag = _clickhouse_heredoc_tag(sql, i) if ch == '$' else None
+    tag = _clickhouse_heredoc_tag(sql, i, tag_starts) if ch == '$' else None
     if tag:
         return _mask_dollar_quoted(sql, i, tag, out)
     word = _CLICKHOUSE_WORD.match(sql, i)
@@ -389,16 +411,37 @@ def _mask_clickhouse(sql: str) -> str:
         Text of the same length with only the executable parts left.
     """
     out: list[str] = []
+    tag_starts = _clickhouse_tag_starts(sql)
     i, n = 0, len(sql)
     while i < n:
-        i = _clickhouse_token(sql, i, out)
+        i = _clickhouse_token(sql, i, out, tag_starts)
     return ''.join(out)
+
+
+def _in_column_position(statement: str, start: int, first_column: int) -> bool:
+    """Return True if the word that starts at ``statement[start]`` stands where ClickHouse reads a column, not a clause.
+
+    Only the whitespace right before the word is read, so checking every word of a statement stays linear.
+
+    Args:
+        statement: One statement with literals and comments blanked.
+        start: Where the word starts.
+        first_column: Where the statement's first column starts, after its SELECT (and DISTINCT), or -1.
+
+    Returns:
+        Whether the word is the first column or follows a comma or an opening parenthesis.
+    """
+    before = start - 1
+    while before >= 0 and statement[before].isspace():
+        before -= 1
+    return start == first_column or (before >= 0 and statement[before] in ',(')
 
 
 def _has_settings_clause(statement: str) -> bool:
     """Return True if the statement holds a ClickHouse SETTINGS clause that gives a setting a value.
 
-    Each ``settings`` keyword is checked on its own, so a column named settings cannot hide a clause after it.
+    Each ``settings`` keyword is checked on its own, so a column named settings cannot hide a clause after it. A
+    keyword in a column position is skipped before its list is read, so a long select list is read once.
 
     Args:
         statement: One statement with literals and comments blanked.
@@ -406,9 +449,11 @@ def _has_settings_clause(statement: str) -> bool:
     Returns:
         Whether a keyword outside a column position starts a list in which some name gets a value.
     """
+    first = _FIRST_COLUMN.match(statement)
+    first_column = first.end() if first else -1
     return any(
-        _SETTINGS_ASSIGNMENT.match(statement, keyword.end())
-        and not _COLUMN_POSITION.search(statement, 0, keyword.start())
+        not _in_column_position(statement, keyword.start(), first_column)
+        and _SETTINGS_ASSIGNMENT.match(statement, keyword.end())
         for keyword in _SETTINGS_KEYWORD.finditer(statement)
     )
 
