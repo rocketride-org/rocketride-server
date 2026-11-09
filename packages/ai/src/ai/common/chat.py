@@ -128,9 +128,12 @@ class ChatBase:
         model = config.get('customModel') or config.get('model')
         self._model = validate_model_name(model)
         # An unset optional leaf resolves to None in the view (defaults are never
-        # written), so "or" keeps the node's fallback.
-        self._modelTotalTokens = config.get('modelTotalTokens') or 16384  # Default to 16K if not specified
-        self._modelOutputTokens = config.get('modelOutputTokens') or 4096  # Default to 4K if not specified
+        # written): only None takes the node's fallback, so a configured 0 still
+        # reaches validate_max_tokens and is refused there
+        total = config.get('modelTotalTokens')
+        output = config.get('modelOutputTokens')
+        self._modelTotalTokens = 16384 if total is None else total  # Default to 16K if not specified
+        self._modelOutputTokens = 4096 if output is None else output  # Default to 4K if not specified
 
         # Validate and clamp output tokens against known safe maximums
         self._modelOutputTokens = validate_max_tokens(self._modelOutputTokens, self._modelTotalTokens)
