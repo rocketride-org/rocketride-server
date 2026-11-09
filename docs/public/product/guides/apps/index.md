@@ -357,6 +357,13 @@ build output, served from its production version
 (`<RR_APP_URL>/apps/<appId>/v<N>/<path>`). Without `RR_APP_URL` only an
 `https://` image is used.
 
+Crawlers also get a `BlogPosting` (JSON-LD) for each page with `published`:
+its `headline` (the title without a trailing ` | <site.title>`),
+`description`, `datePublished`, `dateModified`, `image`, `mainEntityOfPage`
+(the canonical URL), each author as a `Person`, and the site's organization
+as `publisher`, also the `author` of a page without authors. That
+organization is named after `site.title`, on the `RR_APP_URL` origin.
+
 A snapshot is a template with exactly three kinds of tag, each on one line:
 `{{name}}` and `{{a.b}}` insert a value, HTML-escaped; `{{#name}}...{{/name}}`
 repeats its content for each item of a list, enters an object, and renders
@@ -401,7 +408,8 @@ cannot be read, crawlers get the page without it.
 
 `/sitemap.xml` and `/llms.txt` list the listed pages, and `/llms.txt` takes
 its heading, blurb and docs link from `site`; redirects never appear in
-either. `GET` and `HEAD` on a redirect's `from` answer `301` with
+either. Each sitemap entry's `<lastmod>` is the date of the page's `modified`,
+else `published`, else the time its app's production version went live. `GET` and `HEAD` on a redirect's `from` answer `301` with
 `Location: <to>?<query>`, and on `/x/` answer `301` to `/x` when `/x` is a
 page (query kept). Any path that is neither a page, a redirect nor a server
 route answers `404`.

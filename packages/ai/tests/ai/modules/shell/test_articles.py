@@ -21,7 +21,8 @@
 # SOFTWARE.
 
 """
-Article metadata on public pages: link-preview tags for everyone.
+Article metadata on public pages: link-preview tags for everyone, BlogPosting
+JSON-LD for crawlers.
 
 A page's ``image`` (else ``site.image``) becomes ``og:image`` and picks the
 large Twitter card; ``site.title`` is ``og:site_name``; a page with
@@ -29,13 +30,15 @@ large Twitter card; ``site.title`` is ``og:site_name``; a page with
 People and crawlers get the same tags, since some preview fetchers look like
 browsers. An image is an https URL as declared, a root path on ``RR_APP_URL``,
 or a path inside the declaring app's build output, served from its production
-version.
+version. Crawlers also get a BlogPosting for each dated page, published by
+the site's organization.
 """
 
 from __future__ import annotations
 
 import asyncio
 import copy
+import json
 import re
 
 import pytest
@@ -44,6 +47,7 @@ from fastapi.testclient import TestClient
 
 import ai.modules.shell.public_pages as pp
 import ai.modules.shell.shell as shell_mod
+from ai.modules.shell.articles import blogposting
 from ai.modules.shell.pages import FALLBACK_PATH, public_page
 from ai.modules.shell.public_pages import Aggregate, Page
 
@@ -230,3 +234,109 @@ def test_a_hostile_site_title_stays_escaped_in_every_head(shell_root, monkeypatc
         text = _client().get('/blog/launch', headers={'User-Agent': ua}).text
         assert '<script>alert' not in text and '<!--' not in text
         assert _meta(text)['og:site_name'] == ['&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;&lt;!--']
+
+
+# ---------------------------------------------------------------------------
+# BlogPosting JSON-LD (crawlers only)
+# ---------------------------------------------------------------------------
+
+_LD = re.compile(r'<script type="application/ld\+json">(.*?)</script>', re.S)
+
+
+def _jsonld(text: str) -> list:
+    return [json.loads(block) for block in _LD.findall(text)]
+
+
+def test_crawlers_get_a_blogposting_for_each_dated_page(blog):
+    assert _jsonld(blog.get('/blog/launch', headers={'User-Agent': GOOGLEBOT}).text) == [
+        {
+            '@context': 'https://schema.org',
+            '@type': 'BlogPosting',
+            'headline': 'Launch',
+            'description': 'We launched.',
+            'datePublished': '2026-11-09',
+            'dateModified': '2026-11-10T09:00:00Z',
+            'author': [
+                {'@type': 'Person', 'name': 'Ansh', 'url': 'https://rocketride.ai/team/ansh'},
+                {'@type': 'Person', 'name': 'Rod'},
+            ],
+            'image': f'{APP_URL}/apps/rocketride.home/v3/blog/launch.png',
+            'publisher': {'@type': 'Organization', 'name': 'RocketRide', 'url': f'{APP_URL}/'},
+            'mainEntityOfPage': f'{APP_URL}/blog/launch',
+        }
+    ]
+
+
+def test_a_post_without_authors_is_by_its_publisher(blog):
+    [post] = _jsonld(blog.get('/blog/hello', headers={'User-Agent': GOOGLEBOT}).text)
+    assert post['author'] == post['publisher'] == {'@type': 'Organization', 'name': 'RocketRide', 'url': f'{APP_URL}/'}
+    assert post['datePublished'] == post['dateModified'] == '2026-10-01T08:00:00+02:00'
+    assert post['image'] == f'{APP_URL}/apps/rocketride.home/seo-assets/hello.png'
+
+
+def test_people_and_undated_pages_get_no_blogposting(blog):
+    assert _jsonld(blog.get('/blog/launch', headers={'User-Agent': BROWSER}).text) == []
+    for path in ('/', '/blog'):
+        assert _jsonld(blog.get(path, headers={'User-Agent': GOOGLEBOT}).text) == [], path
+
+
+def test_blogposting_escapes_script_close(shell_root, monkeypatch):
+    monkeypatch.setenv('RR_APP_URL', APP_URL)
+    hostile = '</script><script>alert(1)</script> ]]> <!-- & </SCRIPT >'
+    home = copy.deepcopy(BLOG_HOME)
+    home['site']['title'] = hostile
+    home['publicPages'][2].update(title=hostile, description=hostile, authors=[{'name': hostile}])
+    _publish(monkeypatch, home=home)
+    text = _client().get('/blog/launch', headers={'User-Agent': GOOGLEBOT}).text
+    assert '<script>alert' not in text and '</SCRIPT' not in text and '<!--' not in text
+    [inner] = _LD.findall(text)
+    assert not set('<>&') & set(inner)
+    [post] = _jsonld(text)
+    assert post['headline'] == post['description'] == post['author'][0]['name'] == post['publisher']['name'] == hostile
+
+
+def test_a_declared_organization_is_referenced_by_its_id():
+    post = Page('/blog/x', 'rocketride.home', 'X', published='2026-11-09')
+    site = {'title': 'RocketRide', 'organization': {'name': 'RocketRide', 'url': 'https://rocketride.ai'}}
+    out = blogposting(post, site, canonical='', image='')
+    assert out['publisher'] == out['author'] == {'@id': 'https://rocketride.ai#organization'}
+    assert 'mainEntityOfPage' not in out and 'image' not in out and 'description' not in out
+
+
+def test_without_rr_app_url_the_publisher_has_no_url(monkeypatch):
+    monkeypatch.delenv('RR_APP_URL', raising=False)
+    post = Page('/blog/x', 'rocketride.home', 'X', published='2026-11-09')
+    assert blogposting(post, {'title': 'RocketRide'}, canonical='', image='')['publisher'] == {
+        '@type': 'Organization',
+        'name': 'RocketRide',
+    }
+    monkeypatch.setenv('RR_APP_URL', APP_URL)
+    # No site title: the organization is named after the origin.
+    assert blogposting(post, {}, canonical='', image='')['publisher'] == {
+        '@type': 'Organization',
+        'name': 'cloud.example',
+        'url': f'{APP_URL}/',
+    }
+
+
+@pytest.mark.parametrize(
+    'title,site_title,headline',
+    [
+        ('Launch | RocketRide', 'RocketRide', 'Launch'),
+        ('Launch | RocketRide | RocketRide', 'RocketRide', 'Launch | RocketRide'),
+        ('Launch | Other', 'RocketRide', 'Launch | Other'),
+        ('Launch | RocketRide', '', 'Launch | RocketRide'),
+        ('Launch | ', '', 'Launch | '),
+        # A title that is only the suffix stays whole.
+        (' | RocketRide', 'RocketRide', ' | RocketRide'),
+    ],
+)
+def test_the_headline_drops_the_site_suffix(title, site_title, headline):
+    post = Page('/blog/x', 'rocketride.home', title, published='2026-11-09')
+    assert blogposting(post, {'title': site_title}, canonical='', image='')['headline'] == headline
+
+
+def test_the_head_keeps_the_full_title(blog):
+    text = blog.get('/blog/launch', headers={'User-Agent': GOOGLEBOT}).text
+    assert '<title>Launch | RocketRide</title>' in text and _meta(text)['og:title'] == ['Launch | RocketRide']
+    assert _jsonld(text)[0]['headline'] == 'Launch'

@@ -303,6 +303,29 @@ def test_sitemap_ignores_forwarded_headers(app_url):
     assert f'<loc>{BASE}/pricing</loc>' in resp.text
 
 
+def test_lastmod_prefers_page_dates(app_url):
+    bound = 1_700_000_100.0  # 2023-11-14T22:15:00Z
+    _use(
+        Page('/', 'rocketride.home', 'Home', published_at=bound),
+        Page('/blog/a', 'rocketride.home', 'A', published='2026-11-09', modified='2026-11-09T23:30:00-05:00'),
+        Page('/blog/b', 'rocketride.home', 'B', published='2026-10-01T23:30:00-05:00', published_at=bound),
+        Page('/blog/c', 'rocketride.home', 'C', modified='2026-09-30', published_at=bound),
+        Page('/unbound', 'rocketride.home', 'U'),
+    )
+    text = _client().get('/sitemap.xml').text
+    # The page's own date (its UTC date); else when its app's version went live.
+    assert f'<url><loc>{BASE}/</loc><lastmod>2023-11-14T22:15:00+00:00</lastmod></url>' in text
+    assert f'<url><loc>{BASE}/blog/a</loc><lastmod>2026-11-10</lastmod></url>' in text
+    assert f'<url><loc>{BASE}/blog/b</loc><lastmod>2026-10-02</lastmod></url>' in text
+    assert f'<url><loc>{BASE}/blog/c</loc><lastmod>2026-09-30</lastmod></url>' in text
+    assert f'<url><loc>{BASE}/unbound</loc></url>' in text
+
+
+def test_legacy_pages_have_no_lastmod(app_url):
+    assert pp.current().legacy
+    assert '<lastmod>' not in _client().get('/sitemap.xml').text
+
+
 def test_sitemap_sets_cache_control(app_url):
     resp = _client().get('/sitemap.xml')
     assert resp.headers['cache-control'] == 'public, max-age=3600'

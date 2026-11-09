@@ -59,6 +59,7 @@ import posixpath
 import re
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlsplit
@@ -679,6 +680,18 @@ def _md(text: str) -> str:
     return text.replace('\\', '\\\\').replace('[', '\\[').replace(']', '\\]')
 
 
+def own_title(title: str, site_title: str) -> str:
+    """A page title without the trailing `` | <site title>`` the site brands it with.
+
+    For where the title names the page by itself, as an article headline
+    does: search engines and readers then see the article's own title. The
+    title stays whole when there is no site title, or when the suffix is all
+    there is.
+    """
+    own = title.removesuffix(f' | {site_title}') if site_title else title
+    return own if own.strip() else title
+
+
 def sitemap_entries() -> list:
     """``(path, page)`` for every listed public page, sorted by path.
 
@@ -689,15 +702,33 @@ def sitemap_entries() -> list:
     return [(page.path, page) for page in current().pages() if page.listed]
 
 
+def _lastmod(page) -> str:
+    """``<lastmod>``: the page's ``modified`` or ``published`` date, else when its production version went live.
+
+    The UTC date of the declared instant; the fallback is the production
+    binding time, a W3C datetime in UTC. Omitted when neither is known (the
+    legacy pages).
+    """
+    from .contract import page_instant
+
+    declared = page.modified or page.published
+    if declared:
+        return f'<lastmod>{page_instant(declared).date().isoformat()}</lastmod>'
+    if page.published_at is None:
+        return ''
+    stamp = datetime.fromtimestamp(page.published_at, tz=timezone.utc).isoformat(timespec='seconds')
+    return f'<lastmod>{stamp}</lastmod>'
+
+
 async def sitemap_xml(request: Request):
     """
     Serve ``/sitemap.xml`` — one ``<url>`` per listed public page.
 
     Pages come from the page aggregate (published manifests, or the legacy
-    list until one declares pages), sorted by path. Absolute URLs come
-    exclusively from ``RR_APP_URL``. Deployments without it (OSS,
-    self-hosted, desktop) have no public marketing site to index, so the
-    endpoint 404s.
+    list until one declares pages), sorted by path, each with its
+    ``<lastmod>`` when known. Absolute URLs come exclusively from
+    ``RR_APP_URL``. Deployments without it (OSS, self-hosted, desktop) have
+    no public marketing site to index, so the endpoint 404s.
 
     Args:
         request: Incoming HTTP request.
@@ -716,7 +747,9 @@ async def sitemap_xml(request: Request):
         raise HTTPException(status_code=404, detail='Not found')
 
     # escape() guards against XML metacharacters in the configured URL.
-    entries = ''.join(f'  <url><loc>{escape(base_url + path)}</loc></url>\n' for path, _ in sitemap_entries())
+    entries = ''.join(
+        f'  <url><loc>{escape(base_url + path)}</loc>{_lastmod(page)}</url>\n' for path, page in sitemap_entries()
+    )
 
     xml = (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
