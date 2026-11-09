@@ -628,3 +628,31 @@ TEST_CASE("store::Services::oldFormat") {
             R"({ "protocol": "fx://", "properties": [] })"_json, path));
     }
 }
+
+//-----------------------------------------------------------------------------
+// The directory walk init() runs refuses an old-format definition file: the
+// load fails and the error names the file, so a stale node cannot be loaded
+//-----------------------------------------------------------------------------
+TEST_CASE("store::Services::oldFormatFailsLoad") {
+    const auto root = testPath() / "services-old-format";
+    const auto nodeDir = root / "stale_node";
+    if (!file::exists(root)) REQUIRE_NO_ERROR(file::mkdir(root));
+    if (!file::exists(nodeDir)) REQUIRE_NO_ERROR(file::mkdir(nodeDir));
+
+    const auto definition = nodeDir / "services.json";
+    REQUIRE_NO_ERROR(file::put(
+        definition,
+        R"({ "protocol": "stale://", "fields": {}, "shape": [] })"_tv));
+
+    const auto ccode = IServices::loadServices(root, (Text) "*");
+    REQUIRE_ERROR(ccode, Ec::InvalidJson,
+                  "Old-format service definition (\"shape\") is not "
+                  "supported - declare \"properties\" in");
+    REQUIRE(ccode.message().contains("stale_node"));
+    REQUIRE(ccode.message().contains("services.json"));
+
+    // The refused file registered nothing
+    REQUIRE_FALSE(IServices::getServiceDefinition((Text) "stale"));
+
+    *file::remove(definition);
+}

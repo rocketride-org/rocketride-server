@@ -67,9 +67,10 @@ what the node actually receives.
 - **Parameters:** `provider` (string, required) — a provider from
   `list_components`; `config` (object, optional) — the component's config
   block, omitted for pure defaults.
-- **Returns:** `resolved` (the config the node would receive, by key), `paths`
-  (where each key is stored in the config tree), `params`, `paramKeys` and
-  `envKeys`, plus `ok: true`.
+- **Returns:** `provider`, `resolved` (the config the node would receive, by
+  key), `paths` (where each key is stored in the config tree), `params`,
+  `paramKeys` and `envKeys`, plus `ok: true` and a `hint` when the node has
+  per-call parameters.
 - **Notable:** a config that does not fit the schema (an unknown key, a value
   out of range, a selector set to an option that does not exist) is an error
   naming the key — the same check that stops the node at start. Per-call

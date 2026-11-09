@@ -983,9 +983,12 @@ def test_misc_commands_init_is_noop():
 
 def _schemas(monkeypatch):
     """Serve the QDRANT fixture as store_qdrant's engine-resolved schema; nothing else is known."""
+    from ai.common import node_config
     from tests.rocketlib.schemas import QDRANT
 
-    monkeypatch.setattr(cmd_misc, 'getServiceSchema', lambda provider: QDRANT if provider == 'store_qdrant' else None)
+    monkeypatch.setattr(
+        node_config, 'getServiceSchema', lambda provider: QDRANT if provider == 'store_qdrant' else None
+    )
 
 
 @pytest.mark.asyncio

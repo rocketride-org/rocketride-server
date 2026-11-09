@@ -156,6 +156,17 @@ public:
     //-----------------------------------------------------------------
     static Error init() noexcept;
     static Error deinit() noexcept;
+
+    //-----------------------------------------------------------------
+    ///	@details
+    ///		Walks one directory of service definitions: every
+    ///		services.*json under it (recursively) is parsed, refused
+    ///		if still in the old format, resolved and registered.
+    ///		init() runs it over the nodes tree and --node_path; public
+    ///		so a fixture directory can be loaded in a test
+    //-----------------------------------------------------------------
+    static Error loadServices(const Path &path, const Text &mask) noexcept;
+
     static ErrorOr<IServices::ServiceDefinitionPtr> getServiceDefinition(
         const Text &type) noexcept;
     static ErrorOr<IServices::ServiceDefinitionPtr>

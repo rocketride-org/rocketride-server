@@ -44,16 +44,7 @@ from collections import deque
 from typing import TYPE_CHECKING, Awaitable, Callable, Deque, Dict, Any, List, Mapping, Optional, Tuple
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_fixed
 
-from rocketlib import (
-    ConfigError,
-    ConfigView,
-    IJson,
-    debug,
-    getServiceSchema,
-    resolveConfig,
-    warning,
-    args as startup_args,
-)
+from rocketlib import debug, warning, args as startup_args
 from hosting import HOSTED_FLAG, SHARED_HOST_FLAG
 from ai.constants import (
     CONST_DEFAULT_MAX_THREADS,
@@ -76,6 +67,7 @@ from ai.constants import (
 from ai.account.base import OutOfCreditsError
 from ai import CONST_AI_NODE_SCRIPT
 from ai.common.dap import DAPBase, DAPClient, TransportWebSocket
+from ai.common.node_config import resolve_node_config
 from ai.common.rocketride_db import DB_PROVIDERS, db_target, dsn_key, exposes_public_endpoint
 from ai.modules.task.pipeflow import apply_pipeflow_event
 from ai.modules.task.run_log import RunLogWriter
@@ -359,26 +351,6 @@ CONST_MCP_CLIENT_NODE_PATH = 'nodes.tool_mcp_client'
 # so the task can rely on them.
 CONST_HOSTED_CHILD_FLAG = HOSTED_FLAG
 CONST_SHARED_HOST_CHILD_FLAG = SHARED_HOST_FLAG
-
-
-def resolve_node_config(provider: str, config: Dict[str, Any]) -> ConfigView:
-    """Resolve a component's stored config exactly as the node does at start.
-
-    Args:
-        provider: Component provider, e.g. 'tool_mcp_client'.
-        config: The component's config block as the pipeline stores it.
-
-    Returns:
-        ConfigView: Defaults + stored values, validated and flattened to the
-        active branch - what ``IGlobalBase.config`` serves the node.
-
-    Raises:
-        ConfigError: The service is unknown, or the config does not fit its schema.
-    """
-    schema = getServiceSchema(provider)
-    if schema is None:
-        raise ConfigError(f'The service {provider} was not found')
-    return resolveConfig(IJson.toDict(schema), IJson.toDict(config))
 
 
 def _service_capabilities(service: Any) -> List[str]:

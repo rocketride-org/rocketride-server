@@ -47,8 +47,9 @@ Architecture:
 import time
 from typing import TYPE_CHECKING, Dict, Any, List, Tuple
 from rocketride import EVENT_TYPE
-from rocketlib import ConfigError, IJson, getServiceSchema, resolveConfig, validatePipeline
+from rocketlib import ConfigError, resolveConfig, validatePipeline
 from ai.common.dap import DAPConn, TransportBase
+from ai.common.node_config import node_schema, resolve_node_config
 from ai.common.list_rows import paginate_rows
 from ai.account.models import resolve_run_permissions
 from ..pipeline import resolve_implied_source, resolve_pipeline_env
@@ -58,26 +59,6 @@ from .cmd_monitor import owner_key, owner_wildcard_key
 # Only import for type checking to avoid circular import errors
 if TYPE_CHECKING:
     from ..task_server import TaskServer
-
-
-def _resolve_node_config(provider: str, config: Dict[str, Any]):
-    """Resolve a component's stored config exactly as the node does at start.
-
-    Args:
-        provider: Component provider, e.g. 'llm_openai'.
-        config: The component's config block as the pipeline stores it.
-
-    Returns:
-        ConfigView: Defaults + stored values, validated and flattened to the
-        active branch - what ``IGlobalBase.config`` serves the node.
-
-    Raises:
-        ConfigError: The service is unknown, or the config does not fit its schema.
-    """
-    schema = getServiceSchema(provider)
-    if schema is None:
-        raise ConfigError(f'The service {provider} was not found')
-    return resolveConfig(IJson.toDict(schema), IJson.toDict(config))
 
 
 def _config_errors(components: List[Any]) -> List[Dict[str, Any]]:
@@ -101,10 +82,11 @@ def _config_errors(components: List[Any]) -> List[Dict[str, Any]]:
         if not isinstance(component, dict):
             continue
         provider = component.get('provider')
-        if not provider or getServiceSchema(provider) is None:
+        schema = node_schema(provider) if provider else None
+        if schema is None:
             continue
         try:
-            _resolve_node_config(provider, component.get('config') or {})
+            resolveConfig(schema, component.get('config') or {})
         except ConfigError as e:
             errors.append({'id': component.get('id') or provider, 'message': f'{provider}: {e}'})
     return errors
@@ -387,7 +369,7 @@ class MiscCommands(DAPConn):
             if not isinstance(config, dict):
                 raise ValueError('config must be an object')
 
-            view = _resolve_node_config(provider, config)
+            view = resolve_node_config(provider, config)
 
             # The view plus the schema facts an author cannot read off the values:
             # where each key lives in the stored tree, and which keys a caller can
