@@ -137,6 +137,34 @@ TEST_CASE("store::bindings") {
                       Ec::NotFound, "Parent binding is not live");
     }
 
+    SECTION("a released id never attaches to the slot's next holder") {
+        auto parent = endpoint->getPipe(PIPELINE_TRACE_LEVEL::FULL);
+        REQUIRE_NO_ERROR(parent);
+        auto released = (*parent)->bindingId;
+        REQUIRE_NO_ERROR(endpoint->putPipe(*parent));
+
+        // The same slot is busy again under a NEW binding: the moment it is
+        // visible as busy it already carries the new id, never the old one
+        auto next = endpoint->getPipe(PIPELINE_TRACE_LEVEL::NONE);
+        REQUIRE_NO_ERROR(next);
+        REQUIRE((*next)->pipeId == (*parent)->pipeId);
+        REQUIRE((*next)->busy);
+        REQUIRE((*next)->bindingId != released);
+
+        REQUIRE_ERROR(endpoint->getPipe(PIPELINE_TRACE_LEVEL::NONE, released),
+                      Ec::NotFound, "Parent binding is not live");
+
+        // While the new holder's own id is a valid parent
+        auto child = endpoint->getPipe(PIPELINE_TRACE_LEVEL::FULL,
+                                       (*next)->bindingId);
+        REQUIRE_NO_ERROR(child);
+        REQUIRE((*child)->rootBindingId == (*next)->bindingId);
+        REQUIRE((*child)->traceLevel == PIPELINE_TRACE_LEVEL::NONE);
+
+        REQUIRE_NO_ERROR(endpoint->putPipe(*child));
+        REQUIRE_NO_ERROR(endpoint->putPipe(*next));
+    }
+
     SECTION("NONE and FULL bindings on one engine: only FULL emits") {
         // Swap in the capturing monitor for the section (a managed factory
         // Ptr, like the one monitor init installs)
@@ -180,6 +208,19 @@ TEST_CASE("store::bindings") {
         auto end = fields(capture->lines[1]);
         REQUIRE(end[0] == "END");
         REQUIRE(std::stoull(end[4], nullptr, 16) == (*loud)->bindingId);
+
+        // A '*' in the entry name cannot shift the fields after it
+        capture->lines.clear();
+        auto starred = test.getDummyEntry("a*b*c.txt");
+        REQUIRE_NO_ERROR((*loud)->open(starred));
+        REQUIRE_NO_ERROR((*loud)->close());
+        REQUIRE(capture->lines.size() == 2);
+        auto starredBegin = fields(capture->lines[0]);
+        REQUIRE(starredBegin[3] == "abc.txt");
+        REQUIRE(std::stoull(starredBegin[4], nullptr, 16) == (*loud)->bindingId);
+        REQUIRE(std::stoull(starredBegin[5], nullptr, 16) ==
+                (*loud)->rootBindingId);
+        REQUIRE(starredBegin[6] == "{}");
 
         REQUIRE_NO_ERROR(endpoint->putPipe(*loud));
         REQUIRE_NO_ERROR(endpoint->putPipe(*quiet));

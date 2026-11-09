@@ -436,8 +436,20 @@ ErrorOr<ServicePipe> IServiceEndpoint::getPipe(
     // level, unless a parent binding is named
     uint64_t rootBindingId = 0;
 
+    // Stamps the binding onto a pipe that is busy for us. Runs UNDER
+    // m_stackLock: the parent lookup above reads these fields of every busy
+    // pipe under the same lock, so a pipe is never visible as busy with the
+    // previous holder's id. The id is minted from the process-wide counter
+    // and never comes back; the slot (pipeId) does
+    auto stamp = [&](ServicePipe &bound) noexcept {
+        bound->bindingId =
+            s_nextBindingId.fetch_add(1, std::memory_order_relaxed);
+        bound->rootBindingId = rootBindingId ? rootBindingId : bound->bindingId;
+        bound->traceLevel = traceLevel;
+        bound->bindDepth = 0;
+    };
+
     // Find a pipe
-    ServicePipe pipe;
     _block() {
         // Lock the pipes - we are manipulating the pipe stacks
         util::Guard stackGuard{[&] { m_stackLock.lock(); },
@@ -467,39 +479,35 @@ ErrorOr<ServicePipe> IServiceEndpoint::getPipe(
 
             // Get a reference to the head - should be "pipe"
             ServiceInstance &filter = stack[0];
-            ServicePipe &candidate = (ServicePipe &)filter;
+            ServicePipe &pipe = (ServicePipe &)filter;
 
             // If it is busy, skip it
-            if (candidate->busy) continue;
+            if (pipe->busy) continue;
 
-            // Mark as busy
-            candidate->busy = true;
+            // Mark as busy and bind it before anyone else can see it busy
+            pipe->busy = true;
+            stamp(pipe);
 
-            // Take the pipe
-            pipe = candidate;
-            break;
+            // Return the bound pipe
+            return pipe;
         }
     }
 
-    // We don't have any available pipes, create one
-    if (!pipe) {
-        auto result = buildInstancePipe();
+    // We don't have any available pipes, create one - it comes back busy
+    auto result = buildInstancePipe();
 
-        // If we got an error
-        if (!result) return result.ccode();
+    // If we got an error
+    if (!result) return result.ccode();
 
-        pipe = _mv(*result);
+    // Bind it under the same lock the parent lookup takes
+    _block() {
+        util::Guard stackGuard{[&] { m_stackLock.lock(); },
+                               [&] { m_stackLock.unlock(); }};
+        stamp(*result);
     }
 
-    // Stamp the binding - the id is minted from the process-wide counter
-    // and never comes back; the slot (pipeId) does
-    pipe->bindingId = s_nextBindingId.fetch_add(1, std::memory_order_relaxed);
-    pipe->rootBindingId = rootBindingId ? rootBindingId : pipe->bindingId;
-    pipe->traceLevel = traceLevel;
-    pipe->bindDepth = 0;
-
     // Return the bound pipe
-    return pipe;
+    return *result;
 }
 
 //-------------------------------------------------------------------------
