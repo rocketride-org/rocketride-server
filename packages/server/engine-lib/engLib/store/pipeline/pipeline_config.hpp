@@ -52,6 +52,7 @@ public:
                                   bool overwrite = false) noexcept;
     static Error decryptSection(json::Value &section,
                                 bool overwrite = false) noexcept;
+    Error resolveSecureParameters() noexcept;
 
     Error encrypt() noexcept;
     static Error encryptComponent(json::Value &component) noexcept;
