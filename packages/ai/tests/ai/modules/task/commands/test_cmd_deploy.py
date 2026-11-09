@@ -221,12 +221,36 @@ class TestPipeDoorNamespace:
         account_stub.deployments_publish.assert_awaited_once()
 
     @pytest.mark.asyncio
+    async def test_kind_less_legacy_pipe_rows_keep_publishing(self, account_stub):
+        """A row with no kind is a pipe (the backend's reading), so it is pipe history."""
+        conn = self._dev_conn()
+        account_stub.deployments_versions.return_value = [{'version': 1}]
+        await conn._deploy_add_pipe({}, {'pipeline': {**PIPE, 'project_id': 'acme.legacy'}})
+        account_stub.deployments_publish.assert_awaited_once()
+
+    @pytest.mark.asyncio
     async def test_namespace_id_with_an_app_row_stays_refused(self, account_stub):
         conn = self._dev_conn()
         account_stub.deployments_versions.return_value = [
             {'version': 1, 'kind': 'pipe'},
             {'version': 2, 'kind': 'app'},
         ]
+        with pytest.raises(ValueError, match='developer namespace'):
+            await conn._deploy_add_pipe({}, {'pipeline': {**PIPE, 'project_id': 'acme.brandy'}})
+        account_stub.deployments_publish.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        'rows',
+        [
+            [{'version': 1, 'kind': 'node'}],
+            [{'version': 1, 'kind': 'pipe'}, {'version': 2, 'kind': 'node'}],
+        ],
+    )
+    async def test_namespace_id_without_pipe_only_history_stays_refused(self, account_stub, rows):
+        """Only pipe-only history earns the exception: a node row does not."""
+        conn = self._dev_conn()
+        account_stub.deployments_versions.return_value = rows
         with pytest.raises(ValueError, match='developer namespace'):
             await conn._deploy_add_pipe({}, {'pipeline': {**PIPE, 'project_id': 'acme.brandy'}})
         account_stub.deployments_publish.assert_not_awaited()

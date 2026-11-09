@@ -309,7 +309,7 @@ async def assert_pipe_id_outside_app_namespace(conn: Any, account: Any, org_id: 
     The inverse of ``_assert_owns_namespace``: ``<developerId>`` and
     ``<developerId>.*`` are app ids, so the pipe door must not mint registry
     rows there. Exception: a caller whose org ALREADY holds pipe rows for the
-    id (and no app row) keeps publishing it, so registering a developer id
+    id (and only pipe rows: no app or node row) keeps publishing it, so registering a developer id
     never strands a pipe the org already ships (pipe rows carry no app
     identity, the resolvers read ``kind: 'app'`` only).
 
@@ -328,7 +328,10 @@ async def assert_pipe_id_outside_app_namespace(conn: Any, account: Any, org_id: 
         rail = await account.deployments_versions(org_id, project_id)
     except Exception:
         rail = []
-    if rail and not _app_rows(rail):
+    # Pipe-ONLY history: a node row (or any other non-pipe kind) on the id is
+    # not a pipe the org already ships, so it earns no exception. A kind-less
+    # row is a pipe, as the deployment backend reads it.
+    if rail and all(isinstance(e, dict) and (e.get('kind') or 'pipe') == 'pipe' for e in rail):
         return
     raise ValueError(
         f'Pipeline project_id {project_id!r} is inside your developer namespace {dev!r} — '
