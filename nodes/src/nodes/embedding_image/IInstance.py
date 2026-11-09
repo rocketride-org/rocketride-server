@@ -51,6 +51,15 @@ class IInstance(IInstanceBase):
         self._image_chunk_id = 0
         self._source_descriptor = None
 
+    def open(self, object):
+        """Reset the per-object buffers and counters so nothing from a previous object carries over.
+
+        Args:
+            object: The entry being opened (unused; the reset is the point).
+        """
+        self._image_chunk_id = 0
+        self._source_descriptor = None
+
     def writeDocuments(self, documents: List[Doc]):
         """
         Process and enrich a list of documents by generating embeddings for image documents.

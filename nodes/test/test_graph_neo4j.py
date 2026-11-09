@@ -41,6 +41,7 @@ from pathlib import Path
 from typing import Iterator
 
 import pytest
+import rocketlib as _real_rocketlib
 
 _REPO = Path(__file__).resolve().parents[2]
 _GRAPH_PKG = _REPO / 'packages' / 'ai' / 'src' / 'ai' / 'common' / 'graph'
@@ -94,12 +95,16 @@ _STUB_NAMES = (
 def _install_stubs() -> None:
     rocketlib = types.ModuleType('rocketlib')
     rocketlib.IInstanceBase = _StubBase
-    rocketlib.IGlobalBase = _StubBase
+    # The real base and service lookups: IGlobal.config resolves glb.connConfig
+    # through the engine's schema, and the graph base's converted/unconverted
+    # split reads the real definition.
+    rocketlib.IGlobalBase = _real_rocketlib.IGlobalBase
+    rocketlib.getServiceDefinition = _real_rocketlib.getServiceDefinition
+    rocketlib.getServiceSchema = _real_rocketlib.getServiceSchema
     rocketlib.tool_function = lambda **kwargs: lambda f: f
     rocketlib.debug = lambda *a, **kw: None
     rocketlib.error = lambda *a, **kw: None
     rocketlib.warning = lambda *a, **kw: None
-    rocketlib.OPEN_MODE = types.SimpleNamespace(CONFIG=object())
     rocketlib_types = types.ModuleType('rocketlib.types')
     rocketlib_types.IInvokeLLM = types.SimpleNamespace(Ask=lambda **kw: kw)
     rocketlib.types = rocketlib_types
@@ -117,8 +122,10 @@ def _install_stubs() -> None:
     table = types.ModuleType('ai.common.table')
     table.Table = _StubTable
 
+    # The graph base still imports Config for UNCONVERTED drivers (Step 2 item 5
+    # deletes it); this node is converted, so nothing here ever calls it.
     config = types.ModuleType('ai.common.config')
-    config.Config = types.SimpleNamespace(getNodeConfig=lambda *a, **kw: {})
+    config.Config = None
 
     config_utils = _load_from_path('ai.common.config_utils', _CONFIG_UTILS)
     utils = types.ModuleType('ai.common.utils')

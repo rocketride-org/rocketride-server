@@ -30,39 +30,48 @@
 			]
 		}
 	],
-	"preconfig": {
-		"default": "v2-small",
-		"profiles": {
-			"v2-small": {
-				"title": "Depth Anything V2 Small",
-				"model": "depth-anything/Depth-Anything-V2-Small-hf",
-				"revision": "5426e4f0f36572d16453bbda7a8389317b1bef99"
-			}
-		}
-	},
-	"fields": {
+	//
+	// Optional:
+	//		Local property definitions. The model is the selector; the one
+	//		profile pins its Hugging Face model and revision as constants.
+	//		maxEdge is shared by every model, so it sits beside the selector.
+	//
+	"propertyDefinitions": {
 		"depth_estimate.maxEdge": {
-			"type": "number",
+			"type": "integer",
 			"title": "Max input edge (px)",
 			"description": "Downscale input so the long edge <= this value before inference; dense output is upsampled back to original. Lower = faster + less VRAM, higher = sharper depth.",
 			"default": 1024,
 			"minimum": 256,
 			"maximum": 4096
-		},
-		"depth_estimate.profile": {
-			"title": "Model",
-			"type": "string",
-			"default": "v2-small",
-			"enum": ["*>preconfig.profiles.*.title"]
 		}
 	},
-	"shape": [
+	//
+	// Required:
+	//		Defines the properties shown in the pipeline builder side panel, in order
+	//
+	"properties": [
 		{
-			"section": "Pipe",
-			"title": "Depth Estimation",
-			"properties": ["depth_estimate.profile", "depth_estimate.maxEdge"]
-		}
+			"name": "profile",
+			"type": "string",
+			"title": "Model",
+			"default": "v2-small",
+			"enum": {
+				"v2-small": {
+					"title": "Depth Anything V2 Small",
+					"properties": [
+						{ "name": "model", "type": "constant", "default": "depth-anything/Depth-Anything-V2-Small-hf" },
+						{ "name": "revision", "type": "constant", "default": "5426e4f0f36572d16453bbda7a8389317b1bef99" }
+					]
+				}
+			}
+		},
+		"depth_estimate.maxEdge"
 	],
+	//
+	//	Test configuration for automated node testing. "profiles" lists
+	//	values of the "profile" selector.
+	//
 	"test": {
 		"profiles": ["v2-small"],
 		"requiresHardware": { "cuda": { "vramGb": 2 }, "mps": { "ramGb": 4 }, "cpu": { "ramGb": 4 } },

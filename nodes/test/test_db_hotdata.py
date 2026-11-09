@@ -2796,9 +2796,14 @@ def test_the_config_schema_advertises_the_floor_the_node_enforces():
     """The form must not accept a value the node silently overrides, and neither
     may drift from what the API accepts.
     """
-    services = json.loads((_NODE_DIR / 'services.json').read_text(encoding='utf-8'))
-    field = services['fields']['hotdata.async_after_ms']
-    assert field['minimum'] == iglobal_mod.ASYNC_AFTER_MS_MIN == 1000
+    from .framework.discovery import _parse_service_json
+
+    services = _parse_service_json(str(_NODE_DIR / 'services.json'))
+    field = services['propertyDefinitions']['hotdata.async_after_ms']
+    # 1000 is the API's floor: anything lower is answered with 400
+    # "async_after_ms must be at least 1000". The resolver enforces the
+    # schema, so the node no longer clamps.
+    assert field['minimum'] == 1000
     assert field['default'] >= field['minimum']
 
 

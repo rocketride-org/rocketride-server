@@ -38,7 +38,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from redis.exceptions import RedisError
 
-from rocketlib import OPEN_MODE, debug, warning
+from rocketlib import debug, warning
 
 from ai.common.graph import GraphGlobalBase
 from ai.common.utils import config_int, parse_bool
@@ -75,12 +75,6 @@ class IGlobal(GraphGlobalBase):
     allow_writes: bool = False
     max_rows: int = 250
     query_timeout_ms: int = DEFAULT_TIMEOUT_MS
-
-    def beginGlobal(self) -> None:
-        # Config-mode opens the node for editing only; no server round-trip.
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
-        super().beginGlobal()
 
     # ------------------------------------------------------------------
     # Driver hooks

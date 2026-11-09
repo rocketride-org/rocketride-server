@@ -85,50 +85,13 @@
 	],
 	//
 	// Optional:
-	//		Profile section - configuration options used by the driver
+	//		Local property definitions. The preset is the selector; each
+	//		branch pins its mode, model and revision as constants. maxEdge
+	//		is shared (hoisted beside the selector); the semantic preset
+	//		aliases the threshold with its own default, so each preset keeps
+	//		its own stored value.
 	//
-	"preconfig": {
-		"default": "mask2former-instance",
-		"profiles": {
-			"mask2former-instance": {
-				"title": "Mask2Former — Object Instances (COCO, 80 classes, default)",
-				"mode": "instance",
-				"engine": "mask2former-instance",
-				"model": "facebook/mask2former-swin-tiny-coco-instance",
-				"revision": "22c4a2f15dc88149b8b8d9f4d42c54431fbd66f6",
-				"threshold": 0.3,
-				"maxEdge": 1024
-			},
-			"mask2former-semantic": {
-				"title": "Mask2Former — Scene Regions (ADE20K, 150 classes)",
-				"mode": "semantic",
-				"engine": "mask2former-semantic",
-				"model": "facebook/mask2former-swin-tiny-ade-semantic",
-				"revision": "c8cf1b5e823aee214d937d0d001c1850ba44ef6a",
-				"threshold": 0.0,
-				"maxEdge": 1024
-			}
-		}
-	},
-	//
-	// Optional:
-	//		Local field definitions for this service
-	//
-	"fields": {
-		"detect_segment.mode": {
-			"type": "string",
-			"title": "Mode",
-			"description": "Segmentation mode. instance: per-instance masks (default). semantic: per-pixel class map. Both use Mask2Former under the hood.",
-			"default": "instance",
-			"enum": ["instance", "semantic"]
-		},
-		"detect_segment.engine": {
-			"type": "string",
-			"title": "Engine",
-			"description": "Backing engine. Gated by mode: instance -> mask2former-instance; semantic -> mask2former-semantic.",
-			"default": "mask2former-instance",
-			"enum": ["mask2former-instance", "mask2former-semantic"]
-		},
+	"propertyDefinitions": {
 		"detect_segment.threshold": {
 			"type": "number",
 			"title": "Confidence threshold",
@@ -137,43 +100,58 @@
 			"minimum": 0.0,
 			"maximum": 1.0
 		},
+		"detect_segment.semantic.threshold": {
+			"base": "detect_segment.threshold",
+			"default": 0.0
+		},
 		"detect_segment.maxEdge": {
-			"type": "number",
+			"type": "integer",
 			"title": "Max input edge (px)",
 			"description": "Downscale source so long edge <= this value before inference; masks are upsampled back to the source size. Lower = faster + less VRAM.",
 			"default": 1024,
 			"minimum": 256,
 			"maximum": 4096
-		},
-		"detect_segment.profile": {
-			"title": "Profile",
-			"description": "Segmentation preset. Runs on CPU/MPS/CUDA via transformers.",
-			"type": "string",
-			"default": "mask2former-instance",
-			"enum": ["*>preconfig.profiles.*.title"],
-			"conditional": [
-				{
-					"value": "mask2former-instance",
-					"properties": ["detect_segment.threshold", "detect_segment.maxEdge"]
-				},
-				{
-					"value": "mask2former-semantic",
-					"properties": ["detect_segment.threshold", "detect_segment.maxEdge"]
-				}
-			]
 		}
 	},
 	//
 	// Required:
-	//		Defines the fields (shape) of the service
+	//		Defines the properties shown in the pipeline builder side panel, in order
 	//
-	"shape": [
+	"properties": [
 		{
-			"section": "Pipe",
-			"title": "Segmentation",
-			"properties": ["detect_segment.profile"]
+			"name": "profile",
+			"type": "string",
+			"title": "Profile",
+			"description": "Segmentation preset. Runs on CPU/MPS/CUDA via transformers.",
+			"default": "mask2former-instance",
+			"enum": {
+				"mask2former-instance": {
+					"title": "Mask2Former - Object Instances (COCO, 80 classes, default)",
+					"properties": [
+						{ "name": "mode", "type": "constant", "default": "instance" },
+						{ "name": "model", "type": "constant", "default": "facebook/mask2former-swin-tiny-coco-instance" },
+						{ "name": "revision", "type": "constant", "default": "22c4a2f15dc88149b8b8d9f4d42c54431fbd66f6" },
+						"detect_segment.threshold",
+						"detect_segment.maxEdge"
+					]
+				},
+				"mask2former-semantic": {
+					"title": "Mask2Former - Scene Regions (ADE20K, 150 classes)",
+					"properties": [
+						{ "name": "mode", "type": "constant", "default": "semantic" },
+						{ "name": "model", "type": "constant", "default": "facebook/mask2former-swin-tiny-ade-semantic" },
+						{ "name": "revision", "type": "constant", "default": "c8cf1b5e823aee214d937d0d001c1850ba44ef6a" },
+						"detect_segment.semantic.threshold",
+						"detect_segment.maxEdge"
+					]
+				}
+			}
 		}
 	],
+	//
+	//	Test configuration for automated node testing. "profiles" lists
+	//	values of the "profile" selector.
+	//
 	"test": {
 		"profiles": ["mask2former-instance"],
 		"requiresHardware": { "cuda": { "vramGb": 3 }, "mps": { "ramGb": 6 }, "cpu": { "ramGb": 6 } },

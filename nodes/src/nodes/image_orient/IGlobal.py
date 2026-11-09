@@ -24,8 +24,17 @@
 import os
 from typing import Callable
 
-from ai.common.config import Config
-from rocketlib import IGlobalBase, OPEN_MODE
+from depends import depends
+
+# orient/detect import cv2 at module scope, so the requirements are installed
+# before they are imported. This module is only imported on the run path
+# (config mode imports the validator alone), so the install never runs while a
+# user is merely opening the node's settings panel.
+depends(os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt')
+
+from rocketlib import IGlobalBase
+
+from .orient import build_orient
 
 
 class IGlobal(IGlobalBase):
@@ -41,32 +50,8 @@ class IGlobal(IGlobalBase):
     orient: Callable = None
 
     def beginGlobal(self) -> None:
-        """
-        Return early in config mode, install dependencies, then import the imaging code.
-
-        The order is load-bearing rather than stylistic:
-
-        * The ``OPEN_MODE.CONFIG`` early return matters more here than in a node with no model.
-          Without it, merely opening this node's settings panel in the extension would download
-          the detector.
-        * ``orient``/``detect`` import cv2 at module scope, so importing either before
-          ``depends()`` has run would reach for a package that is not installed yet. Keeping them
-          out of this module's own import block is also what lets the unit tests import
-          ``IInstance`` under the engine's bundled Python, which carries neither cv2 nor Pillow.
-        """
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
-
-        config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-
-        from depends import depends
-
-        requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
-        depends(requirements)
-
-        from .orient import build_orient
-
-        self.orient = build_orient(config)
+        """Bind the algorithm over the resolved tunables (defaults and bounds applied by the resolver)."""
+        self.orient = build_orient(self.config)
 
     def endGlobal(self) -> None:
         """Release the detector the bound callable closes over."""

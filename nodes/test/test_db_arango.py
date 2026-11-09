@@ -25,6 +25,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import rocketlib as _real_rocketlib
 
 # ---------------------------------------------------------------------------
 # Capture lists for the stubbed loggers.
@@ -106,7 +107,9 @@ class _StubTable:
 def _build_import_stubs() -> dict:
     rocketlib = types.ModuleType('rocketlib')
     rocketlib.IInstanceBase = object
-    rocketlib.IGlobalBase = object
+    # The real bases: IGlobal.config resolves glb.connConfig through the engine's schema.
+    rocketlib.IGlobalBase = _real_rocketlib.IGlobalBase
+    rocketlib.IValidatorBase = _real_rocketlib.IValidatorBase
     rocketlib.tool_function = lambda *_a, **_k: lambda fn: fn
     rocketlib.warning = _stub_warning
     rocketlib.error = _stub_error
@@ -127,8 +130,6 @@ def _build_import_stubs() -> dict:
     ai_pkg.__path__ = []
     ai_common = types.ModuleType('ai.common')
     ai_common.__path__ = []
-    ai_config = types.ModuleType('ai.common.config')
-    ai_config.Config = SimpleNamespace(getNodeConfig=lambda *_a, **_k: {})
     ai_schema = types.ModuleType('ai.common.schema')
     ai_schema.Answer = _StubAnswer
     ai_schema.Question = _StubQuestion
@@ -143,7 +144,6 @@ def _build_import_stubs() -> dict:
         'arango.exceptions': arango_exc,
         'ai': ai_pkg,
         'ai.common': ai_common,
-        'ai.common.config': ai_config,
         'ai.common.schema': ai_schema,
         'ai.common.table': ai_table,
     }
@@ -196,6 +196,7 @@ def _load_node():
 
     try:
         utils = _load('utils')
+        _load('IValidator')
         iglobal = _load('IGlobal')
         iinstance = _load('IInstance')
     finally:
@@ -572,32 +573,53 @@ class TestReflectSchema:
         assert any('reflection failed' in w for w in _WARNING_CALLS)
 
 
-class TestBeginGlobalClamps:
-    def _begin_with(self, cfg):
+class TestBeginGlobalResolution:
+    """beginGlobal reads the resolver's view: defaults applied, bounds enforced, the auth branch flat."""
+
+    def _begin_with(self, conn_config, monkeypatch):
+        opened = {}
+
+        def _open(client, config, *, verify=False):
+            opened['config'] = config
+            return SimpleNamespace(aql=SimpleNamespace(execute=lambda *a, **k: iter([])))
+
+        monkeypatch.setattr(_IG, 'open_database', _open)
         ig = IGlobal.__new__(IGlobal)
-        ig.glb = SimpleNamespace(logicalType='db_arango', connConfig={})
-        ig._open_database = lambda *a, **k: SimpleNamespace(aql=SimpleNamespace(execute=lambda *a, **k: iter([])))
+        ig.glb = SimpleNamespace(logicalType='db_arango', connConfig=conn_config)
         ig._reflect_schema = lambda: {'collections': {}, 'graphs': [], 'views': []}
-        orig = _IG.Config.getNodeConfig
-        _IG.Config.getNodeConfig = lambda *a, **k: cfg
-        try:
-            ig.beginGlobal()
-        finally:
-            _IG.Config.getNodeConfig = orig
-        return ig
+        ig.beginGlobal()
+        return ig, opened['config']
 
-    def test_clamps_upper_bounds(self):
-        # Non-UI configs bypass the services.json bounds, so beginGlobal clamps at runtime.
-        ig = self._begin_with(
-            {'endpoint': 'http://x:8529', 'database': 'd', 'max_attempts': 9999, 'max_execute_rows': 10**9}
-        )
-        assert ig.max_validation_attempts == 20
-        assert ig.max_execute_rows == 1_000_000
+    def test_defaults_apply_when_nothing_is_stored(self, monkeypatch):
+        ig, config = self._begin_with({}, monkeypatch)
+        assert ig.endpoint == 'http://localhost:8529'
+        assert ig.database == '_system'
+        assert ig.max_validation_attempts == 5
+        assert ig.max_execute_rows == 25000
+        assert ig.allow_execute is False
+        assert config['auth_method'] == 'userpass' and config['user'] == 'root'
 
-    def test_clamps_lower_bounds(self):
-        ig = self._begin_with({'endpoint': 'http://x:8529', 'database': 'd', 'max_attempts': 0, 'max_execute_rows': 0})
-        assert ig.max_validation_attempts == 1
-        assert ig.max_execute_rows == 1
+    def test_token_branch_flattens_to_the_token(self, monkeypatch):
+        _ig, config = self._begin_with({'auth_method': 'token', 'token': {'token': 'jwt'}}, monkeypatch)
+        assert config['auth_method'] == 'token' and config['token'] == 'jwt'
+        assert 'user' not in config and 'password' not in config
+
+    @pytest.mark.parametrize(
+        'stored',
+        [
+            {'max_attempts': 9999},
+            {'max_attempts': 0},
+            {'max_execute_rows': 10**9},
+            {'max_execute_rows': 0},
+            {'bogus': 1},
+        ],
+    )
+    def test_out_of_range_or_unknown_keys_are_refused(self, stored, monkeypatch):
+        """The schema bounds are enforced by the resolver before beginGlobal runs; nothing is clamped."""
+        from rocketlib.config import ConfigError
+
+        with pytest.raises(ConfigError):
+            self._begin_with(stored, monkeypatch)
 
 
 # =============================================================================

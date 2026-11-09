@@ -22,30 +22,26 @@
 # =============================================================================
 
 from rocketlib import IGlobalBase
-from ai.common.config import Config
+
+from .embedding import Embedding
 
 
 class IGlobal(IGlobalBase):
     """
     IGlobal is a subclass of IGlobalBase that manages global lifecycle events for an AI node, such as initialization and cleanup of resources.
 
-    It handles the setup of the AI embedding model and related configuration
-    at the start of the node's global lifecycle and ensures proper cleanup
-    when the lifecycle ends.
+    It handles the setup of the AI embedding model at the start of the node's
+    global lifecycle and ensures proper cleanup when the lifecycle ends.
     """
+
+    embedding: Embedding | None = None
 
     def beginGlobal(self):
         """
-        Initialize resources needed for the node when the global lifecycle begins.
+        Load the image embedding model named by the resolved config.
 
-        This includes:
-        - Importing the Embedding class from the local embedding module.
-        - Retrieving the "bag" from the current endpoint, which typically contains
-          shared state or contextual data.
-        - Loading node-specific configuration using the global logical type
-          and connection configuration.
-        - Instantiating the Embedding object with the logical type, loaded config,
-          and bag for further embedding operations.
+        The selected profile pins the Hugging Face model (or, on the custom
+        profile, the user typed it), so ``self.config.model`` is always set.
 
         Note:
             Nothing here loads or installs torch. ai.common.models proxies to the
@@ -54,35 +50,13 @@ class IGlobal(IGlobalBase):
             declares no requirements of its own: a requirements.txt naming
             accelerate made every cloud run download a CUDA torch it never used.
         """
-        # Import Embedding class locally to avoid circular imports and delay
-        # initialization until beginGlobal is called.
-        from .embedding import Embedding
-
-        # Access the 'bag' from the current endpoint.
-        # The bag usually holds shared or session-specific data relevant to the
-        # node instance.
-        bag = self.IEndpoint.endpoint.bag
-
-        # Retrieve node-specific configuration by using the logical type and
-        # the connection configuration from the global context.
-        # Config.getNodeConfig likely returns structured config data tailored
-        # for this node instance.
-        config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-
-        # Instantiate the Embedding object with the logical type, node config,
-        # and the bag. This sets up the embedding system that will be used during
-        # the node's operation.
-        self.embedding = Embedding(self.glb.logicalType, config, bag)
+        self.embedding = Embedding(self.config.model)
 
     def endGlobal(self):
         """
         Clean up resources and references when the global lifecycle ends.
 
-        This method currently clears the embedding reference to allow
-        garbage collection and release of resources related to the embedding
-        model or processor.
+        Clears the embedding reference so the underlying model or processing
+        resources held by the embedding instance can be released.
         """
-        # Remove the embedding reference to release resources.
-        # This helps ensure that any underlying model or processing resources
-        # held by the embedding instance can be cleaned up.
         self.embedding = None
