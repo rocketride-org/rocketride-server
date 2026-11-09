@@ -47,9 +47,10 @@ manifests (``public_pages``), never from constants here.
 
 The three crawler files key off ``RR_APP_URL`` — the env var that pins the
 public base URL of the hosted SaaS deployment. When it is unset (OSS,
-self-hosted, desktop engines) /sitemap.xml and /llms.txt return 404 and
-/robots.txt disallows all crawling; absolute URLs are never derived from
-request headers.
+self-hosted, desktop engines) /sitemap.xml and /llms.txt return 404,
+/robots.txt disallows all crawling, and every response carries
+``X-Robots-Tag: noindex, nofollow`` (``ungated_noindex``); absolute URLs are
+never derived from request headers.
 """
 
 import hashlib
@@ -669,6 +670,23 @@ async def apps_static(request: Request):
         return FileResponse(file_path)
 
     raise HTTPException(status_code=404, detail='Not found')
+
+
+async def ungated_noindex(request: Request, call_next):
+    """HTTP middleware: ``X-Robots-Tag: noindex, nofollow`` on every response of an engine without ``RR_APP_URL``.
+
+    Such an engine (OSS, self-hosted, desktop, a staging deployment) is not
+    the public site. robots.txt ``Disallow: /`` stops crawling, not
+    indexing: a disallowed URL found through links is still indexed by URL,
+    and the disallow keeps crawlers from ever reading a noindex in the page.
+    The header covers every response (pages, shell assets, 404s, auth
+    refusals) for any crawler that does fetch; only auth or an IP allowlist
+    in front keeps a non-public host out entirely.
+    """
+    response = await call_next(request)
+    if not app_url():
+        response.headers['X-Robots-Tag'] = 'noindex, nofollow'
+    return response
 
 
 def _md(text: str) -> str:

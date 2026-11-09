@@ -1309,3 +1309,55 @@ def test_any_query_string_gets_the_app_not_the_capture(web_server, shell_root, m
     client = _start_engine(web_server, monkeypatch)
     assert SHELL_BODY in client.get('/pricing?token=abc').text
     assert 'captured pricing' in client.get('/pricing').text
+
+
+# ---------------------------------------------------------------------------
+# An engine without RR_APP_URL is not the public site: noindex on every response
+# ---------------------------------------------------------------------------
+
+UNGATED_PROBES = (
+    ('GET', '/'),
+    ('GET', '/pricing'),
+    ('GET', '/store'),
+    ('GET', '/robots.txt'),
+    ('GET', '/sitemap.xml'),
+    ('GET', '/no-such-page'),
+    ('GET', '/shell/static/js/missing.abc.js'),
+    ('GET', '/private'),
+    ('GET', '/pricing/'),
+    ('GET', '/terms'),
+    ('POST', '/pricing'),
+)
+
+
+def test_an_ungated_engine_sends_noindex_nofollow_on_every_response(web_server, shell_root, no_app_url, monkeypatch):
+    client = _start_engine(web_server, monkeypatch, before_fallback=[('/private', _real_route, ['GET'], {})])
+    statuses = set()
+    for method, path in UNGATED_PROBES:
+        resp = client.request(method, path)
+        statuses.add(resp.status_code)
+        assert resp.headers.get('x-robots-tag') == 'noindex, nofollow', (method, path, resp.status_code)
+    # Pages, redirects, 404s, a wrong method and an auth refusal alike.
+    assert statuses == {200, 301, 401, 404, 405}
+    # robots.txt itself is unchanged: still Disallow-all.
+    assert client.get('/robots.txt').text == 'User-agent: *\nDisallow: /\n'
+
+
+def test_a_gated_engine_sends_no_blanket_noindex(web_server, shell_root, app_url, monkeypatch):
+    client = _start_engine(web_server, monkeypatch, before_fallback=[('/private', _real_route, ['GET'], {})])
+    for method, path in UNGATED_PROBES:
+        if path != '/store':
+            assert 'x-robots-tag' not in client.request(method, path).headers, (method, path)
+    # An unlisted page keeps its own page-level noindex.
+    assert client.get('/store').headers['x-robots-tag'] == 'noindex'
+
+
+@pytest.mark.parametrize('fixture,registered', [('no_app_url', True), ('app_url', False)])
+def test_only_an_ungated_engine_registers_the_noindex_middleware(
+    web_server, shell_root, monkeypatch, request, fixture, registered
+):
+    # Decided at init, so a gated engine (production) runs no extra middleware.
+    request.getfixturevalue(fixture)
+    _start_engine(web_server, monkeypatch)
+    dispatches = [m.kwargs.get('dispatch') for m in web_server.app.user_middleware]
+    assert (shell_mod.ungated_noindex in dispatches) is registered
