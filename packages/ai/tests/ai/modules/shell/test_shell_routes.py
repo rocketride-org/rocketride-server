@@ -118,9 +118,9 @@ def app_url(monkeypatch):
     monkeypatch.setenv('RR_APP_URL', BASE + '/')
 
 
-def _use(*pages, site=None):
-    """Swap in an aggregate holding exactly ``pages``."""
-    pp.swap(Aggregate(exact={p.path: p for p in pages}, site=site or {}))
+def _use(*pages, site=None, redirects=None):
+    """Swap in an aggregate holding exactly ``pages`` (and ``redirects``)."""
+    pp.swap(Aggregate(exact={p.path: p for p in pages}, site=site or {}, redirects=redirects or {}))
 
 
 LEGACY = legacy_aggregate()
@@ -864,6 +864,41 @@ def test_boot_serves_the_legacy_list_filtered_against_the_route_table(web_server
     client = TestClient(web_server.app)
     assert client.get('/contact').status_code == 401
     assert '/contact' not in pp.current().exact and '/pricing' in pp.current().exact
+
+
+# ---------------------------------------------------------------------------
+# site.redirects: 301 to the page, query kept
+# ---------------------------------------------------------------------------
+
+REDIRECTS = {'/terms': '/legal/terms', '/master-saas-agreement/': '/legal/terms'}
+
+
+@pytest.mark.parametrize('method', ['GET', 'HEAD'])
+def test_redirect_sources_answer_301_to_the_page_keeping_the_query(web_server, shell_root, monkeypatch, method):
+    client = _start_engine(web_server, monkeypatch)
+    _use(Page('/', 'rocketride.home', 'H'), Page('/legal/terms', 'rocketride.home', 'T'), redirects=REDIRECTS)
+    for source, query in (('/terms', ''), ('/master-saas-agreement/', '?utm_source=x&a=%20b')):
+        for ua in (GOOGLEBOT, BROWSER):
+            resp = client.request(method, source + query, headers={'User-Agent': ua})
+            assert resp.status_code == 301, (source, ua)
+            assert resp.headers['location'] == '/legal/terms' + query
+            assert resp.headers['cache-control'] == 'public, max-age=86400'
+            assert SHELL_BODY not in resp.text
+
+
+def test_redirect_sources_refuse_other_methods_and_never_enumerate(web_server, shell_root, monkeypatch, app_url):
+    client = _start_engine(web_server, monkeypatch)
+    _use(Page('/', 'rocketride.home', 'H'), Page('/legal/terms', 'rocketride.home', 'T'), redirects=REDIRECTS)
+    for method in ('POST', 'PROPFIND'):
+        resp = client.request(method, '/terms')
+        assert resp.status_code == 405 and resp.headers['allow'] == 'GET, HEAD', method
+    for crawler_file in ('/sitemap.xml', '/llms.txt'):
+        text = client.get(crawler_file).text
+        assert f'{BASE}/legal/terms' in text
+        assert f'{BASE}/terms' not in text and '/master-saas-agreement' not in text
+    # The aggregate's redirects stop the moment it is swapped out.
+    _use(Page('/', 'rocketride.home', 'H'), Page('/legal/terms', 'rocketride.home', 'T'))
+    assert client.get('/terms').status_code == 404
 
 
 # ---------------------------------------------------------------------------

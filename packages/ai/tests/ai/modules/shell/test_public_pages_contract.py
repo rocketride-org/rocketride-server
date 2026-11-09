@@ -363,12 +363,133 @@ def test_a_docs_url_with_a_query_and_a_fragment_is_accepted(url):
     assert errors == [] and out == {'docsUrl': url}
 
 
+# ---------------------------------------------------------------------------
+# site.redirects
+# ---------------------------------------------------------------------------
+
+HOME_PAGES = [_page('/'), _page('/pricing'), _page('/legal/terms')]
+
+
+def _redirects(*entries, pages=HOME_PAGES, app_id=ROOT_APP, live_conflict=None):
+    manifest = {'publicPages': pages, 'site': {'title': 'R', 'redirects': list(entries)}}
+    return check_manifest(app_id, manifest, live_conflict=live_conflict)
+
+
+def test_redirects_validate_into_the_site_map():
+    _, site, errors = _redirects(
+        {'from': '/terms', 'to': '/legal/terms'},
+        {'from': '/master-saas-agreement/', 'to': '/legal/terms'},
+        {'from': '/plans', 'to': '/pricing'},
+    )
+    assert errors == []
+    assert site == {
+        'title': 'R',
+        'redirects': {'/terms': '/legal/terms', '/master-saas-agreement/': '/legal/terms', '/plans': '/pricing'},
+    }
+
+
+@pytest.mark.parametrize(
+    'source,needle',
+    [
+        ('terms', 'absolute'),
+        ('/terms?x=1', 'query'),
+        ('/terms#top', 'fragment'),
+        ('/a/../terms', 'dot segment'),
+        ('//terms', 'empty segment'),
+        ('/a//terms', 'empty segment'),
+        ('/old/*', 'wildcard'),
+        ('/Terms', 'lowercase'),
+        ('/api/terms', 'reserved'),
+        ('/shell/', 'reserved'),
+        ('/mcp', 'reserved'),
+        ('/pricing', 'publicPages path'),
+        ('/', 'publicPages path'),
+        ('/terms\n', 'characters'),
+        (5, 'string'),
+        (None, 'string'),
+    ],
+)
+def test_bad_redirect_sources_fail_with_the_field_named(source, needle):
+    _, site, errors = _redirects({'from': source, 'to': '/pricing'}, {'from': '/ok', 'to': '/pricing'})
+    assert len(errors) == 1 and needle in errors[0] and 'site.redirects[0].from' in errors[0]
+    # One bad entry drops only itself: the site block and the other redirects stay.
+    assert site == {'title': 'R', 'redirects': {'/ok': '/pricing'}}
+
+
+@pytest.mark.parametrize('target', ['/nowhere', 'pricing', '/pricing/', '/legal/terms\n', 5, ['/']])
+def test_redirect_targets_must_be_an_exact_page_of_the_manifest(target):
+    _, site, errors = _redirects({'from': '/old', 'to': target})
+    assert len(errors) == 1 and 'site.redirects[0].to' in errors[0] and 'publicPages' in errors[0]
+    assert site['redirects'] == {}
+
+
+def test_redirect_entries_must_be_objects_and_a_bounded_list():
+    _, _, errors = _redirects('/old')
+    assert 'site.redirects[0]: must be an object' in errors[0]
+    _, site, errors = check_manifest(ROOT_APP, {'publicPages': HOME_PAGES, 'site': {'redirects': {'/a': '/'}}})
+    assert 'site.redirects: must be a list' in errors[0] and site == {'redirects': {}}
+    too_many = [{'from': f'/old-{i}', 'to': '/'} for i in range(101)]
+    _, site, errors = _redirects(*too_many)
+    assert 'at most 100' in errors[0] and site['redirects'] == {}
+    _, _, errors = _redirects(*too_many[:100])
+    assert errors == []
+
+
+def test_duplicate_redirect_sources_rejected():
+    _, site, errors = _redirects({'from': '/old', 'to': '/'}, {'from': '/old', 'to': '/pricing'})
+    assert len(errors) == 1 and 'duplicate' in errors[0] and 'site.redirects[1].from' in errors[0]
+    assert site['redirects'] == {'/old': '/'}
+
+
+def test_redirect_sources_on_live_routes_rejected():
+    _, site, errors = _redirects(
+        {'from': '/health', 'to': '/'}, live_conflict=lambda p: 'GET /health' if p == '/health' else None
+    )
+    assert 'live server route GET /health' in errors[0] and site['redirects'] == {}
+
+
+def test_only_the_root_claimant_may_declare_redirects():
+    entry = {'from': '/old', 'to': '/'}
+    # A platform app without may-claim-root: no root pages, so no site at all.
+    _, site, errors = _redirects(entry, app_id='rocketride.pipeBuilder')
+    assert site is None and any('may-claim-root' in e for e in errors)
+    # A third party: refused outright.
+    _, site, errors = _redirects(entry, app_id='acme.app')
+    assert site is None and 'platform capability' in errors[0]
+
+
+def test_a_redirect_source_whose_slash_twin_is_a_live_route_or_a_page_is_rejected():
+    live = {'/health': 'GET /health', '/callback': 'POST /callback', '/hook/': 'POST /hook/'}.get
+    _, site, errors = _redirects(
+        {'from': '/health/', 'to': '/'},
+        {'from': '/callback/', 'to': '/'},
+        {'from': '/hook', 'to': '/'},
+        {'from': '/pricing/', 'to': '/'},
+        live_conflict=live,
+    )
+    assert len(errors) == 4 and site['redirects'] == {}
+    assert "its slash twin '/health' collides with the live server route GET /health" in errors[0]
+    assert "its slash twin '/hook/' collides with the live server route POST /hook/" in errors[2]
+    assert "its slash twin '/pricing' is a publicPages path" in errors[3]
+
+
+def test_both_slash_forms_of_one_old_url_may_redirect():
+    _, site, errors = _redirects({'from': '/terms', 'to': '/legal/terms'}, {'from': '/terms/', 'to': '/legal/terms'})
+    assert errors == [] and site['redirects'] == {'/terms': '/legal/terms', '/terms/': '/legal/terms'}
+
+
 def test_errors_carry_no_em_dashes():
     manifest = {
-        'publicPages': [_page('/Bad'), _page('/api'), _page('/d', data=['nope']), _page('/x', snapshot='x.js')],
-        'site': {'docsUrl': 'http://x'},
+        'publicPages': [
+            _page('/'),
+            _page('/Bad'),
+            _page('/api'),
+            _page('/d', data=['nope']),
+            _page('/x', snapshot='x.js'),
+        ],
+        'site': {'docsUrl': 'http://x', 'redirects': [{'from': '/Old', 'to': '/x'}, {'from': '/old', 'to': '/y'}]},
     }
     _, _, errors = check_manifest(ROOT_APP, manifest, live_conflict=lambda p: None)
     _, _, more = check_manifest('acme.app', manifest)
-    assert len(errors) == 5 and more
+    assert len(errors) == 7 and more
     assert not any('—' in e for e in errors + more)

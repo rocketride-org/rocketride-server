@@ -120,6 +120,22 @@ def test_a_pages_trailing_slash_twin_is_301_to_the_page(engine, method):
     assert engine.request(method, '/nope/').status_code == 404
 
 
+@pytest.mark.parametrize('method', ['GET', 'HEAD'])
+def test_legacy_urls_are_301_to_their_documents(engine, method):
+    for path, location in (
+        ('/terms', '/legal/terms'),
+        ('/terms/', '/legal/terms'),
+        ('/privacy-policy', '/legal/privacy-policy'),
+        ('/privacy-policy/', '/legal/privacy-policy'),
+        ('/privacy', '/legal/privacy-policy'),
+        ('/privacy/', '/legal/privacy-policy'),
+        ('/terms?ref=deck', '/legal/terms?ref=deck'),
+    ):
+        resp = engine.request(method, path)
+        assert resp.status_code == 301 and resp.headers['location'] == location, path
+    assert engine.get('/terms', follow_redirects=True).status_code == 200
+
+
 def test_auth_decides_on_the_path_the_router_matches(engine_under_root_path):
     # The router strips root_path before matching; the auth decision must too,
     # or '/api/status' looks unrouted (public) while the router serves /status.
