@@ -64,7 +64,7 @@ class Store(DocumentStoreBase):
     collection: str = ''
     vectorSize: int = 0
     renderChunkSize: int = 32 * 1024 * 1024
-    similarity: str = 'Cosine'
+    similarity: str = 'COSINE'
     client: MilvusClient | None = None
     vectorSizePos: int = 1
     vectorIndexType: str = 'IVF_FLAT'
@@ -95,6 +95,10 @@ class Store(DocumentStoreBase):
             self.apikey = self.apikey.strip()
 
         self.threshold_search = config['score']
+
+        # The metric is pinned: Milvus documents COSINE, L2 and IP, and the
+        # score rescaling in _convertToDocs assumes COSINE
+        self.similarity = 'COSINE'
 
         # Request timeout (seconds) and bulk insert batch size
         self.timeout = DEFAULT_TIMEOUT

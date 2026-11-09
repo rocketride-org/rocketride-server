@@ -92,10 +92,10 @@
 			"name": "language",
 			"type": "string",
 			"title": "Language",
-			"description": "The parser used to split the source; Auto detect picks it from the filename extension",
+			"description": "The parser used to split the source. Auto detect recognises the language from the source text itself and emits no chunks when it cannot tell.",
 			"default": "auto",
 			"enum": {
-				"auto": { "title": "Auto detect - autodetect language based on filename extension" },
+				"auto": { "title": "Auto detect - recognise the language from the source text" },
 				"c": { "title": "C source" },
 				"cpp": { "title": "C++ source" },
 				"python": { "title": "Python source" },

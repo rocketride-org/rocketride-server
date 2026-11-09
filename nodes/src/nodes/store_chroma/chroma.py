@@ -72,7 +72,7 @@ class Store(DocumentStoreBase):
     vectorSize: int = 0
     renderChunkSize: int = 32 * 1024 * 1024
     payload_limit: int = 32 * 1024 * 1024
-    similarity: str = 'Cosine'
+    similarity: str = 'cosine'
     top_k: int | None = None
     client: chromadb.HttpClient
     collectionObj: chromadb.Collection | None = None
@@ -134,6 +134,10 @@ class Store(DocumentStoreBase):
         # TLS for the cloud profile. Defaults on, since Chroma Cloud is
         # HTTPS-only; a self-hosted server behind plain HTTP turns it off.
         self.ssl = self._coerceBool(config.get('ssl', True))
+
+        # The metric is pinned: Chroma accepts l2, ip or cosine (hnsw:space),
+        # and the score rescaling in the search assumes cosine
+        self.similarity = 'cosine'
 
         # Read the same way as the key check (IGlobal._credentials), so the key is
         # checked exactly when it is sent.

@@ -47,7 +47,6 @@ class PreProcessor(PreProcessorBase):
 
     # conservative token estimator configuration (no transformers import)
     _bytes_per_token: float = 3.0  # conservative default; lower => safer (more tokens estimated)
-    _token_limit: int | None = None  # hard cap for model max tokens (minus safety margin)
 
     def _estimate_tokens(self, text: str) -> int:
         """Estimate token count without importing HF. Conservative by design."""
@@ -99,41 +98,6 @@ class PreProcessor(PreProcessorBase):
         except (ValueError, TypeError):
             # If signature cannot be inspected, return kwargs as-is
             return kwargs
-
-    def _split_safely_by_tokens(self, text: str, max_tokens: int) -> List[str]:
-        """
-        Force-split a too-long string into pieces that fit the token limit.
-
-        using the conservative _estimate_tokens without importing transformers.
-        """
-        if self._estimate_tokens(text) <= max_tokens or not text:
-            return [text]
-
-        out: List[str] = []
-        pending = text
-
-        # Iteratively carve off chunks that fit the budget
-        while pending and self._estimate_tokens(pending) > max_tokens:
-            # Proportional first cut by chars based on token ratio
-            est_tokens = self._estimate_tokens(pending)
-            ratio = max_tokens / max(1, est_tokens)
-            cut_chars = max(1, int(len(pending) * ratio))
-
-            left = pending[:cut_chars]
-            right = pending[cut_chars:]
-
-            # Refine left by halving until it fits
-            while self._estimate_tokens(left) > max_tokens and len(left) > 1:
-                left = left[: len(left) // 2]
-                right = pending[len(left) :]
-
-            out.append(left)
-            pending = right
-
-        if pending:
-            out.append(pending)
-
-        return out
 
     def _getSplitter(self, provider: str, config: Dict[str, Any]):
         """
@@ -302,19 +266,5 @@ class PreProcessor(PreProcessorBase):
 
     # Process a document by splitting it into chunks
     def process(self, text: str, path: str = None) -> List[str]:
-        # Grab the chunks
-        textChunks = self._preprocessor.split_text(text)
-
-        # Safety net for token mode without HF tokenizer:
-        # If a chunk still exceeds the model token budget, subdivide it.
-        if self._mode == 'tokens' and self._token_limit is not None:
-            fixed: List[str] = []
-            for ch in textChunks:
-                if self._estimate_tokens(ch) <= self._token_limit:
-                    fixed.append(ch)
-                else:
-                    fixed.extend(self._split_safely_by_tokens(ch, self._token_limit))
-            textChunks = fixed
-
-        # Return the raw text chunks
-        return textChunks
+        # The splitter measures chunks with _getEmbeddingLength (characters or estimated tokens)
+        return self._preprocessor.split_text(text)

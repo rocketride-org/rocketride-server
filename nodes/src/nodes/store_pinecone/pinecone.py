@@ -63,7 +63,7 @@ class Store(DocumentStoreBase):
     vectorSize: int = 0
     renderChunkSize: int = 32 * 1024 * 1024
     payload_limit: int = 32 * 1024 * 1024
-    similarity: str = 'Cosine'
+    similarity: str = 'cosine'
     threshhold_search: float = 0.0
     client = None
 
@@ -87,6 +87,10 @@ class Store(DocumentStoreBase):
 
         self.profile = config['profile']  # either pod-based or serverless-dense
         self.threshold_search = config['score']
+
+        # The metric is pinned: Pinecone accepts cosine, euclidean or dotproduct,
+        # and the score convention below assumes cosine
+        self.similarity = 'cosine'
 
         # Init the store
         self.client = Pinecone(api_key=self.apikey)
