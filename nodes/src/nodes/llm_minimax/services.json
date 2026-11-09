@@ -241,33 +241,6 @@
 						{ "name": "serverbase", "type": "constant", "default": "https://api.minimax.io/v1" }
 					]
 				},
-				"minimax-m2.7:free": {
-					"title": "MiniMax: MiniMax M2.7 (free) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 196608 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 176947 },
-						{ "name": "reasoning", "type": "constant", "default": true },
-						{ "name": "serverbase", "type": "constant", "default": "https://api.minimax.io/v1" }
-					]
-				},
-				"minimax-m3:batch": {
-					"title": "MiniMax: MiniMax M3 (batch) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 524288 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 471859 },
-						{ "name": "reasoning", "type": "constant", "default": true },
-						{ "name": "serverbase", "type": "constant", "default": "https://api.minimax.io/v1" }
-					]
-				},
-				"minimax-m3:free": {
-					"title": "MiniMax: MiniMax M3 (free) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 1048576 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 943718 },
-						{ "name": "reasoning", "type": "constant", "default": true },
-						{ "name": "serverbase", "type": "constant", "default": "https://api.minimax.io/v1" }
-					]
-				},
 				"custom": {
 					"title": "Custom model",
 					"properties": [

@@ -417,14 +417,6 @@
 						{ "name": "modelOutputTokens", "type": "constant", "default": 16384 }
 					]
 				},
-				"mistral-medium-3-5:batch": {
-					"title": "Mistral: Mistral Medium 3.5 (batch) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 32768 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 26214 },
-						{ "name": "reasoning", "type": "constant", "default": true }
-					]
-				},
 				"custom": {
 					"title": "Custom model",
 					"properties": ["llm_mistral.customModel", "llm_mistral.custom.modelTotalTokens", "llm_mistral.custom.modelOutputTokens"]

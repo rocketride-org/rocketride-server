@@ -201,35 +201,6 @@
 						{ "name": "reasoning", "type": "constant", "default": true }
 					]
 				},
-				"qwen-2.5-72b-instruct": {
-					"title": "Qwen2.5 72B Instruct (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 32768 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 16384 }
-					]
-				},
-				"qwen-2.5-7b-instruct": {
-					"title": "Qwen2.5 7B Instruct (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 32768 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 29491 }
-					]
-				},
-				"qwen-2.5-coder-32b-instruct": {
-					"title": "Qwen2.5 Coder 32B Instruct (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 32768 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 29491 }
-					]
-				},
-				"qwen-plus-2025-07-28:thinking": {
-					"title": "Qwen Plus 0728 (thinking) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 1000000 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 32768 },
-						{ "name": "reasoning", "type": "constant", "default": true }
-					]
-				},
 				"qwen3-14b": {
 					"title": "Qwen: Qwen3 14B",
 					"properties": [
@@ -334,14 +305,6 @@
 						{ "name": "reasoning", "type": "constant", "default": true }
 					]
 				},
-				"qwen3.5-9b:batch": {
-					"title": "Qwen: Qwen3.5-9B (batch) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 262144 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 235929 },
-						{ "name": "reasoning", "type": "constant", "default": true }
-					]
-				},
 				"qwen3.5-flash-02-23": {
 					"title": "Qwen: Qwen3.5-Flash",
 					"properties": [
@@ -411,14 +374,6 @@
 					"properties": [
 						{ "name": "modelTotalTokens", "type": "constant", "default": 1048576 },
 						{ "name": "modelOutputTokens", "type": "constant", "default": 262144 },
-						{ "name": "reasoning", "type": "constant", "default": true }
-					]
-				},
-				"qwen3.8-2.4t-a95b:batch": {
-					"title": "Qwen: Qwen3.8 2.4T A95B (batch) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 1010000 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 909000 },
 						{ "name": "reasoning", "type": "constant", "default": true }
 					]
 				},

@@ -214,14 +214,6 @@
 						{ "name": "reasoning", "type": "constant", "default": true }
 					]
 				},
-				"kimi-k3:batch": {
-					"title": "MoonshotAI: Kimi K3 (batch) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 1048576 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 943718 },
-						{ "name": "reasoning", "type": "constant", "default": true }
-					]
-				},
 				"custom": {
 					"title": "Custom model",
 					"properties": ["llm_kimi.customModel", "llm_kimi.custom.modelTotalTokens", "llm_kimi.custom.modelOutputTokens"]

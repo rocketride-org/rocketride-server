@@ -215,27 +215,6 @@
 						{ "name": "modelOutputTokens", "type": "constant", "default": 65536 }
 					]
 				},
-				"models/gemini-2.5-flash-lite-preview-09-2025": {
-					"title": "Google: Gemini 2.5 Flash Lite Preview 09-2025 (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 1048576 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 65535 }
-					]
-				},
-				"models/gemini-2.5-pro-preview": {
-					"title": "Google: Gemini 2.5 Pro Preview 06-05 (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 1048576 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 65536 }
-					]
-				},
-				"models/gemini-2.5-pro-preview-05-06": {
-					"title": "Google: Gemini 2.5 Pro Preview 05-06 (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 1048576 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 65535 }
-					]
-				},
 				"models/gemini-3.1-pro-preview-customtools": {
 					"title": "Google: Gemini 3.1 Pro Preview Custom Tools",
 					"properties": [
@@ -299,62 +278,6 @@
 						{ "name": "modelOutputTokens", "type": "constant", "default": 65536 }
 					]
 				},
-				"models/gemini-2.5-flash:batch": {
-					"title": "Google: Gemini 2.5 Flash (batch) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 1048576 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 65535 }
-					]
-				},
-				"models/gemini-2.5-flash-lite:batch": {
-					"title": "Google: Gemini 2.5 Flash Lite (batch) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 1048576 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 65535 }
-					]
-				},
-				"models/gemini-2.5-pro:batch": {
-					"title": "Google: Gemini 2.5 Pro (batch) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 1048576 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 65536 }
-					]
-				},
-				"models/gemini-3.1-flash-lite:batch": {
-					"title": "Google: Gemini 3.1 Flash Lite (batch) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 1048576 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 65536 }
-					]
-				},
-				"models/gemini-3.1-pro-preview:batch": {
-					"title": "Google: Gemini 3.1 Pro Preview (batch) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 1048576 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 65536 }
-					]
-				},
-				"models/gemini-3.5-flash:batch": {
-					"title": "Google: Gemini 3.5 Flash (batch) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 1048576 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 65536 }
-					]
-				},
-				"models/gemini-3.5-flash-lite:batch": {
-					"title": "Google: Gemini 3.5 Flash Lite (batch) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 1048576 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 65536 }
-					]
-				},
-				"models/gemini-3.6-flash:batch": {
-					"title": "Google: Gemini 3.6 Flash (batch) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 1048576 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 65536 }
-					]
-				},
 				"models/gemini-3.7-flash": {
 					"title": "Google: Gemini 3.7 Flash",
 					"properties": [
@@ -362,29 +285,8 @@
 						{ "name": "modelOutputTokens", "type": "constant", "default": 65536 }
 					]
 				},
-				"models/gemini-3.7-flash:batch": {
-					"title": "Google: Gemini 3.7 Flash (batch) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 1048576 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 65536 }
-					]
-				},
 				"models/gemini-3.8-flash": {
 					"title": "Google: Gemini 3.8 Flash",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 1048576 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 65536 }
-					]
-				},
-				"models/gemini-3.8-flash:batch": {
-					"title": "Google: Gemini 3.8 Flash (batch) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 1048576 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 65536 }
-					]
-				},
-				"models/gemini-3-flash-preview:batch": {
-					"title": "Google: Gemini 3 Flash Preview (batch) (deprecated)",
 					"properties": [
 						{ "name": "modelTotalTokens", "type": "constant", "default": 1048576 },
 						{ "name": "modelOutputTokens", "type": "constant", "default": 65536 }

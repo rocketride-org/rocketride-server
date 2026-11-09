@@ -173,27 +173,6 @@
 						{ "name": "modelOutputTokens", "type": "constant", "default": 131072 }
 					]
 				},
-				"grok-3-beta": {
-					"title": "xAI: Grok 3 Beta (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 131072 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 131072 }
-					]
-				},
-				"grok-3-mini-beta": {
-					"title": "xAI: Grok 3 Mini Beta (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 131072 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 131072 }
-					]
-				},
-				"grok-4.1-fast": {
-					"title": "xAI: Grok 4.1 Fast (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 2000000 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 30000 }
-					]
-				},
 				"grok-4.20": {
 					"title": "xAI: Grok 4.20",
 					"properties": [
@@ -208,13 +187,6 @@
 						{ "name": "modelTotalTokens", "type": "constant", "default": 2000000 },
 						{ "name": "modelOutputTokens", "type": "constant", "default": 1800000 },
 						{ "name": "reasoning", "type": "constant", "default": true }
-					]
-				},
-				"grok-4-fast": {
-					"title": "xAI: Grok 4 Fast (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 2000000 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 30000 }
 					]
 				},
 				"grok-4.3": {
@@ -246,14 +218,6 @@
 					"properties": [
 						{ "name": "modelTotalTokens", "type": "constant", "default": 500000 },
 						{ "name": "modelOutputTokens", "type": "constant", "default": 450000 },
-						{ "name": "reasoning", "type": "constant", "default": true }
-					]
-				},
-				"grok-4.3:batch": {
-					"title": "SpaceXAI: Grok 4.3 (batch) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 1000000 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 900000 },
 						{ "name": "reasoning", "type": "constant", "default": true }
 					]
 				},

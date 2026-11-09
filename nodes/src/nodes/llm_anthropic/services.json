@@ -219,24 +219,8 @@
 						{ "name": "reasoning", "type": "constant", "default": true }
 					]
 				},
-				"claude-opus-4-7-fast": {
-					"title": "Anthropic: Claude Opus 4.7 (Fast) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 1000000 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 128000 },
-						{ "name": "reasoning", "type": "constant", "default": true }
-					]
-				},
 				"claude-opus-4-8": {
 					"title": "Anthropic: Claude Opus 4.8",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 1000000 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 128000 },
-						{ "name": "reasoning", "type": "constant", "default": true }
-					]
-				},
-				"claude-opus-4-8-fast": {
-					"title": "Anthropic: Claude Opus 4.8 (Fast) (deprecated)",
 					"properties": [
 						{ "name": "modelTotalTokens", "type": "constant", "default": 1000000 },
 						{ "name": "modelOutputTokens", "type": "constant", "default": 128000 },
@@ -277,14 +261,6 @@
 				},
 				"claude-opus-5": {
 					"title": "Claude Opus 5",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 1000000 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 128000 },
-						{ "name": "reasoning", "type": "constant", "default": true }
-					]
-				},
-				"claude-opus-5-fast": {
-					"title": "Claude Opus 5 (Fast) (deprecated)",
 					"properties": [
 						{ "name": "modelTotalTokens", "type": "constant", "default": 1000000 },
 						{ "name": "modelOutputTokens", "type": "constant", "default": 128000 },
