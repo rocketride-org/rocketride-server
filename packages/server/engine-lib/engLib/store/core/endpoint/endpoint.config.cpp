@@ -24,7 +24,6 @@
 
 #include <engLib/eng.h>
 
-#include <algorithm>
 #include <cctype>
 
 namespace engine::store {
@@ -300,18 +299,26 @@ Error IServiceEndpoint::setConfig(const json::Value &_jobConfig,
 //-------------------------------------------------------------------------
 bool IServiceEndpoint::parseTraceLevel(TextView name,
                                        PIPELINE_TRACE_LEVEL &level) noexcept {
-    // Compare in lower case so "Full" and "SUMMARY" name the same levels
-    std::string lower(name.data(), name.length());
-    std::transform(lower.begin(), lower.end(), lower.begin(),
-                   [](unsigned char c) { return (char)std::tolower(c); });
+    // Case-insensitive compare against a lower-case name, without
+    // allocating: this is noexcept, so a copy of the wire name has no place
+    // here. "Full" and "SUMMARY" name the same levels as their lower case
+    auto equalsNoCase = [&](const char *lower) noexcept {
+        size_t length = 0;
+        while (lower[length]) length++;
+        if (name.length() != length) return false;
+        for (size_t i = 0; i < length; i++)
+            if (std::tolower((unsigned char)name.data()[i]) != lower[i])
+                return false;
+        return true;
+    };
 
-    if (lower == "none")
+    if (equalsNoCase("none"))
         level = PIPELINE_TRACE_LEVEL::NONE;
-    else if (lower == "metadata")
+    else if (equalsNoCase("metadata"))
         level = PIPELINE_TRACE_LEVEL::METADATA;
-    else if (lower == "summary")
+    else if (equalsNoCase("summary"))
         level = PIPELINE_TRACE_LEVEL::SUMMARY;
-    else if (lower == "full")
+    else if (equalsNoCase("full"))
         level = PIPELINE_TRACE_LEVEL::FULL;
     else
         return false;
