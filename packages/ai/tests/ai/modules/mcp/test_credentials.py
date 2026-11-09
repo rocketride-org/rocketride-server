@@ -136,12 +136,17 @@ def test_env_found_inside_enum_branch_group_and_array():
                         'enum': {
                             'cloud': {
                                 'title': 'Cloud',
-                                'properties': [{'name': 'pat', 'secret': True, 'env': 'ROCKETRIDE_THING_PAT'}],
+                                'properties': [
+                                    {'name': 'pat', 'path': 'cloud.pat', 'secret': True, 'env': 'ROCKETRIDE_THING_PAT'}
+                                ],
                             },
                             'local': {'title': 'Local', 'properties': [{'name': 'endpoint'}]},
                         },
                     },
-                    {'name': 'advanced', 'properties': [{'name': 'seed', 'env': 'ROCKETRIDE_THING_SEED'}]},
+                    {
+                        'name': 'advanced',
+                        'properties': [{'name': 'seed', 'path': 'advanced.seed', 'env': 'ROCKETRIDE_THING_SEED'}],
+                    },
                     {
                         'name': 'hosts',
                         'type': 'array',
@@ -152,11 +157,14 @@ def test_env_found_inside_enum_branch_group_and_array():
         }
     )
     fields = catalog['tool_thing'].fields
-    assert {f.path for f in fields} == {'pat', 'seed', 'hostKey'}
+    # A nested leaf is reported at the `path` the schema stamps on it - that is
+    # where the resolver reads the value - while a leaf without one (the array
+    # item) falls back to its bare name.
+    assert {f.path for f in fields} == {'cloud.pat', 'advanced.seed', 'hostKey'}
     assert {f.suggests for f in fields} == {
         'ROCKETRIDE_THING_PAT',
         'ROCKETRIDE_THING_SEED',
         'ROCKETRIDE_THING_HOST_KEY',
     }
     # `secret` decides kind; an env-carrying plain setting is not a secret.
-    assert {f.path: f.kind for f in fields} == {'pat': 'secret', 'seed': 'text', 'hostKey': 'secret'}
+    assert {f.path: f.kind for f in fields} == {'cloud.pat': 'secret', 'advanced.seed': 'text', 'hostKey': 'secret'}

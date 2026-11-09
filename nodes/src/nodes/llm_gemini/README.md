@@ -100,8 +100,8 @@ tokens; set both to the actual limits of the model you select.
 
 Provide a Google AI Developer API key in the `apikey` field of the chosen profile
 (create one in Google AI Studio). The key is stored as a secure field. Key format
-validation is delegated to the google-genai library; a missing key fails at pipeline
-start with `Please enter your Gemini API key.`
+validation is delegated to the google-genai library; a blank key is rejected when the
+node's configuration is resolved (`"apikey" is required`), before any Gemini call.
 
 Gotcha: the engine derives a profile sub-key from the segment after the first
 underscore of the profile name (e.g. `gemini-2_5-pro` is stored under `5-pro`). The

@@ -33,6 +33,7 @@ the pipeline runs. psycopg2 is imported inside the probe so this module stays
 import-light.
 """
 
+import os
 from typing import Mapping
 
 from rocketlib import IValidatorBase, warning
@@ -60,6 +61,10 @@ def probe_connection(config: Mapping) -> None:
 
     conn = None
     try:
+        from depends import depends  # type: ignore
+
+        depends(os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt')
+
         import psycopg2  # type: ignore
 
         conn = psycopg2.connect(dsn, connect_timeout=5)

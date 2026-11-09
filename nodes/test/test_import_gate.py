@@ -63,9 +63,17 @@ def _python_node_packages() -> List[str]:
         if '__pycache__' in service_file.parts:
             continue
         data = _parse_service_json(str(service_file))
-        if not data or data.get('node') != 'python':
+        if not data:
             continue
         path = data.get('path')
+        if data.get('node') != 'python':
+            # A C++ node names its directory in `path`; a python package path
+            # (`nodes.<name>`) without `"node": "python"` is a definition the
+            # engine would hand to the C++ factory, so it must not slip past
+            # the gate unnoticed.
+            if isinstance(path, str) and path.startswith('nodes.'):
+                pytest.fail(f'{service_file.relative_to(NODES_SRC)}: a python package path needs "node": "python"')
+            continue
         if not isinstance(path, str) or not path:
             pytest.fail(f'{service_file.relative_to(NODES_SRC)}: a python node needs a "path" (its package)')
         packages.add(path)

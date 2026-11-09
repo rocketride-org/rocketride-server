@@ -68,7 +68,7 @@ def validate_credentials(config: Dict[str, Any]) -> Optional[str]:
     """
     api_key = resolve_api_key(config)
     if not api_key:
-        return 'no API key configured (set it on the node or via ROCKETRIDE_LANDING_AI_KEY)'
+        return 'no API key configured (set it on the node or via ROCKETRIDE_LANDING_AI_APIKEY)'
     try:
         client = build_client(api_key, config.get('region') or 'production')
         client.parse_jobs.list(page=0, page_size=1)

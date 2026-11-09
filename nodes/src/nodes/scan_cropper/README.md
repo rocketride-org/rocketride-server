@@ -52,11 +52,9 @@ and why. There is deliberately no white / dark / album background setting: the n
 background from the scan, so the presets describe what you *scanned* instead, and change the
 things that genuinely differ between those cases.
 
-A scan type shows only **Straighten photos** and **JPEG quality**; everything else it decides
-for you. To go further, each one carries its own **Show advanced settings** switch, which opens
-the ten tunables filled in with *that* scan type's numbers — open it under *Textured page* and
-`texture` reads 9.0, open it under *Album page* and it reads 4.0. So you start from the preset
-nearest your scans and adjust one thing, rather than setting ten values from scratch.
+A scan type lists every value it uses, filled in with *that* scan type's numbers — under
+*Textured page* `texture` reads 9.0, under *Album page* it reads 4.0. So you start from the
+preset nearest your scans and adjust one thing, rather than setting ten values from scratch.
 
 There is deliberately no separate "Advanced" scan type. A scan type is what decides the values,
 so an Advanced entry would have nothing to show you but a fixed set of numbers unrelated to the
@@ -76,8 +74,7 @@ with the offending key named; a setting that is left out takes the scan type's d
 
 ### Every setting
 
-Most are only visible behind **Show advanced settings**, and only worth touching if the symptom
-table below points at one.
+Most are only worth touching if the symptom table below points at one.
 
 | Setting | Default | What it does |
 | --- | --- | --- |

@@ -74,12 +74,13 @@ pattern as the Qdrant node) and switches the visible fields and defaults:
 **Your own Apache Iggy server** (`local`, the default):
 
 - `connection_string`: `user:password@host:port`, e.g. `iggy:iggy@localhost:8090` (Iggy's
-  default dev credentials). Secure field; falls back to the `LASER_CONNECTION_STRING`
-  environment variable. A containerized engine needs an address reachable from the container
+  default dev credentials). Secure, required field; the `ROCKETRIDE_LASERDATA_CONNECTION_STRING`
+  account variable the field references can supply it, and there is no process-environment
+  fallback. A containerized engine needs an address reachable from the container
   (e.g. `host.docker.internal`). No token exists in this mode.
 - The server must be a **VSR-enabled** Iggy build (rc20+ wheels speak only the VSR clustering
   protocol): use [laserdata/laser-stack](https://github.com/laserdata/laser-stack)
-  (`./scripts/up`, which also prints a ready `LASER_CONNECTION_STRING`). Stock pre-VSR
+  (`./scripts/up`, which also prints a ready connection string). Stock pre-VSR
   `iggyrs/iggy` images cannot talk to this SDK.
 - `folded` defaults to `true` — recall folds the memory topic in-process, which a plain Iggy
   server (no managed backend) requires.

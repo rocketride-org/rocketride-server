@@ -84,9 +84,14 @@ def _walk_properties(properties: Any, out: List[CredField]) -> None:
         env = prop.get('env')
         name = prop.get('name')
         if env and name:
+            # The schema stamps every leaf with its resolved `path`
+            # (`cloud.apikey` for a leaf inside the `cloud` branch); that is
+            # where the resolver reads the value, so that is what a caller
+            # wiring the credential must set. The bare name is only right for
+            # a top-level leaf, so it is the fallback, not the rule.
             out.append(
                 CredField(
-                    path=name,
+                    path=prop.get('path') or name,
                     title=prop.get('title') or name,
                     kind='secret' if prop.get('secret') else 'text',
                     required=bool(prop.get('required', True)),

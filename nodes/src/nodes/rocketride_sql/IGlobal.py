@@ -21,7 +21,16 @@
 # SOFTWARE.
 # =============================================================================
 
+import os
 from typing import Dict, Mapping
+
+from depends import depends
+
+# SQLAlchemy loads the psycopg2 driver when the engine connects, so the
+# requirements are installed before that happens. This module is only imported
+# on the run path (config mode imports the validator alone), so the install
+# never runs while a user is merely opening the node's settings panel.
+depends(os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt')
 
 from ai.common.database import DatabaseGlobalBase
 from ai.common.rocketride_db import db_target, parse_dsn_fields, resolve_rocketride_dsn, to_sqlalchemy_url

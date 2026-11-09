@@ -14,13 +14,14 @@ The node counts the tokens of the prompt the engine will actually render with `t
 
 ## Profiles
 
-Default: **Auto - Use default model limits** (`auto`). Both user-facing profiles ship the same budget split; they differ only in where the context window comes from.
+Default: **Auto - Use default model limits** (`auto`). The **Mode** selector has two values; both ship the same budget split (10 / 15 / 50 / 25) and differ only in where the context window comes from.
 
-| Profile | Budget split (system / query / documents / history) | When to pick it |
-| --- | --- | --- |
-| `auto` **(default)** | 10 / 15 / 50 / 25 | The usual choice: name the model and let the node resolve its window. |
-| `manual` | 10 / 15 / 50 / 25 | A deployment whose real window neither the live catalog nor the fallback table knows; set **Max context tokens** yourself (ships at 128 000). |
-| `ci_tiny` | 10 / 20 / 35 / 35 | Automated node tests only. It pins a 112-token window so every case is forced over budget; it is deliberately absent from the **Mode** dropdown. |
+| Mode | When to pick it |
+| --- | --- |
+| `auto` **(default)** | The usual choice: name the model and let the node resolve its window. |
+| `manual` | A deployment whose real window neither the live catalog nor the fallback table knows; set **Max context tokens** yourself (ships at 128 000). |
+
+The automated node tests force every case over budget by running `manual` mode with a 112-token window and a 10 / 20 / 35 / 35 split, configured in the `test` block of `services.json`; there is no separate test profile.
 
 ## Configuration
 

@@ -21,8 +21,17 @@
 # SOFTWARE.
 # =============================================================================
 
+import os
 import urllib.parse
 from typing import Any, Dict
+
+from depends import depends
+
+# SQLAlchemy loads the pymysql driver when the engine connects, so the
+# requirements are installed before that happens. This module is only imported
+# on the run path (config mode imports the validator alone), so the install
+# never runs while a user is merely opening the node's settings panel.
+depends(os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt')
 
 from ai.common.database import DatabaseGlobalBase
 

@@ -124,7 +124,7 @@ Hotdata runs **Apache DataFusion 54 behind the PostgreSQL parser dialect**. Trea
 
 | Symptom                                           | Cause                                                                                                   |
 | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `apikey is required` / `workspace_id is required` | Neither the config field nor the env var is set                                                         |
+| `"apikey" is required` / `"workspace_id" is required` (a `ConfigError`, raised when the config is resolved) | The required field is blank: set it on the node, or for the key, through the `ROCKETRIDE_DB_HOTDATA_APIKEY` account variable the field references |
 | `HTTP 401` / `HTTP 404` from `get_data`           | Wrong API key, workspace or database ID. Raised at once: only a rejected SQL statement is retried       |
 | `raw SQL execution is disabled`                   | Turn on `allow_execute`, or use `get_data` instead                                                      |
 | `only one statement per call`                     | Hotdata rejects semicolon-separated batches                                                             |

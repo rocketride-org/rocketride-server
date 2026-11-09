@@ -40,8 +40,17 @@ transaction ``READ ONLY`` — server-side write protection, with the base's
 ``is_cypher_safe`` regex and the layer's semantic firewall as defence-in-depth.
 """
 
+import os
 import re
 from typing import Any, Dict, List, Mapping, Optional, Tuple
+
+from depends import depends
+
+# psycopg2 is imported at module scope, so the requirements are installed before
+# that happens. This module is only imported on the run path (config mode
+# imports the validator alone), so the install never runs while a user is merely
+# opening the node's settings panel.
+depends(os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt')
 
 import psycopg2
 from psycopg2 import sql
