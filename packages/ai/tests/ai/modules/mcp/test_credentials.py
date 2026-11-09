@@ -1,4 +1,6 @@
 # Copyright 2026 Aparavi Software AG. MIT License.
+import pytest
+
 from ai.modules.mcp import credentials as creds
 
 # A service definition as `getServices` emits it: the credential is declared
@@ -168,3 +170,77 @@ def test_env_found_inside_enum_branch_group_and_array():
     }
     # `secret` decides kind; an env-carrying plain setting is not a secret.
     assert {f.path: f.kind for f in fields} == {'cloud.pat': 'secret', 'advanced.seed': 'text', 'hostKey': 'secret'}
+
+
+# ==== Wiring shape ===========================================================
+
+
+def _nested_spec():
+    """A node whose only credential sits inside the `cloud` branch."""
+    return creds.catalog_from_definitions(
+        {
+            'tool_thing': {
+                'title': 'Thing',
+                'properties': [
+                    {
+                        'name': 'authType',
+                        'type': 'string',
+                        'enum': {
+                            'cloud': {
+                                'properties': [
+                                    {
+                                        'name': 'apikey',
+                                        'path': 'cloud.apikey',
+                                        'secret': True,
+                                        'env': 'ROCKETRIDE_THING_APIKEY',
+                                    }
+                                ],
+                            },
+                        },
+                    }
+                ],
+            }
+        }
+    )['tool_thing']
+
+
+def test_nest_wiring_materialises_the_path_as_a_tree():
+    assert creds.nest_wiring({'cloud.apikey': '${A}', 'cloud.region': '${B}', 'url': '${C}'}) == {
+        'cloud': {'apikey': '${A}', 'region': '${B}'},
+        'url': '${C}',
+    }
+
+
+def test_nest_wiring_leaves_top_level_paths_alone():
+    assert creds.nest_wiring({'url': '${A}', 'apikey': '${B}'}) == {'url': '${A}', 'apikey': '${B}'}
+
+
+def test_nest_wiring_rejects_a_leaf_that_is_also_a_group():
+    with pytest.raises(ValueError, match='cloud'):
+        creds.nest_wiring({'cloud': '${A}', 'cloud.apikey': '${B}'})
+    with pytest.raises(ValueError, match='cloud'):
+        creds.nest_wiring({'cloud.apikey': '${B}', 'cloud': '${A}'})
+
+
+def test_configured_wiring_is_nested_where_the_resolver_and_encrypt_walk_read():
+    """A caller copying `wiring` into config.parameters must land the secret at
+    its nested path: that is where the engine's encrypt walk looks for it.
+    """
+    state = creds.evaluate(_nested_spec(), ['ROCKETRIDE_THING_APIKEY'])
+    assert state['status'] == 'configured'
+    assert state['wiring'] == {'cloud': {'apikey': '${ROCKETRIDE_THING_APIKEY}'}}
+
+
+def test_resolver_refuses_a_flat_dotted_leaf_so_the_wiring_must_nest():
+    """Pins WHY the wiring is nested: the engine's encrypt walk descends object by
+    object, so a secret written as one flat dotted key would stay plaintext. The
+    resolver therefore refuses the flat form outright; nesting is the only shape.
+    """
+    from rocketlib.config import ConfigError, resolveConfig
+
+    from tests.rocketlib.schemas import GOOGLE_WORKSPACE
+
+    nested = resolveConfig(GOOGLE_WORKSPACE, {'service': {'adminEmail': 'a@b', 'serviceKey': 'k'}})
+    assert nested.serviceKey == 'k'
+    with pytest.raises(ConfigError, match='"service.serviceKey" must be written nested'):
+        resolveConfig(GOOGLE_WORKSPACE, {'service': {'adminEmail': 'a@b'}, 'service.serviceKey': 'k'})

@@ -573,6 +573,15 @@ def _flatten_conn_config(
     for key, value in conn_config.items():
         path = f'{prefix}{key}'
         if path in indexed.leaves:
+            if '.' in key:
+                # A leaf written as one flat dotted key ("cloud.apikey": ...)
+                # would resolve like the nested tree, but the engine's encrypt
+                # walk descends object by object and would never find it, so a
+                # secret written that way stays plaintext. Only the nested shape
+                # is accepted. (A dotted KEY is fine when it names a branch
+                # block such as "gpt-5.2": that path is a prefix, not a leaf.)
+                problems.append(f'config key "{path}" must be written nested, not as one dotted key')
+                continue
             out[path] = value
         elif path in indexed.prefixes:
             if value is None:

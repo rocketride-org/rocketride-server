@@ -139,6 +139,37 @@ def catalog_from_definitions(definitions: Any) -> Dict[str, Integration]:
     return out
 
 
+def nest_wiring(flat: Dict[str, str]) -> Dict[str, Any]:
+    """Materialise ``{path: placeholder}`` into the nested config tree the path addresses.
+
+    A credential's ``path`` is where the resolver reads it AND where the
+    engine's encrypt walk (``findNested`` over ``secureParameters``, by
+    resolved path) looks for it. The resolver also accepts the dotted path
+    as one flat key, but the encrypt walk does not: a flat ``cloud.apikey``
+    under ``config.parameters`` validates clean and then rides back out of
+    ``rrext_validate`` - and into the stored pipeline - with its expanded
+    secret in plaintext. So the wiring handed to a caller is already the
+    nested tree; copying it into ``config.parameters`` puts every value
+    where both walks find it. A top-level path is unchanged by this.
+
+    Raises:
+        ValueError: Two paths claim the same key as both a leaf and a group.
+    """
+    out: Dict[str, Any] = {}
+    for path, value in flat.items():
+        parts = path.split('.')
+        node = out
+        for part in parts[:-1]:
+            child = node.setdefault(part, {})
+            if not isinstance(child, dict):
+                raise ValueError(f'credential path {path!r} nests under a leaf')
+            node = child
+        if isinstance(node.get(parts[-1]), dict):
+            raise ValueError(f'credential path {path!r} is also a group')
+        node[parts[-1]] = value
+    return out
+
+
 def node_tokens(name: str) -> frozenset:
     parts = [p.upper() for p in name.split('_') if p not in _GENERIC_TOKENS and len(p) > 2]
     return frozenset(parts) if parts else frozenset({name.upper()})
@@ -167,7 +198,7 @@ def evaluate(spec: Integration, env_keys: Optional[List[str]]) -> dict:
     have = set(env_keys)
     missing = [f.suggests for f in required if f.suggests not in have]
     if not missing:
-        wiring = {f.path: '${' + f.suggests + '}' for f in spec.fields if f.required or f.suggests in have}
+        wiring = nest_wiring({f.path: '${' + f.suggests + '}' for f in spec.fields if f.required or f.suggests in have})
         return {'status': 'configured', 'env_error': False, 'missing': [], 'candidates': [], 'wiring': wiring}
     tokens = node_tokens(spec.name)
     # Match on name *parts*, not raw substrings: a part must start with the
