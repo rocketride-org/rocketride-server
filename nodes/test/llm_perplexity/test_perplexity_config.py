@@ -39,6 +39,8 @@ def test_every_branch_pins_its_context_window():
     """The context optimizer's catalog reads the per-model window from the resolved schema."""
     selector = _model_selector(_load_services())
     for model, branch in selector['enum'].items():
+        if model == 'custom':
+            continue  # the custom branch has an editable window instead of a pinned one
         windows = [p for p in branch['properties'] if isinstance(p, dict) and p.get('name') == 'modelTotalTokens']
         assert windows and windows[0]['default'] > 0, f'{model} declares no modelTotalTokens'
 

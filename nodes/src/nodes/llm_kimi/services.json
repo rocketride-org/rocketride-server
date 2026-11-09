@@ -97,6 +97,26 @@
 			"default": "https://api.moonshot.ai/v1",
 			"title": "Server URL",
 			"description": "Base URL of the OpenAI-compatible endpoint"
+		},
+		"llm_kimi.customModel": {
+			"type": "string",
+			"title": "Model id",
+			"description": "Model id exactly as the provider names it",
+			"required": true
+		},
+		"llm_kimi.custom.modelTotalTokens": {
+			"type": "number",
+			"title": "Tokens",
+			"description": "Total context length of the model in tokens",
+			"minimum": 1,
+			"default": 262144
+		},
+		"llm_kimi.custom.modelOutputTokens": {
+			"type": "integer",
+			"title": "Output Tokens",
+			"description": "Most tokens the model may write in one reply (at least 1,024). Leave it empty to keep the node's default. Reasoning models count their thinking against this limit: set it well above the reply you expect, or they can spend it all thinking and return nothing. It cannot exceed Tokens; a larger value is lowered to it.",
+			"minimum": 1024,
+			"default": 16384
 		}
 	},
 	//
@@ -201,6 +221,10 @@
 						{ "name": "modelOutputTokens", "type": "constant", "default": 943718 },
 						{ "name": "reasoning", "type": "constant", "default": true }
 					]
+				},
+				"custom": {
+					"title": "Custom model",
+					"properties": ["llm_kimi.customModel", "llm_kimi.custom.modelTotalTokens", "llm_kimi.custom.modelOutputTokens"]
 				}
 			}
 		},

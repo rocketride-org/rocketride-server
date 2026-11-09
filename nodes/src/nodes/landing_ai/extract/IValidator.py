@@ -36,6 +36,15 @@ from rocketlib import IValidatorBase, warning
 from ..landing_ai_base import ensure_dependencies, load_schema_from_data_url, validate_credentials
 
 
+_PREFIX = 'Landing.ai Extract: '
+
+
+def _prefixed(message: object) -> str:
+    """Return ``message`` under the node prefix, added only when it is not already there."""
+    text = str(message)
+    return text if text.startswith(_PREFIX) else f'{_PREFIX}{text}'
+
+
 class IValidator(IValidatorBase):
     """Schema check through the resolver, then the upload and credential checks (warn-only)."""
 
@@ -54,16 +63,16 @@ class IValidator(IValidatorBase):
             return
         schema_file = config.get('schema_file') or ''
         if not schema_file:
-            warning('Landing.ai Extract: no extraction schema uploaded')
+            warning(_prefixed('no extraction schema uploaded'))
         else:
             try:
                 load_schema_from_data_url(schema_file)
             except ValueError as e:
-                warning(f'Landing.ai Extract: {e}')
+                warning(_prefixed(e))
         try:
             ensure_dependencies()
             err = validate_credentials(config)
             if err:
-                warning(f'Landing.ai Extract: {err}')
+                warning(_prefixed(err))
         except Exception as e:  # noqa: BLE001 - warn-only; never block canvas editing
-            warning(f'Landing.ai Extract: {e}')
+            warning(_prefixed(e))

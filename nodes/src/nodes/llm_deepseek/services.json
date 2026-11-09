@@ -90,6 +90,32 @@
 			"description": "DeepSeek API key (cloud models; local models need none)",
 			"env": "ROCKETRIDE_LLM_DEEPSEEK_APIKEY",
 			"required": false
+		},
+		"llm_deepseek.customModel": {
+			"type": "string",
+			"title": "Model id",
+			"description": "Model id exactly as the provider names it",
+			"required": true
+		},
+		"llm_deepseek.custom.modelTotalTokens": {
+			"type": "number",
+			"title": "Tokens",
+			"description": "Total context length of the model in tokens",
+			"minimum": 1,
+			"default": 128000
+		},
+		"llm_deepseek.custom.modelOutputTokens": {
+			"type": "integer",
+			"title": "Output Tokens",
+			"description": "Most tokens the model may write in one reply (at least 1,024). Leave it empty to keep the node's default. Reasoning models count their thinking against this limit: set it well above the reply you expect, or they can spend it all thinking and return nothing. It cannot exceed Tokens; a larger value is lowered to it.",
+			"minimum": 1024,
+			"default": 4096
+		},
+		"llm_deepseek.custom.serverbase": {
+			"type": "string",
+			"title": "Server URL",
+			"description": "Base URL of the OpenAI-compatible endpoint serving the model",
+			"default": "https://api.deepseek.com/v1"
 		}
 	},
 	//
@@ -357,6 +383,15 @@
 						{ "name": "modelOutputTokens", "type": "constant", "default": 943718 },
 						{ "name": "reasoning", "type": "constant", "default": true },
 						{ "name": "serverbase", "type": "constant", "default": "https://api.deepseek.com/v1" }
+					]
+				},
+				"custom": {
+					"title": "Custom model",
+					"properties": [
+						"llm_deepseek.customModel",
+						"llm_deepseek.custom.modelTotalTokens",
+						"llm_deepseek.custom.modelOutputTokens",
+						"llm_deepseek.custom.serverbase"
 					]
 				}
 			}

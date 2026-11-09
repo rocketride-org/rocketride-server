@@ -102,6 +102,25 @@
 			"title": "Prompt",
 			"description": "The question asked about every image.",
 			"default": "Describe this image in detail."
+		},
+		"llm_vision_mistral.customModel": {
+			"type": "string",
+			"title": "Model id",
+			"description": "Model id exactly as the provider names it",
+			"required": true
+		},
+		"llm_vision_mistral.custom.modelTotalTokens": {
+			"type": "number",
+			"title": "Tokens",
+			"description": "Total context length of the model in tokens",
+			"minimum": 1,
+			"default": 256000
+		},
+		"llm_vision_mistral.custom.modelOutputTokens": {
+			"type": "integer",
+			"title": "Output Tokens",
+			"description": "Most tokens the model may write in one reply (at least 1,024). Leave it empty to keep the node's default. Reasoning models count their thinking against this limit: set it well above the reply you expect, or they can spend it all thinking and return nothing. It cannot exceed Tokens; a larger value is lowered to it.",
+			"minimum": 1024
 		}
 	},
 	//
@@ -150,6 +169,14 @@
 					"title": "Ministral 3 3B - Efficient Vision (256k tokens)",
 					"properties": [
 						{ "name": "modelTotalTokens", "type": "constant", "default": 256000 }
+					]
+				},
+				"custom": {
+					"title": "Custom model",
+					"properties": [
+						"llm_vision_mistral.customModel",
+						"llm_vision_mistral.custom.modelTotalTokens",
+						"llm_vision_mistral.custom.modelOutputTokens"
 					]
 				}
 			}

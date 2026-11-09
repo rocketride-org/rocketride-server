@@ -201,3 +201,26 @@ def test_resolve_api_key_reads_the_config_only(monkeypatch) -> None:
 
     monkeypatch.delenv('ROCKETRIDE_LANDING_AI_KEY', raising=False)
     assert resolve_api_key({}) is None
+
+
+def test_the_validator_prefixes_a_message_once(monkeypatch) -> None:
+    """A base-module error already carries 'Landing.ai Extract:'; the validator must not double it."""
+    import types
+
+    validator_mod = importlib.import_module('landing_ai.extract.IValidator')
+    warned: list = []
+    monkeypatch.setattr(validator_mod, 'warning', warned.append)
+    monkeypatch.setattr(validator_mod, 'ensure_dependencies', lambda: None)
+    monkeypatch.setattr(validator_mod, 'validate_credentials', lambda _config: 'no API key configured')
+    validator = validator_mod.IValidator()
+    validator.glb = types.SimpleNamespace(
+        logicalType='landing_ai_extract',
+        connConfig={'api_key': 'k', 'schema_file': 'data:application/json;base64,!!not-base64!!'},
+    )
+    validator.validateConfig()
+    assert len(warned) == 2
+    for message in warned:
+        assert message.startswith('Landing.ai Extract: ')
+        assert 'Landing.ai Extract: Landing.ai Extract:' not in message
+    assert 'could not decode the uploaded schema' in warned[0]
+    assert warned[1] == 'Landing.ai Extract: no API key configured'

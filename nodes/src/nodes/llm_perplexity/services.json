@@ -88,6 +88,26 @@
 			"description": "Perplexity API key",
 			"env": "ROCKETRIDE_LLM_PERPLEXITY_APIKEY",
 			"required": true
+		},
+		"llm_perplexity.customModel": {
+			"type": "string",
+			"title": "Model id",
+			"description": "Model id exactly as the provider names it",
+			"required": true
+		},
+		"llm_perplexity.custom.modelTotalTokens": {
+			"type": "number",
+			"title": "Tokens",
+			"description": "Total context length of the model in tokens",
+			"minimum": 1,
+			"default": 127072
+		},
+		"llm_perplexity.custom.modelOutputTokens": {
+			"type": "integer",
+			"title": "Output Tokens",
+			"description": "Most tokens the model may write in one reply (at least 1,024). Leave it empty to keep the node's default. Reasoning models count their thinking against this limit: set it well above the reply you expect, or they can spend it all thinking and return nothing. It cannot exceed Tokens; a larger value is lowered to it.",
+			"minimum": 1024,
+			"default": 114364
 		}
 	},
 	//
@@ -145,6 +165,14 @@
 						{ "name": "modelTotalTokens", "type": "constant", "default": 200000 },
 						{ "name": "modelOutputTokens", "type": "constant", "default": 8000 },
 						{ "name": "reasoning", "type": "constant", "default": true }
+					]
+				},
+				"custom": {
+					"title": "Custom model",
+					"properties": [
+						"llm_perplexity.customModel",
+						"llm_perplexity.custom.modelTotalTokens",
+						"llm_perplexity.custom.modelOutputTokens"
 					]
 				}
 			}
