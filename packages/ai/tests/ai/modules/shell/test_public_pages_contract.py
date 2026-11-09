@@ -599,6 +599,80 @@ def test_both_slash_forms_of_one_old_url_may_redirect():
     assert errors == [] and site['redirects'] == {'/terms': '/legal/terms', '/terms/': '/legal/terms'}
 
 
+# ---------------------------------------------------------------------------
+# site.feeds
+# ---------------------------------------------------------------------------
+
+BLOG_PAGES = [_page('/'), _page('/blog'), _page('/blog/launch', published='2026-11-09')]
+FEED = {'path': '/blog/feed.xml', 'prefix': '/blog/', 'title': 'RocketRide blog'}
+
+
+def _feeds(*entries, redirects=(), live_conflict=None):
+    site = {'title': 'R', 'feeds': list(entries), 'redirects': [{'from': f, 'to': '/blog'} for f in redirects]}
+    return check_manifest(ROOT_APP, {'publicPages': BLOG_PAGES, 'site': site}, live_conflict=live_conflict)
+
+
+def test_feeds_validate_into_the_site_map():
+    everything = {'path': '/feed.xml', 'prefix': '/', 'title': 'All', 'futureKey': 1}
+    _, site, errors = _feeds(FEED, everything)
+    assert errors == []
+    assert site['feeds'] == {'/blog/feed.xml': FEED, '/feed.xml': {'path': '/feed.xml', 'prefix': '/', 'title': 'All'}}
+
+
+@pytest.mark.parametrize(
+    'entry,needle',
+    [
+        ('feed', 'site.feeds[0]: must be an object'),
+        ({**FEED, 'path': 'blog/feed.xml'}, "site.feeds[0].path 'blog/feed.xml'"),
+        ({**FEED, 'path': '/blog/feed'}, "site.feeds[0].path '/blog/feed': must end in .xml"),
+        ({**FEED, 'path': '/blog/Feed.xml'}, "site.feeds[0].path '/blog/Feed.xml'"),
+        ({**FEED, 'path': '/blog/feed.xml/'}, "site.feeds[0].path '/blog/feed.xml/'"),
+        ({**FEED, 'path': '/blog/*.xml'}, "site.feeds[0].path '/blog/*.xml': wildcard pages are not supported"),
+        ({**FEED, 'path': '/sitemap.xml'}, "site.feeds[0].path '/sitemap.xml': is under the reserved prefix"),
+        ({**FEED, 'path': '/apps/feed.xml'}, "site.feeds[0].path '/apps/feed.xml': is under the reserved prefix"),
+        ({**FEED, 'path': 5}, 'site.feeds[0].path 5'),
+        ({**FEED, 'prefix': '/blog'}, "site.feeds[0].prefix '/blog'"),
+        ({**FEED, 'prefix': 'blog/'}, "site.feeds[0].prefix 'blog/'"),
+        ({**FEED, 'prefix': '//'}, "site.feeds[0].prefix '//'"),
+        ({**FEED, 'prefix': '/a//'}, "site.feeds[0].prefix '/a//'"),
+        ({**FEED, 'prefix': '/Blog/'}, "site.feeds[0].prefix '/Blog/'"),
+        ({**FEED, 'prefix': None}, 'site.feeds[0].prefix None'),
+        ({**FEED, 'title': ''}, 'site.feeds[0].title'),
+        ({**FEED, 'title': 'x' * 301}, 'site.feeds[0].title'),
+        ({'path': '/blog/feed.xml', 'prefix': '/blog/'}, 'site.feeds[0].title'),
+        ({**FEED, 'title': 'Blog \ud83d'}, 'site.feeds[0].title: contains a lone surrogate'),
+    ],
+)
+def test_bad_feeds_fail_with_the_field_named(entry, needle):
+    _, site, errors = _feeds(entry)
+    assert len(errors) == 1 and errors[0].startswith(needle), errors
+    assert site['feeds'] == {}
+
+
+def test_feeds_are_a_bounded_list():
+    for raw in ('x', [FEED] * 6):
+        _, site, errors = check_manifest(ROOT_APP, {'publicPages': BLOG_PAGES, 'site': {'title': 'R', 'feeds': raw}})
+        assert site['feeds'] == {} and errors == [
+            'site.feeds: must be a list of at most 5 {"path", "prefix", "title"} objects'
+        ]
+
+
+def test_a_feed_path_collides_with_no_page_redirect_live_route_or_their_twins():
+    _, site, errors = _feeds({**FEED, 'path': '/blog/launch.xml'}, FEED, FEED)
+    assert errors == ["site.feeds[2].path '/blog/feed.xml': duplicate feed path in this manifest; choose another path"]
+    pages = BLOG_PAGES + [_page('/news.xml')]
+    _, _, errors = check_manifest(ROOT_APP, {'publicPages': pages, 'site': {'feeds': [{**FEED, 'path': '/news.xml'}]}})
+    assert errors == ["site.feeds[0].path '/news.xml': is a publicPages path; choose another path"]
+    for source in ('/old.xml', '/old.xml/'):
+        _, _, errors = _feeds({**FEED, 'path': '/old.xml'}, redirects=[source])
+        assert len(errors) == 1 and 'site.redirects source' in errors[0], source
+    for route in ('/live.xml', '/live.xml/'):
+        _, _, errors = _feeds(
+            {**FEED, 'path': '/live.xml'}, live_conflict=lambda p, r=route: 'GET /x' if p == r else None
+        )
+        assert len(errors) == 1 and 'collides with the live server route GET /x' in errors[0], route
+
+
 def test_errors_carry_no_em_dashes():
     manifest = {
         'publicPages': [

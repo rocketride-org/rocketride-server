@@ -29,6 +29,8 @@ actionable message; storage failures fail closed.
 
 from __future__ import annotations
 
+import copy
+
 import pytest
 
 import ai.modules.shell.public_pages as pp
@@ -291,4 +293,18 @@ async def test_a_redirect_source_whose_slash_twin_is_another_apps_page_is_reject
     assert errors == [
         "site.redirects from '/store/': its slash twin '/store' is a page of the published app rocketride.home; "
         'a URL is a page or a redirect, not both: drop the entry'
+    ]
+
+
+async def test_feed_paths_claimed_by_another_published_app_are_rejected():
+    home = copy.deepcopy(HOME_MANIFEST)
+    home['publicPages'].append({'path': '/news.xml', 'title': 'News'})
+    feed = {'prefix': '/', 'title': 'All'}
+    manifest = {
+        'publicPages': [{'path': '/', 'title': 'R'}],
+        'site': {'feeds': [{'path': '/news.xml', **feed}, {'path': '/feed.xml', **feed}]},
+    }
+    errors = await gate_errors('rocketride.other', manifest, DIST, hostile_account(home=home))
+    assert [e for e in errors if 'feeds' in e] == [
+        "site.feeds path '/news.xml' is a page of the published app rocketride.home; choose another path"
     ]
