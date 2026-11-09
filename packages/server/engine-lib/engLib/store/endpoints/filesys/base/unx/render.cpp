@@ -134,7 +134,6 @@ Error IBaseSysInstance<LvlT>::sendTagBeginStream(FileStream &fileStream,
     size_t prevPosition = 0;
     size_t offset = 0;
     size_t endOfFile = 0;
-    size_t streamOffset = 0;
 
     if (auto pos = fileStream.seek(0, SEEK_CUR); pos.check())
         return object.completionCode(pos.ccode());
@@ -153,10 +152,10 @@ Error IBaseSysInstance<LvlT>::sendTagBeginStream(FileStream &fileStream,
         else
             offset = _mv(*pos);
 
-        if (offset != endOfFile) {
+        // Holes are still sent as zeros from the restored cursor, so only
+        // the stream type records that the file is sparse.
+        if (offset != endOfFile)
             type = TAG_OBJECT_STREAM_BEGIN::STREAM_TYPE::STREAM_SPARSE_BLOCK;
-            streamOffset = offset;
-        }
     }
 
     // Restore the cursor
@@ -168,7 +167,8 @@ Error IBaseSysInstance<LvlT>::sendTagBeginStream(FileStream &fileStream,
     // Setup the default stream begin tag
     auto pStreamBeginTag = TAG_OBJECT_STREAM_BEGIN::build(pTagBuffer, type);
 
-    pStreamBeginTag->setStreamOffset(streamOffset);
+    // The data is sent from the restored cursor, so the stream starts there
+    pStreamBeginTag->setStreamOffset(offset);
 
     // Write it
     if (auto ccode = pDown->sendTag(target, pStreamBeginTag)) return ccode;
