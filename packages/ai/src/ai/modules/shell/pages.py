@@ -54,13 +54,15 @@ page's head metadata (title, description, canonical URL, robots, and the
 link-preview tags: ``og:type``, ``og:site_name``, ``og:image``, the Twitter
 card, article times, and a link to each feed whose prefix it is or is under) is
 injected, plus, for crawlers, the JSON-LD of its data sources and, for a page
-with ``published``, its BlogPosting (``articles.py``). A source that cannot be
-read leaves the page without its data, uncached. Every page response carries
-``Vary: User-Agent``. A rendered snapshot is ``public, max-age=3600`` (plan
-section 7); the shell document names the current build's bundles, so it is
-``private, no-cache``. A shared cache put in front would have to honor that
-``Vary`` (CloudFront ignores it by default), or it would hand people a
-crawler's snapshot.
+with ``published``, its BlogPosting (``articles.py``). The root owner's
+``site.organization`` adds its Organization node on ``/`` (with a WebSite node)
+and on every dated page, whose BlogPosting references it by ``@id``. A source
+that cannot be read leaves the page without its data, uncached. Every page
+response carries ``Vary: User-Agent``. A rendered snapshot is
+``public, max-age=3600`` (plan section 7); the shell document names the current
+build's bundles, so it is ``private, no-cache``. A shared cache put in front
+would have to honor that ``Vary`` (CloudFront ignores it by default), or it
+would hand people a crawler's snapshot.
 
 Rendered responses are cached per (path, UA class) under a byte budget and
 dropped on every aggregate swap; a crawler response bound to a data source is
@@ -95,7 +97,8 @@ from ai.web.middleware import route_path
 
 from rocketlib import error, warning
 
-from . import data_sources, public_pages
+from . import articles, data_sources, public_pages
+from .contract import MAX_SNAPSHOT_BYTES, Page, reserved_error, snapshot_error, with_slash_twin
 from .articles import blogposting
 from .contract import MAX_SNAPSHOT_BYTES, Page, reserved_error, snapshot_error, with_slash_twin
 from .crawlers import CRAWLER, classify
@@ -219,6 +222,31 @@ def canonical_url(path: str) -> str:
     if not base:
         return ''
     return f'{base}{path}'
+
+
+def site_jsonld(site: Mapping[str, Any], *, website: bool) -> List[Dict[str, Any]]:
+    """The Organization node of ``site.organization``, plus the WebSite node when ``website``; [] when undeclared.
+
+    The Organization's ``@id`` is the one a BlogPosting's publisher
+    references (``articles.publisher``). The WebSite node names the
+    ``RR_APP_URL`` origin, published by the Organization; without
+    ``RR_APP_URL`` there is no origin to name.
+    """
+    organization = site.get('organization')
+    if not organization:
+        return []
+    org_id = articles.publisher(site)['@id']
+    out: List[Dict[str, Any]] = [
+        {'@context': 'https://schema.org', '@type': 'Organization', '@id': org_id, **organization}
+    ]
+    base = app_url()
+    if website and base:
+        node = {'@context': 'https://schema.org', '@type': 'WebSite', '@id': f'{base}/#website', 'url': f'{base}/'}
+        if site.get('title'):
+            node['name'] = site['title']
+        node['publisher'] = {'@id': org_id}
+        out.append(node)
+    return out
 
 
 def _relative_location(request: Request, path: str) -> str:
@@ -1007,11 +1035,11 @@ async def _render(
     with its bound data sources (``_crawler_snapshot``), or the shell document
     when there is none to serve. Either way the page's head metadata,
     link-preview tags and feed links are injected, plus, for crawlers, the
-    sources' JSON-LD and a dated page's BlogPosting; reading the shell
-    document and rewriting the head run off the event loop.
-    A render bound to a source expires ``data_sources.TTL_SECONDS`` after
-    ``now``. ``cacheable`` is False for a fallback the next request should
-    retry.
+    sources' JSON-LD, a dated page's BlogPosting, and the site's Organization
+    on ``/`` and on dated pages; reading the shell document and rewriting the
+    head run off the event loop. A render bound to a source expires
+    ``data_sources.TTL_SECONDS`` after ``now``. ``cacheable`` is False for a
+    fallback the next request should retry.
     """
     canonical = canonical_url(path)
     # Only crawlers bind data: people get the shell document, which the
@@ -1042,6 +1070,9 @@ async def _render(
     jsonld = data_sources.jsonld(context, canonical)
     if crawler and page.published:
         jsonld.append(blogposting(page, site, canonical=canonical, image=image))
+    if crawler and (path == '/' or page.published):
+        # A BlogPosting references the Organization by @id: the node goes on the same page.
+        jsonld += site_jsonld(site, website=path == '/')
     body = await asyncio.to_thread(
         inject_head,
         body,
