@@ -52,7 +52,7 @@ const SUMMARY_MAX_DEPTH = 6;
 const SUMMARY_SHORT_LIST = 2;
 
 /** Summary budget; a dict splits it among fields that can spend it, so many lists cost no more than one. */
-const SUMMARY_BUDGET = 4000;
+export const SUMMARY_BUDGET = 4000;
 
 /**
  * Longest string shown in full inside a sampled list row. A string this long or

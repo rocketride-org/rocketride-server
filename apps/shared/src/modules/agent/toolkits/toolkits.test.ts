@@ -48,6 +48,7 @@ import { BUILDER_PROMPTS } from '../prompts';
 import { runAgent } from '../run';
 import type { AgentTool } from '../tools';
 import type { ModelCall, QuestionSpec } from '../wave/plan';
+import { summarize } from '../wave/summary';
 import { AppCheckToolkit, reportVerdict, type CheckReport, type MarkerInfo } from './appCheck';
 import { Approvals } from './approval';
 import { AppToolkit } from './appTools';
@@ -285,7 +286,7 @@ async function agentTurn(ws: MemoryWorkspace, model: ModelCall, opts: { client?:
 }
 
 // =============================================================================
-// THE USER'S WORK — read before edit, unsaved changes, the save race, Stop
+// THE USER'S WORK — read before edit, unsaved changes, the save race, Stop, long reads
 // =============================================================================
 
 test('edit_file and write_file refuse a file not read, or changed since it was read, until it is read again', async () => {
@@ -363,6 +364,26 @@ test('a run the user stops closes its open unsaved-changes question as Keep mine
 	await agentTurn(ws, model, { choose, editors: { 'a.ts': editor }, signal: stop.signal });
 	assert.equal(closedAtStop, true, 'the question closed the moment the run was stopped');
 	assert.deepEqual([ws.files.get('a.ts'), ws.log, editor.did], ['a = 1', [], []], 'nothing was written, saved or discarded');
+});
+
+test('a read too long to show whole comes back as whole lines the model sees in full, and reading on from the offset it names skips nothing', async () => {
+	const lines = Array.from({ length: 300 }, (_, i) => `${i + 1}: ${'word '.repeat(i % 40)}`);
+	const ws = new MemoryWorkspace({ 'notes/long.md': lines.join('\n') });
+	const seen: string[] = [];
+	let offset: number | undefined;
+	let reads = 0;
+	do {
+		reads += 1;
+		assert.ok(reads <= 40, 'reading on comes to an end');
+		const result = await run(ws, 'read_file', { path: 'notes/long.md', ...(offset === undefined ? {} : { offset }) });
+		assert.equal(summarize(result), result, `read ${reads}: the model is shown every character it was sent`);
+		const shown = result.split('\n');
+		const next = /^\[Read on with offset=(\d+)\.\]$/.exec(shown.at(-1) ?? '');
+		seen.push(...shown.slice(1, next ? -1 : undefined));
+		offset = next ? Number(next[1]) : undefined;
+	} while (offset !== undefined);
+	assert.ok(reads > 1, 'the file took more than one read');
+	assert.deepEqual(seen, lines, 'the reads together hold every line once, in order');
 });
 
 // =============================================================================

@@ -40,6 +40,7 @@ import { StaleVersionError, StaleWriteError } from '../../vfs/stagedFileSystem';
 import type { IWorkspaceFileSystem } from '../../vfs/vfsTypes';
 import { SaveDroppedError, type EditorControl } from '../host';
 import { AgentTool, AgentToolkit, RefusedError, type ToolStep } from '../tools';
+import { SUMMARY_BUDGET } from '../wave/summary';
 import { replaceSpans, type ChoiceFn } from './common';
 import { SecretMarkers } from './secretMarkers';
 import { UndoRecord } from './undo';
@@ -48,8 +49,6 @@ import { UndoRecord } from './undo';
 // CONSTANTS — caps and hygiene
 // =============================================================================
 
-const READ_DEFAULT_BYTES = 256 * 1024;
-const READ_MAX_BYTES = 4 * 1024 * 1024;
 /** Hard write cap in bytes — one whole-file write per call. */
 const WRITE_MAX_BYTES = 4 * 1024 * 1024;
 
@@ -88,7 +87,7 @@ const FILESYSTEM_INSTRUCTIONS = `File tools operate on the workspace virtual fil
 - Read a file before editing or overwriting it. edit_file and write_file refuse a file you have not read. write_file refuses a file that changed since you read it; edit_file then applies your anchor to the current content only when it still matches once. Either way, read the file again before your next change to it.
 - Prefer edit_file (exact-anchor find/replace) for changes; write_file replaces a whole file.
 - Reads see the user's unsaved editor buffers. Changing a file with unsaved changes asks the user first; if they keep their changes, the call is refused: ask them how to proceed instead of retrying.
-- Truncated reads are always labeled; use offset/limit to window large files cheaply.`;
+- A read shows at most about ${SUMMARY_BUDGET} characters of whole lines; a longer one ends with the offset to read on from.`;
 
 const UNSAVED_TITLE = 'Unsaved changes';
 
@@ -509,18 +508,15 @@ export class FilesystemTools extends AgentToolkit {
 	// ── Executors ────────────────────────────────────────────────────────
 
 	/**
-	 * read_file: cached whole-file read, sliced locally. Line windows cost
-	 * nothing after the first read; overlays win over the cache so unsaved
-	 * buffers are what the agent sees.
+	 * read_file: the whole file or a line window of it, within SUMMARY_BUDGET.
+	 * Overlays win over the cache so unsaved buffers are what the agent sees.
 	 *
-	 * @param maxBytes - Optional byte cap (clamped to READ_MAX_BYTES).
 	 * @param offset - Optional 1-based first line of a partial read.
 	 * @param limit - Optional line count of a partial read.
-	 * @returns The content or window, truncation always labeled.
+	 * @returns The content or window; one cut to fit ends with the offset to read on from.
 	 */
-	private async readFile(rawPath: unknown, maxBytes?: number, offset?: number, limit?: number): Promise<string> {
+	private async readFile(rawPath: unknown, offset?: number, limit?: number): Promise<string> {
 		const path = normalizePath(rawPath);
-		const cap = Math.min(Math.max(1, maxBytes ?? READ_DEFAULT_BYTES), READ_MAX_BYTES);
 		// step: under unsaved typing, also the stored copy a delete is based on. Both reads start together, so no save lands between them
 		const dirty = this.vfs.isDirty(path);
 		const [read, stored] = await Promise.all([this.vfs.readVersioned(path), dirty ? this.vfs.readVersioned(path, { stored: true }).catch(() => null) : null]);
@@ -533,23 +529,31 @@ export class FilesystemTools extends AgentToolkit {
 		text = hidden.text;
 		const note = hidden.note ? `\n[${hidden.note}]` : '';
 
-		// step: line window first — the usual partial-read path
-		let header = '';
-		if (offset !== undefined || limit !== undefined) {
-			const lines = text.split('\n');
-			const start = Math.max(1, Math.floor(offset ?? 1));
-			const count = Math.max(1, Math.floor(limit ?? lines.length));
-			const slice = lines.slice(start - 1, start - 1 + count);
-			if (slice.length === 0) return `[EMPTY WINDOW: ${path} has ${lines.length} lines; requested from line ${start}]`;
-			header = `[Lines ${start}-${start - 1 + slice.length} of ${lines.length} in ${path}]\n`;
-			text = slice.join('\n');
-		}
+		const lines = text.split('\n');
+		const start = Math.max(1, Math.floor(offset ?? 1));
+		const count = Math.max(1, Math.floor(limit ?? lines.length));
+		const slice = lines.slice(start - 1, start - 1 + count);
+		if (slice.length === 0) return `[EMPTY WINDOW: ${path} has ${lines.length} lines; requested from line ${start}]`;
+		const header = (end: number) => `[Lines ${start}-${end} of ${lines.length} in ${path}]\n`;
+		const whole = (offset !== undefined || limit !== undefined ? header(start - 1 + slice.length) : '') + slice.join('\n') + note;
+		if (whole.length <= SUMMARY_BUDGET) return whole;
 
-		// step: cap by UTF-8 byte length — the cap bounds payload, not chars
-		const bytes = new TextEncoder().encode(text);
-		if (bytes.length <= cap) return header + text + note;
-		const truncated = new TextDecoder().decode(bytes.slice(0, cap));
-		return `${header}${truncated}\n[TRUNCATED: showing first ${cap} of ${bytes.length} bytes — narrow with offset/limit or raise maxBytes]${note}`;
+		// step: the loop shows the model a longer result with its middle left out, so stop at the last whole line that fits
+		const readOn = (next: number) => `\n[Read on with offset=${next}.]`;
+		let body = '';
+		let end = start - 1;
+		for (const line of slice) {
+			const grown = end < start ? line : `${body}\n${line}`;
+			if (header(end + 1).length + grown.length + note.length + readOn(end + 2).length > SUMMARY_BUDGET) break;
+			body = grown;
+			end += 1;
+		}
+		if (end >= start) return header(end) + body + note + readOn(end + 1);
+
+		const first = slice[0];
+		const cut = (kept: number) => `\n[Line ${start} cut to its first ${kept} of ${first.length} characters.${start < lines.length ? ` Read on with offset=${start + 1}.` : ''}]`;
+		const kept = Math.max(0, SUMMARY_BUDGET - header(start).length - note.length - cut(first.length).length);
+		return header(start) + first.slice(0, kept) + note + cut(kept);
 	}
 
 	/**
@@ -863,19 +867,18 @@ export class FilesystemTools extends AgentToolkit {
 		return [
 			new AgentTool({
 				name: 'read_file',
-				description: `Read one file as UTF-8 text, or a line window of it via offset/limit (1-based; repeated windows on the same file are cheap — the content is cached). Reads see unsaved editor buffers. Truncation is always labeled. Default cap ${READ_DEFAULT_BYTES} bytes, maximum ${READ_MAX_BYTES}.`,
+				description: `Read one file as UTF-8 text, or a line window of it via offset/limit (1-based). Reads see unsaved editor buffers. One read shows at most about ${SUMMARY_BUDGET} characters of whole lines; a longer file or window comes back as its first part, ending with the offset to read on from.`,
 				parameters: {
 					type: 'object',
 					properties: {
 						path: { type: 'string', description: 'Workspace-relative file path' },
 						offset: { type: 'number', description: 'Optional 1-based first line of a partial read' },
 						limit: { type: 'number', description: 'Optional number of lines to return' },
-						maxBytes: { type: 'number', description: `Optional read cap in bytes (1..${READ_MAX_BYTES})` },
 					},
 					required: ['path'],
 					additionalProperties: false,
 				},
-				execute: (a) => this.readFile(a.path, a.maxBytes === undefined ? undefined : Number(a.maxBytes), a.offset === undefined ? undefined : Number(a.offset), a.limit === undefined ? undefined : Number(a.limit)),
+				execute: (a) => this.readFile(a.path, a.offset === undefined ? undefined : Number(a.offset), a.limit === undefined ? undefined : Number(a.limit)),
 			}),
 			new AgentTool({
 				name: 'list_directory',
