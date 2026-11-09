@@ -99,10 +99,13 @@ def test_native_bert_concurrent_outputs_and_state_match_serial(monkeypatch, hidd
         actual = list(pool.map(lambda request: infer(request, True), requests))
     assert witness.peak == 2
 
+    # A BLAS backend may split work differently while two forwards share the CPU,
+    # so outputs get a tolerance far below any mix-up between requests; weights
+    # and buffers below must stay bit-identical.
     for serial, concurrent in zip(expected, actual):
         assert not concurrent.requires_grad
         assert torch.isfinite(concurrent).all()
-        assert torch.equal(serial, concurrent)
+        assert torch.allclose(serial, concurrent, rtol=1e-5, atol=1e-6)
     for key, value in transformer.state_dict().items():
         assert torch.equal(before[key], value), key
     for key, value in transformer.named_buffers():
