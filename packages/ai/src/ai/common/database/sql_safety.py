@@ -48,11 +48,15 @@ a server reads quotes and comments depends on the database: MySQL escapes a
 quote with a backslash and starts a comment with ``#``; PostgreSQL does
 neither, but nests block comments and has dollar quoting, and a server with
 ``standard_conforming_strings`` off escapes a quote with a backslash in every
-string. Masking by the wrong rules can hide real SQL behind a misread quote,
-so the SQL is checked under PostgreSQL rules with that setting on, again
-with it off, and under MySQL rules, and must pass all three. The PostgreSQL
-rules follow its lexer (``scan.l``): a name may hold ``$`` and any non-ASCII
-character, so ``a$$x$`` is one name, not a name and a dollar quote.
+string. ClickHouse escapes with a backslash in quoted names too, reads
+``‘...’`` as a string and ``“...”`` as a name, starts a comment with ``//``
+and ``# ``, and lets a heredoc tag start with a digit. Masking by the wrong
+rules can hide real SQL behind a misread quote, so the SQL is checked under
+PostgreSQL rules with that setting on, again with it off, under MySQL rules
+and under ClickHouse rules, and must pass all four. The PostgreSQL rules
+follow its lexer (``scan.l``): a name may hold ``$`` and any non-ASCII
+character, so ``a$$x$`` is one name, not a name and a dollar quote. The
+ClickHouse rules follow ``Lexer.cpp``.
 """
 
 import re
@@ -63,6 +67,25 @@ _DOLLAR_TAG = re.compile(r'\$(?:[A-Za-z_\x80-\U0010ffff][A-Za-z0-9_\x80-\U0010ff
 # MySQL block comments whose body the server runs: /*! version comments, MariaDB /*M!, and optimizer
 # hints /*+ (a hint can lift the statement time limit)
 _MYSQL_EXECUTED_COMMENTS = ('/*!', '/*M!', '/*+')
+
+# ClickHouse comments that run to the end of the line (Lexer.cpp: '#' only before a space or '!')
+_CLICKHOUSE_LINE_COMMENTS = ('--', '//', '# ', '#!')
+
+# ClickHouse curly quotes: opening quote -> (closing quote, the ASCII quote the mask writes in their place)
+_CLICKHOUSE_CURLY_QUOTES = {'\u2018': ('\u2019', "'"), '\u201c': ('\u201d', '"')}
+
+# A ClickHouse heredoc tag: ASCII letters, digits and _, possibly empty
+_CLICKHOUSE_TAG = re.compile(r'[A-Za-z0-9_]*')
+
+# A ClickHouse number or bare word, as long as Lexer.cpp reads it: a number takes the sign of its exponent and
+# any word characters after it, a bare word takes $. Inside either, a '-', a '$' or a quote starts nothing.
+_CLICKHOUSE_WORD = re.compile(
+    r'0[xX][0-9A-Fa-f][0-9A-Fa-f_]*(?:\.[0-9A-Fa-f_]*)?(?:[pP][+-]?[0-9_]*)?[A-Za-z0-9_]*'
+    r'|0[bB][01][0-9_]*(?:\.[0-9_]*)?(?:[eE][+-]?[0-9_]*)?[A-Za-z0-9_]*'
+    r'|[0-9][0-9_]*(?:\.[0-9_]*)?(?:[eE][+-]?[0-9_]*)?[A-Za-z0-9_]*'
+    r'|\$[A-Za-z0-9_][A-Za-z0-9_$]*'
+    r'|[A-Za-z_][A-Za-z0-9_$]*'
+)
 
 # Only SELECT is allowed, EXPLAIN as a prefix. WITH (CTE) is excluded: PostgreSQL accepts CTE-into-mutation
 # (WITH x AS (...) DELETE ...), so allowing WITH needs a check that the trailing operation is a SELECT.
@@ -75,8 +98,10 @@ _WRITING_CLAUSE = re.compile(
     re.IGNORECASE,
 )
 
-# ClickHouse's SETTINGS clause (SETTINGS name = value), which changes settings for the query, such as its time limit
-_SETTINGS_CLAUSE = re.compile(r'\bsettings\s+(?:[a-z_][a-z0-9_]*|`[^`]*`|"[^"]*")\s*=', re.IGNORECASE)
+# ClickHouse's SETTINGS clause (SETTINGS name = value), which changes settings for the query, such as its time limit;
+# a quoted name needs no space after the keyword, and a $ right after it makes it part of a longer name. A setting
+# without '= value' can only be a Bool set to true, and the time limit is not a Bool.
+_SETTINGS_CLAUSE = re.compile(r'\bsettings(?![\w$])\s*(?:[a-z0-9_$]+|`[^`]*`|"[^"]*")\s*=', re.IGNORECASE)
 
 
 def _mask_quoted(sql: str, i: int, quote: str, backslash: bool, out: list[str]) -> int:
@@ -271,6 +296,98 @@ def _mask_mysql(sql: str) -> str | None:
     return ''.join(out)
 
 
+def _clickhouse_heredoc_tag(sql: str, i: int) -> str | None:
+    """Return the heredoc tag that starts at ``sql[i]``, or None when ClickHouse reads no heredoc there.
+
+    Args:
+        sql: The statement text.
+        i: Index of a ``$``.
+
+    Returns:
+        ``$tag$`` when the tag holds only ASCII letters, digits and ``_`` and the same tag appears again later
+        to close it; otherwise None.
+    """
+    tag_end = sql.find('$', i + 1)
+    if tag_end == -1 or not _CLICKHOUSE_TAG.fullmatch(sql, i + 1, tag_end):
+        return None
+    tag = sql[i : tag_end + 1]
+    return tag if sql.find(tag, tag_end + 1) != -1 else None
+
+
+def _mask_curly_quoted(sql: str, i: int, out: list[str]) -> int:
+    """Copy a ClickHouse ``‘...’`` string or ``“...”`` name that starts at ``sql[i]`` to ``out``, its contents blanked.
+
+    The mask writes ``'`` and ``"`` for the curly quotes, so the clause checks read them as they read ASCII quotes.
+    ClickHouse takes no escapes between curly quotes.
+
+    Args:
+        sql: The statement text.
+        i: Index of the opening curly quote.
+        out: Receives the quotes and a space for each character between them (line breaks kept).
+
+    Returns:
+        The index after the closing quote, or the end of ``sql`` when the quote is not closed.
+    """
+    close, ascii_quote = _CLICKHOUSE_CURLY_QUOTES[sql[i]]
+    end = sql.find(close, i + 1)
+    out.append(ascii_quote)
+    if end == -1:
+        return _mask_to(sql, i + 1, len(sql), out)
+    _mask_to(sql, i + 1, end, out)
+    out.append(ascii_quote)
+    return end + 1
+
+
+def _clickhouse_token(sql: str, i: int, out: list[str]) -> int:
+    """Copy the ClickHouse token that starts at ``sql[i]`` to ``out``, blanked if it is a literal, quoted name or comment.
+
+    Args:
+        sql: The statement text.
+        i: Where the token starts.
+        out: Receives the token, or its blanked form.
+
+    Returns:
+        The index after the token.
+    """
+    ch = sql[i]
+    if ch in ("'", '"', '`'):
+        return _mask_quoted(sql, i, ch, True, out)
+    if ch in _CLICKHOUSE_CURLY_QUOTES:
+        return _mask_curly_quoted(sql, i, out)
+    if sql.startswith(_CLICKHOUSE_LINE_COMMENTS, i):
+        return _mask_to(sql, i, _line_end(sql, i, '\n'), out)
+    if sql.startswith('/*', i):
+        return _mask_to(sql, i, _block_comment_end(sql, i), out)
+    tag = _clickhouse_heredoc_tag(sql, i) if ch == '$' else None
+    if tag:
+        return _mask_dollar_quoted(sql, i, tag, out)
+    word = _CLICKHOUSE_WORD.match(sql, i)
+    end = word.end() if word else i + 1
+    out.append(sql[i:end])
+    return end
+
+
+def _mask_clickhouse(sql: str) -> str:
+    """Blank literals, quoted names and comments as ClickHouse reads them (``Lexer.cpp``).
+
+    ``'...'``, ``"..."`` and backtick names (backslash and doubled-quote escapes), ``‘...’`` strings and
+    ``“...”`` names, ``$tag$...$tag$`` heredocs (a tag of ASCII letters, digits and ``_``, which may start with a
+    digit), ``--``, ``//``, ``# `` and ``#!`` to the next LF, and nested ``/* */``. A ``$``, a ``-`` or a quote
+    inside a number or a bare word starts nothing.
+
+    Args:
+        sql: The statement text.
+
+    Returns:
+        Text of the same length with only the executable parts left.
+    """
+    out: list[str] = []
+    i, n = 0, len(sql)
+    while i < n:
+        i = _clickhouse_token(sql, i, out)
+    return ''.join(out)
+
+
 def _is_read_shaped(masked: str | None) -> bool:
     """Return True if the masked text holds at most one statement, a SELECT that does not write, lock or change settings.
 
@@ -303,7 +420,7 @@ def is_sql_safe(sql: str) -> bool:
     a ``;``-chain of more than one statement, reads included: on PostgreSQL a later statement could end
     the read-only transaction or lift its time limit, and a generated query is one statement. A trailing
     ``;`` is fine. The text is read under PostgreSQL rules with ``standard_conforming_strings`` on and off,
-    and under MySQL rules (see the module docstring), and must pass all three.
+    and under MySQL and ClickHouse rules (see the module docstring), and must pass all four.
 
     Not a read-only guarantee: see the module docstring. Empty or whitespace-only input passes, as there is
     no statement to reject; a caller that must forbid empty SQL guards that itself.
@@ -318,4 +435,5 @@ def is_sql_safe(sql: str) -> bool:
         _is_read_shaped(_mask_postgres(sql, backslash_strings=False))
         and _is_read_shaped(_mask_postgres(sql, backslash_strings=True))
         and _is_read_shaped(_mask_mysql(sql))
+        and _is_read_shaped(_mask_clickhouse(sql))
     )

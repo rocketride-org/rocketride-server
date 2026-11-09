@@ -172,8 +172,11 @@ server from the environment where the pipeline runs.
 ### Generated-query safety
 
 For LLM-generated SQL, the node only accepts `SELECT`, optionally preceded by
-`EXPLAIN`. It masks literals and comments, and rejects multi-statement input
-and CTEs plus a `SELECT` with `INTO`, a row lock or a `SETTINGS` clause. It
+`EXPLAIN`. It masks literals and comments as ClickHouse reads them (backslash
+escapes in strings and quoted names, `‘...’` and `“...”` quotes, `//` and `# `
+comments, heredocs) and also under PostgreSQL and MySQL rules, and rejects
+multi-statement input and CTEs plus a `SELECT` with `INTO`, a row lock or a
+`SETTINGS` clause. It
 validates each safe candidate with `EXPLAIN` and feeds database errors to the
 LLM for the next attempt.
 

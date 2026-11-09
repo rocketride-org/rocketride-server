@@ -164,7 +164,7 @@ For LLM-generated SQL, the node only accepts `SELECT`, optionally preceded by
 `EXPLAIN`, and rejects a `SELECT` with `INTO` (`INTO OUTFILE` and
 `INTO DUMPFILE` included) or a row lock. It masks literals and comments before
 checking, under MySQL rules (backslash escapes, `#` and `-- ` comments) as well
-as PostgreSQL's, rejects comments MySQL runs (`/*! */`, `/*M! */`) and optimizer
+as PostgreSQL's and ClickHouse's, rejects comments MySQL runs (`/*! */`, `/*M! */`) and optimizer
 hints (`/*+ */`), and rejects multi-statement input and CTEs.
 It validates each safe candidate with `EXPLAIN` and feeds database errors to the
 LLM for the next attempt. If the LLM decides a question is not a database query, its text
