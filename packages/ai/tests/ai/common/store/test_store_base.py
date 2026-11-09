@@ -24,7 +24,7 @@ from rocketlib import OPEN_MODE
 import ai.common.store.store_global_base as sgb
 from ai.common.schema import Doc, DocMetadata
 from ai.common.store.store_global_base import StoreGlobalBase
-from ai.common.store.store_instance_base import StoreInstanceBase
+from ai.common.store.store_instance_base import NO_STORE_MESSAGE, StoreInstanceBase
 
 
 # ---------------------------------------------------------------------------
@@ -217,25 +217,34 @@ def _instance_with_store(store):
     return inst
 
 
+def _assert_says_the_store_is_not_open(message: str) -> None:
+    """The missing-store refusal says what is wrong and what to check (#2476)."""
+    assert message == NO_STORE_MESSAGE
+    assert message == 'Vector store connection is unavailable. Check its connection settings and startup errors.'
+
+
 def test_write_questions_raises_when_store_missing():
-    """The writeQuestions lane raises 'No document store' when the store is absent."""
+    """The writeQuestions lane refuses when the store is absent, saying it is not open."""
     inst = _instance_with_store(None)
-    with pytest.raises(Exception, match='No document store'):
+    with pytest.raises(Exception) as excinfo:
         inst.writeQuestions(SimpleNamespace())
+    _assert_says_the_store_is_not_open(str(excinfo.value))
 
 
 def test_write_documents_raises_when_store_missing():
-    """The writeDocuments lane raises 'No document store' when the store is absent."""
+    """The writeDocuments lane refuses when the store is absent, saying it is not open."""
     inst = _instance_with_store(None)
-    with pytest.raises(Exception, match='No document store'):
+    with pytest.raises(Exception) as excinfo:
         inst.writeDocuments([])
+    _assert_says_the_store_is_not_open(str(excinfo.value))
 
 
 def test_render_object_raises_when_store_missing():
-    """The renderObject lane raises 'No document store' when the store is absent."""
+    """The renderObject lane refuses when the store is absent, saying it is not open."""
     inst = _instance_with_store(None)
-    with pytest.raises(Exception, match='No document store'):
+    with pytest.raises(Exception) as excinfo:
         inst.renderObject(SimpleNamespace(hasVectorBatchId=True, vectorBatchId='b', objectId='o'))
+    _assert_says_the_store_is_not_open(str(excinfo.value))
 
 
 def test_lane_handlers_delegate_to_store_when_present():

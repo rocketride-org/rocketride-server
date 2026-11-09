@@ -10,6 +10,7 @@ not cascade, and not blame an innocent module that restores correctly. These
 exercise the collection-time helper and the per-test teardown hook directly.
 """
 
+import importlib.machinery
 import importlib.util
 import json
 import os
@@ -52,6 +53,25 @@ def pinned_numpy():
     real = guard._pinned['numpy']
     yield real
     sys.modules['numpy'] = real
+
+
+@pytest.fixture(params=['depends', 'engLib'])
+def pinned_engine_module(request):
+    """An engine module the guard pinned; whatever a test does, sys.modules ends with it.
+
+    Args:
+        request (pytest.FixtureRequest): carries the module name in ``param``.
+
+    Yields:
+        tuple: the module name and the module object the guard pinned.
+    """
+    if 'engLib' not in sys.builtin_module_names:
+        pytest.skip('engLib and depends exist only inside the engine')
+    name = request.param
+    assert name in guard._pinned, f'{name} exists in the engine but the guard did not pin it'
+    real = guard._pinned[name]
+    yield name, real
+    sys.modules[name] = real
 
 
 @pytest.fixture(autouse=True)
@@ -160,6 +180,14 @@ def test_is_stub_module_detects_stub_built_via_module_from_spec():
     assert guard._is_stub_module(None) is False
 
 
+def test_is_stub_module_treats_a_built_in_module_as_real():
+    """A module compiled into the interpreter has no __file__ but is real; a stub with its name is still a stub."""
+    assert sys.__spec__.loader is importlib.machinery.BuiltinImporter
+    assert getattr(sys, '__file__', None) is None
+    assert guard._is_stub_module(sys) is False
+    assert guard._is_stub_module(types.ModuleType('sys')) is True
+
+
 def test_numpy_is_pinned_to_the_real_module(pinned_numpy):
     """The guard imports the real numpy once, and that is the numpy tests see.
 
@@ -242,6 +270,48 @@ def test_a_failing_teardown_keeps_its_error_and_numpy_is_put_back(pinned_numpy):
     with pytest.raises(RuntimeError, match='fixture teardown failed'):
         teardown.throw(RuntimeError('fixture teardown failed'))
     assert sys.modules['numpy'] is pinned_numpy
+
+
+def test_engine_modules_are_pinned_to_the_real_modules(pinned_engine_module):
+    """Inside the engine the guard pins the real depends (depends.py) and engLib (built in).
+
+    Args:
+        pinned_engine_module (tuple): the module name and the module the guard pinned.
+    """
+    name, real = pinned_engine_module
+    assert not guard._is_stub_module(real)
+    assert sys.modules[name] is real
+    assert Path(real.__spec__.origin).name == {'depends': 'depends.py', 'engLib': 'built-in'}[name]
+
+
+def test_collection_flags_and_undoes_an_engine_module_stub(pinned_engine_module):
+    """A test module that leaves a stub depends or engLib at import time is flagged, and the real module is put back.
+
+    Args:
+        pinned_engine_module (tuple): the module name and the module the guard pinned.
+    """
+    name, real = pinned_engine_module
+    nodeid = 'nodes/test/fake_engine_module_leaker.py'
+    guard.pytest_collectstart(Module(nodeid))
+    sys.modules[name] = types.ModuleType(name)
+    assert guard.check_after_import(nodeid) == [name]
+    assert guard._core_leaks == [(nodeid, [name])]
+    assert sys.modules[name] is real
+
+
+def test_a_test_that_stubs_an_engine_module_fails_in_teardown(pinned_engine_module):
+    """A test that leaves a stub depends or engLib fails in teardown; the next test gets the real module.
+
+    Args:
+        pinned_engine_module (tuple): the module name and the module the guard pinned.
+    """
+    name, real = pinned_engine_module
+    teardown = guard.pytest_runtest_teardown(Item('nodes/test/test_leaker.py::test_it'), None)
+    next(teardown)
+    sys.modules[name] = types.ModuleType(name)
+    with pytest.raises(pytest.fail.Exception, match=rf"test_leaker\.py::test_it replaced or removed \['{name}'\]"):
+        teardown.send(None)
+    assert sys.modules[name] is real
 
 
 def test_the_teardown_check_is_registered_for_node_tests(request):

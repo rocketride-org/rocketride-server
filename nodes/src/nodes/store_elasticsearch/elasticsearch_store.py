@@ -208,7 +208,9 @@ class Store(DocumentStoreBase):
         if len(doc) != 1:
             if self.count_documents() == 0:
                 return False
-            raise Exception(f'Collection does not have control document, found {len(doc)}')
+            raise Exception(
+                f'Index setup record is missing or invalid (found {len(doc)}, expected 1). Choose a new index name.'
+            )
         self.vectorSize = doc[0].metadata.vectorSize
         self.modelName = doc[0].metadata.modelName
         return True
