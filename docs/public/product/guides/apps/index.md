@@ -238,13 +238,15 @@ interface AppManifest {
   onDesktop?: boolean;
   /** Platform apps only: public pages on the app origin (see Public pages). */
   publicPages?: PublicPage[];
-  /** Platform apps only, honored from the app owning '/': the site's title, blurb, docs link and redirects. */
+  /** Platform apps only, honored from the app owning '/': the site's title, blurb, docs link, redirects and image. */
   site?: {
     title?: string;
     blurb?: string;
     docsUrl?: string;
     /** Old URLs answered with a 301 to one of your pages, query string kept. */
     redirects?: { from: string; to: string }[];
+    /** The link-preview image of pages that declare none (same forms as a page's image). */
+    image?: string;
   };
 }
 ```
@@ -273,6 +275,14 @@ interface PublicPage {
   snapshot?: string;
   /** Server data the page names: 'plans' (this app's plans), 'plans:<appId>' or 'app:<appId>'. */
   data?: string[];
+  /** The link-preview image: an https URL, a root path, or a path in the build output ('og/pricing.png'). */
+  image?: string;
+  /** When the page was first published, 'YYYY-MM-DD' or an RFC 3339 date-time: makes it an article. */
+  published?: string;
+  /** When the page last changed, in the same forms; never earlier than published. */
+  modified?: string;
+  /** At most 5 authors, each a name (at most 300 characters) and an optional https URL. */
+  authors?: { name: string; url?: string }[];
 }
 ```
 
@@ -298,6 +308,18 @@ publish fails with a message naming the field):
   names each source (`plans`, `app`) at most once.
 - `snapshot` must be a relative `.html` path that exists in the built version,
   at most 2 MiB.
+- `image` and `site.image` are an `https://` URL, a root path (`/apps/...`,
+  never `//`) or a relative path inside the build output, with no empty or dot
+  segment, at most 2048 characters.
+- `published` and `modified` are a real date (`2026-11-09`) or an RFC 3339
+  date-time with an offset (`2026-11-09T10:00:00Z`, at most `±23:59`) that
+  stays within years 1 to 9999 in UTC. A date alone means midnight UTC, and
+  `modified` may not be earlier than `published`.
+- `authors` holds at most 5 entries, each with a non-empty `name` and, if
+  given, an `https://` `url`.
+- No text or URL field may hold a lone surrogate (U+D800 to U+DFFF, half of a
+  UTF-16 pair, as a string cut through an emoji leaves), which UTF-8 cannot
+  carry.
 - `site.docsUrl` must be an `https://` URL, with `<`, `>`, `"`, `'` and
   `` ` `` percent-encoded.
 - `site.redirects` (at most 100): each `from` is one exact path in the `path`
@@ -322,6 +344,18 @@ Crawlers (search, AI and link-preview bots, by user agent) get the page's
 same head. A page without a snapshot, or whose snapshot cannot be read or
 rendered, serves crawlers the shell's document; so does a stored snapshot over
 2 MiB, which the server never reads.
+
+Every page's head, for people and crawlers alike (link-preview fetchers do
+not always say they are bots), also carries `og:site_name` (`site.title`),
+`og:type` and a Twitter card. A page with `published` is an `article`, with
+`article:published_time` and `article:modified_time` (`modified`, else
+`published`); any other page is a `website`. `og:image` is the page's `image`,
+else `site.image`, and asks for the large card (`summary_large_image`, else
+`summary`). An `https://` image is used as declared; a root path is made
+absolute with `RR_APP_URL`; a relative path is a file of the declaring app's
+build output, served from its production version
+(`<RR_APP_URL>/apps/<appId>/v<N>/<path>`). Without `RR_APP_URL` only an
+`https://` image is used.
 
 A snapshot is a template with exactly three kinds of tag, each on one line:
 `{{name}}` and `{{a.b}}` insert a value, HTML-escaped; `{{#name}}...{{/name}}`

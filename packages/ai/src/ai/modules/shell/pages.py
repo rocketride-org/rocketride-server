@@ -48,14 +48,15 @@ build output, rendered by the restricted template engine (``template.py``)
 with ``assets``, the version's URL base, and the page's bound data sources
 (``data_sources.py``). A page without a snapshot, or with one that cannot be
 read or rendered, serves crawlers the shell document too. Either way the
-page's head metadata (title, description, canonical URL, robots) is injected,
-plus, for crawlers, the JSON-LD of its data sources. A source that cannot be
-read leaves the page without its data, uncached. Every page response carries
-``Vary: User-Agent``. A rendered snapshot is ``public, max-age=3600`` (plan
-section 7); the shell document names the current build's bundles, so it is
-``private, no-cache``. A shared cache put in front would have to honor that
-``Vary`` (CloudFront ignores it by default), or it would hand people a
-crawler's snapshot.
+page's head metadata (title, description, canonical URL, robots, and the
+link-preview tags: ``og:type``, ``og:site_name``, ``og:image``, the Twitter
+card, article times) is injected, plus, for crawlers, the JSON-LD of its data
+sources. A source that cannot be read leaves the page without its data,
+uncached. Every page response carries ``Vary: User-Agent``. A rendered
+snapshot is ``public, max-age=3600`` (plan section 7); the shell document
+names the current build's bundles, so it is ``private, no-cache``. A shared
+cache put in front would have to honor that ``Vary`` (CloudFront ignores it
+by default), or it would hand people a crawler's snapshot.
 
 Rendered responses are cached per (path, UA class) under a byte budget and
 dropped on every aggregate swap; a crawler response bound to a data source is
@@ -93,7 +94,7 @@ from rocketlib import error, warning
 from . import data_sources, public_pages
 from .contract import MAX_SNAPSHOT_BYTES, Page, reserved_error, snapshot_error, with_slash_twin
 from .crawlers import CRAWLER, classify
-from .head import inject_head
+from .head import inject_head, social_tags
 from .not_found_page import NOT_FOUND_HTML
 from .settings import app_url
 from .shell import capture_candidate, shell_document_path, shell_static
@@ -462,6 +463,25 @@ def assets_base(page: Page) -> str:
     return f'/apps/{page.app_id}/v{page.version}'
 
 
+def image_url(value: str, owner: Optional[Page]) -> str:
+    """The absolute URL of a declared ``image``, or '' when it cannot be made absolute.
+
+    An https URL is kept as declared and a root path goes on ``RR_APP_URL``.
+    Any other value is a path in ``owner``'s build output, served from its
+    production version (``assets_base``), so it changes with each publish.
+    """
+    if value.startswith('https://'):
+        return value
+    base = app_url()
+    if not value or not base:
+        return ''
+    if value.startswith('/'):
+        return base + value
+    if owner is None or owner.version is None:
+        return ''
+    return f'{base}{assets_base(owner)}/{value}'
+
+
 async def _snapshot_bytes(page: Page, path: str) -> bytes:
     """The snapshot at store ``path``, from the snapshot cache or the one read of it in flight.
 
@@ -739,11 +759,11 @@ async def public_page(request: Request) -> Response:
     if page is None:
         return await _unclaimed(request, path)
     if path == '/':
-        return await _home_page(request, page)
-    return await _render_page(request, path, page)
+        return await _home_page(request, page, aggregate)
+    return await _render_page(request, path, page, aggregate)
 
 
-async def _home_page(request: Request, page: Page) -> Response:
+async def _home_page(request: Request, page: Page, aggregate: public_pages.Aggregate) -> Response:
     """``/`` from its page, or, when rendering it fails, the shell exactly as ``shell_static`` serves it.
 
     ``/`` keeps its dedicated route (plan 3.2), so a bug in its page never
@@ -754,7 +774,7 @@ async def _home_page(request: Request, page: Page) -> Response:
         HTTPException: as ``_render_page`` (503 when the shell is not built).
     """
     try:
-        return await _render_page(request, '/', page)
+        return await _render_page(request, '/', page, aggregate)
     except HTTPException:
         raise
     except Exception as exc:
@@ -831,7 +851,7 @@ def _not_found(request: Request, path: str) -> Response:
     return HTMLResponse(NOT_FOUND_HTML, status_code=404, headers=headers)
 
 
-async def _render_page(request: Request, path: str, page: Page) -> Response:
+async def _render_page(request: Request, path: str, page: Page, aggregate: public_pages.Aggregate) -> Response:
     """The page from the render cache, rendered off the event loop on a miss.
 
     Keyed by (path, UA class, shell document, its mtime and size,
@@ -855,7 +875,7 @@ async def _render_page(request: Request, path: str, page: Page) -> Response:
     cached = _render_cache.get(key)
     if cached is None or cached.expires <= now:
         generation = _generation
-        cached, cacheable = await _render(path, page, crawler, document, now)
+        cached, cacheable = await _render(path, page, aggregate, crawler, document, now)
         if generation != _generation:
             # A swap or an invalidation landed mid-render: this copy may already be stale.
             return HTMLResponse(cached.body, headers={**cached.headers, 'Cache-Control': 'private, no-cache'})
@@ -925,16 +945,19 @@ def _file_version(document: Path) -> Optional[Tuple[int, int]]:
     return stat.st_mtime_ns, stat.st_size
 
 
-async def _render(path: str, page: Page, crawler: bool, document: Path, now: float) -> Tuple[_Rendered, bool]:
+async def _render(
+    path: str, page: Page, aggregate: public_pages.Aggregate, crawler: bool, document: Path, now: float
+) -> Tuple[_Rendered, bool]:
     """Render one page: ``(rendered, cacheable)``, the entry as the render cache holds it.
 
     People get the shell document; crawlers get the page's snapshot rendered
     with its bound data sources (``_crawler_snapshot``), or the shell document
-    when there is none to serve. Either way the page's head metadata is
-    injected, plus the sources' JSON-LD for crawlers; reading the shell
-    document and rewriting the head run off the event loop. A render bound to
-    a source expires ``data_sources.TTL_SECONDS`` after ``now``. ``cacheable``
-    is False for a fallback the next request should retry.
+    when there is none to serve. Either way the page's head metadata and
+    link-preview tags are injected, plus the sources' JSON-LD for crawlers;
+    reading the shell document and rewriting the head run off the event loop.
+    A render bound to a source expires ``data_sources.TTL_SECONDS`` after
+    ``now``. ``cacheable`` is False for a fallback the next request should
+    retry.
     """
     canonical = canonical_url(path)
     # Only crawlers bind data: people get the shell document, which the
@@ -959,6 +982,9 @@ async def _render(path: str, page: Page, crawler: bool, document: Path, now: flo
         body = await asyncio.to_thread(document.read_text, encoding='utf-8')
     elif cacheable:
         cache_control = _SNAPSHOT_CACHE_CONTROL
+    site = aggregate.site
+    # The page's own image, else the site's (declared by the root owner).
+    image = image_url(page.image, page) or image_url(site.get('image', ''), aggregate.exact.get('/'))
     body = await asyncio.to_thread(
         inject_head,
         body,
@@ -967,6 +993,9 @@ async def _render(path: str, page: Page, crawler: bool, document: Path, now: flo
         canonical=canonical,
         noindex=not page.listed,
         jsonld=data_sources.jsonld(context, canonical),
+        extra=social_tags(
+            site_name=site.get('title', ''), image=image, published=page.published, modified=page.modified
+        ),
     )
     headers = {'Vary': 'User-Agent', 'Cache-Control': cache_control}
     if not page.listed:

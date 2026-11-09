@@ -255,7 +255,7 @@ def test_unknown_page_and_site_keys_are_ignored():
     manifest = {
         'publicPages': [
             _page('/', futureField={'a': 1}, image='/og.png'),
-            _page('/x', published='2026-11-09'),
+            _page('/x', published='2026-11-09', futureDate='soon'),
         ],
         'site': {'title': 'R', 'futureSite': [1]},
         'futureSection': True,
@@ -265,10 +265,131 @@ def test_unknown_page_and_site_keys_are_ignored():
     assert [p.path for p in pages] == ['/', '/x']
     assert site == {'title': 'R'}
     # A page keeps its unknown keys, read-only, for the layers that serve them.
-    assert dict(pages[0].extra) == {'futureField': {'a': 1}, 'image': '/og.png'}
-    assert dict(pages[1].extra) == {'published': '2026-11-09'}
+    assert dict(pages[0].extra) == {'futureField': {'a': 1}}
+    assert dict(pages[1].extra) == {'futureDate': 'soon'}
     with pytest.raises(TypeError):
-        pages[0].extra['image'] = '/other.png'
+        pages[0].extra['futureField'] = 2
+
+
+# ---------------------------------------------------------------------------
+# Article metadata: image, published, modified, authors, site.image
+# ---------------------------------------------------------------------------
+
+
+def test_article_fields_validate_onto_the_page():
+    pages, site, errors = check_manifest(
+        ROOT_APP,
+        {
+            'publicPages': [
+                _page('/', image='https://cdn.example/og.png'),
+                _page(
+                    '/blog/launch',
+                    image='blog/launch.png',
+                    published='2026-11-09',
+                    modified='2026-11-10T09:00:00.123-08:00',
+                    authors=[{'name': 'Ansh', 'url': 'https://rocketride.ai/team/ansh', 'role': 'x'}, {'name': 'Rod'}],
+                ),
+                _page('/blog/hello', image='/apps/rocketride.home/seo-assets/og.png', modified='2026-11-01T00:00:00Z'),
+            ],
+            'site': {'title': 'R', 'image': 'og/site.png'},
+        },
+    )
+    assert errors == []
+    home, launch, hello = pages
+    assert (home.image, home.published, home.modified, home.authors) == ('https://cdn.example/og.png', '', '', ())
+    assert launch.image == 'blog/launch.png'
+    assert (launch.published, launch.modified) == ('2026-11-09', '2026-11-10T09:00:00.123-08:00')
+    # Unknown author keys are ignored, like any unknown key.
+    assert launch.authors == (('Ansh', 'https://rocketride.ai/team/ansh'), ('Rod', ''))
+    assert (hello.image, hello.modified) == ('/apps/rocketride.home/seo-assets/og.png', '2026-11-01T00:00:00Z')
+    assert site == {'title': 'R', 'image': 'og/site.png'}
+    assert all(dict(p.extra) == {} for p in pages)
+
+
+@pytest.mark.parametrize(
+    'field,value,needle',
+    [
+        ('image', 'http://cdn.example/og.png', 'publicPages[0].image'),
+        ('image', 'https://', 'publicPages[0].image'),
+        ('image', 'https://cdn.example/a b.png', 'publicPages[0].image'),
+        ('image', 'https:///og.png', 'publicPages[0].image'),
+        ('image', 'javascript:alert(1)', 'publicPages[0].image'),
+        ('image', '//evil.example/og.png', 'publicPages[0].image'),
+        ('image', '/a/../og.png', 'publicPages[0].image'),
+        ('image', '../og.png', 'publicPages[0].image'),
+        ('image', 'og/./x.png', 'publicPages[0].image'),
+        ('image', 'og//x.png', 'publicPages[0].image'),
+        ('image', 'og x.png', 'publicPages[0].image'),
+        ('image', '/og.png\n', 'publicPages[0].image'),
+        ('image', 'https://cdn.example/' + 'x' * 2048, 'publicPages[0].image'),
+        ('image', 5, 'publicPages[0].image'),
+        ('image', None, 'publicPages[0].image'),
+        ('published', '2026-11-9', 'publicPages[0].published'),
+        ('published', '2026-13-01', 'publicPages[0].published'),
+        ('published', '2026-02-30', 'publicPages[0].published'),
+        ('published', '2026-11-09T10:00:00', 'publicPages[0].published'),
+        ('published', '2026-11-09 10:00:00Z', 'publicPages[0].published'),
+        ('published', '2026-11-09T24:00:00Z', 'publicPages[0].published'),
+        ('published', '09/11/2026', 'publicPages[0].published'),
+        ('published', '2026-11-09\n', 'publicPages[0].published'),
+        ('published', 20261109, 'publicPages[0].published'),
+        # Offsets that push the instant out of the representable range.
+        ('published', '0001-01-01T00:00:00+01:00', 'publicPages[0].published'),
+        ('modified', '9999-12-31T23:59:59-01:00', 'publicPages[0].modified'),
+        ('published', '2026-11-09T10:00:00+14:60', 'publicPages[0].published'),
+        ('published', '2026-11-09T10:00:00+24:00', 'publicPages[0].published'),
+        ('published', '2026-11-09T10:00:00-07:5', 'publicPages[0].published'),
+        ('published', '\uff12\uff10\uff12\uff16-11-09', 'publicPages[0].published'),
+        ('modified', 'yesterday', 'publicPages[0].modified'),
+        ('authors', 'Ansh', 'publicPages[0].authors'),
+        ('authors', [{'name': str(i)} for i in range(6)], 'publicPages[0].authors'),
+        ('authors', ['Ansh'], 'publicPages[0].authors[0]'),
+        ('authors', [{'name': 'A'}, {'url': 'https://x.example/'}], 'publicPages[0].authors[1].name'),
+        ('authors', [{'name': ' '}], 'publicPages[0].authors[0].name'),
+        ('authors', [{'name': 'x' * 301}], 'publicPages[0].authors[0].name'),
+        ('authors', [{'name': 'A', 'url': 'http://x.example/'}], 'publicPages[0].authors[0].url'),
+        ('authors', [{'name': 'A', 'url': 5}], 'publicPages[0].authors[0].url'),
+        ('authors', [{'name': 'Ansh \ud83d'}], 'publicPages[0].authors[0].name: contains a lone surrogate'),
+        ('authors', [{'name': 'A', 'url': 'https://x.example/\ud83d'}], 'publicPages[0].authors[0].url: contains'),
+        ('image', 'https://cdn.example/\ud83d.png', 'publicPages[0].image'),
+    ],
+)
+def test_bad_article_fields_fail_with_the_field_named(field, value, needle):
+    pages, _, errors = check_manifest(ROOT_APP, {'publicPages': [_page('/x', **{field: value})]})
+    assert pages == []
+    assert len(errors) == 1 and errors[0].startswith(needle), errors
+
+
+def test_modified_before_published_rejected():
+    pages, _, errors = check_manifest(
+        ROOT_APP, {'publicPages': [_page('/x', published='2026-11-10', modified='2026-11-09')]}
+    )
+    assert pages == []
+    assert errors == [
+        "publicPages[0].modified '2026-11-09': must not be earlier than published '2026-11-10'; fix either date"
+    ]
+    # A date-only value is midnight UTC, and offsets compare as instants.
+    for published, modified, ok in (
+        ('2026-11-09', '2026-11-09', True),
+        ('2026-11-09T10:00:00Z', '2026-11-09', False),
+        ('2026-11-10T01:00:00+02:00', '2026-11-09T23:30:00Z', True),
+        ('2026-11-10T01:00:00+02:00', '2026-11-09T22:59:59Z', False),
+        # The extremes of the range, and the widest real offsets.
+        ('0001-01-01T00:00:00Z', '9999-12-31T23:59:59Z', True),
+        ('2026-11-09T10:00:00+14:00', '2026-11-09T10:00:00-12:00', True),
+    ):
+        pages, _, errors = check_manifest(
+            ROOT_APP, {'publicPages': [_page('/x', published=published, modified=modified)]}
+        )
+        assert (errors == []) is ok, (published, modified, errors)
+
+
+@pytest.mark.parametrize(
+    'image', ['http://x.example/og.png', '//x.example/og.png', '../og.png', 7, 'https://x.example/\ud83d.png']
+)
+def test_bad_site_image_fails_with_the_field_named(image):
+    _, site, errors = check_manifest(ROOT_APP, {'publicPages': [_page('/')], 'site': {'title': 'R', 'image': image}})
+    assert site is None and len(errors) == 1 and errors[0].startswith('site.image')
 
 
 def test_publicpages_must_be_a_list():
