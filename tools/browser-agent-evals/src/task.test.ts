@@ -54,11 +54,12 @@ test('a hand-broken copy of a task is refused, with each problem named', () => {
 		checks.push({ id: 'bad-regex', type: 'file_matches', path: 'pipelines/support-chat.pipe', regex: '(' });
 		checks.push({ id: 'no-path', type: 'validates' });
 		checks.push({ id: 'bad-reason', type: 'outcome', expect: 'failed', reason: 3 });
+		checks.push({ id: 'bad-use', type: 'check_app_passes', app: 'apps/a-ui', use: { fill: '', click: 'Ask', pipeline: 'pipelines/*.pipe', answer: '(', timeoutSec: 0, wait: 1 } });
 		// the starting file's text is not copied into the broken set
 		fs.writeFileSync(path.join(dir, `${id}.json`), JSON.stringify(task));
 
 		const { problems } = validateTask(id, dir);
-		const expected = ['unknown field timelimit', 'prompt is empty', 'timeLimitSec must be a whole number of seconds above 0', 'file pipelines/support-chat.pipe comes from "fixtures/support-chat-openai/pipelines/support-chat.pipe", which is not a file in the task set folder', "check tools has type tool_called, which reads the agent's tool calls, so a browser trial cannot grade it", 'check typo has unknown type "file_exist"', 'check bad-regex regex is not a valid regex', 'check no-path (validates) needs path', 'check bad-reason reason must be text: the reason the saved turn must end with, such as refused'];
+		const expected = ['unknown field timelimit', 'prompt is empty', 'timeLimitSec must be a whole number of seconds above 0', 'file pipelines/support-chat.pipe comes from "fixtures/support-chat-openai/pipelines/support-chat.pipe", which is not a file in the task set folder', "check tools has type tool_called, which reads the agent's tool calls, so a browser trial cannot grade it", 'check typo has unknown type "file_exist"', 'check bad-regex regex is not a valid regex', 'check no-path (validates) needs path', 'check bad-reason reason must be text: the reason the saved turn must end with, such as refused', 'check bad-use use has unknown field wait', 'check bad-use use needs fill, the text to type into the app', "check bad-use use needs pipeline, a glob of the app's own pipeline file under apps/a-ui/", 'check bad-use use answer must be a valid regex', 'check bad-use use timeoutSec must be a whole number of seconds above 0'];
 		for (const p of expected) assert.ok(problems.includes(p), `missing problem: ${p}\ngot:\n${problems.join('\n')}`);
 		assert.ok(problems.some((p) => p.startsWith('cards must be')));
 		assert.deepEqual(

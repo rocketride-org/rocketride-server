@@ -322,7 +322,7 @@ function needsInputWhy(task: Task, record: BrowserTrialRecord): string | null {
 	return `the turn ended needs_input ${how} after ${result.usage.waves} steps${cost}: ${String(result.request?.question ?? '(no question)')}`;
 }
 
-/** The check that the product's check_app ran every step on the app, from the saved turn. Listed, never counted (soft): without the Design preview, build and runtime cannot run (task 1.2). */
+/** The check that the product's check_app ran every step, over every app, from the saved turn. Listed, never counted (soft); each app's check_app_passes counts the same rows for its own app (checks/app.ts withSteps). */
 export const APP_STEPS_CHECK = 'check-app-ran-every-step';
 
 /** The steps check_app reports (apps/shared toolkits/appCheck.ts); a pipeline's validate is not one. */

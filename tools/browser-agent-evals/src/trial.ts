@@ -52,7 +52,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { changedApps, checkApps, withLoads, type AppCheckResult } from './checks/app';
+import { changedApps, checkApps, withLoads, withSteps, type AppCheckResult } from './checks/app';
+import { appPipelines, pipelineRuns, runVerdict, withRuns, type AppRun, type RunSeen } from './checks/appRun';
 import { TrialScans, type KeyScan } from './checks/common';
 import { runOutputs, validatePipes } from './checks/pipeline';
 import { Driver, modelTitles, outcomeOfCard, type AppLoad, type ModelPick, type TurnRun } from './driver';
@@ -61,7 +62,8 @@ import { gradeTrial, type TrialResult } from './grade';
 import { guideReads, type GuideReads } from './guides';
 import type { Stack } from './stack';
 import { Store, storePath, type SavedSession, type SavedTurn } from './store';
-import type { Task, UserEvent } from './task';
+import { pyRegex } from './score';
+import type { AppUse, Task, UserEvent } from './task';
 import type { TrialRecord, TurnRecord, TurnResultRecord } from './types';
 
 /** Why the trial ended, beyond the turn's own outcome. */
@@ -96,6 +98,8 @@ export interface BrowserTrial {
 	appChecks: Record<string, AppCheckResult>;
 	/** Each app with an open preview, loaded from the final files after the turn (Driver.appLoad), by app folder. */
 	appLoads: Record<string, AppLoad>;
+	/** Each app a check_app_passes check uses, after its load: what the runner did in it and what the engine ran (checks/appRun.ts), by app folder. */
+	appRuns: Record<string, AppRun>;
 	/** What the runner did as the user, from the task's user_events, in order. */
 	userEvents: Array<{ when: UserEvent['when']; action: UserEvent['action']; path: string; done: boolean; detail: string }>;
 }
@@ -233,6 +237,14 @@ export async function runTrial(opts: TrialOptions): Promise<{ record: BrowserTri
 						return { ok: null, detail, errors: [], crashed: false };
 					});
 				}
+				// step: each app a check uses, after its load: type, press, and read the engine's tasks of its own pipeline (task 3.2's run check)
+				const uses = task.checks.filter((c) => c.type === 'check_app_passes' && c.use !== undefined);
+				const files = uses.length ? await store.readWorkspace() : {};
+				for (const ck of uses) {
+					const folder = String(ck.app);
+					if (browser.appRuns[folder]) continue;
+					browser.appRuns[folder] = await useApp(store, driver, folder, ck.use as AppUse, files, browser.appLoads[folder], steps);
+				}
 				browser.card = run.card;
 				browser.banner = run.banner ?? null;
 				browser.stoppedAtLimit = run.stoppedAtLimit;
@@ -312,6 +324,8 @@ export async function runTrial(opts: TrialOptions): Promise<{ record: BrowserTri
 	if (apps.size) {
 		browser.appChecks = await checkApps([...apps].sort(), final, path.join(dir, 'app-check'));
 		withLoads(browser.appChecks, browser.appLoads);
+		withSteps(browser.appChecks, record.turns.at(-1)?.result?.checks ?? null, final);
+		withRuns(browser.appChecks, browser.appRuns);
 		steps(
 			'app checks',
 			Object.entries(browser.appChecks)
@@ -335,6 +349,39 @@ export async function runTrial(opts: TrialOptions): Promise<{ record: BrowserTri
 
 /** How often the store is read for a new app during the turn. */
 const APP_POLL_MS = 1000;
+
+/**
+ * Uses one app for its check_app_passes check and reads what the engine ran
+ * (checks/appRun.ts). An app whose preview was not loaded is not used: its
+ * run is not read (null) when the preview was never open, and not tried when
+ * the load failed, since that already fails the check. A use or engine read
+ * that throws fails the run, keeping a failure already seen.
+ */
+async function useApp(store: Store, driver: Driver, folder: string, use: AppUse, files: Record<string, string>, load: AppLoad | undefined, steps: (action: string, result: string) => void): Promise<AppRun> {
+	const pipelines = appPipelines(files, use.pipeline);
+	const notUsed = (why: string): AppRun => ({ ok: null, detail: `run not read: ${why}`, used: { done: false, answered: null, detail: why, excerpt: '' }, pipelines, runs: [] });
+	if (!load) return notUsed("the app's Design preview was not open");
+	if (load.ok === false) return notUsed('the app did not load');
+	const ids = new Set(pipelines.map((p) => p.projectId));
+	const engine = (): Promise<Map<string, RunSeen>> => pipelineRuns(store.client, ids);
+	let verdict: AppRun | null = null;
+	try {
+		const before = await engine();
+		const name = (await store.appName(folder)) ?? folder.slice('apps/'.length);
+		const used = await driver.useApp(name, use, use.answer ? pyRegex(use.answer) : null, (use.timeoutSec ?? 120) * 1000);
+		// step: the engine's status can trail the page by a moment, so read it until it says the use ran, for up to 10 s
+		verdict = runVerdict(used, pipelines, before, await engine(), use.pipeline);
+		for (let i = 0; i < 10 && used.done && verdict.ok === false && pipelines.length > 0; i++) {
+			await new Promise((r) => setTimeout(r, 1000));
+			verdict = runVerdict(used, pipelines, before, await engine(), use.pipeline);
+		}
+	} catch (err) {
+		const why = `the app could not be used, or the engine's tasks could not be read: ${(err instanceof Error ? err.message : String(err)).split('\n')[0]}`;
+		verdict = verdict ? { ...verdict, detail: `${verdict.detail}; then ${why}` } : { ...notUsed(why), ok: false, detail: `run: ${why}` };
+	}
+	steps(`use ${folder} and read its pipeline's tasks`, verdict.detail);
+	return verdict;
+}
 
 /**
  * The during-turn step that opens a new app's Design preview as soon as the
@@ -419,7 +466,7 @@ function emptyRecord(opts: TrialOptions): BrowserTrialRecord {
 		session: { saved: false, messages: 0 },
 		infraError: null,
 		replay: null,
-		browser: { card: null, banner: null, cardMatchesOutcome: null, modelShown: null, modelKey: null, approvalMode: null, stoppedAtLimit: false, cards: [], leaks: [], keyScan: null, guides: null, appChecks: {}, appLoads: {}, previewsOpened: [], userEvents: [] },
+		browser: { card: null, banner: null, cardMatchesOutcome: null, modelShown: null, modelKey: null, approvalMode: null, stoppedAtLimit: false, cards: [], leaks: [], keyScan: null, guides: null, appChecks: {}, appLoads: {}, appRuns: {}, previewsOpened: [], userEvents: [] },
 	};
 }
 

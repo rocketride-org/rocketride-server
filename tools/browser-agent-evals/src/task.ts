@@ -70,6 +70,24 @@ export interface UserEvent {
 	set_pointer?: Record<string, unknown>;
 }
 
+/**
+ * How the runner uses an app after the turn, for a check_app_passes check
+ * (checks/appRun.ts): it types `fill` into the app's first text box, presses
+ * the button whose name contains `click`, waits up to `timeoutSec` (default
+ * 120) for `answer` (a regex) on the page, and reads the engine's tasks of
+ * the app's own pipeline, the files `pipeline` globs under the app folder.
+ */
+export interface AppUse {
+	fill: string;
+	click: string;
+	pipeline: string;
+	answer?: string;
+	timeoutSec?: number;
+}
+
+/** The fields an AppUse may have. */
+const USE_FIELDS = new Set(['fill', 'click', 'pipeline', 'answer', 'timeoutSec']);
+
 /** One check. Its other fields depend on its type (CHECK_FIELDS). */
 export interface TaskCheck {
 	id: string;
@@ -368,6 +386,7 @@ export function validateTask(id: string, dir: string = DATA_DIR): Validation {
 			need(expect.length > 0 && expect.every((o) => OUTCOMES.has(String(o))), `${label} expect must be one of, or a list of, ${[...OUTCOMES].join(', ')}`);
 			need(ck.reason === undefined || isText(ck.reason), `${label} reason must be text: the reason the saved turn must end with, such as refused`);
 		} else if (type === 'output') problems.push(...validateOutput(ck, label, t, dir));
+		else if (type === 'check_app_passes' && ck.use !== undefined) problems.push(...validateUse(ck, label));
 		else if (type === 'only_changed') need(Array.isArray(ck.globs) && ck.globs.every((g) => typeof g === 'string'), `${label} globs must be a list of globs (an empty list: nothing may change)`);
 		else if (type === 'canary_absent') {
 			for (const surface of Array.isArray(ck.surfaces) ? ck.surfaces : []) need(SURFACES.has(String(surface)), `${label} names unknown surface ${surface}`);
@@ -376,6 +395,29 @@ export function validateTask(id: string, dir: string = DATA_DIR): Validation {
 		}
 	}
 	return { id, problems };
+}
+
+/** The problems with a check_app_passes check's `use` (AppUse). */
+function validateUse(ck: Record<string, unknown>, label: string): string[] {
+	const u = ck.use;
+	if (!isObject(u)) return [`${label} use must be { fill, click, pipeline, answer?, timeoutSec? }`];
+	const problems = Object.keys(u)
+		.filter((key) => !USE_FIELDS.has(key))
+		.map((key) => `${label} use has unknown field ${key}`);
+	if (!isText(u.fill)) problems.push(`${label} use needs fill, the text to type into the app`);
+	if (!isText(u.click)) problems.push(`${label} use needs click, the name of the button to press`);
+	if (!isText(u.pipeline) || !u.pipeline.startsWith(`${String(ck.app)}/`)) problems.push(`${label} use needs pipeline, a glob of the app's own pipeline file under ${String(ck.app)}/`);
+	if (u.answer !== undefined) {
+		let valid = typeof u.answer === 'string';
+		try {
+			if (valid) pyRegex(String(u.answer));
+		} catch {
+			valid = false;
+		}
+		if (!valid) problems.push(`${label} use answer must be a valid regex`);
+	}
+	if (u.timeoutSec !== undefined && !(Number.isInteger(u.timeoutSec) && Number(u.timeoutSec) > 0)) problems.push(`${label} use timeoutSec must be a whole number of seconds above 0`);
+	return problems;
 }
 
 /**

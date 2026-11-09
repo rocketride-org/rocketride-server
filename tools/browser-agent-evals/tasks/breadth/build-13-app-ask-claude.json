@@ -89,7 +89,13 @@
 		{
 			"id": "check-app",
 			"type": "check_app_passes",
-			"app": "apps/askclaude-ui"
+			"app": "apps/askclaude-ui",
+			"use": {
+				"fill": "What is the capital of France? Reply with one word.",
+				"click": "Ask",
+				"pipeline": "apps/askclaude-ui/*.pipe",
+				"answer": "(?i)\\bparis\\b"
+			}
 		}
 	],
 	"judge": [],

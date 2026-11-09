@@ -45,6 +45,7 @@ import path from 'node:path';
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from 'playwright';
 
 import { REPO_ROOT } from './catalog';
+import type { AppUsed } from './checks/appRun';
 import type { Scrubber } from './evidence';
 import { APP_ID } from './store';
 import type { CardAnswer, CardPolicy, DirtyFileAnswer } from './task';
@@ -579,10 +580,7 @@ export class Driver {
 	 * @returns ok null when the preview or its Console could not be read.
 	 */
 	async appLoad(appName: string): Promise<AppLoad> {
-		const tab = this.page.locator('div[draggable="true"]').filter({ has: this.page.locator('span', { hasText: new RegExp(`^${escapeRe(appName)}$`) }) });
-		if (await tab.count()) await tab.first().locator('span').filter({ hasText: /\S/ }).first().click({ timeout: 10_000 });
-		else await this.openDesignPreview(appName);
-		await this.page.getByRole('tab', { name: 'Design', exact: true }).click({ timeout: 30_000 });
+		await this.appInFront(appName);
 		const view = (name: string) => this.page.getByRole('button', { name, exact: true }).filter({ visible: true }).first();
 		await view('Console').click();
 		const clear = view('Clear');
@@ -655,6 +653,75 @@ export class Driver {
 		const detail = !read ? `not read: ${rows === null ? 'no Console rows' : 'no preview page'}` : ok ? `loads: ${rows.length} Console rows, no errors` : [crashed ? 'the app shows its error screen' : '', empty ? 'the preview page is empty' : '', errors.length ? `${errors.length} error row(s): ${errors[0]}` : ''].filter(Boolean).join('; ');
 		this.log(`load ${appName} in its Design preview`, detail);
 		return { ok, detail, errors, crashed };
+	}
+
+	/**
+	 * Uses an app the way its user would, in the preview appLoad left in
+	 * front: types into its first visible text box, presses the first
+	 * visible button whose name contains `click`, then waits for `answer` on
+	 * its page (checks/appRun.ts reads what the engine ran).
+	 *
+	 * @param appName - The app's name, for the log.
+	 * @param use - What to type and press.
+	 * @param answer - What the page must show, or null for any change.
+	 * @param limitMs - How long to wait for it.
+	 */
+	async useApp(appName: string, use: { fill: string; click: string }, answer: RegExp | null, limitMs: number): Promise<AppUsed> {
+		// step: this app's tab, since the load loop leaves the last app it loaded in front
+		await this.appInFront(appName);
+		const frame = this.page.locator('iframe[src^="blob:"]').filter({ visible: true }).first().contentFrame();
+		const pageText = (fallback: string) =>
+			frame
+				.locator('body')
+				.innerText({ timeout: 5_000 })
+				.catch(() => fallback);
+		const excerpt = (text: string) => this.opts.scrubber.scrub(text.trim().slice(-400));
+		const done = (used: AppUsed): AppUsed => {
+			this.log(`use ${appName}`, used.detail);
+			return used;
+		};
+		await this.page
+			.getByRole('button', { name: 'Preview', exact: true })
+			.filter({ visible: true })
+			.first()
+			.click({ timeout: 10_000 })
+			.catch(() => {});
+		const before = await pageText('');
+		const box = frame.getByRole('textbox').filter({ visible: true }).first();
+		const typed = await box
+			.fill(use.fill, { timeout: 10_000 })
+			.then(() => true)
+			.catch(() => false);
+		if (!typed) return done({ done: false, answered: null, detail: "no text box on the app's page", excerpt: excerpt(before) });
+		const button = frame
+			.getByRole('button', { name: new RegExp(escapeRe(use.click), 'i') })
+			.filter({ visible: true })
+			.first();
+		const pressed = await button
+			.click({ timeout: 10_000 })
+			.then(() => true)
+			.catch(() => false);
+		if (!pressed) return done({ done: false, answered: null, detail: `no button named ${JSON.stringify(use.click)} on the app's page`, excerpt: excerpt(before) });
+		const t0 = Date.now();
+		let text = before;
+		let seen = false;
+		for (const until = t0 + limitMs; !seen && Date.now() < until; ) {
+			await this.page.waitForTimeout(1000);
+			text = await pageText(text);
+			seen = answer ? answer.test(text) : text !== before;
+		}
+		await this.shot('app-use');
+		const secs = Math.round((Date.now() - t0) / 1000);
+		const detail = seen ? `typed and pressed ${use.click}; the page ${answer ? 'showed the answer' : 'changed'} after ${secs} s` : `typed and pressed ${use.click}; the page ${answer ? 'did not show the answer' : 'did not change'} in ${secs} s`;
+		return done({ done: true, answered: answer ? seen : null, detail, excerpt: excerpt(text) });
+	}
+
+	/** Brings an app's App Builder tab to the front (opening its Design preview if it has no tab), on its Design view. */
+	private async appInFront(appName: string): Promise<void> {
+		const tab = this.page.locator('div[draggable="true"]').filter({ has: this.page.locator('span', { hasText: new RegExp(`^${escapeRe(appName)}$`) }) });
+		if (await tab.count()) await tab.first().locator('span').filter({ hasText: /\S/ }).first().click({ timeout: 10_000 });
+		else await this.openDesignPreview(appName);
+		await this.page.getByRole('tab', { name: 'Design', exact: true }).click({ timeout: 30_000 });
 	}
 
 	// =========================================================================

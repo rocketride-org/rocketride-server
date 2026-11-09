@@ -32,7 +32,7 @@ import { test } from 'node:test';
 
 import { DATA_DIR } from '../catalog';
 import { readTree } from '../references';
-import { appFolders, changedApps, checkApps, withLoads } from './app';
+import { appFolders, changedApps, checkApps, withLoads, withSteps, type AppCheckResult } from './app';
 
 test('an app counts as changed when a file under it was added, changed or deleted, and not when it is gone', () => {
 	const start = { 'apps/a-ui/src/App.tsx': 'a', 'apps/a-ui/src/Old.tsx': 'old', 'apps/b-ui/src/App.tsx': 'b', 'apps/c-ui/src/App.tsx': 'c', 'apps/gone-ui/package.json': '{}' };
@@ -76,4 +76,24 @@ test('a failed Design preview load fails the app check, and an unread one only a
 	assert.equal(checks['apps/d'].ok, false, 'a load cannot pass an app whose build failed');
 	assert.equal(checks['apps/e'].ok, true);
 	assert.equal('load' in checks['apps/e'], false);
+});
+
+test("the agent's check_app must have run every step on the app, found by manifest id or folder name", () => {
+	const check = (): AppCheckResult => ({ ok: true, detail: 'types and build pass', types: { ok: true, output: '' }, build: { ok: true, output: '' } });
+	const files = { 'apps/a-ui/package.json': JSON.stringify({ appManifest: { id: 'rocketride.a' } }), 'apps/b-ui/package.json': JSON.stringify({ appManifest: { id: 'rocketride.b' } }), 'apps/c-ui/package.json': '{', 'apps/d-ui/package.json': '{}' };
+	const row = (target: string, step: string, status: 'pass' | 'fail' | 'not_run') => ({ target, step, status, summary: '' });
+	const checks = { 'apps/a-ui': check(), 'apps/b-ui': check(), 'apps/c-ui': check(), 'apps/d-ui': check() };
+	withSteps(checks, [row('rocketride.a', 'types', 'pass'), row('rocketride.a', 'build', 'pass'), row('rocketride.a', 'runtime', 'pass'), row('rocketride.b', 'types', 'pass'), row('rocketride.b', 'build', 'not_run'), row('c-ui', 'check_app', 'not_run'), row('pipelines/x.pipe', 'validate', 'pass')], files);
+	assert.deepEqual(
+		Object.values(checks).map((c) => [c.ok, c.detail]),
+		[
+			[true, 'types and build pass; check_app ran types, build, runtime'],
+			[false, "steps: the agent's check_app did not run build"],
+			[false, "steps: the agent's check_app did not run check_app"],
+			[false, 'steps: the agent ran no check_app on it'],
+		]
+	);
+	const unread = { 'apps/a-ui': check() };
+	withSteps(unread, null, files);
+	assert.deepEqual([unread['apps/a-ui'].ok, unread['apps/a-ui'].detail], [true, 'types and build pass; check_app steps not read (no saved turn)']);
 });

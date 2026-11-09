@@ -38,9 +38,10 @@
  * contract (packages/shell/contract/versions/vN.d.ts), which is the
  * `shell.d.ts` that shell.tgz ships.
  *
- * Not here yet: loading the built app and reading its pipeline's run log.
- * A built app is a Module Federation remote that only loads inside a host
- * (the Design preview), which is task 1.2's open question.
+ * The other halves come from the browser trial, added to each app's result:
+ * the app's load in its Design preview (withLoads), the agent's own
+ * check_app rows (withSteps), and a use of the app with its pipeline's run
+ * on the engine (checks/appRun.ts withRuns).
  */
 
 import { execFile } from 'node:child_process';
@@ -49,6 +50,8 @@ import path from 'node:path';
 
 import { REPO_ROOT } from '../catalog';
 import type { AppLoad } from '../driver';
+import type { TurnCheck } from '../types';
+import type { AppRun } from './appRun';
 
 /** Where the app's dependencies are linked from. */
 const DEP_ROOTS = [path.join(REPO_ROOT, 'apps/rocket-ui/node_modules'), path.join(REPO_ROOT, 'node_modules')];
@@ -67,6 +70,51 @@ export interface AppCheckResult {
 	build: { ok: boolean | null; output: string };
 	/** The app loaded in its Design preview after the turn (Driver.appLoad), when the runner had the preview open. A failed load fails the check. */
 	load?: AppLoad;
+	/** The agent's newest check_app rows on the app, from the saved turn (withSteps). A step that did not run, or no rows, fails the check. */
+	steps?: TurnCheck[];
+	/** The app used in its preview and its pipeline's run on the engine (withRuns), for a check with `use`. A failed run fails the check. */
+	run?: AppRun;
+}
+
+/** The steps the product's check_app reports (apps/shared toolkits/appCheck.ts), and the row it leaves for an app it never checked. */
+const AGENT_STEPS = new Set(['manifest', 'types', 'build', 'runtime', 'console', 'check_app']);
+
+/**
+ * Adds the agent's own check_app on each app: the saved turn's newest rows
+ * for it, which name the app by its manifest id, or by its folder's name
+ * when check_app had none. Every step must have run, so a check_app that
+ * skipped types or build (the Design preview closed), or none at all, fails
+ * the app's check. With no saved turn the steps are noted, not counted.
+ *
+ * @param checks - The app checks, by app folder; changed in place.
+ * @param rows - The saved turn's check rows, or null with no saved turn.
+ * @param files - The final workspace, for each app's manifest id.
+ */
+export function withSteps(checks: Record<string, AppCheckResult>, rows: TurnCheck[] | null, files: Record<string, string>): void {
+	for (const [app, r] of Object.entries(checks)) {
+		if (rows === null) {
+			r.detail = `${r.detail}; check_app steps not read (no saved turn)`;
+			continue;
+		}
+		const names = new Set([app.slice('apps/'.length), manifestId(files, app)].filter((n): n is string => !!n));
+		const mine = rows.filter((c) => names.has(c.target) && AGENT_STEPS.has(c.step));
+		r.steps = mine;
+		const notRun = mine.filter((c) => c.status === 'not_run').map((c) => c.step);
+		const why = !mine.length ? 'the agent ran no check_app on it' : notRun.length ? `the agent's check_app did not run ${notRun.join(', ')}` : '';
+		if (why) r.detail = r.ok ? `steps: ${why}` : `${r.detail}; steps: ${why}`;
+		else r.detail = `${r.detail}; check_app ran ${mine.map((c) => c.step).join(', ')}`;
+		r.ok = r.ok && !why;
+	}
+}
+
+/** An app's appManifest.id from its package.json, or null. */
+function manifestId(files: Record<string, string>, app: string): string | null {
+	try {
+		const id = (JSON.parse(files[`${app}/package.json`] ?? '') as { appManifest?: { id?: unknown } }).appManifest?.id;
+		return typeof id === 'string' && id ? id : null;
+	} catch {
+		return null;
+	}
 }
 
 /**
