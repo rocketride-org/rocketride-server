@@ -55,7 +55,11 @@ class Chat(ChatBase):
 
         # The endpoint that serves the selected model: the DeepSeek API for the
         # cloud branches, the Ollama server the local branches alias
-        serverbase = config['serverbase']
+        serverbase = (config['serverbase'] or '').strip()
+        if not serverbase:
+            # An empty endpoint would let the OpenAI client fall back to its own
+            # default host and fail with an unrelated authentication error
+            raise ValueError('DeepSeek serverbase is required.')
 
         # The API key belongs to the cloud endpoint; a local server takes any token
         apikey = (config.get('apikey') or '').strip()

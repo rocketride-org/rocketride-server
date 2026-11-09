@@ -137,6 +137,13 @@ def test_a_local_url_mentioning_the_api_in_its_path_is_still_local(monkeypatch):
     assert (requests, warnings) == ([], [])
 
 
+def test_an_empty_serverbase_is_refused():
+    # A blank URL would let the OpenAI client fall back to its own default host
+    conn = {'model': 'deepseek-r1:7b', 'deepseek-r1:7b': {'serverbase': '   '}}
+    with pytest.raises(ValueError, match='serverbase is required'):
+        deepseek.Chat(_LOGICAL_TYPE, _resolve(conn), {})
+
+
 def test_a_cloud_model_requires_the_key():
     with pytest.raises(ValueError, match='API key is required'):
         deepseek.Chat(_LOGICAL_TYPE, _resolve({'model': 'deepseek-chat'}), {})
