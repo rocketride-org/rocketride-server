@@ -29,7 +29,6 @@ using namespace ap::file;
 namespace {
 
 // Linux file system defaults for obtaining mounted file system information
-_const auto MntEntryPath = _PATH_MOUNTED;
 _const auto MntDevPrefix = "/dev/"_tv;
 _const auto MntSysBlockRemovablePrefix = "/sys/block/"_tv;
 _const auto MntSysBlockRemovablePostfix = "/removable"_tv;
@@ -38,15 +37,18 @@ _const auto MntSysBlockRemovablePostfix = "/removable"_tv;
 
 namespace ap::file {
 
-// Obtain refreshed information about the mounted file systems
-SharedPtr<MntEntInfoCache> refreshMounting() noexcept {
+// Obtain refreshed information about the mounted file systems from the first
+// of the given mount tables that can be opened
+SharedPtr<MntEntInfoCache> refreshMounting(
+    std::initializer_list<const char *> sources) noexcept {
     auto result = makeShared<MntEntInfoCache>();
 
-    auto file = ::setmntent(MntEntryPath, "r");
-    if (!file) {
-        LOG(File, "setmntent failed", errno);
-        return result;
+    FILE *file = nullptr;
+    for (auto source : sources) {
+        if ((file = ::setmntent(source, "r"))) break;
+        LOG(File, "setmntent failed", source, errno);
     }
+    if (!file) return result;
 
     while (auto mnt = ::getmntent(file)) {
         struct stat devStat{};
@@ -103,6 +105,11 @@ SharedPtr<MntEntInfoCache> refreshMounting() noexcept {
     ::endmntent(file);
 
     return result;
+}
+
+// Obtain refreshed information about the mounted file systems
+SharedPtr<MntEntInfoCache> refreshMounting() noexcept {
+    return refreshMounting({_PATH_MOUNTED});
 }
 
 }  // namespace ap::file
