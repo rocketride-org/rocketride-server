@@ -49,6 +49,7 @@ from ai.account import account as account_singleton
 from ai.account import manifest_push
 from ai.account.app_deploy import (
     _REPLY_MAX_CHARS,
+    _home_org_of,
     _serving_block_of,
     entitled_version_dirs,
     handle_app_add,
@@ -126,6 +127,8 @@ class _FakeRegistry:
             {
                 'version': version,
                 'sha256': f'sha-{version}',
+                # The real backends stamp the row's kind (app|pipe|node).
+                'kind': kind,
                 'state': state,
                 'metadata': metadata,
                 'publishedAt': 1000 + version,
@@ -187,6 +190,7 @@ class _FakeRegistry:
             entry = {
                 'version': version,
                 'sha256': 'sha-new',
+                'kind': str(artifact.get('kind') or 'pipe'),
                 'state': state or ('private' if artifact.get('kind') == 'app' else 'ready'),
                 'metadata': metadata or {},
                 'publishedAt': 3000,
@@ -1513,6 +1517,91 @@ async def test_open_dirs_serve_every_built_version(registry):
     registry.add_version(2, '1.1.0', build='building')
 
     assert await open_version_dirs('acme.brandy') == {1: _V1_DIST}
+
+
+# =============================================================================
+# PIPE ROWS ARE NOT APP IDENTITY (rocketride-ai/rocketride-saas#1011)
+# =============================================================================
+# The pipe door accepts any project id, so another org can hold PIPE rows
+# under a real app's id — with a forged metadata.build.status='ok'. None of
+# the app-identity resolvers may treat those rows as the app.
+
+_EVIL_PIPE_DIST = 'orgs/org-evil/files/.deployments/acme.brandy/v000007-fakesha7/dist'
+
+
+def _install_forged_pipe_rows(registry, monkeypatch, org_id='org-evil'):
+    """org1 keeps the real app rail; ``org_id`` gets one forged-built pipe row."""
+    forged = {
+        'version': 7,
+        'sha256': 'sha-forged',
+        'kind': 'pipe',
+        'state': 'ready',
+        'metadata': {'manifest': {'name': 'x'}, 'build': {'status': 'ok'}},
+        'publishedAt': 9000,
+        'publishedBy': {'userId': 'u-evil', 'display': 'M', 'email': 'm@evil.example'},
+        'comment': '',
+        'artifactPath': f'orgs/{org_id}/files/.deployments/acme.brandy/v000007-fakesha7.json',
+    }
+
+    async def deployments_versions(caller_org, project_id):
+        if caller_org == org_id:
+            return [forged]
+        return list(registry.versions) if caller_org in ('org1', 'local') else []
+
+    monkeypatch.setattr(account_singleton, 'deployments_versions', deployments_versions, raising=False)
+
+
+@pytest.mark.asyncio
+async def test_forged_pipe_rows_do_not_entitle_serving(registry, monkeypatch):
+    """The attacker org's pipe row (build forged 'ok') is not an app rail: it
+    entitles nothing; the real app's public binding still serves.
+    """
+    registry.add_version(1, '1.0.0', publisher_id='dev1', state='ready')
+    registry.seed_publish(AUD_PUBLIC, 1)
+    _install_forged_pipe_rows(registry, monkeypatch)
+    attacker = _info(user_id='u-evil', org_id='org-evil', teams=[])
+
+    assert await entitled_version_dirs(attacker, 'acme.brandy') == {1: _V1_DIST}
+
+
+@pytest.mark.asyncio
+async def test_forged_pipe_rows_alone_entitle_nothing(registry, monkeypatch):
+    """No public binding and no app rail of the caller's own: empty."""
+    registry.add_version(1, '1.0.0', publisher_id='dev1', state='private')
+    _install_forged_pipe_rows(registry, monkeypatch)
+
+    assert await entitled_version_dirs(_info(user_id='u-evil', org_id='org-evil', teams=[]), 'acme.brandy') == {}
+
+
+@pytest.mark.asyncio
+async def test_forged_pipe_rows_do_not_make_the_attacker_the_home_org(registry, monkeypatch):
+    """_home_org_of: the attacker org's pipe rows must not win the app — the
+    publisher org of the caller-visible binding serves it.
+    """
+    registry.add_version(1, '1.0.0', publisher_id='dev1', state='ready')
+    registry.seed_publish(AUD_PUBLIC, 1)
+    _install_forged_pipe_rows(registry, monkeypatch)
+
+    conn = _FakeConn(user_id='u-evil', org_id='org-evil', teams=[], developer_id=None)
+    assert await _home_org_of(conn, account_singleton, 'org-evil', 'acme.brandy') == ('org1', False)
+
+
+@pytest.mark.asyncio
+async def test_real_developer_still_resolves_as_home_and_entitled(registry):
+    """The legitimate developer flow is unchanged: own app rail wins."""
+    registry.add_version(1, '1.0.0', publisher_id='u1')
+
+    conn = _FakeConn()
+    assert await _home_org_of(conn, account_singleton, 'org1', 'acme.brandy') == ('org1', True)
+    assert await entitled_version_dirs(_info(), 'acme.brandy') == {1: _V1_DIST}
+
+
+@pytest.mark.asyncio
+async def test_open_dirs_ignore_pipe_rows(registry):
+    """OSS open serving is app-only too: a built-looking pipe row never serves."""
+    registry.add_version(1, '1.0.0', kind='pipe')
+
+    assert await open_version_dirs('acme.brandy') == {}
 
 
 @pytest.mark.asyncio

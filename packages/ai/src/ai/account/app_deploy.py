@@ -228,6 +228,17 @@ async def _visible_rows_of(conn: Any, account: Any, org_id: str, app_id: Optiona
 _RUNG_RANK = {'public': 0, 'team': 1, 'user': 2}
 
 
+def _app_rows(entries: Any) -> List[Dict[str, Any]]:
+    """The kind:'app' rows of a registry listing — app identity ONLY.
+
+    The rail is keyed by project id, and the pipe door accepts any project
+    id, so a project id's listing can carry pipe rows that merely share the
+    string with an app id (rocketride-ai/rocketride-saas#1011). Pipe rows are never evidence that an org
+    owns, builds, or may serve an app.
+    """
+    return [e for e in entries or [] if isinstance(e, dict) and e.get('kind') == 'app']
+
+
 async def _home_org_of(conn: Any, account: Any, org_id: str, app_id: str) -> 'tuple[str, bool]':
     """(home_org, developer) — which org's rail owns this app for the caller.
 
@@ -240,7 +251,7 @@ async def _home_org_of(conn: Any, account: Any, org_id: str, app_id: str) -> 'tu
     their natural not-found paths.
     """
     try:
-        entries = await account.deployments_versions(org_id, app_id)
+        entries = _app_rows(await account.deployments_versions(org_id, app_id))
     except Exception:
         entries = []
     if entries:
@@ -290,6 +301,42 @@ def _assert_owns_namespace(conn: Any, app_id: str) -> None:
             f'App id {app_id!r} is outside your developer namespace — it must be {dev!r} '
             f'or start with {dev + "."!r} (apps are namespaced by your developer id, guaranteed unique)'
         )
+
+
+async def assert_pipe_id_outside_app_namespace(conn: Any, account: Any, org_id: str, project_id: str) -> None:
+    """GUARANTEE a pipe's project id is not inside the caller's app namespace.
+
+    The inverse of ``_assert_owns_namespace``: ``<developerId>`` and
+    ``<developerId>.*`` are app ids, so the pipe door must not mint registry
+    rows there. Exception: a caller whose org ALREADY holds pipe rows for the
+    id (and only pipe rows: no app or node row) keeps publishing it, so registering a developer id
+    never strands a pipe the org already ships (pipe rows carry no app
+    identity, the resolvers read ``kind: 'app'`` only).
+
+    The engine only knows the CALLER's developer id; ids inside OTHER orgs'
+    namespaces (or equal to another org's app id) are refused by the account
+    backend's publish, which sees every org (rocketride-ai/rocketride-saas#1011).
+
+    Raises:
+        ValueError: ``project_id`` is the caller's developer id or inside it,
+            and the caller's org has no pipe-only history for it.
+    """
+    dev = _developer_id_of(conn)
+    if not dev or not (project_id == dev or project_id.startswith(f'{dev}.')):
+        return
+    try:
+        rail = await account.deployments_versions(org_id, project_id)
+    except Exception:
+        rail = []
+    # Pipe-ONLY history: a node row (or any other non-pipe kind) on the id is
+    # not a pipe the org already ships, so it earns no exception. A kind-less
+    # row is a pipe, as the deployment backend reads it.
+    if rail and all(isinstance(e, dict) and (e.get('kind') or 'pipe') == 'pipe' for e in rail):
+        return
+    raise ValueError(
+        f'Pipeline project_id {project_id!r} is inside your developer namespace {dev!r} — '
+        "that keyspace is reserved for apps (deploy apps via rrext_deploy add kind='app')"
+    )
 
 
 # =============================================================================
@@ -1527,7 +1574,7 @@ async def entitled_version_dirs(info: Optional[Any], app_id: str) -> Dict[int, s
     # follows visibility parity.
     if user_id and org_id:
         try:
-            entries = await account.deployments_versions(org_id, app_id)
+            entries = _app_rows(await account.deployments_versions(org_id, app_id))
         except Exception:
             entries = []
         for entry in entries:
@@ -1551,7 +1598,7 @@ async def open_version_dirs(app_id: str) -> Dict[int, str]:
 
     dirs: Dict[int, str] = {}
     try:
-        entries = await account.deployments_versions('local', app_id)
+        entries = _app_rows(await account.deployments_versions('local', app_id))
     except Exception:
         entries = []
     for entry in entries:
