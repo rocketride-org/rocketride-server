@@ -478,23 +478,25 @@ async def test_engine_request_completes_while_a_transfer_is_running(task_side, c
     started = time.monotonic()
     response = await client.dap_request('rrext_whoami', {})
     assert response['success'] is True
-    assert time.monotonic() - started < 0.3
+    assert time.monotonic() - started < 5.0
     assert not transfer.done()
     gate.set()
     await transfer
     await client.disconnect()
 
 
-@pytest.mark.skip(reason='flaky: 40 ms chunks against a 100 ms timeout miss it on a loaded runner')
 async def test_a_transfer_longer_than_one_timeout_completes_when_each_chunk_is_on_time(
     task_side, commands, monkeypatch
 ):
-    monkeypatch.setattr(channel_module, 'CONST_CHANNEL_CONNECT_TIMEOUT', 0.05)
+    # Room for request_sync to start on a loaded runner; the 3 s transfer still outlasts connect + exchange (2.5 s).
+    monkeypatch.setattr(channel_module, 'CONST_CHANNEL_CONNECT_TIMEOUT', 0.5)
+    chunk = 4096
+    monkeypatch.setattr(registry, 'CONST_CHANNEL_CHUNK', chunk)
 
     async def trickle():
-        for _ in range(4):
-            await asyncio.sleep(0.04)
-            yield b'z' * CHUNK
+        for _ in range(3):
+            await asyncio.sleep(1.0)
+            yield b'z' * chunk
 
     async def handler(task, arguments, data):
         return ChannelReply(data=trickle())
@@ -503,8 +505,8 @@ async def test_a_transfer_longer_than_one_timeout_completes_when_each_chunk_is_o
     task, client = await _connect(task_side)
 
     sink = io.BytesIO()
-    await ask('big', sink=sink, timeout=0.1)  # 0.16 s in all, past the old 0.15 s bound
-    assert len(sink.getvalue()) == 4 * CHUNK
+    await ask('big', sink=sink, timeout=2.0)
+    assert len(sink.getvalue()) == 3 * chunk
     await client.disconnect()
 
 

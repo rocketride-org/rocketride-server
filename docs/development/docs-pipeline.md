@@ -29,7 +29,7 @@ Everything here lives in `docs/docusaurus/`:
 ./builder docs:dev       # gather-dev (symlinks) + docusaurus start, live reload
 ./builder docs:serve     # preview the built site from dist/docs
 ./builder docs:test      # docs:validate + docs:unit
-./builder docs:validate  # node README + client-doc schema validators (blocking)
+./builder docs:validate  # node README, client-doc, and CLI-doc validators (blocking)
 ./builder docs:unit      # unit tests for the docs helpers
 ./builder docs:export    # refresh the generated package README copies under packages/
 ./builder docs:check     # same computation, read-only: fail if a copy has drifted

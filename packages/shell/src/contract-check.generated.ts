@@ -24,6 +24,7 @@ import type { ShellApiV6 } from '../contract/versions/v6';
 import type { ShellApiV7 } from '../contract/versions/v7';
 import type { ShellApiV8 } from '../contract/versions/v8';
 import type { ShellApiV9 } from '../contract/versions/v9';
+import type { ShellApiV10 } from '../contract/versions/v10';
 import type { DAPException as Frozen_DAPException } from '../contract/versions/v0';
 import type { DAPException as Current_DAPException } from './api';
 import type { RocketRideException as Frozen_RocketRideException } from '../contract/versions/v0';
@@ -822,6 +823,8 @@ import type { DesktopAdapter as Frozen_DesktopAdapter } from '../contract/versio
 import type { DesktopAdapter as Current_DesktopAdapter } from './api';
 import type { DesktopViewProps as Frozen_DesktopViewProps } from '../contract/versions/v9';
 import type { DesktopViewProps as Current_DesktopViewProps } from './api';
+import type { InvitedMember as Frozen_InvitedMember } from '../contract/versions/v10';
+import type { InvitedMember as Current_InvitedMember } from './api';
 
 // VALUE floors — the live surface must still satisfy every frozen version.
 const _floor_v0: ShellApiV0 = {} as ShellApiShape;
@@ -844,6 +847,8 @@ const _floor_v8: ShellApiV8 = {} as ShellApiShape;
 void _floor_v8;
 const _floor_v9: ShellApiV9 = {} as ShellApiShape;
 void _floor_v9;
+const _floor_v10: ShellApiV10 = {} as ShellApiShape;
+void _floor_v10;
 
 // TYPE floors — each frozen exported type must still be satisfied.
 // Generic floors are emitted APPLIED (<any, …> at the frozen arity):
@@ -1646,3 +1651,5 @@ const _t_DesktopAdapter: Frozen_DesktopAdapter = {} as Current_DesktopAdapter;
 void _t_DesktopAdapter;
 const _t_DesktopViewProps: Frozen_DesktopViewProps = {} as Current_DesktopViewProps;
 void _t_DesktopViewProps;
+const _t_InvitedMember: Frozen_InvitedMember = {} as Current_InvitedMember;
+void _t_InvitedMember;
