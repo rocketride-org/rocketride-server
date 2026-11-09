@@ -1,0 +1,127 @@
+{
+	"title": "Auth0",
+	"protocol": "tool_auth0://",
+	"classType": [
+		"tool"
+	],
+	"capabilities": [
+		"invoke",
+		"experimental"
+	],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.tool_auth0",
+	"prefix": "auth0",
+	"icon": "auth0.svg",
+	"documentation": "https://docs.rocketride.org/nodes/tool_auth0",
+	"description": [
+		"Investigate Auth0 sign-in failures as agent tools.",
+		"Inspect user profiles, authentication events, and brute-force blocks; optionally unblock with separate write credentials."
+	],
+	"tile": [],
+	"lanes": {},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Auth0",
+				"domain": "",
+				"clientId": "",
+				"clientSecret": "",
+				"allowWrite": false,
+				"writeClientId": "",
+				"writeClientSecret": ""
+			}
+		}
+	},
+	"fields": {
+		"auth0.domain": {
+			"type": "string",
+			"title": "Domain",
+			"description": "Auth0-managed tenant hostname.",
+			"default": ""
+		},
+		"auth0.clientId": {
+			"type": "string",
+			"title": "Read client ID",
+			"description": "Read-only M2M application client ID.",
+			"default": ""
+		},
+		"auth0.clientSecret": {
+			"type": "string",
+			"title": "Read client secret",
+			"description": "RocketRide environment variable reference for the read-only M2M client secret, for example ${ROCKETRIDE_AUTH0_CLIENT_SECRET}.",
+			"default": "",
+			"pattern": "^\\$\\{ROCKETRIDE_[A-Z0-9_]+\\}$",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"auth0.allowWrite": {
+			"type": "boolean",
+			"title": "Enable writes",
+			"description": "Allow brute-force unblock using separate write credentials.",
+			"default": false
+		},
+		"auth0.writeClientId": {
+			"type": "string",
+			"title": "Write client ID",
+			"description": "M2M client ID required when writes are enabled.",
+			"default": "",
+			"optional": true
+		},
+		"auth0.writeClientSecret": {
+			"type": "string",
+			"title": "Write client secret",
+			"description": "RocketRide environment variable reference for the write M2M client secret, required when writes are enabled.",
+			"default": "",
+			"pattern": "^(?:|\\$\\{ROCKETRIDE_[A-Z0-9_]+\\})$",
+			"optional": true,
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Auth0",
+			"if": {
+				"required": ["allowWrite"],
+				"properties": { "allowWrite": { "const": true } }
+			},
+			"then": {
+				"required": ["writeClientId"],
+				"properties": { "writeClientId": { "pattern": "\\S" } },
+				"allOf": [
+					{
+						"if": {
+							"required": ["secureParameters"],
+							"properties": {
+								"secureParameters": {
+									"required": ["secure"],
+									"properties": { "secure": { "type": "array", "contains": { "const": "writeClientSecret" } } }
+								}
+							}
+						},
+						"else": {
+							"required": ["writeClientSecret"],
+							"properties": { "writeClientSecret": { "pattern": "\\S" } }
+						}
+					}
+				]
+			},
+			"properties": [
+				"type",
+				"auth0.domain",
+				"auth0.clientId",
+				"auth0.clientSecret",
+				"auth0.allowWrite",
+				"auth0.writeClientId",
+				"auth0.writeClientSecret"
+			]
+		}
+	]
+}
