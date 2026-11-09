@@ -118,6 +118,10 @@ so setting one leaves the others alone. `vad_threshold` and
 
 ## Notes
 
+### Inference failures
+
+Local and model-server transcription responses retain per-item error information through output-field filtering. A failed inference raises an error instead of returning an empty transcript as a successful result. Successful silent recordings may still have empty text. This does not change native worker counts or inference concurrency.
+
 ### Segmentation and documents
 
 Transcription calls are guarded per run mode: with in-process inference a

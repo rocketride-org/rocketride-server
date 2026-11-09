@@ -113,6 +113,62 @@ def test_get_supported_models():
     assert 'large-v3' in models
 
 
+@pytest.mark.parametrize('lazy', [False, True])
+def test_local_decode_failure_reaches_caller(lazy):
+    """Both immediate native errors and lazy-generator errors survive field filtering."""
+    from types import SimpleNamespace
+
+    class BrokenModel:
+        def transcribe(self, *args, **kwargs):
+            if not lazy:
+                raise RuntimeError('native decode failed')
+
+            def segments():
+                yield SimpleNamespace(start=0, end=1, text='partial', words=None)
+                raise RuntimeError('lazy decode failed')
+
+            return segments(), SimpleNamespace(language='en')
+
+    wrapper = Whisper.__new__(Whisper)
+    wrapper._model = {'model': BrokenModel(), 'language': 'en'}
+    wrapper._metadata = {'device': 'cpu', 'language': 'en'}
+    wrapper.output_fields = ['$text', '$segments']
+    with pytest.raises(RuntimeError, match='Whisper inference failed'):
+        wrapper._transcribe_local(b'\x00' * 3200, 5, True, None, 'en')
+
+
+@pytest.mark.parametrize('message', ['', 'remote decode failed'])
+def test_remote_failure_is_requested_and_raised(message):
+    from types import SimpleNamespace
+
+    captured = {}
+
+    def send(command, payload):
+        captured.update(payload)
+        return {'result': [{'error': message, '$segments': [], '$text': ''}]}
+
+    wrapper = Whisper.__new__(Whisper)
+    wrapper.output_fields = ['$segments', '$text']
+    wrapper._client = SimpleNamespace(send_command=send)
+    with pytest.raises(RuntimeError, match='Whisper inference failed'):
+        wrapper._transcribe_remote(b'\x00' * 3200, 5, True, None, 'en')
+    assert captured['output_fields'] == ['$segments', '$text', 'error']
+    assert wrapper.output_fields == ['$segments', '$text']
+
+
+def test_successful_silence_keeps_original_output_contract():
+    wrapper = Whisper.__new__(Whisper)
+    wrapper.output_fields = ['$text', '$segments']
+    assert wrapper._checked_result({'$text': '', '$segments': [], 'error': None}) == {'$text': '', '$segments': []}
+
+
+def test_batch_failure_does_not_hide_other_successful_items():
+    raw = [{'text': 'ok', 'segments': []}, {'text': '', 'segments': [], 'error': 'failed'}]
+    out = WhisperLoader.postprocess({}, raw, 2, ['$text', 'error'])
+    assert out[0]['$text'] == 'ok'
+    assert out[1]['error'] == 'failed'
+
+
 # -----------------------------------------------------------------------------
 # Whisper.transcribe contract (no model load)
 # -----------------------------------------------------------------------------
