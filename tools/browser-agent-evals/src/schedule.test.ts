@@ -78,6 +78,27 @@ test('10 tasks, 3 first-run failures, 1 passes on rerun: 70% first-run pass, 10%
 	fs.rmSync(dir, { recursive: true });
 });
 
+test('a trial that throws ends as an error for its own task, and the next task still runs', async () => {
+	const runs = await runSchedule(
+		['task-01', 'task-02', 'task-03'],
+		async (id, n) => {
+			if (id === 'task-02') throw new Error('checkApps failed after the turn');
+			return fake(id, n, 'pass');
+		},
+		(r) => r.status,
+		(id, n, err) => ({ ...fake(id, n, 'error'), why: String(err) })
+	);
+	assert.deepEqual(
+		runs.map((r) => [r.id, r.first.status, r.verdict]),
+		[
+			['task-01', 'pass', 'pass'],
+			['task-02', 'error', 'error'],
+			['task-03', 'pass', 'pass'],
+		]
+	);
+	assert.match(runs[1].first.why, /checkApps failed after the turn/);
+});
+
 test('errors and undecided runs are not rerun, and keep their own verdicts', () => {
 	assert.equal(verdictOf('error', []), 'error');
 	assert.equal(verdictOf('pending', []), 'pending');
