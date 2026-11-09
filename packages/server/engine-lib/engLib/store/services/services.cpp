@@ -1107,7 +1107,8 @@ ErrorOr<IServices::ServiceSchema> IServices::getField(
             // See if this has a section for this type that we
             // are working on.. (Pipe, Transform, Source, etc)
             if (!serviceSchema.isMember(section)) continue;
-            if (auto ccode = expand(def.expanded)) return ccode;
+            if (auto ccode = expand(weigh(serviceSchema[section])))
+                return ccode;
 
             // Get a copy of this schema and ui
             auto subformSchema = serviceSchema[section]["schema"];
