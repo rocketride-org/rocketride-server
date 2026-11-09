@@ -51,7 +51,7 @@ this way; a hand-made folder fails later with symptoms far from the cause.
 The scaffold starts the id at `local.<slug>` until your organization has a
 developer id; renaming the id later makes it a different app.
 
-The `<name>.rrapp` file it creates is empty on purpose. Opening it opens
+The `<name>.rrapp` file it creates holds only the app id. Opening it opens
 the App Builder; the app's identity lives in `package.json`.
 
 What you will edit:
@@ -76,11 +76,12 @@ first. Without an account it warns and uses `local`; pass
 
 An app created as `local.<slug>` can move into your organization's
 namespace once the organization has a developer id: in VS Code, the
-Deploy tab's read-only banner offers **Move to `<developerId>.<slug>`**.
-After you confirm, it rewrites the id in `package.json`, the `.rrapp`
-file and `src/AppDescriptor.ts` (plus the publisher and package name, if
-they still hold the scaffold's values), then reopens the App Builder on
-the new id. Nothing on the server is renamed: the app's saved settings in
+read-only banner on the Store and Deploy tabs offers **Move to
+`<developerId>.<slug>`**. After you confirm, it rewrites the id in
+`package.json` (plus the publisher and package name, if they still hold
+the scaffold's values), and in the `.rrapp` file and
+`src/AppDescriptor.ts` where they carry it, then reopens the App Builder
+on the new id. Nothing on the server is renamed: the app's saved settings in
 the App Builder and the preview start fresh. Only `local.` ids move this
 way; rename any other id by hand in the same files.
 
