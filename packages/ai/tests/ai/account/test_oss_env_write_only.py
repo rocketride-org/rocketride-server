@@ -172,6 +172,9 @@ def test_update_env_is_the_merge_the_sdks_send(env_file, monkeypatch):
         {'env': {'ROCKETRIDE_A': {'nested': 'x'}}},
         {'env': ['ROCKETRIDE_A']},
         {'env': {}, 'delete': 'ROCKETRIDE_A'},
+        {'env': {}, 'delete': [['ROCKETRIDE_A']]},
+        {'env': {}, 'delete': [{'name': 'ROCKETRIDE_A'}]},
+        {'env': {}, 'delete': [42]},
     ],
 )
 def test_a_value_that_is_not_a_string_writes_nothing(env_file, monkeypatch, args):
@@ -209,3 +212,55 @@ def test_a_value_the_process_environment_cannot_hold_writes_nothing(env_file, mo
     assert resp['ok'] is False and 'nothing was saved' in resp['message']
     assert os.environ['ROCKETRIDE_A'] == 'kept' and 'ROCKETRIDE_B' not in os.environ
     assert not env_file.exists()
+
+
+@pytest.mark.parametrize(
+    'name', ['ROCKETRIDE_A=B', 'ROCKETRIDE_', 'ROCKETRIDE_A B', 'ROCKETRIDE_A\nX', 'ROCKETRIDE_A\0']
+)
+def test_a_name_the_environment_cannot_hold_writes_nothing(env_file, monkeypatch, name):
+    monkeypatch.setenv('ROCKETRIDE_A', 'kept')
+
+    resp = _call('update_env', env={name: 'value'})
+
+    assert resp['ok'] is False and 'nothing was saved' in resp['message']
+    assert os.environ['ROCKETRIDE_A'] == 'kept' and not env_file.exists()
+
+
+@pytest.mark.parametrize('value', ['a\nROCKETRIDE_INJECTED=1', 'a\rb', 'a\0b'])
+def test_a_value_that_ends_a_env_line_writes_nothing(env_file, monkeypatch, value):
+    monkeypatch.setenv('ROCKETRIDE_A', 'kept')
+
+    resp = _call('update_env', env={'ROCKETRIDE_B': value})
+
+    assert resp['ok'] is False and 'nothing was saved' in resp['message']
+    assert value not in resp['message']
+    assert 'ROCKETRIDE_B' not in os.environ and not env_file.exists()
+
+
+def test_a_env_file_that_fails_to_write_is_left_as_it_was(env_file, monkeypatch):
+    monkeypatch.setenv('ROCKETRIDE_A', 'kept')
+    env_file.write_text('# mine\nROCKETRIDE_A=kept\n', encoding='utf-8')
+
+    def full_disk(src, dst):
+        raise OSError(28, 'No space left on device')
+
+    monkeypatch.setattr(os, 'replace', full_disk)
+
+    resp = _call('update_env', env={'ROCKETRIDE_B': 'new'})
+
+    assert resp['ok'] is False and 'nothing was saved' in resp['message']
+    assert env_file.read_text(encoding='utf-8') == '# mine\nROCKETRIDE_A=kept\n'
+    assert [f.name for f in env_file.parent.iterdir()] == ['.env']
+    assert 'ROCKETRIDE_B' not in os.environ
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='POSIX permission bits')
+def test_a_rewritten_env_file_keeps_its_permissions(env_file, monkeypatch):
+    monkeypatch.setenv('ROCKETRIDE_A', 'a')
+    env_file.write_text('ROCKETRIDE_A=a\n', encoding='utf-8')
+    env_file.chmod(0o640)
+
+    assert _call('update_env', env={'ROCKETRIDE_B': 'b'})['ok'] is True
+
+    assert env_file.stat().st_mode & 0o777 == 0o640
+    assert _env_file_dict(env_file) == {'ROCKETRIDE_A': 'a', 'ROCKETRIDE_B': 'b'}

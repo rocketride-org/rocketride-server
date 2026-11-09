@@ -48,6 +48,8 @@ from depends import depends as _depends
 # requirements.txt before importing anything else from this module.
 _depends(os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt')
 
+import re
+import tempfile
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from rocketlib import debug
@@ -58,6 +60,9 @@ from ..base import AccountBase
 # written once and never read back; sending the mask back keeps the value.
 # The SaaS service (extension/saas/account_service.py) uses the same string.
 ENV_MASK = '••••••••'
+
+# The names accepted: a .env line and the process environment both hold them
+ENV_NAME = re.compile(r'ROCKETRIDE_[A-Za-z0-9_]+')
 
 
 class Account(AccountBase):
@@ -449,17 +454,25 @@ class Account(AccountBase):
                 if not isinstance(raw, dict) or not isinstance(deleted, list):
                     return conn.build_error(request, '`env` must be an object and `delete` a list; nothing was saved.')
                 changes = dict(raw)
+                if not all(isinstance(name, str) for name in deleted):
+                    return conn.build_error(request, 'Environment names and values must be strings; nothing was saved.')
                 changes.update({name: None for name in deleted})
                 if not all(isinstance(k, str) and (v is None or isinstance(v, str)) for k, v in changes.items()):
                     return conn.build_error(request, 'Environment names and values must be strings; nothing was saved.')
-                rejected = sorted(k for k in changes if not k.startswith('ROCKETRIDE_'))
+                rejected = sorted(k for k in changes if not ENV_NAME.fullmatch(k))
                 if rejected:
                     # Names only: the values are secrets and must not reach the client.
                     return conn.build_error(
                         request,
                         'Unsupported environment variable name(s): '
                         + ', '.join(rejected)
-                        + ". Only names beginning with 'ROCKETRIDE_' are accepted; nothing was saved.",
+                        + ". Only names of 'ROCKETRIDE_' followed by letters, digits and underscores are accepted;"
+                        ' nothing was saved.',
+                    )
+                # A .env line ends at a line break, and the environment at a NUL
+                if any(v is not None and any(c in v for c in '\0\r\n') for v in changes.values()):
+                    return conn.build_error(
+                        request, 'Environment values cannot contain a line break or NUL; nothing was saved.'
                     )
                 env = {k: v for k, v in os.environ.items() if k.startswith('ROCKETRIDE_')}
                 unmasked = sorted(k for k, v in changes.items() if v == ENV_MASK and k not in env)
@@ -541,7 +554,17 @@ class Account(AccountBase):
             if k not in written_keys:
                 lines.append(f'{k}={v}\n')
 
-        with open(path, 'w', encoding='utf-8') as f:
-            f.writelines(lines)
+        # Written whole to a temporary file, then swapped in: a failed write
+        # leaves the old .env as it was
+        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix='.env.')
+        try:
+            with open(fd, 'w', encoding='utf-8') as f:
+                f.writelines(lines)
+            if os.path.exists(path):
+                os.chmod(tmp, os.stat(path).st_mode & 0o777)
+            os.replace(tmp, path)
+        except BaseException:
+            os.unlink(tmp)
+            raise
 
     # generate_token is inherited from AccountBase.
