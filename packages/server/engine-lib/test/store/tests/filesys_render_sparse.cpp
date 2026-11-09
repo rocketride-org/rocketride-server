@@ -24,6 +24,9 @@
 #include "filesys_render_fixture.hpp"
 
 #if ROCKETRIDE_PLAT_UNX
+/// Sparse files have zero allocated blocks, like pseudo files, and were
+/// silently dropped. They must render metadata and their full logical
+/// (all-zero) contents.
 TEST_CASE("store::filesys renders logical sparse file contents") {
     using namespace filesys_render_test;
     const auto size = GENERATE(size_t(0), size_t(6), size_t(1024 * 1024));
@@ -48,6 +51,8 @@ TEST_CASE("store::filesys renders logical sparse file contents") {
 #endif
 
 #if ROCKETRIDE_PLAT_LIN
+/// Pseudo files must still be skipped. Returns early with a warning when
+/// the sysfs file is missing or does not report a size with no blocks.
 TEST_CASE("store::filesys keeps skipping sysfs pseudo-file payloads") {
     using namespace filesys_render_test;
     const char *path = "/sys/kernel/uevent_seqnum";
