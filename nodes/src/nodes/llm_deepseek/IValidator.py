@@ -37,7 +37,6 @@ from rocketlib import IValidatorBase, warning
 from ai.common.config import warn_if_credential_unresolved
 
 VALIDATION_PROMPT = 'Hi'
-DEEPSEEK_BASE_URL = 'https://api.deepseek.com/v1'
 
 
 class IValidator(IValidatorBase):
@@ -76,15 +75,19 @@ class IValidator(IValidatorBase):
 
             model = config.get('customModel') or config.model
 
-            # Cloud models we validate: deepseek-reasoner, deepseek-chat
-            if model not in ['deepseek-reasoner', 'deepseek-chat']:
-                # Skip localhost/offline validation per decision
+            # The probe follows the branch's endpoint: the local (Ollama-served)
+            # branches are not probed, the DeepSeek API needs the key first
+            serverbase = config.serverbase
+            if 'api.deepseek' not in serverbase:
+                return
+            if not apikey:
+                warning('DeepSeek API key is required for the DeepSeek API endpoint.')
                 return
 
-            # Minimal probe; UI handles missing key prompts
+            # Minimal probe
             try:
                 # Create client and make a 1-token probe
-                client = OpenAI(api_key=apikey, base_url=DEEPSEEK_BASE_URL)
+                client = OpenAI(api_key=apikey, base_url=serverbase)
                 client.chat.completions.create(
                     model=model, messages=[{'role': 'user', 'content': VALIDATION_PROMPT}], max_tokens=1
                 )

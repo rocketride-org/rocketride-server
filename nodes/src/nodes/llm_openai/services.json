@@ -336,20 +336,6 @@
 						{ "name": "modelOutputTokens", "type": "constant", "default": 4096 }
 					]
 				},
-				"gpt-5.1-chat": {
-					"title": "OpenAI: GPT-5.1 Chat (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 128000 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 16384 }
-					]
-				},
-				"gpt-5.3-chat": {
-					"title": "OpenAI: GPT-5.3 Chat (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 128000 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 16384 }
-					]
-				},
 				"gpt-5.6-luna": {
 					"title": "OpenAI: GPT-5.6 Luna",
 					"properties": [
@@ -398,13 +384,6 @@
 						{ "name": "reasoning", "type": "constant", "default": true }
 					]
 				},
-				"gpt-5-chat": {
-					"title": "OpenAI: GPT-5 Chat (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 128000 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 16384 }
-					]
-				},
 				"gpt-chat-latest": {
 					"title": "OpenAI: GPT Chat Latest",
 					"properties": [
@@ -436,27 +415,11 @@
 						{ "name": "reasoning", "type": "constant", "default": true }
 					]
 				},
-				"gpt-oss-120b:free": {
-					"title": "OpenAI: gpt-oss-120b (free) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 131072 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 131072 },
-						{ "name": "reasoning", "type": "constant", "default": true }
-					]
-				},
 				"gpt-oss-20b": {
 					"title": "OpenAI: gpt-oss-20b",
 					"properties": [
 						{ "name": "modelTotalTokens", "type": "constant", "default": 131072 },
 						{ "name": "modelOutputTokens", "type": "constant", "default": 117964 },
-						{ "name": "reasoning", "type": "constant", "default": true }
-					]
-				},
-				"gpt-oss-20b:free": {
-					"title": "OpenAI: gpt-oss-20b (free) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 131072 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 32768 },
 						{ "name": "reasoning", "type": "constant", "default": true }
 					]
 				},
@@ -492,71 +455,6 @@
 						{ "name": "reasoning", "type": "constant", "default": true }
 					]
 				},
-				"gpt-3.5-turbo:batch": {
-					"title": "OpenAI: GPT-3.5 Turbo (batch) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 16385 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 4096 }
-					]
-				},
-				"gpt-4.1:batch": {
-					"title": "OpenAI: GPT-4.1 (batch) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 1047576 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 32768 }
-					]
-				},
-				"gpt-4.1-mini:batch": {
-					"title": "OpenAI: GPT-4.1 Mini (batch) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 1047576 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 32768 }
-					]
-				},
-				"gpt-4.1-nano:batch": {
-					"title": "OpenAI: GPT-4.1 Nano (batch) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 1047576 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 32768 }
-					]
-				},
-				"gpt-4-turbo:batch": {
-					"title": "OpenAI: GPT-4 Turbo (batch) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 128000 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 4096 }
-					]
-				},
-				"gpt-4o:batch": {
-					"title": "OpenAI: GPT-4o (batch) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 128000 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 16384 }
-					]
-				},
-				"gpt-4o-mini:batch": {
-					"title": "OpenAI: GPT-4o-mini (batch) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 128000 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 16384 }
-					]
-				},
-				"gpt-5.1:batch": {
-					"title": "OpenAI: GPT-5.1 (batch) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 400000 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 128000 },
-						{ "name": "reasoning", "type": "constant", "default": true }
-					]
-				},
-				"gpt-5.2:batch": {
-					"title": "OpenAI: GPT-5.2 (batch) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 400000 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 128000 },
-						{ "name": "reasoning", "type": "constant", "default": true }
-					]
-				},
 				"gpt-5.2-chat": {
 					"title": "OpenAI: GPT-5.2 Chat",
 					"properties": [
@@ -564,152 +462,8 @@
 						{ "name": "modelOutputTokens", "type": "constant", "default": 32000 }
 					]
 				},
-				"gpt-5.2-pro:batch": {
-					"title": "OpenAI: GPT-5.2 Pro (batch) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 400000 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 128000 },
-						{ "name": "reasoning", "type": "constant", "default": true }
-					]
-				},
-				"gpt-5.4:batch": {
-					"title": "OpenAI: GPT-5.4 (batch) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 1050000 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 128000 },
-						{ "name": "reasoning", "type": "constant", "default": true }
-					]
-				},
-				"gpt-5.4-mini:batch": {
-					"title": "OpenAI: GPT-5.4 Mini (batch) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 400000 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 128000 },
-						{ "name": "reasoning", "type": "constant", "default": true }
-					]
-				},
-				"gpt-5.4-nano:batch": {
-					"title": "OpenAI: GPT-5.4 Nano (batch) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 400000 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 128000 },
-						{ "name": "reasoning", "type": "constant", "default": true }
-					]
-				},
-				"gpt-5.4-pro:batch": {
-					"title": "OpenAI: GPT-5.4 Pro (batch) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 1050000 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 128000 },
-						{ "name": "reasoning", "type": "constant", "default": true }
-					]
-				},
-				"gpt-5.5:batch": {
-					"title": "OpenAI: GPT-5.5 (batch) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 1050000 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 128000 },
-						{ "name": "reasoning", "type": "constant", "default": true }
-					]
-				},
-				"gpt-5.5-pro:batch": {
-					"title": "OpenAI: GPT-5.5 Pro (batch) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 1050000 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 128000 },
-						{ "name": "reasoning", "type": "constant", "default": true }
-					]
-				},
-				"gpt-5.6-luna:batch": {
-					"title": "OpenAI: GPT-5.6 Luna (batch) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 1050000 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 128000 },
-						{ "name": "reasoning", "type": "constant", "default": true }
-					]
-				},
-				"gpt-5.6-luna-pro:batch": {
-					"title": "OpenAI: GPT-5.6 Luna Pro (batch) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 1050000 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 128000 },
-						{ "name": "reasoning", "type": "constant", "default": true }
-					]
-				},
-				"gpt-5.6-sol:batch": {
-					"title": "OpenAI: GPT-5.6 Sol (batch) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 1050000 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 128000 },
-						{ "name": "reasoning", "type": "constant", "default": true }
-					]
-				},
-				"gpt-5.6-sol-pro:batch": {
-					"title": "OpenAI: GPT-5.6 Sol Pro (batch) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 1050000 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 128000 },
-						{ "name": "reasoning", "type": "constant", "default": true }
-					]
-				},
-				"gpt-5.6-terra:batch": {
-					"title": "OpenAI: GPT-5.6 Terra (batch) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 1050000 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 128000 },
-						{ "name": "reasoning", "type": "constant", "default": true }
-					]
-				},
-				"gpt-5.6-terra-pro:batch": {
-					"title": "OpenAI: GPT-5.6 Terra Pro (batch) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 1050000 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 128000 },
-						{ "name": "reasoning", "type": "constant", "default": true }
-					]
-				},
-				"gpt-5:batch": {
-					"title": "OpenAI: GPT-5 (batch) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 400000 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 128000 },
-						{ "name": "reasoning", "type": "constant", "default": true }
-					]
-				},
-				"gpt-5-mini:batch": {
-					"title": "OpenAI: GPT-5 Mini (batch) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 400000 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 128000 },
-						{ "name": "reasoning", "type": "constant", "default": true }
-					]
-				},
-				"gpt-5-nano:batch": {
-					"title": "OpenAI: GPT-5 Nano (batch) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 400000 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 128000 },
-						{ "name": "reasoning", "type": "constant", "default": true }
-					]
-				},
-				"gpt-5-pro:batch": {
-					"title": "OpenAI: GPT-5 Pro (batch) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 400000 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 128000 },
-						{ "name": "reasoning", "type": "constant", "default": true }
-					]
-				},
 				"gpt-6-astra": {
 					"title": "OpenAI: GPT-6 Astra",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 1050000 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 128000 },
-						{ "name": "reasoning", "type": "constant", "default": true }
-					]
-				},
-				"gpt-6-astra:batch": {
-					"title": "OpenAI: GPT-6 Astra (batch) (deprecated)",
 					"properties": [
 						{ "name": "modelTotalTokens", "type": "constant", "default": 1050000 },
 						{ "name": "modelOutputTokens", "type": "constant", "default": 128000 },
@@ -721,54 +475,6 @@
 					"properties": [
 						{ "name": "modelTotalTokens", "type": "constant", "default": 1050000 },
 						{ "name": "modelOutputTokens", "type": "constant", "default": 128000 },
-						{ "name": "reasoning", "type": "constant", "default": true }
-					]
-				},
-				"gpt-6-astra-pro:batch": {
-					"title": "OpenAI: GPT-6 Astra Pro (batch) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 1050000 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 128000 },
-						{ "name": "reasoning", "type": "constant", "default": true }
-					]
-				},
-				"gpt-oss-120b:batch": {
-					"title": "OpenAI: gpt-oss-120b (batch) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 131072 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 117964 },
-						{ "name": "reasoning", "type": "constant", "default": true }
-					]
-				},
-				"gpt-oss-20b:batch": {
-					"title": "OpenAI: gpt-oss-20b (batch) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 131072 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 117964 },
-						{ "name": "reasoning", "type": "constant", "default": true }
-					]
-				},
-				"o3:batch": {
-					"title": "OpenAI: o3 (batch) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 200000 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 100000 },
-						{ "name": "reasoning", "type": "constant", "default": true }
-					]
-				},
-				"o3-mini:batch": {
-					"title": "OpenAI: o3 Mini (batch) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 200000 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 100000 },
-						{ "name": "reasoning", "type": "constant", "default": true }
-					]
-				},
-				"o4-mini:batch": {
-					"title": "OpenAI: o4 Mini (batch) (deprecated)",
-					"properties": [
-						{ "name": "modelTotalTokens", "type": "constant", "default": 200000 },
-						{ "name": "modelOutputTokens", "type": "constant", "default": 100000 },
 						{ "name": "reasoning", "type": "constant", "default": true }
 					]
 				},
