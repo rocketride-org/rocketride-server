@@ -283,8 +283,8 @@ def test_predict_still_uses_a_thread_pool():
     assert threading.current_thread().name not in calling_threads, 'work must run off the calling thread'
 
 
-def test_a_failing_chunk_does_not_lose_the_others():
-    """One bad batch is logged and skipped; the rest still come back."""
+def test_a_failing_chunk_rejects_partial_anonymization():
+    """One failed chunk makes the document fail instead of exposing unredacted text."""
     positions = [10, 900, 1800, 2700, 3600]
     text = build_text(positions)
 
@@ -300,9 +300,33 @@ def test_a_failing_chunk_does_not_lose_the_others():
 
     model.predict_entities = flaky
 
-    results = make_recognizer(model).predict(text, ['organization'])
+    with pytest.raises(RuntimeError, match='Anonymization failed'):
+        make_recognizer(model).predict(text, ['organization'])
 
-    assert results, 'a single chunk failure must not empty the result'
+
+@pytest.mark.parametrize('slots', [1, 2, 4])
+def test_process_never_returns_original_text_after_model_error(slots):
+    model = _MarkerModel()
+
+    def fail(*args, **kwargs):
+        raise RuntimeError('injected inference failure')
+
+    model.predict_entities = fail
+    recognizer = make_recognizer(model)
+    recognizer._predict_lock = threading.BoundedSemaphore(slots)
+    recognizer.redaction_style = 'mask'
+    recognizer.anonymize_char = 'X'
+    with pytest.raises(RuntimeError, match='Anonymization failed'):
+        recognizer.process('Alice Example works at Example Company.', ['person'])
+    assert recognizer._predict_lock.acquire(blocking=False)
+    recognizer._predict_lock.release()
+
+
+def test_successful_empty_prediction_still_returns_original_text():
+    recognizer = make_recognizer(_MarkerModel(marker='NOT_PRESENT'))
+    recognizer.redaction_style = 'mask'
+    recognizer.anonymize_char = 'X'
+    assert recognizer.process('Nothing matched.', ['person']) == 'Nothing matched.'
 
 
 @pytest.mark.parametrize('label_count', [1, 40, 70])

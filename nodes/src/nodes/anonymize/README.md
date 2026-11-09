@@ -107,9 +107,10 @@ plan for, especially before selecting a larger profile.
 
 Text is processed in 1,024-character chunks with 128-character overlap, label
 lists are sent in batches of 32, and up to four chunks run concurrently.
-Duplicate entities from overlapping chunks are removed. A model error for one
-label batch or chunk is logged and processing continues, so review redaction
-results when complete coverage is required.
+Duplicate entities from overlapping chunks are removed. If prediction fails for
+any label batch or chunk, the node raises an error and does not emit partially
+redacted text. A classification callback failure also prevents text emission
+during closing. A successful prediction with no entities remains a valid result.
 
 ### Classifier input
 

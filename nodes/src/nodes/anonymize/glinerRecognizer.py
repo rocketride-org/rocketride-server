@@ -178,7 +178,9 @@ class GliNERRecognizer:
                         chunk_results.append(res)
 
                 except Exception as e:
-                    debug(f'Anonymize: GLiNER Error on chunk {chunk_idx} with labels {label_batch}: {str(e)}')
+                    # A failed prediction is not evidence that the chunk contains
+                    # no sensitive entities. Never return partially redacted text.
+                    raise RuntimeError(f'GLiNER inference failed for chunk {chunk_idx}') from e
 
             return chunk_results
 
@@ -191,9 +193,9 @@ class GliNERRecognizer:
                 try:
                     all_results.extend(future.result())
                 except Exception as e:
-                    # Per-batch failures are already handled inside process_chunk,
-                    # so this only catches a failure in the surrounding scaffolding.
-                    debug(f'Anonymize: Error processing chunk: {str(e)}')
+                    for pending in futures:
+                        pending.cancel()
+                    raise RuntimeError('Anonymization failed; no redacted result is available') from e
 
                 completed += 1
                 if completed % 5 == 0 or completed == total_chunks:

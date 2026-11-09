@@ -37,6 +37,7 @@ class IInstance(IInstanceBase):
     def open(self, object: Entry):
         self.target_object_text = ''
         self.has_classifications = False
+        self._anonymize_error = None
 
     def writeText(self, text: str):
         self.target_object_text = self.target_object_text + text
@@ -45,11 +46,17 @@ class IInstance(IInstanceBase):
 
     def writeClassifications(self, classifications: dict, classificationPolicy: dict, classificationRules: dict):
         self.has_classifications = True
-        self.target_object_text = self.IGlobal.recognizer.handleClassifications(
-            classifications, self.target_object_text, classificationPolicy, classificationRules
-        )
+        try:
+            self.target_object_text = self.IGlobal.recognizer.handleClassifications(
+                classifications, self.target_object_text, classificationPolicy, classificationRules
+            )
+        except Exception as exc:
+            self._anonymize_error = exc
+            raise
 
     def closing(self):
+        if self._anonymize_error is not None:
+            raise RuntimeError('Cannot emit text after failed anonymization') from self._anonymize_error
         if not self.has_classifications:
             # No classifications received - anonymize with the configured entity types
             self.target_object_text = self.IGlobal.recognizer.process(
