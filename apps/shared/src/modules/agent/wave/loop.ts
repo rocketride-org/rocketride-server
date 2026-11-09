@@ -667,6 +667,12 @@ class WaveRun {
 	/** Each stored result's text by the key that first held it. */
 	private readonly seenResults = new Map<string, string>();
 	private readonly removed = new Set<string>();
+	/**
+	 * For each call repeated after its result was removed, the key of its newest result. Remove skips
+	 * that key, so read, remove, read again cannot loop; an older result of the call can go, so copies
+	 * of a file read after each edit don't pile up.
+	 */
+	private readonly kept = new Map<string, string>();
 	private readonly tools: Map<string, AgentTool>;
 
 	constructor(private readonly o: LoopOptions) {
@@ -825,6 +831,7 @@ class WaveRun {
 	 * wrote them, and points out a call identical to an earlier one. The note
 	 * informs and never blocks: reading a file again after writing it is
 	 * legitimate. A check run again is what the rules ask for, so it is never a repeat.
+	 * The newest result of a call repeated after its result was removed is kept.
 	 */
 	private withCall(entry: Entry, call: ToolCall): Entry {
 		const { tool, key, ...rest } = entry;
@@ -832,15 +839,23 @@ class WaveRun {
 		if (Object.keys(call.args).length) shown.args = previewArgs(call.args);
 		Object.assign(shown, rest);
 		if (call.tool === this.o.finish.checkTool) return shown;
-		const first = setDefault(this.seenCalls, canonical({ tool: call.tool, args: call.args }), key);
+		const asCalled = canonical({ tool: call.tool, args: call.args });
+		const first = setDefault(this.seenCalls, asCalled, key);
 		if (first !== key && this.removed.has(first)) {
 			// Read, remove, read again: the model dropped data it still needed.
-			shown.note = `Same tool and arguments as ${first}, whose result you removed. If you still need data from a result, keep it in scratch before you remove the result.`;
+			this.kept.set(asCalled, key);
+			shown.note = `Same tool and arguments as ${first}, whose result you removed, so this result stays in memory and remove will not clear it.`;
 		} else if (first !== key) {
 			// A note that the result is identical already says more.
 			shown.note ??= `Same tool and arguments as ${first}.`;
 		}
 		return shown;
+	}
+
+	/** True for the newest result of a call the model removed and then made again. */
+	isKept(key: string): boolean {
+		for (const kept of this.kept.values()) if (kept === key) return true;
+		return false;
 	}
 
 	/** The keys of the entries from earlier waves. */
@@ -1058,10 +1073,10 @@ export async function runLoop(o: LoopOptions): Promise<LoopResult> {
 			return run.answerFromGathered('empty_plan', wave + 1);
 		}
 
-		// step: run the calls. Only earlier waves' keys can be removed, and a reply
+		// step: run the calls. Only earlier waves' keys can be removed, never a kept one, and a reply
 		// asking to finish keeps its keys in case it is sent back.
 		const earlier = run.earlierKeys();
-		const removing = reply.askedDone ? [] : reply.remove.filter((key) => earlier.has(key));
+		const removing = reply.askedDone ? [] : reply.remove.filter((key) => earlier.has(key) && !run.isKept(key));
 		run.forget(removing);
 		run.toolCalls += toolCalls.length;
 		const { entries, ran } = await run.act(wave, toolCalls);

@@ -21,7 +21,7 @@
 // SOFTWARE.
 
 // =============================================================================
-// WAVE LOOP TESTS — the done rule, running calls (order, approval, timeouts, user time), stop and steering, no key past a tool
+// WAVE LOOP TESTS — the done rule, running calls (order, approval, timeouts, user time), stop and steering, remove, no key past a tool
 // =============================================================================
 
 import assert from 'node:assert/strict';
@@ -334,6 +334,25 @@ test('a message sent before done is read before the run finishes', async () => {
 	const result = await loop(model, [], { takeQueued: () => inbox.splice(0) });
 	assert.match(replies.questions[1].context.join('\n'), /also do C/, 'the done was sent back so the message is read');
 	assert.equal(result.answer, 'final');
+});
+
+// =============================================================================
+// REMOVE — what the model clears from later questions
+// =============================================================================
+
+test('a result read again after the model removed it stays, until a newer read of the same call replaces it', async () => {
+	const read: Call = ['read_file', { path: 'guide.md' }];
+	const tidy = (key: string): string => JSON.stringify({ thought: 'tidying', tool_calls: [{ tool: 'list_directory', args: { path: '' } }], remove: [key] });
+	const model = scriptedModel([plan(read), tidy('wave-0.r0'), plan(read), tidy('wave-2.r0'), plan(read), tidy('wave-2.r0'), tidy('wave-4.r0'), done('ok')]);
+	await loop(model, [stub('read_file'), stub('list_directory')]);
+	const shown = resultsIn(model.questions[4]);
+	assert.ok(!shown.some((entry) => entry.key === 'wave-0.r0'), 'the first read was removed');
+	const reread = shown.find((entry) => entry.key === 'wave-2.r0');
+	assert.ok(reread, 'the second read was not removed');
+	assert.match(String(reread.note), /stays/, 'the model is told the second read stays');
+	const last = resultsIn(model.questions[7]).map((entry) => entry.key);
+	assert.ok(!last.includes('wave-2.r0'), 'an older read of the call can go once a newer one stays');
+	assert.ok(last.includes('wave-4.r0'), 'the newest read of the call stays');
 });
 
 // =============================================================================
