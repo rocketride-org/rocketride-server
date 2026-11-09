@@ -67,12 +67,17 @@ from .contract import (
 
 @dataclass(frozen=True)
 class Published:
-    """One production-rung (public) app version's manifest, as the loader read it."""
+    """One production-rung (public) app version's manifest, as the loader read it.
+
+    ``version`` is the registry version the public rung serves; ``dist_dir``
+    is that version's build output.
+    """
 
     app_id: str
     manifest: Mapping[str, Any]
     dist_dir: str = ''
     published_at: Optional[float] = None
+    version: Optional[int] = None
 
 
 @dataclass(frozen=True)
@@ -125,7 +130,7 @@ def _claims(
             if owner is not None:
                 warning(f'[public_pages] {pub.app_id}: {page.path} already claimed by {owner.app_id} (page skipped)')
                 continue
-            exact[page.path] = replace(page, dist_dir=pub.dist_dir, published_at=pub.published_at)
+            exact[page.path] = replace(page, dist_dir=pub.dist_dir, version=pub.version, published_at=pub.published_at)
         if site is not None:
             sites[pub.app_id] = site
     return exact, sites
@@ -287,7 +292,15 @@ async def load_published(
         published_at: Optional[float] = None
         if isinstance(bound_at, (int, float)):
             published_at = float(bound_at)
-        out.append(Published(app_id=app_id, manifest=manifest, dist_dir=dist_dir, published_at=published_at))
+        out.append(
+            Published(
+                app_id=app_id,
+                manifest=manifest,
+                dist_dir=dist_dir,
+                published_at=published_at,
+                version=version,
+            )
+        )
     return out
 
 

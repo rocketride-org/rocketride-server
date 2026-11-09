@@ -83,6 +83,7 @@ async def test_loader_keeps_only_the_served_platform_manifests():
     assert [p.app_id for p in published] == ['rocketride.home']
     home = published[0]
     assert home.dist_dir == 'orgs/00000000-platform/files/.deployments/rocketride.home/v000001-abc/dist'
+    assert home.version == 1
     assert home.published_at == 1_700_000_100.0
 
 
@@ -228,9 +229,10 @@ def test_pages_carry_their_version_and_binding_time():
         {'publicPages': [{'path': '/', 'title': 'H', 'image': '/og.png'}]},
         dist_dir='orgs/p/dist',
         published_at=5.0,
+        version=7,
     )
     page = build_aggregate([pub]).exact['/']
-    assert (page.app_id, page.dist_dir, page.published_at) == ('rocketride.home', 'orgs/p/dist', 5.0)
+    assert (page.app_id, page.dist_dir, page.version, page.published_at) == ('rocketride.home', 'orgs/p/dist', 7, 5.0)
     assert dict(page.extra) == {'image': '/og.png'}
 
 

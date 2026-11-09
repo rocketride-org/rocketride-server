@@ -123,9 +123,10 @@ class Page:
 
     ``data`` holds the raw ``data`` entries; ``extra`` the page's unknown
     keys, read-only. ``dist_dir`` (the version's servable store tree, where
-    snapshots live) and ``published_at`` (the production binding's time) are
-    filled by the aggregate loader; ``head_title`` is set only by the legacy
-    adapter (empty = use ``title``).
+    snapshots live), ``version`` (the registry version on the production
+    rung, whose build ``dist_dir`` is) and ``published_at`` (the production
+    binding's time) are filled by the aggregate loader; ``head_title`` is set
+    only by the legacy adapter (empty = use ``title``).
     """
 
     path: str
@@ -136,6 +137,7 @@ class Page:
     snapshot: str = ''
     data: Tuple[str, ...] = ()
     dist_dir: str = ''
+    version: Optional[int] = None
     published_at: Optional[float] = None
     head_title: str = ''
     # Out of the hash (a mapping is not hashable), still compared.
