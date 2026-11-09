@@ -51,12 +51,13 @@ read or rendered, serves crawlers the shell document too. Either way the
 page's head metadata (title, description, canonical URL, robots, and the
 link-preview tags: ``og:type``, ``og:site_name``, ``og:image``, the Twitter
 card, article times) is injected, plus, for crawlers, the JSON-LD of its data
-sources. A source that cannot be read leaves the page without its data,
-uncached. Every page response carries ``Vary: User-Agent``. A rendered
-snapshot is ``public, max-age=3600`` (plan section 7); the shell document
-names the current build's bundles, so it is ``private, no-cache``. A shared
-cache put in front would have to honor that ``Vary`` (CloudFront ignores it
-by default), or it would hand people a crawler's snapshot.
+sources and, for a page with ``published``, its BlogPosting (``articles.py``).
+A source that cannot be read leaves the page without its data, uncached. Every
+page response carries ``Vary: User-Agent``. A rendered snapshot is
+``public, max-age=3600`` (plan section 7); the shell document names the current
+build's bundles, so it is ``private, no-cache``. A shared cache put in front
+would have to honor that ``Vary`` (CloudFront ignores it by default), or it
+would hand people a crawler's snapshot.
 
 Rendered responses are cached per (path, UA class) under a byte budget and
 dropped on every aggregate swap; a crawler response bound to a data source is
@@ -93,6 +94,7 @@ from rocketlib import error, warning
 
 from . import data_sources, public_pages
 from .contract import MAX_SNAPSHOT_BYTES, Page, reserved_error, snapshot_error, with_slash_twin
+from .articles import blogposting
 from .crawlers import CRAWLER, classify
 from .head import inject_head, social_tags
 from .not_found_page import NOT_FOUND_HTML
@@ -953,8 +955,9 @@ async def _render(
     People get the shell document; crawlers get the page's snapshot rendered
     with its bound data sources (``_crawler_snapshot``), or the shell document
     when there is none to serve. Either way the page's head metadata and
-    link-preview tags are injected, plus the sources' JSON-LD for crawlers;
-    reading the shell document and rewriting the head run off the event loop.
+    link-preview tags are injected, plus, for crawlers, the sources' JSON-LD
+    and a dated page's BlogPosting; reading the shell document and rewriting
+    the head run off the event loop.
     A render bound to a source expires ``data_sources.TTL_SECONDS`` after
     ``now``. ``cacheable`` is False for a fallback the next request should
     retry.
@@ -985,6 +988,9 @@ async def _render(
     site = aggregate.site
     # The page's own image, else the site's (declared by the root owner).
     image = image_url(page.image, page) or image_url(site.get('image', ''), aggregate.exact.get('/'))
+    jsonld = data_sources.jsonld(context, canonical)
+    if crawler and page.published:
+        jsonld.append(blogposting(page, site, canonical=canonical, image=image))
     body = await asyncio.to_thread(
         inject_head,
         body,
@@ -992,7 +998,7 @@ async def _render(
         description=page.description,
         canonical=canonical,
         noindex=not page.listed,
-        jsonld=data_sources.jsonld(context, canonical),
+        jsonld=jsonld,
         extra=social_tags(
             site_name=site.get('title', ''), image=image, published=page.published, modified=page.modified
         ),
