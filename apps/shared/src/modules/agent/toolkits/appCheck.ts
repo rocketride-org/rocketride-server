@@ -70,11 +70,31 @@ export interface CheckReport {
 
 /**
  * Whether a report counts as passing. A step that did not run is not a
- * failure; only a step that ran and failed is.
+ * failure; only a step that ran and failed is. The finish rule
+ * (run.ts appChecked) reads this; the tool result reads reportVerdict.
  */
 export function reportPassed(report: CheckReport): boolean {
 	return report.evidence.every((e) => e.status !== 'fail');
 }
+
+/** What a report says as a whole. */
+export type CheckVerdict = 'passed' | 'failed' | 'not_checked';
+
+/** The steps a report needs to pass; runtime and console are advisory. */
+const REQUIRED_STEPS = new Set(['types', 'build']);
+
+/**
+ * A report's verdict: failed when any step failed, not_checked when the types
+ * or build step did not run, and passed otherwise.
+ */
+export function reportVerdict(report: CheckReport): CheckVerdict {
+	if (report.evidence.some((e) => e.status === 'fail')) return 'failed';
+	if (report.evidence.some((e) => REQUIRED_STEPS.has(e.step) && e.status === 'not_run')) return 'not_checked';
+	return 'passed';
+}
+
+/** The tool result's first line, by verdict. */
+const HEADLINES: Record<CheckVerdict, string> = { passed: 'CHECK PASSED', failed: 'CHECK FAILED', not_checked: 'CHECK NOT COMPLETE' };
 
 function indent(text: string): string {
 	return text
@@ -88,7 +108,7 @@ function indent(text: string): string {
  * did not run still says why.
  */
 function formatReport(report: CheckReport): string {
-	const lines = [`CHECK ${reportPassed(report) ? 'PASSED' : 'FAILED'}: ${report.target}`];
+	const lines = [`${HEADLINES[reportVerdict(report)]}: ${report.target}`];
 	for (const e of report.evidence) {
 		lines.push(`- [${e.status}] ${e.step}: ran ${e.ran}`);
 		const body = e.output.trim() || e.summary.trim();
@@ -304,10 +324,17 @@ function appModelPaths(src: MarkerSource, appId: string): string[] {
 // =============================================================================
 
 /**
+ * The app's build config at its root. It imports Node and rsbuild, whose types the editor in the browser does not
+ * have, so every app's untouched template config shows "Cannot find module" errors there that say nothing about
+ * the app. Its errors are left out of the type evidence and the file is named instead.
+ */
+const BUILD_CONFIG = /^rsbuild\.config\.[cm]?[jt]s$/;
+
+/**
  * Reads an app's type errors into check evidence; settle `src` first if files just changed. `not_run` when no
  * TypeScript file of the app has a model; otherwise `fail` with one `relPath:line message` per error, or
  * `pass`. Unloaded TypeScript files are named. Errors in files no longer in the app are dropped and counted,
- * because the editor keeps a deleted file's model.
+ * because the editor keeps a deleted file's model, and so are the build config's (BUILD_CONFIG).
  */
 async function appTypeEvidence(src: MarkerSource, app: AppEntry, tsFiles: string[], hide: (text: string) => string): Promise<CheckEvidence> {
 	const appId = app.id;
@@ -322,8 +349,9 @@ async function appTypeEvidence(src: MarkerSource, app: AppEntry, tsFiles: string
 		.markers()
 		.filter((m) => m.uri.startsWith(prefix) && isTypeError(m))
 		.map((m) => ({ uri: m.uri, relPath: m.uri.slice(prefix.length), line: m.line, message: m.message.replace(/\s*\n\s*/g, ' ') }));
-	const gone = all.filter((e) => TYPESCRIPT_FILE.test(e.relPath) && !live.has(e.uri));
-	const errors = all.filter((e) => !gone.includes(e)).sort((a, b) => (a.relPath === b.relPath ? a.line - b.line : a.relPath < b.relPath ? -1 : 1));
+	const config = all.filter((e) => BUILD_CONFIG.test(e.relPath));
+	const gone = all.filter((e) => !config.includes(e) && TYPESCRIPT_FILE.test(e.relPath) && !live.has(e.uri));
+	const errors = all.filter((e) => !gone.includes(e) && !config.includes(e)).sort((a, b) => (a.relPath === b.relPath ? a.line - b.line : a.relPath < b.relPath ? -1 : 1));
 	const checked = tsFiles.filter((file) => models.has(uriOf(file)));
 	const unchecked = tsFiles.filter((file) => !models.has(uriOf(file)));
 
@@ -335,10 +363,13 @@ async function appTypeEvidence(src: MarkerSource, app: AppEntry, tsFiles: string
 	const note = unchecked.length > 0 ? `\nNot type-checked (not loaded in the editor): ${unchecked.join(', ')}` : '';
 	const goneFiles = [...new Set(gone.map((e) => e.relPath))];
 	const ignored = gone.length > 0 ? `\nIgnored ${gone.length} ${gone.length === 1 ? 'marker' : 'markers'} for ${goneFiles.length === 1 ? 'a file that no longer exists' : 'files that no longer exist'}: ${goneFiles.join(', ')}.` : '';
-	const output = `${clip(hide(errorText), 'fix the first errors and check again to see the rest')}${note}${ignored}`;
+	const configFiles = [...new Set(config.map((e) => e.relPath))];
+	const configNote = configFiles.length > 0 ? `\nNot type-checked in the editor: ${configFiles.join(', ')}, a build config whose Node and rsbuild types the browser does not have (${config.length} ${config.length === 1 ? 'error' : 'errors'} left out).` : '';
+	const output = `${clip(hide(errorText), 'fix the first errors and check again to see the rest')}${note}${ignored}${configNote}`;
 
 	if (errors.length > 0) return { step: TYPES_STEP, ran: TYPES_RAN, output, status: 'fail', summary: `types: ${errors.length} errors` };
-	const summary = unchecked.length > 0 ? `types clean (${unchecked.length} files not type-checked)` : 'types clean';
+	const notChecked = [...(unchecked.length > 0 ? [`${unchecked.length} files`] : []), ...configFiles];
+	const summary = notChecked.length > 0 ? `types clean (${notChecked.join(', ')} not type-checked)` : 'types clean';
 	return { step: TYPES_STEP, ran: TYPES_RAN, output, status: 'pass', summary };
 }
 

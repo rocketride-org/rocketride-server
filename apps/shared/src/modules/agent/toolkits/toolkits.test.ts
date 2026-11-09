@@ -47,7 +47,7 @@ import { BUILDER_PROMPTS } from '../prompts';
 import { runAgent } from '../run';
 import type { AgentTool } from '../tools';
 import type { ModelCall, QuestionSpec } from '../wave/plan';
-import { AppCheckToolkit, type CheckReport, type MarkerInfo } from './appCheck';
+import { AppCheckToolkit, reportVerdict, type CheckReport, type MarkerInfo } from './appCheck';
 import { Approvals } from './approval';
 import { AppToolkit } from './appTools';
 import { redactText, type ChoiceFn } from './common';
@@ -652,6 +652,65 @@ test('check_app fails an app with type errors, and one whose build fails', async
 		assert.match(await toolOf(toolkit, 'check_app').execute({ app: 'daybook-ui' }), /^CHECK FAILED: daybook/, steps.join());
 		const evidence = heard[0].evidence.map((e) => `${e.step} ${e.status}`);
 		assert.deepEqual(evidence, steps);
+	}
+});
+
+test("check_app leaves the template build config's browser-only type errors out, names the file, and still fails an app error", async () => {
+	// what Monaco reports on an untouched template with the Design preview open: its rsbuild.config.mts imports Node and rsbuild
+	const config = ['node:fs', 'node:path', '@rsbuild/core'].map((mod, i): MarkerInfo => ({ uri: 'file:///daybook/rsbuild.config.mts', line: 6 + i, message: `Cannot find module '${mod}' or its corresponding type declarations.`, severity: 8, owner: 'typescript' }));
+	const appError: MarkerInfo = { uri: 'file:///daybook/src/App.tsx', line: 3, message: "Type 'string' is not assignable to type 'number'.", severity: 8, owner: 'typescript' };
+	const cases: Array<[markers: MarkerInfo[], headline: RegExp, types: string]> = [
+		[config, /^CHECK PASSED: daybook\n/, 'pass types clean (rsbuild.config.mts not type-checked)'],
+		[[...config, appError], /^CHECK FAILED: daybook\n/, 'fail types: 1 errors'],
+	];
+	for (const [markers, headline, types] of cases) {
+		const heard: CheckReport[] = [];
+		const source = { modelUris: () => ['file:///daybook/src/App.tsx', 'file:///daybook/rsbuild.config.mts'], markers: () => markers, onChange: () => () => undefined };
+		const toolkit = new AppCheckToolkit(
+			hostFor(new MemoryWorkspace(DAYBOOK), { devSession: () => devSession() }),
+			async () => source,
+			(_folder, report) => heard.push(report),
+			{ build: { buildWaitMs: 1000, settleMs: 20, runtimeGraceMs: 20 }, types: { quietMs: 10, maxMs: 200 } }
+		);
+		const result = await toolOf(toolkit, 'check_app').execute({ app: 'daybook-ui' });
+		assert.match(result, headline);
+		const step = heard[0].evidence.find((e) => e.step === 'types');
+		assert.equal(`${step?.status} ${step?.summary}`, types);
+		assert.match(step?.output ?? '', /Not type-checked in the editor: rsbuild\.config\.mts, a build config .* \(3 errors left out\)/);
+		assert.doesNotMatch(step?.output ?? '', /Cannot find module/);
+	}
+});
+
+test('a check whose types or build step did not run is not checked, and a failed step still fails it', () => {
+	const report = (...steps: Array<[step: string, status: 'pass' | 'fail' | 'not_run']>): CheckReport => ({ target: 'daybook', evidence: steps.map(([step, status]) => ({ step, status, ran: step, output: '', summary: '' })) });
+	assert.equal(reportVerdict(report(['types', 'pass'], ['build', 'pass'], ['runtime', 'pass'])), 'passed');
+	assert.equal(reportVerdict(report(['types', 'pass'], ['build', 'not_run'])), 'not_checked');
+	assert.equal(reportVerdict(report(['types', 'not_run'], ['build', 'pass'], ['runtime', 'pass'])), 'not_checked');
+	assert.equal(reportVerdict(report(['manifest', 'fail'], ['types', 'not_run'], ['build', 'not_run'])), 'failed');
+	assert.equal(reportVerdict(report(['types', 'pass'], ['build', 'pass'], ['runtime', 'fail'])), 'failed');
+});
+
+test('check_app says CHECK NOT COMPLETE, and why, when the preview is closed, and CHECK PASSED when types and build both pass', async () => {
+	const source = { modelUris: () => ['file:///daybook/src/App.tsx'], markers: () => [], onChange: () => () => undefined };
+	const cases: Array<[dev: AgentDevSession | null, headline: RegExp, steps: string[]]> = [
+		[null, /^CHECK NOT COMPLETE: daybook\n/, ['types pass', 'build not_run']],
+		[devSession(), /^CHECK PASSED: daybook\n/, ['types pass', 'build pass', 'runtime pass']],
+	];
+	for (const [dev, headline, steps] of cases) {
+		const heard: CheckReport[] = [];
+		const toolkit = new AppCheckToolkit(
+			hostFor(new MemoryWorkspace(DAYBOOK), { devSession: () => dev }),
+			async () => source,
+			(_folder, report) => heard.push(report),
+			{ build: { buildWaitMs: 1000, settleMs: 20, runtimeGraceMs: 20 }, types: { quietMs: 10, maxMs: 200 } }
+		);
+		const result = await toolOf(toolkit, 'check_app').execute({ app: 'daybook-ui' });
+		assert.match(result, headline, steps.join());
+		if (!dev) assert.match(result, /- \[not_run\] build: .*\n {2}The app's Design preview is not open/);
+		assert.deepEqual(
+			heard[0].evidence.map((e) => `${e.step} ${e.status}`),
+			steps
+		);
 	}
 });
 
