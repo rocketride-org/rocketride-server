@@ -38,6 +38,26 @@ from rocketlib import IValidatorBase, warning
 
 QDRANT_COLLECTION_RE = re.compile(r'^[A-Za-z0-9._-]{1,255}$')
 
+# A ${NAME} the task did not fill, or the <REDACTED> the server substitutes
+# for a non-ROCKETRIDE_ placeholder: neither is a key to send anywhere
+UNRESOLVED_CREDENTIAL_RE = re.compile(r'\$\{([A-Za-z_][A-Za-z0-9_]*)\}|<REDACTED>')
+
+
+def unresolved_credential(value: object) -> str | None:
+    """
+    Return the placeholder still inside a credential value, or None when it is usable.
+
+    Args:
+        value: The resolved config value. Anything but a string passes.
+
+    Returns:
+        str | None: The ``${NAME}`` / ``<REDACTED>`` text found, else None.
+    """
+    if not isinstance(value, str):
+        return None
+    match = UNRESOLVED_CREDENTIAL_RE.search(value)
+    return match.group(0) if match else None
+
 
 def probe_connection(config: Mapping) -> None:
     """
@@ -160,5 +180,14 @@ class IValidator(IValidatorBase):
         """
         config = self.config
         if syntaxOnly:
+            return
+        # An unfilled reference is reported as such; the probe must not send
+        # the placeholder text as the key and surface Qdrant's "unauthorized"
+        placeholder = unresolved_credential(config.get('apikey'))
+        if placeholder is not None:
+            warning(
+                f'API Key still holds {placeholder}: save the variable it names under Environment Variables, '
+                'or paste the key. The connection was not probed.'
+            )
             return
         probe_connection(config)

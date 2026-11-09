@@ -70,8 +70,10 @@ class StoreGlobalBase(IGlobalBase, ABC):
     # The live store, opened in beginGlobal and read by StoreInstanceBase.
     store: Optional[DocumentStoreBase] = None
 
-    # Embedder wiring for the control-plane tool path (search/upsert). Bound in
-    # beginGlobal only when an embedding sub-block is configured.
+    # Embedder hook for the control-plane tool path (search/upsert). Nothing
+    # binds it today: the store embeds in the data lane only, and the tool
+    # path reports semantic search as unavailable. A query-embedding provider
+    # on the store node is a planned addition (plan section 15, item 13).
     embed_query = None
     embed_model_name: Optional[str] = None
 
@@ -119,6 +121,23 @@ class StoreGlobalBase(IGlobalBase, ABC):
     # Lifecycle — identical across vector stores
     # ------------------------------------------------------------------
 
+    def _effective_config(self) -> Tuple[Any, bool, Any]:
+        """The node's effective config as ``(cfg, converted, written)``.
+
+        A converted node (its definition has no "preconfig") reads the
+        resolver's view: defaults applied, the active branch flattened, keys
+        read by path. An unconverted node keeps the preconfig merge until
+        this base is converted for real. ``written`` is what the pipeline
+        stored, for the unfilled-placeholder message; the resolver already
+        read that tree by path, so a converted node passes None.
+        """
+        definition = getServiceDefinition(self.glb.logicalType)
+        converted = definition is not None and 'preconfig' not in definition
+        if converted:
+            return self.config, True, None
+        written = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
+        return Config.getNodeConfig(self.glb.logicalType, written), False, written
+
     def beginGlobal(self) -> None:
         """Open the store, unless in CONFIG mode."""
         # CONFIG mode only needs configureService; the driver is not loaded.
@@ -128,20 +147,7 @@ class StoreGlobalBase(IGlobalBase, ABC):
         self.store = None
         bag = self.IEndpoint.endpoint.bag
 
-        # A converted node (its definition has no "preconfig") reads the
-        # resolver's view: defaults applied, the active branch flattened, keys
-        # read by path. An unconverted node keeps the preconfig merge until
-        # this base is converted for real. ``written`` is what the pipeline
-        # stored, for the unfilled-placeholder message; the resolver already
-        # read that tree by path, so a converted node passes none.
-        definition = getServiceDefinition(self.glb.logicalType)
-        converted = definition is not None and 'preconfig' not in definition
-        if converted:
-            cfg = self.config
-            written = None
-        else:
-            written = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-            cfg = Config.getNodeConfig(self.glb.logicalType, written)
+        cfg, converted, written = self._effective_config()
 
         # Resolve the namespace used for agent-facing tool names from the merged
         # config so it honors both profile defaults and user overrides.
@@ -175,11 +181,15 @@ class StoreGlobalBase(IGlobalBase, ABC):
         self.store = None
 
     def validateConfig(self) -> None:
-        """Save-time validation: probe the server so the user sees errors immediately."""
+        """Save-time validation: probe the server so the user sees errors immediately.
+
+        Reads the config the same way ``beginGlobal`` does, so a converted node
+        (resolver view, no preconfig) and an unconverted one both validate.
+        """
         try:
-            config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
+            config, _converted, written = self._effective_config()
             # An unfilled credential is reported as such, and the probe does not send it.
-            self._check_credentials(config, self.glb.connConfig)
+            self._check_credentials(config, written)
             self._probe_connection(config)
         except Exception as e:
             warning(str(e))

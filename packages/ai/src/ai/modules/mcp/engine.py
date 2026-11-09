@@ -37,7 +37,7 @@ class EngineClient(Protocol):
         mimetype: Optional[str] = None,
         on_sse: Optional[Any] = None,
     ) -> Any: ...
-    async def get_services(self) -> Dict[str, Any]: ...
+    async def get_services(self, *, definitions: bool = False) -> Dict[str, Any]: ...
     async def get_service(self, name: str) -> Optional[Dict[str, Any]]: ...
     async def validate(self, pipeline: dict, source: Optional[str] = None) -> Dict[str, Any]: ...
     async def resolve_config(self, provider: str, config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]: ...
@@ -222,8 +222,10 @@ class WsEngineClient:
             lambda: self._client.send(token, data, objinfo=objinfo, mimetype=mimetype, on_sse=on_sse)
         )
 
-    async def get_services(self) -> Dict[str, Any]:
-        return await self._guarded(lambda: self._client.get_services())
+    async def get_services(self, *, definitions: bool = False) -> Dict[str, Any]:
+        # definitions=True asks for every service's FULL definition (properties
+        # included), the form list_integrations / list_components read
+        return await self._guarded(lambda: self._client.get_services(definitions=definitions))
 
     async def get_service(self, name: str) -> Optional[Dict[str, Any]]:
         return await self._guarded(lambda: self._client.get_service(name))

@@ -1034,7 +1034,7 @@ class VectorStoreToolMixin:
             return {
                 'success': False,
                 'error': (
-                    f'no embedding provider bound to IGlobal.embed_query; configure an embedding sub-block for the {self._vectordb_server_name()} node to enable semantic search'
+                    f'semantic search is not available on the {self._vectordb_server_name()} node: no embedding provider is bound to IGlobal.embed_query (the store node embeds in the data lane only; a query-embedding provider on the store is a planned addition)'
                 ),
             }
 
@@ -1251,7 +1251,7 @@ class VectorStoreToolMixin:
                     return {
                         'success': False,
                         'error': (
-                            f'no embedding provider bound to IGlobal.embed_query; configure an embedding sub-block for the {self._vectordb_server_name()} node or supply pre-computed "embedding" and "embedding_model" per document'
+                            f'the {self._vectordb_server_name()} node has no embedding provider bound to IGlobal.embed_query: supply pre-computed "embedding" and "embedding_model" per document'
                         ),
                     }
                 doc.embedding = computed

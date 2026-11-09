@@ -28,7 +28,7 @@ import { TransportWebSocket } from './core/TransportWebSocket.js';
 import { redactProtocolMessage } from './core/TransportBase.js';
 import { DAPClient } from './core/DAPClient.js';
 import { DAPMessage, EventCallback, RocketRideClientConfig, ConnectCallback, DisconnectCallback, ConnectErrorCallback, ConnectResult, ServerInfoResult, TraceType } from './types/index.js';
-import { TASK_STATUS, UPLOAD_RESULT, PIPELINE_RESULT, PipelineConfig, DashboardResponse, ListPageRequest, ListConnectionsResponse, ListTasksResponse, ServicesResponse, ServiceDefinition, ValidationResult, CProfileStatusResponse, CProfileStopResponse, CProfileReportResponse, CProfileReportTreeResponse, CProfileThreadsResponse } from './types/index.js';
+import { TASK_STATUS, UPLOAD_RESULT, PIPELINE_RESULT, PipelineConfig, DashboardResponse, ListPageRequest, ListConnectionsResponse, ListTasksResponse, ServicesResponse, ServiceDefinitionsResponse, ServiceDefinition, ValidationResult, CProfileStatusResponse, CProfileStopResponse, CProfileReportResponse, CProfileReportTreeResponse, CProfileThreadsResponse } from './types/index.js';
 import { CONST_DEFAULT_WEB_CLOUD, CONST_DEFAULT_WEB_PROTOCOL, CONST_DEFAULT_WEB_PORT } from './constants.js';
 import { Question } from './schema/Question.js';
 import { AccountApi } from './account.js';
@@ -3339,11 +3339,17 @@ export class RocketRideClient extends DAPClient {
 	 * }
 	 * ```
 	 */
-	async getServices(options?: { definitions?: boolean }): Promise<ServicesResponse> {
+	async getServices(): Promise<ServicesResponse>;
+	async getServices(options: { definitions: true }): Promise<ServiceDefinitionsResponse>;
+	async getServices(options?: { definitions?: boolean }): Promise<ServicesResponse>;
+	async getServices(options?: { definitions?: boolean }): Promise<ServicesResponse | ServiceDefinitionsResponse> {
 		// definitions: every entry is the FULL definition (configuration
 		// schema included) and there is no icons table — the bulk form of
 		// getService(), for callers that need every service's properties
-		return this.call<ServicesResponse>('rrext_services', options?.definitions ? { definitions: true } : {});
+		return this.call<ServicesResponse | ServiceDefinitionsResponse>(
+			'rrext_services',
+			options?.definitions ? { definitions: true } : {}
+		);
 	}
 
 	/**

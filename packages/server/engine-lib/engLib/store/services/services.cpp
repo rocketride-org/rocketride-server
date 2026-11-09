@@ -571,7 +571,11 @@ ErrorOr<json::Value> IServices::expandBranches(ServiceContext &context,
                 const auto outerNestedIn = context.nestedIn;
                 auto *outerNames = context.levelNames;
                 context.pathPrefix.push_back(Text{branchName});
-                context.nestedIn = "an enum branch";
+                // A branch inside an array item is still inside the item:
+                // "secret" is refused there too, since the encrypt walk
+                // has no "[]" semantics (the item rule outranks the branch)
+                if (context.nestedIn != "an array item")
+                    context.nestedIn = "an enum branch";
                 context.levelNames = &seen;
 
                 auto res = expandProperty(context, specifier);

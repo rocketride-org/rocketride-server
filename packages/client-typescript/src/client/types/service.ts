@@ -196,6 +196,19 @@ export interface ServicesResponse {
 	version?: number;
 }
 
+/**
+ * Response from `getServices({ definitions: true })`: every service's FULL
+ * definition (configuration properties and `params` descriptors included).
+ * There is no icon table in this form; each definition carries its own
+ * `icon`.
+ */
+export interface ServiceDefinitionsResponse {
+	/** Map of logical type name to its full definition. */
+	services: Record<string, ServiceDefinition>;
+	/** Engine services version. */
+	version?: number;
+}
+
 // ============================================================================
 // VALIDATION TYPES
 // ============================================================================
