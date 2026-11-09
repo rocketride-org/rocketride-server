@@ -69,8 +69,14 @@ class IGlobal(IGlobalBase):
 
         self.key_id = str(cfg.apiKeyId or '').strip()
         self.key_secret = str(cfg.apiKeySecret or '').strip()
+        # Required by the schema, but a whitespace-only value passes `required` and would
+        # build /api/workspaces//...: refuse it here, naming the field.
         self.owner = cfg.owner.strip()
+        if not self.owner:
+            raise ValueError('tool_guild: owner must not be blank')
         self.workspace = cfg.workspace.strip()
+        if not self.workspace:
+            raise ValueError('tool_guild: workspace must not be blank')
         self.default_agent = str(cfg.agent or '').strip()
 
         self.result_mode = cfg.resultMode

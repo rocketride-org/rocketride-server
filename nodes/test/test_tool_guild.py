@@ -1028,6 +1028,13 @@ def test_begin_global_reads_start_mode():
     assert _run_begin_global({**_FULL_CONFIG, 'resultMode': 'start', 'agent': 'b'}).result_mode == 'start'
 
 
+@pytest.mark.parametrize('field', ['owner', 'workspace'])
+def test_begin_global_refuses_a_blank_owner_or_workspace(field):
+    """A whitespace-only value passes `required` but would address /api/workspaces//...: refused by name."""
+    with pytest.raises(ValueError, match=f'tool_guild: {field} must not be blank'):
+        _run_begin_global({**_FULL_CONFIG, field: '   '})
+
+
 def test_begin_global_requires_both_key_halves_owner_and_workspace():
     """Guild authenticates with HTTP Basic and addresses /api/workspaces/<owner>/<workspace>: all four are required."""
     from rocketlib.config import ConfigError

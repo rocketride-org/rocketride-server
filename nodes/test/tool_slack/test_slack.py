@@ -46,9 +46,15 @@ def _require_str(args, key, *, tool_name=''):
 
 
 def _build_import_stubs():
+    # The real base: its ``config`` property resolves self.glb.connConfig against the engine's
+    # schema for tool_slack (rocketlib.filters is never stubbed); the stub stands in for the rest.
+    from rocketlib.filters import IGlobalBase
+
     rocketlib = MagicMock()
     rocketlib.IInstanceBase = object
-    rocketlib.IGlobalBase = object
+    rocketlib.IGlobalBase = IGlobalBase
+    rocketlib.engine = importlib.import_module('rocketlib.engine')
+    rocketlib.config = importlib.import_module('rocketlib.config')
     rocketlib.tool_function = lambda **kwargs: lambda f: f
     rocketlib.OPEN_MODE = MagicMock()
     rocketlib.warning = lambda *a, **kw: None

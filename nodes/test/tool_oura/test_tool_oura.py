@@ -90,9 +90,15 @@ def _build_import_stubs():
     status_codes.codes = _Codes
     requests.status_codes = status_codes
 
+    # The real base: its ``config`` property resolves self.glb.connConfig against the engine's
+    # schema for tool_oura (rocketlib.filters is never stubbed); the stub stands in for the rest.
+    from rocketlib.filters import IGlobalBase
+
     rocketlib = MagicMock()
     rocketlib.IInstanceBase = object  # must be a real class for inheritance
-    rocketlib.IGlobalBase = object
+    rocketlib.IGlobalBase = IGlobalBase
+    rocketlib.engine = importlib.import_module('rocketlib.engine')
+    rocketlib.config = importlib.import_module('rocketlib.config')
     rocketlib.tool_function = lambda **kwargs: lambda f: f  # pass-through decorator
     rocketlib.debug = lambda *a, **kw: None
     rocketlib.error = lambda *a, **kw: None

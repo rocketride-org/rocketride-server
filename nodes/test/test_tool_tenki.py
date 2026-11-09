@@ -81,7 +81,13 @@ class _InstanceBase:
 
 
 def _stubs() -> dict:
-    rocketlib = MagicMock(IInstanceBase=_InstanceBase, IGlobalBase=object, tool_function=_tool_function)
+    # The real base: its ``config`` property resolves self.glb.connConfig against the engine's schema for
+    # tool_tenki (rocketlib.filters is never stubbed); the stub module only stands in for the rest.
+    from rocketlib.filters import IGlobalBase
+
+    rocketlib = MagicMock(IInstanceBase=_InstanceBase, IGlobalBase=IGlobalBase, tool_function=_tool_function)
+    rocketlib.engine = importlib.import_module('rocketlib.engine')
+    rocketlib.config = importlib.import_module('rocketlib.config')
     rocketlib.debug = rocketlib.warning = rocketlib.error = lambda *a, **kw: None
     tenki = MagicMock(SandboxError=_SandboxError, WaitReadyFailedError=_CarriesSandbox)
     tenki.TemplateRuntimeFailedError = type('TemplateRuntimeFailedError', (_CarriesSandbox,), {})
