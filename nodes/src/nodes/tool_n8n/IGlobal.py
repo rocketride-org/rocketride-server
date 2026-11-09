@@ -80,12 +80,21 @@ class IGlobal(IGlobalBase):
     def _build_webhook_auth(cfg: Mapping) -> Optional[Dict[str, str]]:
         """Assemble the per-webhook auth dict (separate from the REST API key) from the active branch."""
         kind = cfg['webhookAuth']
+        # The schema's `required` refuses a missing or empty value but lets a
+        # whitespace-only one through; refuse it here so the failure names the
+        # field instead of surfacing as an invalid header or a bare "Bearer ".
         if kind == 'header':
-            return {'type': 'header', 'name': cfg['webhookHeaderName'].strip(), 'value': str(cfg['webhookHeaderValue'])}
+            name = cfg['webhookHeaderName'].strip()
+            if not name:
+                raise ValueError('tool_n8n: webhookHeaderName must not be blank')
+            return {'type': 'header', 'name': name, 'value': str(cfg['webhookHeaderValue'])}
         if kind == 'basic':
             return {'type': 'basic', 'user': str(cfg['webhookUser']), 'password': str(cfg.get('webhookPassword') or '')}
         if kind in ('bearer', 'jwt'):
-            return {'type': kind, 'value': str(cfg['webhookToken']).strip()}
+            token = str(cfg['webhookToken']).strip()
+            if not token:
+                raise ValueError('tool_n8n: webhookToken must not be blank')
+            return {'type': kind, 'value': token}
         return None
 
     def endGlobal(self) -> None:

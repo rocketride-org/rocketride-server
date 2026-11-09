@@ -232,6 +232,23 @@ def test_begin_global_reads_the_selected_branches():
     assert glb.webhook_auth == {'type': 'bearer', 'value': 'tok'}
 
 
+@pytest.mark.parametrize(
+    'auth, branch, field',
+    [
+        ('bearer', 'bearer', 'webhookToken'),
+        ('jwt', 'jwt', 'webhookToken'),
+        ('header', 'header', 'webhookHeaderName'),
+    ],
+)
+def test_begin_global_refuses_a_blank_webhook_credential(auth, branch, field):
+    # `required` lets a whitespace-only value through; the start-time guard names the field
+    stored = {'webhookAuth': auth, branch: {field: '   '}}
+    if auth == 'header':
+        stored[branch]['webhookHeaderValue'] = 'v'
+    with pytest.raises(ValueError, match=field):
+        _begin(stored)
+
+
 def test_begin_global_rejects_a_timeout_outside_the_schema():
     from rocketlib.config import ConfigError
 
