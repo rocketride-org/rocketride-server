@@ -29,7 +29,8 @@ above is served.
 
 ``STUB_MCP_PAGE_SIZE=<n>`` makes ``tools/list`` return at most ``n`` tools per
 page with a ``nextCursor``. The stub's cursor is the next offset as a string; a
-client must treat it as opaque. An unknown cursor answers ``-32602``.
+client must treat it as opaque. A cursor that is not an integer, or that is below
+0 or above the tool count, answers ``-32602``.
 """
 
 import json

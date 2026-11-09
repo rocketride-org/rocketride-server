@@ -36,24 +36,33 @@ included. Only a missing ``nextCursor`` (or JSON ``null``, which cannot be
 forwarded) ends the traversal.
 
 The traversal is complete-or-raise: a malformed page, a non-string or repeated
-cursor, or more than ``MAX_TOOLS_LIST_PAGES`` pages or ``MAX_TOOLS_LIST_ENTRIES``
-raw entries raises ``error_cls`` naming the page, instead of returning what was
-collected, so a partial list never replaces a good cached catalog
-(``IGlobal.refresh_tools`` keeps the old catalog when ``list_tools`` raises).
-Entries are counted as the server sent them, before the transport skips
-malformed ones and before duplicate names collapse, so a hostile server cannot
-dodge the bound with junk. Exceptions raised by the transport itself (timeouts,
-HTTP errors, JSON-RPC errors) propagate unchanged with their own diagnostics.
+cursor, a tool name already listed on an earlier page, more than
+``MAX_TOOLS_LIST_PAGES`` pages or ``MAX_TOOLS_LIST_ENTRIES`` raw entries, or a
+traversal still unfinished after ``MAX_TOOLS_LIST_SECONDS`` raises ``error_cls``
+naming the page, instead of returning what was collected, so a partial list
+never replaces a good cached catalog (``IGlobal.refresh_tools`` keeps the old
+catalog when ``list_tools`` raises). Entries are counted as the server sent
+them, before the transport skips malformed ones, so a hostile server cannot
+dodge the bound with junk. A name repeated within one page is left to the caller
+as before. Exceptions raised by the transport itself (timeouts, HTTP errors,
+JSON-RPC errors) propagate unchanged with their own diagnostics.
 """
 
 from __future__ import annotations
 
+import time
 from typing import Any, Callable, Dict, List, Optional, Type
 
-# Counts of requests and raw entries, not seconds or bytes: how long one page may
-# take is up to the transport.
 MAX_TOOLS_LIST_PAGES = 100
 MAX_TOOLS_LIST_ENTRIES = 5000
+# Checked before each request after the first. A request already in flight is
+# not cut short: how long one request may take is up to the transport, as before.
+MAX_TOOLS_LIST_SECONDS = 60.0
+
+
+def _monotonic() -> float:
+    """Clock for the time budget; tests drive this instead of patching ``time.monotonic``."""
+    return time.monotonic()
 
 
 def fetch_all_tool_entries(
@@ -62,6 +71,7 @@ def fetch_all_tool_entries(
     error_cls: Type[Exception] = RuntimeError,
     max_pages: int = MAX_TOOLS_LIST_PAGES,
     max_entries: int = MAX_TOOLS_LIST_ENTRIES,
+    max_seconds: float = MAX_TOOLS_LIST_SECONDS,
 ) -> List[Any]:
     """Return the raw ``tools`` entries of every ``tools/list`` page, in server order.
 
@@ -69,14 +79,20 @@ def fetch_all_tool_entries(
     requested with ``{}`` exactly as before; later pages send ``{'cursor': <value>}``
     with the cursor forwarded untouched (``''`` included). A missing or ``null``
     ``nextCursor`` ends the traversal. A non-string cursor, a cursor seen before, a
-    malformed page or an exceeded limit raises ``error_cls`` with the page number in
-    the message (cursor values are opaque and are not logged). Exceptions raised by
-    ``request`` propagate unchanged.
+    tool name listed on an earlier page, a malformed page or an exceeded limit raises
+    ``error_cls`` with the page number in the message (cursor values are opaque and
+    are not logged). Exceptions raised by ``request`` propagate unchanged.
     """
     entries: List[Any] = []
     seen_cursors: set = set()
+    seen_names: set = set()
     cursor: Optional[str] = None
+    deadline = _monotonic() + max_seconds
     for page in range(1, max_pages + 1):
+        if page > 1 and _monotonic() >= deadline:
+            raise error_cls(
+                f'tools/list ran past its {max_seconds:g} s budget before page {page}; refusing the catalog'
+            )
         params: Dict[str, Any] = {} if cursor is None else {'cursor': cursor}
         result = request('tools/list', params)
         if not isinstance(result, dict):
@@ -84,11 +100,19 @@ def fetch_all_tool_entries(
         tools = result.get('tools', [])
         if not isinstance(tools, list):
             raise error_cls(f'tools/list page {page} result.tools expected list, got {type(tools)}')
-        entries.extend(tools)
-        if len(entries) > max_entries:
+        if len(entries) + len(tools) > max_entries:
             raise error_cls(
                 f'tools/list returned more than {max_entries} tool entries by page {page}; refusing the catalog'
             )
+        page_names = {t['name'] for t in tools if isinstance(t, dict) and isinstance(t.get('name'), str) and t['name']}
+        repeated = page_names & seen_names
+        if repeated:
+            name = min(repeated)
+            raise error_cls(
+                f'tools/list page {page} lists tool {name[:100]!r} again from an earlier page; refusing the catalog'
+            )
+        seen_names |= page_names
+        entries.extend(tools)
         next_cursor = result.get('nextCursor')
         if next_cursor is None:
             return entries
