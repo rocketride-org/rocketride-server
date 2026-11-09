@@ -127,15 +127,18 @@ class StoreGlobalBase(IGlobalBase, ABC):
         A converted node (its definition has no "preconfig") reads the
         resolver's view: defaults applied, the active branch flattened, keys
         read by path. An unconverted node keeps the preconfig merge until
-        this base is converted for real. ``written`` is what the pipeline
-        stored, for the unfilled-placeholder message; the resolver already
-        read that tree by path, so a converted node passes None.
+        this base is converted for real: ONE ``getNodeConfig`` pass over the
+        stored config (a second pass over the merged result would have lost
+        ``profile`` and read the default profile's block over the active one).
+        ``written`` is what the pipeline stored, for the unfilled-placeholder
+        message and for the driver's own merge; the resolver already read that
+        tree by path, so a converted node passes None.
         """
         definition = getServiceDefinition(self.glb.logicalType)
         converted = definition is not None and 'preconfig' not in definition
         if converted:
             return self.config, True, None
-        written = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
+        written = self.glb.connConfig
         return Config.getNodeConfig(self.glb.logicalType, written), False, written
 
     def beginGlobal(self) -> None:
