@@ -101,7 +101,7 @@ def test_a_newer_home_ui_manifest_still_validates():
     assert errors == []
     assert len(pages) == 26
     assert site == {
-        **{k: newer['site'][k] for k in ('title', 'blurb', 'docsUrl', 'image')},
+        **{k: newer['site'][k] for k in ('title', 'blurb', 'docsUrl', 'image', 'organization')},
         'redirects': {'/terms': '/legal/terms', '/terms/': '/legal/terms'},
         'feeds': {'/blog/feed.xml': {'path': '/blog/feed.xml', 'prefix': '/blog/', 'title': 'RocketRide blog'}},
     }

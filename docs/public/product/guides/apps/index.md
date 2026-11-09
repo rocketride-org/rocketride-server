@@ -238,7 +238,7 @@ interface AppManifest {
   onDesktop?: boolean;
   /** Platform apps only: public pages on the app origin (see Public pages). */
   publicPages?: PublicPage[];
-  /** Platform apps only, honored from the app owning '/': the site's title, blurb, docs link, redirects, image and feeds. */
+  /** Platform apps only, honored from the app owning '/': the site's title, blurb, docs link, redirects, image, feeds and organization. */
   site?: {
     title?: string;
     blurb?: string;
@@ -249,6 +249,8 @@ interface AppManifest {
     image?: string;
     /** Atom feeds of the dated pages under a prefix: { path: '/blog/feed.xml', prefix: '/blog/', title: 'Blog' }. */
     feeds?: { path: string; prefix: string; title: string }[];
+    /** The organization the site belongs to: its Organization JSON-LD, with the @id `${url}#organization`. */
+    organization?: { name: string; url: string; logo?: string; description?: string; sameAs?: string[] };
   };
 }
 ```
@@ -336,6 +338,9 @@ publish fails with a message naming the field):
   route; it appears once. `prefix` is a page path ending in `/` (`/blog/`, or
   `/` for every page), and `title` a non-empty string of at most 300
   characters.
+- `site.organization` needs a non-empty `name` (at most 300 characters) and an
+  `https://` `url`; `logo` is an `https://` URL, `description` at most 1000
+  characters, and `sameAs` a list of at most 20 `https://` URLs.
 
 Until a published platform app contributes a valid page, the page map holds
 the server's built-in page list instead. A published app whose storage cannot
@@ -370,7 +375,13 @@ its `headline` (the title without a trailing ` | <site.title>`),
 `description`, `datePublished`, `dateModified`, `image`, `mainEntityOfPage`
 (the canonical URL), each author as a `Person`, and the site's organization
 as `publisher`, also the `author` of a page without authors. That
-organization is named after `site.title`, on the `RR_APP_URL` origin.
+organization is a reference to the `site.organization` node by its `@id`
+when one is declared, else an organization named after `site.title`, on the
+`RR_APP_URL` origin. Crawlers get the `site.organization` node (an
+`Organization` with the declared fields and the `@id`
+`<url>#organization`) on `/` and on every page with `published`, so the
+reference resolves on the page itself; `/` also carries a `WebSite` node for
+the `RR_APP_URL` origin, published by that organization.
 
 A snapshot is a template with exactly three kinds of tag, each on one line:
 `{{name}}` and `{{a.b}}` insert a value, HTML-escaped; `{{#name}}...{{/name}}`

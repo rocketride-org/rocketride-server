@@ -34,7 +34,9 @@ from the app owning ``/``, the site facts the SEO files carry:
     "site": {"title": "...", "blurb": "...", "docsUrl": "https://.../llms.txt",
              "redirects": [{"from": "/terms", "to": "/legal/terms"}],
              "image": "og/site.png",
-             "feeds": [{"path": "/blog/feed.xml", "prefix": "/blog/", "title": "..."}]}
+             "feeds": [{"path": "/blog/feed.xml", "prefix": "/blog/", "title": "..."}],
+             "organization": {"name": "...", "url": "https://...", "logo": "https://...",
+                              "description": "...", "sameAs": ["https://..."]}}
 
 ``check_manifest`` is the single validator: the publish gate refuses on any
 error it reports, and the aggregate builder re-runs it on every published
@@ -127,6 +129,7 @@ _MAX_URL = 2048
 _MAX_REDIRECTS = 100
 _MAX_AUTHORS = 5
 _MAX_FEEDS = 5
+_MAX_SAME_AS = 20
 
 # The largest snapshot the publish gate accepts and the server reads. A crawler
 # request is cheap to send and its UA trivially spoofed, so every snapshot must
@@ -467,6 +470,56 @@ def _check_site(raw: Any) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
         if err:
             return None, f'site.image {raw["image"]!r}: {err}'
         out['image'] = raw['image']
+    if 'organization' in raw:
+        organization, err = _check_organization(raw['organization'])
+        if err:
+            return None, err
+        out['organization'] = organization
+    return out, None
+
+
+def _check_organization(raw: Any) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """``site.organization``: the entity the site belongs to, as its Organization JSON-LD declares it.
+
+    ``name`` and ``url`` are required: ``url`` anchors the node's ``@id``
+    (``<url>#organization``), which every BlogPosting references, so it must
+    be an absolute https URL without a query or fragment. ``logo`` and each
+    ``sameAs`` entry are https URLs too. Unknown keys are ignored; the engine
+    holds no entity facts of its own.
+    """
+    if not isinstance(raw, dict):
+        return None, 'site.organization: must be an object {"name": "...", "url": "https://..."}'
+    name = raw.get('name')
+    if not isinstance(name, str) or not name.strip() or len(name) > _MAX_TITLE:
+        return None, f'site.organization.name: required, a non-empty string of at most {_MAX_TITLE} characters'
+    err = _surrogate_error(name)
+    if err:
+        return None, f'site.organization.name: {err}'
+    url = raw.get('url')
+    err = _https_url_error(url)
+    if not err and ('?' in url or '#' in url):
+        err = 'must not carry a query or fragment (it anchors the @id <url>#organization)'
+    if err:
+        return None, f'site.organization.url: {err}'
+    out: Dict[str, Any] = {'name': name, 'url': url}
+    if 'logo' in raw:
+        err = _https_url_error(raw['logo'])
+        if err:
+            return None, f'site.organization.logo: {err}'
+        out['logo'] = raw['logo']
+    if 'description' in raw:
+        description = raw['description']
+        if not isinstance(description, str) or len(description) > _MAX_DESCRIPTION:
+            return None, f'site.organization.description: must be a string of at most {_MAX_DESCRIPTION} characters'
+        err = _surrogate_error(description)
+        if err:
+            return None, f'site.organization.description: {err}'
+        out['description'] = description
+    if 'sameAs' in raw:
+        same_as = raw['sameAs']
+        if not isinstance(same_as, list) or len(same_as) > _MAX_SAME_AS or any(_https_url_error(u) for u in same_as):
+            return None, f'site.organization.sameAs: must be a list of at most {_MAX_SAME_AS} https:// URLs'
+        out['sameAs'] = list(same_as)
     return out, None
 
 

@@ -91,7 +91,7 @@ async def test_aggregate_from_hostile_state_has_no_leaks():
     agg = build_aggregate(await load_published(hostile_account()))
     assert not agg.legacy
     assert _paths(agg) == ['/', '/marketplace', '/pricing', '/store']
-    assert agg.site == {k: HOME_MANIFEST['site'][k] for k in ('title', 'blurb', 'docsUrl')}
+    assert agg.site == {k: HOME_MANIFEST['site'][k] for k in ('title', 'blurb', 'docsUrl', 'organization')}
     blob = repr(agg)
     for marker in LEAK_MARKERS:
         assert marker not in blob
