@@ -32,6 +32,8 @@ Google auth helper is imported inside the check so this module stays
 import-light.
 """
 
+import importlib.util
+
 from rocketlib import IValidatorBase, warning
 
 _VERTEX_SCOPES = ['https://www.googleapis.com/auth/cloud-platform']
@@ -54,14 +56,17 @@ class IValidator(IValidatorBase):
         if syntaxOnly:
             return
 
-        try:
-            from nodes.core.gcp_auth import GCPAuthError, get_gcp_credentials
-        except ImportError as e:
-            # CONFIG mode installs no node requirements; google-auth arrives
-            # with the node's first start. Say so instead of reporting a
-            # credential problem that does not exist.
-            warning(f'Credential check skipped: {e}. It runs once the node has started and installed its requirements.')
+        # CONFIG mode installs no node requirements; google-auth arrives with
+        # the node's first start. The helper wraps that ImportError as an auth
+        # error, so test for the library first and say what really happened
+        if importlib.util.find_spec('google.auth') is None:
+            warning(
+                'Credential check skipped: google-auth is not installed yet. '
+                'It runs once the node has started and installed its requirements.'
+            )
             return
+
+        from nodes.core.gcp_auth import GCPAuthError, get_gcp_credentials
 
         try:
             get_gcp_credentials(config, scopes=_VERTEX_SCOPES)

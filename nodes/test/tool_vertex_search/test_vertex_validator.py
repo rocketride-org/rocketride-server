@@ -104,9 +104,21 @@ def test_a_missing_google_auth_is_reported_not_mistaken_for_a_bad_key(validator,
     # CONFIG mode installs no node requirements: an absent google-auth is a
     # skipped check, not a credential problem
     instance, warnings = validator
-    monkeypatch.setitem(sys.modules, 'nodes.core.gcp_auth', None)
+    import importlib.util
+
+    real_find_spec = importlib.util.find_spec
+    monkeypatch.setattr(
+        importlib.util,
+        'find_spec',
+        lambda name, *a, **k: None if name == 'google.auth' else real_find_spec(name, *a, **k),
+    )
+
+    def boom(*args, **kwargs):
+        raise AssertionError('the helper must not run without google-auth')
+
+    monkeypatch.setattr(gcp_auth, 'get_gcp_credentials', boom)
     instance.validateConfig()
-    assert len(warnings) == 1 and warnings[0].startswith('Credential check skipped:')
+    assert len(warnings) == 1 and warnings[0].startswith('Credential check skipped: google-auth is not installed')
 
 
 def test_syntax_only_skips_the_credential_build(validator, monkeypatch):

@@ -196,6 +196,32 @@ class TestHardErrors:
         assert '"maxEdge" must be >= 64' in str(info.value)
         assert 'unknown config key "bogus"' in str(info.value)
 
+    def test_an_empty_block_for_a_branch_with_only_hoisted_leaves_is_allowed(self):
+        # Every leaf of both branches is hoisted to the selector's level, so no
+        # path lies under the branch; a stored empty block for it is still a
+        # declared block, not an unknown key
+        from tests.rocketlib.schemas import _leaf
+
+        schema = {
+            'properties': [
+                {
+                    'name': 'mode',
+                    'path': 'mode',
+                    'type': 'string',
+                    'default': 'a',
+                    'enum': {
+                        'a': {'properties': [_leaf('shared', 'shared', type='string', default='x')]},
+                        'b.1': {'properties': [_leaf('shared', 'shared', type='string', default='x')]},
+                    },
+                },
+                _leaf('shared', 'shared', type='string', default='x'),
+            ],
+            'params': [],
+            'capabilities': 0,
+        }
+        assert resolveConfig(schema, {'mode': 'a', 'a': {}, 'b.1': {}}).shared == 'x'
+        assert resolveConfig(schema, {'mode': 'b.1', 'b.1': {}}).mode == 'b.1'
+
     def test_a_flat_dotted_group_key_is_refused(self):
         # "cloud.apikey" written as one key with the leaf beneath it: the
         # encrypt walk would never reach the secret, so the shape is refused

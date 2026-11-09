@@ -137,9 +137,14 @@ def test_a_stale_model_value_is_an_error_naming_the_options():
 
 
 def test_a_key_the_schema_does_not_declare_is_an_error():
-    """The old per-profile objects are gone: a leftover one is named, not ignored."""
-    with pytest.raises(ConfigError, match='unknown config key "medium"'):
+    """The old per-profile objects are gone: a leftover one is named by its stray key, not ignored.
+
+    ``medium`` itself is a declared branch (an empty block for it is legal), so the
+    error names the leaf that no longer lives under it.
+    """
+    with pytest.raises(ConfigError, match='unknown config key "medium.beam_size"'):
         _resolve({'model': 'medium', 'medium': {'beam_size': 1}})
+    assert _resolve({'model': 'medium', 'medium': {}})['model'] == 'medium'
 
 
 def test_a_display_title_never_reaches_a_key_iglobal_reads():

@@ -176,6 +176,9 @@ def _walk(properties: Any, prefix: str, schema: _Schema) -> None:
             group_prefix = f'{prefix}{name}.' if name else prefix
             if name:
                 schema.children.setdefault(prefix.rstrip('.'), set()).add(name)
+                # Declared even when every child is hoisted away, so a stored
+                # empty block for it is "nothing set", not an unknown key
+                schema.prefixes.add(group_prefix.rstrip('.'))
             _walk(children, group_prefix, schema)
             continue
 
@@ -193,6 +196,8 @@ def _walk(properties: Any, prefix: str, schema: _Schema) -> None:
             for branch, body in enum.items():
                 if isinstance(body, dict):
                     schema.children.setdefault(level.rstrip('.'), set()).add(branch)
+                    # A branch whose leaves are all hoisted still owns a block
+                    schema.prefixes.add(f'{level}{branch}')
                     _walk(body.get('properties'), f'{level}{branch}.', schema)
 
 
