@@ -62,7 +62,7 @@ def _build(adapter, *descriptors, agent=None):
 
 
 def _prompt_entries(prompt: str) -> List[Dict[str, Any]]:
-    return json.loads(prompt.split('args schema): ', 1)[1])
+    return json.JSONDecoder().raw_decode(prompt.split('args schema): ', 1)[1])[0]
 
 
 def test_description_has_no_schema_paste_when_the_original_attaches(adapter):
@@ -81,14 +81,35 @@ def test_nested_schema_and_enum_survive_only_in_the_original(adapter):
 
 
 def test_protocol_prompt_shows_the_original_schema_once(adapter):
-    utils = pytest.importorskip('ai.common.utils')
+    from ai.common.utils import normalize_bound_tools
+
     other = {'name': 'crm.list_deals', 'description': 'List deals.', 'inputSchema': {'type': 'object'}}
-    prompt = adapter._tool_call_protocol_prompt(utils.normalize_bound_tools(_build(adapter, TOOL, other)))
+    prompt = adapter._tool_call_protocol_prompt(normalize_bound_tools(_build(adapter, TOOL, other)))
     assert prompt.count(STAGE) == 1
     assert PASTE_LABEL not in prompt
     entries = _prompt_entries(prompt)
     assert [entry['name'] for entry in entries] == ['crm.get_deal', 'crm.list_deals']
     assert entries[0] == {'name': 'crm.get_deal', 'description': TOOL['description'], 'args_schema': SCHEMA}
+
+
+def test_bind_tools_sends_the_original_schema_once(adapter):
+    prompts: List[str] = []
+
+    class _Host(_FakeAgent):
+        def call_llm(self, context: Any, prompt: str, **kwargs: Any) -> str:
+            prompts.append(prompt)
+            return 'FINAL>>>done'
+
+    host = _Host()
+    model = adapter._build_deepagent_llm(host, SimpleNamespace())
+    model.bind_tools(_build(adapter, TOOL, agent=host))
+    model.invoke('Read deal 42.')
+    assert len(prompts) == 1
+    assert prompts[0].count(STAGE) == 1
+    assert PASTE_LABEL not in prompts[0]
+    assert _prompt_entries(prompts[0]) == [
+        {'name': 'crm.get_deal', 'description': TOOL['description'], 'args_schema': SCHEMA}
+    ]
 
 
 def test_framework_tool_without_original_keeps_its_generated_schema(adapter):

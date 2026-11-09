@@ -55,7 +55,13 @@ DEEPAGENT_SYMBOLS: Dict[str, Dict[str, Any]] = {
 
 
 def real_langchain_or_skip() -> Callable[[], None]:
-    """Swap stubs out for the real packages and return the function that puts them back. Skip when not installed."""
+    """Swap stubs out for the real packages and return the function that puts them back. Skip when not installed.
+
+    For each package that had a stub, the function drops the real modules imported since the swap, and their
+    attributes on parent modules, then puts the stubs back. A test module that keeps its own stubs then never finds a
+    real submodule under a stub parent, whatever the test order. A package with no stub is left alone: dropping a real
+    ``pydantic`` that was already loaded would make the next importer build second copies of its classes.
+    """
     stubs = {
         name: module
         for name, module in sys.modules.items()
@@ -63,9 +69,20 @@ def real_langchain_or_skip() -> Callable[[], None]:
     }
     for name in stubs:
         del sys.modules[name]
+    before = set(sys.modules)
+    packages = {name.partition('.')[0] for name in stubs}
 
     def restore() -> None:
-        sys.modules.update(stubs)
+        for name in [n for n in sys.modules if n not in before and n.partition('.')[0] in packages]:
+            module = sys.modules.pop(name)
+            parent, _, child = name.rpartition('.')
+            if getattr(sys.modules.get(parent), child, None) is module:
+                delattr(sys.modules[parent], child)
+        for name, module in stubs.items():
+            sys.modules[name] = module
+            parent, _, child = name.rpartition('.')
+            if parent in sys.modules:
+                setattr(sys.modules[parent], child, module)
 
     try:
         real = importlib.import_module('langchain_core.tools').BaseTool is not object
