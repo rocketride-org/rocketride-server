@@ -1021,6 +1021,61 @@ def test_live_clickhouse_profiles_run_read_only(monkeypatch, profile, limit, war
         admin.dispose()
 
 
+# SETTINGS clauses that ClickHouse runs and is_sql_safe once missed: behind a quote or comment only ClickHouse reads,
+# or after a setting given without a value; {get} reads the limit
+_CLICKHOUSE_HIDDEN_SETTINGS = [
+    pytest.param("SELECT \u2018'\u2019 AS s, {get} SETTINGS max_execution_time = 7 --'", id='curly-string'),
+    pytest.param('SELECT {get} SETTINGS \u201cmax_execution_time\u201d = 7', id='curly-name'),
+    pytest.param('SELECT {get} SETTINGS`max_execution_time`=7', id='backtick-name-after-the-keyword'),
+    pytest.param('SELECT {get} SETTINGS"max_execution_time"=7', id='quoted-name-after-the-keyword'),
+    pytest.param("SELECT {get} // '\nSETTINGS max_execution_time = 7 --'", id='slash-comment'),
+    pytest.param(
+        "SELECT $1$'$1$ AS s, {get} SETTINGS max_execution_time = 7 --'", id='heredoc-tag-starting-with-a-digit'
+    ),
+    pytest.param(
+        'SELECT {get} SETTINGS force_index_by_date, max_execution_time = 7', id='after-a-setting-without-value'
+    ),
+    pytest.param('SELECT {get} SETTINGS "force_index_by_date", max_execution_time = 7', id='after-a-quoted-setting'),
+]
+
+
+@pytest.mark.parametrize('template', _CLICKHOUSE_HIDDEN_SETTINGS)
+def test_live_clickhouse_runs_each_settings_clause_is_sql_safe_refuses(template):
+    """A readonly=2 user lifts the node's time limit with each of these, so is_sql_safe must refuse them.
+
+    The query runs on the node's read-only connection: without the clause it gets the node's limit, with it the
+    query's own value replaces that limit.
+
+    Args:
+        template: The query, with ``{get}`` for the column that reads the time limit.
+    """
+    dsn = os.environ.get('RR_TEST_CLICKHOUSE_DSN')
+    if not dsn:
+        pytest.skip('Set RR_TEST_CLICKHOUSE_DSN to run against a live ClickHouse server')
+    statement = template.format(get="getSetting('max_execution_time') AS t")
+    assert not is_sql_safe(statement)
+    admin = create_engine(dsn)
+    user, password = f'rr_settings_{uuid4().hex[:12]}', uuid4().hex
+    database = make_url(dsn).database
+    created, engine = False, None
+    try:
+        created, error = _create_writing_user(admin, user, password, 'readonly = 2', database)
+        if error is not None:
+            pytest.skip(f'The DSN user cannot create a user: {error}')
+        engine = create_engine(make_url(dsn).set(username=user, password=password))
+        with _global(engine).read_only_connection() as conn:
+            limit = conn.exec_driver_sql("SELECT getSetting('max_execution_time')").scalar()
+            lifted = conn.exec_driver_sql(statement).one()
+        assert float(limit) == _Global.READ_QUERY_TIMEOUT
+        assert float(lifted[-1]) == 7
+    finally:
+        if engine is not None:
+            engine.dispose()
+        if created:
+            _drop_writing_user(admin, user, database)
+        admin.dispose()
+
+
 class _DriverError(Exception):
     """Stands in for clickhouse-sqlalchemy's DatabaseException: not a SQLAlchemyError, the driver error on ``.orig``."""
 

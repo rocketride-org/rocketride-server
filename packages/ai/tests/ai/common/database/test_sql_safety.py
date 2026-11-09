@@ -9,9 +9,11 @@ the allowlist, the masking of literals and comments under PostgreSQL and MySQL
 rules, multi-statement input, and the clauses that make a SELECT write.
 """
 
+import time
+
 import pytest
 
-from ai.common.database.sql_safety import is_sql_safe
+from ai.common.database.sql_safety import _mask_clickhouse, is_sql_safe
 
 
 # ---------------------------------------------------------------------------
@@ -317,6 +319,24 @@ def test_select_that_writes_or_locks_is_rejected(sql):
         'SELECT 1 SETTINGS `max_execution_time` = 0',
         'SELECT 1 SETTINGS "max_execution_time" = 0',
         'EXPLAIN SELECT 1 SETTINGS max_execution_time = 0',
+        # A setting without a value (a Bool set to true) may come first in the list
+        'SELECT 1 SETTINGS force_index_by_date, max_execution_time = 0',
+        'SELECT 1 SETTINGS force_index_by_date, use_query_cache, max_execution_time = 0',
+        'SELECT 1 SETTINGS "force_index_by_date", max_execution_time = 0',
+        'SELECT 1 SETTINGS`force_index_by_date`,max_execution_time=0',
+        'SELECT * FROM (SELECT 1 SETTINGS force_index_by_date, max_execution_time = 0)',
+        'SELECT 1 FORMAT TSV SETTINGS force_index_by_date, max_execution_time = 0',
+        'SELECT 1 SETTINGS max_execution_time = DEFAULT',
+        'SELECT 1 SETTINGS x.max_execution_time = 0',
+        # 1. is a number, so the keyword after it starts the clause
+        'SELECT 1. SETTINGS max_execution_time = 0',
+        # A column named settings earlier in the query does not hide the clause
+        'SELECT settings a, b = 1 FROM t SETTINGS force_index_by_date, max_execution_time = 0',
+        # select and distinct can be aliases: only the statement's first SELECT [DISTINCT] makes settings a column
+        'SELECT 1 AS select SETTINGS max_execution_time = 0',
+        'SELECT 1 select SETTINGS max_execution_time = 0',
+        'SELECT 1 AS distinct SETTINGS force_index_by_date, max_execution_time = 0',
+        "SELECT 'f'DISTINCT SETTINGS max_execution_time = 0",
     ],
 )
 def test_a_clickhouse_settings_clause_is_rejected(sql):
@@ -339,15 +359,129 @@ def test_a_clickhouse_settings_clause_is_rejected(sql):
         "SELECT 'SETTINGS max_execution_time = 0' AS q",
         'SELECT 1 -- SETTINGS max_execution_time = 0',
         'SELECT my_settings x FROM t',
+        # Right after the first SELECT (and DISTINCT), a comma or an opening parenthesis, settings is a column there too
+        'SELECT settings a, b = 1 FROM t',
+        'SELECT DISTINCT settings a, b = 1 FROM t',
+        'SELECT x, settings a, b = 1 FROM t',
+        'SELECT (settings a, b = 1) FROM t',
+        'SELECT /* c */ settings a, b = 1 FROM t',
+        # A setting without a value can only set a Bool to true, which cannot lift the time limit
+        'SELECT 1 SETTINGS force_index_by_date',
+        'SELECT 1 SETTINGS force_index_by_date, use_query_cache',
     ],
 )
 def test_the_word_settings_alone_is_not_a_settings_clause(sql):
-    """A table, column or text named settings is not the clause.
+    """A table, column or text named settings is not the clause, and neither is a list that gives no value.
 
     Args:
         sql: The SQL under test.
     """
     assert is_sql_safe(sql) is True
+
+
+# ---------------------------------------------------------------------------
+# The ClickHouse reading
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    'sql',
+    [
+        pytest.param("SELECT \u2018'\u2019 AS s SETTINGS max_execution_time = 0 --'", id='curly-string'),
+        pytest.param('SELECT 1 SETTINGS \u201cmax_execution_time\u201d = 0', id='curly-name'),
+        pytest.param('SELECT 1 SETTINGS`max_execution_time`=0', id='backtick-name-after-the-keyword'),
+        pytest.param('SELECT 1 SETTINGS"max_execution_time"=0', id='quoted-name-after-the-keyword'),
+        pytest.param("SELECT 1 // '\nSETTINGS max_execution_time = 0 --'", id='slash-comment'),
+        pytest.param("SELECT $1$'$1$ SETTINGS max_execution_time = 0 --'", id='heredoc-tag-starting-with-a-digit'),
+        pytest.param("SELECT \u2018'\u2019 AS s INTO OUTFILE 'f' --'", id='curly-string-into'),
+        pytest.param("SELECT \u2018'\u2019; SELECT 2 --'", id='curly-string-chain'),
+        pytest.param('SELECT 1 SETTINGS a$b = 0', id='name-with-dollar'),
+        pytest.param('SELECT $1$x$1$SETTINGS max_execution_time = 0', id='keyword-right-after-a-heredoc'),
+    ],
+)
+def test_the_clickhouse_reading_sees_what_clickhouse_runs(sql):
+    """ClickHouse reads the clause in each of these as code, where the PostgreSQL and MySQL readings see a literal.
+
+    Args:
+        sql: The SQL under test.
+    """
+    assert is_sql_safe(sql) is False
+
+
+@pytest.mark.parametrize(
+    'sql',
+    [
+        "SELECT \u2018it's\u2019 AS s",
+        'SELECT \u201ccol\u201d FROM t',
+        'SELECT \u201csettings\u201d FROM t',
+        'SELECT $1$x$1$ AS s',
+        'SELECT 1 // 2',
+        'SELECT 1 # comment',
+        'SELECT 1e-1, 0x1p-1, a$b FROM t',
+        "SELECT x'1F', b'01'",
+        'SELECT * FROM settings s',
+        'SELECT a$settings = 1, settings$b = 2 FROM t',
+        'SELECT a FROM t WHERE settings$b = 2',
+        # PostgreSQL and MySQL read a letter glued to settings as part of one name
+        'SELECT \u00e9settings x = 1',
+    ],
+)
+def test_clickhouse_quotes_comments_and_heredocs_still_pass(sql):
+    """Curly quotes, heredocs, ClickHouse comments and numbers do not reject a read.
+
+    Args:
+        sql: The SQL under test.
+    """
+    assert is_sql_safe(sql) is True
+
+
+@pytest.mark.parametrize(
+    ('sql', 'visible'),
+    [
+        # Backslash and doubled-quote escapes in strings and in both kinds of quoted name
+        ("a 'b\\'c' d", ['a', "'", "'", 'd']),
+        ('a "b\\"c" d', ['a', '"', '"', 'd']),
+        ('a `b\\`c` d', ['a', '`', '`', 'd']),
+        ("a 'b''c' d", ['a', "'", "'", 'd']),
+        # Curly quotes: a string and a name, written as ASCII quotes; an unclosed one runs to the end
+        ('a \u2018b\u2019 d', ['a', "'", "'", 'd']),
+        ('a \u201cb\u201d d', ['a', '"', '"', 'd']),
+        ('a \u2018b c', ['a', "'"]),
+        # Heredocs: a tag of ASCII word characters, a digit first too; none without a closing tag
+        ('a $x$b$x$ d', ['a', '$x$', '$x$', 'd']),
+        ('a $1$b$1$ d', ['a', '$1$', '$1$', 'd']),
+        ('a $$b$$ d', ['a', '$$', '$$', 'd']),
+        ('a $\u00e9$b$\u00e9$ d', ['a', '$\u00e9$b$\u00e9$', 'd']),
+        ('a $x$b d', ['a', '$x$b', 'd']),
+        # A bare word takes $, a number does not
+        ('a x$y$b$y$ d', ['a', 'x$y$b$y$', 'd']),
+        ('a 1$y$b$y$ d', ['a', '1$y$', '$y$', 'd']),
+        # Line comments end at LF only; '#' is a comment only before a space or '!'
+        ('a -- b\nc', ['a', 'c']),
+        ('a // b\nc', ['a', 'c']),
+        ('a # b\nc', ['a', 'c']),
+        ('a #!b\nc', ['a', 'c']),
+        ('a #b', ['a', '#b']),
+        ('a -- b\rc', ['a']),
+        ('a /* b /* c */ d */ e', ['a', 'e']),
+        # A number takes the sign of its exponent, so the -- after it is no comment
+        ('a 1e--1 b', ['a', '1e--1', 'b']),
+        ('a 0x1p--1 b', ['a', '0x1p--1', 'b']),
+        ('a 0b1e--1 b', ['a', '0b1e--1', 'b']),
+        ('a 1--1 b', ['a', '1']),
+        ('a x--1 b', ['a', 'x']),
+    ],
+)
+def test_the_clickhouse_mask_follows_its_lexer(sql, visible):
+    """The ClickHouse mask blanks what ClickHouse's lexer (Lexer.cpp) reads as a literal, a quoted name or a comment.
+
+    Args:
+        sql: The text to mask.
+        visible: What stays readable, split on whitespace.
+    """
+    masked = _mask_clickhouse(sql)
+    assert len(masked) == len(sql)
+    assert masked.split() == visible
 
 
 @pytest.mark.parametrize(
@@ -371,3 +505,44 @@ def test_ordinary_reads_with_quotes_and_comments_pass(sql):
         sql: The SQL under test.
     """
     assert is_sql_safe(sql) is True
+
+
+# ---------------------------------------------------------------------------
+# Time
+# ---------------------------------------------------------------------------
+
+
+def _fastest_check(sql):
+    """Return the fastest of three runs of is_sql_safe on ``sql``, in seconds; the fastest is the least disturbed.
+
+    Args:
+        sql: The SQL to check.
+
+    Returns:
+        The shortest time of three runs.
+    """
+    best = float('inf')
+    for _ in range(3):
+        start = time.perf_counter()
+        is_sql_safe(sql)
+        best = min(best, time.perf_counter() - start)
+    return best
+
+
+@pytest.mark.parametrize(
+    ('make', 'parts'),
+    [
+        pytest.param(
+            lambda n: 'SELECT ' + ', '.join(['settings a, b = 1'] * n) + ' FROM t', 1000, id='settings-columns'
+        ),
+        pytest.param(lambda n: 'SELECT ' + ' '.join(f'$x{i}$' for i in range(n)), 4000, id='unclosed-heredoc-tags'),
+    ],
+)
+def test_the_check_grows_linearly_with_the_input(make, parts):
+    """Four times the input takes about four times as long; rescanning the text for each part would take sixteen.
+
+    Args:
+        make: Builds an input from a number of repeated parts.
+        parts: How many parts the smaller input has.
+    """
+    assert _fastest_check(make(4 * parts)) / _fastest_check(make(parts)) < 9
