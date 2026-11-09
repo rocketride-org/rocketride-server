@@ -269,4 +269,8 @@ def describe_state(spec: Integration, state: dict) -> dict:
         result['wiring'] = state['wiring']
     else:
         result['setup'] = setup_block(spec)
+    if state.get('definition_error'):
+        # The defect is in the node definition, not in the caller's variables;
+        # say so beside the setup block so nobody chases variables they have set
+        result['definition_error'] = state['definition_error']
     return result

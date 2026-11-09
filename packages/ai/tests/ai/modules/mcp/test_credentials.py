@@ -256,6 +256,11 @@ def test_a_credential_path_collision_degrades_that_node_instead_of_failing(caplo
     assert state['candidates'] == [], 'candidates are variable names a caller may bind, never paths'
     assert 'credential paths collide' in state['definition_error']
     assert 'credential paths collide' in caplog.text
+    shaped = creds.describe_state(spec, state)
+    assert shaped['status'] == 'unconfirmed' and 'setup' in shaped
+    assert shaped['definition_error'] == state['definition_error'], (
+        'the caller must see the defect is in the definition'
+    )
 
 
 def test_configured_wiring_is_nested_where_the_resolver_and_encrypt_walk_read():

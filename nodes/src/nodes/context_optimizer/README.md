@@ -12,22 +12,18 @@ The node counts the tokens of the prompt the engine will actually render with `t
 | --- | --- | --- |
 | `questions` | `questions` | Questions with optimized context fitting within model token limits |
 
-## Profiles
-
-Default: **Auto - Use default model limits** (`auto`). The **Mode** selector has two values; both ship the same budget split (10 / 15 / 50 / 25) and differ only in where the context window comes from.
-
-| Mode | When to pick it |
-| --- | --- |
-| `auto` **(default)** | The usual choice: name the model and let the node resolve its window. |
-| `manual` | A deployment whose real window neither the live catalog nor the fallback table knows; set **Max context tokens** yourself (ships at 128 000). |
-
-The automated node tests force every case over budget by running `manual` mode with a 112-token window and a 10 / 20 / 35 / 35 split, configured in the `test` block of `services.json`; there is no separate test profile.
-
 ## Configuration
 
 Pick a **Mode** and, in `auto`, name the model. The four budget percentages have workable defaults (10 / 15 / 50 / 25) and most pipelines never touch them — reach for them only when one component of your prompt is systematically starved.
 
 ### Mode
+
+The **Mode** selector has two values; both ship the same budget split (10 / 15 / 50 / 25) and differ only in where the context window comes from.
+
+| Mode | When to pick it |
+| --- | --- |
+| `auto` **(default)** | The usual choice: name the model and let the node resolve its window. |
+| `manual` | A deployment whose real window neither the live catalog nor the fallback table knows; set **Max context tokens** yourself (ships at 128 000). |
 
 `auto` resolves the context window for the model named in **Model name**; `manual` ignores the model entirely and uses **Max context tokens**. `auto` is right whenever the model is one an `llm_*` node in this deployment publishes, which is the common case; `manual` is the escape hatch for a gateway, a fine-tune, or a self-hosted deployment whose window this build cannot know. How `auto` resolves the window — and what it does when it cannot — is described under [Where the context-window size comes from](#where-the-context-window-size-comes-from).
 
@@ -44,6 +40,10 @@ The explicit window, in tokens, used by `manual` mode; `0` falls back to the mod
 These four fields divide whatever window is left after the un-budgeted sections are counted (see [What is budgeted, and what is only counted](#what-is-budgeted-and-what-is-only-counted)). They are percentages of that remainder, and the node never lets them over-commit it: a set summing to more than 100 is scaled proportionally back to 100, and a set summing to less than 90 is honoured but logs a warning that the window is being under-used. The system prompt, query and document allowances are taken from their percentages in that order and history absorbs whatever is left, so history is the component that gives way first. Raise **Document budget %** for retrieval-heavy pipelines where history is short; raise **History budget %** for long chat sessions with few documents. A component given `0` is emptied whenever the request is over budget, which is a legitimate way to say "drop history before you touch my documents".
 
 ## Notes
+
+### How the node tests run
+
+The automated node tests force every case over budget by running `manual` mode with a 112-token window and a 10 / 20 / 35 / 35 split, configured in the `test` block of `services.json`; there is no separate test profile.
 
 ### What is budgeted, and what is only counted
 

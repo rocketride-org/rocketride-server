@@ -121,6 +121,22 @@ def test_a_missing_google_auth_is_reported_not_mistaken_for_a_bad_key(validator,
     assert len(warnings) == 1 and warnings[0].startswith('Credential check skipped: google-auth is not installed')
 
 
+def test_a_missing_google_parent_package_is_also_a_skipped_check(validator, monkeypatch):
+    # With no `google` package at all, find_spec raises instead of returning None
+    instance, warnings = validator
+    import importlib.util
+
+    def raise_missing(name, *a, **k):
+        raise ModuleNotFoundError("No module named 'google'")
+
+    monkeypatch.setattr(importlib.util, 'find_spec', raise_missing)
+    monkeypatch.setattr(
+        gcp_auth, 'get_gcp_credentials', lambda *a, **k: (_ for _ in ()).throw(AssertionError('must not run'))
+    )
+    instance.validateConfig()
+    assert len(warnings) == 1 and warnings[0].startswith('Credential check skipped: google-auth is not installed')
+
+
 def test_syntax_only_skips_the_credential_build(validator, monkeypatch):
     instance, warnings = validator
 

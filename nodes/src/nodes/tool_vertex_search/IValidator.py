@@ -39,6 +39,17 @@ from rocketlib import IValidatorBase, warning
 _VERTEX_SCOPES = ['https://www.googleapis.com/auth/cloud-platform']
 
 
+def _google_auth_available() -> bool:
+    """
+    True when google-auth can be imported; a missing ``google`` parent package
+    makes ``find_spec`` raise rather than return None, so both are "absent".
+    """
+    try:
+        return importlib.util.find_spec('google.auth') is not None
+    except (ModuleNotFoundError, ValueError):
+        return False
+
+
 class IValidator(IValidatorBase):
     """Schema check through the resolver, then the credential check."""
 
@@ -59,7 +70,7 @@ class IValidator(IValidatorBase):
         # CONFIG mode installs no node requirements; google-auth arrives with
         # the node's first start. The helper wraps that ImportError as an auth
         # error, so test for the library first and say what really happened
-        if importlib.util.find_spec('google.auth') is None:
+        if not _google_auth_available():
             warning(
                 'Credential check skipped: google-auth is not installed yet. '
                 'It runs once the node has started and installed its requirements.'
