@@ -64,7 +64,7 @@ from typing import Any, Dict
 from ai.web import WebServer
 from . import indexnow, pages, public_pages
 from .pages import public_page, register_public_pages
-from .shell import shell_static, apps_static, apps_session, sitemap_xml, robots_txt, llms_txt
+from .shell import app_url, shell_static, apps_static, apps_session, sitemap_xml, robots_txt, llms_txt, ungated_noindex
 
 __all__ = ['initModule', 'register_public_pages']
 
@@ -163,3 +163,12 @@ def initModule(server: WebServer, config: Dict[str, Any]):
     for path, handler in (('/sitemap.xml', sitemap_xml), ('/robots.txt', robots_txt), ('/llms.txt', llms_txt)):
         for method in ('GET', 'HEAD'):
             server.add_route(path=path, routeHandler=handler, methods=[method], public=True)
+
+    # ── Engines without RR_APP_URL: noindex everywhere ──────────────────
+    # Disallow-all alone does not keep a linked host (a staging deployment)
+    # out of search indexes: every response says noindex, nofollow. Added
+    # last, so it wraps the auth middleware and covers its refusals too.
+    # Only an engine ungated at init registers it: production runs no extra
+    # middleware.
+    if not app_url():
+        server.app.middleware('http')(ungated_noindex)

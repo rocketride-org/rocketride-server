@@ -348,6 +348,10 @@ be read keeps the pages of its last readable build while the server runs;
 after a restart it has none until its storage can be read again. Kept pages
 still compete with other apps' claims under the same first-claim rule.
 
+A server without `RR_APP_URL` is not the public site: `/robots.txt` disallows
+all crawling, and every response carries `X-Robots-Tag: noindex, nofollow`, so
+a host found through links stays out of search indexes.
+
 The server answers `GET` and `HEAD` on each page with the shell's document
 (the route's prerendered capture when the shell build carries one, else
 `index.html`), its head carrying the page's `title`, `description`, a
