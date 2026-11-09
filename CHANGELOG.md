@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] — since 2026-11-04
 
 ### Added
+- **shell**: a public page can bind `plans`, `plans:<appId>` and `app:<appId>` into its crawler snapshot, with `Product`/`Offer` and `SoftwareApplication` JSON-LD. `Account.get_public_plans` supplies the plans, and responses with bound data expire after 300 s.
 - **shell**: apps can declare public pages and site metadata (`publicPages`, `site`) in `dist/app-manifest.json`. Publishing refuses an invalid or unprivileged declaration, and the engine keeps one page map built from every published platform app.
 - **client-python**: `rocketride --version` prints the installed package version
 - **mcp**: every HTTP MCP tool now declares explicit `readOnlyHint`, `destructiveHint` and `openWorldHint` annotations, the server sends `instructions`, the four core workflow tools ask Claude Code to load them upfront (`anthropic/alwaysLoad`), and the engine serves OpenAI's plugin domain-verification token at `/.well-known/openai-apps-challenge` from `MCP_OPENAI_APPS_CHALLENGE_TOKEN` (404 while unset) (#2997)
