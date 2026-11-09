@@ -29,8 +29,10 @@ the same loop runs from a terminal or CI.
   on the Deploy tab (lowercase letters and underscores, starting with a
   letter), and can then deploy
   only apps inside that namespace. Until the prefix of your app's id
-  matches, the Deploy tab is read-only with a banner; the fix is to rename
-  the id in `package.json`. Design and Package always work.
+  matches, the Deploy tab is read-only with a banner. An app still on
+  `local.<name>` can move into your namespace from that banner in VS Code
+  (see [Create](#create-dashboard-tab)); rename any other id by hand.
+  Design and Package always work.
 - Catalog nodes only, if the app is headed for the store. Pipelines in a
   store app use the nodes that ship with the engine and nothing else; see
   [Adding a pipeline to your app](#adding-a-pipeline-to-your-app).
@@ -71,6 +73,16 @@ the developer id from your account. The command reads the account from the
 credentials in `.env`, so run `rocketride login` (or `rocketride init`)
 first. Without an account it warns and uses `local`; pass
 `--developer <id>` to choose one yourself.
+
+An app created as `local.<slug>` can move into your organization's
+namespace once the organization has a developer id: in VS Code, the
+Deploy tab's read-only banner offers **Move to `<developerId>.<slug>`**.
+After you confirm, it rewrites the id in `package.json`, the `.rrapp`
+file and `src/AppDescriptor.ts` (plus the publisher and package name, if
+they still hold the scaffold's values), then reopens the App Builder on
+the new id. Nothing on the server is renamed: the app's saved settings in
+the App Builder and the preview start fresh. Only `local.` ids move this
+way; rename any other id by hand in the same files.
 
 ### Design
 
