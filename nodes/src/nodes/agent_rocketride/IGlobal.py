@@ -17,7 +17,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from rocketlib import IGlobalBase, OPEN_MODE
+from rocketlib import IGlobalBase
 
 
 class IGlobal(IGlobalBase):
@@ -38,15 +38,10 @@ class IGlobal(IGlobalBase):
         import from the ai.common package.  Deferring the import to beginGlobal
         ensures the module graph is fully loaded before the driver is instantiated.
 
-        Configuration (including instructions) is loaded by
-        ``AgentBase.__init__`` via ``Config.getNodeConfig``, so no
+        Configuration (including instructions) is read by
+        ``AgentBase.__init__`` from this global's resolved ``config``, so no
         config handling is needed here.
         """
-        # In CONFIG mode the driver is never used, so skip the dependency
-        # install (and its side effects) — same guard as the other nodes.
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
-
         # Install dependencies
         from depends import depends  # type: ignore
 

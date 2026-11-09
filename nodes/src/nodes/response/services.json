@@ -77,26 +77,12 @@
 		"image": []
 	},
 	//
-	//	Optional:
-	//		Profile section are configuration optoins used by the driver
-	//		itself
-	//
-	"preconfig": {
-		// Define the values that will be merged into any profile configuration
-		// specified, unless the profile is 'absolute'
-		"default": "default",
-		// Defines profiles used with the "profile": key
-		"profiles": {
-			"default": {}
-		}
-	},
-	//
 	// Optional:
-	//		Local fields definitions - these define fields only for the
-	//		current service. You may specify them here, or directly
-	//		in the shape
+	//		Local property definitions - these define fields only for the
+	//		current service. You may also reference global propertyDefinitions
+	//		(see services.common.json) from "properties".
 	//
-	"fields": {
+	"propertyDefinitions": {
 		"laneId": {
 			"type": "string",
 			"title": "Lane name",
@@ -121,25 +107,16 @@
 		"lanes": {
 			"title": "Lanes",
 			"type": "array",
-			"minItems": 0,
-			"items": {
-				"type": "object",
+			"item": {
+				"name": "lane",
 				"properties": ["laneId", "laneName"]
 			},
-			"ui:options:inline": true,
 			"description": ["Each lane maps pipeline data to a custom JSON key in the response. ", "Select the data type (text, documents, answers, etc.) for Lane Name, ", "and enter a custom JSON key name (1-32 characters) for Result Key."]
 		}
 	},
 	//
 	// Required:
-	//		Defines the fields (shape) of the service. Either source or target
-	//		map be specified, or both, but at least one is required
+	//		Defines the fields shown in the node's config panel, in order
 	//
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "Response",
-			"properties": ["lanes"]
-		}
-	]
+	"properties": ["lanes"]
 }

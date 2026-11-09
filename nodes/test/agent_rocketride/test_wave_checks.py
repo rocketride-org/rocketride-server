@@ -70,9 +70,12 @@ def _context(wave, *tools, memory=None):
 
 
 def _driver(wave, **config):
-    """Build the driver from node config, through the real Config merge."""
-    glb = SimpleNamespace(logicalType='agent_rocketride', connConfig=config)
-    return wave.rocketride_agent.RocketRideDriver(SimpleNamespace(glb=glb))
+    """Build the driver from node config, through the real resolver (``IGlobalBase.config``)."""
+    from rocketlib import IGlobalBase
+
+    iglobal = IGlobalBase()
+    iglobal.glb = SimpleNamespace(logicalType='agent_rocketride', connConfig=config)
+    return wave.rocketride_agent.RocketRideDriver(iglobal)
 
 
 def test_each_result_shows_the_arguments_the_model_sent(wave):

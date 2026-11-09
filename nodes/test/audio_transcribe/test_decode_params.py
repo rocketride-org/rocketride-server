@@ -5,11 +5,10 @@
 
 """Engine-glue tests for audio_transcribe's per-request decode parameters (#1809).
 
-Mirrors the direct-instance harness used by schema_validate/test_engine_glue.py and
-currency_convert_explicit/test_isjson_gate.py: rocketlib and ai.common.* are stubbed,
-IGlobal.py is loaded from source via importlib, the IGlobal is built with
-__new__ + beginGlobal(), and ai.common.models.Whisper is a recorder. No server, no
-model, no GPU.
+IGlobal.py is loaded from source via importlib with ai.common.models.Whisper replaced
+by a recorder; the IGlobal is built with __new__ + beginGlobal() and reads its config
+through the real resolver (the engine's schema for services.json), so a stored config
+here is exactly what a pipeline stores. No server, no model, no GPU.
 
 Guards the half of #1809 the integration runs cannot see. A misspelled field name or a
 stale default falls back silently: the transcript does not move, nodes:test stays green,
@@ -25,6 +24,7 @@ import sys
 import types
 
 import pytest
+from rocketlib.config import ConfigError
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _NODE_DIR = os.path.join(_HERE, '..', '..', 'src', 'nodes', 'audio_transcribe')
@@ -65,56 +65,36 @@ class _FakeWhisper:
 
 
 def _load_iglobal():
-    """Load IGlobal.py from source behind stubs. Returns (IGlobal, config_holder)."""
-    saved = {}
-    config_holder = {'raw': {}, 'debug': []}
+    """Load IGlobal.py from source with Whisper replaced by the recorder and debug captured.
 
-    class FakeIGlobalBase:
-        glb = None
+    Returns:
+        ``(IGlobal, debug_lines)``: the class, and the list the node's debug() calls land in.
+    """
+    debug_lines = []
 
-    stubs = {
-        'rocketlib': types.ModuleType('rocketlib'),
-        'ai': types.ModuleType('ai'),
-        'ai.common': types.ModuleType('ai.common'),
-        'ai.common.config': types.ModuleType('ai.common.config'),
-        'ai.common.models': types.ModuleType('ai.common.models'),
-    }
-    stubs['rocketlib'].IGlobalBase = FakeIGlobalBase
-    stubs['rocketlib'].debug = lambda message='', *a, **kw: config_holder['debug'].append(str(message))
-    stubs['ai.common.config'].Config = type(
-        'FakeConfig', (), {'getNodeConfig': staticmethod(lambda lt, cc: config_holder['raw'])}
-    )
-    stubs['ai.common.models'].Whisper = _FakeWhisper
-
-    for name, stub in stubs.items():
-        saved[name] = sys.modules.get(name)
-        sys.modules[name] = stub
-
-    # Loads standalone — the package __init__ would drag in IInstance.
+    # Loads standalone, by file path: the engine imports the module the same way.
     mod_name = '_audio_transcribe_iglobal_under_test'
-    try:
-        spec = importlib.util.spec_from_file_location(mod_name, os.path.join(_NODE_DIR, 'IGlobal.py'))
-        mod = importlib.util.module_from_spec(spec)
-        sys.modules[mod_name] = mod
-        spec.loader.exec_module(mod)
-        return mod.IGlobal, config_holder
-    finally:
-        sys.modules.pop(mod_name, None)
-        for name in stubs:
-            if saved[name] is None:
-                sys.modules.pop(name, None)
-            else:
-                sys.modules[name] = saved[name]
+    spec = importlib.util.spec_from_file_location(mod_name, os.path.join(_NODE_DIR, 'IGlobal.py'))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    mod.Whisper = _FakeWhisper
+    mod.debug = lambda message='', *a, **kw: debug_lines.append(str(message))
+    return mod.IGlobal, debug_lines
 
 
-def _decode_kwargs(raw_config):
-    """Build an IGlobal from a node config and return the kwargs it hands Whisper."""
-    IGlobal, holder = _load_iglobal()
-    holder['raw'] = raw_config
+def _begin(stored_config):
+    """Build an IGlobal on a stored node config through the real resolver and start it."""
+    IGlobal, debug_lines = _load_iglobal()
 
     ig = IGlobal.__new__(IGlobal)
-    ig.glb = types.SimpleNamespace(logicalType='audio_transcribe://', connConfig={})
+    ig.glb = types.SimpleNamespace(logicalType='audio_transcribe', connConfig=stored_config)
     ig.beginGlobal()
+    return ig, debug_lines
+
+
+def _decode_kwargs(stored_config):
+    """Build an IGlobal from a node config and return the kwargs it hands Whisper."""
+    ig, _ = _begin(stored_config)
     ig.transcribe(b'\x00\x01' * 2000)
 
     return ig._whisper.calls[-1]
@@ -128,15 +108,14 @@ def _parse_services_json():
     return mod._parse_service_json(_SERVICES_JSON)
 
 
-def _profile_groups(service):
-    """The per-profile object groups, keyed by profile name (#2067).
+def _definitions():
+    """The node's ``propertyDefinitions``, the one place every knob is declared (#2067)."""
+    return _parse_services_json()['propertyDefinitions']
 
-    Each declared profile gets its own group, so a check that used to read
-    transcribe.default alone now has five more places to be wrong.
-    """
-    return {
-        field['object']: field for field in service['fields'].values() if isinstance(field, dict) and 'object' in field
-    }
+
+def _panel():
+    """The config panel's property list; a knob not listed here is unreachable from the UI."""
+    return _parse_services_json()['properties']
 
 
 # -----------------------------------------------------------------------------
@@ -195,14 +174,9 @@ def test_several_keys_at_once():
     assert kw['vad_parameters']['min_silence_duration_ms'] == 500  # untouched default
 
 
-def _built_whisper(raw_config):
+def _built_whisper(stored_config):
     """Build an IGlobal from a node config and return the _FakeWhisper it constructed."""
-    IGlobal, holder = _load_iglobal()
-    holder['raw'] = raw_config
-
-    ig = IGlobal.__new__(IGlobal)
-    ig.glb = types.SimpleNamespace(logicalType='audio_transcribe://', connConfig={})
-    ig.beginGlobal()
+    ig, _ = _begin(stored_config)
     return ig._whisper
 
 
@@ -218,14 +192,11 @@ def test_language_defaults_to_english():
 
 
 def test_language_is_declared_in_services_json():
-    service = _parse_services_json()
-    fields = service['fields']
+    definitions = _definitions()
 
-    assert 'transcribe.language' in fields
-    assert fields['transcribe.language']['default'] == 'en'
-
-    for profile, group in _profile_groups(service).items():
-        assert 'transcribe.language' in group['properties'], f'language missing from profile {profile}'
+    assert 'transcribe.language' in definitions
+    assert definitions['transcribe.language']['default'] == 'en'
+    assert 'transcribe.language' in _panel()
 
 
 def test_compute_type_reaches_the_whisper_constructor():
@@ -238,24 +209,14 @@ def test_compute_type_defaults_to_float16():
 
 
 def test_compute_type_is_declared_in_services_json():
-    service = _parse_services_json()
-    fields = service['fields']
-
-    assert fields['transcribe.compute_type']['default'] == 'float16'
-
-    for profile, group in _profile_groups(service).items():
-        assert 'transcribe.compute_type' in group['properties'], f'compute_type missing from profile {profile}'
+    assert _definitions()['transcribe.compute_type']['default'] == 'float16'
+    assert 'transcribe.compute_type' in _panel()
 
 
-def _debug_lines(raw_config):
+def _debug_lines(stored_config):
     """Build an IGlobal from a node config and return everything it logged."""
-    IGlobal, holder = _load_iglobal()
-    holder['raw'] = raw_config
-
-    ig = IGlobal.__new__(IGlobal)
-    ig.glb = types.SimpleNamespace(logicalType='audio_transcribe://', connConfig={})
-    ig.beginGlobal()
-    return holder['debug']
+    _, debug_lines = _begin(stored_config)
+    return debug_lines
 
 
 def test_the_startup_log_names_what_was_actually_loaded():
@@ -301,12 +262,21 @@ def test_zero_is_kept_on_every_other_vad_key():
 
 
 def test_types_match_what_vadoptions_declares():
-    """JSON does not distinguish 5 from 5.0, and CTranslate2 wants an int beam size."""
-    kw = _decode_kwargs({'beam_size': 5.0, 'vad_min_silence_duration_ms': 500.0})
+    """CTranslate2 wants an int beam size, so the schema declares integers and the resolver enforces them.
 
-    assert kw['beam_size'] == 5
+    JSON does not distinguish 5 from 5.0; the node no longer casts, a stored 5.0
+    is a config error rather than a silently coerced value.
+    """
+    definitions = _definitions()
+    for name in ('beam_size', 'vad_min_silence_duration_ms', 'vad_speech_pad_ms', 'chunk_duration'):
+        assert definitions[f'transcribe.{name}']['type'] == 'integer', f'{name} is not declared an integer'
+
+    kw = _decode_kwargs({'beam_size': 5, 'vad_min_silence_duration_ms': 500})
     assert isinstance(kw['beam_size'], int)
     assert isinstance(kw['vad_parameters']['min_silence_duration_ms'], int)
+
+    with pytest.raises(ConfigError, match='"beam_size" expects integer'):
+        _decode_kwargs({'beam_size': 5.0})
 
 
 # -----------------------------------------------------------------------------
@@ -315,22 +285,20 @@ def test_types_match_what_vadoptions_declares():
 
 
 def test_services_json_declares_every_field_iglobal_reads():
-    """Every other test hands IGlobal a config dict, so a typo in the JSON would leave
-    the knob unreachable from the UI with the whole file still green.
+    """The resolver only serves declared keys, so a knob missing here is unreachable from
+    the UI AND an AttributeError in beginGlobal; both halves are checked.
     """
-    service = _parse_services_json()
-    fields = service['fields']
-    groups = _profile_groups(service)
+    definitions = _definitions()
+    panel = _panel()
 
     for name in _NEW_FIELDS:
-        assert f'transcribe.{name}' in fields, f'{name} missing from services.json fields'
-        for profile, group in groups.items():
-            assert f'transcribe.{name}' in group['properties'], f'{name} missing from profile {profile}'
+        assert f'transcribe.{name}' in definitions, f'{name} missing from services.json propertyDefinitions'
+        assert f'transcribe.{name}' in panel, f'{name} missing from the config panel'
 
 
-def test_services_json_defaults_match_the_python_fallbacks():
-    """A UI default that disagrees with the runtime fallback changes behaviour on save."""
-    fields = _parse_services_json()['fields']
+def test_services_json_defaults_match_what_the_node_ran_with():
+    """A UI default that disagrees with what the node sent before the knobs existed changes behaviour on save."""
+    fields = _definitions()
     expected = {
         'transcribe.chunk_duration': 60,
         'transcribe.beam_size': 5,
@@ -359,12 +327,7 @@ def _class_attrs(path, class_name):
 
 
 def test_iglobal_reads_buffering_from_config():
-    IGlobal, holder = _load_iglobal()
-    holder['raw'] = {'chunk_duration': 30}
-
-    ig = IGlobal.__new__(IGlobal)
-    ig.glb = types.SimpleNamespace(logicalType='audio_transcribe://', connConfig={})
-    ig.beginGlobal()
+    ig, _ = _begin({'chunk_duration': 30})
 
     assert ig.chunk_duration == 30
 
@@ -372,9 +335,8 @@ def test_iglobal_reads_buffering_from_config():
 def test_buffering_defaults_reproduce_transcribe_constants():
     """The defaults must equal what Transcribe ran unconditionally before it was wired."""
     consts = _class_attrs(os.path.join(_NODE_DIR, 'transcribe.py'), 'Transcribe')
-    fields = _parse_services_json()['fields']
 
-    assert fields['transcribe.chunk_duration']['default'] == consts['CHUNK_DURATION']
+    assert _definitions()['transcribe.chunk_duration']['default'] == consts['CHUNK_DURATION']
 
 
 def test_iinstance_passes_buffering_to_transcribe():
@@ -487,26 +449,24 @@ def test_audio_is_flushed_once_chunk_duration_is_reached():
 
 def test_dead_fields_are_gone():
     """Nothing reads these, so declaring them offers knobs that silently do nothing."""
-    service = _parse_services_json()
-    fields = service['fields']
-    groups = _profile_groups(service)
+    definitions = _definitions()
+    panel = _panel()
 
     for name in _DEAD_FIELDS:
         key = f'transcribe.{name}'
-        assert key not in fields, f'{name} is declared again but nothing reads it'
-        for profile, group in groups.items():
-            assert key not in group['properties'], f'{name} is back in profile {profile}'
-
-    for profile, values in service['preconfig']['profiles'].items():
-        leftovers = sorted(set(values) & set(_DEAD_FIELDS))
-        assert not leftovers, f'profile {profile} still carries {leftovers}'
+        assert key not in definitions, f'{name} is declared again but nothing reads it'
+        assert key not in panel, f'{name} is back in the config panel'
 
 
-def test_every_profile_selects_its_own_model():
-    """Profiles used to set "mode" while IGlobal reads "model", so all six loaded base."""
-    profiles = _parse_services_json()['preconfig']['profiles']
+def test_the_model_selector_offers_every_size_and_selects_it():
+    """Profiles used to set "mode" while IGlobal reads "model", so all six loaded base.
 
-    for name, values in profiles.items():
-        assert 'mode' not in values, f'profile {name} still sets "mode", which nothing reads'
-        expected = 'base' if name == 'default' else name
-        assert values.get('model') == expected, f'profile {name} selects {values.get("model")!r}'
+    The model is now the selector itself: its branches are the sizes, and the
+    stored value is what the node loads.
+    """
+    sizes = _definitions()['transcribe.model']['enum']
+
+    assert sorted(sizes) == sorted(['tiny', 'base', 'small', 'medium', 'large-v3'])
+    assert 'mode' not in _definitions()
+    for size in sizes:
+        assert _built_whisper({'model': size}).model_name == size

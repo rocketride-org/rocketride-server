@@ -36,21 +36,12 @@ def _load_iglobal():
     sys.modules so the rocketlib/ai stubs never leak to sibling tests.
     """
     # Save prior state so the stubs are scoped to the import below.
-    _core = ('rocketlib', 'ai', 'ai.common', 'ai.common.config')
+    _core = ('rocketlib',)
     _saved = {name: sys.modules.get(name) for name in _core}
 
     rocketlib = types.ModuleType('rocketlib')
     rocketlib.IGlobalBase = type('IGlobalBase', (), {})
-    rocketlib.OPEN_MODE = type('OPEN_MODE', (), {'CONFIG': 'config'})
     sys.modules['rocketlib'] = rocketlib
-
-    sys.modules['ai'] = types.ModuleType('ai')
-    sys.modules['ai'].__path__ = []  # mark as package so sub-imports resolve
-    sys.modules['ai.common'] = types.ModuleType('ai.common')
-    sys.modules['ai.common'].__path__ = []
-    ai_cfg = types.ModuleType('ai.common.config')
-    ai_cfg.Config = type('Config', (), {})
-    sys.modules['ai.common.config'] = ai_cfg
 
     # Synthetic package so IGlobal's `from . import openai_tts, elevenlabs_tts` resolves.
     pkg = types.ModuleType('cloud_tts')
@@ -100,38 +91,48 @@ class TestEngineRegistry:
     def test_entry_has_required_fields(self, engine):
         spec = _ig._ENGINES[engine]
         assert callable(spec['synthesize'])
-        for key in ('default_model', 'default_voice', 'env_key', 'label'):
-            assert spec[key], f'{engine} missing {key}'
+        assert spec['label'], f'{engine} missing label'
 
 
-class TestVoiceWiredUnderProfile:
-    """Guards the review fix: voice must be merged under the selected profile
-    (form-object), never orphaned in the top-level shape — otherwise
-    Config.getNodeConfig drops it and cfg.get('voice') silently defaults.
+class TestSharedVoiceSchema:
+    """OpenAI and ElevenLabs voices are model-independent, so the voice is one
+    flat property beside the model selector: every model shows it and the
+    stored value survives a model switch. The key is a required secret the
+    account variable supplies.
     """
 
     @pytest.mark.parametrize('svc', _SERVICES)
-    def test_voice_absent_from_top_level_shape(self, svc):
+    def test_model_is_the_selector(self, svc):
         data = parse_service_json(_DIR / svc)
-        voice = f'{data["prefix"]}.voice'
-        for section in data['shape']:
-            assert voice not in section['properties']
+        selector = data['properties'][0]
+        assert selector['name'] == 'model'
+        assert isinstance(selector['enum'], dict) and selector['enum']
+        assert selector['default'] in selector['enum']
 
     @pytest.mark.parametrize('svc', _SERVICES)
-    def test_voice_present_in_every_profile_form_object(self, svc):
+    def test_voice_is_a_flat_property_with_its_default_in_the_enum(self, svc):
         data = parse_service_json(_DIR / svc)
-        prefix = data['prefix']
-        voice = f'{prefix}.voice'
-        for profile_key in data['preconfig']['profiles']:
-            form = data['fields'][f'{prefix}.{profile_key}']
-            assert voice in form['properties'], f'{profile_key} form-object missing {voice}'
+        voice = f'{data["prefix"]}.voice'
+        assert voice in data['properties']
+        field = data['propertyDefinitions'][voice]
+        assert field['default'] in [row[0] for row in field['enum']]
+
+    @pytest.mark.parametrize('svc', _SERVICES)
+    def test_apikey_is_a_required_secret_from_an_account_variable(self, svc):
+        data = parse_service_json(_DIR / svc)
+        apikey = f'{data["prefix"]}.apikey'
+        assert apikey in data['properties']
+        field = data['propertyDefinitions'][apikey]
+        assert field['base'] == 'llm.cloud.apikey'
+        assert field['required'] is True
+        assert field['env'] == f'ROCKETRIDE_{data["prefix"].upper()}_APIKEY'
 
 
 # --------------------------------------------------------------------------- #
 # Rime — the third vendor registration (services.tts_rime.json + rime_tts).
-# Rime speakers are MODEL-SPECIFIC, so it does not share the single-global-voice
-# enum the OpenAI/ElevenLabs registrations use: each profile carries its own
-# `tts_rime.<model>.voice` enum (leaf key `voice`) inside the profile form-object.
+# Rime speakers are MODEL-SPECIFIC, so it does not share the single flat voice
+# the OpenAI/ElevenLabs registrations use: each model branch carries its own
+# `tts_rime.<model>.voice` enum, every one resolving to the `voice` key.
 # --------------------------------------------------------------------------- #
 
 _RIME_URL = 'https://users.rime.ai/v1/rime-tts'
@@ -240,9 +241,6 @@ class TestRimeDispatch:
 
         spec = _ig._ENGINES['rime']
         assert spec['synthesize'] is rime_tts.synthesize
-        assert spec['default_model'] == 'coda'
-        assert spec['default_voice'] == 'astra'
-        assert spec['env_key'] == 'RIME_API_KEY'
         assert spec['label']
 
     def test_synthesize_dispatches_model_scoped_speaker(self, fake_requests):
@@ -267,17 +265,24 @@ class TestRimeDispatch:
 
 
 class TestRimeSchema:
-    """services.tts_rime.json — model-scoped speaker enums must merge under `voice`.
+    """services.tts_rime.json — one speaker enum per model branch, every one named `voice`.
 
-    A speaker field left bare in a conditional branch (or in the top-level shape) is a
-    sibling of the profile selector and is silently dropped by getNodeConfig — the exact
-    trap that made the old standalone node always synthesize with the default speaker.
+    A speaker field at the root would offer every model the same list, and Rime
+    rejects an out-of-model speaker at request time — the trap that made the old
+    standalone node always synthesize with the default speaker. Each branch's
+    field is branch-specific (its own definition), so switching models keeps the
+    other model's speaker and shows the new model's own list.
     """
 
     _SVC = 'services.tts_rime.json'
 
     def _data(self):
         return parse_service_json(_DIR / self._SVC)
+
+    def _selector(self):
+        selector = self._data()['properties'][0]
+        assert selector['name'] == 'model'
+        return selector
 
     def test_shares_cloud_tts_engine(self):
         data = self._data()
@@ -286,41 +291,34 @@ class TestRimeSchema:
         assert data['classType'] == ['audio']
         assert 'experimental' in data['capabilities']
 
-    def test_profiles_carry_model_and_voice(self):
-        profiles = self._data()['preconfig']['profiles']
-        assert set(profiles) == set(_RIME_MODELS)
-        for name, prof in profiles.items():
-            assert prof['model'] == name
-            assert prof['voice']  # default speaker the shared engine reads as cfg['voice']
-            assert 'apikey' in prof
+    def test_models_are_the_selector_branches(self):
+        selector = self._selector()
+        assert set(selector['enum']) == set(_RIME_MODELS)
+        assert selector['default'] in selector['enum']
 
-    def test_each_form_object_carries_its_model_voice_field(self):
-        data = self._data()
-        for model in _RIME_MODELS:
-            form = data['fields'][f'tts_rime.{model}']
-            assert form['object'] == model  # object must equal the profile name to merge
-            assert f'tts_rime.{model}.voice' in form['properties']
+    def test_each_branch_carries_its_own_voice_field(self):
+        for model, branch in self._selector()['enum'].items():
+            assert branch['properties'] == [f'tts_rime.{model}.voice'], f'{model} branch does not carry its speaker'
 
-    def test_voice_fields_absent_from_top_level_shape(self):
-        data = self._data()
-        shape_props = [p for section in data['shape'] for p in section['properties']]
+    def test_voice_fields_absent_from_the_root(self):
+        root = self._data()['properties']
         for model in _RIME_MODELS:
-            assert f'tts_rime.{model}.voice' not in shape_props
-        assert 'tts_rime.voice' not in shape_props
+            assert f'tts_rime.{model}.voice' not in root
+        assert 'tts_rime.voice' not in root
 
     def test_voice_defaults_are_in_enum(self):
         data = self._data()
         for model in _RIME_MODELS:
-            field = data['fields'][f'tts_rime.{model}.voice']
+            field = data['propertyDefinitions'][f'tts_rime.{model}.voice']
             values = [row[0] for row in field['enum']]
             assert field['default'] in values, f'{model} default {field["default"]} not in enum'
 
-    def test_conditional_covers_every_model(self):
+    def test_apikey_is_shared_by_every_model(self):
         data = self._data()
-        cond = {c['value']: c['properties'] for c in data['fields']['tts_rime.profile']['conditional']}
-        assert set(cond) == set(_RIME_MODELS)
-        for model in _RIME_MODELS:
-            assert f'tts_rime.{model}' in cond[model]
+        assert 'tts_rime.apikey' in data['properties']
+        field = data['propertyDefinitions']['tts_rime.apikey']
+        assert field['required'] is True
+        assert field['env'] == 'ROCKETRIDE_TTS_RIME_APIKEY'
 
 
 class TestInputLimit:

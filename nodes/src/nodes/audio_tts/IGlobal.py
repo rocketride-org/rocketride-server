@@ -11,8 +11,7 @@ from typing import Any, Dict, Optional
 
 import numpy as np
 
-from rocketlib import IGlobalBase, OPEN_MODE
-from ai.common.config import Config
+from rocketlib import IGlobalBase
 from ai.common.models.base import ModelClient, get_model_server_address
 
 
@@ -40,21 +39,13 @@ class IGlobal(IGlobalBase):
     def beginGlobal(self):
         """Initialise local pipeline or remote client from the node configuration.
 
-        No-op when the endpoint is opened in ``CONFIG`` mode (the UI only needs
-        the schema). Otherwise validates that a voice is configured, then either
-        connects to the model server — skipping the heavy local dependency
-        install — or installs the local requirements and constructs a
-        ``KPipeline``.
+        The resolved config supplies the voice (the schema default when unset,
+        and always one of the listed voices), then either connects to the
+        model server — skipping the heavy local dependency install — or
+        installs the local requirements and constructs a ``KPipeline``.
         """
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
-
-        cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-        voice = str(cfg.get('kokoro_voice') or '').strip()
-        if not voice:
-            raise Exception('Kokoro: choose a voice from the list')
-        self._voice = voice
-        self._lang = voice[0]
+        self._voice = self.config.kokoro_voice
+        self._lang = self._voice[0]
 
         addr = get_model_server_address()
         if addr:

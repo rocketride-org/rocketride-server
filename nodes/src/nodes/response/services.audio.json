@@ -63,24 +63,10 @@
 		"audio": []
 	},
 	//
-	//	Optional:
-	//		Profile section are configuration optoins used by the driver
-	//		itself
-	//
-	"preconfig": {
-		// Define the values that will be merged into any profile configuration
-		// specified, unless the profile is 'absolute'
-		"default": "default",
-		// Defines profiles used with the "profile": key
-		"profiles": {
-			"default": {}
-		}
-	},
-	//
 	// Optional:
 	//		Local property definitions - these define fields only for the
 	//		current service. You may also reference global propertyDefinitions
-	//		(see services.common.json) from "properties" via "use".
+	//		(see services.common.json) from "properties".
 	//
 	"propertyDefinitions": {
 		"laneName": {
