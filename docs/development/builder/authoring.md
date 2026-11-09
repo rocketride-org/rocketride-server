@@ -192,7 +192,9 @@ The build system searches these directories:
 - `scripts/tasks.js` (root-level)
 
 All trees are searched at any depth, and a `tasks.cjs` variant is also
-discovered (mcp-widgets uses one).
+discovered (mcp-widgets uses one). Below the root, a module file may also be
+named `evals.js` (or `evals.cjs`): `tools/browser-agent-evals/scripts/evals.js`
+is one. It is found and loaded the same way as `tasks.js`.
 
 ### Required imports
 

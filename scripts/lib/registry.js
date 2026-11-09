@@ -1,7 +1,7 @@
 /**
  * Module Registry - Auto-discovers and manages build modules
  *
- * Finds tasks.js files throughout the project and registers them.
+ * Finds tasks.js and evals.js files throughout the project and registers them.
  */
 const path = require('path');
 const { exists } = require('./fs');
@@ -12,8 +12,8 @@ class ModuleRegistry {
 	}
 
 	/**
-	 * Discover all tasks.js files in the project
-	 * Searches for scripts/tasks.js in packages/, apps/, nodes/, shared/, ...
+	 * Discover all tasks.js and evals.js files in the project
+	 * Searches for scripts/tasks.js and scripts/evals.js in packages/, apps/, nodes/, tools/, shared/, ...
 	 */
 	async discover(rootDir) {
 		const { glob } = require('glob');
@@ -26,12 +26,12 @@ class ModuleRegistry {
 
 		const taskFiles = await glob(
 			[
-				'{packages,apps,nodes,examples,extension,tools,shared,docs}/**/scripts/tasks.{js,cjs}',
+				'{packages,apps,nodes,examples,extension,tools,shared,docs}/**/scripts/{tasks,evals}.{js,cjs}',
 				'scripts/tasks.{js,cjs}',
 			],
 			{
 				cwd: rootDir,
-				// A tasks.js inside any node_modules is never a build module
+				// A tasks.js or evals.js inside any node_modules is never a build module
 				// (installed/materialized packages ship their dev files), so it
 				// is excluded regardless of what the gitignore contributes.
 				ignore: ['**/node_modules/**', ...gitignore],
@@ -64,7 +64,7 @@ class ModuleRegistry {
 
 			const exported = require(filePath);
 
-			// A tasks.js may export either a single module object {name, actions}
+			// A tasks.js or evals.js may export either a single module object {name, actions}
 			// or an array of such objects. Array form lets one file register
 			// several modules under different action prefixes — useful when an
 			// overlay (e.g. extension/) wants to expose multiple action namespaces
