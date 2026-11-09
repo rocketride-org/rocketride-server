@@ -28,9 +28,12 @@ from the app owning ``/``, the site facts the SEO files carry:
 
     "publicPages": [{"path": "/pricing", "title": "...", "description": "...",
                      "listed": true, "snapshot": "pages/pricing.html",
-                     "data": ["plans"]}],
+                     "data": ["plans"], "image": "og/pricing.png",
+                     "published": "2026-11-09", "modified": "2026-11-10T09:00:00Z",
+                     "authors": [{"name": "...", "url": "https://..."}]}],
     "site": {"title": "...", "blurb": "...", "docsUrl": "https://.../llms.txt",
-             "redirects": [{"from": "/terms", "to": "/legal/terms"}]}
+             "redirects": [{"from": "/terms", "to": "/legal/terms"}],
+             "image": "og/site.png"}
 
 ``check_manifest`` is the single validator: the publish gate refuses on any
 error it reports, and the aggregate builder re-runs it on every published
@@ -53,6 +56,7 @@ non-root platform app gets no root-mounted pages.
 
 import re
 from dataclasses import dataclass, field, replace
+from datetime import date, datetime, time, timezone
 from types import MappingProxyType
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
@@ -109,9 +113,18 @@ _SEGMENT = re.compile(r'[a-z0-9\-._~]+')
 _SNAPSHOT = re.compile(r'[A-Za-z0-9_\-.]+(?:/[A-Za-z0-9_\-.]+)*\.html')
 # A real URL percent-encodes < > " ' and `; raw, they could break out of the HTML attribute a URL lands in.
 _HTTPS_URL = re.compile(r'https://[^\s/?#<>"\'`]+[^\s<>"\'`]*')
+# An image inside the build output, or a root path on the app origin: the
+# snapshot segment grammar, so neither can leave its tree or its origin.
+_BUILD_PATH = re.compile(r'[A-Za-z0-9_\-.]+(?:/[A-Za-z0-9_\-.]+)*')
+_DATE = re.compile(r'[0-9]{4}-[0-9]{2}-[0-9]{2}')
+_DATETIME = re.compile(
+    r'[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?(?:Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])'
+)
 _MAX_TITLE = 300
 _MAX_DESCRIPTION = 1000
+_MAX_URL = 2048
 _MAX_REDIRECTS = 100
+_MAX_AUTHORS = 5
 
 # The largest snapshot the publish gate accepts and the server reads. A crawler
 # request is cheap to send and its UA trivially spoofed, so every snapshot must
@@ -119,19 +132,23 @@ _MAX_REDIRECTS = 100
 MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024
 
 # The page keys this engine validates; every other key lands in ``Page.extra``.
-_PAGE_KEYS = frozenset({'path', 'title', 'description', 'listed', 'snapshot', 'data'})
+_PAGE_KEYS = frozenset(
+    {'path', 'title', 'description', 'listed', 'snapshot', 'data', 'image', 'published', 'modified', 'authors'}
+)
 
 
 @dataclass(frozen=True)
 class Page:
     """One public page claim: the aggregate's unit.
 
-    ``data`` holds the raw ``data`` entries; ``extra`` the page's unknown
-    keys, read-only. ``dist_dir`` (the version's servable store tree, where
-    snapshots live), ``version`` (the registry version on the production
-    rung, whose build ``dist_dir`` is) and ``published_at`` (the production
-    binding's time) are filled by the aggregate loader; ``head_title`` is set
-    only by the legacy adapter (empty = use ``title``).
+    ``data`` holds the raw ``data`` entries; ``image``, ``published`` and
+    ``modified`` the declared values ('' when absent); ``authors`` one
+    ``(name, url)`` pair per author (url '' when absent); ``extra`` the
+    page's unknown keys, read-only. ``dist_dir`` (the version's servable
+    store tree, where snapshots live), ``version`` (the registry version on
+    the production rung, whose build ``dist_dir`` is) and ``published_at``
+    (the production binding's time) are filled by the aggregate loader;
+    ``head_title`` is set only by the legacy adapter (empty = use ``title``).
     """
 
     path: str
@@ -141,6 +158,10 @@ class Page:
     listed: bool = True
     snapshot: str = ''
     data: Tuple[str, ...] = ()
+    image: str = ''
+    published: str = ''
+    modified: str = ''
+    authors: Tuple[Tuple[str, str], ...] = ()
     dist_dir: str = ''
     version: Optional[int] = None
     published_at: Optional[float] = None
@@ -278,6 +299,81 @@ def _page_data_error(data: Any) -> Optional[str]:
     return None
 
 
+def _image_error(value: Any) -> Optional[str]:
+    """Why ``value`` cannot be an ``image``: an https URL, a root path, or a path in the build output."""
+    if isinstance(value, str) and len(value) <= _MAX_URL:
+        if value.startswith('https://'):
+            if not _https_url_error(value):
+                return None
+        else:
+            relative = value[1:] if value.startswith('/') else value
+            if _BUILD_PATH.fullmatch(relative) and not any(seg in ('.', '..') for seg in relative.split('/')):
+                return None
+    return (
+        f'must be an https:// URL, a root path ("/apps/<appId>/og.png") or a path inside the build output '
+        f'("og/page.png"), at most {_MAX_URL} characters, without empty or dot segments'
+    )
+
+
+def page_instant(value: str) -> datetime:
+    """The UTC instant of a valid ``published``/``modified`` value; a date alone is midnight UTC.
+
+    Raises:
+        ValueError: ``value`` is neither ``YYYY-MM-DD`` nor an RFC 3339 date-time.
+        OverflowError: its offset moves the instant outside years 1 to 9999.
+    """
+    if _DATE.fullmatch(value):
+        return datetime.combine(date.fromisoformat(value), time(), timezone.utc)
+    if _DATETIME.fullmatch(value):
+        return datetime.fromisoformat(value).astimezone(timezone.utc)
+    raise ValueError(f'not a page date: {value!r}')
+
+
+def _date_error(value: Any) -> Optional[str]:
+    """Why ``value`` is not a real ``YYYY-MM-DD`` date or RFC 3339 date-time with an offset, or None."""
+    try:
+        if isinstance(value, str):
+            page_instant(value)
+            return None
+    except (ValueError, OverflowError):
+        pass
+    return 'must be a real date, YYYY-MM-DD or an RFC 3339 date-time with an offset (2026-11-09T10:00:00Z)'
+
+
+def _check_article(where: str, raw: Mapping[str, Any]) -> Tuple[Dict[str, Any], Optional[str]]:
+    """The page's ``image``, ``published``, ``modified`` and ``authors`` as Page fields, or the first error."""
+    out: Dict[str, Any] = {}
+    for key, check in (('image', _image_error), ('published', _date_error), ('modified', _date_error)):
+        value = raw.get(key, '')
+        if value != '':
+            err = check(value)
+            if err:
+                return {}, f'{where}.{key} {value!r}: {err}'
+        out[key] = value
+    published, modified = out['published'], out['modified']
+    if published and modified and page_instant(modified) < page_instant(published):
+        return {}, f'{where}.modified {modified!r}: must not be earlier than published {published!r}; fix either date'
+    authors = raw.get('authors', [])
+    if not isinstance(authors, list) or len(authors) > _MAX_AUTHORS:
+        return {}, f'{where}.authors: must be a list of at most {_MAX_AUTHORS} {{"name", "url"?}} objects'
+    pairs = []
+    for j, author in enumerate(authors):
+        if not isinstance(author, dict):
+            return {}, f'{where}.authors[{j}]: must be an object {{"name": "...", "url": "https://..."}}'
+        name, url = author.get('name'), author.get('url', '')
+        if not isinstance(name, str) or not name.strip() or len(name) > _MAX_TITLE:
+            return {}, f'{where}.authors[{j}].name: required, a non-empty string of at most {_MAX_TITLE} characters'
+        err = _surrogate_error(name)
+        if err:
+            return {}, f'{where}.authors[{j}].name: {err}'
+        err = _https_url_error(url) if url != '' else None
+        if err:
+            return {}, f'{where}.authors[{j}].url: {err}'
+        pairs.append((name, url))
+    out['authors'] = tuple(pairs)
+    return out, None
+
+
 def _check_page(
     i: int, raw: Any, root: bool, live_conflict: Optional[Callable[[str], Optional[str]]]
 ) -> Tuple[Optional[Page], Optional[str]]:
@@ -304,6 +400,9 @@ def _check_page(
         err = snapshot_error(snapshot)
         if err:
             return None, f'{where}.snapshot {snapshot!r}: {err}'
+    article, err = _check_article(where, raw)
+    if err:
+        return None, err
     page = Page(
         path=path,
         app_id='',
@@ -312,6 +411,7 @@ def _check_page(
         listed=listed,
         snapshot=snapshot,
         data=tuple(data),
+        **article,
         extra=MappingProxyType({k: v for k, v in raw.items() if k not in _PAGE_KEYS}),
     )
     return page, None
@@ -335,6 +435,11 @@ def _check_site(raw: Any) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
         if err:
             return None, f'site.docsUrl: {err}'
         out['docsUrl'] = raw['docsUrl']
+    if 'image' in raw:
+        err = _image_error(raw['image'])
+        if err:
+            return None, f'site.image {raw["image"]!r}: {err}'
+        out['image'] = raw['image']
     return out, None
 
 

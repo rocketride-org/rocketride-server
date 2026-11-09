@@ -101,11 +101,12 @@ def test_a_newer_home_ui_manifest_still_validates():
     assert errors == []
     assert len(pages) == 26
     assert site == {
-        **{k: newer['site'][k] for k in ('title', 'blurb', 'docsUrl')},
+        **{k: newer['site'][k] for k in ('title', 'blurb', 'docsUrl', 'image')},
         'redirects': {'/terms': '/legal/terms', '/terms/': '/legal/terms'},
     }
     launch = {p.path: p for p in pages}['/blog/launch']
-    assert dict(launch.extra) == {k: newer['publicPages'][-1][k] for k in ('image', 'published', 'modified', 'authors')}
+    assert (launch.image, launch.published, launch.modified) == ('/og/launch.png', '2026-11-09', '2026-11-10T09:00:00Z')
+    assert launch.authors == (('Ansh', 'https://rocketride.ai/team/ansh'),)
 
 
 async def test_loader_prefers_the_emitted_file_over_metadata():
