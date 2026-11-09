@@ -16,6 +16,8 @@ from __future__ import annotations
 import sys
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
@@ -143,3 +145,53 @@ def test_exception_in_is_public_route_is_caught():
     body = r.json()
     assert body['status'] == 'Error'
     assert 'cannot decide' in body['error']['message']
+
+
+def test_public_route_check_gets_the_path_the_router_matches():
+    """Behind a root_path (uvicorn --root-path), the check sees the route path, not the prefixed one."""
+    server = MagicMock()
+    server.is_public_route.return_value = True
+    server.authenticate_request = AsyncMock()
+
+    client = TestClient(_build_app(server), root_path='/api')
+    r = client.get('/api/public')
+
+    assert r.status_code == 200
+    server.is_public_route.assert_called_with('/public')
+
+
+@pytest.mark.parametrize(
+    'path,root_path',
+    [
+        ('/public', ''),
+        ('/api/public', '/api'),
+        ('/api', '/api'),
+        ('/apix/public', '/api'),
+        ('/other/public', '/api'),
+        ('/api/', '/api'),
+    ],
+)
+def test_route_path_is_the_path_starlettes_router_matches(path, root_path):
+    """Pinned to Starlette's own computation, so an upgrade that changes it fails here."""
+    from starlette._utils import get_route_path
+
+    scope = {'type': 'http', 'path': path, 'root_path': root_path}
+    assert middleware_mod.route_path(scope) == get_route_path(scope)
+
+
+def test_the_router_serves_the_route_the_auth_check_was_asked_about():
+    """Behind a root_path, the route that answers is the one whose path the check saw."""
+    server = MagicMock()
+    server.is_public_route.return_value = True
+    server.authenticate_request = AsyncMock()
+    app = _build_app(server)
+
+    @app.get('/api/public')
+    def _shadow():
+        return {'ok': 'shadow'}
+
+    client = TestClient(app, root_path='/api')
+    for url, served in (('/api/public', 'public'), ('/api/api/public', 'shadow')):
+        r = client.get(url)
+        assert r.json() == {'ok': served}, url
+        assert server.is_public_route.call_args.args[0] == ('/public' if served == 'public' else '/api/public')

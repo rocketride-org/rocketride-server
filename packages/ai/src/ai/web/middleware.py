@@ -1,9 +1,25 @@
 from ai.web import exception, Request
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.types import Scope
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ai.web import WebServer
+
+
+def route_path(scope: Scope) -> str:
+    """The path the router matches: ``scope['path']`` with ``root_path`` stripped.
+
+    Must match Starlette's router (``starlette._utils.get_route_path``), or
+    the auth decision and the route that serves the request see different paths.
+    """
+    path: str = scope['path']
+    root_path = scope.get('root_path', '')
+    if not root_path or not path.startswith(root_path):
+        return path
+    if path == root_path:
+        return ''
+    return path[len(root_path) :] if path[len(root_path)] == '/' else path
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -16,8 +32,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
             # Save the server off, it is removed by /chat
             server: WebServer = request.app.state.server
 
-            # If this is a public endpoint, just call it
-            if server.is_public_route(request.url.path):
+            # If this is a public endpoint, just call it. Decide on the path the
+            # router matches (root_path stripped, as Starlette's router does):
+            # behind a proxy prefix the raw path would match no route at all.
+            if server.is_public_route(route_path(request.scope)):
                 # Call it
                 return await call_next(request)
 
