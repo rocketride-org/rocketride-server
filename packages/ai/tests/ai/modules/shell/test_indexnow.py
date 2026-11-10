@@ -328,11 +328,12 @@ async def test_snapshot_reads_run_at_most_max_concurrent_reads_at_a_time(sent, m
     assert indexnow.MAX_CONCURRENT_READS == 8 and peak[0] == 8 and len(indexnow._last) == 20
 
 
-async def test_at_most_the_protocols_url_cap_goes_in_one_submission(sent, monkeypatch):
+async def test_more_urls_than_the_protocols_cap_go_in_several_submissions(sent, monkeypatch):
+    assert indexnow._MAX_URLS == 10000
     monkeypatch.setattr(indexnow, '_MAX_URLS', 2)
     await _build(*_version(1))
-    await _build(*_version(2), _page('/x', 2), _page('/y', 2), _page('/z', 2))
-    assert _urls(sent) == [[f'{BASE}/x', f'{BASE}/y']]
+    await _build(*_version(2), *(_page(p, 2) for p in ('/v', '/w', '/x', '/y', '/z')))
+    assert _urls(sent) == [[f'{BASE}/v', f'{BASE}/w'], [f'{BASE}/x', f'{BASE}/y'], [f'{BASE}/z']]
 
 
 @pytest.mark.parametrize('value', ['', 'short', 'has space in it', 'x' * 129, 'bad/slash00', 'line\nbreak0'])
