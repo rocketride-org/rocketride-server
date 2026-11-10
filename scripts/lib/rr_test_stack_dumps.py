@@ -53,11 +53,22 @@ frame object is still on its stack::
 followed by a blank line. A given stuck ``start`` frame is reported once; a later
 ``start`` call that gets stuck is reported again.
 
+On Windows the hook also wraps ``_wmi.exec_query``, which ``platform`` calls on its first
+``platform.*`` call. Each call appends one block, written under the same lock and
+fsynced because the process may hang right after::
+
+    === wmi query seconds=<s, 3 decimals> ok chars=<length of the returned text> query=<first 200 chars>
+    === wmi query seconds=<s> error=<exception class> winerror=<code or -> query=<first 200 chars>
+
+followed by a blank line. The wrapper returns the original result or re-raises the
+original exception unchanged, and nothing it logs can raise.
+
 A child that exits normally removes a file that holds no dump, so what is left
 belongs to children that ran long or were killed.
 """
 
 import atexit
+import functools
 import os
 import sys
 import threading
@@ -81,6 +92,9 @@ _SIDECAR_MAX = 300
 
 # Longest ``current_test`` text kept in the info line, in characters.
 _TEST_MAX = 300
+
+# Longest WMI query text kept in the ``=== wmi query`` line, in characters.
+_WMI_QUERY_MAX = 200
 
 # Interpreter options that take the next argument as their value.
 _VALUE_OPTIONS = ('-W', '-X')
@@ -541,6 +555,86 @@ class _Dumper:
             self._file.close()
 
 
+def _wrap_wmi(dumper: '_Dumper') -> bool:
+    """
+    Wrap ``_wmi.exec_query`` so every call appends one ``=== wmi query`` line to the dump file.
+
+    ``platform`` looks ``_wmi.exec_query`` up on the module at call time, so replacing
+    the attribute here covers its first query. The wrapper returns the original result
+    or re-raises the original exception unchanged; a failure to log is swallowed.
+
+    Args:
+        dumper (_Dumper): The dumper whose file lock and file receive the line.
+
+    Returns:
+        bool: True when the wrapper was installed, False when ``_wmi`` is missing,
+            has no ``exec_query`` or is already wrapped.
+    """
+    try:
+        import _wmi
+    except Exception:
+        return False
+    original = getattr(_wmi, 'exec_query', None)
+    if original is None or getattr(original, '_rr_wmi_wrapped', False):
+        return False
+
+    @functools.wraps(original)
+    def exec_query(*args, **kwargs):
+        """
+        Call the original ``exec_query``, time it and log the outcome.
+
+        Args:
+            *args: Positional arguments, passed on unchanged.
+            **kwargs: Keyword arguments, passed on unchanged.
+
+        Returns:
+            str: The original result.
+        """
+        begin = time.monotonic()
+        try:
+            result = original(*args, **kwargs)
+        except BaseException as exc:
+            winerror = getattr(exc, 'winerror', None)
+            _log_wmi(
+                dumper,
+                begin,
+                args,
+                kwargs,
+                f'error={type(exc).__name__} winerror={"-" if winerror is None else winerror}',
+            )
+            raise
+        _log_wmi(dumper, begin, args, kwargs, f'ok chars={len(result) if isinstance(result, str) else "-"}')
+        return result
+
+    exec_query._rr_wmi_wrapped = True
+    _wmi.exec_query = exec_query
+    return True
+
+
+def _log_wmi(dumper: '_Dumper', begin: float, args: tuple, kwargs: dict, outcome: str) -> None:
+    """
+    Append one ``=== wmi query`` line; never raises.
+
+    Args:
+        dumper (_Dumper): The dumper that owns the file.
+        begin (float): ``time.monotonic()`` value before the call.
+        args (tuple): Positional arguments of the call; the first one is the query text.
+        kwargs (dict): Keyword arguments of the call; ``query`` is used when ``args`` is empty.
+        outcome (str): The text after the seconds field.
+
+    Returns:
+        None
+    """
+    try:
+        seconds = time.monotonic() - begin
+        query = args[0] if args else kwargs.get('query', '')
+        query = str(query)[:_WMI_QUERY_MAX].replace('\r', ' ').replace('\n', ' ')
+        dumper._append(f'=== wmi query seconds={seconds:.3f} {outcome} query={query}\n\n')
+    except Exception:
+        # A diagnostic must never stop the process it observes.
+        pass
+
+
 def _start() -> None:
     """
     Open the per-pid dump file and start the dumper thread.
@@ -575,6 +669,12 @@ def _start() -> None:
 
     dumper = _Dumper(dump_file, interval, time.monotonic(), kind)
     dumper.start()
+    if os.name == 'nt':
+        try:
+            _wrap_wmi(dumper)
+        except Exception:
+            # A diagnostic must never stop the process it observes.
+            pass
 
     def _finish() -> None:
         """

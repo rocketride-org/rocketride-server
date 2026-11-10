@@ -25,6 +25,7 @@ const {
 	selectHolderTargets,
 	claimFile,
 	lockHoldersScript,
+	cdbScript,
 	startStackWatch,
 } = require('./stackwatch');
 
@@ -388,6 +389,44 @@ test('scan claims a pid before cdb runs and leaves a pid another watcher claimed
 	run.watch.stop();
 	assert.match(during, /^claimed time=.* pid=9280 by watcher \d+\n$/);
 	assert.match(fs.readFileSync(path.join(run.dir, 'native_9280.txt'), 'utf8'), /NATIVE STACK/);
+});
+
+test('a cdb killed on its timeout gets one resume attach; a normal exit gets none', async () => {
+	const frozen = HEADER + dump(FROZEN_MAIN) + dump(FROZEN_MAIN);
+	const cases = [
+		{ name: 'killed', killed: true, resumeFails: false },
+		{ name: 'exited', killed: false, resumeFails: false },
+		{ name: 'killed, resume fails', killed: true, resumeFails: true },
+	];
+	for (const c of cases) {
+		const cdbCalls = [];
+		const exec = (file, args, options, cb) => {
+			if (file === 'tasklist') cb(null, '"engine.exe","9280","Console","1","10,000 K"\n', '');
+			else if (file === 'powershell') cb(null, '2026-11-06T18:31:50.0000000Z', '');
+			else {
+				cdbCalls.push(args);
+				const isResume = args.includes('~*m; ~*m; qd');
+				if (isResume && c.resumeFails) cb(Object.assign(new Error('boom'), { code: 1 }), '', '');
+				else if (!isResume && c.killed) {
+					const err = Object.assign(new Error('timed out'), { killed: true, signal: 'SIGKILL' });
+					cb(err, '', '');
+				}
+				else cb(null, 'NATIVE STACK', '');
+			}
+			return { kill() {} };
+		};
+		const { dir, watch } = makeWatch({ 'stacks_9280.txt': frozen }, { exec });
+		await watch.scan();
+		watch.stop();
+		const resumes = cdbCalls.filter((a) => a.includes('~*m; ~*m; qd'));
+		assert.strictEqual(cdbCalls.length, c.killed ? 2 : 1, c.name);
+		assert.strictEqual(resumes.length, c.killed ? 1 : 0, c.name);
+		if (c.killed) assert.deepStrictEqual(resumes[0].slice(0, 3), ['-pv', '-p', '9280']);
+		const log = fs.readFileSync(path.join(dir, 'stackwatch.log'), 'utf8');
+		assert.strictEqual(/resumed pid=9280 exit=0/.test(log), c.killed && !c.resumeFails, c.name);
+		assert.strictEqual(/resume failed pid=9280 exit=1 error=boom/.test(log), c.resumeFails, c.name);
+		assert.match(fs.readFileSync(path.join(dir, 'native_9280.txt'), 'utf8'), /signal=/);
+	}
 });
 
 test('scan takes at most three captures', async () => {
@@ -792,4 +831,119 @@ test('a frozen task child that is also marked keeps its frozen trigger', async (
 	watch.stop();
 	const native = fs.readFileSync(path.join(dir, 'native_9280.txt'), 'utf8');
 	assert.match(native, /trigger: main thread unchanged in the last two dumps/);
+});
+
+/**
+ * Read the cdb script a captured call ran.
+ *
+ * @param {{args: string[]}} call - The recorded cdb call
+ * @returns {string[]} The script lines
+ */
+function scriptLines(call) {
+	const at = call.args.indexOf('-cf');
+	assert.ok(at > 0, 'cdb runs a script file');
+	return fs.readFileSync(call.args[at + 1], 'utf8').split('\n');
+}
+
+test('the cdb script keeps the stack part first, adds the loader and thread commands, and detaches last', () => {
+	const lines = cdbScript('0x00002a48').split('\n');
+	assert.deepStrictEqual(lines.slice(0, 3), ['~*kn 80', '!locks', 'lm']);
+	assert.strictEqual(lines[lines.length - 1], 'qd');
+	assert.strictEqual(lines.filter((l) => l === 'qd').length, 1);
+	for (const name of ['LdrpLoadCompleteEvent', 'LdrpWorkCompleteEvent', 'LdrpWorkInProgress']) {
+		assert.ok(lines.includes(`x ntdll!${name}`));
+		assert.ok(lines.includes(`dq ntdll!${name} L1`));
+	}
+	assert.ok(lines.includes('x ntdll!Ldrp*Complete*') && lines.includes('x ntdll!LdrpWork*'));
+	assert.ok(lines.includes('!handle poi(ntdll!LdrpLoadCompleteEvent) f'));
+	assert.ok(lines.includes('!handle poi(ntdll!LdrpWorkCompleteEvent) f'));
+	// One command per line: ~*e takes the rest of its line, so nothing may follow it there.
+	const each = lines.filter((l) => l.startsWith('~*e '));
+	assert.strictEqual(each.length, 1);
+	assert.match(each[0], /@\$tid, @r10,.*SameTebFlags.*>>c\).*>>d\)/);
+	assert.ok(!each[0].includes(';'));
+	// The target thread is selected, then its r10 is looked up as a handle.
+	const select = lines.indexOf('~~[0x2a48]s');
+	assert.ok(select > lines.indexOf('.echo === loader'));
+	assert.strictEqual(lines[lines.indexOf('!handle @r10 f') - 1], 'k 3');
+	assert.ok(lines.indexOf('!handle @r10 f') > select);
+	// Every command before qd is on a line of its own, so a failing one cannot swallow qd.
+	assert.ok(lines.every((l) => !l.includes('qd') || l === 'qd'));
+});
+
+test('the cdb script targets thread 0 without a usable thread id', () => {
+	for (const tid of [null, undefined, '', 'zz', '0x', '12345678901234567']) {
+		const lines = cdbScript(tid).split('\n');
+		assert.ok(lines.includes('~0s'), String(tid));
+		assert.ok(!lines.some((l) => l.startsWith('~~[')), String(tid));
+	}
+	assert.ok(cdbScript('0000000000001644').includes('~~[0x1644]s'));
+	assert.ok(cdbScript(0x2a48).includes('~~[0x2a48]s'));
+});
+
+test('a task capture examines the dump main thread', async () => {
+	const { dir, calls, watch } = makeWatch({
+		'stacks_9280.txt': HEADER + dump(FROZEN_MAIN) + dump(FROZEN_MAIN, '0:01:00'),
+	});
+	await watch.scan();
+	watch.stop();
+	const lines = scriptLines(calls.find((c) => c.file === __filename));
+	assert.ok(lines.includes('~~[0x243c]s'));
+	assert.deepStrictEqual(lines.slice(0, 3), ['~*kn 80', '!locks', 'lm']);
+	assert.strictEqual(lines[lines.length - 1], 'qd');
+	assert.ok(fs.existsSync(path.join(dir, 'cdb_native_9280.txt')));
+});
+
+test('a pytest worker capture examines the [main] thread of its dump', async () => {
+	const stuck = pytestHeader('pytest-worker') + pytestDumps(workerMain(CV2_TOP, ' [main]'), everyMinute(6));
+	const { calls, watch } = makeWatch({ 'stacks_5180.txt': stuck });
+	await watch.scan();
+	watch.stop();
+	assert.ok(scriptLines(calls.find((c) => c.file === __filename)).includes('~~[0x1590]s'));
+});
+
+test('a pytest controller capture examines the [main] thread of its dump', async () => {
+	const main = 'Thread 0x0000069c [main] (most recent call first):\n' +
+		CV2_TOP +
+		frame(`${WIN}\\dist\\server\\Lib\\site-packages\\pytest\\__main__.py`, 9, '<module>') +
+		frame('<frozen runpy>', 88, '_run_code');
+	const stuck = pytestHeader('pytest-main', 7936) + pytestDumps(main, everyMinute(6));
+	const { calls, watch } = makeWatch({ 'stacks_7936.txt': stuck });
+	await watch.scan();
+	watch.stop();
+	assert.ok(scriptLines(calls.find((c) => c.file === __filename)).includes('~~[0x69c]s'));
+});
+
+test('a thread-start capture examines the thread of the marker, not the main thread', async () => {
+	const marked = threadsDump(startThread(START_CHAIN)) + STUCK;
+	const { calls, watch } = makeWatch({ 'stacks_9281.txt': HEADER.replace('9280', '9281') + marked });
+	await watch.scan();
+	watch.stop();
+	const lines = scriptLines(calls.find((c) => c.file === __filename));
+	assert.ok(lines.includes('~~[0x1bac]s'));
+	assert.strictEqual(lines.filter((l) => l.startsWith('~~[')).length, 1);
+});
+
+test('a capture without a known main thread examines thread 0 and keeps the script file', async () => {
+	const cut = `${HEADER}Timeout (0:00:30)!\n${LOOP_THREAD}`;
+	const { dir, calls, watch } = makeWatch({ 'stacks_9280.txt': cut });
+	age(path.join(dir, 'stacks_9280.txt'), 600);
+	await watch.scan();
+	watch.stop();
+	const lines = scriptLines(calls.find((c) => c.file === __filename));
+	assert.ok(lines.includes('~0s'));
+	assert.ok(fs.existsSync(path.join(dir, 'cdb_native_9280.txt')));
+});
+
+test('the old command string runs when the script file cannot be written', async () => {
+	const { dir, calls, watch } = makeWatch({
+		'stacks_9280.txt': HEADER + dump(FROZEN_MAIN) + dump(FROZEN_MAIN, '0:01:00'),
+	});
+	// A directory in the way of the script file makes the write fail.
+	fs.mkdirSync(path.join(dir, 'cdb_native_9280.txt'));
+	await watch.scan();
+	watch.stop();
+	const args = calls.find((c) => c.file === __filename).args;
+	assert.deepStrictEqual(args.slice(-2), ['-c', '~*kn 80; !locks; lm; qd']);
+	assert.match(fs.readFileSync(path.join(dir, 'native_9280.txt'), 'utf8'), /NATIVE STACK/);
 });

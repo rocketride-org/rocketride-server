@@ -44,6 +44,8 @@ const SCAN_MS = 30_000;
 // Generous: a capture that downloads symbols takes several seconds, and a killed cdb
 // leaves the child suspended.
 const CDB_TIMEOUT_MS = 300_000;
+// The recovery attach after a killed cdb only resumes threads, so it needs far less than a capture.
+const RESUME_TIMEOUT_MS = 30_000;
 const MAX_CAPTURES = 3;
 // Captures of pytest processes, counted apart from the task children.
 const MAX_PYTEST_CAPTURES = 2;
@@ -52,7 +54,17 @@ const MAX_THREAD_START_CAPTURES = 4;
 // A pytest main thread with an identical stack for this long (dump time) is frozen.
 const PYTEST_FROZEN_S = 300;
 const SYMBOL_URL = 'https://msdl.microsoft.com/download/symbols';
-const CDB_COMMANDS = '~*kn 80; !locks; lm; qd';
+// The proven part of every capture: all stacks, the locks and the modules. It runs first, so a failure of a
+// later command never loses the stacks.
+const CDB_STACK_COMMANDS = ['~*kn 80', '!locks', 'lm'];
+// The whole capture when the script file cannot be written.
+const CDB_COMMANDS = `${CDB_STACK_COMMANDS.join('; ')}; qd`;
+// The loader's synchronisation globals in ntdll's public symbols. A wildcard lists them again in case a build
+// names them differently.
+const LOADER_GLOBALS = ['LdrpLoadCompleteEvent', 'LdrpWorkCompleteEvent', 'LdrpWorkInProgress'];
+// The TEB word with the loader flags; the offset comes from ntdll's type information. On x64 Windows 10/11 bit 12
+// is LoadOwner and bit 13 is LoaderWorker.
+const TEB_FLAGS = 'wo(@$teb+@@c++(#FIELD_OFFSET(ntdll!_TEB, SameTebFlags)))';
 const CDB_OVERRIDE_VAR = 'ROCKETRIDE_TEST_CDB';
 const CHILD_IMAGE = 'engine.exe';
 // A live child rewrites its file every dump interval; a file left unwritten for this many
@@ -99,6 +111,50 @@ const HOLDER_CDB_TIMEOUT_MS = 120_000;
 const HOLDER_BUDGET_MS = 600_000;
 const MAX_HOLDER_CAPTURES = 12;
 const TIME_RE = /^(\d{4}-\d\d-\d\d)T(\d\d:\d\d:\d\d)(?:\.(\d+))?(Z|[+-]\d\d:?\d\d)$/;
+
+/**
+ * Normalise an operating-system thread id from a dump to bare lower-case hex.
+ *
+ * @param {string|number|null|undefined} id - Hex text as the dump or marker wrote it (with or without 0x), or a number
+ * @returns {string|null} The hex digits without 0x or leading zeros, or null when the id is not a number
+ */
+function hexThreadId(id) {
+	if (id === null || id === undefined) return null;
+	if (typeof id === 'number') return Number.isSafeInteger(id) && id >= 0 ? id.toString(16) : null;
+	const m = /^(?:0x)?([0-9a-f]{1,16})$/i.exec(String(id).trim());
+	return m ? BigInt(`0x${m[1]}`).toString(16) : null;
+}
+
+/**
+ * Build the cdb script of a native capture, one command per line. The stack part comes first and
+ * qd (detach) last; the commands between them print the loader's synchronisation state, the
+ * thread id, r10 and loader flags of every thread, and the handle the target thread waits on.
+ * For a thread inside NtWaitForSingleObject r10 holds the waited handle, because the first
+ * syscall argument stays in r10.
+ *
+ * @param {string|number|null} [tid] - The OS thread id of the thread to examine (cdb selects it
+ *   with ~~[0x<tid>]s); thread 0, the process's first thread, when absent or not a number
+ * @returns {string} The script text, lines joined with LF
+ */
+function cdbScript(tid = null) {
+	const hex = hexThreadId(tid);
+	const select = hex ? `~~[0x${hex}]s` : '~0s';
+	const lines = [...CDB_STACK_COMMANDS, '.echo === loader'];
+	for (const name of LOADER_GLOBALS) lines.push(`x ntdll!${name}`);
+	lines.push('x ntdll!Ldrp*Complete*', 'x ntdll!LdrpWork*');
+	for (const name of LOADER_GLOBALS) lines.push(`dq ntdll!${name} L1`);
+	// The events' handle values are the first quad word of their globals.
+	lines.push('!handle poi(ntdll!LdrpLoadCompleteEvent) f', '!handle poi(ntdll!LdrpWorkCompleteEvent) f');
+	lines.push('.echo === threads: tid r10 SameTebFlags LoadOwner LoaderWorker');
+	// ~*e takes the rest of its line as the per-thread command, which is why every command has its own line.
+	lines.push(
+		'~*e .printf "tid=%x r10=%p flags=%x loadowner=%d loaderworker=%d\\n", @$tid, @r10, ' +
+			`${TEB_FLAGS}, (${TEB_FLAGS}>>c)&1, (${TEB_FLAGS}>>d)&1`
+	);
+	lines.push(`.echo === target thread ${hex ? `0x${hex}` : '0'}: handle in r10`);
+	lines.push(select, '.printf "target tid=%x r10=%p\\n", @$tid, @r10', 'k 3', '!handle @r10 f', 'qd');
+	return lines.join('\n');
+}
 
 /**
  * Tell whether a thread's oldest frame marks it as the main thread of a process of a kind.
@@ -152,8 +208,9 @@ function parseThreads(lines) {
  *
  * @param {string[]} lines - The lines of the block
  * @param {string} [kind] - The process kind from the file header (task when absent)
- * @returns {{complete: boolean, frames: object[]}} The main thread's frames, most
- *   recent first, and whether the block is complete. The main thread is the thread the
+ * @returns {{complete: boolean, frames: object[], mainId?: string}} The main thread's frames, most
+ *   recent first, whether the block is complete, and the main thread's hex id (absent when no
+ *   main thread is found). The main thread is the thread the
  *   dumper labelled [main] (complete once a blank line closes its stack); without a label it
  *   is the thread whose oldest frame is the kind's bottom frame (see isMainBottom). A block
  *   without such a thread is incomplete (the dump was cut) and has no frames.
@@ -163,11 +220,11 @@ function parseDump(lines, kind = 'task') {
 	const labelled = threads.find((t) => t.label === 'main');
 	if (labelled) {
 		return labelled.closed && labelled.frames.length
-			? { complete: true, frames: labelled.frames }
-			: { complete: false, frames: [] };
+			? { complete: true, frames: labelled.frames, mainId: labelled.id }
+			: { complete: false, frames: [], mainId: labelled.id };
 	}
 	const main = threads.find((t) => isMainBottom(kind, t.frames));
-	return main ? { complete: true, frames: main.frames } : { complete: false, frames: [] };
+	return main ? { complete: true, frames: main.frames, mainId: main.id } : { complete: false, frames: [] };
 }
 
 /**
@@ -687,6 +744,27 @@ function startStackWatch(dumpDir, opts = {}) {
 	const claim = (pid) => claimFile(dumpDir, `native_${pid}.txt`, `pid=${pid}`);
 
 	/**
+	 * Resume a child whose cdb was killed before it detached. A non-invasive attach (-pv) suspends
+	 * every thread and the kill leaves them suspended; a second attach that runs ~*m (resume all
+	 * threads) twice and detaches releases them, and resuming a thread that is not suspended is
+	 * harmless. It never throws: the outcome goes to the log.
+	 *
+	 * @param {number} pid - The child's process id
+	 * @param {string} sympath - The symbol path passed to the killed cdb
+	 * @returns {Promise<void>}
+	 */
+	const resume = async (pid, sympath) => {
+		try {
+			const args = ['-pv', '-p', String(pid), '-y', sympath, '-c', '~*m; ~*m; qd'];
+			const res = await run(cdb, args, { timeout: RESUME_TIMEOUT_MS, killSignal: 'SIGKILL' }, exec);
+			const failed = res.error ? ` error=${res.error}` : '';
+			log(`${res.error ? 'resume failed' : 'resumed'} pid=${pid} exit=${res.code}${failed}`);
+		} catch (err) {
+			log(`resume failed pid=${pid} error=${err.message}`);
+		}
+	};
+
+	/**
 	 * Attach cdb to one stuck child and write native_<pid>.txt over the claim. cdb
 	 * suspends the child while it reads every thread, and resumes it when it detaches
 	 * (qd). The child stays suspended only if cdb is killed first, which happens on the
@@ -694,19 +772,30 @@ function startStackWatch(dumpDir, opts = {}) {
 	 *
 	 * @param {number} pid - The child's process id
 	 * @param {string} trigger - Why the child was captured; written to the file
-	 * @param {{file?: string, timeoutMs?: number}} [where] - The output file (default
-	 *   native_<pid>.txt) and the cdb time limit
+	 * @param {{file?: string, timeoutMs?: number, tid?: string|null}} [where] - The output file (default
+	 *   native_<pid>.txt), the cdb time limit and the OS thread id whose waited handle is examined
+	 *   (thread 0 when absent)
 	 * @returns {Promise<void>}
 	 */
 	const capture = async (pid, trigger, where = {}) => {
 		const outName = where.file ?? `native_${pid}.txt`;
 		const sympath = `srv*${cacheDir}*${SYMBOL_URL}`;
 		const started = Date.now();
-		const args = ['-pv', '-p', String(pid), '-y', sympath, '-c', CDB_COMMANDS];
+		// The script is kept next to the capture, so the file shows which commands ran.
+		const scriptFile = path.join(dumpDir, `cdb_${outName}`);
+		let script = ['-c', CDB_COMMANDS];
+		try {
+			fs.writeFileSync(scriptFile, cdbScript(where.tid));
+			script = ['-cf', scriptFile];
+		} catch (err) {
+			log(`cdb script not written, stacks only: ${err.message}`);
+		}
+		const args = ['-pv', '-p', String(pid), '-y', sympath, ...script];
 		const options = { timeout: where.timeoutMs ?? CDB_TIMEOUT_MS, killSignal: 'SIGKILL' };
 		let mine = null;
 		const res = await run(cdb, args, options, exec, (child) => children.add((mine = child)));
 		children.delete(mine);
+		if (res.signal) await resume(pid, sympath);
 		const text = [
 			`time=${new Date(started).toISOString()} pid=${pid} cdb=${cdb}`,
 			`trigger: ${trigger}`,
@@ -885,6 +974,8 @@ function startStackWatch(dumpDir, opts = {}) {
 				// The counter the capture is charged to: the process group, or the thread-start group.
 				let slot = group;
 				let trigger = null;
+				// The OS thread id whose waited handle the capture examines (thread 0 when unknown).
+				let thread = null;
 				if (groupOpen) {
 					const silent = checkSilent(parsed, Date.now() - fs.statSync(file).mtimeMs);
 					// A pytest trigger names the kind, the xdist worker and the running test of the last dump.
@@ -911,6 +1002,7 @@ function startStackWatch(dumpDir, opts = {}) {
 					const stuck = checkThreadStart(text);
 					if (stuck) {
 						slot = 'threadStart';
+						thread = stuck.id;
 						const head = `thread-start thread=${stuck.id} kind=${stuck.kind} seconds=${stuck.seconds}`;
 						trigger = stuck.frames.length ? `${head}\n${list(stuck.frames)}` : head;
 					}
@@ -923,7 +1015,8 @@ function startStackWatch(dumpDir, opts = {}) {
 					log(`skipped pid=${pid}: claimed by another watcher`);
 					continue;
 				}
-				await capture(pid, trigger);
+				const mainId = parsed.dumps.findLast((d) => d.mainId)?.mainId;
+				await capture(pid, trigger, { tid: thread ?? mainId });
 				if (++captures[slot] >= caps[slot]) {
 					// The lock-holder check keeps running.
 					log(`stopped ${slot} captures after ${caps[slot]}`);
@@ -972,5 +1065,7 @@ module.exports = {
 	isPytestIdleFrame,
 	parseTime,
 	findCdb,
+	hexThreadId,
+	cdbScript,
 	startStackWatch,
 };
