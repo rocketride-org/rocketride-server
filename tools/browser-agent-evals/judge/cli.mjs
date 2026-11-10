@@ -17,6 +17,8 @@ const EXIT_CODES = { pass: 0, fail: 1, inconclusive: 2 };
 const EXIT_USAGE = 64;
 
 const optionalNumber = (value) => (value === undefined ? undefined : Number(value));
+// The sessions run on the eval key only, never on a credential the shell or a logged-in claude holds.
+const apiKey = process.env.EVAL_ANTHROPIC_KEY;
 
 async function judge(values) {
 	if (!values.url || !values.checklist || !values.out) throw new Error(USAGE);
@@ -29,7 +31,7 @@ async function judge(values) {
 	// A file, so a token never shows up in the process list.
 	const localStorage = values['local-storage'] ? JSON.parse(fs.readFileSync(values['local-storage'], 'utf8')) : undefined;
 
-	const result = await judgeApp({ url: values.url, checklist, runs: optionalNumber(values.runs), model: values.model, budgetUsd: optionalNumber(values['budget-usd']), timeoutMs: optionalNumber(values['timeout-ms']), outDir: values.out, localStorage });
+	const result = await judgeApp({ url: values.url, checklist, runs: optionalNumber(values.runs), model: values.model, budgetUsd: optionalNumber(values['budget-usd']), timeoutMs: optionalNumber(values['timeout-ms']), outDir: values.out, localStorage, apiKey });
 
 	const resultFile = path.join(values.out, 'result.json');
 	fs.writeFileSync(resultFile, JSON.stringify(result, null, '\t'));
@@ -42,7 +44,7 @@ async function judge(values) {
 async function explain(values) {
 	if (!values.failed || !values.out) throw new Error(USAGE);
 
-	const lead = await explainFailure({ trialDir: values.explain, failed: JSON.parse(fs.readFileSync(values.failed, 'utf8')), model: values.model, budgetUsd: optionalNumber(values['budget-usd']), timeoutMs: optionalNumber(values['timeout-ms']), outDir: values.out });
+	const lead = await explainFailure({ trialDir: values.explain, failed: JSON.parse(fs.readFileSync(values.failed, 'utf8')), model: values.model, budgetUsd: optionalNumber(values['budget-usd']), timeoutMs: optionalNumber(values['timeout-ms']), outDir: values.out, apiKey });
 
 	const leadFile = path.join(values.out, 'lead.json');
 	fs.writeFileSync(leadFile, JSON.stringify(lead, null, '\t'));

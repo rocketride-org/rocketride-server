@@ -21,7 +21,7 @@ node tools/browser-agent-evals/judge/cli.mjs \
   --out ~/judge-results/run-1
 ```
 
-The checklist file has one expectation per line. The CLI prints each run and line, writes the full result to `result.json` in `--out`, and exits 0 for `pass`, 1 for `fail`, 2 for `inconclusive` and 64 for bad input.
+The sessions run on `EVAL_ANTHROPIC_KEY` from the CLI's environment and nothing else. The checklist file has one expectation per line. The CLI prints each run and line, writes the full result to `result.json` in `--out`, and exits 0 for `pass`, 1 for `fail`, 2 for `inconclusive` and 64 for bad input.
 
 | Flag              | Default             | Meaning                                                                          |
 | ----------------- | ------------------- | -------------------------------------------------------------------------------- |
@@ -41,6 +41,7 @@ const { verdict, lines, runs, costUsd } = await judgeApp({
 	checklist: ['Adding a tool puts it in the list.'],
 	outDir,
 	localStorage: { 'rr:user_token': token },
+	apiKey, // the eval Anthropic key
 });
 ```
 
@@ -66,7 +67,7 @@ A run is invalid when any of these is true, and its claims don't count:
 
 ## What it needs
 
-- `claude` on `PATH`, logged in or with `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` or `CLAUDE_CODE_OAUTH_TOKEN` set. The session gets a minimal environment, and `INHERITED_ENV` in `session.mjs` lists what passes through.
+- `claude` on `PATH`, and the eval Anthropic key as `apiKey` (`EVAL_ANTHROPIC_KEY` for the CLI). A session gets it as `ANTHROPIC_API_KEY` and gets no other Anthropic credential: `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_BASE_URL` from the shell don't pass through. The session gets a minimal environment, and `INHERITED_ENV` in `session.mjs` lists what does. The key is replaced with `[redacted]` in the saved transcripts.
 - `npx` with access to the npm registry. Each session starts `@playwright/mcp@0.0.84` through it, so this folder adds no workspace package.
 - The browser from the command above. Set `PLAYWRIGHT_BROWSERS_PATH` if you installed it somewhere else.
 
@@ -96,6 +97,7 @@ const { text, step, evidence, verified, invalid } = await explainFailure({
 	failed: [{ id: 'runs_and_returns_both', detail: 'Both answers were a 404' }],
 	outDir,
 	redact: [token],
+	apiKey,
 });
 ```
 

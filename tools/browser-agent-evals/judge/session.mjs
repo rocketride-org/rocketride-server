@@ -6,12 +6,22 @@
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 
-const INHERITED_ENV = ['PATH', 'HOME', 'USER', 'LOGNAME', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL', 'CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_CONFIG_DIR', 'PLAYWRIGHT_BROWSERS_PATH'];
+// No Anthropic credential or endpoint: a session runs on the key it is given, never on one from the shell.
+const INHERITED_ENV = ['PATH', 'HOME', 'USER', 'LOGNAME', 'CLAUDE_CONFIG_DIR', 'PLAYWRIGHT_BROWSERS_PATH'];
 
-/** The minimal environment a `claude -p` session gets: `INHERITED_ENV` from this process, with background features off, plus `extra`. */
-export function sessionEnv(extra = {}) {
+/** Throws unless `apiKey` is a non-empty string, before a session or its scratch files exist. */
+export function checkApiKey(apiKey) {
+	if (typeof apiKey !== 'string' || apiKey === '') throw new Error('a judge session needs an Anthropic API key (EVAL_ANTHROPIC_KEY)');
+}
+
+/**
+ * The minimal environment a `claude -p` session gets: `INHERITED_ENV` from this process, with background features off,
+ * plus `extra`, and `apiKey` as `ANTHROPIC_API_KEY`, its only Anthropic credential.
+ */
+export function sessionEnv(apiKey, extra = {}) {
+	checkApiKey(apiKey);
 	const inherited = INHERITED_ENV.filter((name) => process.env[name]).map((name) => [name, process.env[name]]);
-	return { ...Object.fromEntries(inherited), LANG: 'en_US.UTF-8', TERM: 'dumb', ENABLE_TOOL_SEARCH: 'false', CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', DISABLE_AUTOUPDATER: '1', DISABLE_TELEMETRY: '1', DISABLE_ERROR_REPORTING: '1', ...extra };
+	return { ...Object.fromEntries(inherited), LANG: 'en_US.UTF-8', TERM: 'dumb', ENABLE_TOOL_SEARCH: 'false', CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', DISABLE_AUTOUPDATER: '1', DISABLE_TELEMETRY: '1', DISABLE_ERROR_REPORTING: '1', ...extra, ANTHROPIC_API_KEY: apiKey };
 }
 
 /** Reads a `stream-json` transcript into its events, skipping lines that don't parse. */

@@ -74,9 +74,10 @@ function findRejection(events, result) {
  * @param {number} [options.timeoutMs] Time limit for the session.
  * @param {string} options.outDir Receives `explain.jsonl`, the session's transcript, and `explain.stderr`. Must be outside `trialDir`, or the session could read its own transcript and quote it.
  * @param {string[]} [options.redact] Values of 8 characters or more are replaced in the saved transcript and the lead.
+ * @param {string} options.apiKey The Anthropic API key the session runs on, as `ANTHROPIC_API_KEY`. It is replaced in the saved transcript too.
  * @returns {Promise<Lead>} `invalid` names why the session's claims don't count. A session killed at its time limit reports no cost.
  */
-export async function explainFailure({ trialDir, failed, model = 'claude-sonnet-5-5', budgetUsd = 0.5, timeoutMs = 300_000, outDir, redact = [] }) {
+export async function explainFailure({ trialDir, failed, model = 'claude-sonnet-5-5', budgetUsd = 0.5, timeoutMs = 300_000, outDir, redact = [], apiKey }) {
 	const root = fs.realpathSync(trialDir);
 	const absoluteOutDir = path.resolve(outDir);
 	if (`${absoluteOutDir}${path.sep}`.startsWith(`${path.resolve(trialDir)}${path.sep}`)) throw new Error(`outDir ${outDir} is inside trialDir ${trialDir}`);
@@ -87,9 +88,9 @@ export async function explainFailure({ trialDir, failed, model = 'claude-sonnet-
 	const prompt = `Checks this trial failed:\n${failed.map(({ id, detail }) => `- ${id}: ${detail}`).join('\n')}`;
 	// --restricted confines the file tools to cwd even if an allow rule, such as a managed policy, would let a read through.
 	const args = ['-p', prompt, '--model', model, '--system-prompt', SYSTEM, '--tools', TOOLS.join(','), '--restricted', '--strict-mcp-config', '--setting-sources', '', '--disable-slash-commands', '--no-chrome', '--no-session-persistence', '--permission-mode', 'dontAsk', '--output-format', 'stream-json', '--verbose', '--json-schema', JSON.stringify(SCHEMA), '--max-budget-usd', String(budgetUsd)];
-	const finished = await runClaude(args, { cwd: root, env: sessionEnv(), transcript, stderr, timeoutMs });
+	const finished = await runClaude(args, { cwd: root, env: sessionEnv(apiKey), transcript, stderr, timeoutMs });
 
-	scrub([transcript, stderr], redact);
+	scrub([transcript, stderr], [...redact, apiKey]);
 	const events = parseEvents(fs.readFileSync(transcript, 'utf8'));
 	const result = events.findLast((event) => event.type === 'result');
 	const costUsd = result?.total_cost_usd ?? null;

@@ -14,6 +14,8 @@ import { checkEvidence, explainFailure } from './explain.mjs';
 import { judgeApp } from './judge.mjs';
 
 const TOKEN = 'seeded-token-value';
+const EVAL_KEY = 'eval-anthropic-key-value';
+const SHELL_CREDENTIALS = ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_BASE_URL'];
 const CHECKLIST = ['First expectation', 'Second expectation'];
 
 const INIT = { type: 'system', subtype: 'init', tools: ['StructuredOutput', 'mcp__playwright__browser_navigate'] };
@@ -48,6 +50,7 @@ const fs = require('fs');
 const root = ${JSON.stringify(root)};
 const count = fs.existsSync(root + '/count') ? Number(fs.readFileSync(root + '/count', 'utf8')) : 0;
 fs.writeFileSync(root + '/count', String(count + 1));
+fs.writeFileSync(root + '/env.json', JSON.stringify(Object.fromEntries(${JSON.stringify(SHELL_CREDENTIALS)}.map((name) => [name, process.env[name]]))));
 const text = JSON.parse(fs.readFileSync(root + '/transcripts.json', 'utf8'))[count];
 if (text === 'HANG') setTimeout(() => {}, 60000);
 else process.stdout.write(text);
@@ -66,7 +69,7 @@ describe('judgeApp', () => {
 	/** Runs judgeApp against a fake `claude` that prints one given transcript per run. */
 	async function judge(transcripts, options = {}) {
 		const outDir = path.join(stage(transcripts), 'out');
-		return { outDir, result: await judgeApp({ url: 'http://127.0.0.1:1/', checklist: CHECKLIST, runs: transcripts.length, outDir, ...options }) };
+		return { outDir, result: await judgeApp({ url: 'http://127.0.0.1:1/', checklist: CHECKLIST, runs: transcripts.length, outDir, apiKey: EVAL_KEY, ...options }) };
 	}
 
 	const rollUps = [
@@ -132,6 +135,26 @@ describe('judgeApp', () => {
 		assert.equal(result.verdict, 'pass');
 	});
 
+	it('runs the session on the given key alone, never on an Anthropic credential from the shell', async () => {
+		const saved = Object.fromEntries(SHELL_CREDENTIALS.map((name) => [name, process.env[name]]));
+		for (const name of SHELL_CREDENTIALS) process.env[name] = `shell-${name.toLowerCase()}`;
+		try {
+			const shown = transcript({ lines: lines('pass', 'pass').map((line) => ({ ...line, saw: `The page showed ${EVAL_KEY}` })), overall: 'pass' });
+			const { outDir } = await judge([shown]);
+			assert.deepEqual(JSON.parse(fs.readFileSync(path.join(root, 'env.json'), 'utf8')), { ANTHROPIC_API_KEY: EVAL_KEY });
+			assert.ok(!fs.readFileSync(path.join(outDir, 'run-1.jsonl'), 'utf8').includes(EVAL_KEY));
+		} finally {
+			for (const [name, value] of Object.entries(saved)) {
+				if (value === undefined) delete process.env[name];
+				else process.env[name] = value;
+			}
+		}
+	});
+
+	it('refuses to start a session without a key', async () => {
+		await assert.rejects(judge([ALL_PASS], { apiKey: undefined }), /EVAL_ANTHROPIC_KEY/);
+	});
+
 	it('stops a session at its time limit and counts the run as invalid', async () => {
 		const { result } = await judge(['HANG'], { timeoutMs: 200 });
 		assert.equal(result.verdict, 'inconclusive');
@@ -142,7 +165,7 @@ describe('judgeApp', () => {
 		const checklist = path.join(root, 'checklist.txt');
 		fs.writeFileSync(checklist, CHECKLIST.join('\n'));
 		const cli = fileURLToPath(new URL('./cli.mjs', import.meta.url));
-		const { status, stdout } = spawnSync(process.execPath, [cli, '--url', 'http://127.0.0.1:1/', '--checklist', checklist, '--out', path.join(root, 'no-claude'), '--runs', '1'], { encoding: 'utf8', timeout: 20000, env: { PATH: path.join(root, 'no-such-dir') } });
+		const { status, stdout } = spawnSync(process.execPath, [cli, '--url', 'http://127.0.0.1:1/', '--checklist', checklist, '--out', path.join(root, 'no-claude'), '--runs', '1'], { encoding: 'utf8', timeout: 20000, env: { PATH: path.join(root, 'no-such-dir'), EVAL_ANTHROPIC_KEY: EVAL_KEY } });
 		assert.equal(status, 2);
 		assert.match(stdout, /could not start claude/);
 	});
@@ -175,7 +198,7 @@ describe('explainFailure', () => {
 	async function explain(text, options = {}) {
 		const dir = stage([text]);
 		const outDir = path.join(dir, 'out');
-		return { outDir, lead: await explainFailure({ trialDir: trialIn(dir), failed: FAILED, outDir, ...options }) };
+		return { outDir, lead: await explainFailure({ trialDir: trialIn(dir), failed: FAILED, outDir, apiKey: EVAL_KEY, ...options }) };
 	}
 
 	it('verifies a lead whose quote is in its file', async () => {
@@ -228,6 +251,6 @@ describe('explainFailure', () => {
 
 	it('refuses an outDir inside the trial folder, where the session could quote its own transcript', async () => {
 		const trialDir = trialIn(stage([explained(LEAD)]));
-		await assert.rejects(explainFailure({ trialDir, failed: FAILED, outDir: path.join(trialDir, 'explain') }), /inside/);
+		await assert.rejects(explainFailure({ trialDir, failed: FAILED, outDir: path.join(trialDir, 'explain'), apiKey: EVAL_KEY }), /inside/);
 	});
 });

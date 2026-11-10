@@ -6,7 +6,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { parseEvents, runClaude, scrub, sessionEnv } from './session.mjs';
+import { checkApiKey, parseEvents, runClaude, scrub, sessionEnv } from './session.mjs';
 
 /**
  * @typedef {'pass' | 'fail' | 'inconclusive'} Verdict
@@ -76,7 +76,7 @@ function parseTranscript(text, lineCount) {
 	return { invalidReason, lines: invalidReason ? [] : result.structured_output.lines, overall: invalidReason ? null : result.structured_output.overall, costUsd: result?.total_cost_usd ?? null };
 }
 
-async function judgeOnce(run, { url, checklist, model, budgetUsd, timeoutMs, outDir, localStorage }) {
+async function judgeOnce(run, { url, checklist, model, budgetUsd, timeoutMs, outDir, localStorage, apiKey }) {
 	const origin = new URL(url).origin;
 	const scratch = path.join(outDir, `run-${run}.scratch`);
 	const tmp = path.join(scratch, 'tmp');
@@ -89,7 +89,7 @@ async function judgeOnce(run, { url, checklist, model, budgetUsd, timeoutMs, out
 
 	const prompt = `URL: ${url}\nCurrent local date and time: ${new Date().toString()}\n\nChecklist:\n${checklist.map((line, index) => `${index + 1}. ${line}`).join('\n')}`;
 	const args = ['-p', prompt, '--model', model, '--system-prompt', SYSTEM, '--tools', '', '--mcp-config', mcpConfig, '--strict-mcp-config', '--allowedTools', ALLOWED.join(','), '--disallowedTools', BLOCKED.join(','), '--setting-sources', '', '--disable-slash-commands', '--no-chrome', '--no-session-persistence', '--permission-mode', 'dontAsk', '--output-format', 'stream-json', '--verbose', '--json-schema', JSON.stringify(SCHEMA), '--max-budget-usd', String(budgetUsd)];
-	const env = sessionEnv({ TMPDIR: tmp, PWTEST_SOCKETS_DIR: sockets });
+	const env = sessionEnv(apiKey, { TMPDIR: tmp, PWTEST_SOCKETS_DIR: sockets });
 
 	const started = Date.now();
 	let finished;
@@ -105,7 +105,7 @@ async function judgeOnce(run, { url, checklist, model, budgetUsd, timeoutMs, out
 	const durationMs = Date.now() - started;
 
 	// A page can show or log a seeded value, and it would land in the transcript.
-	scrub([transcript, stderr], Object.values(localStorage));
+	scrub([transcript, stderr], [...Object.values(localStorage), apiKey]);
 	const parsed = parseTranscript(fs.readFileSync(transcript, 'utf8'), checklist.length);
 	const invalidReason = parsed.invalidReason && (finished.failure ?? parsed.invalidReason);
 	return { run, verdict: invalidReason ? 'inconclusive' : runVerdict(parsed.lines, parsed.overall), ...parsed, invalidReason, durationMs, exit: finished.exit, transcript };
@@ -128,17 +128,19 @@ async function judgeOnce(run, { url, checklist, model, budgetUsd, timeoutMs, out
  * @param {number} [options.timeoutMs] Time limit for each run.
  * @param {string} options.outDir Receives each run's transcript. Scratch files live here during a run. The judge can see this path, so don't name it after the expected verdict.
  * @param {Record<string, string>} [options.localStorage] Seeded for the URL's origin. Values of 8 characters or more are replaced in the saved transcripts.
+ * @param {string} options.apiKey The Anthropic API key the sessions run on, as `ANTHROPIC_API_KEY`. No other Anthropic credential reaches them, and the key is replaced in the saved transcripts.
  * @returns {Promise<JudgeResult>} `costUsd` adds up what the runs reported, and a run killed at its time limit reports nothing.
  */
-export async function judgeApp({ url, checklist, runs = 3, model = 'claude-sonnet-5-5', budgetUsd = 0.6, timeoutMs = 600_000, outDir, localStorage = {} }) {
+export async function judgeApp({ url, checklist, runs = 3, model = 'claude-sonnet-5-5', budgetUsd = 0.6, timeoutMs = 600_000, outDir, localStorage = {}, apiKey }) {
 	if (checklist.length === 0) throw new Error('checklist has no lines');
+	checkApiKey(apiKey);
 	if (!Number.isInteger(runs) || runs < 1) throw new Error(`runs must be a positive integer, got ${runs}`);
 	const absoluteOutDir = path.resolve(outDir);
 	fs.mkdirSync(absoluteOutDir, { recursive: true });
 
 	const completed = [];
 	for (let run = 1; run <= runs; run++) {
-		completed.push(await judgeOnce(run, { url, checklist, model, budgetUsd, timeoutMs, outDir: absoluteOutDir, localStorage }));
+		completed.push(await judgeOnce(run, { url, checklist, model, budgetUsd, timeoutMs, outDir: absoluteOutDir, localStorage, apiKey }));
 	}
 
 	const lines = checklist.map((text, index) => {
