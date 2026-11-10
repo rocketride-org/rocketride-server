@@ -774,6 +774,7 @@ def test_a_failed_process_name_read_falls_back_and_is_read_again(monkeypatch):
         nvmlDeviceGetHandleByUUID=lambda uuid: 'handle',
         nvmlDeviceGetComputeRunningProcesses=lambda handle: only_this_process,
         nvmlDeviceGetGraphicsRunningProcesses=lambda handle: [],
+        nvmlDeviceGetProcessUtilization=lambda handle, since: [],
     )
     cuda = types.SimpleNamespace(get_device_properties=lambda index: types.SimpleNamespace(uuid='0'))
     warnings = []
@@ -787,6 +788,223 @@ def test_a_failed_process_name_read_falls_back_and_is_read_again(monkeypatch):
     assert neighbours() is True
     assert neighbours() is False  # read now: only this process is on the GPU
     assert len(warnings) == 1
+
+
+def test_an_idle_engine_process_is_not_a_neighbour():
+    """A process named like this one that was not seen busy only holds a context."""
+    assert not _has_neighbour({10, 11, 20}, 10, 'engine.exe', _name_of, busy=set())
+    assert _has_neighbour({10, 11, 20}, 10, 'engine.exe', _name_of, busy={11})
+    assert not _has_neighbour({10, 11, 20}, 10, 'engine.exe', _name_of, busy={20})  # a busy desktop does not count
+
+
+def test_without_utilisation_every_listed_process_counts():
+    """Without per-process utilisation (``busy`` is None) the old rule holds."""
+    assert _has_neighbour({10, 11}, 10, 'engine.exe', _name_of, busy=None)
+    assert _has_neighbour({10, 30}, 10, 'engine.exe', _name_of, busy=None)
+
+
+def test_an_unnamed_process_counts_only_when_busy():
+    """A process that cannot be named is told apart by utilisation when this process is listed."""
+    assert not _has_neighbour({10, 30}, 10, 'engine.exe', _name_of, busy=set())
+    assert _has_neighbour({10, 30}, 10, 'engine.exe', _name_of, busy={30})
+
+
+def test_in_another_pid_namespace_unnamed_processes_count_whatever_their_utilisation():
+    """Host pids cannot be matched to this process, so an idle unnamed one still counts beyond the first."""
+    assert not _has_neighbour({30}, 5, 'engine', _name_of, busy=set())
+    assert _has_neighbour({30, 31}, 5, 'engine', _name_of, busy=set())
+
+
+def test_in_another_pid_namespace_a_named_idle_process_is_not_a_neighbour():
+    """A host pid that can be named is told apart by utilisation as usual."""
+    names = {11: 'engine'}
+    assert not _has_neighbour({11}, 5, 'engine', lambda pid: names.get(pid, '?'), busy=set())
+    assert _has_neighbour({11}, 5, 'engine', lambda pid: names.get(pid, '?'), busy={11})
+
+
+class _NotFound(Exception):
+    """NVML's "no sample" error."""
+
+    value = 6
+
+
+def _sample(pid, sm, mem=0):
+    """Build a fake NVML utilisation sample.
+
+    Args:
+        pid: The process id.
+        sm: Its SM utilisation.
+        mem: Its memory utilisation.
+
+    Returns:
+        The sample.
+    """
+    return types.SimpleNamespace(pid=pid, smUtil=sm, memUtil=mem)
+
+
+def test_busy_pids_are_those_with_a_sample_above_zero():
+    """Only processes with SM or memory utilisation count as busy."""
+    seen = []
+
+    def util(handle, since):
+        """Record the start of the window and return the samples."""
+        seen.append(since)
+        return [_sample(1, 80), _sample(2, 0), _sample(3, 0, 5)]
+
+    nvml = types.SimpleNamespace(nvmlDeviceGetProcessUtilization=util, NVML_ERROR_NOT_FOUND=6)
+    before = time.time()
+    assert budgetmod._busy_pids(nvml, 'handle', 10.0) == {1, 3}
+    assert (before - 10.0) * 1e6 - 1 <= seen[0] <= (time.time() - 10.0) * 1e6  # int() truncates
+
+
+def test_no_sample_in_the_window_means_nothing_was_busy():
+    """NVML's not-found error is an empty answer, not a failure."""
+
+    def util(handle, since):
+        """Raise as NVML does when nothing ran."""
+        raise _NotFound()
+
+    nvml = types.SimpleNamespace(nvmlDeviceGetProcessUtilization=util, NVML_ERROR_NOT_FOUND=6)
+    assert budgetmod._busy_pids(nvml, 'handle', 10.0) == set()
+
+
+def test_another_utilisation_error_is_not_an_empty_answer():
+    """Any other NVML error is raised, so the caller keeps the old rule."""
+
+    def util(handle, since):
+        """Raise as NVML does on a device without the call."""
+        raise RuntimeError('not supported')
+
+    nvml = types.SimpleNamespace(nvmlDeviceGetProcessUtilization=util, NVML_ERROR_NOT_FOUND=6)
+    with pytest.raises(RuntimeError):
+        budgetmod._busy_pids(nvml, 'handle', 10.0)
+
+
+class _FakeNvml:
+    """NVML with a settable process list and per-process busy times."""
+
+    NVML_ERROR_NOT_FOUND = 6
+
+    def __init__(self, listed):
+        """List the given pids; ``busy_until`` maps a pid to the time it last ran.
+
+        Args:
+            listed: The pids on the device.
+        """
+        self.listed = listed
+        self.busy_until = {}
+        self.fail = None
+
+    def nvmlInit(self):
+        """Do nothing."""
+
+    def nvmlDeviceGetHandleByUUID(self, uuid):
+        """Return a placeholder handle."""
+        return 'handle'
+
+    def nvmlDeviceGetComputeRunningProcesses(self, handle):
+        """List the pids."""
+        return [types.SimpleNamespace(pid=pid) for pid in self.listed]
+
+    def nvmlDeviceGetGraphicsRunningProcesses(self, handle):
+        """List nothing."""
+        return []
+
+    def nvmlDeviceGetProcessUtilization(self, handle, since):
+        """Return a sample for each process that ran after ``since``, as NVML does."""
+        if self.fail:
+            raise self.fail
+        samples = [_sample(pid, 80) for pid, last in self.busy_until.items() if last * 1e6 > since]
+        if not samples:
+            raise _NotFound()
+        return samples
+
+
+@pytest.fixture
+def _nvml(monkeypatch):
+    """Install a fake NVML, psutil, torch and clock, this process just seen busy; return (probe, NVML, clock)."""
+    own = os.getpid()
+    clock = [1000.0]
+    nvml = _FakeNvml([own, 7777])
+    nvml.busy_until[own] = clock[0]
+    names = {own: 'engine.exe', 7777: 'engine.exe'}
+    cuda = types.SimpleNamespace(get_device_properties=lambda index: types.SimpleNamespace(uuid='0'))
+    process = types.SimpleNamespace(Process=lambda pid=own: types.SimpleNamespace(name=lambda: names[pid]))
+    monkeypatch.setitem(sys.modules, 'psutil', process)
+    monkeypatch.setitem(sys.modules, 'pynvml', nvml)
+    monkeypatch.setitem(sys.modules, 'ai.common.torch', types.SimpleNamespace(torch=types.SimpleNamespace(cuda=cuda)))
+    monkeypatch.setattr(budgetmod, '_process_name', lambda pid: names.get(pid, '?'))
+    monkeypatch.setattr(budgetmod, 'time', types.SimpleNamespace(time=lambda: clock[0], monotonic=time.monotonic))
+    return budgetmod._nvml_neighbours('cuda:0'), nvml, clock
+
+
+def test_an_idle_neighbour_does_not_count(_nvml):
+    """The idle process of a finished task holds a context but has run nothing for a minute."""
+    neighbours, nvml, clock = _nvml
+    nvml.busy_until[7777] = clock[0] - 60
+    assert neighbours() is False
+
+
+def test_a_busy_neighbour_counts_until_the_window_has_passed(_nvml):
+    """A neighbour counts while its last sample is inside the window, and not after."""
+    neighbours, nvml, clock = _nvml
+    nvml.busy_until[7777] = clock[0]
+    assert neighbours() is True
+    clock[0] += budgetmod.BUSY_WINDOW_S - 1
+    assert neighbours() is True
+    clock[0] += 2  # the neighbour paused for longer than the window
+    assert neighbours() is False
+    nvml.busy_until[7777] = clock[0]  # and it resumes
+    assert neighbours() is True
+
+
+def test_samples_count_once_they_have_shown_this_process_busy(_nvml, monkeypatch):
+    """Until NVML has sampled this process busy, an idle-looking neighbour counts; from then on it does not."""
+    neighbours, nvml, clock = _nvml
+    warnings = []
+    monkeypatch.setattr(budgetmod, 'logger', types.SimpleNamespace(warning=lambda *args: warnings.append(args)))
+    del nvml.busy_until[os.getpid()]
+    nvml.busy_until[3908] = clock[0]  # a busy desktop says nothing about engine processes
+    assert neighbours() is True
+    nvml.busy_until[os.getpid()] = clock[0]
+    assert neighbours() is False
+    clock[0] += budgetmod.BUSY_WINDOW_S + 1  # this process idle since
+    assert neighbours() is False
+    assert not warnings  # the first answer came from the samples, not from a failed read
+
+
+def test_a_driver_that_samples_no_process_keeps_the_old_rule(_nvml, monkeypatch):
+    """With no sample of this process ever, every listed engine process counts, without a warning."""
+    neighbours, nvml, clock = _nvml
+    del nvml.busy_until[os.getpid()]
+    warnings = []
+    monkeypatch.setattr(budgetmod, 'logger', types.SimpleNamespace(warning=lambda *args: warnings.append(args)))
+    assert neighbours() is True
+    clock[0] += 60
+    assert neighbours() is True
+    assert not warnings
+
+
+def test_without_a_utilisation_call_every_listed_engine_counts_and_it_is_logged_once(_nvml, monkeypatch):
+    """A device that cannot report utilisation keeps the old rule, with one warning."""
+    neighbours, nvml, clock = _nvml
+    nvml.fail = RuntimeError('not supported')
+    warnings = []
+    monkeypatch.setattr(budgetmod, 'logger', types.SimpleNamespace(warning=lambda *args: warnings.append(args)))
+    assert neighbours() is True
+    assert neighbours() is True
+    assert len(warnings) == 1
+    assert 'utilisation' in warnings[0][0]
+
+
+def test_a_failed_utilisation_read_is_tried_again(_nvml):
+    """A utilisation error keeps the old rule for that listing only, even once the samples were trusted."""
+    neighbours, nvml, clock = _nvml
+    assert neighbours() is False
+    nvml.fail = RuntimeError('busy driver')
+    assert neighbours() is True
+    nvml.fail = None
+    assert neighbours() is False
 
 
 def test_the_cuda_release_hands_the_cache_back():

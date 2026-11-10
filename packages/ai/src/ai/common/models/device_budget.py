@@ -14,15 +14,25 @@ allocation seen when the device was last idle, so a lasting allocation made mean
 again. Other devices (CPU) admit up to ``CPU_SLOTS`` calls.
 
 Another engine process on the same GPU reads the same free memory, so two budgets would
-over-commit the card. While NVML lists one there (or a process it cannot name), calls run
-one at a time, as with the old lock; for ``SHARED_WAIT_S`` after a neighbour appears, a
-lone call also waits until its cost fits, while the calls the neighbour admitted alone
-drain. Only processes named like this one, or not named, count: the desktop, browsers
-and other servers are ignored.
+over-commit the card. While NVML lists one there (or a process it cannot name) and has
+seen it busy on the GPU in the last ``BUSY_WINDOW_S``, calls run one at a time, as with the
+old lock; for ``SHARED_WAIT_S`` after a neighbour appears, a lone call also waits until its
+cost fits, while the calls the neighbour admitted alone drain. Only processes named like
+this one, or not named, count: the desktop, browsers and other servers are ignored. A
+process that only holds a CUDA context (the idle process of a finished task, alive for its
+idle TTL) does not count, since it takes no compute; its memory is still used, which the
+free-memory reads see. A process that has just started may show start-up samples and count
+for about the same window. A neighbour that pauses for longer than the window stops
+counting and counts again when it resumes, as a new neighbour does. Where NVML cannot
+report per-process utilisation, every listed process counts, and so it does until the
+samples have once shown this process busy: a driver that samples no engine process would
+make every neighbour look idle. In another PID namespace NVML lists host pids, so this
+process does not find itself in the samples, and an unnamed process cannot be told from
+this one either.
 
 Torch keeps the memory a call frees cached for this process; the driver, and so another
 process, sees it as used. The guard hands that cache back once the device has been idle
-for ``IDLE_RELEASE_S``, and before each call while a neighbour is listed, so neither an
+for ``IDLE_RELEASE_S``, and before each call while a neighbour counts, so neither an
 idle process nor one that ran several calls alone holds memory the other one needs.
 ``torch.cuda.empty_cache()`` takes no device: a release hands back the process's unused
 cache on every device, which other models of the process then allocate again. A cached
@@ -64,6 +74,9 @@ RECHECK_S = 0.5
 # How long the list of processes on a GPU is reused
 NEIGHBOURS_TTL_S = 1.0
 
+# How recently NVML must have seen a neighbour busy on the GPU for it to count
+BUSY_WINDOW_S = 10.0
+
 # After a neighbour appears, how long a lone call waits for its cost to fit
 SHARED_WAIT_S = 30.0
 
@@ -75,7 +88,7 @@ _MB = float(1 << 20)
 # (driver free MB, own torch cache not in use MB, own torch allocated MB)
 Probe = Callable[[], Tuple[float, float, float]]
 
-# Whether another engine process may hold the device
+# Whether another engine process busy on the device may hold it
 Neighbours = Callable[[], bool]
 
 # Hands this process's unused torch cache, on every device, back to the driver
@@ -153,7 +166,35 @@ def _cuda_warm(device: str) -> Warm:
     return warm
 
 
-def _has_neighbour(pids: Set[int], own_pid: int, own_name: str, name_of: Callable[[int], str]) -> bool:
+def _busy_pids(pynvml: Any, handle: Any, window_s: float) -> Optional[Set[int]]:
+    """Find the processes NVML saw busy on a GPU in the last ``window_s`` seconds.
+
+    Args:
+        pynvml: The NVML binding.
+        handle: The NVML handle of the device.
+        window_s: How far back to look.
+
+    Returns:
+        The pids with a utilisation sample above zero; empty when NVML has no sample at all
+        (nothing ran); ``None`` when it cannot report per-process utilisation.
+    """
+    try:
+        samples = pynvml.nvmlDeviceGetProcessUtilization(handle, int((time.time() - window_s) * 1e6))
+    except Exception as e:
+        # NVML answers "not found" when no process had a sample in the window
+        if getattr(e, 'value', None) == getattr(pynvml, 'NVML_ERROR_NOT_FOUND', None):
+            return set()
+        raise
+    return {s.pid for s in samples if s.smUtil > 0 or s.memUtil > 0}
+
+
+def _has_neighbour(
+    pids: Set[int],
+    own_pid: int,
+    own_name: str,
+    name_of: Callable[[int], str],
+    busy: Optional[Set[int]] = None,
+) -> bool:
     """Whether the processes NVML lists on a GPU include another engine process.
 
     Args:
@@ -161,20 +202,30 @@ def _has_neighbour(pids: Set[int], own_pid: int, own_name: str, name_of: Callabl
         own_pid: This process's id.
         own_name: This process's executable name, lower case.
         name_of: Names a process id; ``'?'`` when it cannot.
+        busy: The pids NVML saw busy recently; ``None`` when it cannot tell, and then every
+            listed process counts.
 
     Returns:
-        True if another process is named like this one or cannot be named. In another PID
-        namespace, where NVML lists host pids, one unnamed process is taken to be this one.
+        True if another process is named like this one or cannot be named, and is in ``busy``.
+        In another PID namespace, where NVML lists host pids, one unnamed process is taken to
+        be this one and the other unnamed ones count whether busy or not.
     """
+    foreign = own_pid not in pids
     unnamed = 0
     for pid in pids - {own_pid}:
         name = name_of(pid)
-        if name == '?':
+        if name != '?' and name.lower() != own_name:
+            continue
+        if name == '?' and foreign:
+            # a host pid: it cannot be told from this process, so utilisation proves nothing
             unnamed += 1
-        elif name.lower() == own_name:
+        elif busy is not None and pid not in busy:
+            continue
+        elif name == '?':
+            unnamed += 1
+        else:
             return True
-    # in another PID namespace NVML lists host pids, and one of the unnamed ones is this process
-    if own_pid not in pids and unnamed:
+    if foreign and unnamed:
         unnamed -= 1
     return unnamed > 0
 
@@ -186,14 +237,42 @@ def _nvml_neighbours(device: str) -> Neighbours:
         device: The device, ``'cuda:N'``.
 
     Returns:
-        A callable telling whether another engine process may hold the device; True when NVML
-        cannot be read.
+        A callable telling whether another engine process busy on the device may hold it; True
+        when NVML cannot be read. Without per-process utilisation, and until its samples have
+        once shown this process busy, any listed process counts.
     """
     index = int(device.split(':')[1])
     nvml: Dict[str, Any] = {}
 
+    def busy_now(pynvml: Any) -> Optional[Set[int]]:
+        """Return the pids NVML saw busy on the device lately, or ``None`` when its samples prove nothing.
+
+        Args:
+            pynvml: The NVML binding, initialised, with the device handle in ``nvml``.
+
+        Returns:
+            The busy pids; ``None`` without per-process utilisation (logged once) or until the
+            samples have once shown this process busy.
+        """
+        try:
+            busy = _busy_pids(pynvml, nvml['handle'], BUSY_WINDOW_S)
+        except Exception as e:
+            if not nvml.get('util_warned'):
+                nvml['util_warned'] = True
+                logger.warning(
+                    '%s: cannot read GPU process utilisation (%s); every engine process on it counts', device, e
+                )
+            return None
+        # a driver that samples no engine process would make every neighbour idle
+        nvml['seen_self'] = nvml.get('seen_self') or os.getpid() in busy
+        return busy if nvml['seen_self'] else None
+
     def neighbours() -> bool:
-        """Return whether NVML lists another engine process on the device (True when it cannot tell)."""
+        """Tell whether another engine process busy on the device may hold it.
+
+        Returns:
+            True if NVML lists one, or cannot tell.
+        """
         try:
             import psutil
             import pynvml
@@ -208,7 +287,7 @@ def _nvml_neighbours(device: str) -> Neighbours:
             pids = set()
             for listing in (pynvml.nvmlDeviceGetComputeRunningProcesses, pynvml.nvmlDeviceGetGraphicsRunningProcesses):
                 pids.update(proc.pid for proc in listing(nvml['handle']))
-            return _has_neighbour(pids, os.getpid(), nvml['name'], _process_name)
+            return _has_neighbour(pids, os.getpid(), nvml['name'], _process_name, busy_now(pynvml))
         except Exception as e:
             # no NVML, or a device it cannot resolve (e.g. a MIG slice): assume a neighbour
             if not nvml.get('warned'):
@@ -235,7 +314,7 @@ class DeviceBudget:
         Args:
             device: ``'cuda:N'``, or another device such as ``'cpu'``.
             probe: Reads the device's memory; the CUDA probe by default on a GPU.
-            neighbours: Tells whether another engine process holds the device; NVML by default on a GPU.
+            neighbours: Tells whether another engine process busy on the device may hold it; NVML by default on a GPU.
             release: Hands this process's unused cache back; ``torch.cuda.empty_cache`` by default on a GPU.
             warm: Creates the calling thread's cuBLAS workspace in a pool of its own; by default on a GPU.
         """
@@ -344,7 +423,7 @@ class DeviceBudget:
                 logger.warning('%s: cannot release the torch cache (%s)', self.device, e)
 
     def _sharing(self) -> bool:
-        """Whether another engine process holds the device, asked at most every ``NEIGHBOURS_TTL_S``.
+        """Whether another engine process busy on the device may hold it, asked at most every ``NEIGHBOURS_TTL_S``.
 
         Returns:
             The last answer of ``neighbours``; the moment it turns true starts ``SHARED_WAIT_S``.
