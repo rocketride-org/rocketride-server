@@ -24,6 +24,13 @@ Torch keeps the memory a call frees cached for this process; the driver, and so 
 process, sees it as used. The guard hands that cache back once the device has been idle
 for ``IDLE_RELEASE_S``, and before each call while a neighbour is listed, so neither an
 idle process nor one that ran several calls alone holds memory the other one needs.
+``torch.cuda.empty_cache()`` takes no device: a release hands back the process's unused
+cache on every device, which other models of the process then allocate again. A cached
+block goes back only when nothing in it is in use, and the cuBLAS workspace a thread gets
+with its first matrix product lives as long as the thread's handle; allocated inside a
+large cached block, it would keep the whole block. So the guard creates that workspace,
+when a thread first enters on a GPU, in a memory pool of its own, and an idle process
+keeps its models and one workspace per thread (8 MiB, 32 MiB on Hopper).
 
 With ``--modelserver`` inference runs in the server, which has its own dispatcher, and
 the guard is a no-op.
@@ -71,8 +78,11 @@ Probe = Callable[[], Tuple[float, float, float]]
 # Whether another engine process may hold the device
 Neighbours = Callable[[], bool]
 
-# Hands this process's unused torch cache on the device back to the driver
+# Hands this process's unused torch cache, on every device, back to the driver
 Release = Callable[[], None]
+
+# Creates the calling thread's cuBLAS workspace on the device in a pool of its own
+Warm = Callable[[], None]
 
 
 def _cuda_probe(device: str) -> Probe:
@@ -98,25 +108,49 @@ def _cuda_probe(device: str) -> Probe:
     return probe
 
 
-def _cuda_release(device: str) -> Release:
-    """Hand this process's unused torch cache on a CUDA device back to the driver.
+def _cuda_release() -> Release:
+    """Hand this process's unused torch cache back to the driver.
+
+    Returns:
+        A callable that runs ``torch.cuda.empty_cache()``, which takes no device: the unused
+        cache of every device goes back.
+    """
+
+    def release() -> None:
+        """Run ``torch.cuda.empty_cache()``; memory in use stays."""
+        from ai.common.torch import torch
+
+        torch.cuda.empty_cache()
+
+    return release
+
+
+def _cuda_warm(device: str) -> Warm:
+    """Create a thread's cuBLAS workspace on a CUDA device in a memory pool of its own.
 
     Args:
         device: The device, ``'cuda:N'``.
 
     Returns:
-        A callable that runs ``torch.cuda.empty_cache()`` on that device.
+        A callable that, run in a thread, makes cuBLAS allocate that thread's workspace on the
+        device from the pool, where it cannot keep a large cached block from going back.
     """
     index = int(device.split(':')[1])
+    pool: Dict[str, Any] = {}
+    lock = threading.Lock()
 
-    def release() -> None:
-        """Run ``torch.cuda.empty_cache()`` on the device; memory in use stays."""
+    def warm() -> None:
+        """Allocate the calling thread's cuBLAS workspace on the device from the pool."""
         from ai.common.torch import torch
 
-        with torch.cuda.device(index):
-            torch.cuda.empty_cache()
+        with lock:
+            if 'pool' not in pool:
+                pool['pool'] = torch.cuda.MemPool()
+        with torch.cuda.device(index), torch.cuda.use_mem_pool(pool['pool']):
+            # the first handle request of a thread allocates its workspace; a later one reuses it
+            torch.cuda.current_blas_handle()
 
-    return release
+    return warm
 
 
 def _has_neighbour(pids: Set[int], own_pid: int, own_name: str, name_of: Callable[[int], str]) -> bool:
@@ -194,6 +228,7 @@ class DeviceBudget:
         probe: Optional[Probe] = None,
         neighbours: Optional[Neighbours] = None,
         release: Optional[Release] = None,
+        warm: Optional[Warm] = None,
     ):
         """Guard one device.
 
@@ -202,12 +237,14 @@ class DeviceBudget:
             probe: Reads the device's memory; the CUDA probe by default on a GPU.
             neighbours: Tells whether another engine process holds the device; NVML by default on a GPU.
             release: Hands this process's unused cache back; ``torch.cuda.empty_cache`` by default on a GPU.
+            warm: Creates the calling thread's cuBLAS workspace in a pool of its own; by default on a GPU.
         """
         self.device = device
         self._gpu = device.startswith('cuda')
         self._probe = probe if probe or not self._gpu else _cuda_probe(device)
         self._neighbours = neighbours if neighbours or not self._gpu else _nvml_neighbours(device)
-        self._release = release if release or not self._gpu else _cuda_release(device)
+        self._release = release if release or not self._gpu else _cuda_release()
+        self._warm = warm if warm or not self._gpu else _cuda_warm(device)
         self._cond = threading.Condition()
         self._queue: collections.deque = collections.deque()
         self._inside: List[Optional[float]] = []
@@ -215,8 +252,12 @@ class DeviceBudget:
         self._shared = False
         self._shared_since = 0.0
         self._neighbours_read = -float('inf')
-        self._drains = 0
+        self._drained_at = 0.0
+        self._release_due = False
+        self._releaser: Optional[threading.Thread] = None
         self._release_warned = False
+        self._warmed = threading.local()
+        self._warm_failed = False
 
     @contextlib.contextmanager
     def reserve(self, cost_mb: Optional[float]) -> Iterator[None]:
@@ -239,6 +280,8 @@ class DeviceBudget:
                 self._cond.notify_all()
             self._inside.append(cost_mb)
         try:
+            if self._gpu:
+                self._warm_thread()
             yield
         finally:
             with self._cond:
@@ -247,23 +290,48 @@ class DeviceBudget:
                     self._release_when_idle()
                 self._cond.notify_all()
 
+    def _warm_thread(self) -> None:
+        """Create the calling thread's cuBLAS workspace once per thread; a failure is logged once, never raised."""
+        # a flag of the thread, not its id: the OS hands a finished thread's id to a new one
+        if self._warm_failed or getattr(self._warmed, 'done', False):
+            return
+        self._warmed.done = True
+        try:
+            self._warm()
+        except Exception as e:
+            # the workspace then comes with the first matrix product, as without the guard
+            self._warm_failed = True
+            logger.warning('%s: cannot set up the cuBLAS workspace in its own pool (%s)', self.device, e)
+
     def _release_when_idle(self) -> None:
         """Release the cache once the device has stayed idle for ``IDLE_RELEASE_S``; the caller holds the lock."""
-        # calls that come back to back keep the cache; re-allocating it costs each of them
-        self._drains += 1
-        timer = threading.Timer(IDLE_RELEASE_S, self._release_if_still_idle, args=(self._drains,))
-        timer.daemon = True
-        timer.start()
+        self._drained_at = time.monotonic()
+        self._release_due = True
+        if self._releaser is None:
+            # one thread per guard, started on the first drain; reserve wakes it on every change
+            self._releaser = threading.Thread(
+                target=self._release_loop, name=f'device-budget-{self.device}', daemon=True
+            )
+            self._releaser.start()
 
-    def _release_if_still_idle(self, drain: int) -> None:
-        """Release the cache if no call came since the drain that started the timer.
-
-        Args:
-            drain: The drain count when the timer started.
-        """
+    def _release_loop(self) -> None:
+        """Release the cache each time the device has stayed idle for ``IDLE_RELEASE_S`` after a drain."""
         with self._cond:
-            if drain == self._drains and not self._inside and not self._queue:
-                self._free_cache()
+            while True:
+                self._release_or_wait()
+
+    def _release_or_wait(self) -> None:
+        """Release the cache if the idle spell is over, else wait for it to end or for a call; the caller holds the lock."""
+        if not self._release_due or self._inside:
+            self._cond.wait()
+            return
+        # calls that come back to back keep the cache; re-allocating it costs each of them
+        left = self._drained_at + IDLE_RELEASE_S - time.monotonic()
+        if left > 0:
+            self._cond.wait(left)
+            return
+        self._release_due = False
+        self._free_cache()
 
     def _free_cache(self) -> None:
         """Hand the unused cache back to the driver; a failure is logged once, never raised."""
