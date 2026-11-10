@@ -358,12 +358,12 @@ say `public: false`. Otherwise `plans` is empty and `app` is absent. Crawlers
 also get JSON-LD built from the same data: a `SoftwareApplication` for `app`,
 and a `Product` with an `Offer` for each plan whose price is a plain decimal
 number (ASCII digits) and whose currency is a three-letter ISO 4217 code. A
-price change (`invalidate('plans')` from the billing layer) or any app
-deployment change takes effect on the next crawl; other servers pick it up
-within five minutes. A crawler response that carries this data is sent with a
-`max-age` of what remains of those five minutes, so no shared cache keeps it
-longer; other rendered snapshots keep `max-age=3600`. When the data cannot be
-read, crawlers get the page without it.
+price change (`invalidate('plans')` from the billing layer) or a deployment
+change of an app a page names takes effect on the next crawl; other servers
+pick it up within five minutes. A crawler response that carries this data is
+sent with a `max-age` of what remains of those five minutes, so no shared cache
+keeps it longer; other rendered snapshots keep `max-age=3600`. When the data
+cannot be read, crawlers get the page without it.
 
 `/sitemap.xml` and `/llms.txt` list the listed pages, and `/llms.txt` takes
 its heading, blurb and docs link from `site`; redirects never appear in
