@@ -76,7 +76,7 @@ cut, and a run that needs it fails at start. Its data is kept for 30 days.
 ## Backups
 
 - Changes are archived continuously, and a full backup is taken every day.
-  Backups are kept for 30 days.
+  Backups cover the last 30 days; older ones become eligible for deletion.
 - Live data is held on a primary and two replicas; a commit is on at least one
   replica before it is acknowledged.
 - Backups are configured for point-in-time recovery of the whole cluster, never
@@ -85,10 +85,16 @@ cut, and a run that needs it fails at start. Its data is kept for 30 days.
   the only undo for a single database.
 - After a member, team or organization is removed, its data remains in
   separate places, each with its own clock:
-  1. The database itself: kept 30 days after the removal.
-  2. Backups that hold it: kept 30 days after the database is deleted.
-  3. Backup files pruned after that: kept up to 35 more days.
+  1. The database itself: deleted by the daily cleanup once 30 days have
+     passed, later if its final copy fails.
+  2. Backups that hold it: eligible for deletion 30 days after the database
+     is deleted, later while a backup is still needed for recovery.
+  3. Backup files pruned after that: eligible for deletion 35 days later; the
+     storage removes them some time after that.
   4. The final copy taken before deletion: no expiry is set today.
+
+  These are the earliest points at which each copy can be deleted, not dates
+  by which it is gone.
 
 ## Export
 
