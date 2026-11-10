@@ -49,6 +49,7 @@ from ai.account import account as account_singleton
 from ai.account import manifest_push
 from ai.account.app_deploy import (
     _REPLY_MAX_CHARS,
+    _publisher_of,
     _serving_block_of,
     entitled_version_dirs,
     handle_app_add,
@@ -1689,3 +1690,115 @@ async def test_resolve_internal_serves_unapproved_but_not_failed(registry):
     registry.versions[0]['state'] = 'failed'
     resolved = await resolve_app_pins('org1', 'u1', ['t1'])
     assert resolved == []
+
+
+# =============================================================================
+# PUBLISHER: the store's DEVELOPER field is never empty (#2977)
+# =============================================================================
+
+
+def _public_listing(registry, manifest, snapshot):
+    """Bind version 1 publicly with the given stored manifest and binding snapshot.
+
+    ``manifest=None`` models a version with no stored appManifest (a legacy
+    binary deploy): the artifact then carries no metadata. Otherwise the
+    artifact gets the registry entry's metadata attached, as both real
+    backends do for app artifacts.
+    """
+    registry.add_version(1, '1.0.0', state='ready', manifest=manifest)
+    if manifest is None:
+        registry.versions[0]['metadata'].pop('manifest')
+    else:
+        registry.artifacts[1]['metadata'] = registry.versions[0]['metadata']
+    registry.seed_publish(AUD_PUBLIC, 1)
+    registry.publishes[('acme.brandy', 'public~')]['snapshot'] = snapshot
+
+
+@pytest.mark.asyncio
+async def test_resolve_publisher_covers_versions_bound_before_the_snapshot_kept_it(registry):
+    """A binding whose snapshot has no publisher (bound before #2625, or any
+    DB-edition row) still lists the version's declared appManifest.publisher.
+    """
+    _public_listing(registry, {'name': 'Brandy', 'publisher': 'mithilesh_app'}, {'name': 'Brandy'})
+
+    resolved = await resolve_app_pins('org1', 'other-user', [])
+
+    assert resolved[0]['publisher'] == 'mithilesh_app'
+
+
+@pytest.mark.asyncio
+async def test_resolve_publisher_reads_the_version_manifest_before_the_snapshot(registry):
+    """The version's stored appManifest is the listing truth and the only
+    source the DB edition has, so it decides first on both editions; the
+    snapshot copy never overrides it.
+    """
+    _public_listing(
+        registry,
+        {'name': 'Brandy', 'publisher': 'Acme Labs'},
+        {'name': 'Brandy', 'publisher': 'an older copy'},
+    )
+
+    resolved = await resolve_app_pins('org1', 'other-user', [])
+
+    assert resolved[0]['publisher'] == 'Acme Labs'
+
+
+@pytest.mark.asyncio
+async def test_resolve_publisher_falls_back_to_the_snapshot_without_a_stored_manifest(registry):
+    """A version with no stored appManifest lists the binding snapshot's publisher."""
+    _public_listing(registry, None, {'name': 'Brandy', 'publisher': 'Acme Labs'})
+
+    resolved = await resolve_app_pins('org1', 'other-user', [])
+
+    assert resolved[0]['publisher'] == 'Acme Labs'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'manifest, snapshot',
+    [
+        ({'name': 'Brandy'}, {'name': 'Brandy'}),
+        ({'name': 'Brandy', 'publisher': '   '}, {'name': 'Brandy', 'publisher': ''}),
+        (None, {'name': 'Brandy'}),
+        # The scaffold's no-developer-id placeholder, left behind after the
+        # id was renamed into the org's namespace for deploy.
+        ({'name': 'Brandy', 'publisher': 'local'}, {'name': 'Brandy', 'publisher': 'local'}),
+    ],
+)
+async def test_resolve_publisher_falls_back_to_the_developer_namespace(registry, manifest, snapshot):
+    """With no declared publisher anywhere (or only the reserved 'local'
+    placeholder), the listing names the publishing org's developer id: the
+    app id's namespace segment, which deploy and publish guarantee is that
+    org's registered developer id.
+    """
+    _public_listing(registry, manifest, snapshot)
+
+    resolved = await resolve_app_pins('org1', 'other-user', [])
+
+    assert resolved[0]['publisher'] == 'acme'
+
+
+@pytest.mark.parametrize(
+    'app_id, manifest, snapshot, expected',
+    [
+        # A seeded platform app: apps.json carries the package.json publisher.
+        ('rocketride.aparavi', {'publisher': 'Aparavi Software AG'}, {}, 'Aparavi Software AG'),
+        ('rocketride.aparavi', {}, {}, 'rocketride'),
+        # An app id may be the bare developer id itself.
+        ('acme', {}, {}, 'acme'),
+        ('acme.brandy', {'publisher': '  Acme Labs  '}, {}, 'Acme Labs'),
+        ('acme.brandy', {'publisher': None}, {'publisher': 'Acme Labs'}, 'Acme Labs'),
+        # A blank manifest value defers to the snapshot.
+        ('acme.brandy', {'publisher': '   '}, {'publisher': 'Acme'}, 'Acme'),
+        # A non-string value is not a name, in the manifest or the snapshot.
+        ('acme.brandy', {'publisher': {'name': 'Acme'}}, {}, 'acme'),
+        ('acme.brandy', {}, {'publisher': 42}, 'acme'),
+        # The reserved 'local' placeholder never names a developer, in any case.
+        ('acme.brandy', {'publisher': 'local'}, {}, 'acme'),
+        ('acme.brandy', {'publisher': ' Local '}, {'publisher': 'LOCAL'}, 'acme'),
+        ('acme.brandy', {'publisher': 'local'}, {'publisher': 'Acme Labs'}, 'Acme Labs'),
+    ],
+)
+def test_publisher_of_never_returns_empty(app_id, manifest, snapshot, expected):
+    """The publisher resolver's order and its namespace floor."""
+    assert _publisher_of(app_id, manifest, snapshot) == expected
