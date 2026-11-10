@@ -255,6 +255,17 @@ async def test_a_snapshot_is_read_once_per_version(sent, reads):
     assert len(reads) == 2 and len(sent) == 1
 
 
+async def test_a_snapshot_over_the_size_cap_is_statted_never_read(sent, warnings, reads, monkeypatch):
+    monkeypatch.setattr(indexnow, 'MAX_SNAPSHOT_BYTES', len('<h1>Pricing</h1>'))
+    await _build(*_version(1))  # at the cap: read
+    assert len(reads) == 1
+    await _build(*_version(2, '<h1>Pricing, now longer</h1>'))  # over it: crawlers get the shell
+    await _build(*_version(2, '<h1>Pricing, now longer</h1>'))  # same version: not even statted again
+    assert len(reads) == 1 and warnings == []
+    assert indexnow._last['/pricing'].digest == ''
+    assert _urls(sent) == [[f'{BASE}/pricing']]
+
+
 @pytest.fixture
 def hang(monkeypatch):
     """Once ``hang.arm()`` is called, the next snapshot read hangs past ``READ_SECONDS``; ``hang.started`` is then set."""

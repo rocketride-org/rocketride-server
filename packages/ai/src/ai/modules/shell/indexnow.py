@@ -73,7 +73,7 @@ from ai.web import Request
 from rocketlib import debug, warning
 
 from . import public_pages
-from .contract import Page
+from .contract import MAX_SNAPSHOT_BYTES, Page
 from .pages import snapshot_path
 from .public_pages import Aggregate
 from .settings import indexnow_key
@@ -93,8 +93,9 @@ _MAX_URLS = 10000  # the protocol's per-request cap
 class _Content:
     """What a listed page shows: its manifest entry, and its snapshot's store path and sha256.
 
-    ``digest`` is '' for a page without a snapshot and None when the
-    snapshot could not be read.
+    ``digest`` is '' when the page shows no snapshot (none declared, no
+    production version, or one over ``MAX_SNAPSHOT_BYTES``, which crawlers
+    never get) and None when the snapshot could not be read.
     """
 
     entry: Page
@@ -136,6 +137,11 @@ async def _content(page: Page, last: Optional[_Content], reads: asyncio.Semaphor
         return _Content(entry, path, last.digest)
     try:
         async with reads:
+            # Stat first, as serving does: a snapshot over the cap is never
+            # downloaded, and crawlers get the shell document instead.
+            info = await public_pages.artifact_file_info(path)
+            if info['size'] > MAX_SNAPSHOT_BYTES:
+                return _Content(entry, path, '')
             raw = await public_pages.read_artifact_file(path)
     except Exception as exc:
         warning(f'[indexnow] {page.path}: snapshot {page.snapshot!r} unreadable, counted as changed: {exc}')

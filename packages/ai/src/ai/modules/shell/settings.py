@@ -68,7 +68,8 @@ def app_url() -> str:
 def indexnow_key() -> str:
     """The IndexNow key as configured, unvalidated (``indexnow.key`` checks it).
 
-    Read at startup and once per page map build, never per page request.
+    Read at startup, once per page map build, and on each request for the
+    key file (``/<key>.txt``); never on a page request.
 
     Returns:
         ``RR_INDEXNOW_KEY`` with surrounding whitespace stripped, or an empty
