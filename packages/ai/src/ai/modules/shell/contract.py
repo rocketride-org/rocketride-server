@@ -352,19 +352,25 @@ def check_manifest(
         ``(pages, site, errors)``: the valid pages (stamped with ``app_id``),
         the validated site block (None when absent or invalid), and one
         actionable message per problem. A manifest without either section
-        returns ``([], None, [])``.
+        returns ``([], None, [])``, and so does a non-platform app's manifest
+        without ``publicPages``: its ``site`` is ignored.
     """
     raw_pages = manifest.get('publicPages')
     raw_site = manifest.get('site')
     if raw_pages is None and raw_site is None:
         return [], None, []
     if not is_privileged(app_id):
+        # A non-platform app owns no '/' page, so its site can never take
+        # effect, and 'site' is a generic key a store manifest may already
+        # carry: ignore it rather than refuse the publish.
+        if raw_pages is None:
+            return [], None, []
         return (
             [],
             None,
             [
-                f'publicPages/site are a platform capability: {app_id} is not a platform app '
-                f'(not in the {PLATFORM_DEVELOPER_ID!r} developer namespace); remove both sections'
+                f'publicPages is a platform capability: {app_id} is not a platform app '
+                f'(not in the {PLATFORM_DEVELOPER_ID!r} developer namespace); remove the section'
             ],
         )
     root = may_claim_root(app_id)

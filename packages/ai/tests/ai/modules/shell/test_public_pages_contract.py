@@ -135,6 +135,14 @@ def test_third_party_publicpages_rejected_loudly():
     pages, site, errors = check_manifest('acme.app', {'publicPages': [_page('/acme')]})
     assert pages == [] and site is None
     assert len(errors) == 1 and 'platform' in errors[0] and 'acme.app' in errors[0]
+    # With a site block too, the one error is about publicPages.
+    _, site, errors = check_manifest('acme.app', {'publicPages': [_page('/acme')], 'site': {'title': 'Acme'}})
+    assert site is None and len(errors) == 1 and errors[0].startswith('publicPages is a platform capability')
+
+
+def test_third_party_site_alone_is_ignored():
+    # 'site' is a generic key a store manifest may carry, and it can never take effect without a root page.
+    assert check_manifest('acme.app', {'name': 'x', 'site': {'title': 'Acme', 'docsUrl': 'http://x'}}) == ([], None, [])
 
 
 def test_privileged_non_root_app_cannot_mount_root_paths():

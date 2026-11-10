@@ -55,6 +55,12 @@ async def test_third_party_rejected():
     assert len(errors) == 1 and 'platform capability' in errors[0]
 
 
+async def test_third_party_site_alone_passes():
+    acct = hostile_account()
+    assert await gate_errors('acme.brandy', {'name': 'Brandy', 'site': {'title': 'Brandy'}}, DIST, acct) == []
+    assert acct.publish_list_calls == 0
+
+
 async def test_a_manifest_without_a_valid_page_never_loads_the_platform_claims():
     acct = hostile_account()
     acct.fail = True  # platform storage is down
