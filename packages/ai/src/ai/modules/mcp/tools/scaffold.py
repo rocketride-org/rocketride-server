@@ -22,7 +22,7 @@ import re
 from typing import Any, Dict
 
 from ..errors import _bad
-from ..tooling import ToolRegistry
+from ..tooling import ToolHints, ToolRegistry
 from ._common import engine_call
 
 # Handler and argument per input lane, so the skeleton compiles for the lane it
@@ -260,4 +260,5 @@ def register(registry: ToolRegistry) -> None:
             },
             'required': ['name'],
         },
+        hints=ToolHints.reads('Renders node file contents for the caller to write; the server writes nothing.'),
     )(_scaffold_node)

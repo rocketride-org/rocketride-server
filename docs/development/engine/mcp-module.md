@@ -14,6 +14,24 @@ boot via `server.use('mcp')` in `packages/ai/src/ai/eaas.py` and mounted at
 `packages/ai/tests/ai/modules/mcp/`; run it with `./builder ai:test` or
 `python -m pytest packages/ai/tests/ai/modules/mcp/`.
 
+## Tool contract
+
+Every `registry.register(...)` in `tools/` passes `hints=ToolHints(...)` with a
+reason, and `packages/ai/tests/ai/modules/mcp/test_tool_contract.py` pins the
+values. A new tool fails that test until it has hints and a row in
+`EXPECTED_HINTS`; add the same row to the Annotations table in
+`docs/public/mcp/http/tools.md`. A hint must cover every input form the tool
+accepts, including optional modes: `validate_pipeline` is a destructive,
+open-world write because of its single-component form, even though the whole
+pipeline form is static.
+
+`always_load=True` (`_meta["anthropic/alwaysLoad"]`) is reserved for the core
+workflow tools. Name any other tool in `SERVER_INSTRUCTIONS` in `handlers.py`, so
+a host using tool search knows to look for it.
+
+The OpenAI domain-verification route lives in `ai.web.openai_apps_challenge` and
+is registered from `initModule` beside the OAuth discovery document.
+
 ## The engine-client seam
 
 Tool and resource handlers never touch the WS/DAP SDK directly — they depend on

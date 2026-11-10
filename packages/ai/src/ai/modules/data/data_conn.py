@@ -39,6 +39,7 @@ from rocketlib import (
     IServiceEndpoint,
     IServiceFilterPipe,
     getObject,
+    isCancelled,
     monitorCompleted,
     monitorFailed,
     monitorOther,
@@ -273,33 +274,70 @@ class DataConn(DAPConn):
             if not future.done():
                 future.set_exception(error)
 
+    async def _wait_for_target(self) -> 'IServiceEndpoint':
+        """Wait for the source node to bind ``state.target``, then return it.
+
+        A client may open a pipe as soon as ``use()`` returns, while the source
+        node is still starting and has not bound its target. This connection
+        lives in the task's own process and cannot see the engine's task state,
+        so it watches what it can see: it stops at once when the connection is
+        closing or the task is being cancelled, and otherwise gives up after
+        ``CONST_DATA_OPEN_TARGET_WAIT`` seconds (the task's ready time). Every
+        waiter polls on its own, so none holds a lock or a pipe slot.
+
+        Returns:
+            IServiceEndpoint: The bound source target.
+
+        Raises:
+            RuntimeError: The connection closed or the task was cancelled while
+                waiting, or no source bound a target within the wait.
+        """
+        deadline = time.monotonic() + CONST_DATA_OPEN_TARGET_WAIT
+        while True:
+            target = self._target
+            if target is not None:
+                return target
+            if self._shutdown_event.is_set() or isCancelled():
+                raise RuntimeError(
+                    'The task stopped before its source node was ready, so the data operation was dropped.'
+                )
+            if time.monotonic() >= deadline:
+                break
+            await asyncio.sleep(0.05)
+        raise RuntimeError(
+            f'The pipeline source did not become ready within {CONST_DATA_OPEN_TARGET_WAIT:g} seconds, '
+            'so the data operation was dropped. Check that the pipeline has a source node that accepts data '
+            '(for example webhook, chat or dropper) and that it started without errors.'
+        )
+
     async def _ensure_pipe_sem(self) -> asyncio.Semaphore:
         """Lazy-init `_thread_count` + `_pipe_sem` once `state.target` is bound.
 
         Folds two concerns:
 
-        1. The race-window wait that used to live at the top of `_open` —
-           EaaS may send `data/open` BEFORE the source node's `_run()` has
-           bound `state.target`. Poll the lazy `_target` property for up
-           to ``CONST_DATA_OPEN_TARGET_WAIT`` seconds.
-        2. The semaphore size — read `target.taskConfig['threadCount']`
-           once target is actually available. Doing this in `__init__`
-           would always see `None` and silently default to 4, ignoring
-           any user-configured `threadCount`.
+        1. The wait for the source node to bind `state.target`, which can
+           trail a client's first open (see :pyfunc:`_wait_for_target`).
+        2. The semaphore size: read `target.taskConfig['threadCount']`
+           once the target is bound, because it is not available when the
+           connection is created.
 
         Idempotent. The lock guards against concurrent first-`_open`
         calls on the same connection racing to init the semaphore.
+
+        Returns:
+            asyncio.Semaphore: The semaphore limiting concurrent pipes.
+
+        Raises:
+            RuntimeError: No source bound a target; see :pyfunc:`_wait_for_target`.
         """
         if self._pipe_sem is not None:
             return self._pipe_sem
+        # Outside the lock, so concurrent opens wait side by side
+        target = await self._wait_for_target()
         async with self._pipe_sem_init_lock:
             if self._pipe_sem is not None:  # double-check after acquiring lock
                 return self._pipe_sem
-            deadline = time.monotonic() + CONST_DATA_OPEN_TARGET_WAIT
-            while self._target is None and time.monotonic() < deadline:
-                await asyncio.sleep(0.05)
-            target = self._target
-            self._thread_count = target.taskConfig.get('threadCount', 4) if target is not None else 4
+            self._thread_count = target.taskConfig.get('threadCount', 4)
             self._pipe_sem = asyncio.Semaphore(self._thread_count)
             self.debug_message(f'Initialized pipe semaphore: max {self._thread_count} concurrent pipes')
             return self._pipe_sem
@@ -682,9 +720,8 @@ class DataConn(DAPConn):
         if mime_type is None:
             raise ValueError('No mimeType specified')
 
-        # Lazy-init the semaphore using the now-bound target's threadCount
-        # config. Also folds the race-window wait for `state.target` — see
-        # `_ensure_pipe_sem` docstring.
+        # Waits for the source to bind `state.target`, then sizes the semaphore
+        # from its threadCount config; see `_ensure_pipe_sem`.
         pipe_sem = await self._ensure_pipe_sem()
 
         # Acquire semaphore in async context (non-blocking for event loop)
