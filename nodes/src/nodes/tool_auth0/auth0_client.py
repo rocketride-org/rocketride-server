@@ -45,6 +45,7 @@ class Auth0Error(ValueError):
 
 
 def _retry_after(headers):
+    """Parse a retry delay from response headers."""
     value = headers.get('Retry-After')
     if not value:
         return 0.0
@@ -120,6 +121,7 @@ class Auth0Client:
         return self._config.get('allowWrite') is True
 
     def _token(self, kind):
+        """Get or refresh the cached token for the credential kind."""
         import requests
 
         with self._locks[kind]:
@@ -165,6 +167,7 @@ class Auth0Client:
             return token
 
     def _invalidate(self, kind, token):
+        """Discard a cached token if it matches the rejected token."""
         with self._locks[kind]:
             if self._tokens[kind] and self._tokens[kind][0] == token:
                 self._tokens[kind] = None

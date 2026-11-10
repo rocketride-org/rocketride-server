@@ -65,6 +65,7 @@ _GENERIC = 'No specific diagnostic is available for this event type.'
 
 
 def _input(args, name):
+    """Normalize and validate tool arguments."""
     try:
         value = normalize_tool_input(args, tool_name=name)
     except Exception:
@@ -75,6 +76,7 @@ def _input(args, name):
 
 
 def _identifier(args, key):
+    """Validate a bounded Auth0 identifier."""
     value = args.get(key)
     if not isinstance(value, str) or not value.strip() or len(value) > 300 or value in ('.', '..'):
         raise Auth0Error('INVALID_INPUT', f'{key} must be a nonempty string of at most 300 characters.')
@@ -82,6 +84,7 @@ def _identifier(args, key):
 
 
 def _limit(args, maximum):
+    """Validate the requested result limit."""
     value = args.get('limit', 10)
     if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= maximum:
         raise Auth0Error('INVALID_INPUT', f'limit must be an integer between 1 and {maximum}.')
@@ -89,6 +92,7 @@ def _limit(args, maximum):
 
 
 def _run(operation):
+    """Return a structured result or safe Auth0 error."""
     try:
         return {'success': True, **operation()}
     except Auth0Error as exc:
@@ -102,18 +106,21 @@ def _run(operation):
 
 
 def _object(value):
+    """Require an object response from Auth0."""
     if not isinstance(value, dict):
         raise Auth0Error('API_ERROR', 'Auth0 returned an invalid response.')
     return value
 
 
 def _list(value):
+    """Require a list of object responses from Auth0."""
     if not isinstance(value, list) or any(not isinstance(item, dict) for item in value):
         raise Auth0Error('API_ERROR', 'Auth0 returned an invalid response.')
     return value
 
 
 def _text(value):
+    """Return string values and discard other types."""
     return value if isinstance(value, str) else None
 
 
@@ -133,6 +140,7 @@ def _log_text(value):
 
 
 def _user(value):
+    """Select the user fields exposed to callers."""
     return {
         'user_id': _text(value.get('user_id')),
         'email': _text(value.get('email')),
@@ -142,6 +150,7 @@ def _user(value):
 
 
 def _event(value):
+    """Select and sanitize authentication event fields."""
     event_type = _log_text(value.get('type'))
     return {
         'log_id': _log_text(value.get('log_id') or value.get('_id')),
@@ -154,6 +163,7 @@ def _event(value):
 
 
 def _blocks(client, user_id):
+    """Retrieve and sanitize brute-force blocks."""
     data = _object(
         client.request('get_user_blocks', identifier=user_id, params={'consider_brute_force_enablement': 'true'})
     )
@@ -171,10 +181,12 @@ def _blocks(client, user_id):
 
 
 def _schema(required, properties):
+    """Build a closed input schema."""
     return {'type': 'object', 'required': required, 'properties': properties, 'additionalProperties': False}
 
 
 def _output(properties):
+    """Build an output schema with common result fields."""
     return {'type': 'object', 'properties': {**_ERROR, **properties}}
 
 
