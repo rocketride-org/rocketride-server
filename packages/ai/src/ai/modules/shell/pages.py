@@ -59,7 +59,7 @@ from ai.web.middleware import route_path
 from . import public_pages
 from .crawlers import CRAWLER, classify
 from .head import inject_head
-from .shell import _CACHE_CONTROL, _app_url, shell_document_path, shell_static
+from .shell import CACHE_CONTROL, app_url, shell_document_path, shell_static
 
 # The web server whose route table the auth predicate and the live-route
 # collision check read (set by initModule).
@@ -72,6 +72,12 @@ FALLBACK_PATH = '/{public_page_path:path}'
 # Bounds how long browsers keep a 301: the redirect map and page paths are
 # manifest data that can change, and an unbounded 301 is cached indefinitely.
 _REDIRECT_CACHE_CONTROL = 'public, max-age=86400'
+
+
+def set_web_server(server: Any) -> None:
+    """Give the page handlers the live server, whose route table decides collisions and router misses."""
+    global _web_server
+    _web_server = server
 
 
 def _real_routes(server: Any) -> list:
@@ -121,7 +127,7 @@ def live_route_conflict(path: str) -> Optional[str]:
 
 def canonical_url(path: str) -> str:
     """Absolute canonical URL, from RR_APP_URL only, never request headers ('' when unset)."""
-    base = _app_url()
+    base = app_url()
     return f'{base}{path}' if base else ''
 
 
@@ -283,7 +289,7 @@ async def public_page(request: Request):
         return _router_miss(request) or _not_found()
     crawler = classify(request.headers.get('user-agent', '')) == CRAWLER
     document = shell_document_path(request)
-    key = (path, crawler, str(document), document.stat().st_mtime_ns, _app_url())
+    key = (path, crawler, str(document), document.stat().st_mtime_ns, app_url())
     cached = _render_cache.get(key)
     if cached is None:
         generation = _generation
@@ -296,7 +302,7 @@ async def public_page(request: Request):
         )
         # Crawler responses may sit in shared caches; people's never do (the
         # document names the current build's bundles), so caches key on the UA.
-        headers = {'Vary': 'User-Agent', 'Cache-Control': _CACHE_CONTROL if crawler else 'private, no-cache'}
+        headers = {'Vary': 'User-Agent', 'Cache-Control': CACHE_CONTROL if crawler else 'private, no-cache'}
         if not page.listed:
             headers['X-Robots-Tag'] = 'noindex'
         cached = (body.encode('utf-8'), headers)

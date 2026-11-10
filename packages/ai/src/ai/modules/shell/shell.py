@@ -80,7 +80,7 @@ _apps_root = os.path.join(_root_dir, 'static', 'apps')
 
 # Crawler files are cheap to regenerate but change rarely — let shared
 # caches hold them for an hour (same max-age convention as task/fetch.py).
-_CACHE_CONTROL = 'public, max-age=3600'
+CACHE_CONTROL = 'public, max-age=3600'
 
 
 def _resolve_safe(base_dir: str, requested_path: str) -> Path:
@@ -661,7 +661,7 @@ async def apps_static(request: Request):
     raise HTTPException(status_code=404, detail='Not found')
 
 
-def _app_url() -> str:
+def app_url() -> str:
     """
     Return the public base URL of the hosted SaaS deployment, if configured.
 
@@ -720,7 +720,7 @@ async def sitemap_xml(request: Request):
     from .public_pages import maybe_refresh
 
     maybe_refresh()
-    base_url = _app_url()
+    base_url = app_url()
     if not base_url:
         raise HTTPException(status_code=404, detail='Not found')
 
@@ -736,7 +736,7 @@ async def sitemap_xml(request: Request):
     return Response(
         content=xml,
         media_type='application/xml',
-        headers={'Cache-Control': _CACHE_CONTROL},
+        headers={'Cache-Control': CACHE_CONTROL},
     )
 
 
@@ -759,14 +759,14 @@ async def robots_txt(request: Request):
     """
     from .crawlers import robots_groups
 
-    base_url = _app_url()
+    base_url = app_url()
 
     if base_url:
         content = f'{robots_groups("Allow: /")}Sitemap: {base_url}/sitemap.xml\n'
     else:
         content = 'User-agent: *\nDisallow: /\n'
 
-    return PlainTextResponse(content, headers={'Cache-Control': _CACHE_CONTROL})
+    return PlainTextResponse(content, headers={'Cache-Control': CACHE_CONTROL})
 
 
 async def llms_txt(request: Request):
@@ -791,7 +791,7 @@ async def llms_txt(request: Request):
     from .public_pages import current, maybe_refresh
 
     maybe_refresh()
-    base_url = _app_url()
+    base_url = app_url()
     if not base_url:
         raise HTTPException(status_code=404, detail='Not found')
 
@@ -809,5 +809,5 @@ async def llms_txt(request: Request):
     return PlainTextResponse(
         '\n'.join(lines) + '\n',
         media_type='text/plain; charset=utf-8',
-        headers={'Cache-Control': _CACHE_CONTROL},
+        headers={'Cache-Control': CACHE_CONTROL},
     )
