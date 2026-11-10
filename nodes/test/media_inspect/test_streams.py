@@ -27,14 +27,17 @@ import ast
 import builtins
 import importlib
 import json
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from rocketlib import AVI_ACTION, APERR, Ec, OPEN_MODE
+import rocketlib
+from rocketlib import AVI_ACTION, APERR, Ec
+from rocketlib.config import ConfigError, resolveConfig
 
-from media_inspect import IInstance
-from media_inspect.IGlobal import DEFAULTS, IGlobal
+from media_inspect.IInstance import IInstance
+from media_inspect.IGlobal import IGlobal
 from media_inspect._support.workspace import Workspace
 from media_inspect._support.media import run_ffmpeg, probe
 
@@ -87,11 +90,24 @@ class Output:
         self.media('image', *args)
 
 
+def _schema():
+    """The engine-resolved schema of the node."""
+    schema = rocketlib.getServiceSchema(NODE)
+    assert schema is not None, f'{NODE} is not registered with the engine'
+    return schema
+
+
+#: The node's declared defaults, as the resolver hands them to an unconfigured node.
+DEFAULTS = resolveConfig(_schema(), {}).to_dict()
+
+
 def node(request=None, config=None):
     """Create an isolated node instance with a JSON request."""
     instance = IInstance()
     instance.IGlobal = SimpleNamespace(
-        config={**DEFAULTS, 'chunk_bytes': 65536, 'request': json.dumps(request or {}), **(config or {})}
+        config={**DEFAULTS, 'request': json.dumps(request or {}), **(config or {})},
+        chunk_bytes=65536,
+        max_input_bytes=(config or {}).get('max_input_bytes', 16 * 1024**3),
     )
     instance.instance = Output()
     instance.open(SimpleNamespace(name='source.mp4'))
@@ -293,14 +309,15 @@ def test_invalid_request_fails_and_cleans(media, invalid_request):
 
 
 def test_editor_validation_has_no_dependency_side_effects(monkeypatch):
-    """Verify editor validation has no dependency side effects."""
+    """CONFIG mode runs the validator, never beginGlobal: the schema check installs nothing."""
     import depends
+    from rocketlib import IValidatorBase
 
     monkeypatch.setattr(depends, 'load_depends', lambda *_: pytest.fail('Dependencies loaded in CONFIG mode'))
-    state = IGlobal()
-    state.IEndpoint = SimpleNamespace(endpoint=SimpleNamespace(openMode=OPEN_MODE.CONFIG))
-    state.beginGlobal()
-    assert not hasattr(state, 'store')
+    validator = IValidatorBase()
+    validator.glb = SimpleNamespace(logicalType=NODE, connConfig={'silence_db': -35})
+    validator.validateConfig()
+    assert validator.config['silence_db'] == -35
 
 
 def test_dependency_errors_propagate(monkeypatch):
@@ -399,14 +416,23 @@ def test_operation_outputs(media, tmp_path, monkeypatch):
         assert info['has_video'] and info['has_audio'] and 1600 <= info['duration_ms'] <= 2000
 
 
-def test_fractional_silence_threshold_is_preserved(monkeypatch):
-    """Verify fractional silence threshold is preserved."""
-    from ai.common.config import Config
-    from media_inspect._support.config import load_node_config
+def test_fractional_silence_threshold_is_preserved():
+    """A fractional threshold resolves as written: the leaf is a number, not an integer."""
+    assert resolveConfig(_schema(), {'silence_db': -37.5})['silence_db'] == -37.5
 
-    monkeypatch.setattr(Config, 'getNodeConfig', lambda *_: {'silence_db': -37.5})
-    state = SimpleNamespace(
-        IEndpoint=SimpleNamespace(endpoint=SimpleNamespace(openMode=None)),
-        glb=SimpleNamespace(logicalType=NODE, connConfig={}),
-    )
-    assert load_node_config(state, DEFAULTS, NODE)['silence_db'] == -37.5
+
+def test_the_global_derives_the_byte_sizes_from_the_resolved_config(monkeypatch):
+    """IGlobal.beginGlobal turns the KB/MiB leaves into the byte counts the instance reads."""
+    monkeypatch.setitem(sys.modules, 'depends', SimpleNamespace(load_depends=lambda *_: None))
+    glb = IGlobal()
+    glb.glb = SimpleNamespace(logicalType=NODE, connConfig={'chunk_kb': 64, 'max_input_mb': 2})
+    glb.beginGlobal()
+    assert (glb.chunk_bytes, glb.max_input_bytes) == (64 * 1024, 2 * 1024 * 1024)
+    assert glb.config['request'] == '{}'
+
+
+@pytest.mark.parametrize('key, value', [('chunk_kb', 32), ('max_input_mb', 0), ('peak_ms', 5), ('silence_ms', 0)])
+def test_out_of_range_sizes_are_refused_by_the_schema(key, value):
+    """The bounds the node used to clamp by hand are the schema's: a value outside them is an error."""
+    with pytest.raises(ConfigError, match=key):
+        resolveConfig(_schema(), {key: value})

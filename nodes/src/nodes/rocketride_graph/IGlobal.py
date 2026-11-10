@@ -40,8 +40,17 @@ transaction ``READ ONLY`` — server-side write protection, with the base's
 ``is_cypher_safe`` regex and the layer's semantic firewall as defence-in-depth.
 """
 
+import os
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
+
+from depends import depends
+
+# psycopg2 is imported at module scope, so the requirements are installed before
+# that happens. This module is only imported on the run path (config mode
+# imports the validator alone), so the install never runs while a user is merely
+# opening the node's settings panel.
+depends(os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt')
 
 import psycopg2
 from psycopg2 import sql
@@ -59,7 +68,9 @@ from ai.common.graph.age import (
     decode_row,
     translate,
 )
-from ai.common.rocketride_db import DsnNotDelivered, db_target, resolve_rocketride_dsn
+from ai.common.rocketride_db import db_target, resolve_rocketride_dsn
+
+from .IValidator import probe_connection
 
 DEFAULT_GRAPH_NAME = 'rocketride'
 DEFAULT_MAX_ROWS = 1000
@@ -88,11 +99,15 @@ class IGlobal(GraphGlobalBase):
     # Driver lifecycle
     # ------------------------------------------------------------------
 
-    def _open_driver(self, config: Dict[str, Any]) -> None:
-        """Read the delivered DSN, connect, and fail fast on a missing graph."""
-        self.graph_name = str(config.get('graph') or DEFAULT_GRAPH_NAME).strip()
-        self.max_rows = self._config_int(config, 'max_rows', DEFAULT_MAX_ROWS)
-        self.query_timeout_ms = self._config_int(config, 'query_timeout_ms', DEFAULT_QUERY_TIMEOUT_MS)
+    def _open_driver(self, config: Mapping) -> None:
+        """Read the delivered DSN, connect, and fail fast on a missing graph.
+
+        The schema supplies the defaults and bounds the row cap and the
+        timeout, so the values are read as they are.
+        """
+        self.graph_name = config['graph'].strip()
+        self.max_rows = int(config['max_rows'])
+        self.query_timeout_ms = int(config['query_timeout_ms'])
 
         # The one RocketRide difference: the delivered DSN, no connection config.
         dsn = resolve_rocketride_dsn(*db_target(config))
@@ -131,36 +146,9 @@ class IGlobal(GraphGlobalBase):
             self.client.close()
             self.client = None
 
-    def _probe_connection(self, config: Dict[str, Any]) -> None:
-        """Save-time probe: warn-only (the user is still editing the node).
-
-        Outside a task no DSN is delivered, so only scope / target are
-        checked: connectivity is checked when the pipeline runs.
-        """
-        conn = None
-        try:
-            dsn = resolve_rocketride_dsn(*db_target(config))
-            conn = psycopg2.connect(dsn, connect_timeout=3)
-            with conn.cursor() as cur:
-                cur.execute('SELECT 1')
-                cur.execute("SELECT 1 FROM pg_extension WHERE extname = 'age'")
-                if cur.fetchone() is None:
-                    warning('The tenant database does not have the Apache AGE extension installed')
-                    return
-                graph = str(config.get('graph') or DEFAULT_GRAPH_NAME).strip()
-                cur.execute('SELECT 1 FROM ag_catalog.ag_graph WHERE name = %s', (graph,))
-                if cur.fetchone() is None:
-                    warning(f'AGE graph {graph!r} does not exist yet in the tenant database')
-        except DsnNotDelivered:
-            return
-        except Exception as e:
-            warning(str(e).strip().splitlines()[0] if str(e).strip() else repr(e))
-        finally:
-            try:
-                if conn is not None:
-                    conn.close()
-            except Exception:
-                pass
+    def _probe_connection(self, config: Mapping) -> None:
+        """Save-time probe; the one copy lives beside the validator."""
+        probe_connection(config)
 
     # ------------------------------------------------------------------
     # Query paths — everything routes through the translation layer
@@ -410,14 +398,3 @@ class IGlobal(GraphGlobalBase):
             return '', ''
         row = decode_row(plan, raw[0])
         return str(row.get('s') or ''), str(row.get('e') or '')
-
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _config_int(config: Dict[str, Any], key: str, default: int) -> int:
-        try:
-            return max(1, int(config.get(key, default)))
-        except (TypeError, ValueError):
-            return default

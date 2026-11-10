@@ -32,8 +32,7 @@ depends(requirements)
 import importlib
 import re
 from tree_sitter import Language, Parser
-from typing import List, Dict, Any
-from ai.common.config import Config
+from typing import List, Dict, Any, Mapping
 from ai.common.preprocessor import PreProcessorBase
 
 RXFLAGS = re.MULTILINE | re.DOTALL
@@ -166,20 +165,22 @@ class PreProcessor(PreProcessorBase):
     languageParsers: Dict[str, Any] = {}
     language: str = 'auto'
 
-    def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
+    def __init__(self, provider: str, config: Mapping, bag: Dict[str, Any]):
         """
         Initialize the splitter with the given programming language.
 
-        Supported languages: 'python', 'javascript', 'typescript', 'cpp'
+        Supported languages: 'auto', 'c', 'cpp', 'python', 'javascript', 'typescript'
+
+        Args:
+            provider: The node's logical type.
+            config: The resolved node config (language, strlen).
+            bag: The endpoint's shared bag.
         """
         # Init the base
-        super().__init__(provider, connConfig, bag)
-
-        # Get the configuration
-        config = Config.getNodeConfig(provider, connConfig)
+        super().__init__(provider, config, bag)
 
         # Save the language
-        self.language = config.get('language', 'auto')
+        self.language = config['language']
 
     def _getParser(self, language: str) -> Parser:
         """

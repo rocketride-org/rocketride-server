@@ -58,7 +58,7 @@ class IInstance(IInstanceBase):
             payload = None
 
         if isinstance(payload, (dict, list)):
-            self.pending.append(('json', normalize_payload(payload, self.IGlobal.config)))
+            self.pending.append(('json', normalize_payload(payload, self.IGlobal.rules)))
         else:
             # Plain text / scalar JSON carries no fact — pass through verbatim.
             self.pending.append(('text', answer.getText() if answer is not None else ''))
@@ -89,7 +89,7 @@ class IInstance(IInstanceBase):
             else:
                 extras.append(data)
 
-        deduped = dedupe_facts(facts, self.IGlobal.config.get('label_field') or 'label')
+        deduped = dedupe_facts(facts, self.IGlobal.rules.get('label_field') or 'label')
 
         if deduped:
             # Preserve a lone bare-dict payload's shape; otherwise emit one list.

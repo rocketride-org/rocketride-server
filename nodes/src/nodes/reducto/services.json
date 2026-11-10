@@ -63,124 +63,81 @@
 	"lanes": {
 		"tags": ["text", "table"]
 	},
-
 	//
-	// Required:
-	//		Defines the fields (shape) of the service. Either source or target
-	//		map be specified, or both, but at least one is required
+	// Optional:
+	//		Local property definitions. One Reducto account, stored flat; the key
+	//		is required because the node cannot run without it, and arrives
+	//		through the node config (a ${ROCKETRIDE_REDUCTO_APIKEY} reference
+	//		resolved per call). Advanced mode reads the three option dictionaries
+	//		and ignores the simple-mode switches.
 	//
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "Reducto",
-			"properties": ["reducto.default"]
-		}
-	],
-
-	//
-	// Required:
-	//		Defines the fields that are available in the UI and for config
-	//
-	"fields": {
+	"propertyDefinitions": {
 		"reducto.api_key": {
 			"type": "string",
 			"title": "API Key",
 			"description": "Your Reducto API key",
-			"secure": true,
-			"ui": {
-				"ui:widget": "ApiKeyWidget"
-			}
+			"secret": true,
+			"env": "ROCKETRIDE_REDUCTO_APIKEY",
+			"required": true
 		},
 		"reducto.parse_mode": {
 			"type": "boolean",
 			"title": "Advanced Mode",
-			"description": "Toggle to use the advanced parse mode, and have access to the full set of options from the Reducto API.",
-			"default": false,
-			"enum": [
-				[false, "Simple"],
-				[true, "Advanced"]
-			],
-			"conditional": [
-				{
-					"value": false,
-					"properties": ["reducto.Contains_Handwritten_Text", "reducto.Contains_Non_English_Text", "reducto.Summarize_Text"]
-				},
-				{
-					"value": true,
-					"properties": ["reducto.advanced_documentation", "reducto.options", "reducto.advanced_options", "reducto.experimental_options"]
-				}
-			]
+			"description": "Toggle to use the advanced parse mode, and have access to the full set of options from the Reducto API. In advanced mode the simple-mode switches are ignored.",
+			"default": false
 		},
 		"reducto.Contains_Handwritten_Text": {
 			"type": "boolean",
 			"title": "Contains Handwritten Text",
-			"description": "Enables Agentic OCR mode for better handwriting recognition and small text/table cell corrections.",
-			"default": false,
-			"enum": [
-				[true, "Yes"],
-				[false, "No"]
-			]
+			"description": "Simple mode: enables Agentic OCR mode for better handwriting recognition and small text/table cell corrections.",
+			"default": false
 		},
 		"reducto.Contains_Non_English_Text": {
 			"type": "boolean",
 			"title": "Contains Non-English Text",
-			"description": "Enables Multilingual OCR system which can parse non-Germanic languages and unicode symbols.",
-			"default": false,
-			"enum": [
-				[true, "Yes"],
-				[false, "No"]
-			]
+			"description": "Simple mode: enables the Multilingual OCR system which can parse non-Germanic languages and unicode symbols.",
+			"default": false
 		},
 		"reducto.Summarize_Text": {
 			"type": "boolean",
 			"title": "AI Summarize Figures/Images",
-			"description": "Generate AI summaries for figures, diagrams, and images using vision-language models.",
-			"default": false,
-			"enum": [
-				[true, "Yes"],
-				[false, "No"]
-			]
-		},
-		"reducto.advanced_documentation": {
-			"type": "null",
-			"title": "Advanced Parse Mode - How to",
-			"description": "In advanced mode, you can use the full set of options from the Reducto API. For each set of options you must use and only include a python dictionary, e.g., {'key': 'value', 'flag': True}. If no information is provided for a set of options, the default values will be used. For more information on what options are available, see the Reducto API documentation at https://docs.reducto.ai/parsing/default-configurations. This page also contains examples of how to format the options fields. (In Advanced mode your configuration from Simple mode will be ignored)",
-			"default": null
+			"description": "Simple mode: generate AI summaries for figures, diagrams, and images using vision-language models.",
+			"default": false
 		},
 		"reducto.options": {
 			"type": "string",
 			"title": "Options",
-			"description": "Options for the Reducto API",
-			"format": "textarea"
+			"description": "Advanced mode: options for the Reducto API as a Python dictionary, e.g. {'key': 'value', 'flag': True}. Empty keeps the API defaults. See https://docs.reducto.ai/parsing/default-configurations for the available options and examples.",
+			"format": "textarea",
+			"default": ""
 		},
 		"reducto.advanced_options": {
 			"type": "string",
 			"title": "Advanced Options",
-			"description": "Advanced options for the Reducto API",
-			"format": "textarea"
+			"description": "Advanced mode: advanced options for the Reducto API as a Python dictionary. Empty keeps the API defaults.",
+			"format": "textarea",
+			"default": ""
 		},
 		"reducto.experimental_options": {
 			"type": "string",
 			"title": "Experimental Options",
-			"description": "Experimental options for the Reducto API",
-			"format": "textarea"
-		},
-		"reducto.default": {
-			"object": "default",
-			"properties": ["reducto.api_key", "reducto.parse_mode"]
+			"description": "Advanced mode: experimental options for the Reducto API as a Python dictionary. Empty keeps the API defaults.",
+			"format": "textarea",
+			"default": ""
 		}
 	},
 	//
-	// Optional:
-	//		Predefined configurations for common use cases
+	// Required:
+	//		Defines the properties shown in the pipeline builder side panel, in order
 	//
-	"preconfig": {
-		"default": "default",
-		"profiles": {
-			"default": {
-				"parse_mode": false
-			}
-		}
-	},
-	"required": ["reducto.api_key", "reducto.parse_mode"]
+	"properties": [
+		"reducto.api_key",
+		"reducto.parse_mode",
+		"reducto.Contains_Handwritten_Text",
+		"reducto.Contains_Non_English_Text",
+		"reducto.Summarize_Text",
+		"reducto.options",
+		"reducto.advanced_options",
+		"reducto.experimental_options"
+	]
 }

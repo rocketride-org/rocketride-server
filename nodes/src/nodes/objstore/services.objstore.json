@@ -100,105 +100,54 @@
 	],
 	//
 	// Optional:
-	//		Local fields defintions - these define fields only for the
-	//		current service. You may specify them here, or directly
-	//		in the shape
+	//		Local property definitions. The endpoint URL and the account
+	//		credentials live in the "parameters" group, which is where the C++
+	//		node reads them; the keys are secrets the account variables supply.
 	//
-	"fields": {
-		"include": {
-			"description": "This path defines the paths included for Scan, File Signature, Index, Classify, and OCR.\nExample Path for AWS S3: BucketName/FolderName/* or BucketName/*"
+	"propertyDefinitions": {
+		"objstore.url": {
+			"base": "url",
+			"description": "URL of the S3-compatible endpoint. E.g: https://[dnsname].com",
+			"readonly": false
 		},
-		"include.path": {
-			"description": "This path defines the paths included for Scan, File Signature, Index, Classify, and OCR.\nExample Path for AWS S3: BucketName/FolderName/* or BucketName/*"
+		"objstore.accessKey": {
+			"base": "aws.accessKey",
+			"env": "ROCKETRIDE_OBJSTORE_ACCESS_KEY",
+			"required": true
 		},
-		"exclude": {
-			"description": "This path defines the paths excluded for Scan, File Signature, Index, Classify, and OCR.\nExample Path for AWS S3: BucketName/FolderName/*"
-		},
-		"exclude.path": {
-			"description": "This path defines the paths excluded for Scan, File Signature, Index, Classify, and OCR.\nExample Path for AWS S3: BucketName/FolderName/*"
-		},
-		"objstore.source.parameters": {
-			"section": "parameters",
-			"title": "Parameters",
-			"properties": [
-				"url",
-				"aws.accessKey",
-				"aws.secretKey"
-			]
-		},
-		"objstore.target.parameters": {
-			"object": "parameters",
-			"title": "Parameters",
-			"properties": [
-				"storePath",
-				"url",
-				"aws.accessKey",
-				"aws.secretKey"
-			]
-		},
-		"Pipe.include": {
-			"description": "Example path: [bucket_name]/[folder]/*"
-		},
-		"Pipe.exclude": {
-			"description": "Example path: [bucket_name]/[folder]/*"
-		},
-		"Pipe.objstore.source.parameters": {
-			"object": "parameters",
-			"properties": [
-				"url",
-				"aws.accessKey",
-				"aws.secretKey"
-			]
+		"objstore.secretKey": {
+			"base": "aws.secretKey",
+			"env": "ROCKETRIDE_OBJSTORE_SECRET_KEY",
+			"required": true
 		}
 	},
 	//
 	// Required:
-	//		Defines the fields (shape) of the service. Either source or target
-	//		map be specified, or both, but at least one is required
+	//		Defines the properties shown in the pipeline builder side panel, in order
 	//
-	"shape": [
+	"properties": [
+		"type",
+		"actions",
+		"source.mode",
 		{
-			"section": "Source",
-			"title": "S3 Compatible",
+			"name": "parameters",
 			"properties": [
-				"type",
-				"actions",
-				"source.mode",
-				"objstore.source.parameters",
-				"include",
-				"exclude",
-				"estimation"
+				"objstore.url",
+				"objstore.accessKey",
+				"objstore.secretKey"
 			]
 		},
 		{
-			"section": "Pipe",
-			"title": "S3 Compatible",
-			"properties": [
-				"type",
-				"actions",
-				"source.mode",
-				"Pipe.objstore.source.parameters",
-				"Pipe.include",
-				"Pipe.exclude"
-			]
+			"name": "include",
+			"type": "array",
+			"description": "Example path: [bucket_name]/[folder]/*",
+			"item": "Pipe.include.path"
 		},
 		{
-			"section": "Target",
-			"title": "S3 Compatible",
-			"properties": [
-				"type",
-				"target.mode",
-				"objstore.target.parameters"
-			]
-		},
-		{
-			"section": "Export",
-			"title": "S3 Compatible",
-			"properties": [
-				"type",
-				"target.mode",
-				"objstore.target.parameters"
-			]
+			"name": "exclude",
+			"type": "array",
+			"description": "Example path: [bucket_name]/[folder]/*",
+			"item": "Pipe.exclude.path"
 		}
 	]
 }

@@ -28,8 +28,9 @@ This module defines the IGlobal class which handles global configuration
 for AI processing tasks including text summarization and entity extraction.
 """
 
+import os
+
 from rocketlib import IGlobalBase
-from ai.common.config import Config
 
 
 class IGlobal(IGlobalBase):
@@ -38,42 +39,26 @@ class IGlobal(IGlobalBase):
 
     This class extends IGlobalBase and manages configuration parameters
     for text analysis operations including summarization, key point extraction,
-    and entity recognition. It handles dynamic loading of dependencies and
-    configuration retrieval from the node configuration system.
+    and entity recognition. It installs the dependencies and reads the
+    resolved node configuration.
 
     Attributes:
         numberOfTokens (int): Maximum number of tokens per chunk.
     """
 
-    # Default configuration values for AI processing
-    numberOfTokens: int = 384  # Number of tokens per chunk
+    # Number of tokens per chunk; the schema default until beginGlobal runs
+    numberOfTokens: int = 384
 
     def beginGlobal(self) -> None:
         """
-        Initialize global configuration and dependencies.
+        Install the dependencies and read the resolved configuration.
 
-        This method is called during the initialization phase to:
-        1. Install required Python dependencies from requirements.txt
-        2. Load node-specific configuration parameters
-        3. Override default values with configured settings
-
-        The method dynamically installs dependencies and retrieves configuration
-        based on the logical type and node configuration from the global context.
+        The schema supplies the default and the lower bound, so the value is
+        read as it is.
         """
-        # Install required Python packages dynamically
-        import os
         from depends import depends  # type: ignore
 
-        # Construct path to requirements file relative to this module
         requirements_path = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
-
-        # Install dependencies listed in requirements.txt
         depends(requirements_path)
 
-        # Retrieve node-specific configuration from the global context
-        # Uses the logical type and node config from the global object
-        config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-
-        # Override default configuration values with node-specific settings
-        # Uses .get() with defaults to ensure backwards compatibility
-        self.numberOfTokens = config.get('numberOfTokens', 384)
+        self.numberOfTokens = int(self.config.numberOfTokens)

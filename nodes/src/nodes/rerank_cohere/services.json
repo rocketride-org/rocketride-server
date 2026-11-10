@@ -89,106 +89,76 @@
 		}
 	],
 	//
-	//	Optional:
-	//		Profile section are configuration options used by the driver
-	//		itself
-	//
-	"preconfig": {
-		"default": "rerank-english-v3.0",
-		"profiles": {
-			"rerank-v3.5": {
-				"title": "Rerank v3.5",
-				"model": "rerank-v3.5",
-				"top_n": 5,
-				"min_score": 0.0,
-				"apikey": ""
-			},
-			"rerank-english-v3.0": {
-				"title": "Rerank v3.0",
-				"model": "rerank-english-v3.0",
-				"top_n": 5,
-				"min_score": 0.0,
-				"apikey": ""
-			},
-			"custom": {
-				"title": "Custom",
-				"model": "",
-				"top_n": 5,
-				"min_score": 0.0,
-				"apikey": ""
-			}
-		}
-	},
-	//
 	// Optional:
-	//		Local fields definitions - these define fields only for the
-	//		current service. You may specify them here, or directly
-	//		in the shape
+	//		Local property definitions. The model choice is the selector: the
+	//		named entries pin their Cohere model name as a constant, Custom takes
+	//		a free-form one. The result count, the score filter and the API key
+	//		are referenced by every entry, so they are shared and stored flat.
 	//
-	"fields": {
-		"model": {
+	"propertyDefinitions": {
+		"rerank_cohere.custom.model": {
 			"type": "string",
 			"title": "Model",
 			"description": "Cohere rerank model name",
-			"default": "rerank-english-v3.0"
+			"required": true
 		},
-		"top_n": {
-			"type": "number",
+		"rerank_cohere.top_n": {
+			"type": "integer",
 			"title": "Top N",
 			"description": "Number of top results to return",
+			"default": 5,
 			"minimum": 1
 		},
-		"min_score": {
+		"rerank_cohere.min_score": {
 			"type": "number",
 			"title": "Min Score",
 			"description": "Minimum relevance score threshold (0.0-1.0)",
+			"default": 0.0,
 			"minimum": 0.0,
 			"maximum": 1.0
 		},
-		"rerank_cohere.rerank-v3.5": {
-			"object": "rerank-v3.5",
-			"properties": ["top_n", "min_score", "llm.cloud.apikey"]
-		},
-		"rerank_cohere.rerank-v3.0": {
-			"object": "rerank-english-v3.0",
-			"properties": ["top_n", "min_score", "llm.cloud.apikey"]
-		},
-		"rerank_cohere.custom": {
-			"object": "custom",
-			"properties": ["model", "top_n", "min_score", "llm.cloud.apikey"]
-		},
-		"rerank_cohere.profile": {
-			"title": "Model",
-			"description": "Rerank model",
-			"type": "string",
-			"default": "rerank-english-v3.0",
-			"enum": ["*>preconfig.profiles.*.title"],
-			"conditional": [
-				{
-					"value": "rerank-v3.5",
-					"properties": ["rerank_cohere.rerank-v3.5"]
-				},
-				{
-					"value": "rerank-english-v3.0",
-					"properties": ["rerank_cohere.rerank-v3.0"]
-				},
-				{
-					"value": "custom",
-					"properties": ["rerank_cohere.custom"]
-				}
-			]
+		"rerank_cohere.apikey": {
+			"base": "llm.cloud.apikey",
+			"description": "Cohere API key",
+			"env": "ROCKETRIDE_RERANK_COHERE_APIKEY",
+			"required": true
 		}
 	},
 	//
 	// Required:
-	//		Defines the fields (shape) of the service. Either source or target
-	//		may be specified, or both, but at least one is required
+	//		Defines the properties shown in the pipeline builder side panel, in order
 	//
-	"shape": [
+	"properties": [
 		{
-			"section": "Pipe",
-			"title": "Cohere Rerank",
-			"properties": ["rerank_cohere.profile"]
+			"name": "profile",
+			"title": "Model",
+			"description": "Rerank model",
+			"type": "string",
+			"default": "rerank-english-v3.0",
+			"enum": {
+				"rerank-english-v3.0": {
+					"title": "Rerank v3.0",
+					"properties": [
+						{ "name": "model", "type": "constant", "default": "rerank-english-v3.0" },
+						"rerank_cohere.top_n",
+						"rerank_cohere.min_score",
+						"rerank_cohere.apikey"
+					]
+				},
+				"rerank-v3.5": {
+					"title": "Rerank v3.5",
+					"properties": [
+						{ "name": "model", "type": "constant", "default": "rerank-v3.5" },
+						"rerank_cohere.top_n",
+						"rerank_cohere.min_score",
+						"rerank_cohere.apikey"
+					]
+				},
+				"custom": {
+					"title": "Custom",
+					"properties": ["rerank_cohere.custom.model", "rerank_cohere.top_n", "rerank_cohere.min_score", "rerank_cohere.apikey"]
+				}
+			}
 		}
 	],
 	"test": {

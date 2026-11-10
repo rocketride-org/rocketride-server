@@ -20,15 +20,3 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-
-"""
-Named Entity Recognition (NER) node.
-
-This node identifies and extracts named entities (people, organizations,
-locations, etc.) from text using HuggingFace transformers models via the model server.
-"""
-
-from .IGlobal import IGlobal
-from .IInstance import IInstance
-
-__all__ = ['IGlobal', 'IInstance']

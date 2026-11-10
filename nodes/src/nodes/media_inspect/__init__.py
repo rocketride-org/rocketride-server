@@ -20,11 +20,3 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-
-
-"""RocketRide media inspect node entry points."""
-
-from .IGlobal import IGlobal
-from .IInstance import IInstance
-
-__all__ = ['IGlobal', 'IInstance']

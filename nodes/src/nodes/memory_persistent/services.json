@@ -24,115 +24,104 @@
 			"lane": "questions",
 			"description": "Questions are enriched with session memory context before forwarding",
 			"output": [
-				{
-					"lane": "questions",
-					"description": "Questions with memory context attached in metadata"
-				}
+				{ "lane": "questions", "description": "Questions with memory context attached in metadata" }
 			]
 		},
 		{
 			"lane": "answers",
 			"description": "Answers are stored in session memory for future retrieval",
 			"output": [
-				{
-					"lane": "answers",
-					"description": "Answers passed through after persistence"
-				}
+				{ "lane": "answers", "description": "Answers passed through after persistence" }
 			]
 		}
 	],
-	"preconfig": {
-		"default": "memory",
-		"profiles": {
-			"redis": {
-				"backend": "redis",
-				"redis_host": "localhost",
-				"redis_port": 6379,
-				"redis_password": "",
-				"session_ttl_hours": 24,
-				"max_history": 100,
-				"auto_summarize": true
-			},
-			"memory": {
-				"backend": "memory",
-				"session_ttl_hours": 0,
-				"max_history": 100,
-				"auto_summarize": true
-			},
-			"custom": {
-				"backend": "redis",
-				"redis_host": "",
-				"redis_port": 6379,
-				"redis_password": "",
-				"session_ttl_hours": 0,
-				"max_history": 100,
-				"auto_summarize": true
-			}
-		}
-	},
-	"fields": {
-		"backend": {
-			"type": "string",
-			"title": "Backend",
-			"description": "Storage backend: redis (production) or memory (testing)",
-			"default": "memory",
-			"enum": [
-				["redis", "Redis"],
-				["memory", "In-Memory (testing)"]
-			]
-		},
-		"redis_host": {
+	//
+	// Optional:
+	//		Local property definitions. The backend is the selector; the TTL
+	//		defaults differ per backend (an in-memory store expires with the run),
+	//		so each branch aliases it with its own default. History settings are
+	//		shared by both backends and stored flat.
+	//
+	"propertyDefinitions": {
+		"memory_persistent.redis_host": {
 			"type": "string",
 			"title": "Redis Host",
 			"description": "Redis server hostname",
-			"default": "localhost"
+			"default": "localhost",
+			"minLength": 1
 		},
-		"redis_port": {
-			"type": "number",
+		"memory_persistent.redis_port": {
+			"type": "integer",
 			"title": "Redis Port",
 			"description": "Redis server port",
-			"default": 6379
+			"default": 6379,
+			"minimum": 1,
+			"maximum": 65535
 		},
-		"redis_password": {
+		"memory_persistent.redis_password": {
 			"type": "string",
 			"title": "Redis Password",
 			"description": "Redis server password (leave empty for no auth)",
-			"ui:options:password": true
+			"secret": true,
+			"env": "ROCKETRIDE_MEMORY_PERSISTENT_REDIS_PASSWORD"
 		},
-		"session_ttl_hours": {
+		"memory_persistent.session_ttl_hours": {
 			"type": "number",
 			"title": "Session TTL (hours)",
 			"description": "How long sessions persist before auto-expiry (0 = no expiry)",
-			"default": 0
+			"default": 0,
+			"minimum": 0
 		},
-		"max_history": {
-			"type": "number",
+		"memory_persistent.redis.session_ttl_hours": { "base": "memory_persistent.session_ttl_hours", "default": 24 },
+		"memory_persistent.max_history": {
+			"type": "integer",
 			"title": "Max History Entries",
 			"description": "Maximum history entries per session before auto-summarization",
-			"default": 100
+			"default": 100,
+			"minimum": 1
 		},
-		"auto_summarize": {
+		"memory_persistent.auto_summarize": {
 			"type": "boolean",
 			"title": "Auto-Summarize",
 			"description": "Automatically summarize older history entries when limit is reached",
 			"default": true
 		}
 	},
-	"shape": [
+	//
+	// Required:
+	//		Defines the properties shown in the pipeline builder side panel, in order
+	//
+	"properties": [
 		{
-			"section": "Pipe",
-			"title": "Persistent Memory",
-			"properties": [
-				"backend",
-				"redis_host",
-				"redis_port",
-				"redis_password",
-				"session_ttl_hours",
-				"max_history",
-				"auto_summarize"
-			]
+			"name": "backend",
+			"type": "string",
+			"title": "Backend",
+			"description": "Storage backend: redis (production) or memory (testing)",
+			"default": "memory",
+			"enum": {
+				"memory": {
+					"title": "In-Memory (testing)",
+					"properties": ["memory_persistent.session_ttl_hours", "memory_persistent.max_history", "memory_persistent.auto_summarize"]
+				},
+				"redis": {
+					"title": "Redis",
+					"properties": [
+						"memory_persistent.redis_host",
+						"memory_persistent.redis_port",
+						"memory_persistent.redis_password",
+						"memory_persistent.redis.session_ttl_hours",
+						"memory_persistent.max_history",
+						"memory_persistent.auto_summarize"
+					]
+				}
+			}
 		}
 	],
+	//
+	// Optional:
+	//		Test configuration for automated node testing. "profiles" lists values
+	//		of the root selector; the framework writes the selected one at its path.
+	//
 	"test": {
 		"profiles": ["memory"],
 		"cases": [
@@ -140,9 +129,7 @@
 				"name": "Forwards a question with no session_id unchanged",
 				"questions": "hello world",
 				"expect": {
-					"questions": {
-						"notEmpty": true
-					}
+					"questions": { "notEmpty": true }
 				}
 			}
 		]

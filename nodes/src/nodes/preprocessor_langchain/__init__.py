@@ -20,23 +20,3 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-
-# Import the filters
-from .IGlobal import IGlobal
-from .IInstance import IInstance
-
-
-def getPreProcessor():
-    """
-    Get the preprocessor class.
-    """
-    from .langchain import PreProcessor
-
-    return PreProcessor
-
-
-__all__ = [
-    'IGlobal',
-    'IInstance',
-    'getPreProcessor',
-]

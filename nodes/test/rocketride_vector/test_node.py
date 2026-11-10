@@ -1,183 +1,226 @@
-"""Unit tests for the rocketride_vector node on the shared store base (#2587).
+# =============================================================================
+# MIT License
+# Copyright (c) 2026 Aparavi Software AG
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+# =============================================================================
 
-The node keeps two things of its own on top of StoreGlobalBase: the tenant DSN
-(no connection fields, and a transform key scoped by the tenant database) and
-the two tool switches, both off by default (expose_tools for the whole tool
-surface, allow_write for upsert/delete). The lanes and the tools come from the
-base and are covered in packages/ai.
+"""
+The RocketRide cloud vector store node on the shared store base.
+
+The node supplies the driver hook and the two tool-switch defaults; the base
+owns the lifecycle and, through StoreInstanceBase, the lanes and the tools.
+The save-time probe lives in IValidator and is driven here with the delivered
+DSN and psycopg2 stood in.
 """
 
-from __future__ import annotations
-
+import json
+import sys
 import types
-from unittest.mock import call
+from types import SimpleNamespace
+from unittest.mock import MagicMock, call
 
 import pytest
+import rocketlib
+from rocketlib.config import ConfigError, resolveConfig
+
+from ai.common.store import StoreInstanceBase
+
+import nodes.rocketride_vector.IValidator as validator
+from nodes.rocketride_vector.IGlobal import IGlobal
+from nodes.rocketride_vector.IInstance import IInstance
+
+TEST_DSN = 'postgresql://u:p@pool:5432/tenant_db'
 
 
-def _iglobal(iglobal):
-    return object.__new__(iglobal.IGlobal)
+def _resolve(conn_config):
+    """Resolve a node config exactly as IGlobal.beginGlobal() would."""
+    return resolveConfig(rocketlib.getServiceSchema('rocketride_vector'), conn_config)
 
 
-def test_tool_namespace_defaults_to_rrvector(node_modules):
-    iglobal, _, _ = node_modules
-    assert iglobal.IGlobal.serverName == 'rrvector'
+# ---- the node's own surface --------------------------------------------------
 
 
-def test_tools_are_off_unless_configured(node_modules):
+def test_server_name_default():
+    assert IGlobal.serverName == 'rrvector'
+
+
+def test_tools_and_writes_are_off_unless_configured():
     # The managed store's table is the team's database: nothing is offered as
     # a tool until the pipeline owner turns Expose as tools on.
-    iglobal, _, _ = node_modules
-    assert iglobal.IGlobal.expose_tools is False
+    assert IGlobal.expose_tools is False
+    assert IGlobal.allow_write is False
+    config = _resolve({})
+    assert config['expose_tools'] is False and config['allow_write'] is False
 
 
-def test_writes_are_off_unless_configured(node_modules):
-    iglobal, _, _ = node_modules
-    assert iglobal.IGlobal.allow_write is False
+def test_open_store_builds_the_driver_store_from_the_resolved_config(monkeypatch):
+    # The base hands the resolved view through; the node must not pre-process it.
+    store_cls = MagicMock(name='Store')
+    driver = types.ModuleType('nodes.rocketride_vector.rocketride_vector')
+    driver.Store = store_cls
+    monkeypatch.setitem(sys.modules, 'nodes.rocketride_vector.rocketride_vector', driver)
+    glb = IGlobal.__new__(IGlobal)
+    config = _resolve({'collection': 'docs'})
+
+    store = glb._open_store('rocketride_vector', config, {'bag': 1})
+
+    store_cls.assert_called_once_with('rocketride_vector', config, {'bag': 1})
+    assert store is store_cls.return_value
 
 
-def test_the_shipped_services_json_keeps_both_switches_off():
-    # services.json is what ships; the real-node check is in a *_full suite, which CI skips.
-    from pathlib import Path
+def test_iglobal_overrides_only_the_store_hook_and_the_switch_defaults():
+    # Lifecycle (beginGlobal, endGlobal) and the switch resolution belong to
+    # StoreGlobalBase; the node supplies the hook and its defaults.
+    own = {name for name in vars(IGlobal) if not name.startswith('__') and name != '_abc_impl'}
 
-    json5 = pytest.importorskip('json5')
-    path = Path(__file__).resolve().parents[2] / 'src' / 'nodes' / 'rocketride_vector' / 'services.json'
-    services = json5.loads(path.read_text(encoding='utf-8'))
-
-    cloud = services['preconfig']['profiles']['cloud']
-    assert cloud['expose_tools'] is False
-    assert cloud['allow_write'] is False
-    assert services['fields']['rrvector.expose_tools']['default'] is False
-    assert services['fields']['rrvector.allow_write']['default'] is False
+    assert own == {'serverName', 'expose_tools', 'allow_write', '_open_store'}
 
 
-def test_open_store_builds_the_driver_store_from_the_raw_config(node_modules):
-    # The base passes the raw connConfig; the driver re-resolves the profile
-    # merge itself, so the node must not pre-process it here.
-    iglobal, _, stubs = node_modules
-    glb = _iglobal(iglobal)
-
-    store = glb._open_store('rocketride_vector', {'conn': 1}, {'bag': 1})
-
-    stubs.Store.assert_called_once_with('rocketride_vector', {'conn': 1}, {'bag': 1})
-    assert store is stubs.Store.return_value
+def test_instance_inherits_lanes_and_tools_from_the_store_base():
+    assert issubclass(IInstance, StoreInstanceBase)
+    # No per-driver copies of the lane handlers or the tools: the base owns them.
+    for name in ('writeQuestions', 'writeDocuments', 'renderObject', 'search', 'upsert', 'delete'):
+        assert name not in vars(IInstance)
 
 
-def test_iglobal_overrides_only_the_store_hooks(node_modules):
-    # Lifecycle (beginGlobal, endGlobal, validateConfig) and the switch
-    # resolution belong to StoreGlobalBase; the node supplies the three hooks.
-    # Exact equality holds because the conftest stands in for the base with a
-    # plain class; under the real ABC base ``vars()`` would also show ``_abc_impl``.
-    iglobal, _, _ = node_modules
-    own = {name for name in vars(iglobal.IGlobal) if not name.startswith('__')}
-
-    assert own == {'serverName', 'expose_tools', 'allow_write', '_open_store', '_sub_key', '_probe_connection'}
+def test_the_schema_bounds_the_hnsw_parameters():
+    with pytest.raises(ConfigError, match='hnsw_m'):
+        _resolve({'hnsw_m': 1})
+    with pytest.raises(ConfigError, match='hnsw_ef_construction'):
+        _resolve({'hnsw_ef_construction': 1001})
 
 
-def test_sub_key_is_scoped_by_the_tenant_database(node_modules):
-    iglobal, _, _ = node_modules
-    glb = _iglobal(iglobal)
-    glb.store = types.SimpleNamespace(database='tenant_db', host='pool', port=5432, collection='rocketride')
-
-    assert glb._sub_key() == 'tenant_db/rocketride'
+# ---- the save-time probe -----------------------------------------------------
 
 
-def test_sub_key_falls_back_to_host_and_port_without_a_database(node_modules):
-    iglobal, _, _ = node_modules
-    glb = _iglobal(iglobal)
-    glb.store = types.SimpleNamespace(database='', host='pool', port=5432, collection='docs')
+@pytest.fixture
+def probe(monkeypatch):
+    """The probe's collaborators stood in: warnings, the DSN resolution, depends and psycopg2."""
+    stubs = SimpleNamespace(warning=MagicMock(), resolve_dsn=MagicMock(return_value=TEST_DSN), connect=MagicMock())
+    monkeypatch.setattr(validator, 'warning', stubs.warning)
+    monkeypatch.setattr(validator, 'resolve_rocketride_dsn', stubs.resolve_dsn)
+    depends = types.ModuleType('depends')
+    depends.depends = MagicMock()
+    stubs.depends = depends.depends
+    monkeypatch.setitem(sys.modules, 'depends', depends)
+    psycopg2 = types.ModuleType('psycopg2')
+    psycopg2.connect = stubs.connect
+    psycopg2.OperationalError = type('OperationalError', (Exception,), {})
+    psycopg2.ProgrammingError = type('ProgrammingError', (Exception,), {})
+    monkeypatch.setitem(sys.modules, 'psycopg2', psycopg2)
+    return stubs
 
-    assert glb._sub_key() == 'pool:5432/docs'
+
+def _validate(conn_config):
+    v = validator.IValidator()
+    v.glb = SimpleNamespace(logicalType='rocketride_vector', connConfig=conn_config)
+    v.validateConfig()
 
 
-def test_probe_rejects_an_invalid_table_without_connecting(node_modules):
-    iglobal, _, stubs = node_modules
+def test_probe_rejects_an_invalid_table_without_connecting(probe):
+    _validate({'collection': 'bad-name'})
 
-    _iglobal(iglobal)._probe_connection({'table': 'bad-name'})
-
-    stubs.warning.assert_called_once()
-    assert 'Table name' in stubs.warning.call_args.args[0]
-    stubs.resolve_dsn.assert_not_called()
-    stubs.connect.assert_not_called()
+    probe.warning.assert_called_once()
+    assert 'Table name' in probe.warning.call_args.args[0]
+    probe.resolve_dsn.assert_not_called()
+    probe.connect.assert_not_called()
 
 
-def test_probe_connects_with_the_tenant_dsn(node_modules):
-    iglobal, _, stubs = node_modules
-    conn = stubs.connect.return_value
+def test_probe_connects_with_the_tenant_dsn(probe):
+    conn = probe.connect.return_value
     cursor = conn.cursor.return_value.__enter__.return_value
 
-    # Legacy key still accepted, as before the move to the store base.
-    _iglobal(iglobal)._probe_connection({'collection': 'rocketride'})
+    _validate({})
 
-    stubs.resolve_dsn.assert_called_once_with('org', '')
-    stubs.depends.assert_called_once()
-    stubs.connect.assert_called_once_with('postgresql://u:p@pool:5432/tenant_db', connect_timeout=3)
+    probe.resolve_dsn.assert_called_once_with('org', '')
+    probe.depends.assert_called_once()
+    probe.connect.assert_called_once_with(TEST_DSN, connect_timeout=3)
     assert cursor.execute.call_args_list == [call('SELECT 1'), call('SELECT NULL::vector')]
     conn.close.assert_called_once()
-    stubs.warning.assert_not_called()
+    probe.warning.assert_not_called()
 
 
 @pytest.mark.parametrize('scope, target', [('team', ''), ('team', 't-1'), ('user', 'u-1')])
-def test_probe_resolves_the_configured_database(node_modules, scope, target):
-    """The shared-base probe preserves the scoped DSN lookup from #2626."""
-    iglobal, _, stubs = node_modules
+def test_probe_resolves_the_configured_database(probe, scope, target):
+    """The probe preserves the scoped DSN lookup from #2626."""
+    _validate({'collection': 'docs', 'scope': scope, 'target': target})
 
-    _iglobal(iglobal)._probe_connection({'collection': 'docs', 'scope': scope, 'target': target})
-
-    stubs.resolve_dsn.assert_called_once_with(scope, target)
-    stubs.connect.assert_called_once()
-    stubs.warning.assert_not_called()
+    probe.resolve_dsn.assert_called_once_with(scope, target)
+    probe.connect.assert_called_once()
+    probe.warning.assert_not_called()
 
 
-def test_probe_outside_a_task_skips_connectivity(node_modules):
+def test_probe_outside_a_task_skips_connectivity(probe):
     """Save-time validation does not need a delivered database or driver dependencies."""
-    iglobal, _, stubs = node_modules
-    stubs.resolve_dsn.side_effect = stubs.DsnNotDelivered('outside a task')
+    probe.resolve_dsn.side_effect = validator.DsnNotDelivered('outside a task')
 
-    _iglobal(iglobal)._probe_connection({'collection': 'docs', 'scope': 'team'})
+    _validate({'collection': 'docs', 'scope': 'team'})
 
-    stubs.resolve_dsn.assert_called_once_with('team', '')
-    stubs.depends.assert_not_called()
-    stubs.connect.assert_not_called()
-    stubs.warning.assert_not_called()
+    probe.resolve_dsn.assert_called_once_with('team', '')
+    probe.depends.assert_not_called()
+    probe.connect.assert_not_called()
+    probe.warning.assert_not_called()
 
 
-def test_probe_rejects_invalid_database_target(node_modules):
+def test_probe_rejects_invalid_database_target(probe):
     """Static scope validation still runs before any database connection."""
-    iglobal, _, stubs = node_modules
+    _validate({'collection': 'docs', 'scope': 'org', 'target': 't-1'})
 
-    _iglobal(iglobal)._probe_connection({'collection': 'docs', 'scope': 'org', 'target': 't-1'})
-
-    stubs.resolve_dsn.assert_not_called()
-    stubs.connect.assert_not_called()
-    assert 'org scope takes no target' in stubs.warning.call_args.args[0]
+    probe.resolve_dsn.assert_not_called()
+    probe.connect.assert_not_called()
+    assert 'org scope takes no target' in probe.warning.call_args.args[0]
 
 
-def test_probe_reports_a_database_not_authorized_for_the_task(node_modules):
+def test_probe_reports_a_database_not_authorized_for_the_task(probe):
     """Only DsnNotDelivered is silent; a missing authorized scope remains an error."""
-    iglobal, _, stubs = node_modules
-    stubs.resolve_dsn.side_effect = ValueError('this task was not given the team database')
+    probe.resolve_dsn.side_effect = ValueError('this task was not given the team database')
 
-    _iglobal(iglobal)._probe_connection({'collection': 'docs', 'scope': 'team'})
+    _validate({'collection': 'docs', 'scope': 'team'})
 
-    stubs.connect.assert_not_called()
-    assert 'not given the team database' in stubs.warning.call_args.args[0]
-
-
-def test_probe_reports_failures_as_warnings_not_exceptions(node_modules):
-    iglobal, _, stubs = node_modules
-    stubs.connect.side_effect = RuntimeError('pooler unreachable')
-
-    _iglobal(iglobal)._probe_connection({'table': 'rocketride'})
-
-    stubs.warning.assert_called_once()
-    assert 'pooler unreachable' in stubs.warning.call_args.args[0]
+    probe.connect.assert_not_called()
+    assert 'not given the team database' in probe.warning.call_args.args[0]
 
 
-def test_instance_inherits_lanes_and_tools_from_the_store_base(node_modules):
-    _, iinstance, stubs = node_modules
+def test_probe_reports_failures_as_warnings_not_exceptions(probe):
+    probe.connect.side_effect = RuntimeError('pooler unreachable')
 
-    assert issubclass(iinstance.IInstance, stubs.StoreInstanceBase)
-    # No per-driver copies of the lane handlers or the tools: the base owns them.
-    for name in ('writeQuestions', 'writeDocuments', 'renderObject', 'search', 'upsert', 'delete'):
-        assert name not in vars(iinstance.IInstance)
+    _validate({})
+
+    probe.warning.assert_called_once()
+    assert 'pooler unreachable' in probe.warning.call_args.args[0]
+
+
+def test_the_delivered_dsn_map_is_what_the_probe_reads(monkeypatch):
+    """Without stand-ins: the DSN comes from ROCKETRIDE_DB_DSNS, and a scope the task was not given is an error."""
+    monkeypatch.setenv('ROCKETRIDE_DB_DSNS', json.dumps({'org': TEST_DSN}))
+    warnings = []
+    monkeypatch.setattr(validator, 'warning', warnings.append)
+    connect = MagicMock()
+    monkeypatch.setitem(sys.modules, 'psycopg2', SimpleNamespace(connect=connect))
+    depends = types.ModuleType('depends')
+    depends.depends = MagicMock()
+    monkeypatch.setitem(sys.modules, 'depends', depends)
+
+    _validate({'scope': 'team', 'target': 't-9'})
+    assert connect.call_count == 0
+    assert len(warnings) == 1 and "not given the team database 't-9'" in warnings[0]
+
+    _validate({})
+    connect.assert_called_once_with(TEST_DSN, connect_timeout=3)

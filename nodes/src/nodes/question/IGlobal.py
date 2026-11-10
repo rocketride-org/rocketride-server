@@ -21,24 +21,18 @@
 # SOFTWARE.
 # =============================================================================
 
-from rocketlib import IGlobalBase, OPEN_MODE
+import os
+
+from rocketlib import IGlobalBase
 
 
 class IGlobal(IGlobalBase):
     def beginGlobal(self):
-        # Are we in config mode or some other mode?
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            # We are going to get a call to configureService but
-            # we don't actually need to load the driver for that
-            pass
-        else:
-            import os
-            from depends import depends  # type: ignore
+        """Install the dependencies; the node has no settings."""
+        from depends import depends  # type: ignore
 
-            # Load the requirements
-            requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
-            depends(requirements)
+        requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
+        depends(requirements)
 
     def endGlobal(self):
-        # Release the index and embeddings
-        self.store = None
+        """Nothing to release."""

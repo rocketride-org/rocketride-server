@@ -26,7 +26,6 @@ import io
 import threading
 from typing import List, Tuple, Any
 from rocketlib import IGlobalBase, debug, warning
-from ai.common.config import Config
 
 from depends import depends
 
@@ -389,7 +388,7 @@ class IGlobal(IGlobalBase):
         bag = self.IEndpoint.endpoint.bag
 
         # Get this node's config
-        config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
+        config = self.config
 
         # No node-side lock: in-process inference waits for device memory inside the OCR
         # engine (ai.common.models.device_budget); with --modelserver the server batches
@@ -402,8 +401,8 @@ class IGlobal(IGlobalBase):
 
         # Get table OCR settings
         # script_family determines languages for EasyOCR, table_engine selects OCR backend
-        script_family = config.get('script_family', 'latin')
-        table_engine = config.get('table_engine', 'doctr').lower()
+        script_family = config['script_family']
+        table_engine = config['table_engine']
 
         # Import script families from ocr module
         from .ocr import SCRIPT_FAMILIES
