@@ -48,7 +48,6 @@ import { BUILDER_PROMPTS } from '../prompts';
 import { runAgent } from '../run';
 import type { AgentTool } from '../tools';
 import type { ModelCall, QuestionSpec } from '../wave/plan';
-import { summarize } from '../wave/summary';
 import { AppCheckToolkit, reportVerdict, type CheckReport, type MarkerInfo } from './appCheck';
 import { Approvals } from './approval';
 import { AppToolkit } from './appTools';
@@ -268,6 +267,13 @@ function scriptedModel(replies: Array<string | ((q: QuestionSpec) => string)>): 
 	return Object.assign(call, { questions });
 }
 
+/** The result entries a question shows the model, oldest first. */
+function resultsIn(q: QuestionSpec): Array<{ tool: string; key: string; summary?: string }> {
+	const head = 'Previous tool results:\n';
+	const block = q.context.find((c) => c.startsWith(head));
+	return block ? JSON.parse(block.slice(head.length)) : [];
+}
+
 /** A reply asking for tool calls. */
 const plan = (...calls: Array<[tool: string, args?: Record<string, unknown>]>): string => JSON.stringify({ thought: 'working', tool_calls: calls.map(([tool, args]) => ({ tool, args: args ?? {} })) });
 
@@ -366,37 +372,47 @@ test('a run the user stops closes its open unsaved-changes question as Keep mine
 	assert.deepEqual([ws.files.get('a.ts'), ws.log, editor.did], ['a = 1', [], []], 'nothing was written, saved or discarded');
 });
 
-test('a read too long to show whole comes back as whole lines the model sees in full, and reading on from the offset it names skips nothing', async () => {
+test('a read is shown as whole lines under its line header: a .pipe as its text, a long file a page at a time that reading on walks without a gap, and a memory reference to the read copies the file exactly', async () => {
+	const pipe = JSON.stringify({ components: Array.from({ length: 6 }, (_, i) => ({ id: `extract_${i}`, provider: 'extract_data', config: { fields: [`field_${i}a`, `field_${i}b`], prompt: `Extract the fields of invoice section ${i}.` } })) }, null, 1);
 	const lines = Array.from({ length: 300 }, (_, i) => `${i + 1}: ${'word '.repeat(i % 40)}`);
-	const ws = new MemoryWorkspace({ 'notes/long.md': lines.join('\n') });
-	const seen: string[] = [];
-	let offset: number | undefined;
-	let reads = 0;
-	do {
-		reads += 1;
-		assert.ok(reads <= 40, 'reading on comes to an end');
-		const result = await run(ws, 'read_file', { path: 'notes/long.md', ...(offset === undefined ? {} : { offset }) });
-		assert.equal(summarize(result), result, `read ${reads}: the model is shown every character it was sent`);
-		const shown = result.split('\n');
-		const next = /^\[Read on with offset=(\d+)\.\]$/.exec(shown.at(-1) ?? '');
-		seen.push(...shown.slice(1, next ? -1 : undefined));
-		offset = next ? Number(next[1]) : undefined;
-	} while (offset !== undefined);
-	assert.ok(reads > 1, 'the file took more than one read');
-	assert.deepEqual(seen, lines, 'the reads together hold every line once, in order');
+	const ws = new MemoryWorkspace({ 'pipelines/extract.pipe': pipe, 'notes/long.md': lines.join('\n') });
+	const pages: string[] = [];
+	// The model reads on from each page's offset, then copies the first, whole read by reference.
+	const step = (q: QuestionSpec): string => {
+		const results = resultsIn(q);
+		const last = results.at(-1);
+		if (last?.tool === 'write_file') return done('Copied.');
+		pages.push(last?.summary ?? '');
+		const next = /\n\[Read on with offset=(\d+)\.\]$/.exec(last?.summary ?? '');
+		if (next) return plan(['read_file', { path: 'notes/long.md', offset: Number(next[1]) }]);
+		return plan(['write_file', { path: 'notes/copy.md', content: `{{memory.ref:${results[1].key}}}` }]);
+	};
+	const model = scriptedModel([plan(['read_file', { path: 'pipelines/extract.pipe' }], ['read_file', { path: 'notes/long.md' }]), ...Array.from({ length: 40 }, () => step)]);
+	await agentTurn(ws, model);
+
+	const shownPipe = resultsIn(model.questions[1])[0].summary ?? '';
+	assert.equal(shownPipe.slice(shownPipe.indexOf('\n') + 1), pipe, 'the model sees the .pipe as its text, every field in it');
+	assert.ok(pages.length > 1, 'the long file took more than one read');
+	const seen = pages.flatMap((page) => page.split('\n').slice(1, /\n\[Read on with offset=\d+\.\]$/.test(page) ? -1 : undefined));
+	assert.deepEqual(seen, lines, 'the pages together hold every line whole, once, in order');
+	assert.equal(ws.files.get('notes/copy.md'), lines.join('\n'), 'the copy holds the whole file, not the first page');
 });
 
-test('a whole read of a long Markdown file lists its sections with line ranges, and each range reads from its heading', async () => {
+test('a whole read of a long Markdown file is shown as its sections with line ranges, and each range reads from its heading', async () => {
 	const prose = (n: number) => Array.from({ length: n }, (_, i) => `${'some prose '.repeat(8)}${i}`);
 	const lines = ['# Guide', ...prose(10), '## Setup', ...prose(20), '## Usage', '### Basics', '```sh', '# not a heading', '```', ...prose(20), '### Advanced', ...prose(20)];
 	const at = (heading: string) => lines.indexOf(heading) + 1;
 	const ws = new MemoryWorkspace({ 'docs/guide.md': lines.join('\n') });
-	const outline = await run(ws, 'read_file', { path: 'docs/guide.md' });
-	assert.equal(summarize(outline), outline, 'the model is shown the whole outline');
-	const sections = outline
-		.split('\n')
-		.slice(1, -1)
-		.map((row) => /^(\d+)-(\d+) (.+)$/.exec(row)?.slice(1) ?? [row]);
+	const sectionsIn = (q: QuestionSpec): string[][] =>
+		(resultsIn(q)[0].summary ?? '')
+			.split('\n')
+			.slice(1, -1)
+			.map((row) => /^(\d+)-(\d+) (.+)$/.exec(row)?.slice(1) ?? [row]);
+	const readEach = (q: QuestionSpec): string => plan(...sectionsIn(q).map(([from, to]): [string, Record<string, unknown>] => ['read_file', { path: 'docs/guide.md', offset: Number(from), limit: Number(to) - Number(from) + 1 }]));
+	const model = scriptedModel([plan(['read_file', { path: 'docs/guide.md' }]), readEach, done('Read.')]);
+	await agentTurn(ws, model);
+
+	const sections = sectionsIn(model.questions[1]);
 	const end = lines.length;
 	assert.deepEqual(sections, [
 		['1', `${end}`, '# Guide'],
@@ -405,10 +421,8 @@ test('a whole read of a long Markdown file lists its sections with line ranges, 
 		[`${at('### Basics')}`, `${at('### Advanced') - 1}`, '### Basics'],
 		[`${at('### Advanced')}`, `${end}`, '### Advanced'],
 	]);
-	for (const [from, to, heading] of sections) {
-		const section = await run(ws, 'read_file', { path: 'docs/guide.md', offset: Number(from), limit: Number(to) - Number(from) + 1 });
-		assert.equal(section.split('\n')[1], heading, `${heading} reads from its heading`);
-	}
+	const pages = resultsIn(model.questions[2]).slice(1);
+	sections.forEach(([, , heading], i) => assert.equal(pages[i]?.summary?.split('\n')[1], heading, `${heading} reads from its heading`));
 });
 
 // =============================================================================
@@ -533,9 +547,9 @@ test('read_file and search_files put a marker, never the key, in the next questi
 	await run(ws, 'edit_file', { path: 'pipelines/a.pipe', oldString: `"apikey": "${marker}"`, newString: `"apikey": "${marker}", "model": "gpt-5"` });
 	assert.deepEqual(config(), { apikey: pipeKey, model: 'gpt-5', fallback: '${ROCKETRIDE_OPENAI_KEY}' });
 
-	// step: the whole read, without its header line and the note it ends with, goes back with the key in it
+	// step: the whole read, without the note it ends with, goes back with the key in it
 	const again = await run(ws, 'read_file', { path: 'pipelines/a.pipe' });
-	await run(ws, 'write_file', { path: 'pipelines/a.pipe', content: again.slice(again.indexOf('\n') + 1, again.lastIndexOf('\n[')).replace('gpt-5', 'gpt-5-mini') });
+	await run(ws, 'write_file', { path: 'pipelines/a.pipe', content: again.slice(0, again.lastIndexOf('\n[')).replace('gpt-5', 'gpt-5-mini') });
 	assert.deepEqual(config(), { apikey: pipeKey, model: 'gpt-5-mini', fallback: '${ROCKETRIDE_OPENAI_KEY}' });
 });
 

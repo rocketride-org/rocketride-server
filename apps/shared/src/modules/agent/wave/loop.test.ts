@@ -219,10 +219,13 @@ test('a call on a file a timed-out call still changes is not run, and done waits
 		await sleep(5);
 	});
 	const model = scriptedModel([plan(['edit_file', { path: APP_FILE, n: 0 }], ['edit_file', { path: APP_FILE, n: 1 }]), done('too soon'), done('too soon'), done('ok')]);
-	const result = await loop(model, [loggedEdit(events, (n) => (n === 0 ? hang.promise : Promise.resolve()))], { finish, timeoutMs: () => 10 });
+	const edit = loggedEdit(events, (n) => (n === 0 ? hang.promise : Promise.resolve()));
+	const shown = new AgentTool({ name: edit.name, description: edit.description, parameters: edit.parameters, prepare: (args) => edit.prepare(args), show: (result, args) => `${result}, shown for n=${args.n}` });
+	const result = await loop(model, [shown], { finish, timeoutMs: () => 10 });
 	assert.deepEqual(events, ['start 0', 'write 0'], 'the second edit never started, so it cannot land before or under the first');
 	assert.equal(result.answer, 'ok', 'a done before the model read how the edit ended was accepted');
-	assert.match(JSON.stringify(resultsIn(model.questions[3])), /wave-2\.late0/, 'the accepted done came after the model read how the edit ended');
+	const late = resultsIn(model.questions[3]).find((entry) => entry.key === 'wave-2.late0');
+	assert.equal(late?.summary, 'edited, shown for n=0', 'the model read how the edit ended, in the view its tool gives of the call it ran');
 });
 
 /** Fakes setTimeout and performance.now together, so only the test moves the clock; the returned function moves it on once the loop is idle. */

@@ -42,7 +42,7 @@ import { SaveDroppedError, type EditorControl } from '../host';
 import { AgentTool, AgentToolkit, RefusedError, type ToolStep } from '../tools';
 import { SUMMARY_BUDGET } from '../wave/summary';
 import { replaceSpans, type ChoiceFn } from './common';
-import { SecretMarkers } from './secretMarkers';
+import { HIDDEN_NOTE_LINE, SecretMarkers } from './secretMarkers';
 import { UndoRecord } from './undo';
 
 // =============================================================================
@@ -345,6 +345,57 @@ function markdownOutline(path: string, lines: string[], note: string): string | 
 }
 
 // =============================================================================
+// READ PAGE — what the model is shown of a stored read
+// =============================================================================
+
+/** A stored window's header: its first line, the file's line count, and the path. */
+const WINDOW_HEADER = /^\[Lines (\d+)-\d+ of (\d+) in ([^\n]*)\]\n/;
+
+/**
+ * read_file's view of a stored read: the whole lines that fit SUMMARY_BUDGET under a
+ * `[Lines a-b of N in path]` header, ending with the offset to read on from when cut, and a whole
+ * read of a long Markdown file as its outline. Every page has the header, which also keeps a JSON
+ * file (a .pipe, package.json) from being shown as a structural summary that cuts its strings.
+ *
+ * @param result - The read as stored: the file, or a window under its header, then the hidden-secret note, if any.
+ * @param args - The read's arguments; a window's first line and the file's line count come from its header.
+ */
+function readPage(result: string, args: Record<string, unknown>): string {
+	const note = HIDDEN_NOTE_LINE.exec(result)?.[0] ?? '';
+	const text = result.slice(0, result.length - note.length);
+	const whole = args.offset === undefined && args.limit === undefined;
+	const window = whole ? null : WINDOW_HEADER.exec(text);
+	// an empty window has no header and no lines to page
+	if (!whole && !window) return result;
+	const path = window ? window[3] : normalizePath(args.path);
+	const start = window ? Number(window[1]) : 1;
+	const slice = (window ? text.slice(window[0].length) : text).split('\n');
+	const total = window ? Number(window[2]) : slice.length;
+	const header = (end: number) => `[Lines ${start}-${end} of ${total} in ${path}]\n`;
+	const all = header(start - 1 + slice.length) + slice.join('\n') + note;
+	if (all.length <= SUMMARY_BUDGET) return all;
+	const outline = whole && /\.md$/i.test(path) ? markdownOutline(path, slice, note) : null;
+	if (outline) return outline;
+
+	// step: stop at the last whole line that fits, so reading on from the next one skips nothing
+	const readOn = (next: number) => `\n[Read on with offset=${next}.]`;
+	let body = '';
+	let end = start - 1;
+	for (const line of slice) {
+		const grown = end < start ? line : `${body}\n${line}`;
+		if (header(end + 1).length + grown.length + note.length + readOn(end + 2).length > SUMMARY_BUDGET) break;
+		body = grown;
+		end += 1;
+	}
+	if (end >= start) return header(end) + body + note + readOn(end + 1);
+
+	const first = slice[0];
+	const cut = (kept: number) => `\n[Line ${start} cut to its first ${kept} of ${first.length} characters.${start < total ? ` Read on with offset=${start + 1}.` : ''}]`;
+	const kept = Math.max(0, SUMMARY_BUDGET - header(start).length - note.length - cut(first.length).length);
+	return header(start) + first.slice(0, kept) + note + cut(kept);
+}
+
+// =============================================================================
 // FILESYSTEM TOOLKIT
 // =============================================================================
 
@@ -541,12 +592,13 @@ export class FilesystemTools extends AgentToolkit {
 	// ── Executors ────────────────────────────────────────────────────────
 
 	/**
-	 * read_file: the whole file or a line window of it, within SUMMARY_BUDGET.
+	 * read_file: the whole file or a line window of it, stored whole in run memory so a
+	 * reference to it copies the file; readPage builds the page the model is shown.
 	 * Overlays win over the cache so unsaved buffers are what the agent sees.
 	 *
 	 * @param offset - Optional 1-based first line of a partial read.
 	 * @param limit - Optional line count of a partial read.
-	 * @returns The content or window; one cut to fit ends with the offset to read on from. A whole read of a long Markdown file returns its outline instead.
+	 * @returns The file, or a window under its `[Lines a-b of N in path]` header; either ends with the hidden-secret note, if any.
 	 */
 	private async readFile(rawPath: unknown, offset?: number, limit?: number): Promise<string> {
 		const path = normalizePath(rawPath);
@@ -561,35 +613,14 @@ export class FilesystemTools extends AgentToolkit {
 		const hidden = this.shown(path, text);
 		text = hidden.text;
 		const note = hidden.note ? `\n[${hidden.note}]` : '';
+		if (offset === undefined && limit === undefined) return text + note;
 
 		const lines = text.split('\n');
 		const start = Math.max(1, Math.floor(offset ?? 1));
 		const count = Math.max(1, Math.floor(limit ?? lines.length));
 		const slice = lines.slice(start - 1, start - 1 + count);
 		if (slice.length === 0) return `[EMPTY WINDOW: ${path} has ${lines.length} lines; requested from line ${start}]`;
-		const header = (end: number) => `[Lines ${start}-${end} of ${lines.length} in ${path}]\n`;
-		// The header also keeps a JSON file (a .pipe, package.json) from being shown as a structural summary that cuts its strings
-		const whole = header(start - 1 + slice.length) + slice.join('\n') + note;
-		if (whole.length <= SUMMARY_BUDGET) return whole;
-		const outline = offset === undefined && limit === undefined && /\.md$/i.test(path) ? markdownOutline(path, lines, note) : null;
-		if (outline) return outline;
-
-		// step: the loop shows the model a longer result with its middle left out, so stop at the last whole line that fits
-		const readOn = (next: number) => `\n[Read on with offset=${next}.]`;
-		let body = '';
-		let end = start - 1;
-		for (const line of slice) {
-			const grown = end < start ? line : `${body}\n${line}`;
-			if (header(end + 1).length + grown.length + note.length + readOn(end + 2).length > SUMMARY_BUDGET) break;
-			body = grown;
-			end += 1;
-		}
-		if (end >= start) return header(end) + body + note + readOn(end + 1);
-
-		const first = slice[0];
-		const cut = (kept: number) => `\n[Line ${start} cut to its first ${kept} of ${first.length} characters.${start < lines.length ? ` Read on with offset=${start + 1}.` : ''}]`;
-		const kept = Math.max(0, SUMMARY_BUDGET - header(start).length - note.length - cut(first.length).length);
-		return header(start) + first.slice(0, kept) + note + cut(kept);
+		return `[Lines ${start}-${start - 1 + slice.length} of ${lines.length} in ${path}]\n${slice.join('\n')}${note}`;
 	}
 
 	/**
@@ -915,6 +946,7 @@ export class FilesystemTools extends AgentToolkit {
 					additionalProperties: false,
 				},
 				execute: (a) => this.readFile(a.path, a.offset === undefined ? undefined : Number(a.offset), a.limit === undefined ? undefined : Number(a.limit)),
+				show: readPage,
 			}),
 			new AgentTool({
 				name: 'list_directory',

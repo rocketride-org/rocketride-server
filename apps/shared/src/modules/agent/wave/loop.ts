@@ -770,7 +770,7 @@ class WaveRun {
 			// a refused or unstarted call changed nothing, so a denied delete_file needs no check_app
 			if (outcome.ok) ran.push({ tool: p.call.tool, args: p.args, result: outcome.result });
 			else if (!outcome.unstarted) ran.push({ tool: p.call.tool, args: p.args, error: outcome.error });
-			return this.withCall(outcome.ok ? this.store(p.call.tool, key, outcome.result) : { tool: p.call.tool, key, error: outcome.error }, p.call);
+			return this.withCall(outcome.ok ? this.store(p.call.tool, key, outcome.result, p.args) : { tool: p.call.tool, key, error: outcome.error }, p.call);
 		});
 		return { entries, ran };
 	}
@@ -814,16 +814,24 @@ class WaveRun {
 	 * stored says so: it never blocks, as repeating a call is often legitimate,
 	 * but it tells the model the call brought nothing new. A check that passes
 	 * again is news, not a repeat.
+	 *
+	 * @param args - The arguments the call ran with, for the tool's own view of its result.
 	 */
-	private store(tool: string, key: string, result: string): Entry {
+	private store(tool: string, key: string, result: string, args: Record<string, unknown>): Entry {
 		this.memory.put(key, result);
-		const entry: Entry = { tool, key, summary: summarize(result) };
+		const entry: Entry = { tool, key, summary: this.summaryOf(tool, result, args) };
 		if (tool === this.o.finish.checkTool) return entry;
 		const prior = setDefault(this.seenResults, result, key);
 		if (prior === key) return entry;
 		entry.deduplicated = true;
 		entry.note = `This result is identical to ${prior}, which is already in memory, so this call produced no new information. Read ${prior} with memory.peek, or change approach: repeating a call that returns the same data will not advance the task.`;
 		return entry;
+	}
+
+	/** What the model is shown of a stored result: its tool's own view when it has one, else the generic summary. */
+	private summaryOf(tool: string, result: string, args: Record<string, unknown>): string {
+		const show = this.tools.get(tool)?.show;
+		return show ? show(result, args) : summarize(result);
 	}
 
 	/**
@@ -919,7 +927,7 @@ class WaveRun {
 			if (call.error !== undefined) entry.error = call.error;
 			else {
 				this.memory.put(key, call.result ?? '');
-				entry.summary = summarize(call.result ?? '');
+				entry.summary = this.summaryOf(call.tool, call.result ?? '', call.args);
 			}
 			entry.note = LATE_NOTE;
 			return entry;
