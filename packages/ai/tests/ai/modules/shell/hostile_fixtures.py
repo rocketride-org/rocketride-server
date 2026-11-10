@@ -139,6 +139,15 @@ async def read_file(path: str) -> bytes:
     return FILES[path]
 
 
+async def file_info(path: str) -> Dict[str, Any]:
+    """``public_pages.artifact_file_info`` over FILES (StorageNotFoundError when absent)."""
+    from ai.account.store import StorageNotFoundError
+
+    if path not in FILES:
+        raise StorageNotFoundError(f'File not found: {path}')
+    return {'size': len(FILES[path]), 'modified': 0.0}
+
+
 def dist_of(org: str, app_id: str, version: int = 1) -> str:
     """A version's store dist tree (where app-manifest.json and pages/*.html live)."""
     return f'orgs/{org}/files/.deployments/{app_id}/v{version:06d}-abc/dist'

@@ -32,7 +32,9 @@ from __future__ import annotations
 import pytest
 
 import ai.modules.shell.public_pages as pp
-from ai.modules.shell.public_pages import gate_errors
+
+# Bound at import, before conftest swaps the module attribute for the FILES double.
+from ai.modules.shell.public_pages import artifact_file_info, gate_errors
 
 from .hostile_fixtures import FILES, HOME_MANIFEST, hostile_account
 
@@ -127,18 +129,63 @@ async def test_every_problem_is_reported_at_once():
         assert any(needle in e for e in errors), needle
 
 
-async def test_a_snapshot_read_failure_other_than_not_found_fails_closed(monkeypatch):
-    from .hostile_fixtures import read_file
+async def test_a_snapshot_stat_failure_other_than_not_found_fails_closed(monkeypatch):
+    from .hostile_fixtures import file_info
 
     async def flaky(path):
         if path.endswith('/pages/fresh.html'):
             raise OSError('store down')
-        return await read_file(path)
+        return await file_info(path)
 
-    monkeypatch.setattr(pp, 'read_artifact_file', flaky)
+    monkeypatch.setattr(pp, 'artifact_file_info', flaky)
     manifest = {'publicPages': [{'path': '/fresh', 'title': 'F', 'snapshot': 'pages/fresh.html'}]}
     with pytest.raises(OSError):
         await gate_errors('rocketride.other', manifest, DIST, hostile_account())
+
+
+async def test_the_gate_never_reads_a_snapshot_body(monkeypatch):
+    from .hostile_fixtures import read_file
+
+    async def no_snapshot_reads(path):
+        assert not path.endswith('.html'), f'the gate read {path}'
+        return await read_file(path)
+
+    monkeypatch.setattr(pp, 'read_artifact_file', no_snapshot_reads)
+    FILES[f'{DIST}/pages/fresh.html'] = b'<html></html>'
+    manifest = {'publicPages': [{'path': '/fresh', 'title': 'F', 'snapshot': 'pages/fresh.html'}]}
+    assert await gate_errors('rocketride.other', manifest, DIST, hostile_account()) == []
+
+
+class _RawStore:
+    """A raw store whose bodies must never be read: only ``get_file_info`` answers."""
+
+    def __init__(self, files):
+        self.files = files
+        self.stats = []
+
+    async def get_file_info(self, path):
+        from ai.account.store import StorageNotFoundError
+
+        self.stats.append(path)
+        if path not in self.files:
+            raise StorageNotFoundError(f'File not found: {path}')
+        return {'size': len(self.files[path]), 'modified': 1.0}
+
+    async def read_bytes(self, path):
+        raise AssertionError(f'read the body of {path}')
+
+
+async def test_artifact_file_info_stats_through_the_raw_store(monkeypatch):
+    from types import SimpleNamespace
+
+    from ai.account.store import Store, StorageNotFoundError
+
+    raw = _RawStore({'a/dist/pages/x.html': b'12345'})
+    monkeypatch.setattr(Store, 'instance', classmethod(lambda cls: SimpleNamespace(raw_store=lambda: raw)))
+    assert await artifact_file_info('a/dist/pages/x.html') == {'size': 5, 'modified': 1.0}
+    with pytest.raises(StorageNotFoundError):
+        await artifact_file_info('a/dist/pages/missing.html')
+    assert raw.stats == ['a/dist/pages/x.html', 'a/dist/pages/missing.html']
 
 
 async def test_storage_failure_fails_closed():
