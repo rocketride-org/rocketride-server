@@ -89,6 +89,10 @@ class IInstance(IInstanceBase):
 
         Returns:
             preventDefault() on END to suppress default forwarding; None otherwise.
+
+        Raises:
+            RuntimeError: On END, the frame could not be decoded, processed or written;
+                the message names the cause.
         """
         if action == AVI_ACTION.BEGIN:
             # BEGIN carries the source stream descriptor (provenance), not image bytes.
@@ -101,7 +105,8 @@ class IInstance(IInstanceBase):
                 image = ImageProcessor.load_image_from_bytes(self._image_data)
                 self._emit(image)
             except Exception as exc:
-                raise RuntimeError('depth_estimate failed to process the input frame') from exc
+                cause = str(exc) or type(exc).__name__
+                raise RuntimeError(f'depth_estimate failed to process the input frame: {cause}') from exc
             finally:
                 self._image_data = None
             return self.preventDefault()

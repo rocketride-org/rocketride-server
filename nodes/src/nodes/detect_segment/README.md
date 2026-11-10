@@ -50,7 +50,7 @@ This node declares GPU capability and uses its configured transformer engine thr
 
 ### Output and failures
 
-The text and image outputs are produced only when those lanes have listeners. Image decoding or segmentation failures raise an error to the engine instead of silently dropping a frame. Outputs already written before a downstream failure cannot be retracted; a failed frame must not be counted as a successful result. Individual overlay-rendering failures still log a warning and skip that overlay.
+The text and image outputs are produced only when those lanes have listeners. If a frame cannot be decoded, or segmentation or writing the outputs fails, the node raises an error that names the cause, and the engine marks the object as failed: the image, or the whole video the frame came from. The task goes on with the next object. Output already written is not withdrawn, such as the masks JSON when only the annotated image fails, or other frames of the same video. A mask or semantic map that cannot be decoded for the overlay is logged as a warning and left out of the annotated image; the JSON still carries it.
 
 ## Upstream docs
 
