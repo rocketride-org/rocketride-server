@@ -157,6 +157,21 @@ def legacy_aggregate(live_conflict: Optional[Callable[[str], Optional[str]]] = N
     return Aggregate(exact=exact, site=dict(manifest['site']), legacy=True)
 
 
+def _skip_unreadable(
+    app_id: str, reason: str, strict: bool, unreadable: Optional[Set[str]], cause: Optional[Exception] = None
+) -> None:
+    """Leave one app the loader cannot read out of this build; under ``strict``, refuse instead for a root claimant.
+
+    One unreadable app must not freeze the map (a later unpublish elsewhere
+    would never apply). The gate is strict: an unverifiable claim refuses.
+    """
+    if strict and may_claim_root(app_id):
+        raise RuntimeError(f'cannot read the published manifest of {app_id}: {reason}') from cause
+    debug(f'[public_pages] {app_id}: skipped this build: {reason}')
+    if unreadable is not None:
+        unreadable.add(app_id)
+
+
 async def load_published(
     acct: Any = None, strict: bool = False, exclude: str = '', unreadable: Optional[Set[str]] = None
 ) -> List[Published]:
@@ -206,9 +221,15 @@ async def load_published(
             continue
         version = row.get('version')
         artifact_path = str(row.get('artifactPath') or '')
+        if not isinstance(version, int) or not artifact_path:
+            _skip_unreadable(
+                app_id,
+                f'malformed public row (version {version!r}, artifactPath {artifact_path!r})',
+                strict,
+                unreadable,
+            )
+            continue
         try:
-            if not isinstance(version, int) or not artifact_path:
-                raise ValueError(f'malformed public row (version {version!r}, artifactPath {artifact_path!r})')
             artifact = await acct.deployments_artifact(str(row.get('orgId') or org), app_id, version)
             stored = manifest_of(artifact or {})
             if stored.get('public', True) is False:
@@ -216,14 +237,7 @@ async def load_published(
             dist_dir = dist_dir_of(artifact_path)
             manifest = await page_manifest(stored, dist_dir)
         except Exception as exc:
-            # One unreadable app must not freeze the map (a later unpublish
-            # elsewhere would never apply): it contributes nothing this build.
-            # The gate is strict instead: an unverifiable claim refuses.
-            if strict and may_claim_root(app_id):
-                raise RuntimeError(f'cannot read the published manifest of {app_id}: {exc}') from exc
-            debug(f'[public_pages] {app_id}: skipped this build: {exc}')
-            if unreadable is not None:
-                unreadable.add(app_id)
+            _skip_unreadable(app_id, str(exc), strict, unreadable, exc)
             continue
         if 'publicPages' not in manifest and 'site' not in manifest:
             continue
@@ -380,7 +394,7 @@ _current: Optional[Aggregate] = None
 _live_conflict: Optional[Callable[[str], Optional[str]]] = None
 _on_swap: List[Callable[[Aggregate, Aggregate], None]] = []
 _rebuild_lock = asyncio.Lock()
-_rebuild_task: Any = None
+_rebuild_task: Optional[asyncio.Task] = None
 _rebuild_pending = False
 
 
@@ -474,6 +488,7 @@ def schedule_rebuild() -> None:
 
 
 async def _rebuild_loop() -> None:
+    """Run rebuilds until no more were requested while one ran (``schedule_rebuild`` coalesces into this)."""
     global _rebuild_pending
     while _rebuild_pending:
         _rebuild_pending = False
