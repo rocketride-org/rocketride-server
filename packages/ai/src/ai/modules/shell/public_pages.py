@@ -719,11 +719,22 @@ def maybe_refresh() -> None:
 def app_changed(app_id: str) -> None:
     """The app deployment-change hook (``broadcast_app_changed``).
 
-    Any app's change can change what a page naming it (``plans:<appId>``,
-    ``app:<appId>``) may show, so the data sources are invalidated. Only a
+    A change to an app a page names (``plans:<appId>``, ``app:<appId>``) can
+    change what that page may show, so the data sources are invalidated; any
+    other app's change (a build, say) leaves bound renders cached. Only a
     platform app's publish, unpublish or rung repoint can change the page
     claims, so only those rebuild the aggregate.
+
+    Args:
+        app_id: The app whose deployment changed.
     """
-    data_sources.invalidate('app')
+    if _named_by_a_page(app_id):
+        data_sources.invalidate('app')
     if is_privileged(app_id):
         schedule_rebuild()
+
+
+def _named_by_a_page(app_id: str) -> bool:
+    """Whether a page of the current aggregate binds ``app_id``'s data (``plans:<appId>`` or ``app:<appId>``)."""
+    entries = {f'plans:{app_id}', f'app:{app_id}'}
+    return any(entries.intersection(page.data) for page in current().exact.values())

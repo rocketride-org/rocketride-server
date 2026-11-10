@@ -451,6 +451,19 @@ def test_data_source_event_invalidates_dependent_entries(acct, shell_root):
     assert 'Builder' not in text and _jsonld(text) == []
 
 
+def test_a_deployment_change_of_an_app_no_page_names_keeps_bound_renders(acct, shell_root):
+    acct.plans['acme.brandy'] = PLANS
+    _seed()
+    _serve(_page('/pricing', ['plans:acme.brandy', 'app:acme.brandy']), _page('/own', ['plans']))
+    client = _client()
+    _crawl(client)
+    _crawl(client, '/own')
+    pp.app_changed('acme.unrelated')  # a build of an app no page names
+    assert len(pages._render_cache) == 2
+    pp.app_changed('acme.brandy')
+    assert len(pages._render_cache) == 0
+
+
 def test_a_render_overtaken_by_an_invalidation_is_served_but_not_cached(acct, shell_root, monkeypatch):
     from ai.account import account as singleton
 

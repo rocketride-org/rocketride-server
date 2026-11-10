@@ -48,8 +48,9 @@ price is a plain decimal number and whose currency is an ISO 4217 code.
 
 Freshness: ``invalidate(name)`` tells listeners (the render cache drops every
 response bound to that source). The plan layer calls ``invalidate('plans')``
-after a price change; every app deployment change calls ``invalidate('app')``,
-which also covers ``plans`` (a named app's plans depend on its visibility).
+after a price change; a deployment change of an app some page names calls
+``invalidate('app')`` (``public_pages.app_changed``), which also covers
+``plans`` (a named app's plans depend on its visibility).
 Those events are in-process, so bound responses also expire after
 ``TTL_SECONDS`` on pods that miss one, and shared caches may keep them only
 for what is left of that time.
