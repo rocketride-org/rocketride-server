@@ -37,15 +37,15 @@ import path from 'node:path';
 import { DATA_DIR, REPO_ROOT } from './catalog';
 import { modelTitles, parseModel, type ModelPick } from './driver';
 import { findLeaks, heldKeys, readModelKeys, Scrubber, type HeldKey } from './evidence';
-import { erroredTrial } from './grade';
+import { erroredTrial, type TrialResult } from './grade';
 import { LOCAL_APIKEY, openStack, type Stack } from './stack';
 import { agentSettingsFile, Store, type AgentLimits } from './store';
 import { loadTasks, type Task } from './task';
 import { writeRunReport } from './report';
-import { buildResults, writeResults } from './results';
+import { buildResults, writeResults, type Schedule } from './results';
 import { checkWorkspace, readTree, referenceWorkspace } from './references';
 import { causeOf } from './cause';
-import { runSchedule } from './schedule';
+import { roundOrder, runSchedule, runTrials, type Job } from './schedule';
 import { SMOKE_MODELS, smokeModels, smokeTable } from './smoke-models';
 import { runTrial } from './trial';
 
@@ -113,6 +113,12 @@ Options:
   --cost-limit <usd>
                   run: the agent's estimated cost limit per turn, in US
                   dollars, set the same way (0: no limit).
+  --trials <n>    run: every task exactly n times, pass or fail, in rounds
+                  (every task once, then every task again), with no reruns
+                  of failures. Within a round: real-* tasks, then app tasks,
+                  then the rest. After the last round each trial that ended
+                  error is retried once as a new trial (retryOf). The report
+                  shows k of n per task. Without it, --reruns applies.
   --headed        run: show the browser.
   --no-preview    run: leave every Design preview closed. By default the
                   runner opens each app's preview as a user watching would:
@@ -134,6 +140,8 @@ interface Args {
 	apikeyEnv: string | null;
 	out: string | null;
 	reruns: number;
+	/** Every task this many times in rounds, with no reruns (null: reruns mode). */
+	trials: number | null;
 	headed: boolean;
 	models: string[];
 	workspace: string | null;
@@ -145,7 +153,7 @@ interface Args {
 }
 
 function parseArgs(argv: string[]): Args {
-	const args: Args = { command: null, tasks: DATA_DIR, only: [], table: false, model: DEFAULT_MODEL, url: null, apikeyEnv: null, out: null, reruns: 2, headed: false, models: [], workspace: null, allowWipe: false, noPreview: false, envFile: DEFAULT_ENV_FILE, limits: {}, help: false };
+	const args: Args = { command: null, tasks: DATA_DIR, only: [], table: false, model: DEFAULT_MODEL, url: null, apikeyEnv: null, out: null, reruns: 2, trials: null, headed: false, models: [], workspace: null, allowWipe: false, noPreview: false, envFile: DEFAULT_ENV_FILE, limits: {}, help: false };
 	for (let i = 0; i < argv.length; i++) {
 		const a = argv[i];
 		const value = () => {
@@ -164,6 +172,9 @@ function parseArgs(argv: string[]): Args {
 		else if (a === '--reruns') {
 			args.reruns = Number(value());
 			if (!Number.isInteger(args.reruns) || args.reruns < 0) throw new Error('--reruns needs a whole number of 0 or more');
+		} else if (a === '--trials') {
+			args.trials = Number(value());
+			if (!Number.isInteger(args.trials) || args.trials < 1) throw new Error('--trials needs a whole number of 1 or more');
 		} else if (a === '--headed') args.headed = true;
 		else if (a === '--workspace') args.workspace = path.resolve(value());
 		else if (a === '--allow-wipe') args.allowWipe = true;
@@ -181,6 +192,7 @@ function parseArgs(argv: string[]): Args {
 		else if (args.command === null) args.command = a;
 		else throw new Error(`unexpected argument ${a}`);
 	}
+	if (args.trials !== null && argv.includes('--reruns')) throw new Error('--trials runs every task a fixed number of times with no reruns; leave out --reruns');
 	return args;
 }
 
@@ -244,7 +256,8 @@ async function run(args: Args, modelKeys: HeldKey[]): Promise<number> {
 	// the engine's keys, for keys-not-leaked: never the account's API key, which the page sends to sign in
 	const accountKeyEnv = apiKeyEnvOf(args);
 	const engineKeys = heldKeys(modelKeys).filter((k) => k.name !== accountKeyEnv && k.value !== apiKey);
-	log(`${valid.length} task(s), up to ${args.reruns} rerun(s) of each failure, ${model.provider}/${model.model}, output in ${out}`);
+	const schedule: Schedule = args.trials === null ? { mode: 'reruns', reruns: args.reruns } : { mode: 'trials', trials: args.trials };
+	log(`${valid.length} task(s), ${schedule.mode === 'trials' ? `each ${schedule.trials} time(s) in rounds, each error retried once` : `up to ${schedule.reruns} rerun(s) of each failure`}, ${model.provider}/${model.model}, output in ${out}`);
 	log(`model keys held: ${keys.map((k) => k.name).join(', ') || 'none'}`);
 	const limits = Object.keys(args.limits).length ? args.limits : null;
 	log(`agent limits: ${limits ? JSON.stringify(agentSettingsFile(limits).settings) : "the product's defaults"}`);
@@ -270,52 +283,64 @@ async function run(args: Args, modelKeys: HeldKey[]): Promise<number> {
 	const byId = new Map(valid.map((t) => [t.id, t]));
 	let failedToRun = 0;
 	try {
-		const runs = await runSchedule(
-			valid.map((t) => t.id),
-			async (id, n) => {
-				const task = byId.get(id) as Task;
-				const dir = path.join(out, task.id, `trial-${n}`);
-				const { record: r, result: raw } = await runTrial({ task, tasksDir: args.tasks, trial: n, model, stack, dir, headed: args.headed, previews: !args.noPreview, limits, keys, engineKeys, scrubber });
-				// step: the known-good call after every trial the runner drove, recorded with it; a failed trial gets its cause from it too
-				const kg = r.endReason === 'not_supported' ? null : ((await smokeModels(stack.engineUri, apiKey, [model], scrubber).catch(() => null))?.[0] ?? null);
-				raw.knownGood = kg ? { model: kg.model, answered: kg.answered, seconds: kg.seconds, detail: kg.detail } : null;
-				if (raw.status !== 'pass' && raw.status !== 'pending') raw.cause = causeOf(raw, r, kg);
-				// step: from here on the grade is scrubbed: the log, result.json, results.json and the report all read this copy
-				const result = JSON.parse(scrubber.scrub(JSON.stringify(raw))) as typeof raw;
-				fs.writeFileSync(path.join(dir, 'result.json'), `${JSON.stringify(result, null, '\t')}\n`);
-				const outcome = r.turns[0]?.result?.outcome ?? 'none';
-				const card = r.browser.card ? `card "${r.browser.card.title}"${r.browser.cardMatchesOutcome === false ? ' (DISAGREES)' : ''}` : 'no card';
-				const cards = r.confirms.length ? `, ${r.confirms.length} card(s): ${r.confirms.map((c) => c.answer).join(', ')}` : '';
-				log(`${task.id} trial ${n}${n > 1 ? ' (rerun)' : ''}: ${result.status.toUpperCase()}, outcome ${outcome}, ${card}${cards}, ${Math.round(r.totalWallMs / 1000)}s: ${result.why.slice(0, 200)}`);
-				log(`  ${dir}`);
-				if (r.endReason === 'runner_error' || r.endReason === 'environment' || r.browser.leaks.length) failedToRun++;
-				if (result.cause) log(`  cause: ${result.cause.label}: ${result.cause.evidence.slice(0, 200)}`);
-				return result;
-			},
-			(r) => r.status,
-			// a trial that threw past its own catch has no record to grade; nothing is written here, since a write may be what failed
-			(id, n, err) => {
-				const task = byId.get(id) as Task;
-				const leaks = findLeaks(path.join(out, task.id, `trial-${n}`), keys);
-				const leaked = leaks.length ? `; a held key is in the trial folder: ${leaks.map((l) => `${l.key} in ${l.file}`).join(', ')}` : '';
-				const result = erroredTrial(task, n, `${model.provider}/${model.model}`, `${scrubber.scrub((err instanceof Error ? err.message : String(err)).split('\n')[0] ?? '')}${leaked}`);
-				log(`${task.id} trial ${n}${n > 1 ? ' (rerun)' : ''}: ${result.status.toUpperCase()}: ${result.why.slice(0, 200)}`);
-				failedToRun++;
-				return result;
-			},
-			args.reruns
-		);
+		const label = (job: Job) => (job.retryOf ? ` (retry of trial ${job.retryOf})` : schedule.mode === 'reruns' && job.trial > 1 ? ' (rerun)' : '');
+		const one = async (job: Job): Promise<TrialResult> => {
+			const task = byId.get(job.id) as Task;
+			const n = job.trial;
+			const dir = path.join(out, task.id, `trial-${n}`);
+			const { record: r, result: raw } = await runTrial({ task, tasksDir: args.tasks, trial: n, model, stack, dir, headed: args.headed, previews: !args.noPreview, limits, keys, engineKeys, scrubber });
+			if (job.retryOf) raw.retryOf = job.retryOf;
+			// step: the known-good call after every trial the runner drove, recorded with it; a failed trial gets its cause from it too
+			const kg = r.endReason === 'not_supported' ? null : ((await smokeModels(stack.engineUri, apiKey, [model], scrubber).catch(() => null))?.[0] ?? null);
+			raw.knownGood = kg ? { model: kg.model, answered: kg.answered, seconds: kg.seconds, detail: kg.detail } : null;
+			if (raw.status !== 'pass' && raw.status !== 'pending') raw.cause = causeOf(raw, r, kg);
+			// step: from here on the grade is scrubbed: the log, result.json, results.json and the report all read this copy
+			const result = JSON.parse(scrubber.scrub(JSON.stringify(raw))) as typeof raw;
+			fs.writeFileSync(path.join(dir, 'result.json'), `${JSON.stringify(result, null, '\t')}\n`);
+			const outcome = r.turns[0]?.result?.outcome ?? 'none';
+			const card = r.browser.card ? `card "${r.browser.card.title}"${r.browser.cardMatchesOutcome === false ? ' (DISAGREES)' : ''}` : 'no card';
+			const cards = r.confirms.length ? `, ${r.confirms.length} card(s): ${r.confirms.map((c) => c.answer).join(', ')}` : '';
+			log(`${task.id} trial ${n}${label(job)}: ${result.status.toUpperCase()}, outcome ${outcome}, ${card}${cards}, ${Math.round(r.totalWallMs / 1000)}s: ${result.why.slice(0, 200)}`);
+			log(`  ${dir}`);
+			if (r.endReason === 'runner_error' || r.endReason === 'environment' || r.browser.leaks.length) failedToRun++;
+			if (result.cause) log(`  cause: ${result.cause.label}: ${result.cause.evidence.slice(0, 200)}`);
+			return result;
+		};
+		// a trial that threw past its own catch has no record to grade; nothing is written here, since a write may be what failed
+		const fail = (job: Job, err: unknown): TrialResult => {
+			const task = byId.get(job.id) as Task;
+			const leaks = findLeaks(path.join(out, task.id, `trial-${job.trial}`), keys);
+			const leaked = leaks.length ? `; a held key is in the trial folder: ${leaks.map((l) => `${l.key} in ${l.file}`).join(', ')}` : '';
+			const result = erroredTrial(task, job.trial, `${model.provider}/${model.model}`, `${scrubber.scrub((err instanceof Error ? err.message : String(err)).split('\n')[0] ?? '')}${leaked}`);
+			if (job.retryOf) result.retryOf = job.retryOf;
+			log(`${task.id} trial ${job.trial}${label(job)}: ${result.status.toUpperCase()}: ${result.why.slice(0, 200)}`);
+			failedToRun++;
+			return result;
+		};
+		const statusOf = (r: TrialResult) => r.status;
+		const runs =
+			schedule.mode === 'trials'
+				? await runTrials(roundOrder(valid), schedule.trials, one, statusOf, fail)
+				: await runSchedule(
+						valid.map((t) => t.id),
+						(id, n) => one({ id, trial: n }),
+						statusOf,
+						(id, n, err) => fail({ id, trial: n }, err),
+						schedule.reruns
+					);
 		const results = buildResults(runs, byId, out, {
 			startedAt,
 			finishedAt: new Date().toISOString(),
 			model: `${model.provider}/${model.model}`,
 			taskSet: path.relative(REPO_ROOT, args.tasks),
+			schedule,
 			engine: stack.engine,
 			checkout: checkout(),
 		});
 		writeResults(out, results);
 		const report = writeRunReport(out, results);
 		const s = results.summary;
+		if (schedule.mode === 'trials') log(`${results.tasks.reduce((k, t) => k + t.score.passed, 0)} of ${results.tasks.reduce((k, t) => k + t.score.runs, 0)} runs passed (errors left out), over ${s.tasks} task(s)`);
 		log(
 			`first-run pass rate ${Math.round(s.firstRunPassRate * 100)}%, flake rate ${Math.round(s.flakeRate * 100)}%, over ${s.tasks} task(s): ${Object.entries(s.verdicts)
 				.map(([v, n]) => `${n} ${v}`)

@@ -66,8 +66,8 @@ export interface GradeContext {
 	appChecks?: Record<string, { ok: boolean; detail: string } | undefined>;
 }
 
-/** A graded trial: #2885's ScenarioResult, plus the task type and the path substitutions. */
-export type TrialResult = ScenarioResult & { type: string; substitutions: Substitution[]; cause?: Cause | null; knownGood?: Cause['knownGood'] | null };
+/** A graded trial: #2885's ScenarioResult, plus the task type, the path substitutions, and the trial it retries when it is a retry of an error. */
+export type TrialResult = ScenarioResult & { type: string; substitutions: Substitution[]; cause?: Cause | null; knownGood?: Cause['knownGood'] | null; retryOf?: number };
 
 function* allStrings(obj: unknown): Generator<string> {
 	if (typeof obj === 'string') yield obj;

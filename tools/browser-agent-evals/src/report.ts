@@ -246,14 +246,28 @@ function percent(x: number): string {
  * @returns The report's path.
  */
 export function writeRunReport(dir: string, results: ResultsFile): string {
-	const s = results.summary;
-	const cell = (x: string) => scrub(x).replace(/\|/g, '\\|').replace(/\n/g, ' ');
-	const flaky = results.tasks.filter((t) => t.verdict === 'flaky').map((t) => t.id);
-	const lines = [
+	const head = [
 		`# Browser agent evals: ${results.model}`,
 		'',
 		`${results.startedAt} to ${results.finishedAt}, task set ${results.taskSet}, checkout ${results.checkout.commit.slice(0, 10)} on ${results.checkout.branch}${results.checkout.dirtyFiles ? ` with ${results.checkout.dirtyFiles} uncommitted files` : ''}.`,
 		'',
+	];
+	const body = results.schedule?.mode === 'trials' ? trialsSummary(results, results.schedule.trials) : rerunsSummary(results);
+	const file = path.join(dir, 'report.md');
+	fs.writeFileSync(file, [...head, ...body].join('\n'));
+	return file;
+}
+
+/** A report cell: scrubbed, on one line, with its pipes escaped. */
+function cell(x: string): string {
+	return scrub(x).replace(/\|/g, '\\|').replace(/\n/g, ' ');
+}
+
+/** Reruns mode: the first-run pass rate and the flake rate side by side, then one row per task. */
+function rerunsSummary(results: ResultsFile): string[] {
+	const s = results.summary;
+	const flaky = results.tasks.filter((t) => t.verdict === 'flaky').map((t) => t.id);
+	return [
 		'| First-run pass rate | Flake rate | Tasks |',
 		'| --- | --- | --- |',
 		`| ${percent(s.firstRunPassRate)} (${Math.round(s.firstRunPassRate * s.tasks)} of ${s.tasks}) | ${percent(s.flakeRate)} (${s.verdicts.flaky} of ${s.tasks}) | ${s.tasks} |`,
@@ -272,7 +286,33 @@ export function writeRunReport(dir: string, results: ResultsFile): string {
 		}),
 		'',
 	];
-	const file = path.join(dir, 'report.md');
-	fs.writeFileSync(file, lines.join('\n'));
-	return file;
+}
+
+/** Trials mode: k of n over every run and per task, then one row per task. */
+function trialsSummary(results: ResultsFile, trials: number): string[] {
+	const passed = results.tasks.reduce((n, t) => n + t.score.passed, 0);
+	const runs = results.tasks.reduce((n, t) => n + t.score.runs, 0);
+	const errors = results.tasks.reduce((n, t) => n + t.score.errors, 0);
+	const everyRun = results.tasks.filter((t) => t.score.runs > 0 && t.score.passed === t.score.runs).length;
+	const tasks = results.tasks.length;
+	return [
+		'| Runs passed | Tasks that passed every run | Tasks |',
+		'| --- | --- | --- |',
+		`| ${percent(runs ? passed / runs : 0)} (${passed} of ${runs}) | ${everyRun} of ${tasks} | ${tasks} |`,
+		'',
+		`Each task ran ${trials} time(s), in rounds, pass or fail, with no reruns. k of n is the runs that passed of the runs that got past the runner: ${errors} run(s) ended \`error\` (the runner or the environment, not the agent), were left out of n, and were retried once as a new trial; they stay listed. Pending runs count in n and never as passes.`,
+		'',
+		`Verdicts: ${Object.entries(results.summary.verdicts)
+			.map(([v, n]) => `${n} ${v}`)
+			.join(', ')}. Pass: every run passed. Flaky: some passed. Failing: none passed. Error: no run got past the runner. Pending: no run could be decided.`,
+		'',
+		'| Task | Type | Passed (k of n) | Runs | Verdict | Cause (first run that did not pass) | Why (first run that did not pass) |',
+		'| --- | --- | --- | --- | --- | --- | --- |',
+		...results.tasks.map((t) => {
+			const miss = t.trials.find((r) => r.status !== 'pass');
+			const ran = t.trials.map((r) => `${r.trial} ${r.status}${r.retryOf ? ` (retry of ${r.retryOf})` : ''}`).join(', ');
+			return `| ${t.id} | ${t.type} | ${t.score.passed} of ${t.score.runs}${t.score.pending ? ` (${t.score.pending} pending)` : ''} | ${ran} | ${t.verdict} | ${miss?.cause?.label ?? '-'} | ${cell((miss?.why ?? '').slice(0, 200))} |`;
+		}),
+		'',
+	];
 }

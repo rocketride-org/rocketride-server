@@ -36,16 +36,22 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import type { TrialResult } from './grade';
-import { summarize, type ScheduleSummary, type TaskRuns, type TaskVerdict } from './schedule';
+import { scoreOf, summarize, type ScheduleSummary, type TaskRuns, type TaskVerdict, type TrialScore } from './schedule';
 import type { JudgeLine, Task } from './task';
 import type { RunStatus } from './types';
 
 export const RESULTS_SCHEMA = 'browser-agent-evals/results/v1';
 
+/** How the run scheduled its trials: reruns of each failure (runSchedule), or a fixed count of every task in rounds (runTrials). */
+export type Schedule = { mode: 'reruns'; reruns: number } | { mode: 'trials'; trials: number };
+
 /** One trial as results.json lists it. */
 export interface ResultsTrial {
 	trial: number;
+	/** A rerun of a failed first run (reruns mode only). */
 	rerun: boolean;
+	/** The errored trial this one retries, when it is a retry. */
+	retryOf?: number;
 	status: RunStatus;
 	why: string;
 	checks: Array<{ id: string; type: string; status: string; detail: string; blocker: boolean; soft?: boolean }>;
@@ -70,6 +76,8 @@ export interface ResultsTask {
 	type: string;
 	target: string;
 	verdict: TaskVerdict;
+	/** k of n: the trials that passed, of those that ran (errors left out). */
+	score: TrialScore;
 	trials: ResultsTrial[];
 	/** The task's questions for the judge. */
 	judgeQuestions: JudgeLine[];
@@ -82,6 +90,8 @@ export interface ResultsFile {
 	finishedAt: string;
 	model: string;
 	taskSet: string;
+	/** Reruns mode when absent. */
+	schedule?: Schedule;
 	engine: unknown;
 	checkout: { commit: string; branch: string; dirtyFiles: number };
 	summary: ScheduleSummary & { firstRunStatuses: Record<string, number> };
@@ -98,10 +108,12 @@ export interface ResultsFile {
  */
 export function buildResults(runs: Array<TaskRuns<TrialResult>>, tasks: Map<string, Task>, dir: string, meta: Omit<ResultsFile, 'schema' | 'summary' | 'tasks'>): ResultsFile {
 	const rel = (p: string | null) => (p ? path.relative(dir, p) : '');
-	const entry = (r: TrialResult, rerun: boolean): ResultsTrial => ({
+	const reruns = (meta.schedule?.mode ?? 'reruns') === 'reruns';
+	const entry = (r: TrialResult, later: boolean): ResultsTrial => ({
 		guides: (r.diagnostics.guides as ResultsTrial['guides']) ?? null,
 		trial: r.trial,
-		rerun,
+		rerun: reruns && later,
+		...(r.retryOf ? { retryOf: r.retryOf } : {}),
 		status: r.status,
 		why: r.why,
 		checks: r.checks.map((c) => ({ id: c.id, type: c.kind, status: c.status, detail: c.detail, blocker: c.blocker, ...(c.soft ? { soft: true } : {}) })),
@@ -120,7 +132,8 @@ export function buildResults(runs: Array<TaskRuns<TrialResult>>, tasks: Map<stri
 		summary: { ...summarize(runs, (t) => t.status), firstRunStatuses },
 		tasks: runs.map((r) => {
 			const t = tasks.get(r.id);
-			return { id: r.id, type: t?.type ?? '', target: t?.target ?? '', verdict: r.verdict, trials: [entry(r.first, false), ...r.reruns.map((x) => entry(x, true))], judgeQuestions: t?.judge ?? [] };
+			const all = [r.first, ...r.reruns];
+			return { id: r.id, type: t?.type ?? '', target: t?.target ?? '', verdict: r.verdict, score: scoreOf(all.map((x) => x.status)), trials: all.map((x, i) => entry(x, i > 0)), judgeQuestions: t?.judge ?? [] };
 		}),
 	};
 }
