@@ -37,7 +37,8 @@ def _public_pages_state(monkeypatch):
     dropped on every swap, as after startup; swap listeners a test adds are
     dropped with the page map. The artifact store is the hostile fixture's
     in-memory ``FILES`` (empty unless a test seeds it), so unit tests never
-    touch a real store.
+    touch a real store. The render and snapshot caches start empty, with
+    their production budgets.
     """
     import ai.modules.shell.pages as pages
     import ai.modules.shell.public_pages as pp
@@ -51,6 +52,7 @@ def _public_pages_state(monkeypatch):
     monkeypatch.setattr(
         pages, '_render_cache', pages._FifoCache(pages._RENDER_CACHE_MAX_BYTES, pages._RENDER_CACHE_MAX)
     )
+    monkeypatch.setattr(pages, '_snapshot_cache', pages._FifoCache(pages._SNAPSHOT_CACHE_MAX_BYTES))
     monkeypatch.setattr(pages, '_documents', {})
     pp.on_swap(pages._clear_rendered)  # as register_public_pages installs it
     FILES.clear()

@@ -215,7 +215,7 @@ def reserved_error(path: str) -> Optional[str]:
     return None
 
 
-def _snapshot_error(snapshot: Any) -> Optional[str]:
+def snapshot_error(snapshot: Any) -> Optional[str]:
     """Why ``snapshot`` is not a relative ``.html`` path inside the artifact, or None."""
     if not isinstance(snapshot, str) or not _SNAPSHOT.fullmatch(snapshot):
         return 'must be a relative path inside the artifact ending in .html (e.g. "pages/pricing.html")'
@@ -316,7 +316,7 @@ def _check_page(
         return None, f'{where}.data: {err}'
     snapshot = raw.get('snapshot', '')
     if snapshot != '':
-        err = _snapshot_error(snapshot)
+        err = snapshot_error(snapshot)
         if err:
             return None, f'{where}.snapshot {snapshot!r}: {err}'
     page = Page(
