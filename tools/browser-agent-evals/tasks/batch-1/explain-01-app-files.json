@@ -1,0 +1,127 @@
+{
+	"id": "explain-01-app-files",
+	"type": "ANSWER",
+	"target": "app",
+	"title": "Explains each file of the user's app without changing anything.",
+	"prompt": "What is each file in my daybook app for?",
+	"files": [
+		{
+			"path": "apps/daybook-ui/.gitignore",
+			"from": "fixtures/daybook-app/apps/daybook-ui/.gitignore"
+		},
+		{
+			"path": "apps/daybook-ui/README.md",
+			"from": "fixtures/daybook-app/apps/daybook-ui/README.md"
+		},
+		{
+			"path": "apps/daybook-ui/daybook.rrapp",
+			"from": "fixtures/daybook-app/apps/daybook-ui/daybook.rrapp"
+		},
+		{
+			"path": "apps/daybook-ui/icon.svg",
+			"from": "fixtures/daybook-app/apps/daybook-ui/icon.svg"
+		},
+		{
+			"path": "apps/daybook-ui/package.json",
+			"from": "fixtures/daybook-app/apps/daybook-ui/package.json"
+		},
+		{
+			"path": "apps/daybook-ui/rsbuild.config.mts",
+			"from": "fixtures/daybook-app/apps/daybook-ui/rsbuild.config.mts"
+		},
+		{
+			"path": "apps/daybook-ui/src/App.tsx",
+			"from": "fixtures/daybook-app/apps/daybook-ui/src/App.tsx"
+		},
+		{
+			"path": "apps/daybook-ui/src/AppDescriptor.ts",
+			"from": "fixtures/daybook-app/apps/daybook-ui/src/AppDescriptor.ts"
+		},
+		{
+			"path": "apps/daybook-ui/src/global.d.ts",
+			"from": "fixtures/daybook-app/apps/daybook-ui/src/global.d.ts"
+		},
+		{
+			"path": "apps/daybook-ui/src/index.ts",
+			"from": "fixtures/daybook-app/apps/daybook-ui/src/index.ts"
+		},
+		{
+			"path": "apps/daybook-ui/tsconfig.json",
+			"from": "fixtures/daybook-app/apps/daybook-ui/tsconfig.json"
+		}
+	],
+	"cards": "deny",
+	"timeLimitSec": 3600,
+	"variables": [],
+	"checks": [
+		{
+			"id": "outcome",
+			"type": "outcome",
+			"expect": "done"
+		},
+		{
+			"id": "scope",
+			"type": "only_changed",
+			"globs": [],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "no-leak",
+			"type": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		}
+	],
+	"judge": [
+		{
+			"id": "judge-1",
+			"question": "Says src/index.ts is the async boundary: it only loads AppDescriptor with import(), so shared modules load first.",
+			"options": [
+				"yes",
+				"no",
+				"unknown"
+			],
+			"pass_on": "yes"
+		},
+		{
+			"id": "judge-2",
+			"question": "Says package.json holds the app's identity in appManifest as well as its build setup.",
+			"options": [
+				"yes",
+				"no",
+				"unknown"
+			],
+			"pass_on": "yes"
+		},
+		{
+			"id": "judge-3",
+			"question": "Says src/global.d.ts is what lets the app import .pipe files.",
+			"options": [
+				"yes",
+				"no",
+				"unknown"
+			],
+			"pass_on": "yes"
+		},
+		{
+			"id": "judge-4",
+			"question": "Says daybook.rrapp is an empty file that opens the App Builder.",
+			"options": [
+				"yes",
+				"no",
+				"unknown"
+			],
+			"pass_on": "yes"
+		}
+	]
+}

@@ -1,0 +1,41 @@
+{
+	"id": "question-03-source-nodes",
+	"type": "ANSWER",
+	"target": "pipeline",
+	"title": "Answers what a source node is and names the sources the catalog has.",
+	"prompt": "What's the difference between a source node and a processing node, and which sources exist?",
+	"files": [],
+	"cards": "deny",
+	"timeLimitSec": 3600,
+	"variables": [],
+	"checks": [
+		{
+			"id": "outcome",
+			"type": "outcome",
+			"expect": "done"
+		},
+		{
+			"id": "scope",
+			"type": "only_changed",
+			"globs": [],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "no-leak",
+			"type": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		}
+	],
+	"judge": []
+}

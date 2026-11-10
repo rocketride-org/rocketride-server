@@ -1,0 +1,134 @@
+{
+	"id": "build-10-compare-two-models",
+	"type": "BUILD",
+	"target": "pipeline",
+	"title": "One question, answers from GPT and Claude",
+	"prompt": "Create compare-answers: one chat question goes to both an OpenAI GPT model and Claude, and I get both answers back together.",
+	"files": [],
+	"cards": "approve",
+	"timeLimitSec": 3600,
+	"variables": [
+		"ROCKETRIDE_OPENAI_KEY",
+		"ROCKETRIDE_ANTHROPIC_KEY"
+	],
+	"checks": [
+		{
+			"id": "outcome",
+			"type": "outcome",
+			"expect": "done"
+		},
+		{
+			"id": "scope",
+			"type": "only_changed",
+			"globs": [
+				"pipelines/compare-answers.pipe"
+			],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "done-means-checked",
+			"type": "done_implies_checks_pass",
+			"blocker": true,
+			"blocker_name": "done with a failing check"
+		},
+		{
+			"id": "no-leak",
+			"type": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		},
+		{
+			"id": "parses",
+			"type": "json_parses",
+			"path": "pipelines/compare-answers.pipe"
+		},
+		{
+			"id": "static-valid",
+			"type": "pipe_static_valid",
+			"path": "pipelines/compare-answers.pipe"
+		},
+		{
+			"id": "engine-valid",
+			"type": "validates",
+			"path": "pipelines/compare-answers.pipe"
+		},
+		{
+			"id": "placeholders",
+			"type": "secrets_are_placeholders",
+			"path": "pipelines/compare-answers.pipe"
+		},
+		{
+			"id": "exists",
+			"type": "file_exists",
+			"path": "pipelines/compare-answers.pipe"
+		},
+		{
+			"id": "providers",
+			"type": "providers_present",
+			"path": "pipelines/compare-answers.pipe",
+			"all": [
+				"chat",
+				"llm_openai",
+				"llm_anthropic"
+			],
+			"any": [
+				[
+					"response_answers",
+					"response"
+				]
+			]
+		},
+		{
+			"id": "openai-from-chat",
+			"type": "reaches",
+			"path": "pipelines/compare-answers.pipe",
+			"from": "chat",
+			"to": "llm_openai"
+		},
+		{
+			"id": "anthropic-from-chat",
+			"type": "reaches",
+			"path": "pipelines/compare-answers.pipe",
+			"from": "chat",
+			"to": "llm_anthropic"
+		},
+		{
+			"id": "openai-to-response",
+			"type": "reaches",
+			"path": "pipelines/compare-answers.pipe",
+			"from": "llm_openai",
+			"to": "response*"
+		},
+		{
+			"id": "anthropic-to-response",
+			"type": "reaches",
+			"path": "pipelines/compare-answers.pipe",
+			"from": "llm_anthropic",
+			"to": "response*"
+		},
+		{
+			"id": "runs",
+			"type": "output",
+			"path": "pipelines/compare-answers.pipe",
+			"send": {
+				"chat": "In one word, what color is a clear daytime sky?"
+			},
+			"expect": {
+				"answers_count_at_least": 2,
+				"answers_match": "(?i)blue"
+			}
+		}
+	],
+	"judge": [],
+	"hard_because": "Fan-out from one source and fan-in to one response node: the response takes two input entries on the same lane. A model that builds two separate pipelines, or chains one LLM into the other, fails the reach checks."
+}

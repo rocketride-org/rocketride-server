@@ -1,0 +1,85 @@
+{
+	"id": "build-12-app-sales-dashboard",
+	"type": "BUILD",
+	"target": "app",
+	"title": "Dashboard template with fixed numbers",
+	"prompt": "Make a dashboard app called sales (display name Sales) from the Dashboard template. Three cards: Revenue $120,400, Orders 342, Refunds 4. Subtitle \"This month\". Keep the bar chart as it is.",
+	"files": [],
+	"cards": "approve",
+	"timeLimitSec": 3600,
+	"variables": [],
+	"checks": [
+		{
+			"id": "outcome",
+			"type": "outcome",
+			"expect": "done"
+		},
+		{
+			"id": "scope",
+			"type": "only_changed",
+			"globs": [
+				"apps/sales-ui/*"
+			],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "done-means-checked",
+			"type": "done_implies_checks_pass",
+			"blocker": true,
+			"blocker_name": "done with a failing check"
+		},
+		{
+			"id": "no-leak",
+			"type": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		},
+		{
+			"id": "revenue",
+			"type": "file_matches",
+			"path": "apps/sales-ui/src/App.tsx",
+			"regex": "Revenue[\\s\\S]{0,200}\\$120,400"
+		},
+		{
+			"id": "orders",
+			"type": "file_matches",
+			"path": "apps/sales-ui/src/App.tsx",
+			"regex": "Orders[\\s\\S]{0,200}342"
+		},
+		{
+			"id": "refunds",
+			"type": "file_matches",
+			"path": "apps/sales-ui/src/App.tsx",
+			"regex": "Refunds[\\s\\S]{0,200}>4<"
+		},
+		{
+			"id": "subtitle",
+			"type": "file_matches",
+			"path": "apps/sales-ui/src/App.tsx",
+			"regex": "This month"
+		},
+		{
+			"id": "chart-kept",
+			"type": "file_matches",
+			"path": "apps/sales-ui/src/App.tsx",
+			"regex": "SERIES\\.map"
+		},
+		{
+			"id": "check-app",
+			"type": "check_app_passes",
+			"app": "apps/sales-ui"
+		}
+	],
+	"judge": [],
+	"hard_because": "Mostly a test of create_app with the Dashboard template and a small edit. Easy; kept as a control for the app path."
+}

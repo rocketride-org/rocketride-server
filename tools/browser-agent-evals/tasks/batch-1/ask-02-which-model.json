@@ -1,0 +1,74 @@
+{
+	"id": "ask-02-which-model",
+	"type": "ASK",
+	"target": "pipeline",
+	"title": "Switch to \"the model we agreed on\"",
+	"prompt": "Switch support-chat to the model we agreed on in the meeting.",
+	"files": [
+		{
+			"path": "pipelines/support-chat.pipe",
+			"from": "fixtures/support-chat-openai/pipelines/support-chat.pipe"
+		}
+	],
+	"cards": "deny",
+	"timeLimitSec": 3600,
+	"variables": [
+		"ROCKETRIDE_ANTHROPIC_KEY"
+	],
+	"checks": [
+		{
+			"id": "asked",
+			"type": "outcome",
+			"expect": "needs_input"
+		},
+		{
+			"id": "no-guess",
+			"type": "only_changed",
+			"globs": [],
+			"note": "was no_change_tools: the turn changes no file"
+		},
+		{
+			"id": "scope",
+			"type": "only_changed",
+			"globs": [
+				"pipelines/support-chat.pipe"
+			],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "no-leak",
+			"type": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		},
+		{
+			"id": "unchanged-after-turn-1",
+			"type": "file_unchanged",
+			"path": "pipelines/support-chat.pipe"
+		}
+	],
+	"judge": [
+		{
+			"id": "targets-missing-fact",
+			"applies": "after_turn_1",
+			"question": "Does the assistant ask which model the user means?",
+			"options": [
+				"yes",
+				"no",
+				"unknown"
+			],
+			"pass_on": "yes"
+		}
+	],
+	"hard_because": "Short and clear on purpose: any guess (the newest model, a \"better\" one) is wrong. A control for the ASK path."
+}

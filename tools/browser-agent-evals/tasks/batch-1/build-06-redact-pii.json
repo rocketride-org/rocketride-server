@@ -1,0 +1,120 @@
+{
+	"id": "build-06-redact-pii",
+	"type": "BUILD",
+	"target": "pipeline",
+	"title": "Local PII masking",
+	"prompt": "I need a pipeline called redact-pii. I post text to a webhook and get the same text back with names, email addresses and phone numbers masked. It must not send the text to any outside API.",
+	"files": [],
+	"cards": "approve",
+	"timeLimitSec": 3600,
+	"variables": [],
+	"checks": [
+		{
+			"id": "outcome",
+			"type": "outcome",
+			"expect": "done"
+		},
+		{
+			"id": "scope",
+			"type": "only_changed",
+			"globs": [
+				"pipelines/redact-pii.pipe"
+			],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "done-means-checked",
+			"type": "done_implies_checks_pass",
+			"blocker": true,
+			"blocker_name": "done with a failing check"
+		},
+		{
+			"id": "no-leak",
+			"type": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		},
+		{
+			"id": "parses",
+			"type": "json_parses",
+			"path": "pipelines/redact-pii.pipe"
+		},
+		{
+			"id": "static-valid",
+			"type": "pipe_static_valid",
+			"path": "pipelines/redact-pii.pipe"
+		},
+		{
+			"id": "engine-valid",
+			"type": "validates",
+			"path": "pipelines/redact-pii.pipe"
+		},
+		{
+			"id": "placeholders",
+			"type": "secrets_are_placeholders",
+			"path": "pipelines/redact-pii.pipe"
+		},
+		{
+			"id": "exists",
+			"type": "file_exists",
+			"path": "pipelines/redact-pii.pipe"
+		},
+		{
+			"id": "providers",
+			"type": "providers_present",
+			"path": "pipelines/redact-pii.pipe",
+			"all": [
+				"webhook",
+				"anonymize_text"
+			],
+			"any": [
+				[
+					"response_text",
+					"response"
+				]
+			]
+		},
+		{
+			"id": "no-outside-api",
+			"type": "providers_absent",
+			"path": "pipelines/redact-pii.pipe",
+			"providers": [
+				"llm_*",
+				"embedding_openai",
+				"image_vision_*",
+				"tool_*",
+				"search_*",
+				"reducto",
+				"llamaparse",
+				"landing_ai_*"
+			]
+		},
+		{
+			"id": "runs",
+			"type": "output",
+			"path": "pipelines/redact-pii.pipe",
+			"send": {
+				"webhook": {
+					"text": "Please call Jane Smith at 555-123-4567 or email jane.smith@acme.com about the order.",
+					"mimetype": "text/plain"
+				}
+			},
+			"expect": {
+				"text_not_match": "(?i)jane smith|555-123-4567|jane\\.smith@acme\\.com",
+				"text_match": "(?i)order"
+			}
+		}
+	],
+	"judge": [],
+	"hard_because": "The model must pick the local anonymize node over an LLM prompt that \"removes PII\", which breaks the no-outside-API rule. The first live run downloads a GLiNER model, so allow for a slow first run."
+}

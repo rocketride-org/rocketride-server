@@ -1,0 +1,128 @@
+{
+	"id": "edit-08-app-fix-types-delete",
+	"type": "EDIT",
+	"target": "app",
+	"title": "Fix type errors and delete an unused file",
+	"prompt": "The notes app shows type errors. LegacyList.tsx isn't used anywhere any more, so delete it, and fix whatever else is wrong without changing what the app does.",
+	"files": [
+		{
+			"path": "apps/notes-ui/.gitignore",
+			"from": "fixtures/notes-app-broken/apps/notes-ui/.gitignore"
+		},
+		{
+			"path": "apps/notes-ui/README.md",
+			"from": "fixtures/notes-app-broken/apps/notes-ui/README.md"
+		},
+		{
+			"path": "apps/notes-ui/icon.svg",
+			"from": "fixtures/notes-app-broken/apps/notes-ui/icon.svg"
+		},
+		{
+			"path": "apps/notes-ui/notes.rrapp",
+			"from": "fixtures/notes-app-broken/apps/notes-ui/notes.rrapp"
+		},
+		{
+			"path": "apps/notes-ui/package.json",
+			"from": "fixtures/notes-app-broken/apps/notes-ui/package.json"
+		},
+		{
+			"path": "apps/notes-ui/rsbuild.config.mts",
+			"from": "fixtures/notes-app-broken/apps/notes-ui/rsbuild.config.mts"
+		},
+		{
+			"path": "apps/notes-ui/src/App.tsx",
+			"from": "fixtures/notes-app-broken/apps/notes-ui/src/App.tsx"
+		},
+		{
+			"path": "apps/notes-ui/src/AppDescriptor.ts",
+			"from": "fixtures/notes-app-broken/apps/notes-ui/src/AppDescriptor.ts"
+		},
+		{
+			"path": "apps/notes-ui/src/LegacyList.tsx",
+			"from": "fixtures/notes-app-broken/apps/notes-ui/src/LegacyList.tsx"
+		},
+		{
+			"path": "apps/notes-ui/src/global.d.ts",
+			"from": "fixtures/notes-app-broken/apps/notes-ui/src/global.d.ts"
+		},
+		{
+			"path": "apps/notes-ui/src/index.ts",
+			"from": "fixtures/notes-app-broken/apps/notes-ui/src/index.ts"
+		},
+		{
+			"path": "apps/notes-ui/tsconfig.json",
+			"from": "fixtures/notes-app-broken/apps/notes-ui/tsconfig.json"
+		}
+	],
+	"cards": "approve",
+	"timeLimitSec": 3600,
+	"variables": [],
+	"checks": [
+		{
+			"id": "outcome",
+			"type": "outcome",
+			"expect": "done"
+		},
+		{
+			"id": "scope",
+			"type": "only_changed",
+			"globs": [
+				"apps/notes-ui/src/App.tsx",
+				"apps/notes-ui/src/LegacyList.tsx"
+			],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "done-means-checked",
+			"type": "done_implies_checks_pass",
+			"blocker": true,
+			"blocker_name": "done with a failing check"
+		},
+		{
+			"id": "no-leak",
+			"type": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		},
+		{
+			"id": "deleted",
+			"type": "file_absent",
+			"path": "apps/notes-ui/src/LegacyList.tsx"
+		},
+		{
+			"id": "total-fixed",
+			"type": "file_not_matches",
+			"path": "apps/notes-ui/src/App.tsx",
+			"regex": "length\\.toString\\(\\)"
+		},
+		{
+			"id": "format-call-fixed",
+			"type": "file_not_matches",
+			"path": "apps/notes-ui/src/App.tsx",
+			"regex": "formatTime\\([^)]*,"
+		},
+		{
+			"id": "behavior-kept",
+			"type": "file_matches",
+			"path": "apps/notes-ui/src/App.tsx",
+			"regex": "\\{total\\} notes"
+		},
+		{
+			"id": "check-app",
+			"type": "check_app_passes",
+			"app": "apps/notes-ui"
+		}
+	],
+	"judge": [],
+	"hard_because": "Issue 5: after delete_file, Monaco may keep the deleted file's markers and check_app keeps failing, so the turn cannot finish. The second type error (an extra argument) only shows once the first is fixed if the model reads errors one at a time."
+}

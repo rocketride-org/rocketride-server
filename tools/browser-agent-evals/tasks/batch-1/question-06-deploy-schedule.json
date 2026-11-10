@@ -1,0 +1,62 @@
+{
+	"id": "question-06-deploy-schedule",
+	"type": "ANSWER",
+	"target": "pipeline",
+	"title": "Answers how to deploy a pipeline, give it a Monday, Wednesday and Friday run window and pause it, all of which need a team.",
+	"prompt": "How do I get a pipeline running on the server so it works without my machine, on a schedule of Monday, Wednesday and Friday from 08:00 to 15:00? And how do I pause that over the holidays without losing the schedule?",
+	"files": [],
+	"cards": "deny",
+	"timeLimitSec": 3600,
+	"variables": [],
+	"checks": [
+		{
+			"id": "outcome",
+			"type": "outcome",
+			"expect": "done"
+		},
+		{
+			"id": "scope",
+			"type": "only_changed",
+			"globs": [],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "no-leak",
+			"type": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		}
+	],
+	"judge": [
+		{
+			"id": "judge-1",
+			"question": "Uses deploy.setSchedule with cron 0 8 * * 1,3,5 and a ttl of 25200 seconds.",
+			"options": [
+				"yes",
+				"no",
+				"unknown"
+			],
+			"pass_on": "yes"
+		},
+		{
+			"id": "judge-2",
+			"question": "Says the ttl counts from the last data request, so 15:00 is not a fixed stop.",
+			"options": [
+				"yes",
+				"no",
+				"unknown"
+			],
+			"pass_on": "yes"
+		}
+	]
+}

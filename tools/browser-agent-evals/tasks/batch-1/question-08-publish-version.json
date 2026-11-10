@@ -1,0 +1,82 @@
+{
+	"id": "question-08-publish-version",
+	"type": "ANSWER",
+	"target": "app",
+	"title": "Answers why a deployed version isn't live, how publishing fixes it and how to see where each version is live.",
+	"prompt": "I deployed v3 of my app but my team still sees v2. Why, and how do I get v3 to them? And how can I see where each version of my app is live?",
+	"files": [],
+	"cards": "deny",
+	"timeLimitSec": 3600,
+	"variables": [],
+	"checks": [
+		{
+			"id": "outcome",
+			"type": "outcome",
+			"expect": "done"
+		},
+		{
+			"id": "scope",
+			"type": "only_changed",
+			"globs": [],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "no-leak",
+			"type": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		}
+	],
+	"judge": [
+		{
+			"id": "judge-1",
+			"question": "Says deploying only adds a version and changes nothing users see, and publishing binds a version to an audience.",
+			"options": [
+				"yes",
+				"no",
+				"unknown"
+			],
+			"pass_on": "yes"
+		},
+		{
+			"id": "judge-2",
+			"question": "The fix is to publish v3 to that rung, and whereApp(appId) shows what is live.",
+			"options": [
+				"yes",
+				"no",
+				"unknown"
+			],
+			"pass_on": "yes"
+		},
+		{
+			"id": "judge-3",
+			"question": "Uses publishApp(appId, version, '@team/<name>') or the Publish to... row in the App Builder.",
+			"options": [
+				"yes",
+				"no",
+				"unknown"
+			],
+			"pass_on": "yes"
+		},
+		{
+			"id": "judge-4",
+			"question": "Says the version must be deployed and built first, and publishing moves a pointer without rebuilding. On a server with no teams, saying so and giving these steps also passes.",
+			"options": [
+				"yes",
+				"no",
+				"unknown"
+			],
+			"pass_on": "yes"
+		}
+	]
+}

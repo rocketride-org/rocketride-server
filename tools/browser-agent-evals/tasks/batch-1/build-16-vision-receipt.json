@@ -1,0 +1,136 @@
+{
+	"id": "build-16-vision-receipt",
+	"type": "BUILD",
+	"target": "pipeline",
+	"title": "Builds a pipeline that reads a receipt photo with an OpenAI vision model and returns the store and the total.",
+	"prompt": "Build receipt-reader: I upload a photo of a receipt, GPT-4o looks at the image, and I get back the store's name and the total paid. My OpenAI key is in Variables.",
+	"files": [],
+	"cards": "approve",
+	"timeLimitSec": 3600,
+	"variables": [
+		"ROCKETRIDE_OPENAI_KEY"
+	],
+	"checks": [
+		{
+			"id": "outcome",
+			"type": "outcome",
+			"expect": "done"
+		},
+		{
+			"id": "scope",
+			"type": "only_changed",
+			"globs": [
+				"pipelines/receipt-reader.pipe"
+			],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "done-means-checked",
+			"type": "done_implies_checks_pass",
+			"blocker": true,
+			"blocker_name": "done with a failing check"
+		},
+		{
+			"id": "no-leak",
+			"type": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		},
+		{
+			"id": "parses",
+			"type": "json_parses",
+			"path": "pipelines/receipt-reader.pipe"
+		},
+		{
+			"id": "static-valid",
+			"type": "pipe_static_valid",
+			"path": "pipelines/receipt-reader.pipe"
+		},
+		{
+			"id": "engine-valid",
+			"type": "validates",
+			"path": "pipelines/receipt-reader.pipe"
+		},
+		{
+			"id": "placeholders",
+			"type": "secrets_are_placeholders",
+			"path": "pipelines/receipt-reader.pipe"
+		},
+		{
+			"id": "exists",
+			"type": "file_exists",
+			"path": "pipelines/receipt-reader.pipe"
+		},
+		{
+			"id": "providers",
+			"type": "providers_present",
+			"path": "pipelines/receipt-reader.pipe",
+			"all": [
+				"dropper",
+				"parse",
+				"image_vision_openai"
+			],
+			"any": [
+				[
+					"response_text",
+					"response"
+				]
+			]
+		},
+		{
+			"id": "image-lane",
+			"type": "edge",
+			"path": "pipelines/receipt-reader.pipe",
+			"from": "parse",
+			"to": "image_vision_openai",
+			"lane": "image"
+		},
+		{
+			"id": "model",
+			"type": "config_value",
+			"path": "pipelines/receipt-reader.pipe",
+			"provider": "image_vision_openai",
+			"pointer": "profile",
+			"equals": "openai-4o"
+		},
+		{
+			"id": "key",
+			"type": "config_value",
+			"path": "pipelines/receipt-reader.pipe",
+			"provider": "image_vision_openai",
+			"pointer": "{profile}/apikey",
+			"equals": "${ROCKETRIDE_OPENAI_KEY}"
+		},
+		{
+			"id": "asks-for-total",
+			"type": "any_config_matches",
+			"path": "pipelines/receipt-reader.pipe",
+			"provider": "image_vision_openai",
+			"matches": "(?i)total"
+		},
+		{
+			"id": "runs",
+			"type": "output",
+			"path": "pipelines/receipt-reader.pipe",
+			"send": {
+				"dropper": {
+					"file": "inputs/receipt.png"
+				}
+			},
+			"expect": {
+				"text_match": "(?is)(?=.*corner market)(?=.*27\\.14)"
+			}
+		}
+	],
+	"judge": []
+}

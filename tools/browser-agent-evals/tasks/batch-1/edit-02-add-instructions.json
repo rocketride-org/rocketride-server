@@ -1,0 +1,115 @@
+{
+	"id": "edit-02-add-instructions",
+	"type": "EDIT",
+	"target": "pipeline",
+	"title": "Add answer-style instructions",
+	"prompt": "Make support-chat answer in at most two sentences, always in a friendly tone.",
+	"files": [
+		{
+			"path": "pipelines/support-chat.pipe",
+			"from": "fixtures/support-chat-anthropic/pipelines/support-chat.pipe"
+		}
+	],
+	"cards": "approve",
+	"timeLimitSec": 3600,
+	"variables": [
+		"ROCKETRIDE_ANTHROPIC_KEY"
+	],
+	"checks": [
+		{
+			"id": "outcome",
+			"type": "outcome",
+			"expect": "done"
+		},
+		{
+			"id": "scope",
+			"type": "only_changed",
+			"globs": [
+				"pipelines/support-chat.pipe"
+			],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "done-means-checked",
+			"type": "done_implies_checks_pass",
+			"blocker": true,
+			"blocker_name": "done with a failing check"
+		},
+		{
+			"id": "no-leak",
+			"type": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		},
+		{
+			"id": "parses",
+			"type": "json_parses",
+			"path": "pipelines/support-chat.pipe"
+		},
+		{
+			"id": "static-valid",
+			"type": "pipe_static_valid",
+			"path": "pipelines/support-chat.pipe"
+		},
+		{
+			"id": "engine-valid",
+			"type": "validates",
+			"path": "pipelines/support-chat.pipe"
+		},
+		{
+			"id": "placeholders",
+			"type": "secrets_are_placeholders",
+			"path": "pipelines/support-chat.pipe"
+		},
+		{
+			"id": "project-id",
+			"type": "project_id_unchanged",
+			"path": "pipelines/support-chat.pipe",
+			"from": "pipelines/support-chat.pipe"
+		},
+		{
+			"id": "instruction",
+			"type": "any_config_matches",
+			"path": "pipelines/support-chat.pipe",
+			"matches": "two sentences|2 sentences"
+		},
+		{
+			"id": "model-unchanged",
+			"type": "config_value",
+			"path": "pipelines/support-chat.pipe",
+			"provider": "llm_anthropic",
+			"pointer": "profile",
+			"equals": "claude-sonnet-4-6"
+		},
+		{
+			"id": "still-works",
+			"type": "reaches",
+			"path": "pipelines/support-chat.pipe",
+			"from": "chat",
+			"to": "response*"
+		},
+		{
+			"id": "runs",
+			"type": "output",
+			"path": "pipelines/support-chat.pipe",
+			"send": {
+				"chat": "Explain what a webhook is."
+			},
+			"expect": {
+				"answers_max_sentences": 3
+			}
+		}
+	],
+	"judge": [],
+	"hard_because": "There is no system-prompt field on the LLM node; the instruction needs a new prompt node and a rewire. \"Old behavior still works\" is the chat-to-response path and the unchanged model."
+}

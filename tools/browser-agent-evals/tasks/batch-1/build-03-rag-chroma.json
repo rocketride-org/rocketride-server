@@ -1,0 +1,163 @@
+{
+	"id": "build-03-rag-chroma",
+	"type": "BUILD",
+	"target": "pipeline",
+	"title": "Document Q&A with Chroma, OpenAI embeddings and Claude",
+	"prompt": "Build a pipeline called docs-qa for our employee handbook. I upload documents with a dropper; they get chunked, embedded with OpenAI text-embedding-3-small and stored in a Chroma collection called handbook. The Chroma host and port are in Variables as ROCKETRIDE_CHROMA_HOST and ROCKETRIDE_CHROMA_PORT. Then I ask questions in a chat and Claude answers from the stored chunks.",
+	"files": [],
+	"cards": "approve",
+	"timeLimitSec": 3600,
+	"variables": [
+		"ROCKETRIDE_OPENAI_KEY",
+		"ROCKETRIDE_ANTHROPIC_KEY",
+		"ROCKETRIDE_CHROMA_HOST",
+		"ROCKETRIDE_CHROMA_PORT"
+	],
+	"checks": [
+		{
+			"id": "outcome",
+			"type": "outcome",
+			"expect": "done"
+		},
+		{
+			"id": "scope",
+			"type": "only_changed",
+			"globs": [
+				"pipelines/docs-qa.pipe"
+			],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "done-means-checked",
+			"type": "done_implies_checks_pass",
+			"blocker": true,
+			"blocker_name": "done with a failing check"
+		},
+		{
+			"id": "no-leak",
+			"type": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		},
+		{
+			"id": "parses",
+			"type": "json_parses",
+			"path": "pipelines/docs-qa.pipe"
+		},
+		{
+			"id": "static-valid",
+			"type": "pipe_static_valid",
+			"path": "pipelines/docs-qa.pipe"
+		},
+		{
+			"id": "engine-valid",
+			"type": "validates",
+			"path": "pipelines/docs-qa.pipe"
+		},
+		{
+			"id": "placeholders",
+			"type": "secrets_are_placeholders",
+			"path": "pipelines/docs-qa.pipe"
+		},
+		{
+			"id": "exists",
+			"type": "file_exists",
+			"path": "pipelines/docs-qa.pipe"
+		},
+		{
+			"id": "providers",
+			"type": "providers_present",
+			"path": "pipelines/docs-qa.pipe",
+			"all": [
+				"dropper",
+				"chat",
+				"embedding_openai",
+				"chroma",
+				"llm_anthropic"
+			],
+			"any": [
+				[
+					"preprocessor_langchain",
+					"chunker",
+					"preprocessor_llm"
+				],
+				[
+					"response_answers",
+					"response"
+				]
+			]
+		},
+		{
+			"id": "same-embedding",
+			"type": "same_config",
+			"path": "pipelines/docs-qa.pipe",
+			"provider": "embedding_openai",
+			"pointer": "profile"
+		},
+		{
+			"id": "embedding-model",
+			"type": "config_value",
+			"path": "pipelines/docs-qa.pipe",
+			"provider": "embedding_openai",
+			"pointer": "profile",
+			"equals": "text-embedding-3-small"
+		},
+		{
+			"id": "collection",
+			"type": "config_value",
+			"path": "pipelines/docs-qa.pipe",
+			"provider": "chroma",
+			"pointer": "{profile}/collection",
+			"equals": "handbook"
+		},
+		{
+			"id": "host",
+			"type": "config_value",
+			"path": "pipelines/docs-qa.pipe",
+			"provider": "chroma",
+			"pointer": "{profile}/host",
+			"equals": "${ROCKETRIDE_CHROMA_HOST}"
+		},
+		{
+			"id": "ingest-path",
+			"type": "reaches",
+			"path": "pipelines/docs-qa.pipe",
+			"from": "dropper",
+			"to": "chroma"
+		},
+		{
+			"id": "query-path",
+			"type": "reaches",
+			"path": "pipelines/docs-qa.pipe",
+			"from": "chat",
+			"to": "response*"
+		},
+		{
+			"id": "runs",
+			"type": "output",
+			"path": "pipelines/docs-qa.pipe",
+			"needs": "a reachable Chroma server",
+			"send": {
+				"dropper": {
+					"file": "inputs/handbook.txt"
+				},
+				"then_chat": "How many vacation days do new employees get?"
+			},
+			"expect": {
+				"answers_match": "(?i)\\b(18|eighteen)\\b"
+			}
+		}
+	],
+	"judge": [],
+	"hard_because": "Two source components (dropper and chat) in one file; the engine refuses an ambiguous run unless the run names the source, so the agent must test each path with an explicit source. The same embedding model must feed ingest and query. Non-secret settings (host, port) are placeholders too. The live run needs a Chroma server the eval engine can reach."
+}

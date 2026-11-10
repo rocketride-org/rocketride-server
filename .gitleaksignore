@@ -16,3 +16,5 @@ fd6b61d56b0671f7a3d24d0314d060a3d0d61b8c:nodes/src/nodes/tool_exa_search/service
 # real key, and the task file lists it under canaries.
 tools/browser-agent-evals/tasks/breadth/fixtures/legacy-bot-inline-key/pipelines/legacy-bot.pipe:pipe-file-api-key:59
 tools/browser-agent-evals/tasks/breadth/fixtures/legacy-bot-inline-key/pipelines/legacy-bot.pipe:services-json-api-key:59
+tools/browser-agent-evals/tasks/batch-1/fixtures/legacy-bot-inline-key/pipelines/legacy-bot.pipe:pipe-file-api-key:59
+tools/browser-agent-evals/tasks/batch-1/fixtures/legacy-bot-inline-key/pipelines/legacy-bot.pipe:services-json-api-key:59

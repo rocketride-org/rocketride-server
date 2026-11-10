@@ -1,0 +1,130 @@
+{
+	"id": "edit-03-fix-validation",
+	"type": "EDIT",
+	"target": "pipeline",
+	"title": "Fix a pipeline that fails validation",
+	"prompt": "faq-bot fails validation. Fix it without changing what it does.",
+	"files": [
+		{
+			"path": "pipelines/faq-bot.pipe",
+			"from": "fixtures/faq-bot-broken/pipelines/faq-bot.pipe"
+		}
+	],
+	"cards": "approve",
+	"timeLimitSec": 3600,
+	"variables": [
+		"ROCKETRIDE_OPENAI_KEY"
+	],
+	"checks": [
+		{
+			"id": "outcome",
+			"type": "outcome",
+			"expect": "done"
+		},
+		{
+			"id": "scope",
+			"type": "only_changed",
+			"globs": [
+				"pipelines/faq-bot.pipe"
+			],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "done-means-checked",
+			"type": "done_implies_checks_pass",
+			"blocker": true,
+			"blocker_name": "done with a failing check"
+		},
+		{
+			"id": "no-leak",
+			"type": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		},
+		{
+			"id": "parses",
+			"type": "json_parses",
+			"path": "pipelines/faq-bot.pipe"
+		},
+		{
+			"id": "static-valid",
+			"type": "pipe_static_valid",
+			"path": "pipelines/faq-bot.pipe"
+		},
+		{
+			"id": "engine-valid",
+			"type": "validates",
+			"path": "pipelines/faq-bot.pipe"
+		},
+		{
+			"id": "placeholders",
+			"type": "secrets_are_placeholders",
+			"path": "pipelines/faq-bot.pipe"
+		},
+		{
+			"id": "project-id",
+			"type": "project_id_unchanged",
+			"path": "pipelines/faq-bot.pipe",
+			"from": "pipelines/faq-bot.pipe"
+		},
+		{
+			"id": "provider-fixed",
+			"type": "providers_present",
+			"path": "pipelines/faq-bot.pipe",
+			"all": [
+				"chat",
+				"prompt",
+				"llm_openai"
+			],
+			"any": [
+				[
+					"response_answers",
+					"response"
+				]
+			]
+		},
+		{
+			"id": "no-typo",
+			"type": "providers_absent",
+			"path": "pipelines/faq-bot.pipe",
+			"providers": [
+				"llm_opnai"
+			]
+		},
+		{
+			"id": "lane-fixed",
+			"type": "edge",
+			"path": "pipelines/faq-bot.pipe",
+			"from": "prompt",
+			"to": "llm_openai",
+			"lane": "questions"
+		},
+		{
+			"id": "instructions-kept",
+			"type": "any_config_matches",
+			"path": "pipelines/faq-bot.pipe",
+			"provider": "prompt",
+			"matches": "return policy: 30 days"
+		},
+		{
+			"id": "model-kept",
+			"type": "config_value",
+			"path": "pipelines/faq-bot.pipe",
+			"provider": "llm_openai",
+			"pointer": "profile",
+			"equals": "openai-4o-mini"
+		}
+	],
+	"judge": [],
+	"hard_because": "Two faults, reported one at a time: validate_pipeline reports unknown providers first and stops, so the wrong lane only shows after the typo is fixed. Tests that the model re-validates instead of claiming the fix."
+}

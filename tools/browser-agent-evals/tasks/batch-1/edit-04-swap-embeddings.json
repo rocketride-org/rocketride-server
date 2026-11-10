@@ -1,0 +1,128 @@
+{
+	"id": "edit-04-swap-embeddings",
+	"type": "EDIT",
+	"target": "pipeline",
+	"title": "Move both embedding steps to OpenAI",
+	"prompt": "Switch docs-qa to OpenAI embeddings, text-embedding-3-small.",
+	"files": [
+		{
+			"path": "pipelines/docs-qa.pipe",
+			"from": "fixtures/docs-qa-minilm/pipelines/docs-qa.pipe"
+		}
+	],
+	"cards": "approve",
+	"timeLimitSec": 3600,
+	"variables": [
+		"ROCKETRIDE_OPENAI_KEY",
+		"ROCKETRIDE_QDRANT_HOST"
+	],
+	"checks": [
+		{
+			"id": "outcome",
+			"type": "outcome",
+			"expect": "done"
+		},
+		{
+			"id": "scope",
+			"type": "only_changed",
+			"globs": [
+				"pipelines/docs-qa.pipe"
+			],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "done-means-checked",
+			"type": "done_implies_checks_pass",
+			"blocker": true,
+			"blocker_name": "done with a failing check"
+		},
+		{
+			"id": "no-leak",
+			"type": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		},
+		{
+			"id": "parses",
+			"type": "json_parses",
+			"path": "pipelines/docs-qa.pipe"
+		},
+		{
+			"id": "static-valid",
+			"type": "pipe_static_valid",
+			"path": "pipelines/docs-qa.pipe"
+		},
+		{
+			"id": "engine-valid",
+			"type": "validates",
+			"path": "pipelines/docs-qa.pipe"
+		},
+		{
+			"id": "placeholders",
+			"type": "secrets_are_placeholders",
+			"path": "pipelines/docs-qa.pipe"
+		},
+		{
+			"id": "project-id",
+			"type": "project_id_unchanged",
+			"path": "pipelines/docs-qa.pipe",
+			"from": "pipelines/docs-qa.pipe"
+		},
+		{
+			"id": "no-transformer",
+			"type": "providers_absent",
+			"path": "pipelines/docs-qa.pipe",
+			"providers": [
+				"embedding_transformer"
+			]
+		},
+		{
+			"id": "two-openai",
+			"type": "count",
+			"path": "pipelines/docs-qa.pipe",
+			"provider": "embedding_openai",
+			"n": 2
+		},
+		{
+			"id": "same-model",
+			"type": "same_config",
+			"path": "pipelines/docs-qa.pipe",
+			"provider": "embedding_openai",
+			"pointer": "profile"
+		},
+		{
+			"id": "model",
+			"type": "config_value",
+			"path": "pipelines/docs-qa.pipe",
+			"provider": "embedding_openai",
+			"pointer": "profile",
+			"equals": "text-embedding-3-small"
+		},
+		{
+			"id": "ingest-path",
+			"type": "reaches",
+			"path": "pipelines/docs-qa.pipe",
+			"from": "webhook",
+			"to": "qdrant"
+		},
+		{
+			"id": "query-path",
+			"type": "reaches",
+			"path": "pipelines/docs-qa.pipe",
+			"from": "chat",
+			"to": "response*"
+		}
+	],
+	"judge": [],
+	"hard_because": "Both the ingest and the query embedding must change, or retrieval silently returns nothing. The stored vectors have a different dimension afterwards; a good answer says the documents must be ingested again (a soft check, not pass or fail)."
+}

@@ -1,0 +1,74 @@
+{
+	"id": "build-14-app-unit-converter",
+	"type": "BUILD",
+	"target": "app",
+	"title": "Kilometers and miles converter",
+	"prompt": "Create an app unitconv (display name Unit Converter) that converts kilometers to miles and back, with a swap button. Set its store description to \"Convert kilometers and miles\".",
+	"files": [],
+	"cards": "approve",
+	"timeLimitSec": 3600,
+	"variables": [],
+	"checks": [
+		{
+			"id": "outcome",
+			"type": "outcome",
+			"expect": "done"
+		},
+		{
+			"id": "scope",
+			"type": "only_changed",
+			"globs": [
+				"apps/unitconv-ui/*"
+			],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "done-means-checked",
+			"type": "done_implies_checks_pass",
+			"blocker": true,
+			"blocker_name": "done with a failing check"
+		},
+		{
+			"id": "no-leak",
+			"type": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		},
+		{
+			"id": "description",
+			"type": "json_value",
+			"path": "apps/unitconv-ui/package.json",
+			"pointer": "appManifest/description",
+			"equals": "Convert kilometers and miles"
+		},
+		{
+			"id": "factor",
+			"type": "file_matches",
+			"path": "apps/unitconv-ui/src/App.tsx",
+			"regex": "1\\.609|0\\.621"
+		},
+		{
+			"id": "swap",
+			"type": "file_matches",
+			"path": "apps/unitconv-ui/src/App.tsx",
+			"regex": "(?i)swap"
+		},
+		{
+			"id": "check-app",
+			"type": "check_app_passes",
+			"app": "apps/unitconv-ui"
+		}
+	],
+	"judge": [],
+	"hard_because": "The manifest edit is in package.json, a file the model must read before editing; the description field also appears at the top level of package.json, and only appManifest.description counts."
+}

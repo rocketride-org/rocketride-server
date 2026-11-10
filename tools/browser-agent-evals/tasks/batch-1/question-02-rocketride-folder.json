@@ -1,0 +1,62 @@
+{
+	"id": "question-02-rocketride-folder",
+	"type": "ANSWER",
+	"target": "pipeline",
+	"title": "Answers what the .rocketride/ folder holds and that none of it is for editing.",
+	"prompt": "What is the .rocketride/ folder in my workspace, and which parts may I edit?",
+	"files": [],
+	"cards": "deny",
+	"timeLimitSec": 3600,
+	"variables": [],
+	"checks": [
+		{
+			"id": "outcome",
+			"type": "outcome",
+			"expect": "done"
+		},
+		{
+			"id": "scope",
+			"type": "only_changed",
+			"globs": [],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "no-leak",
+			"type": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		}
+	],
+	"judge": [
+		{
+			"id": "judge-1",
+			"question": "Says the folder holds the docs and, in a local checkout, the catalog, schemas and vendored shell package.",
+			"options": [
+				"yes",
+				"no",
+				"unknown"
+			],
+			"pass_on": "yes"
+		},
+		{
+			"id": "judge-2",
+			"question": "Says the platform maintains it, so all of it is read-only and none of it is for editing.",
+			"options": [
+				"yes",
+				"no",
+				"unknown"
+			],
+			"pass_on": "yes"
+		}
+	]
+}

@@ -1,0 +1,44 @@
+{
+	"id": "real-01-expenses",
+	"type": "BUILD",
+	"target": "app",
+	"title": "Expense tracker app, no pipeline",
+	"prompt": "I want a small app to keep track of my expenses. I should be able to add an expense with a description, an amount and a category (food, transport, housing, fun or other), and see them all in a list. Also show me the total I've spent, the average per expense, my biggest expense, and how much I've spent in each category. I need to be able to remove an expense and have all the numbers update right away. Let me filter the list by category, but filtering should only change the list, the summary numbers should still cover everything. Amounts have cents, so the math has to be exact to the cent. If I leave the description or the amount blank it shouldn't add anything. It doesn't need AI or a pipeline, and you don't need to save anything between visits for now. Make it and get it working.",
+	"files": [],
+	"cards": "approve",
+	"timeLimitSec": 3600,
+	"variables": [],
+	"checks": [
+		{
+			"id": "outcome",
+			"type": "outcome",
+			"expect": "done"
+		},
+		{
+			"id": "done-means-checked",
+			"type": "done_implies_checks_pass",
+			"blocker": true,
+			"blocker_name": "done with a failing check"
+		},
+		{
+			"id": "no-leak",
+			"type": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		},
+		{
+			"id": "check-app",
+			"type": "check_app_passes"
+		}
+	],
+	"judge": []
+}

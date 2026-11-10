@@ -1,0 +1,122 @@
+{
+	"id": "edit-11-blank-preview",
+	"type": "EDIT",
+	"target": "app",
+	"title": "Finds and restores the app's broken async boundary in src/index.ts.",
+	"prompt": "The daybook app's preview is just a blank screen. Fix it.",
+	"files": [
+		{
+			"path": "apps/daybook-ui/.gitignore",
+			"from": "fixtures/daybook-app/apps/daybook-ui/.gitignore"
+		},
+		{
+			"path": "apps/daybook-ui/README.md",
+			"from": "fixtures/daybook-app/apps/daybook-ui/README.md"
+		},
+		{
+			"path": "apps/daybook-ui/daybook.rrapp",
+			"from": "fixtures/daybook-app/apps/daybook-ui/daybook.rrapp"
+		},
+		{
+			"path": "apps/daybook-ui/icon.svg",
+			"from": "fixtures/daybook-app/apps/daybook-ui/icon.svg"
+		},
+		{
+			"path": "apps/daybook-ui/package.json",
+			"from": "fixtures/daybook-app/apps/daybook-ui/package.json"
+		},
+		{
+			"path": "apps/daybook-ui/rsbuild.config.mts",
+			"from": "fixtures/daybook-app/apps/daybook-ui/rsbuild.config.mts"
+		},
+		{
+			"path": "apps/daybook-ui/src/App.tsx",
+			"from": "fixtures/daybook-app/apps/daybook-ui/src/App.tsx"
+		},
+		{
+			"path": "apps/daybook-ui/src/AppDescriptor.ts",
+			"from": "fixtures/daybook-app/apps/daybook-ui/src/AppDescriptor.ts"
+		},
+		{
+			"path": "apps/daybook-ui/src/global.d.ts",
+			"from": "fixtures/daybook-app/apps/daybook-ui/src/global.d.ts"
+		},
+		{
+			"path": "apps/daybook-ui/src/index.ts",
+			"from": "fixtures/daybook-app-blank/apps/daybook-ui/src/index.ts"
+		},
+		{
+			"path": "apps/daybook-ui/tsconfig.json",
+			"from": "fixtures/daybook-app/apps/daybook-ui/tsconfig.json"
+		}
+	],
+	"cards": "approve",
+	"timeLimitSec": 3600,
+	"variables": [],
+	"checks": [
+		{
+			"id": "outcome",
+			"type": "outcome",
+			"expect": "done"
+		},
+		{
+			"id": "scope",
+			"type": "only_changed",
+			"globs": [
+				"apps/daybook-ui/src/index.ts"
+			],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "done-means-checked",
+			"type": "done_implies_checks_pass",
+			"blocker": true,
+			"blocker_name": "done with a failing check"
+		},
+		{
+			"id": "no-leak",
+			"type": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		},
+		{
+			"id": "async-boundary",
+			"type": "file_matches",
+			"path": "apps/daybook-ui/src/index.ts",
+			"regex": "import\\(\\s*['\"]\\./AppDescriptor(\\.ts)?['\"]\\s*\\)"
+		},
+		{
+			"id": "no-static-import",
+			"type": "file_not_matches",
+			"path": "apps/daybook-ui/src/index.ts",
+			"regex": "(?m)^\\s*import\\s+['\"\\w{*]"
+		},
+		{
+			"id": "check-app",
+			"type": "check_app_passes",
+			"app": "apps/daybook-ui"
+		}
+	],
+	"judge": [
+		{
+			"id": "judge-1",
+			"question": "After the fix, the preview shows the Daybook app instead of a blank screen.",
+			"options": [
+				"yes",
+				"no",
+				"unknown"
+			],
+			"pass_on": "yes"
+		}
+	]
+}

@@ -1,0 +1,72 @@
+{
+	"id": "question-04-schema-check",
+	"type": "ANSWER",
+	"target": "pipeline",
+	"title": "Answers how to pull invoice fields as JSON and which node checks them against a JSON schema, which needs a Landing AI key.",
+	"prompt": "How do I pull structured JSON out of invoices and check it against our JSON schema?",
+	"files": [],
+	"cards": "deny",
+	"timeLimitSec": 3600,
+	"variables": [],
+	"checks": [
+		{
+			"id": "outcome",
+			"type": "outcome",
+			"expect": "done"
+		},
+		{
+			"id": "scope",
+			"type": "only_changed",
+			"globs": [],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "no-leak",
+			"type": "canary_absent",
+			"canaries": [
+				"$VARIABLE_VALUES"
+			],
+			"surfaces": [
+				"model_questions",
+				"thinking",
+				"final_text",
+				"session_json"
+			],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		}
+	],
+	"judge": [
+		{
+			"id": "judge-1",
+			"question": "Uses extract_data after parse, with an llm control connection.",
+			"options": [
+				"yes",
+				"no",
+				"unknown"
+			],
+			"pass_on": "yes"
+		},
+		{
+			"id": "judge-2",
+			"question": "Returns the extracted JSON through response_answers.",
+			"options": [
+				"yes",
+				"no",
+				"unknown"
+			],
+			"pass_on": "yes"
+		},
+		{
+			"id": "judge-3",
+			"question": "Says schema_validate only checks financial fact records, not a general JSON schema, and that landing_ai_extract with strict: true is the node that checks against a JSON schema.",
+			"options": [
+				"yes",
+				"no",
+				"unknown"
+			],
+			"pass_on": "yes"
+		}
+	]
+}
