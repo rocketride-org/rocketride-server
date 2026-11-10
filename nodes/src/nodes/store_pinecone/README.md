@@ -13,7 +13,7 @@ retrieval and you want RocketRide to store and query the same index.
 
 The node accepts embedded documents on its `documents` lane and can retrieve matching documents for incoming questions. It also exposes the store to an agent as tools. It creates a Pinecone index when documents are first added, and rejects incoming chunks without embeddings. Pick it over a self-managed store when the retrieval corpus belongs in a Pinecone index and its selected deployment mode is already part of the intended Pinecone setup.
 
-The driver treats its Collection setting as the Pinecone index name. When it has to create that index, the supplied embeddings determine its dimension and the selected similarity setting determines its metric.
+The driver treats its Collection setting as the Pinecone index name. When it has to create that index, the supplied embeddings determine its dimension and the metric is always `cosine`.
 
 ## Lanes
 
@@ -72,9 +72,9 @@ The collection is the Pinecone index name and defaults to `rocketride`. Validati
 
 ### Similarity and retrieval score
 
-The runtime accepts `cosine`, `euclidean`, or `dotproduct` as the similarity setting, defaulting to `cosine`; another value stops initialization. This value becomes the metric when the driver creates an index, so make it agree with the embedding data and leave an existing index's metric alone. Choosing the wrong metric changes ranking and can make good matches appear weak.
+The metric is not configurable: the driver creates every index with the `cosine` metric, and the score handling assumes it. An index created earlier with `euclidean` or `dotproduct` keeps its metric, so its scores are not on the cosine scale; recreate such an index under a new collection name to get comparable scores.
 
-Although the configuration value `score` is read with a default of `0.5`, the semantic-search filtering code reads the separately named `threshhold_search` attribute, whose initial value is `0.0`; therefore the configured score is not applied by this implementation. Do not rely on this setting to suppress weak Pinecone results. If relevance needs stricter filtering, apply a downstream constraint or use a store whose retrieval threshold is enforced until this implementation changes.
+Retrieval Score (`score`, default `0.7`) is the minimum Pinecone match score a semantic-search result must reach; matches below it are dropped before they are returned. `0.0` returns every match.
 
 ### API key
 

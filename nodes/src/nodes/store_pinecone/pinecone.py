@@ -64,7 +64,7 @@ class Store(DocumentStoreBase):
     renderChunkSize: int = 32 * 1024 * 1024
     payload_limit: int = 32 * 1024 * 1024
     similarity: str = 'cosine'
-    threshhold_search: float = 0.0
+    threshold_search: float = 0.0
     client = None
 
     def __init__(self, provider: str, config: Mapping, bag: Dict[str, Any]):
@@ -281,7 +281,7 @@ class Store(DocumentStoreBase):
         )['matches']
 
         # Have to get similarity score threshold post query
-        points_satisfy_threshold = [point for point in points if point['score'] >= self.threshhold_search]
+        points_satisfy_threshold = [point for point in points if point['score'] >= self.threshold_search]
         # Convert the points into groups
         docs = self._convertToDocs(points_satisfy_threshold)
 
