@@ -27,6 +27,8 @@ import os
 import sys
 import types
 
+import rocketlib as _real_rocketlib
+
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _NODE_DIR = os.path.join(_HERE, '..', '..', 'src', 'nodes', 'extract_facts')
@@ -116,7 +118,7 @@ class FakeDoc:
 # ---------------------------------------------------------------------------
 
 
-def _load_iinstance_class(node_config):
+def _load_iinstance_class():
     saved = {}
     stubs = {
         'rocketlib': types.ModuleType('rocketlib'),
@@ -124,7 +126,6 @@ def _load_iinstance_class(node_config):
         'ai': types.ModuleType('ai'),
         'ai.common': types.ModuleType('ai.common'),
         'ai.common.schema': types.ModuleType('ai.common.schema'),
-        'ai.common.config': types.ModuleType('ai.common.config'),
         'ai.common.util': types.ModuleType('ai.common.util'),
     }
 
@@ -138,19 +139,12 @@ def _load_iinstance_class(node_config):
         def preventDefault(self):
             pass
 
-    class FakeIGlobalBase:
-        glb = None
-
     class FakeEntry:
         pass
 
-    class FakeConfig:
-        @staticmethod
-        def getNodeConfig(logicalType, connConfig):
-            return node_config
-
     stubs['rocketlib'].IInstanceBase = FakeIInstanceBase
-    stubs['rocketlib'].IGlobalBase = FakeIGlobalBase
+    # The real base: IGlobal.config resolves glb.connConfig through the engine's schema.
+    stubs['rocketlib'].IGlobalBase = _real_rocketlib.IGlobalBase
     stubs['rocketlib'].Entry = FakeEntry
     stubs['rocketlib'].warning = lambda *a, **kw: None
     stubs['rocketlib.types'].IInvokeLLM = FakeIInvokeLLM
@@ -159,7 +153,6 @@ def _load_iinstance_class(node_config):
     stubs['ai.common.schema'].Answer = FakeAnswer
     stubs['ai.common.schema'].Doc = FakeDoc
     stubs['ai.common.schema'].DocMetadata = FakeDocMetadata
-    stubs['ai.common.config'].Config = FakeConfig
     stubs['ai.common.util'].normalize = lambda s: ' '.join(str(s).split())
 
     for name, stub in stubs.items():
@@ -234,10 +227,10 @@ def _build_instance(
         'validate': validate,
         'include_provenance': include_provenance,
     }
-    IInstance, IGlobal = _load_iinstance_class(config)
+    IInstance, IGlobal = _load_iinstance_class()
 
     glob = IGlobal.__new__(IGlobal)
-    glob.glb = types.SimpleNamespace(logicalType='extract_facts', connConfig={})
+    glob.glb = types.SimpleNamespace(logicalType='extract_facts', connConfig=config)
     glob.beginGlobal()  # populates glob.fields/validate/include_provenance
 
     inst = IInstance.__new__(IInstance)

@@ -43,7 +43,6 @@ monitorStatus('Loading transformers')
 # Load all the heavy weight stuff
 from numpy import ndarray
 from ai.common.models import SentenceTransformer
-from ai.common.config import Config
 from ai.common.embedding import EmbeddingBase
 from ai.common.schema import Doc, Question
 
@@ -65,19 +64,25 @@ class Embedding(EmbeddingBase):
     _document_prefix: str = ''
     _query_prefix: str = ''
 
-    def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
-        """Initialize the Embedding instance with provider configuration."""
-        # Init the base
-        super().__init__(provider, connConfig, bag)
+    def __init__(self, provider: str, config: Dict[str, Any], bag: Dict[str, Any]):
+        """Initialize the Embedding instance from the node's resolved config.
 
-        # Get the nodes configuration
-        config = Config.getNodeConfig(provider, connConfig)
+        Args:
+            provider: The node's logical type.
+            config: The node's resolved config (``IGlobal.config``). The model
+                is always set (pinned by the preset, or typed on the custom
+                profile); the truncation and prefix knobs exist on the custom
+                profile only, so they are read with their resolver defaults.
+            bag: The endpoint bag.
+        """
+        # Init the base
+        super().__init__(provider, config, bag)
 
         # Get the model from our section
-        self._model = config.get('model')
-        self._truncateDim = config.get('truncate_dim', None) or None
-        self._document_prefix = config.get('document_prefix', '')
-        self._query_prefix = config.get('query_prefix', '')
+        self._model = config['model']
+        self._truncateDim = config.get('truncate_dim') or None
+        self._document_prefix = config.get('document_prefix') or ''
+        self._query_prefix = config.get('query_prefix') or ''
 
         # Create one
         monitorStatus('Loading model', self._model)

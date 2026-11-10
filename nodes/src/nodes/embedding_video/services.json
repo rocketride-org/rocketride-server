@@ -63,113 +63,100 @@
 		"video": ["documents"]
 	},
 	//
-	//	Optional:
-	//		Profile section are configuration optoins used by the driver
-	//		itself
-	//
-	"preconfig": {
-		// Define the values that will be merged into any profile configuration
-		// specified, unless the profile is 'absolute'
-		"default": "openai-patch16",
-		// Defines profiles used with the "profile": key
-		"profiles": {
-			"custom": {
-				"title": "Custom model"
-			},
-			"openai-patch16": {
-				"title": "OpenAI CLIP - 16x16 - good performance, lower memory",
-				"model": "openai/clip-vit-base-patch16"
-			},
-			"openai-patch32": {
-				"title": "OpenAI CLIP - 32x32 - lower performance, better recognition",
-				"model": "openai/clip-vit-base-patch32"
-			},
-			"google16x224": {
-				"title": "Google ViT - 16x16 - fast, accurate, general-purpose",
-				"model": "google/vit-base-patch16-224"
-			}
-		}
-	},
-	//
 	// Optional:
-	//		Local fields defintions - these define fields only for the
-	//		current service. You may specify them here, or directly
-	//		in the shape
+	//		Local property definitions. The model is the selector: each
+	//		preset pins its Hugging Face model as a constant, and "custom"
+	//		exposes the model name instead. The frame extraction settings
+	//		are one group shared by every model.
 	//
-	"fields": {
+	"propertyDefinitions": {
 		"embedding.model": {
 			"type": "string",
 			"title": "Model name",
 			"minLength": 2,
 			"maxLength": 256,
+			"required": true,
 			"description": "Hugging Face model to use for frame embedding"
-		},
-		"embedding.custom": {
-			"object": "custom",
-			"title": "",
-			"properties": ["embedding.model"]
-		},
-		"embedding.profile": {
-			"title": "Model",
-			"description": "Embedding model for video frames",
-			"type": "string",
-			"default": "openai-patch16",
-			"enum": ["*>preconfig.profiles.*.title"],
-			"conditional": [
-				{
-					"value": "custom",
-					"properties": ["embedding.custom"]
-				}
-			]
 		},
 		"embedding.interval": {
 			"type": "number",
 			"title": "Interval (in seconds) between frames",
 			"description": "Time in seconds between extracted frames",
-			"default": 5
+			"default": 5,
+			"minimum": 0.01
 		},
 		"embedding.max_frames": {
-			"type": "number",
+			"type": "integer",
 			"title": "Maximum number of frames to extract (0=unlimited)",
 			"description": "Limit the total number of frames extracted from the video. Set to 0 for unlimited.",
-			"default": 50
+			"default": 50,
+			"minimum": 0
 		},
 		"embedding.start_time": {
 			"type": "number",
 			"title": "Start time (in seconds) for frame extraction (0=beginning)",
-			"default": 0
+			"default": 0,
+			"minimum": 0
 		},
 		"embedding.duration": {
 			"type": "number",
 			"title": "Duration (in seconds) for frame extraction (0=end of video)",
-			"default": 0
+			"default": 0,
+			"minimum": 0
 		},
 		"embedding.maxVideoSizeMB": {
 			"type": "number",
 			"title": "Maximum video file size (MB)",
 			"description": "Maximum allowed video file size in megabytes. Videos exceeding this limit will be rejected.",
-			"default": 500
-		},
-		"embedding.extraction": {
-			"object": "extraction",
-			"title": "Frame Extraction",
-			"properties": ["embedding.interval", "embedding.max_frames", "embedding.start_time", "embedding.duration", "embedding.maxVideoSizeMB"]
+			"default": 500,
+			"minimum": 1
 		}
 	},
 	//
 	// Required:
-	//		Defines the fields (shape) of the service. Either source or target
-	//		map be specified, or both, but at least one is required
+	//		Defines the properties shown in the pipeline builder side panel, in order
 	//
-	"shape": [
+	"properties": [
 		{
-			"section": "Pipe",
-			"title": "Video Embedding",
-			"properties": ["embedding.profile", "embedding.extraction"]
+			"name": "profile",
+			"type": "string",
+			"title": "Model",
+			"description": "Embedding model for video frames",
+			"default": "openai-patch16",
+			"enum": {
+				"custom": {
+					"title": "Custom model",
+					"properties": ["embedding.model"]
+				},
+				"openai-patch16": {
+					"title": "OpenAI CLIP - 16x16 - good performance, lower memory",
+					"properties": [{ "name": "model", "type": "constant", "default": "openai/clip-vit-base-patch16" }]
+				},
+				"openai-patch32": {
+					"title": "OpenAI CLIP - 32x32 - lower performance, better recognition",
+					"properties": [{ "name": "model", "type": "constant", "default": "openai/clip-vit-base-patch32" }]
+				},
+				"google16x224": {
+					"title": "Google ViT - 16x16 - fast, accurate, general-purpose",
+					"properties": [{ "name": "model", "type": "constant", "default": "google/vit-base-patch16-224" }]
+				}
+			}
+		},
+		{
+			"name": "extraction",
+			"title": "Frame Extraction",
+			"properties": [
+				"embedding.interval",
+				"embedding.max_frames",
+				"embedding.start_time",
+				"embedding.duration",
+				"embedding.maxVideoSizeMB"
+			]
 		}
 	],
 	//
-	//	Test configuration for automated node testing
+	//	Test configuration for automated node testing. "profiles" lists
+	//	values of the "profile" selector.
 	//
 	"test": {
 		"profiles": ["openai-patch16"],

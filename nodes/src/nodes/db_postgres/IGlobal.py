@@ -46,15 +46,18 @@ class IGlobal(DatabaseGlobalBase):
     """
 
     def _connection_params(self, config: Dict[str, Any]) -> Dict[str, str]:
-        """Map the node's stored config to a flat PostgreSQL connection-params dict."""
-        # Config.getNodeConfig() strips the node namespace prefix before returning;
-        # keys are unprefixed here by design (e.g. 'host', not 'postgresdb.host').
+        """Map the resolved node config to a flat connection-params dict.
+
+        The resolver has applied the schema defaults (host, user, database,
+        table) and flattened the keys to their short names ('host', not
+        'postgresdb.host'); the password has no default, so an unset one is None.
+        """
         return {
-            'host': config.get('host', 'localhost').strip(),
-            'user': config.get('user', 'postgres').strip(),
-            'password': config.get('password', ''),  # Do not strip — whitespace is valid in passwords
-            'database': config.get('database', 'postgres').strip(),
-            'table': config.get('table', 'table').strip(),
+            'host': config['host'].strip(),
+            'user': config['user'].strip(),
+            'password': config['password'] or '',  # Do not strip: whitespace is valid in passwords
+            'database': config['database'].strip(),
+            'table': config['table'].strip(),
         }
 
     def _build_connection_url(self, params: Dict[str, str]) -> str:
@@ -69,12 +72,9 @@ class IGlobal(DatabaseGlobalBase):
         return f'postgresql+psycopg2://{user}:{password}@{params["host"]}/{database}'
 
     def _max_validation_attempts(self, config: Dict[str, Any]) -> int:
-        """Return the EXPLAIN-validation retry count from config (default 5)."""
-        try:
-            return int(config.get('max_attempts', 5))
-        except (ValueError, TypeError):
-            return 5
+        """Return the EXPLAIN-validation retry count; the resolver bounded it to the schema's 1..20."""
+        return config['max_attempts']
 
     def _db_description(self, config: Dict[str, Any]) -> str:
         """Return the user-provided database description (empty string if unset)."""
-        return config.get('db_description', '')
+        return config['db_description'] or ''

@@ -74,28 +74,18 @@
 		"questions": ["table", "text", "answers"]
 	},
 	//
-	//	Optional:
-	//		Profile section are configuration options used by the driver
-	//		itself
-	//
-	"preconfig": {
-		// Define the values that will be merged into any profile configuration
-		// specified, unless the profile is 'absolute'
-		"default": "default",
-		// Defines profiles used with the "profile": key
-		"profiles": {
-			"default": {
-				"database": "default"
-			}
-		}
-	},
-	//
 	// Optional:
-	//		Local fields definitions - these define fields only for the
-	//		current service. You may specify them here, or directly
-	//		in the shape
+	//		Local property definitions. Every field is stored flat; the
+	//		password is a secret an account variable can supply.
 	//
-	"fields": {
+	"propertyDefinitions": {
+		"clickhouse.db_description": {
+			"type": "string",
+			"format": "textarea",
+			"title": "Database description",
+			"default": "",
+			"description": "What is this database used for? Describe its content and purpose, this helps the LLM generate more accurate queries."
+		},
 		"clickhouse.host": {
 			"type": "string",
 			"title": "ClickHouse host",
@@ -112,10 +102,8 @@
 			"type": "string",
 			"title": "Password",
 			"description": "Password to connect to the ClickHouse server",
-			"secure": true,
-			"ui": {
-				"ui:widget": "password"
-			}
+			"secret": true,
+			"env": "ROCKETRIDE_DB_CLICKHOUSE_PASSWORD"
 		},
 		"clickhouse.database": {
 			"type": "string",
@@ -137,15 +125,6 @@
 			"default": "table",
 			"description": "Name of table"
 		},
-		"clickhouse.db_description": {
-			"type": "string",
-			"title": "Database description",
-			"default": "",
-			"description": "What is this database used for? Describe its content and purpose, this helps the LLM generate more accurate queries.",
-			"ui": {
-				"ui:widget": "textarea"
-			}
-		},
 		"clickhouse.max_attempts": {
 			"type": "integer",
 			"title": "Max validation attempts",
@@ -159,34 +138,21 @@
 			"title": "Allow direct query execution",
 			"default": false,
 			"description": "Permit the execute, begin, commit, and rollback tool functions to run raw SQL without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue SQL directly."
-		},
-		"clickhouse.default": {
-			"object": "default",
-			"properties": ["clickhouse.db_description", "clickhouse.host", "clickhouse.user", "clickhouse.password", "clickhouse.database", "clickhouse.tls", "clickhouse.table", "clickhouse.max_attempts", "clickhouse.allow_execute"]
-		},
-		"clickhouse.profile": {
-			"hidden": true,
-			"type": "string",
-			"default": "default",
-			"enum": [["default", "Default"]],
-			"conditional": [
-				{
-					"value": "default",
-					"properties": ["clickhouse.default"]
-				}
-			]
 		}
 	},
 	//
 	// Required:
-	//		Defines the fields (shape) of the service. Either source or target
-	//		may be specified, or both, but at least one is required
+	//		Defines the properties shown in the pipeline builder side panel, in order
 	//
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "ClickHouse",
-			"properties": ["clickhouse.profile"]
-		}
+	"properties": [
+		"clickhouse.db_description",
+		"clickhouse.host",
+		"clickhouse.user",
+		"clickhouse.password",
+		"clickhouse.database",
+		"clickhouse.tls",
+		"clickhouse.table",
+		"clickhouse.max_attempts",
+		"clickhouse.allow_execute"
 	]
 }

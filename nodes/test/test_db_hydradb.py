@@ -24,9 +24,11 @@
 """
 Network-free unit tests for the db_hydradb node (stub-import pattern).
 
-Stubs rocketlib, ai.common.config, and ai.common.utils.post_with_retry, then loads
-the node package via spec_from_file_location so relative imports resolve. Asserts
-request building (URL / auth header / body), response parsing, and error paths.
+Stubs rocketlib's logging and tool decorator, ai.common.utils.post_with_retry and
+requests, then loads the node package via spec_from_file_location so relative
+imports resolve. The global keeps the REAL IGlobalBase so its config resolves
+through the real resolver against the engine's schema. Asserts request building
+(URL / auth header / body), response parsing, and error paths.
 """
 
 import importlib.util
@@ -37,6 +39,8 @@ import types
 from types import SimpleNamespace
 
 import pytest
+import rocketlib as _real_rocketlib
+from rocketlib.config import ConfigError
 
 NODE_DIR = os.path.join(os.path.dirname(__file__), '..', 'src', 'nodes', 'graph_hydradb')
 NODE_DIR = os.path.abspath(NODE_DIR)
@@ -81,7 +85,8 @@ _WARNINGS = []
 def _install_stubs():
     rocketlib = types.ModuleType('rocketlib')
     rocketlib.IInstanceBase = object
-    rocketlib.IGlobalBase = object
+    # The real base: self.config resolves through the engine's schema.
+    rocketlib.IGlobalBase = _real_rocketlib.IGlobalBase
     rocketlib.tool_function = lambda *_a, **_k: lambda fn: fn
     rocketlib.warning = lambda *a, **_k: _WARNINGS.append(' '.join(str(x) for x in a))
     rocketlib.debug = lambda *_a, **_k: None
@@ -97,28 +102,16 @@ def _install_stubs():
 
     ai = types.ModuleType('ai')
     ai_common = types.ModuleType('ai.common')
-    ai_common_config = types.ModuleType('ai.common.config')
     ai_common_utils = types.ModuleType('ai.common.utils')
 
-    class _Config:
-        node_config = {}
-
-        @staticmethod
-        def getNodeConfig(_logical_type, _conn_config):
-            return dict(_Config.node_config)
-
-    ai_common_config.Config = _Config
     ai_common_utils.post_with_retry = _stub_post_with_retry
     ai_common_utils.get_with_retry = _stub_get
 
     ai.common = ai_common
-    ai_common.config = ai_common_config
     ai_common.utils = ai_common_utils
     sys.modules['ai'] = ai
     sys.modules['ai.common'] = ai_common
-    sys.modules['ai.common.config'] = ai_common_config
     sys.modules['ai.common.utils'] = ai_common_utils
-    return _Config
 
 
 def _load_package():
@@ -160,17 +153,14 @@ def node():
         'rocketlib',
         'ai',
         'ai.common',
-        'ai.common.config',
         'ai.common.utils',
         'requests',
     ]
     _saved = {name: sys.modules.get(name) for name in _managed}
     try:
-        Config = _install_stubs()
+        _install_stubs()
         client_mod, iglobal_mod, iinstance_mod = _load_package()
-        yield SimpleNamespace(
-            Config=Config, client_mod=client_mod, iglobal_mod=iglobal_mod, iinstance_mod=iinstance_mod
-        )
+        yield SimpleNamespace(client_mod=client_mod, iglobal_mod=iglobal_mod, iinstance_mod=iinstance_mod)
     finally:
         for name in _managed:
             if _saved[name] is not None:
@@ -281,19 +271,17 @@ def test_recall_memory_requires_query(node):
         inst.recall_memory({'query': 'ok', 'max_results': True})
 
 
-def test_iglobal_validate_warns_without_key(node):
-    node.Config.node_config = {'database': 'acme'}  # no api_key
-    os.environ.pop('HYDRA_DB_API_KEY', None)
+def test_iglobal_refuses_a_config_without_key(node):
+    """The schema marks the key required, so the resolver refuses the start; no env fallback."""
     g = node.iglobal_mod.IGlobal()
-    g.glb = SimpleNamespace(logicalType='db_hydradb', connConfig={})
-    g.validateConfig()
-    assert any('API key' in w for w in _WARNINGS)
+    g.glb = SimpleNamespace(logicalType='db_hydradb', connConfig={'database': 'acme'})  # no api_key
+    with pytest.raises(ConfigError, match='api_key'):
+        g.beginGlobal()
 
 
 def test_iglobal_endglobal_clears_key(node):
-    node.Config.node_config = {'api_key': 'topsecret', 'database': 'acme'}
     g = node.iglobal_mod.IGlobal()
-    g.glb = SimpleNamespace(logicalType='db_hydradb', connConfig={})
+    g.glb = SimpleNamespace(logicalType='db_hydradb', connConfig={'api_key': 'topsecret', 'database': 'acme'})
     g.beginGlobal()
     assert g.client is not None and g.client.api_key == 'topsecret'
     g.endGlobal()

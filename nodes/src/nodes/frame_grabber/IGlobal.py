@@ -22,33 +22,40 @@
 # =============================================================================
 
 import threading
+
+from depends import load_depends
+
+load_depends(__file__)
+
 from rocketlib import IGlobalBase
-from ai.common.config import Config
 
 
 class IGlobal(IGlobalBase):
+    #: The extractor's config: the resolved node config as a plain dict plus
+    #: the two keys VideoFrameExtractor reads under other names.
+    grab_config: dict = {}
+
     def beginGlobal(self):
-        # Load dependencies
-        from depends import load_depends
+        """Build the extractor config from the resolved node config.
 
-        load_depends(__file__)
-
+        The selected mode flattens to its own leaves (interval, percent,
+        min_scene_gap, max_frames) beside the shared ones (start_time,
+        duration, watermark); the resolver applied every default and bounded
+        the interval above zero.
+        """
         # Mutex if this driver requires physical devices
         self.device_lock = threading.Lock()
 
-        # Get and save the config info
-        self.config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
+        config = self.config
+        self.grab_config = dict(config)
 
-        # Put the profile (type) in there as well
-        self.config['type'] = self.glb.connConfig.get('profile', 'interval')
+        # VideoFrameExtractor reads the mode as 'type'
+        self.grab_config['type'] = config.profile
 
         # Translate interval (seconds between frames) to fps for VideoFrameExtractor,
         # which only reads 'fps' and never reads 'interval'
-        interval = self.config.get('interval')
-        if interval is not None:
-            if interval <= 0:
-                raise ValueError(f'interval must be positive, got {interval}')
-            self.config['fps'] = 1.0 / interval
+        if 'interval' in config:
+            self.grab_config['fps'] = 1.0 / config.interval
 
     def endGlobal(self):
         # Release the lock

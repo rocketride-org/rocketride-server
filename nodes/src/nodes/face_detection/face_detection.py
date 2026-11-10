@@ -37,8 +37,6 @@ load_depends(__file__)
 
 from typing import Any, Dict, List
 
-from ai.common.config import Config
-
 
 # -----------------------------------------------------------------------------
 # Profile keys -> .task model bundle URLs (Google CDN, Apache-2.0).
@@ -51,7 +49,7 @@ from ai.common.config import Config
 # bundle. The legacy MediaPipe Solutions full-range tflite uses a different
 # metadata format and is not loadable via the Tasks FaceDetector. If/when a
 # full-range Tasks bundle is published, add it to MODEL_URLS and surface it
-# as a second preconfig profile.
+# as a second profile of the model selector.
 # -----------------------------------------------------------------------------
 
 MODEL_URLS: Dict[str, str] = {
@@ -105,13 +103,16 @@ class FaceDetector:
         emit_landmarks (bool): Whether to include 6 keypoints per face.
     """
 
-    def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
-        config = Config.getNodeConfig(provider, connConfig)
-
+    def __init__(self, threshold: float, emit_landmarks: bool):
+        """
+        Args:
+            threshold: Minimum detection confidence, already bounded to 0..1 by the schema.
+            emit_landmarks: Include the 6 coarse keypoints per face.
+        """
         self.profile = 'short'
         self.model_url = MODEL_URLS['short']
-        self.threshold = float(config.get('threshold', 0.5))
-        self.emit_landmarks = bool(config.get('emit_landmarks', True))
+        self.threshold = float(threshold)
+        self.emit_landmarks = bool(emit_landmarks)
 
         self.model_name = f'blazeface-{self.profile}'
         self._detector = self._build_detector()

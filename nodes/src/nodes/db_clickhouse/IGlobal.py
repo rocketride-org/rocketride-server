@@ -97,40 +97,25 @@ class IGlobal(DatabaseGlobalBase):
     best-effort primary key, so the dialect-agnostic base works unchanged.
     """
 
-    @staticmethod
-    def _normalize_field(value: Any, default: str) -> str:
-        """Coerce a config value to a stripped string, returning ``default`` when it is None or empty.
-
-        Non-string values are coerced via ``str()`` first, so a stored null or a
-        non-string (e.g. a number) can never raise ``AttributeError`` on ``.strip()``.
-        """
-        if value is None:
-            return default
-        text = str(value).strip()
-        return text or default
-
     def _connection_params(self, config: Dict[str, Any]) -> Dict[str, str]:
-        """Map the node's stored config to a flat ClickHouse connection-params dict."""
-        # Config.getNodeConfig() strips the node namespace prefix before returning;
-        # keys are unprefixed here by design (e.g. 'host', not 'clickhouse.host').
-        # 'tls' is a ClickHouse-specific option (not present on the MySQL/PostgreSQL
-        # nodes). It is distinct from the field-level "secure": true attribute on the
-        # password field — that attribute only marks the value as a masked secret and
-        # is shared identically across all three database nodes.
-        tls = config.get('tls', False)
-        if isinstance(tls, str):
-            # Config values may arrive as strings ('true'/'false'); 'false' must
-            # not be truthy, so don't use bool() directly.
-            tls = tls.strip().lower() in {'1', 'true', 'yes', 'on'}
+        """Map the resolved node config to a flat ClickHouse connection-params dict.
+
+        The resolver has applied the schema defaults (host, user, database,
+        table, tls) and flattened the keys to their short names ('host', not
+        'clickhouse.host'); the password has no default, so an unset one is None.
+        'tls' is a ClickHouse-specific option (not present on the MySQL/PostgreSQL
+        nodes). It is distinct from the "secret" flag on the password property,
+        which only marks the value as a masked secret.
+        """
         return {
-            'host': self._normalize_field(config.get('host'), 'localhost'),
-            'user': self._normalize_field(config.get('user'), 'default'),
-            'password': config.get('password') or '',  # Do not strip — whitespace is valid in passwords
-            'database': self._normalize_field(config.get('database'), 'default'),
-            'table': self._normalize_field(config.get('table'), 'table'),
+            'host': config['host'].strip(),
+            'user': config['user'].strip(),
+            'password': config['password'] or '',  # Do not strip: whitespace is valid in passwords
+            'database': config['database'].strip(),
+            'table': config['table'].strip(),
             # Normalised to a flag string so the params dict stays Dict[str, str];
             # consumed by _build_connection_url below.
-            'tls': 'true' if tls else '',
+            'tls': 'true' if config['tls'] else '',
         }
 
     def _build_connection_url(self, params: Dict[str, str]) -> str:
@@ -163,21 +148,12 @@ class IGlobal(DatabaseGlobalBase):
         return f'clickhouse+native://{user}:{password}@{host}/{database}'
 
     def _max_validation_attempts(self, config: Dict[str, Any]) -> int:
-        """Return the EXPLAIN-validation retry count, clamped to the documented 1..20 range."""
-        try:
-            value = int(config.get('max_attempts', 5))
-        except (ValueError, TypeError):
-            return 5
-        # Clamp to the documented 1..20 range (services.json minimum/maximum) so
-        # a value supplied directly (bypassing UI validation) can't request 0,
-        # negative, or excessive EXPLAIN-validation retries.
-        return max(1, min(20, value))
+        """Return the EXPLAIN-validation retry count; the resolver bounded it to the schema's 1..20."""
+        return config['max_attempts']
 
     def _db_description(self, config: Dict[str, Any]) -> str:
         """Return the user-provided database description, always as a string."""
-        # A stored null (or non-string) must not violate the -> str contract.
-        value = config.get('db_description')
-        return value if isinstance(value, str) else ''
+        return config['db_description'] or ''
 
     def _format_db_error(self, exc: Exception) -> str:
         """Return ``Error <code>: <class>: <sentence>`` for a ClickHouse server error.

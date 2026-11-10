@@ -38,7 +38,6 @@ from rocketlib import debug
 from typing import List, Dict, Any
 
 from langchain_openai import OpenAIEmbeddings
-from ai.common.config import Config, check_credential_resolved
 from ai.common.embedding import EmbeddingBase
 from ai.common.schema import Doc, Question
 
@@ -53,22 +52,23 @@ class OpenAIEmbeddingWrapper(EmbeddingBase):
     _tokenSize: int = 0
     _embedding: OpenAIEmbeddings | None = None
 
-    def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
+    def __init__(self, provider: str, config: Dict[str, Any], bag: Dict[str, Any]):
         """
         Construct OpenAI embedding wrapper.
+
+        Args:
+            provider: The node's logical type.
+            config: The node's resolved config (``IGlobal.config``): the model
+                selector's value and the required API key.
+            bag: The endpoint bag.
         """
         # Init the base
-        super().__init__(provider, connConfig, bag)
+        super().__init__(provider, config, bag)
 
-        # Get the nodes configuration
-        config = Config.getNodeConfig(provider, connConfig)
+        # The model is the selector and the key a required leaf, so both are set
+        self._model = config['model']
 
-        # Get the model from our section
-        openai_api_key = config.get('apikey')
-        check_credential_resolved(provider, 'apikey', openai_api_key, connConfig)
-        self._model = config.get('model')
-
-        self._embedding = OpenAIEmbeddings(openai_api_key=openai_api_key, model=self._model)
+        self._embedding = OpenAIEmbeddings(openai_api_key=config['apikey'].strip(), model=self._model)
 
         # Check it
         if self._embedding is None:

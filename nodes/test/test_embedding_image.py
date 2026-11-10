@@ -41,16 +41,8 @@ def test_embedding_image_create_embedding():
     # Use the same embedding class the node uses
     from nodes.embedding_image.embedding import Embedding
 
-    # Minimal config: provider and connConfig with default model
-    provider = 'embedding_image'
-    connConfig = {
-        'embedding_image': {
-            'model': 'openai/clip-vit-base-patch16',
-        },
-    }
-    bag = {}
-
-    embedding_driver = Embedding(provider, connConfig, bag)
+    # The model the default profile pins in services.json
+    embedding_driver = Embedding('openai/clip-vit-base-patch16')
 
     # Node uses create_image_embedding(Image) -> List[float]
     result = embedding_driver.create_image_embedding(pil_image)

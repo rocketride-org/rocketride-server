@@ -12,54 +12,35 @@
 	"documentation": "https://docs.rocketride.org/nodes/db_firestore",
 	"invoke": {},
 	"lanes": {},
-	"preconfig": {
-		"default": "default",
-		"profiles": {
-			"default": {
-				"database": "(default)"
-			}
-		}
-	},
-	"fields": {
+	//
+	// Optional:
+	//		Local property definitions. Authentication reuses the shared GCP
+	//		definitions (gcp.authType is a selector: the service-account
+	//		branch carries the key upload); everything else is stored flat.
+	//
+	"propertyDefinitions": {
 		"firestore.database": {
 			"type": "string",
 			"title": "Database ID",
 			"default": "(default)",
+			"minLength": 1,
 			"description": "The Firestore database ID. Usually '(default)'."
 		},
 		"firestore.collection": {
 			"type": "string",
 			"title": "Collection",
+			"default": "",
 			"description": "The Firestore collection to query or insert into."
-		},
-		"firestore.default": {
-			"object": "default",
-			"properties": [
-				"gcp.authType",
-				"gcp.serviceAccountKey",
-				"gcp.projectId",
-				"firestore.database",
-				"firestore.collection"
-			]
-		},
-		"firestore.profile": {
-			"hidden": true,
-			"type": "string",
-			"default": "default",
-			"enum": [["default", "Default"]],
-			"conditional": [
-				{
-					"value": "default",
-					"properties": ["firestore.default"]
-				}
-			]
 		}
 	},
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "Firestore",
-			"properties": ["firestore.profile"]
-		}
+	//
+	// Required:
+	//		Defines the properties shown in the pipeline builder side panel, in order
+	//
+	"properties": [
+		"gcp.authType",
+		"gcp.projectId",
+		"firestore.database",
+		"firestore.collection"
 	]
 }

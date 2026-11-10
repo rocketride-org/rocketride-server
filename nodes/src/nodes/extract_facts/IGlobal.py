@@ -23,7 +23,6 @@
 
 from typing import List
 from rocketlib import IGlobalBase, warning
-from ai.common.config import Config
 
 
 class IGlobal(IGlobalBase):
@@ -32,16 +31,16 @@ class IGlobal(IGlobalBase):
     include_provenance: bool = True
 
     def beginGlobal(self) -> None:
-        # Get the config info
-        config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
+        """Read the toggles and the well-formed field definitions from the resolved config."""
+        config = self.config
 
         # Validator + provenance toggles (see services.json facts.validate / facts.include_provenance)
-        self.validate = bool(config.get('validate', True))
-        self.include_provenance = bool(config.get('include_provenance', True))
+        self.validate = config.validate
+        self.include_provenance = config.include_provenance
 
         # Filter out fields with empty name or type
         self.fields = []
-        for field in config.get('fields', []):
+        for field in config.fields:
             field_name = field.get('column', '')
             field_type = field.get('type', '')
             if not field_name or not field_type:
