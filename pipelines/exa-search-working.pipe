@@ -43,17 +43,11 @@
       "provider": "search_exa",
       "name": "Exa search",
       "config": {
-        "profile": "default",
-        "default": {
-          "apikey": "${ROCKETRIDE_EXA_KEY}",
-          "highlightChars": 600,
-          "includeHighlights": true,
-          "numResults": 5,
-          "type": "auto"
-        },
-        "parameters": {
-          "google": {}
-        }
+        "apikey": "${ROCKETRIDE_EXA_APIKEY}",
+        "type": "auto",
+        "numResults": 5,
+        "includeHighlights": true,
+        "highlightChars": 600
       },
       "ui": {
         "position": {
