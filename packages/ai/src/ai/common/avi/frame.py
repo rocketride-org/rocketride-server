@@ -171,11 +171,16 @@ class VideoFrameExtractor(AVIReader):
         return None
 
     def _processBuffer(self):
+        # The first error a frame callback raised in this pass, raised after the loop.
+        # The loop only ever breaks, so the error is not lost when the loop stops at a
+        # frame that is incomplete or still waiting for its showinfo entry.
+        first_error = None
+
         while True:
             result = self.extract_complete_png(self._buffer)
             if not result:
                 # No complete PNG image found yet
-                return
+                break
 
             # Get the data and the offes
             png_data, end_offset = result
@@ -188,17 +193,28 @@ class VideoFrameExtractor(AVIReader):
                 frame_number, start_time = self._frame_info_queue.get(timeout=_FRAME_INFO_TIMEOUT)
             except queue.Empty:
                 warning(f'[{self._name}]: no showinfo entry for a complete frame after {_FRAME_INFO_TIMEOUT}s')
-                return
+                break
 
-            # Remove the frame from the buffer before the callback runs. Its showinfo
-            # entry is already consumed, so a callback that raises (a downstream node
-            # failing the frame) must not leave the PNG here: the reader carries on with
-            # the next chunk, and the same PNG would be sent again under the next frame's
-            # number and timestamp.
+            # Remove the frame from the buffer before the callback runs, and go on with
+            # the next frame when the callback raises (a downstream node failing the
+            # frame). The frame's showinfo entry is already consumed, so a PNG left here
+            # would be sent again under the next frame's number and timestamp. Stopping
+            # at the failed frame would hold back the complete frames behind it in this
+            # read, and at the end of the stream those were never sent. So a failed frame
+            # is not sent again, the frames behind it still go out with their own numbers
+            # and timestamps, and the first error is raised after the loop for the reader
+            # to log and keep for stop().
             self._buffer = self._buffer[end_offset:]
 
             # Callback with complete PNG frame
-            self._frame_callback(png_data, frame_number, start_time + self._start_time)
+            try:
+                self._frame_callback(png_data, frame_number, start_time + self._start_time)
+            except Exception as exc:
+                if first_error is None:
+                    first_error = exc
+
+        if first_error is not None:
+            raise first_error
 
     def onData(self, chunk: bytes = None):
         # Add the bytes to the existing buffer
@@ -207,12 +223,14 @@ class VideoFrameExtractor(AVIReader):
         else:
             self._done = True
 
-        # Process the buffer
-        self._processBuffer()
-
-        # If we are done, signal end
-        if chunk is None:
-            self._frame_callback(None, 0, 0)
+        try:
+            # Process the buffer
+            self._processBuffer()
+        finally:
+            # If we are done, signal end, also when a frame in the final flush failed:
+            # its error still propagates once the end marker is sent
+            if chunk is None:
+                self._frame_callback(None, 0, 0)
 
     def onInfo(self, info: str):
         # If this is the end, then done

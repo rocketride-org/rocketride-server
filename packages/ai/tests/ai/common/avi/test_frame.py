@@ -12,7 +12,8 @@ the next. What ``start()`` fails to clear therefore leaks from one video into th
 Covers the two failure modes behind #1963: showinfo entries surviving a restart, and a
 complete frame waiting forever for an entry that never comes. Also covers a frame
 callback that raises, as it does when a downstream node fails the frame: the failed frame
-must not be sent again under the next frame's number and timestamp.
+must not be sent again under the next frame's number and timestamp, and the frames behind
+it in the same read must still be sent.
 """
 
 import io
@@ -223,11 +224,12 @@ def _failing_extractor(consumer):
 
 
 def test_a_frame_whose_callback_raises_leaves_the_buffer(monkeypatch):
-    """The failed frame is gone from the buffer, so the next frame gets its own bytes.
+    """The failed frame is gone from the buffer, and the frame behind it still goes out.
 
     The frame's showinfo entry is taken before the callback runs. When the callback
     raised before the PNG was trimmed, the next pass found the same PNG again and paired
-    it with the next frame's entry.
+    it with the next frame's entry. The pass now also goes on past the failed frame: the
+    second PNG of the same read is sent in the same pass, and the error is raised after.
     """
     monkeypatch.setattr(F, '_FRAME_INFO_TIMEOUT', 1.0)
     first, second = _png(width=1), _png(width=2)
@@ -241,14 +243,34 @@ def test_a_frame_whose_callback_raises_leaves_the_buffer(monkeypatch):
     with pytest.raises(RuntimeError, match='frame 1'):
         extractor.onData(first + second)
 
-    assert extractor._buffer == bytearray(second), 'the failed frame must not stay buffered'
-
-    extractor._processBuffer()  # what the reader's next chunk does
-
     assert consumer.attempts == [(first, 1, 1.0), (second, 2, 2.0)], (
-        'the second call must carry the second frame, not the failed one under number 2'
+        'the second frame must go out in the same pass, with its own bytes and number'
     )
-    assert extractor._buffer == bytearray()
+    assert extractor._buffer == bytearray(), 'the failed frame must not stay buffered'
+
+
+def test_a_frame_error_is_raised_when_the_next_frame_waits_for_its_info(monkeypatch):
+    """The failed frame's error is kept when the pass stops at a frame with no entry.
+
+    The pass goes on past a failed frame. When the next complete PNG then times out on
+    its showinfo entry, the pass ends there with that PNG still buffered for a later
+    read, as before, and the failed frame's error is still raised.
+    """
+    monkeypatch.setattr(F, '_FRAME_INFO_TIMEOUT', 0.01)
+    warnings = []
+    monkeypatch.setattr(F, 'warning', warnings.append)
+    first, second = _png(width=1), _png(width=2)
+    consumer = _FailingConsumer(fails=lambda attempt: attempt == 0)
+    extractor = _failing_extractor(consumer)
+    extractor.onInfo(_info(1, 1.0))
+    extractor._buffer = bytearray()
+
+    with pytest.raises(RuntimeError, match='frame 1'):
+        extractor.onData(first + second)
+
+    assert consumer.attempts == [(first, 1, 1.0)]
+    assert extractor._buffer == bytearray(second), 'the frame with no entry stays buffered'
+    assert len(warnings) == 1 and 'showinfo' in warnings[0]
 
 
 def test_one_failed_frame_does_not_shift_the_frames_after_it(monkeypatch):
@@ -304,3 +326,55 @@ def test_a_persistent_failure_never_sends_the_same_frame_twice(monkeypatch):
     assert consumer.attempts == [(png, n, float(n)) for n, png in enumerate(pngs)]
     with pytest.raises(RuntimeError, match='frame 1'):
         extractor.stop()  # the first error is the one kept
+
+
+def test_frames_behind_a_failed_frame_in_the_same_read_are_sent(monkeypatch):
+    """Two frames per read and a persistent failure: all eight are sent once each.
+
+    A black or near-uniform frame compresses to a few KB, so one 16 KiB read can hold
+    several complete PNGs. The pass used to stop at the failed frame and leave the
+    frames behind it for the next read; under a persistent failure that backlog grew by
+    one frame per read, and the frames still buffered at the end of the stream were
+    never sent, nor was the end marker.
+    """
+    monkeypatch.setattr(F, '_FRAME_INFO_TIMEOUT', 0.05)
+    warnings = []
+    monkeypatch.setattr(F, 'warning', warnings.append)
+    monkeypatch.setattr(R, 'rocketlib_error', lambda message: None)
+
+    pngs = [_png(width=w) for w in range(1, 9)]
+    consumer = _FailingConsumer(fails=lambda attempt: attempt >= 1)
+    extractor = _failing_extractor(consumer)
+    extractor.start()
+    for number in range(8):
+        extractor.onInfo(_info(number, float(number)))
+
+    _drive(extractor, [pngs[i] + pngs[i + 1] for i in range(0, 8, 2)])
+
+    assert consumer.attempts == [(png, n, float(n)) for n, png in enumerate(pngs)]
+    assert consumer.ended, 'the end-of-stream marker still reaches the callback'
+    assert warnings == [], 'no frame was left waiting for a showinfo entry'
+    assert extractor._buffer == bytearray()
+    with pytest.raises(RuntimeError, match='frame 1'):
+        extractor.stop()  # the first error is the one kept
+
+
+def test_the_end_marker_is_sent_when_the_final_flush_fails(monkeypatch):
+    """A frame that fails in the end-of-stream flush does not hold back the end marker.
+
+    The flush (`onData(None)`) sends any complete frame still buffered, such as one that
+    waited on its showinfo entry. When that frame's callback raised, the error left
+    `onData` before the end marker was sent.
+    """
+    monkeypatch.setattr(F, '_FRAME_INFO_TIMEOUT', 1.0)
+    png = _png()
+    consumer = _FailingConsumer(fails=lambda attempt: True)
+    extractor = _failing_extractor(consumer)
+    extractor.onInfo(_info(4, 4.0))
+    extractor._buffer = bytearray(png)
+
+    with pytest.raises(RuntimeError, match='frame 4'):
+        extractor.onData(None)
+
+    assert consumer.attempts == [(png, 4, 4.0)]
+    assert consumer.ended, 'the end marker must still reach the callback'
