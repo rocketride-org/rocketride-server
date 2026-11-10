@@ -138,12 +138,12 @@ def _capture_for(request: Request) -> Optional[Path]:
     return None
 
 
-def shell_document_path(request: Request) -> Path:
+def shell_document_path(request: Request, *, capture: bool = True) -> Path:
     """The HTML document a browser navigating to this path boots from.
 
     The route's prerendered capture when the shell build carries one (see
-    ``_capture_for``), else the SPA ``index.html``: what ``shell_static``
-    serves for the same navigation.
+    ``_capture_for``) and ``capture`` allows it, else the SPA ``index.html``:
+    what ``shell_static`` serves for the same navigation.
 
     Raises:
         HTTPException: 503 when the shell has not been built.
@@ -151,7 +151,7 @@ def shell_document_path(request: Request) -> Path:
     index_path = Path(_shell_root) / 'index.html'
     if not index_path.is_file():
         raise HTTPException(status_code=503, detail='Shell UI not built. Run: ./builder shell:build')
-    return _capture_for(request) or index_path
+    return (_capture_for(request) if capture else None) or index_path
 
 
 async def shell_static(request: Request):

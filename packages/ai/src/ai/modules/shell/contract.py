@@ -32,6 +32,7 @@ from the app owning ``/``, the site facts the SEO files carry:
                      "published": "2026-11-09", "modified": "2026-11-10T09:00:00Z",
                      "authors": [{"name": "...", "url": "https://..."}]}],
     "site": {"title": "...", "blurb": "...", "docsUrl": "https://.../llms.txt",
+             "notFound": "pages/404.html",
              "redirects": [{"from": "/terms", "to": "/legal/terms"}],
              "image": "og/site.png",
              "feeds": [{"path": "/blog/feed.xml", "prefix": "/blog/", "title": "..."}],
@@ -230,7 +231,7 @@ def path_error(path: Any) -> Optional[str]:
     return None
 
 
-def _reserved_error(path: str) -> Optional[str]:
+def reserved_error(path: str) -> Optional[str]:
     """Why ``path`` falls under a reserved prefix (segment-aware), or None."""
     for prefix in RESERVED_PREFIXES:
         if path == prefix or path.startswith(prefix + '/'):
@@ -277,7 +278,7 @@ def _page_path_error(path: Any, root: bool, live_conflict: Optional[Callable[[st
         return err
     if not root:
         return 'root-mounted pages need the may-claim-root privilege (the app id listed in RR_PUBLIC_ROOT_APPS)'
-    err = _reserved_error(path)
+    err = reserved_error(path)
     if err:
         return f'{err}; choose another path'
     if live_conflict is not None:
@@ -465,6 +466,11 @@ def _check_site(raw: Any) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
         if err:
             return None, f'site.docsUrl: {err}'
         out['docsUrl'] = raw['docsUrl']
+    if 'notFound' in raw:
+        err = snapshot_error(raw['notFound'])
+        if err:
+            return None, f'site.notFound {raw["notFound"]!r}: {err}'
+        out['notFound'] = raw['notFound']
     if 'image' in raw:
         err = _image_error(raw['image'])
         if err:
@@ -577,7 +583,7 @@ def _redirect_source_error(
     err = path_error(bare)
     if err:
         return err
-    err = _reserved_error(source)
+    err = reserved_error(source)
     if err:
         return err
     paths = {p.path for p in pages}
@@ -650,7 +656,7 @@ def _feed_path_error(
     err = path_error(path)
     if err:
         return err
-    err = _reserved_error(path)
+    err = reserved_error(path)
     if err:
         return err
     if not path.endswith('.xml'):

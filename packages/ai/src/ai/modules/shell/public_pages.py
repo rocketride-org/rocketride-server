@@ -408,8 +408,9 @@ async def gate_errors(app_id: str, manifest: Mapping[str, Any], dist_dir: str, a
     paths and redirect sources) against every OTHER published platform
     manifest (first claim wins; ownership is derived from published
     manifests, so unpublishing releases it, with no table) and of feed
-    paths against their pages, and snapshot files missing from the built
-    version or over ``MAX_SNAPSHOT_BYTES`` (sized by a stat, never read).
+    paths against their pages, and snapshot files (each page's and
+    ``site.notFound``) missing from the built version, or a page's over
+    ``MAX_SNAPSHOT_BYTES`` (sized by a stat, never read).
 
     The collision check sees only what is already published: two platform
     apps publishing the same path at the same moment can both pass. The
@@ -503,6 +504,14 @@ async def gate_errors(app_id: str, manifest: Mapping[str, Any], dist_dir: str, a
                 f'publicPages path {page.path!r}: snapshot {page.snapshot!r} is {info["size"]} bytes, over the '
                 f'{MAX_SNAPSHOT_BYTES}-byte limit; move images, styles and scripts into the build output and '
                 'reference them through {{assets}}'
+            )
+    not_found = (site or {}).get('notFound')
+    if not_found:
+        try:
+            await read_artifact_file(f'{dist_dir}/{not_found}')
+        except StorageNotFoundError:
+            errors.append(
+                f'site.notFound {not_found!r} is not in the built version; emit it into the build output or drop the field'
             )
     images = [(f'publicPages path {page.path!r}: image', page.image) for page in pages]
     if site is not None:
