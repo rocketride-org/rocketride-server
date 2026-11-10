@@ -27,10 +27,10 @@ block-based Markdown this node reconstructs.
 
 ## Configuration
 
-The default profile uses Simple mode. Use it for the three built-in enhancement
-choices; switch to Advanced Mode only when you need to send raw Reducto
-`enhance` dictionaries. The simple and advanced settings are mutually
-exclusive in the implementation.
+Simple mode is the default (**Advanced Mode** off). Use it for the three
+built-in enhancement choices; switch to Advanced Mode only when you need to
+send raw Reducto `enhance` dictionaries. The simple and advanced settings are
+mutually exclusive in the implementation.
 
 ### Advanced Mode
 
@@ -57,9 +57,12 @@ the dictionaries instead.
 
 ## Authentication
 
-Set **API Key** to a Reducto API key. Configuration validation performs a
-minimal in-memory upload of `ping.txt`; failure raises `Reducto API key
-validation failed`, so saving configuration requires access to Reducto.
+Set **API Key** to a Reducto API key, or to the
+`${ROCKETRIDE_REDUCTO_APIKEY}` reference and supply the key through the
+environment. Configuration validation performs a minimal in-memory upload of
+`ping.txt`; a failure is reported as the warning `Reducto API key validation
+failed` and the configuration still saves. An unfilled reference is reported
+as such and skips the upload.
 
 ## Notes
 

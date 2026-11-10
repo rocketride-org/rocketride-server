@@ -78,7 +78,7 @@
 		"code.splitter.strlen": {
 			"type": "integer",
 			"title": "Maximum string length",
-			"description": "Longest chunk, in characters, a code unit is split into",
+			"description": "Chunk length in characters. The splitter currently emits whole syntax nodes and does not divide them by this length.",
 			"default": 512,
 			"minimum": 1
 		}
