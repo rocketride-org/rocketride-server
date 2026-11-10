@@ -39,11 +39,11 @@ The node has a single field: the integration secret it authenticates with. There
 
 ### API Key
 
-The Notion internal integration secret. It is stored encrypted and masked in the UI. Leave it empty only if you set `NOTION_API_KEY` on the engine host instead; the config field wins when both are present, and startup fails when neither yields a value.
+The Notion internal integration secret. It is stored encrypted and masked in the UI. The node reads the key only from this field, typically as a `${ROCKETRIDE_NOTION_APIKEY}` reference resolved per call; it does not read `NOTION_API_KEY` or any other variable from the engine host, and startup fails when the field is empty. A pipeline that relied on `NOTION_API_KEY` on the engine host must now set `${ROCKETRIDE_NOTION_APIKEY}` in this field.
 
 ## Authentication
 
-Create an internal integration at <https://www.notion.so/my-integrations> and paste its secret into **API Key**, or set `NOTION_API_KEY` on the engine host. The key is sent as an `Authorization: Bearer` header.
+Create an internal integration at <https://www.notion.so/my-integrations> and paste its secret into **API Key** (or put a `${ROCKETRIDE_NOTION_APIKEY}` reference there). The key is sent as an `Authorization: Bearer` header.
 
 Access is granted per page, not per scope: an integration sees only the pages and databases explicitly shared with it from a page's connection menu, and sharing a page also shares everything nested beneath it. A search that returns nothing usually means nothing has been shared yet.
 

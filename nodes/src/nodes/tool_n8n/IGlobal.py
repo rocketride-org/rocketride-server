@@ -64,7 +64,11 @@ class IGlobal(IGlobalBase):
         # commonly self-hosted on localhost / a private IP, which that SSRF guard
         # rejects. Like the database / vector-store nodes, we accept the user's
         # host as-is. SSRF is contained at the tool face instead (IInstance).
+        # The schema's minLength counts whitespace, so a blank or bare '/' value
+        # passes it and would only fail on the first tool call: refuse it here.
         self.base_url = cfg.baseUrl.strip().rstrip('/')
+        if not self.base_url:
+            raise ValueError('tool_n8n: baseUrl must not be blank')
         self.api_key = str(cfg.apiKey or '').strip()
         self.default_workflow = str(cfg.workflow or '').strip()
         self.mode = cfg.mode

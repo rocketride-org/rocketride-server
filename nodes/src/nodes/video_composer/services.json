@@ -37,7 +37,8 @@
 			"title": "Output frame rate (fps)",
 			"description": "Playback speed of the output video. Should match the upstream frame rate.",
 			"default": 1.0,
-			"minimum": 0.01
+			"minimum": 0.01,
+			"maximum": 240
 		},
 		"composer.codec": {
 			"type": "constant",

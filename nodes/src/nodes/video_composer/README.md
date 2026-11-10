@@ -31,7 +31,7 @@ Choose the standard profile for the smaller default output or the high-quality p
 
 ### Output frame rate (fps)
 
-This value determines both the FFmpeg input framerate and the playback speed of the MP4. The profiles default to `1.0` fps. Set it to match the timing of the upstream frames: raise it for a faster playback sequence, or lower it when each frame should remain on screen longer. Encoding returns no video if the runtime value is not greater than zero and no more than `240` fps.
+This value determines both the FFmpeg input framerate and the playback speed of the MP4. The profiles default to `1.0` fps. Set it to match the timing of the upstream frames: raise it for a faster playback sequence, or lower it when each frame should remain on screen longer. The schema accepts `0.01` to `240` fps; a configured value outside that range stops the pipeline at startup.
 
 ### Quality (CRF)
 

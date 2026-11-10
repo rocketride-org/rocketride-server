@@ -72,8 +72,6 @@ _WARM_UP_TIMEOUT_SECS = 10
 _WARM_UP_WAIT_SECS = 40
 # How long endGlobal waits for a call holding the session lock before it closes the session anyway.
 _END_LOCK_WAIT_SECS = 10
-# Given an empty endpoint the SDK reads TENKI_API_ENDPOINT / TENKI_API_URL, so the default is passed explicitly.
-_DEFAULT_BASE_URL = 'https://api.tenki.cloud'
 # USER_SHUTDOWN is not in Tenki's documented lifecycle, but it is in the protocol.
 _GONE_STATES = frozenset({'TERMINATING', 'TERMINATED', 'USER_SHUTDOWN'})
 _SHUTTING_DOWN = 'tool_tenki: the pipeline is shutting down, so no sandbox session is used'
@@ -404,7 +402,12 @@ class IGlobal(IGlobalBase):
         if outlives:
             warning(outlives)
         self.rpc_timeout_secs = max(self.exec_timeout_secs, _MIN_RPC_TIMEOUT_SECS)
-        self.client = Client(auth_token=apikey, base_url=cfg.base_url.strip(), timeout=self.rpc_timeout_secs)
+        # The schema's minLength counts whitespace, so a blank value passes it; given an empty endpoint the SDK
+        # reads TENKI_API_ENDPOINT / TENKI_API_URL, letting the engine host's environment pick the endpoint.
+        base_url = cfg.base_url.strip()
+        if not base_url:
+            raise Exception('tool_tenki: base_url is required')
+        self.client = Client(auth_token=apikey, base_url=base_url, timeout=self.rpc_timeout_secs)
 
     def path_lock(self, path: str) -> threading.Lock:
         """The lock for one normalized path (dict.setdefault is atomic, so concurrent callers get the same one)."""

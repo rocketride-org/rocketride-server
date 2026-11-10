@@ -6,8 +6,8 @@
 """Unit tests for tool_vertex_search score_threshold filtering.
 
 These are pure-Python unit tests — no server, no live Vertex AI. The node
-module is imported under a stubbed ``rocketlib`` so ``IInstance.py`` resolves
-without the engine runtime.
+module is imported under a stubbed ``rocketlib`` and ``depends`` so
+``IInstance.py`` resolves without the engine runtime or a requirements install.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from pathlib import Path
 
 _NODE_DIR = Path(__file__).resolve().parent.parent.parent / 'src' / 'nodes' / 'tool_vertex_search'
 
-_STUB_MODULE_NAMES = ('rocketlib', 'ai', 'ai.common')
+_STUB_MODULE_NAMES = ('rocketlib', 'ai', 'ai.common', 'depends')
 
 
 def _tool_function(**meta):
@@ -53,6 +53,12 @@ def _install_stubs() -> None:
     ai.common = ai_common
     sys.modules['ai'] = ai
     sys.modules['ai.common'] = ai_common
+
+    # IGlobal installs its requirements at import time; this pure-Python test
+    # must not resolve or install them during collection
+    depends = types.ModuleType('depends')
+    depends.depends = lambda *a, **kw: None
+    sys.modules['depends'] = depends
 
     if 'tool_vertex_search' not in sys.modules:
         pkg = types.ModuleType('tool_vertex_search')

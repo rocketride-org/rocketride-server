@@ -582,6 +582,14 @@ def test_the_client_gets_the_stripped_key_the_public_endpoint_and_a_deadline(mon
     assert built == [{'auth_token': _KEY, 'base_url': 'https://tenki.example', 'timeout': 60}]
 
 
+def test_a_blank_endpoint_stops_startup_before_a_client_exists(monkeypatch, logs):
+    """The schema minLength counts whitespace; an empty endpoint would let the SDK read TENKI_API_ENDPOINT."""
+    glb, built = _global(monkeypatch, {'apikey': _KEY, 'base_url': '   '})
+    with pytest.raises(Exception, match='base_url is required'):
+        glb.beginGlobal()
+    assert built == []
+
+
 def test_a_blank_key_is_a_schema_error_before_a_client_exists(monkeypatch, logs):
     """The schema requires the key (a ${ROCKETRIDE_TENKI_KEY} reference per call); the resolver names the leaf."""
     from rocketlib.config import ConfigError

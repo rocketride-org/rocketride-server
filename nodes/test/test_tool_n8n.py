@@ -256,6 +256,13 @@ def test_begin_global_refuses_a_blank_webhook_credential(auth, branch, field):
         _begin(stored)
 
 
+@pytest.mark.parametrize('base_url', ['   ', '/'])
+def test_begin_global_refuses_a_base_url_that_strips_to_empty(base_url):
+    # minLength counts whitespace; the start-time guard refuses what strips to ''
+    with pytest.raises(ValueError, match='baseUrl must not be blank'):
+        _begin({'baseUrl': base_url})
+
+
 def test_begin_global_rejects_a_timeout_outside_the_schema():
     from rocketlib.config import ConfigError
 
