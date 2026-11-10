@@ -47,6 +47,22 @@ GOOGLEBOT = 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.
 BROWSER = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/131.0 Safari/537.36'
 
 
+def _close_bounded(loop: asyncio.AbstractEventLoop) -> None:
+    """Close the loop ``eaas.run`` ran on without waiting on its service loops for ever.
+
+    ``eaas.run`` starts the task module's service loops (scheduler, TTL monitor,
+    cleanup, app builds), which only a process exit stops. ``asyncio.run`` would
+    cancel them and wait with no limit, and on Windows CI that wait once never
+    returned. These tests need only the built app.
+    """
+    pending = asyncio.all_tasks(loop)
+    for task in pending:
+        task.cancel()
+    if pending:
+        loop.run_until_complete(asyncio.wait(pending, timeout=5))
+    loop.close()
+
+
 @pytest.fixture
 def engine(monkeypatch, tmp_path):
     """The app ``eaas.run`` serves, with no published manifests (the legacy aggregate)."""
@@ -67,7 +83,11 @@ def engine(monkeypatch, tmp_path):
         built['server'] = self
 
     monkeypatch.setattr(WebServer, 'serve', capture)
-    asyncio.run(eaas.run({'port': 0, 'host': '127.0.0.1'}))
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(eaas.run({'port': 0, 'host': '127.0.0.1'}))
+    finally:
+        _close_bounded(loop)
     assert pp.current().legacy
     return TestClient(built['server'].app, follow_redirects=False)
 
