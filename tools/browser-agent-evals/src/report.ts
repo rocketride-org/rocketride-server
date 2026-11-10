@@ -251,6 +251,7 @@ export function writeRunReport(dir: string, results: ResultsFile): string {
 		'',
 		`${results.startedAt} to ${results.finishedAt}, task set ${results.taskSet}, checkout ${results.checkout.commit.slice(0, 10)} on ${results.checkout.branch}${results.checkout.dirtyFiles ? ` with ${results.checkout.dirtyFiles} uncommitted files` : ''}.`,
 		'',
+		...(results.stopped ? [`The batch stopped early, at ${results.stopped}. Trials already running finished, no other trial started, and the counts below cover only the trials that ran.`, ''] : []),
 	];
 	const body = results.schedule?.mode === 'trials' ? trialsSummary(results, results.schedule.trials) : rerunsSummary(results);
 	const file = path.join(dir, 'report.md');

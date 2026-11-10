@@ -98,6 +98,8 @@ export interface ResultsFile {
 	taskSet: string;
 	/** Reruns mode when absent. */
 	schedule?: Schedule;
+	/** Why the batch stopped starting trials before its schedule was done (guards.ts), or null when it ran to the end. */
+	stopped?: string | null;
 	engine: unknown;
 	checkout: { commit: string; branch: string; dirtyFiles: number };
 	summary: ScheduleSummary & { firstRunStatuses: Record<string, number>; totals: Totals };

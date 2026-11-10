@@ -31,8 +31,9 @@ import path from 'node:path';
 import { test } from 'node:test';
 
 import type { TrialResult } from './grade';
+import { freeGb, stopReason } from './guards';
 import { writeRunReport } from './report';
-import { buildResults } from './results';
+import { buildResults, spentUsd } from './results';
 import { roundOrder, runJobs, runSchedule, runTrials, summarize, trialJobs, verdictOf } from './schedule';
 import type { Task } from './task';
 import type { RunStatus } from './types';
@@ -192,6 +193,55 @@ test('several workers share one queue: every job runs once, and a stop lets runn
 		{ stop: () => (started >= 4 ? 'the spend cap' : null) }
 	);
 	assert.equal(stopped.length, 4);
+});
+
+test('the spend cap stops new trials once the finished ones reach it; running trials finish and the report says why', async () => {
+	const guards = { maxSpendUsd: 7, minFreeGb: 3 };
+	assert.equal(stopReason(guards, 6.99, 9.2), null);
+	const finished: TrialResult[] = [];
+	let stopped: string | null = null;
+	// 4 tasks, 2 trials each, 2 workers, $3 a trial: trials 1 and 2 start at $0, 3 starts at $3, 4 at $6; at $9 nothing more starts
+	const runs = await runTrials(
+		['t1', 't2', 't3', 't4'],
+		2,
+		async (job) => {
+			await new Promise((r) => setTimeout(r, 5));
+			const r = { ...fake(job.id, job.trial, 'pass'), diagnostics: { estimatedCostUsd: 3, waves: 5, wallMs: 1000 } };
+			finished.push(r);
+			return r;
+		},
+		(r) => r.status,
+		() => assert.fail('no trial throws here'),
+		{ workers: 2, stop: () => (stopped ??= stopReason(guards, spentUsd(finished), 9.2)) }
+	);
+	assert.equal(finished.length, 4, 'the trial running when the cap was reached still finished');
+	assert.match(stopped ?? '', /^the spend cap: the finished trials' estimated cost is \$9\.00, at or over --max-spend \$7\.00$/);
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'run-'));
+	const tasks = new Map(['t1', 't2', 't3', 't4'].map((id) => [id, { id, type: 'BUILD', target: 'pipeline', judge: [] } as unknown as Task]));
+	const results = buildResults(runs, tasks, dir, { startedAt: 't0', finishedAt: 't1', model: 'm', taskSet: 'tasks/batch-1', schedule: { mode: 'trials', trials: 2 }, stopped, engine: null, checkout: { commit: 'abc', branch: 'b', dirtyFiles: 0 } });
+	assert.equal(results.stopped, stopped);
+	assert.equal(results.summary.totals.estimatedCostUsd, 12);
+	assert.match(fs.readFileSync(writeRunReport(dir, results), 'utf8'), /^The batch stopped early, at the spend cap: .* no other trial started/m);
+	fs.rmSync(dir, { recursive: true });
+});
+
+test('the disk floor stops new trials once the output disk has less free than it', async () => {
+	let free = 4;
+	const ran: string[] = [];
+	await runJobs(
+		trialJobs(['a', 'b', 'c'], 2),
+		async (job) => {
+			ran.push(`${job.id}#${job.trial}`);
+			free -= 0.6;
+			return job.id;
+		},
+		() => assert.fail('no job throws here'),
+		{ stop: () => stopReason({ maxSpendUsd: null, minFreeGb: 3 }, 1000, free) }
+	);
+	assert.deepEqual(ran, ['a#1', 'b#1']);
+	assert.match(stopReason({ maxSpendUsd: null, minFreeGb: 3 }, 0, free) ?? '', /^the disk floor: 2\.8 GB free on the output folder's disk, under --min-free-disk 3 GB$/);
+	// the output folder does not exist before the first trial; its disk is read from the nearest folder that does
+	assert.ok(freeGb(path.join(os.tmpdir(), 'not-made-yet', 'run')) > 0);
 });
 
 test('errors and undecided runs are not rerun, and keep their own verdicts', () => {

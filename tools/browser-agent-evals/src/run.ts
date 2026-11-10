@@ -38,11 +38,12 @@ import { DATA_DIR, REPO_ROOT } from './catalog';
 import { modelTitles, parseModel, type ModelPick } from './driver';
 import { findLeaks, heldKeys, readModelKeys, Scrubber, type HeldKey } from './evidence';
 import { erroredTrial, type TrialResult } from './grade';
+import { freeGb, stopReason, type Guards } from './guards';
 import { LOCAL_APIKEY, openStack, type Stack } from './stack';
 import { agentSettingsFile, Store, type AgentLimits } from './store';
 import { loadTasks, type Task } from './task';
 import { writeRunReport } from './report';
-import { buildResults, writeResults, type Schedule } from './results';
+import { buildResults, spentUsd, writeResults, type Schedule } from './results';
 import { checkWorkspace, readTree, referenceWorkspace } from './references';
 import { causeOf } from './cause';
 import { roundOrder, runSchedule, runTrials, type Job } from './schedule';
@@ -53,6 +54,9 @@ const DEFAULT_MODEL = 'anthropic/claude-haiku-5-5';
 
 /** The env file the model keys come from: .env.local two folders above the checkout, beside the worktrees folder. */
 const DEFAULT_ENV_FILE = path.resolve(REPO_ROOT, '..', '..', '.env.local');
+
+/** No trial starts with less free disk than this, in GB. */
+const DEFAULT_MIN_FREE_GB = 3;
 
 const USAGE = `Usage: EVAL_ARGS="<command> [options]" ./builder browser-agent:eval
    or: node --import tsx src/run.ts <command> [options]   (from tools/browser-agent-evals)
@@ -119,6 +123,14 @@ Options:
                   then the rest. After the last round each trial that ended
                   error is retried once as a new trial (retryOf). The report
                   shows k of n per task. Without it, --reruns applies.
+  --max-spend <usd>
+                  run: before each trial starts, stop starting trials once
+                  the finished trials' estimated cost is at or over this.
+                  Running trials finish; results.json and report.md say
+                  the batch stopped at the spend cap. Default: no cap.
+  --min-free-disk <GB>
+                  run: the same, once the output folder's disk has less
+                  than this free (default: ${DEFAULT_MIN_FREE_GB}).
   --headed        run: show the browser.
   --no-preview    run: leave every Design preview closed. By default the
                   runner opens each app's preview as a user watching would:
@@ -149,11 +161,12 @@ interface Args {
 	noPreview: boolean;
 	envFile: string;
 	limits: AgentLimits;
+	guards: Guards;
 	help: boolean;
 }
 
 function parseArgs(argv: string[]): Args {
-	const args: Args = { command: null, tasks: DATA_DIR, only: [], table: false, model: DEFAULT_MODEL, url: null, apikeyEnv: null, out: null, reruns: 2, trials: null, headed: false, models: [], workspace: null, allowWipe: false, noPreview: false, envFile: DEFAULT_ENV_FILE, limits: {}, help: false };
+	const args: Args = { command: null, tasks: DATA_DIR, only: [], table: false, model: DEFAULT_MODEL, url: null, apikeyEnv: null, out: null, reruns: 2, trials: null, headed: false, models: [], workspace: null, allowWipe: false, noPreview: false, envFile: DEFAULT_ENV_FILE, limits: {}, guards: { maxSpendUsd: null, minFreeGb: DEFAULT_MIN_FREE_GB }, help: false };
 	for (let i = 0; i < argv.length; i++) {
 		const a = argv[i];
 		const value = () => {
@@ -175,6 +188,12 @@ function parseArgs(argv: string[]): Args {
 		} else if (a === '--trials') {
 			args.trials = Number(value());
 			if (!Number.isInteger(args.trials) || args.trials < 1) throw new Error('--trials needs a whole number of 1 or more');
+		} else if (a === '--max-spend') {
+			args.guards.maxSpendUsd = Number(value());
+			if (!Number.isFinite(args.guards.maxSpendUsd) || args.guards.maxSpendUsd <= 0) throw new Error('--max-spend needs a number of US dollars above 0');
+		} else if (a === '--min-free-disk') {
+			args.guards.minFreeGb = Number(value());
+			if (!Number.isFinite(args.guards.minFreeGb) || args.guards.minFreeGb < 0) throw new Error('--min-free-disk needs a number of GB, 0 or more');
 		} else if (a === '--headed') args.headed = true;
 		else if (a === '--workspace') args.workspace = path.resolve(value());
 		else if (a === '--allow-wipe') args.allowWipe = true;
@@ -261,6 +280,7 @@ async function run(args: Args, modelKeys: HeldKey[]): Promise<number> {
 	log(`model keys held: ${keys.map((k) => k.name).join(', ') || 'none'}`);
 	const limits = Object.keys(args.limits).length ? args.limits : null;
 	log(`agent limits: ${limits ? JSON.stringify(agentSettingsFile(limits).settings) : "the product's defaults"}`);
+	log(`no trial starts once the finished trials' estimated cost reaches ${args.guards.maxSpendUsd === null ? '(no cap)' : `$${args.guards.maxSpendUsd.toFixed(2)}`}, or under ${args.guards.minFreeGb} GB free on the output disk`);
 
 	let stack: Stack;
 	try {
@@ -282,8 +302,10 @@ async function run(args: Args, modelKeys: HeldKey[]): Promise<number> {
 	const startedAt = new Date().toISOString();
 	const byId = new Map(valid.map((t) => [t.id, t]));
 	let failedToRun = 0;
+	const finished: TrialResult[] = [];
+	let stopped: string | null = null;
 	try {
-		const label = (job: Job) => (job.retryOf ? ` (retry of trial ${job.retryOf})` : schedule.mode === 'reruns' && job.trial > 1 ? ' (rerun)' : '');
+		const label =(job: Job) => (job.retryOf ? ` (retry of trial ${job.retryOf})` : schedule.mode === 'reruns' && job.trial > 1 ? ' (rerun)' : '');
 		const one = async (job: Job): Promise<TrialResult> => {
 			const task = byId.get(job.id) as Task;
 			const n = job.trial;
@@ -304,6 +326,7 @@ async function run(args: Args, modelKeys: HeldKey[]): Promise<number> {
 			log(`  ${dir}`);
 			if (r.endReason === 'runner_error' || r.endReason === 'environment' || r.browser.leaks.length) failedToRun++;
 			if (result.cause) log(`  cause: ${result.cause.label}: ${result.cause.evidence.slice(0, 200)}`);
+			finished.push(result);
 			return result;
 		};
 		// a trial that threw past its own catch has no record to grade; nothing is written here, since a write may be what failed
@@ -315,18 +338,28 @@ async function run(args: Args, modelKeys: HeldKey[]): Promise<number> {
 			if (job.retryOf) result.retryOf = job.retryOf;
 			log(`${task.id} trial ${job.trial}${label(job)}: ${result.status.toUpperCase()}: ${result.why.slice(0, 200)}`);
 			failedToRun++;
+			finished.push(result);
 			return result;
+		};
+		// step: before each trial starts, the spend cap and the disk floor; once one is hit no trial starts again
+		const stop = (): string | null => {
+			if (stopped === null) {
+				stopped = stopReason(args.guards, spentUsd(finished), freeGb(out));
+				if (stopped) log(`stopping: no more trials start, at ${stopped}`);
+			}
+			return stopped;
 		};
 		const statusOf = (r: TrialResult) => r.status;
 		const runs =
 			schedule.mode === 'trials'
-				? await runTrials(roundOrder(valid), schedule.trials, one, statusOf, fail)
+				? await runTrials(roundOrder(valid), schedule.trials, one, statusOf, fail, { stop })
 				: await runSchedule(
 						valid.map((t) => t.id),
 						(id, n) => one({ id, trial: n }),
 						statusOf,
 						(id, n, err) => fail({ id, trial: n }, err),
-						schedule.reruns
+						schedule.reruns,
+						{ stop }
 					);
 		const results = buildResults(runs, byId, out, {
 			startedAt,
@@ -334,6 +367,7 @@ async function run(args: Args, modelKeys: HeldKey[]): Promise<number> {
 			model: `${model.provider}/${model.model}`,
 			taskSet: path.relative(REPO_ROOT, args.tasks),
 			schedule,
+			stopped,
 			engine: stack.engine,
 			checkout: checkout(),
 		});
