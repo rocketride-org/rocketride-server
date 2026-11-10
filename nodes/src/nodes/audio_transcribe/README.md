@@ -120,7 +120,11 @@ so setting one leaves the others alone. `vad_threshold` and
 
 ### Inference failures
 
-Local and model-server transcription responses retain per-item error information through output-field filtering. A failed inference raises an error instead of returning an empty transcript as a successful result. Successful silent recordings may still have empty text. This does not change native worker counts or inference concurrency.
+A transcription that fails inside Whisper, for example CUDA out of memory,
+fails the object with `Whisper inference failed: <cause>` instead of passing
+it on with an empty transcript. This holds in-process and with
+`--modelserver`: any deployed model server returns the error. A recording
+with no speech still completes with empty text.
 
 ### Segmentation and documents
 

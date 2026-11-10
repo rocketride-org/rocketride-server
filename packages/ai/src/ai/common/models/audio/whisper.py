@@ -1239,9 +1239,14 @@ class Whisper:
         return self.output_fields if 'error' in self.output_fields else [*self.output_fields, 'error']
 
     def _checked_result(self, result: Dict[str, Any]) -> Dict[str, Any]:
-        """A failed decode is not a successful silent/empty audio recording."""
-        if result.get('error') is not None:
-            raise RuntimeError(f'Whisper inference failed: {result["error"] or "no message"}')
+        """Raise when the loader reported a failed inference; otherwise return the result.
+
+        The result carries ``error`` only when the caller asked for it.
+        """
+        error = result.get('error')
+        # a success carries None; str(e) is '' for some exceptions, e.g. AssertionError()
+        if error is not None:
+            raise RuntimeError(f'Whisper inference failed: {error or "no message"}')
         if 'error' not in self.output_fields:
             return {key: value for key, value in result.items() if key != 'error'}
         return result

@@ -11,9 +11,12 @@ Run this module from project root (with ai on PYTHONPATH, e.g. from dist/server)
 Run all ai package tests: pytest packages/ai/tests -v (see packages/ai/tests/__init__.py).
 """
 
+from types import SimpleNamespace
+
 import pytest
 
 from ai.common.models.audio.whisper import WhisperLoader, Whisper
+import ai.common.models.audio.whisper as whispermod
 
 
 # -----------------------------------------------------------------------------
@@ -113,62 +116,6 @@ def test_get_supported_models():
     assert 'large-v3' in models
 
 
-@pytest.mark.parametrize('lazy', [False, True])
-def test_local_decode_failure_reaches_caller(lazy):
-    """Both immediate native errors and lazy-generator errors survive field filtering."""
-    from types import SimpleNamespace
-
-    class BrokenModel:
-        def transcribe(self, *args, **kwargs):
-            if not lazy:
-                raise RuntimeError('native decode failed')
-
-            def segments():
-                yield SimpleNamespace(start=0, end=1, text='partial', words=None)
-                raise RuntimeError('lazy decode failed')
-
-            return segments(), SimpleNamespace(language='en')
-
-    wrapper = Whisper.__new__(Whisper)
-    wrapper._model = {'model': BrokenModel(), 'language': 'en'}
-    wrapper._metadata = {'device': 'cpu', 'language': 'en'}
-    wrapper.output_fields = ['$text', '$segments']
-    with pytest.raises(RuntimeError, match='Whisper inference failed'):
-        wrapper._transcribe_local(b'\x00' * 3200, 5, True, None, 'en')
-
-
-@pytest.mark.parametrize('message', ['', 'remote decode failed'])
-def test_remote_failure_is_requested_and_raised(message):
-    from types import SimpleNamespace
-
-    captured = {}
-
-    def send(command, payload):
-        captured.update(payload)
-        return {'result': [{'error': message, '$segments': [], '$text': ''}]}
-
-    wrapper = Whisper.__new__(Whisper)
-    wrapper.output_fields = ['$segments', '$text']
-    wrapper._client = SimpleNamespace(send_command=send)
-    with pytest.raises(RuntimeError, match='Whisper inference failed'):
-        wrapper._transcribe_remote(b'\x00' * 3200, 5, True, None, 'en')
-    assert captured['output_fields'] == ['$segments', '$text', 'error']
-    assert wrapper.output_fields == ['$segments', '$text']
-
-
-def test_successful_silence_keeps_original_output_contract():
-    wrapper = Whisper.__new__(Whisper)
-    wrapper.output_fields = ['$text', '$segments']
-    assert wrapper._checked_result({'$text': '', '$segments': [], 'error': None}) == {'$text': '', '$segments': []}
-
-
-def test_batch_failure_does_not_hide_other_successful_items():
-    raw = [{'text': 'ok', 'segments': []}, {'text': '', 'segments': [], 'error': 'failed'}]
-    out = WhisperLoader.postprocess({}, raw, 2, ['$text', 'error'])
-    assert out[0]['$text'] == 'ok'
-    assert out[1]['error'] == 'failed'
-
-
 # -----------------------------------------------------------------------------
 # Whisper.transcribe contract (no model load)
 # -----------------------------------------------------------------------------
@@ -191,3 +138,125 @@ def test_transcribe_requires_bytes():
         w.transcribe([1, 2, 3])  # type: ignore
     with pytest.raises(TypeError, match='audio must be bytes'):
         w.transcribe('string')
+
+
+# -----------------------------------------------------------------------------
+# Failed inference
+# -----------------------------------------------------------------------------
+
+_PCM = b'\x00\x01' * 2000  # 2000 samples, above the loader's 1600-sample floor
+
+
+class _BrokenWhisperModel:
+    """Stands in for faster-whisper failing at decode time, before or while segments are read."""
+
+    def __init__(self, lazy):
+        self.lazy = lazy
+
+    def transcribe(self, audio, **kw):
+        if not self.lazy:
+            raise RuntimeError('native decode failed')
+
+        def segments():
+            yield SimpleNamespace(start=0.0, end=1.0, text='partial', words=None)
+            raise RuntimeError('lazy decode failed')
+
+        return segments(), SimpleNamespace(language='en')
+
+
+def _local_whisper(monkeypatch, model):
+    """A local-mode Whisper over ``model``; the real loader inference and postprocess run."""
+    monkeypatch.setattr(whispermod, 'get_model_server_address', lambda: None)
+    monkeypatch.setattr(WhisperLoader, 'load', staticmethod(lambda *a, **k: ({'model': model}, {}, -1)))
+    return Whisper('tiny', output_fields=['$text', '$segments'])
+
+
+class _Client:
+    """Model-server client stand-in: records the requested fields and answers with ``reply``."""
+
+    sent: list = []
+    reply: dict = {}
+
+    def __init__(self, addr):
+        self.metadata = {}
+
+    def load_model(self, *a, **kw):
+        pass
+
+    def send_command(self, command, args):
+        _Client.sent.append(args['output_fields'])
+        return {'result': [dict(_Client.reply)]}
+
+    def disconnect(self):
+        pass
+
+
+def _proxy_whisper(monkeypatch, reply):
+    """A model-server Whisper whose server answers every request with ``reply``."""
+    _Client.sent = []
+    _Client.reply = reply
+    monkeypatch.setattr(whispermod, 'get_model_server_address', lambda: 'localhost:5590')
+    monkeypatch.setattr(whispermod, 'ModelClient', _Client)
+    return Whisper('tiny', output_fields=['$text', '$segments'])
+
+
+@pytest.mark.parametrize('lazy', [False, True], ids=['immediate', 'lazy-generator'])
+def test_local_failure_raises(monkeypatch, lazy):
+    """A decode failure raises instead of returning an empty transcript, also when raised while segments are read."""
+    whisper = _local_whisper(monkeypatch, _BrokenWhisperModel(lazy))
+
+    with pytest.raises(RuntimeError, match='Whisper inference failed: (native|lazy) decode failed'):
+        whisper.transcribe(_PCM)
+
+
+@pytest.mark.parametrize(
+    'message, expected',
+    [('', 'no message'), ('remote decode failed', 'remote decode failed')],
+    ids=['empty-message', 'with-message'],
+)
+def test_proxy_failure_raises(monkeypatch, message, expected):
+    """The model server returns the plain ``error`` field when asked for it, as any deployed version does."""
+    whisper = _proxy_whisper(monkeypatch, {'$text': '', '$segments': [], 'error': message})
+
+    with pytest.raises(RuntimeError, match=f'Whisper inference failed: {expected}'):
+        whisper.transcribe(_PCM)
+    assert _Client.sent == [['$text', '$segments', 'error']]
+
+
+def test_proxy_success_keeps_the_callers_fields(monkeypatch):
+    """A silent recording still returns empty text, without the ``error`` field the wrapper added."""
+    whisper = _proxy_whisper(monkeypatch, {'$text': '', '$segments': [], 'error': None})
+
+    result = whisper.transcribe(_PCM)
+
+    assert _Client.sent == [['$text', '$segments', 'error']]
+    assert result == {'$text': '', '$segments': []}
+    assert whisper.output_fields == ['$text', '$segments']
+
+
+class _FailsSecondAudio:
+    """Transcribes the first audio of a batch and fails the second, as one bad item in a server batch would."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def transcribe(self, audio, **kw):
+        self.calls += 1
+        if self.calls == 2:
+            raise RuntimeError('failed')
+        return iter((SimpleNamespace(start=0.0, end=1.0, text=' ok', words=None),)), SimpleNamespace(language='en')
+
+
+def test_batch_failure_stays_with_the_failing_audio():
+    """Guard, not a regression test: pins the loader contract deployed model servers already honour.
+
+    One failed audio in a model-server batch carries its own ``error`` and the healthy
+    one carries None, which is what the wrapper's ``is not None`` check relies on. The
+    loader is unchanged by the wrapper fix, so this also passes without it.
+    """
+    preprocessed = {'audios': [[0.0] * 2000, [0.0] * 2000], 'batch_size': 2}
+
+    raw = WhisperLoader.inference({'model': _FailsSecondAudio()}, preprocessed)
+    out = WhisperLoader.postprocess({}, raw, 2, ['$text', '$segments', 'error'])
+
+    assert [(r['$text'], r['error']) for r in out] == [('ok', None), ('', 'failed')]
