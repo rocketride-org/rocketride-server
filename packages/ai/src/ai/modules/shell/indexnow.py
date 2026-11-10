@@ -35,7 +35,8 @@ A page's content is its manifest entry (every declared field, but not its
 production version, build path or binding time, which change with each
 publish of its app) plus the sha256 of its snapshot. A version's build
 output never changes, so a snapshot is read again only when its page moves
-to another version; a read that fails counts as a change.
+to another version; a read that fails counts as a change. A page without a
+production version has no snapshot to read, so it shows none.
 
 Changes are measured against the last real build this process read in
 full. The first one is a baseline (a restart submits nothing), a build that
@@ -126,8 +127,13 @@ async def _content(page: Page, last: Optional[_Content], reads: asyncio.Semaphor
         return _Content(entry)
     try:
         path = snapshot_path(page)
-        if last is not None and last.snapshot == path and last.digest is not None:
-            return _Content(entry, path, last.digest)
+    except ValueError:
+        # No production version to read it from: crawlers get the shell
+        # document, so the page shows no snapshot (not a failed read).
+        return _Content(entry)
+    if last is not None and last.snapshot == path and last.digest is not None:
+        return _Content(entry, path, last.digest)
+    try:
         async with reads:
             raw = await public_pages.read_artifact_file(path)
     except Exception as exc:
