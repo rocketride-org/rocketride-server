@@ -40,7 +40,10 @@ analysis task. Each listed model pins its model id and context limit. The defaul
 
 Select **Custom model** to enter an OpenAI model id exactly as OpenAI names it, its
 total context length in tokens (default 1,047,576), and optionally its output token
-limit (at least 1,024). Choose a model that accepts image input.
+limit (at least 1,024). Choose a model that accepts image input. The output limit is
+not sent to OpenAI (requests carry no output cap); the node lowers it to the context
+limit, requires at least 1,024, and reports it to nodes that ask for the model's
+output length.
 
 ### Documents and images
 

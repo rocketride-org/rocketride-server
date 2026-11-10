@@ -64,7 +64,9 @@ Select **Custom model** to enter another Token Factory model id, its context lim
 
 For the generic endpoint, provide the API key expected by the configured endpoint; the
 key is optional there. The Nebius preset requires a key, and its schema declares the
-field env-backed by `ROCKETRIDE_NEBIUS_KEY`.
+field env-backed by `ROCKETRIDE_NEBIUS_KEY`: enter the key itself, or the placeholder
+`${ROCKETRIDE_NEBIUS_KEY}` to take it from that account variable when the pipeline
+runs. Defining the variable does not fill an empty field.
 
 ## Notes
 

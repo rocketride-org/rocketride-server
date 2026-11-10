@@ -40,7 +40,10 @@ and token limit. The default is **Mistral Large 3 - Premier Vision (256k tokens)
 
 Select **Custom model** to enter a Mistral model id exactly as Mistral names it, its
 total context length in tokens (default 256,000), and optionally its output token limit
-(at least 1,024). Choose a model that accepts image input.
+(at least 1,024). Choose a model that accepts image input. The output limit is
+not sent to Mistral (requests carry no output cap); the node lowers it to the context
+limit, requires at least 1,024, and reports it to nodes that ask for the model's
+output length.
 
 ### Lane behavior
 

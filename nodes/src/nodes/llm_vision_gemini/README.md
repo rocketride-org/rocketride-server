@@ -47,7 +47,10 @@ default is **Gemini 2.5 Flash - Fast Vision (1M tokens)** (`models/gemini-2.5-fl
 
 Select **Custom model** to enter a Gemini model id such as `models/gemini-2.5-pro`, its
 total context length in tokens (default 1,048,576), and optionally its output token
-limit (at least 1,024). Choose a model that accepts image input.
+limit (at least 1,024). Choose a model that accepts image input. The output limit is
+not sent to Gemini (requests carry no output cap); the node lowers it to the context
+limit, requires at least 1,024, and reports it to nodes that ask for the model's
+output length.
 
 ### Documents and images
 
