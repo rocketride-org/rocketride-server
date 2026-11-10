@@ -33,8 +33,9 @@ the same loop runs from a terminal or CI.
   and underscores, starting with a letter; `local`, the prefix of an app
   scaffolded before registering, is reserved, so pick another id and rename
   the app's prefix. Registering is an org admin's step, and permanent. The
-  organization can then deploy only apps inside that namespace. A self-hosted server registers nothing: it publishes
-  under the fixed id `rocketride`. Until the prefix of your app's id
+  organization can then deploy only apps inside that namespace. A
+  self-hosted server registers nothing: it publishes under the fixed id
+  `rocketride`. Until the prefix of your app's id
   matches, the Deploy tab is read-only with a banner; the fix is to rename
   the id in `package.json`. Design and Package always work.
 - Catalog nodes only, if the app is headed for the store. Pipelines in a
