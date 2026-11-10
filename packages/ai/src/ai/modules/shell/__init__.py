@@ -62,6 +62,9 @@ Routes registered:
 from typing import Any, Dict
 
 from ai.web import WebServer
+
+from rocketlib import warning
+
 from . import indexnow, pages, public_pages
 from .pages import public_page, register_public_pages
 from .shell import app_url, shell_static, apps_static, apps_session, sitemap_xml, robots_txt, llms_txt, ungated_noindex
@@ -169,6 +172,11 @@ def initModule(server: WebServer, config: Dict[str, Any]):
     # out of search indexes: every response says noindex, nofollow. Added
     # last, so it wraps the auth middleware and covers its refusals too.
     # Only an engine ungated at init registers it: production runs no extra
-    # middleware.
+    # middleware. A production engine that lost RR_APP_URL deindexes itself,
+    # so say so at startup rather than weeks later in Search Console.
     if not app_url():
+        warning(
+            '[shell] RR_APP_URL is not set: every response carries X-Robots-Tag: noindex, nofollow and '
+            'robots.txt disallows all crawling; set RR_APP_URL on an engine that serves the public site'
+        )
         server.app.middleware('http')(ungated_noindex)

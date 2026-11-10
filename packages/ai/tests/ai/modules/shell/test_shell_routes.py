@@ -1357,7 +1357,14 @@ def test_only_an_ungated_engine_registers_the_noindex_middleware(
     web_server, shell_root, monkeypatch, request, fixture, registered
 ):
     # Decided at init, so a gated engine (production) runs no extra middleware.
+    import ai.modules.shell as shell_pkg
+
     request.getfixturevalue(fixture)
+    lines = []
+    monkeypatch.setattr(shell_pkg, 'warning', lines.append)
     _start_engine(web_server, monkeypatch)
     dispatches = [m.kwargs.get('dispatch') for m in web_server.app.user_middleware]
     assert (shell_mod.ungated_noindex in dispatches) is registered
+    # Registering it is a startup warning: a production pod without RR_APP_URL deindexes itself.
+    noindex_warnings = [line for line in lines if 'RR_APP_URL is not set' in line and 'noindex, nofollow' in line]
+    assert len(noindex_warnings) == (1 if registered else 0), lines
