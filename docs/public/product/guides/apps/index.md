@@ -313,7 +313,7 @@ publish fails with a message naming the field):
 - Each `data` entry is `plans`, `plans:<appId>` or `app:<appId>`, and a page
   names each source (`plans`, `app`) at most once.
 - `snapshot` and `site.notFound` must be a relative `.html` path that exists
-  in the built version, and a `snapshot` at most 2 MiB.
+  in the built version, at most 2 MiB.
 - `image` and `site.image` are an `https://` URL, a root path (`/apps/...`,
   never `//`) or a relative path inside the build output, with no empty or dot
   segment, at most 2048 characters.
