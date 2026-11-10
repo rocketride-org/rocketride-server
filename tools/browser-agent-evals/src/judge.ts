@@ -64,6 +64,8 @@ export interface JudgeArgs {
 	runs: number | null;
 	/** Keep the stack's store when the judge is done (--keep-store). */
 	keepStore?: boolean;
+	/** A folder of files the judge may upload into the app (--inputs). */
+	inputs?: string | null;
 }
 
 /** What one judge command does, checked. */
@@ -79,6 +81,8 @@ export interface JudgePlan {
 	out: string;
 	runs: number | null;
 	keepStore: boolean;
+	/** The folder the judge may upload from, absolute; null blocks uploads. */
+	inputs: string | null;
 }
 
 /**
@@ -117,7 +121,9 @@ export function judgePlan(args: JudgeArgs): JudgePlan {
 	const checklistFile = path.resolve(args.checklist as string);
 	const checklist = parseChecklist(fs.readFileSync(checklistFile, 'utf8'));
 	if (!checklist.length) throw new Error(`--checklist ${checklistFile} has no lines`);
-	return { workspace, app: app.split(path.sep).join('/'), appId, checklistFile, checklist, out: path.resolve(args.out), runs: args.runs, keepStore: args.keepStore ?? false };
+	const inputs = args.inputs ? path.resolve(args.inputs) : null;
+	if (inputs && !fs.statSync(inputs, { throwIfNoEntry: false })?.isDirectory()) throw new Error(`--inputs ${inputs} is not a folder`);
+	return { workspace, app: app.split(path.sep).join('/'), appId, checklistFile, checklist, out: path.resolve(args.out), runs: args.runs, keepStore: args.keepStore ?? false, inputs };
 }
 
 /**
@@ -253,7 +259,7 @@ export async function judgeCommand(plan: JudgePlan, modelKeys: HeldKey[]): Promi
 		const loadError = await lookAtApp(served.url, stack, path.join(plan.out, 'served'), scrubber);
 		if (loadError) throw new Error(`the shell shows "${loadError}" at ${served.url}, so the judge did not start (screenshot in ${path.join(plan.out, 'served')})`);
 
-		const result = await judgeApp({ url: served.url, checklist: plan.checklist, ...(plan.runs === null ? {} : { runs: plan.runs }), outDir: plan.out, localStorage: { [LS_TOKEN]: stack.apiKey }, apiKey });
+		const result = await judgeApp({ url: served.url, checklist: plan.checklist, ...(plan.runs === null ? {} : { runs: plan.runs }), outDir: plan.out, localStorage: { [LS_TOKEN]: stack.apiKey }, apiKey, ...(plan.inputs ? { uploadDir: plan.inputs } : {}) });
 		fs.writeFileSync(path.join(plan.out, 'result.json'), `${scrubber.scrub(JSON.stringify({ served, checklistFile: plan.checklistFile, ...result }, null, '\t'))}\n`);
 		fs.writeFileSync(path.join(plan.out, 'summary.md'), scrubber.scrub(judgeSummary(result, served)));
 		for (const r of result.runs) log(`run ${r.run}: ${r.verdict}, $${r.costUsd?.toFixed(3) ?? '?'}, ${Math.round(r.durationMs / 1000)}s${r.invalidReason ? `, invalid: ${r.invalidReason}` : ''}`);

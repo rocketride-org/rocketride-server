@@ -51,6 +51,7 @@ const root = ${JSON.stringify(root)};
 const count = fs.existsSync(root + '/count') ? Number(fs.readFileSync(root + '/count', 'utf8')) : 0;
 fs.writeFileSync(root + '/count', String(count + 1));
 fs.writeFileSync(root + '/env.json', JSON.stringify(Object.fromEntries(${JSON.stringify(SHELL_CREDENTIALS)}.map((name) => [name, process.env[name]]))));
+fs.writeFileSync(root + '/call.json', JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd(), files: fs.readdirSync(process.cwd()) }));
 const text = JSON.parse(fs.readFileSync(root + '/transcripts.json', 'utf8'))[count];
 if (text === 'HANG') setTimeout(() => {}, 60000);
 else process.stdout.write(text);
@@ -149,6 +150,40 @@ describe('judgeApp', () => {
 				else process.env[name] = value;
 			}
 		}
+	});
+
+	/** The fake claude's last call: its arguments, working folder and that folder's files. */
+	const lastCall = () => JSON.parse(fs.readFileSync(path.join(root, 'call.json'), 'utf8'));
+	const argAfter = (argv, flag) => argv[argv.indexOf(flag) + 1];
+	const UPLOAD = 'mcp__playwright__browser_file_upload';
+
+	it('never lets a session upload a file unless given a folder to upload from', async () => {
+		await judge([ALL_PASS]);
+		const { argv, cwd } = lastCall();
+		assert.ok(!argAfter(argv, '--allowedTools').split(',').includes(UPLOAD));
+		assert.ok(argAfter(argv, '--disallowedTools').split(',').includes(UPLOAD));
+		assert.equal(cwd, '/');
+	});
+
+	it('lets a session upload only from a copy of the given folder, outside any repo, with the checklist pointing at the copy', async () => {
+		// real-05's invoices: the app reads a PDF the judge drops in
+		const uploads = fs.mkdtempSync(path.join(os.tmpdir(), 'judge-uploads-'));
+		fs.writeFileSync(path.join(uploads, 'invoice-1.pdf'), 'pdf');
+		const checklist = [`Dropping in ${path.join(uploads, 'invoice-1.pdf')} adds a row.`, 'Second expectation'];
+		const offered = transcript({ lines: lines('pass', 'pass'), overall: 'pass' }, [{ ...INIT, tools: [...INIT.tools, UPLOAD] }, OPENED]);
+		const { result } = await judge([offered], { checklist, uploadDir: uploads });
+		const { argv, cwd, files } = lastCall();
+		assert.ok(argAfter(argv, '--allowedTools').split(',').includes(UPLOAD));
+		assert.ok(!argAfter(argv, '--disallowedTools').split(',').includes(UPLOAD));
+		// the session runs in the copy, and the copy is gone after the run
+		assert.notEqual(cwd, fs.realpathSync(uploads));
+		assert.deepEqual(files, ['invoice-1.pdf']);
+		assert.ok(argAfter(argv, '-p').includes(`Dropping in ${path.join(cwd, 'invoice-1.pdf')} adds a row.`), 'the prompt names the copy');
+		assert.ok(!argAfter(argv, '-p').includes(uploads), 'the prompt never names the original folder');
+		assert.ok(!fs.existsSync(cwd));
+		// a run offered the upload tool is valid, and the result keeps the person's own line
+		assert.equal(result.verdict, 'pass');
+		assert.equal(result.lines[0].text, checklist[0]);
 	});
 
 	it('refuses to start a session without a key', async () => {

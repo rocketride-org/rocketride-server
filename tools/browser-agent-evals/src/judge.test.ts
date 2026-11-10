@@ -64,6 +64,16 @@ test('judgePlan refuses what it cannot judge', () => {
 	assert.throws(plan({ app: '.' }), /not a folder inside the workspace/);
 	assert.throws(judgePlan.bind(null, { ...fixture({ appManifest: {} }, 'One line\n'), app: 'apps/expenses-ui', out: 'out', runs: null }), /no appManifest.id/);
 	assert.throws(judgePlan.bind(null, { ...fixture({ appManifest: { id: 'a.b' } }, '\n  \n'), app: 'apps/expenses-ui', out: 'out', runs: null }), /has no lines/);
+	assert.throws(plan({ inputs: path.join(os.tmpdir(), 'no-such-inputs-folder') }), /--inputs .* is not a folder/);
+});
+
+test('judgePlan takes a folder of files the judge may upload, and none by default', () => {
+	// real-05, real-07 and real-08 need invoices, statements and CVs to upload
+	const f = fixture({ appManifest: { id: 'rocketride.invoices' } }, 'Dropping in an invoice adds a row.\n');
+	const inputs = fs.mkdtempSync(path.join(os.tmpdir(), 'judge-inputs-'));
+	const base = { workspace: f.workspace, app: 'apps/expenses-ui', checklist: f.checklist, out: 'out', runs: null };
+	assert.equal(judgePlan(base).inputs, null);
+	assert.equal(judgePlan({ ...base, inputs }).inputs, path.resolve(inputs));
 });
 
 test("the judge's sessions run on EVAL_ANTHROPIC_KEY alone, never on an Anthropic credential from the env file's other lines or the shell", () => {

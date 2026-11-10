@@ -176,6 +176,7 @@ Options:
                   judge: the checklist, one expectation per line.
   --runs <n>      judge: judge sessions, one after another (default 3).
   --keep-store    judge: keep the stack's store (about 250 MB) when done; it is cleared by default.
+  --inputs <dir>  judge: a folder of files the judge may upload into the app; checklist lines name them by path.
   --models <p/m,...>
                   smoke: the models to ask (default: ${SMOKE_MODELS.join(', ')}).
   --help          This text.`;
@@ -205,6 +206,8 @@ interface Args {
 	runs: number | null;
 	/** judge: keep the stack's store when done. */
 	keepStore: boolean;
+	/** judge: a folder of files the judge may upload. */
+	inputs: string | null;
 	allowWipe: boolean;
 	noPreview: boolean;
 	envFile: string;
@@ -214,7 +217,7 @@ interface Args {
 }
 
 function parseArgs(argv: string[]): Args {
-	const args: Args = { command: null, tasks: DATA_DIR, only: [], table: false, model: DEFAULT_MODEL, url: null, apikeyEnv: null, out: null, reruns: 2, trials: null, slots: 1, headed: false, models: [], workspace: null, app: null, checklist: null, runs: null, keepStore: false, allowWipe: false, noPreview: false, envFile: DEFAULT_ENV_FILE, limits: {}, guards: { maxSpendUsd: null, minFreeGb: DEFAULT_MIN_FREE_GB }, help: false };
+	const args: Args = { command: null, tasks: DATA_DIR, only: [], table: false, model: DEFAULT_MODEL, url: null, apikeyEnv: null, out: null, reruns: 2, trials: null, slots: 1, headed: false, models: [], workspace: null, app: null, checklist: null, runs: null, keepStore: false, inputs: null, allowWipe: false, noPreview: false, envFile: DEFAULT_ENV_FILE, limits: {}, guards: { maxSpendUsd: null, minFreeGb: DEFAULT_MIN_FREE_GB }, help: false };
 	for (let i = 0; i < argv.length; i++) {
 		const a = argv[i];
 		const value = () => {
@@ -254,6 +257,7 @@ function parseArgs(argv: string[]): Args {
 			if (!Number.isInteger(args.runs) || args.runs < 1) throw new Error('--runs needs a whole number of 1 or more');
 		}
 		else if (a === '--keep-store') args.keepStore = true;
+		else if (a === '--inputs') args.inputs = path.resolve(value());
 		else if (a === '--allow-wipe') args.allowWipe = true;
 		else if (a === '--no-preview') args.noPreview = true;
 		else if (a === '--env-file') args.envFile = path.resolve(value());
@@ -657,7 +661,7 @@ async function check(args: Args, modelKeys: HeldKey[]): Promise<number> {
 async function judge(args: Args, modelKeys: HeldKey[]): Promise<number> {
 	try {
 		const out = args.out ?? path.join(REPO_ROOT, '.verify', 'browser-agent', `judge-${new Date().toISOString().replace(/[:.]/g, '-')}`);
-		return await judgeCommand(judgePlan({ workspace: args.workspace, app: args.app, checklist: args.checklist, out, runs: args.runs, keepStore: args.keepStore }), modelKeys);
+		return await judgeCommand(judgePlan({ workspace: args.workspace, app: args.app, checklist: args.checklist, out, runs: args.runs, keepStore: args.keepStore, inputs: args.inputs }), modelKeys);
 	} catch (err) {
 		console.error(err instanceof Error ? err.message : String(err));
 		return 2;

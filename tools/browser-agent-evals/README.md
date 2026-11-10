@@ -115,7 +115,7 @@ node --import tsx src/run.ts judge \
   --app apps/expenses-ui \
   --checklist checklist.txt \
   --out .verify/browser-agent/<batch>/judge/<task>/round-1 \
-  [--runs 3] [--keep-store]
+  [--runs 3] [--keep-store] [--inputs <folder>]
 ```
 
 It needs what `run` needs (the engine, the env file, free ports), plus `claude` on `PATH` and the judge's browser, installed with the command in `judge/README.md`. Without that browser every line comes back `not_tested`. Its steps:
@@ -124,7 +124,7 @@ It needs what `run` needs (the engine, the env file, free ports), plus `claude` 
 2. Write the workspace into the store, as a trial leaves it.
 3. Deploy the app the way the App Builder's Deploy button does (`deploy.addApp`), wait for the engine's build, and publish it to the signed-in user (`@me`).
 4. Open `<shell>/?appid=<id>` in the runner's browser with the sign-in token seeded, and keep a screenshot in `<out>/served/`. If the shell says it could not load the app, it stops here and spends nothing on the judge.
-5. Run `judgeApp` on that URL, with the same token in the judge's browser (without it the page can hang at "Initialising..."). The sessions run on `EVAL_ANTHROPIC_KEY` alone.
+5. Run `judgeApp` on that URL, with the same token in the judge's browser (without it the page can hang at "Initialising..."). The sessions run on `EVAL_ANTHROPIC_KEY` alone. With `--inputs`, each session may upload files from a copy of that folder made outside the repo, and checklist lines that name a file in the folder by absolute path are pointed at the copy. Without it, uploading is blocked.
 6. Write `result.json` (the judge's result, plus where the app was served from) and `summary.md` (each line's verdict, its runs, and what the judge saw in the run that decided it), stop the stack, clear its store (unless `--keep-store`), and scan `<out>` for a held key.
 
 The app is not judged in its Design preview, because the preview's frame is a `blob:` URL that no other browser can open. The published app is what a user gets, built by the engine with the platform's config rather than the app's own `rsbuild.config.mts`.
