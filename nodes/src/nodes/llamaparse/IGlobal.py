@@ -71,7 +71,7 @@ class IGlobal(IGlobalBase):
             # validator reports bad JSON at save time; here it stops the run so no
             # tokens are spent on an unintended configuration.
             try:
-                advanced_config = json.loads(config.advanced_config or '{}')
+                advanced_config = json.loads((config.advanced_config or '').strip() or '{}')
             except json.JSONDecodeError as e:
                 raise RuntimeError(f'LlamaParse Global: advanced configuration is not valid JSON: {e}') from e
             if not isinstance(advanced_config, dict):
