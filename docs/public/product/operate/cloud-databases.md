@@ -81,8 +81,9 @@ cut, and a run that needs it fails at start. Its data is kept for 30 days.
   replica before it is acknowledged.
 - Backups are configured for point-in-time recovery of the whole cluster, never
   of one database. There is no restore of one organization's, team's or
-  member's database, and no self-service restore. The 30-day retention above is
-  the only undo for a single database.
+  member's database, and no self-service restore. Within the 30-day retention
+  above, the only way back is a removed member rejoining, which returns their
+  personal database; a deleted team or organization cannot be brought back.
 - After a member, team or organization is removed, its data remains in
   separate places, each with its own clock:
   1. The database itself: deleted by the daily cleanup once 30 days have
