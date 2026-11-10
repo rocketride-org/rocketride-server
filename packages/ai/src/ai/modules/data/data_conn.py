@@ -1065,7 +1065,16 @@ class DataConn(DAPConn):
         # node/tool name degrades to a readable label instead of shifting
         # every field after it.
         component = component.replace('*', '')
-        monitorOther('DBG', f'{op}*{pipe.pipeId:x}*0*{component}*{pipe.bindingId:x}*{pipe.rootBindingId:x}*{payload}')
+        # Observability is best-effort: the BEGIN call sits before the tool's
+        # cleanup try and END inside its finally, so a failure reading the pipe's
+        # ids or writing the monitor line must never abort the call, skip
+        # returning a borrowed pipe, or replace the tool's result or error.
+        try:
+            monitorOther(
+                'DBG', f'{op}*{pipe.pipeId:x}*0*{component}*{pipe.bindingId:x}*{pipe.rootBindingId:x}*{payload}'
+            )
+        except Exception:
+            pass
 
     async def _tool(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
         """
