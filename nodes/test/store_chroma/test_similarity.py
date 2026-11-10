@@ -81,7 +81,7 @@ def test_a_closer_match_scores_higher():
     docs = store._convertToDocs(_results([0.1, 0.5, 1.0]))
 
     scores = [doc.score for doc in docs]
-    assert scores == sorted(scores, reverse=True)
+    assert scores[0] > scores[1] > scores[2]
 
 
 def test_a_collection_created_in_another_space_keeps_its_rescaling():
