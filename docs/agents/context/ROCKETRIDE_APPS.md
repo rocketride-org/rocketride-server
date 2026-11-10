@@ -970,6 +970,28 @@ updateAppState((prev) => ({ ...prev, lastQuery: 'foo' }));
 The Documents system can bind to it for automatic persistence of open
 documents and layout — see [The Documents System](#the-documents-system).
 
+### Data in the RocketRide cloud databases
+
+Tables your app's pipelines write with `rocketride_sql`, `rocketride_vector`
+or `rocketride_graph` belong to the organization, team or member the run
+belongs to, never to the app:
+
+- Each organization has one database shared by its members, plus one per
+  team and one personal database per member. A store app's pipelines run in
+  the organization of the person using the app, so its data lands in that
+  organization's databases, not the publisher's.
+- There is no database or schema per app: every app using the same database
+  can read, change and drop the other apps' tables in its `public` schema, so
+  prefix your table names.
+- Uninstalling the app, or ending its subscription, leaves its tables in
+  place. Only a member leaving, a team being deleted or an organization being
+  deleted retains a database; after 30 days it is dumped and deleted.
+- Each database runs up to 6 transactions at once on RocketRide Cloud; there
+  are no storage, table or query-rate quotas. Backups cover the whole cluster
+  only, and there is no export: read data out through the nodes.
+
+Full rules: https://docs.rocketride.org/operate/cloud-databases
+
 ### The two-phase startup: `seeded` vs `loaded`
 
 1. **Seeded** (`seeded = true`, `loaded = false`): the workspace holds
@@ -1093,12 +1115,13 @@ value alone; see below.)
 To run two instances of one pipeline for the same user at once (a second
 tab, say), give each `use()` its own `token`: the server then keys the task
 on that token instead of the hash. Use an unguessable value that keeps the
-`tk_` prefix (`tk_` plus a UUID, for example): the value is the run's private
+`tk_` prefix (`tk_` plus a UUID, for example; a `tk_` token with fewer than 32
+letters, digits, `-` or `_` after the prefix is refused): the value is the run's private
 token (full control for anyone who presents it), tokens share one namespace
 across every user of the server, and a token without the prefix cannot serve
-as a private token on webhook or dropper endpoints. With `useExisting`, a
-token that matches a running task attaches to it, whoever started it: one
-more reason the value must be unguessable. Keep the tokens you chose: both
+as a private token on webhook or dropper endpoints. A token that matches
+another owner's task is refused; with `useExisting`, one that matches your
+own running task attaches to it. Keep the tokens you chose: both
 instances get the same `pk_` public authorization key, and a webhook call or
 dropper upload that uses it always reaches the instance that started first
 (to send data to one specific instance, use its `tk_` token); `getTaskToken()`
@@ -1760,6 +1783,19 @@ If your org has no developer id yet, the Deploy tab shows a registration
 banner. Claim a slug (letters and underscores, e.g. `acme_labs`); every app
 you deploy must be named `<developerId>.<name>` — the namespace guarantee:
 nobody outside your org can ever deploy into it.
+
+Registering is an org admin's step, happens once, and is permanent: the
+slug is the org's publisher identity, a different one later is refused, and
+`local` (the scaffold's fallback while the org has no id) is reserved. It
+exists on RocketRide Cloud only; a self-hosted server publishes under the
+fixed `rocketride` namespace. Without the App Builder, the npm CLI's
+`rocketride app developer status` shows whether it is done and `rocketride
+app developer register <id>` claims it (both use the deployment target,
+`ROCKETRIDE_DEPLOY_*`; the Python CLI does not have the `app developer`
+verbs yet, so use the SDK calls); in code, `client.developerStatus()` and
+`client.registerDeveloper(id)` (Python: `developer_status()` and
+`register_developer(id)`). Deploying from an org with no developer id fails
+with "requires a registered developer id" and names the same ways.
 
 ### Deploy — the "+ Deploy" card
 
