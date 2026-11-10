@@ -63,6 +63,8 @@ from rocketlib import warning
 
 from ai.account.app_rows import holds_required_permissions, manifest_of, precedence_sorted, serving_block_of
 
+from .contract import Page
+
 # How long a response bound to a source may be served from cache.
 TTL_SECONDS = 300.0
 
@@ -86,7 +88,11 @@ def on_invalidate(callback: Callable[[str], None]) -> None:
 
 def invalidate(name: str) -> None:
     """Announce that a source's data changed; ``app`` also announces ``plans``."""
-    for changed in ('app', 'plans') if name == 'app' else (name,):
+    names = [name]
+    if name == 'app':
+        # A named app's plans show only while the app is visible.
+        names = ['app', 'plans']
+    for changed in names:
         for callback in list(_listeners):
             try:
                 callback(changed)
@@ -198,7 +204,7 @@ async def plans(app_id: str, acct: Any = None) -> List[Dict[str, Any]]:
     return [p for p in (_plan(r) for r in raw or [] if isinstance(r, Mapping)) if p is not None]
 
 
-async def bind(page: Any, url: str, acct: Any = None) -> Dict[str, Any]:
+async def bind(page: Page, url: str, acct: Any = None) -> Dict[str, Any]:
     """The template and JSON-LD context of one page: ``{source name: value}``.
 
     ``url`` is the page's canonical URL, exposed as ``app.url`` when it is
@@ -221,11 +227,16 @@ async def bind(page: Any, url: str, acct: Any = None) -> Dict[str, Any]:
     for entry in page.data:
         name, _, app_id = entry.partition(':')
         if name == 'plans':
-            shown = not app_id or await visible(app_id) is not None
-            context['plans'] = await plans(app_id or page.app_id, acct) if shown else []
+            context['plans'] = []
+            if not app_id:
+                context['plans'] = await plans(page.app_id, acct)
+            elif await visible(app_id) is not None:
+                context['plans'] = await plans(app_id, acct)
         elif name == 'app':
+            context['app'] = None
             item = await visible(app_id)
-            context['app'] = None if item is None else {**item, 'url': _https(url)}
+            if item is not None:
+                context['app'] = {**item, 'url': _https(url)}
     return context
 
 
