@@ -29,6 +29,8 @@ from typing import Any, Dict
 from ai.common.chat import ChatBase
 from langchain_openai import ChatOpenAI
 
+from .kimi_endpoint import is_moonshot_api
+
 
 class Chat(ChatBase):
     """
@@ -60,7 +62,7 @@ class Chat(ChatBase):
         apikey = config.get('apikey') or 'sk-local-dummy-key'
 
         # API key validation logic, only if it's a cloud model, locals do not have the apikey property
-        if 'api.moonshot' in serverbase and not apikey.startswith('sk-'):
+        if is_moonshot_api(serverbase) and not apikey.startswith('sk-'):
             raise ValueError('Invalid Kimi (Moonshot) API key format, please check your API key.')
 
         # Kimi K2 reasoning models reject any temperature other than 1

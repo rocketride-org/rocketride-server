@@ -36,6 +36,8 @@ import re
 from rocketlib import IValidatorBase, warning
 from ai.common.config import warn_if_credential_unresolved
 
+from .kimi_endpoint import is_moonshot_api
+
 VALIDATION_PROMPT = 'Hi'
 
 
@@ -77,8 +79,8 @@ class IValidator(IValidatorBase):
             model = config.get('customModel') or config.model
             serverbase = config['serverbase']
 
-            # Only validate cloud Moonshot endpoints; skip self-hosted/offline ones.
-            if 'api.moonshot' not in serverbase:
+            # Only validate cloud Moonshot endpoints, judged by host; skip self-hosted/offline ones.
+            if not is_moonshot_api(serverbase):
                 return
 
             # Minimal probe; UI handles missing key prompts

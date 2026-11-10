@@ -36,6 +36,8 @@ import re
 from rocketlib import IValidatorBase, warning
 from ai.common.config import warn_if_credential_unresolved
 
+from .glm_endpoint import is_glm_cloud_api
+
 VALIDATION_PROMPT = 'Hi'
 
 
@@ -78,8 +80,8 @@ class IValidator(IValidatorBase):
             serverbase = config['serverbase']
 
             # Only validate cloud Z.ai / Zhipu endpoints (api.z.ai international,
-            # open.bigmodel.cn mainland); skip self-hosted/offline ones.
-            if 'api.z.ai' not in serverbase and 'bigmodel.cn' not in serverbase:
+            # open.bigmodel.cn mainland), judged by host; skip self-hosted/offline ones.
+            if not is_glm_cloud_api(serverbase):
                 return
 
             # UI handles missing key prompts; skip the probe when the key is absent
