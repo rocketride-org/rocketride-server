@@ -61,7 +61,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional
 
 from rocketlib import warning
 
-from ai.account.app_rows import holds_required_permissions, manifest_of, precedence_sorted, serving_block_of
+from ai.account.app_rows import manifest_of, public_winners
 
 from .contract import Page
 
@@ -115,32 +115,20 @@ async def app(app_id: str, acct: Any = None) -> Optional[Dict[str, str]]:
     """``{name, description}`` of an app anonymous store callers may see, else None.
 
     The store walk's rules (``app_deploy.resolve_app_pins``) for one app on
-    the public rung: the winning serving binding, no ``requiredPermissions``,
-    and ``public: false`` in neither the binding snapshot nor the artifact's
-    own manifest (the DB edition's snapshot columns drop ``public``, so the
+    the public rung: the winning serving binding (``app_rows.public_winners``,
+    as the page map reads it), no ``requiredPermissions``, and
+    ``public: false`` in neither the binding snapshot nor the artifact's own
+    manifest (the DB edition's snapshot columns drop ``public``, so the
     manifest is re-read, as ``public_pages.load_published`` does).
 
     Raises:
         Exception: the bindings or the winning artifact could not be read (the
             caller serves the page without its data).
     """
-    acct = _account(acct)
-    org = '' if 'saas' in getattr(acct, 'capabilities', ()) else 'local'
-    ladder = getattr(acct, 'review_ladder', True)
-    rows = await acct.publish_list(org, 'app', [{'type': 'public', 'id': ''}])
-    # The store walk's order: rows that do not serve to an anonymous caller
-    # never compete, and the precedence winner among the rest lands last.
-    serving = [
-        r
-        for r in precedence_sorted(rows)
-        if r.get('appId') == app_id
-        and (r.get('audience') or {}).get('type') == 'public'
-        and not serving_block_of(r, ladder)
-        and holds_required_permissions(r, set())
-    ]
-    if not serving:
+    acct, org, winners = await public_winners(acct)
+    row = winners.get(app_id)
+    if row is None:
         return None
-    row = serving[-1]
     snapshot = row.get('snapshot') or {}
     version = row.get('version')
     if snapshot.get('public', True) is False:

@@ -46,13 +46,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Tuple
 
 from rocketlib import debug, warning
 
-from ai.account.app_rows import (
-    dist_dir_of,
-    holds_required_permissions,
-    manifest_of,
-    precedence_sorted,
-    serving_block_of,
-)
+from ai.account.app_rows import dist_dir_of, manifest_of, public_winners
 
 from . import data_sources
 from .contract import (
@@ -229,7 +223,9 @@ async def load_published(
     enabled, deployment approved on a review-ladder server, build ok),
     anonymous permission reach (no requiredPermissions), platform namespace
     only. One winner per app id, chosen among its serving rows (lowest
-    publisher org, as the store walk resolves ties).
+    publisher org, as the store walk resolves ties) by
+    ``app_rows.public_winners``, which the ``plans:``/``app:`` data sources
+    read too.
 
     ``public: false`` apps never contribute. One app whose row or artifact
     cannot be read is skipped (logged) so it cannot freeze the map, and its
@@ -248,23 +244,10 @@ async def load_published(
         RuntimeError: with ``strict``, a root claimant that cannot be read
             (the message names it).
     """
-    if acct is None:
-        from ai.account import account as acct
-
-    org = 'local'
-    if 'saas' in getattr(acct, 'capabilities', ()):
-        org = ''
-    review_ladder = getattr(acct, 'review_ladder', True)
-    winners: Dict[str, Dict[str, Any]] = {}
-    for row in precedence_sorted(await acct.publish_list(org, 'app', [{'type': 'public', 'id': ''}])):
-        # The store walk's order: a row that does not serve never competes,
-        # and the precedence winner among the rest lands last.
-        if serving_block_of(row, review_ladder) or not holds_required_permissions(row, set()):
-            continue
-        winners[str(row.get('appId') or '')] = row
+    acct, org, winners = await public_winners(acct)
     out: List[Published] = []
     for app_id, row in sorted(winners.items()):
-        if app_id == exclude or (row.get('audience') or {}).get('type') != 'public' or not is_privileged(app_id):
+        if app_id == exclude or not is_privileged(app_id):
             continue
         if (row.get('snapshot') or {}).get('public', True) is False:
             continue
