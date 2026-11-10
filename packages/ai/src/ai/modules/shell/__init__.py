@@ -98,7 +98,7 @@ def initModule(server: WebServer, config: Dict[str, Any]):
 
     # The publish gate and the aggregate builder reject page paths that
     # collide with this server's live routes.
-    pages._web_server = server
+    pages.set_web_server(server)
     public_pages.set_live_conflict(pages.live_route_conflict)
 
     # ── Shell assets ──────────────────────────────────────────────────

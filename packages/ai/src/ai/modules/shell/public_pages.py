@@ -54,7 +54,7 @@ from ai.account.app_rows import (
     serving_block_of,
 )
 
-from .contract import Page, _check_redirects, _with_slash_twin, check_manifest, is_privileged, may_claim_root
+from .contract import Page, check_redirects, with_slash_twin, check_manifest, is_privileged, may_claim_root
 
 
 @dataclass(frozen=True)
@@ -144,7 +144,7 @@ def build_aggregate(
         site = dict(sites.get(root.app_id, {}))
     redirects = {}
     for source, target in site.pop('redirects', {}).items():
-        if any(c in exact for c in _with_slash_twin(source)):
+        if any(c in exact for c in with_slash_twin(source)):
             debug(f'[public_pages] redirect {source} -> {target} collides with a page (redirect skipped)')
             continue
         redirects[source] = target
@@ -183,7 +183,7 @@ def legacy_aggregate(live_conflict: Optional[Callable[[str], Optional[str]]] = N
             head_title=legacy_head_title(raw['path'], raw['title']),
         )
     site = dict(manifest['site'])
-    redirects, errors = _check_redirects(site.pop('redirects'), list(exact.values()), live_conflict)
+    redirects, errors = check_redirects(site.pop('redirects'), list(exact.values()), live_conflict)
     for err in errors:
         debug(f'[public_pages] legacy {err} (redirect skipped)')
     return Aggregate(exact=exact, site=site, legacy=True, redirects=redirects)
@@ -418,7 +418,7 @@ async def gate_errors(app_id: str, manifest: Mapping[str, Any], dist_dir: str, a
                 '(first claim wins; the claim is released when that app unpublishes); choose another path'
             )
     for source in (site or {}).get('redirects', {}):
-        for candidate in _with_slash_twin(source):
+        for candidate in with_slash_twin(source):
             owner = exact.get(candidate)
             if owner is not None:
                 which = '' if candidate == source else f'its slash twin {candidate!r} '

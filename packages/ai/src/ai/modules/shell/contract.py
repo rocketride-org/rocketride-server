@@ -331,7 +331,7 @@ def _check_site(raw: Any) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     return out, None
 
 
-def _with_slash_twin(path: str) -> Tuple[str, ...]:
+def with_slash_twin(path: str) -> Tuple[str, ...]:
     """``path`` and its trailing-slash twin (``/x`` and ``/x/``); ``/`` has none.
 
     A redirect source decides both forms' fate: the twin of a page already
@@ -359,7 +359,7 @@ def _redirect_source_error(
     if err:
         return err
     paths = {p.path for p in pages}
-    for candidate in _with_slash_twin(source):
+    for candidate in with_slash_twin(source):
         which = '' if candidate == source else f'its slash twin {candidate!r} '
         if candidate in paths:
             return f'{which}is a publicPages path (a URL is a page or a redirect, not both)'
@@ -369,7 +369,7 @@ def _redirect_source_error(
     return None
 
 
-def _check_redirects(
+def check_redirects(
     raw: Any, pages: List[Page], live_conflict: Optional[Callable[[str], Optional[str]]]
 ) -> Tuple[Dict[str, str], List[str]]:
     """``site.redirects`` as ``({from: to}, errors)``; a bad entry drops only itself.
@@ -467,7 +467,7 @@ def check_manifest(
             if err:
                 errors.append(err)
             if isinstance(raw_site, dict) and 'redirects' in raw_site:
-                redirects, redirect_errors = _check_redirects(raw_site['redirects'], pages, live_conflict)
+                redirects, redirect_errors = check_redirects(raw_site['redirects'], pages, live_conflict)
                 errors.extend(redirect_errors)
                 if site is not None:
                     site['redirects'] = redirects
