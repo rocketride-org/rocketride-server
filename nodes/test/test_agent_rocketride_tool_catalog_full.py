@@ -29,8 +29,9 @@ stub server (default: this test's).
     RR_LIVE_TOOL_CATALOG=1 RR_LIVE_LLM=llm_openai ROCKETRIDE_URI=http://localhost:5565 \\
         ./builder nodes:test-full --pytest-pattern="tool_catalog_full" --pytest="-s"
 
-The pipelines it starts are terminated when it ends. The report is printed and
-written to ``nodes/test/.reports/tool_catalog_live.json``.
+The pipelines it starts are terminated when it ends. The report is printed, and
+every task's record is written to RR_LIVE_REPORT (default: tool_catalog_live.json
+in the temp directory).
 """
 
 import datetime
@@ -46,7 +47,7 @@ import pytest
 
 _HERE = Path(__file__).resolve().parent
 _STUB = _HERE / 'tool_mcp_client' / 'stub_mcp_server.py'
-_REPORT = _HERE / '.reports' / 'tool_catalog_live.json'
+_REPORT = Path(os.environ.get('RR_LIVE_REPORT') or Path(tempfile.gettempdir()) / 'tool_catalog_live.json')
 
 _spec = importlib.util.spec_from_file_location('_rr_live_eval', _HERE / 'agent_rocketride' / 'live_eval.py')
 live_eval = importlib.util.module_from_spec(_spec)
@@ -208,9 +209,9 @@ async def test_tool_catalog_live_evaluation(client):
     with tempfile.TemporaryDirectory() as tmp:
         for n_tools, budget in _cells():
             cells.append(await _run_cell(client, n_tools, budget, Path(tmp)))
-    _REPORT.parent.mkdir(parents=True, exist_ok=True)
     _REPORT.write_text(live_eval.dumps(cells), encoding='utf-8')
     print('\n' + live_eval.format_report(cells))
+    print(f'records: {_REPORT}')
 
     by_cell = {(c['tools'], c['budget']): c for c in cells}
     for (n_tools, budget), cell in by_cell.items():
