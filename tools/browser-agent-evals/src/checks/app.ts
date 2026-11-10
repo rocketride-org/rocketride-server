@@ -50,6 +50,7 @@ import path from 'node:path';
 
 import { REPO_ROOT } from '../catalog';
 import type { AppLoad } from '../driver';
+import { withoutKeys } from '../evidence';
 import type { TurnCheck } from '../types';
 import type { AppRun } from './appRun';
 
@@ -150,7 +151,7 @@ export function shellContract(): string {
 
 function run(cmd: string, args: string[], cwd: string): Promise<{ code: number; output: string }> {
 	return new Promise((resolve) => {
-		execFile(cmd, args, { cwd, timeout: STEP_LIMIT_MS, maxBuffer: 8 * 1024 * 1024, env: { ...process.env, NODE_ENV: 'production', CI: 'true' } }, (err, stdout, stderr) => {
+		execFile(cmd, args, { cwd, timeout: STEP_LIMIT_MS, maxBuffer: 8 * 1024 * 1024, env: { ...withoutKeys(process.env), NODE_ENV: 'production', CI: 'true' } }, (err, stdout, stderr) => {
 			const code = err ? (typeof (err as { code?: unknown }).code === 'number' ? (err as { code: number }).code : 1) : 0;
 			resolve({ code, output: `${stdout}${stderr}`.trim() });
 		});

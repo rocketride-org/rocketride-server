@@ -36,7 +36,8 @@
  * - the shell dev server on 3000, which proxies the engine's paths to 5565
  *   (packages/shell/rsbuild.config.mts) and the dev prefix to 3010.
  *
- * The model keys go into the engine's environment and nowhere else. A port
+ * The model keys, read from the env file, go into the engine's environment
+ * and nowhere else; no process gets a model key from the shell. A port
  * already in use stops the start: the stack never stops or shares what it
  * did not start. stop() ends the three process groups it started.
  */
@@ -47,7 +48,7 @@ import net from 'node:net';
 import path from 'node:path';
 
 import { REPO_ROOT } from './catalog';
-import { MODEL_KEYS, scrubbedLines, withoutKeys, type Scrubber } from './evidence';
+import { engineEnv, scrubbedLines, withoutKeys, type HeldKey, type Scrubber } from './evidence';
 import { APP_ID, Store } from './store';
 
 export const ENGINE_PORT = 5565;
@@ -94,6 +95,8 @@ export interface StackOptions {
 	engineOnly?: boolean;
 	/** The API key the page and the store client sign in with. */
 	apiKey: string;
+	/** The model keys from the env file (readModelKeys): the only keys a started engine gets. */
+	modelKeys: HeldKey[];
 	/** Where the stack writes its logs and the engine's store. */
 	dir: string;
 	scrubber: Scrubber;
@@ -140,12 +143,8 @@ async function startLocal(opts: StackOptions): Promise<Stack> {
 	process.once('exit', onExit);
 
 	try {
-		// step: the engine, its keys in its environment only, its store in the run folder
-		const env: NodeJS.ProcessEnv = { ...process.env, RR_STORE_URL: `filesystem://${store}` };
-		for (const { variable, alias } of MODEL_KEYS) {
-			const value = process.env[variable] || process.env[alias];
-			if (value) env[variable] = value;
-		}
+		// step: the engine, the env file's model keys in its environment only, its store in the run folder
+		const env: NodeJS.ProcessEnv = { ...engineEnv(opts.modelKeys), RR_STORE_URL: `filesystem://${store}` };
 		started.push(startProcess('engine', './engine', ['ai/eaas.py', `--port=${ENGINE_PORT}`], ENGINE_DIR, env, opts.dir, opts.scrubber));
 		opts.log(`starting the engine from dist/server on ${ENGINE_PORT}, store ${store}`);
 		const engineUri = `http://127.0.0.1:${ENGINE_PORT}`;

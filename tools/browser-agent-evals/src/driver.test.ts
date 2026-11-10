@@ -25,13 +25,15 @@
 // =============================================================================
 
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 
+import { EVAL_DIR } from './catalog';
 import { cardAnswer, dirtyFileAnswer, isWriteOpen, modelTitles, parseModel } from './driver';
-import { findLeaks, heldKeys, Scrubber, scrubbedLines, withoutKeys } from './evidence';
+import { engineEnv, findLeaks, heldKeys, readModelKeys, Scrubber, scrubbedLines, withoutKeys } from './evidence';
 import { scopePrefix, storePath } from './store';
 import { loadTask } from './task';
 import { cardMatches, setPointer, supportedEvent } from './trial';
@@ -41,31 +43,70 @@ const FAKE_ANTHROPIC = `sk-ant-test-${'a1B2'.repeat(10)}`;
 const FAKE_OPENAI = `sk-proj-test${'Z9y8'.repeat(10)}`;
 const CANARY = `sk-ant-rrEvalCanary${'0'.repeat(30)}`;
 
-test('heldKeys takes each model key under either name, and every other ROCKETRIDE_ value but the settings', () => {
-	const keys = heldKeys({
-		ANTHROPIC_API_KEY: FAKE_ANTHROPIC,
-		ROCKETRIDE_OPENAI_KEY: FAKE_OPENAI,
-		ROCKETRIDE_DB_BROKER_TOKEN: 'broker-token-value',
-		ROCKETRIDE_ANTHROPIC_KEYS: 'a-key-under-a-misspelled-name',
-		ROCKETRIDE_SHORT_KEY: 'x',
-		ROCKETRIDE_BUILD_ROOT: '/home/someone/checkout/build',
-		PATH: '/bin',
-	});
-	assert.deepEqual(
-		keys.map((k) => k.name),
-		['ROCKETRIDE_ANTHROPIC_KEY', 'ROCKETRIDE_OPENAI_KEY', 'ROCKETRIDE_DB_BROKER_TOKEN', 'ROCKETRIDE_ANTHROPIC_KEYS']
+/** A shell that holds model keys under every name the runner must ignore. */
+const SHELL_WITH_KEYS = {
+	ANTHROPIC_API_KEY: 'sk-ant-shell-anthropic-0000000000',
+	OPENAI_API_KEY: 'sk-proj-shell-openai-00000000000000',
+	ROCKETRIDE_ANTHROPIC_KEY: 'sk-ant-shell-rocketride-000000000',
+	ROCKETRIDE_OPENAI_KEY: 'sk-proj-shell-rocketride-0000000000',
+	EVAL_ANTHROPIC_KEY: 'sk-ant-shell-eval-000000000000000',
+	EVAL_ARGS: 'run --trials 2',
+	ROCKETRIDE_DB_BROKER_TOKEN: 'broker-token-value',
+	ROCKETRIDE_BUILD_ROOT: '/home/someone/checkout/build',
+	PATH: '/bin',
+};
+
+/** Writes a fake env file and returns its path. */
+function envFile(text: string): string {
+	const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'env-')), '.env.local');
+	fs.writeFileSync(file, text);
+	return file;
+}
+
+test('the model keys come from the env file by their EVAL_ names only, with export and quotes allowed', () => {
+	const file = envFile(['# eval keys', `export EVAL_ANTHROPIC_KEY="${FAKE_ANTHROPIC}"`, `EVAL_OPENAI_KEY='${FAKE_OPENAI}'`, 'ANTHROPIC_API_KEY=sk-ant-not-this-one-00000000000', 'SOME_TOKEN = abc # a comment', ''].join('\n'));
+	assert.deepEqual(readModelKeys(file), [
+		{ name: 'ROCKETRIDE_ANTHROPIC_KEY', value: FAKE_ANTHROPIC },
+		{ name: 'ROCKETRIDE_OPENAI_KEY', value: FAKE_OPENAI },
+	]);
+	assert.deepEqual(readModelKeys(envFile(`EVAL_ANTHROPIC_KEY=${FAKE_ANTHROPIC} # anthropic\nEVAL_OPENAI_KEY=${FAKE_OPENAI}\n`))[0], { name: 'ROCKETRIDE_ANTHROPIC_KEY', value: FAKE_ANTHROPIC });
+});
+
+test('a missing or empty eval key stops the runner with its name and never a value', () => {
+	const only = envFile(`EVAL_ANTHROPIC_KEY=${FAKE_ANTHROPIC}\nEVAL_OPENAI_KEY=""\n`);
+	assert.throws(
+		() => readModelKeys(only),
+		(err: Error) => /EVAL_OPENAI_KEY is missing or empty/.test(err.message) && !err.message.includes(FAKE_ANTHROPIC)
 	);
+	assert.throws(() => readModelKeys(envFile('OTHER=1\n')), /EVAL_ANTHROPIC_KEY and EVAL_OPENAI_KEY are missing or empty/);
+	assert.throws(() => readModelKeys(path.join(os.tmpdir(), 'no-such-dir', '.env.local')), /no env file at/);
+});
+
+test('every command that needs the keys exits 2 naming the missing eval key, before it starts anything', () => {
+	const file = envFile(`EVAL_ANTHROPIC_KEY=${FAKE_ANTHROPIC}\n`);
+	for (const command of ['run', 'smoke', 'check', 'stack']) {
+		const r = spawnSync(process.execPath, ['--import', 'tsx', 'src/run.ts', command, '--env-file', file], { cwd: path.dirname(EVAL_DIR), encoding: 'utf8', env: { ...process.env, ...SHELL_WITH_KEYS } });
+		assert.equal(r.status, 2, `${command}: ${r.stderr}`);
+		assert.match(r.stderr, /EVAL_OPENAI_KEY is missing or empty/, command);
+		assert.ok(!`${r.stdout}${r.stderr}`.includes(FAKE_ANTHROPIC), `${command} printed a key`);
+	}
+});
+
+test("the engine gets the env file's keys and no shell key; the other processes get no key at all", () => {
+	const modelKeys = [
+		{ name: 'ROCKETRIDE_ANTHROPIC_KEY', value: FAKE_ANTHROPIC },
+		{ name: 'ROCKETRIDE_OPENAI_KEY', value: FAKE_OPENAI },
+	];
+	assert.deepEqual(engineEnv(modelKeys, SHELL_WITH_KEYS), { ROCKETRIDE_DB_BROKER_TOKEN: 'broker-token-value', ROCKETRIDE_BUILD_ROOT: '/home/someone/checkout/build', PATH: '/bin', ROCKETRIDE_ANTHROPIC_KEY: FAKE_ANTHROPIC, ROCKETRIDE_OPENAI_KEY: FAKE_OPENAI });
+	assert.deepEqual(withoutKeys(SHELL_WITH_KEYS), { ROCKETRIDE_BUILD_ROOT: '/home/someone/checkout/build', PATH: '/bin' });
+	// held, so scrubbed and scanned for: the file's keys and the engine's other ROCKETRIDE_ secrets, never a shell's model key
+	assert.deepEqual(heldKeys(modelKeys, { ...SHELL_WITH_KEYS, ROCKETRIDE_SHORT_KEY: 'x' }), [...modelKeys, { name: 'ROCKETRIDE_DB_BROKER_TOKEN', value: 'broker-token-value' }]);
 });
 
 test('the scrubber names a held key, blanks other key shapes, and keeps canaries', () => {
 	const s = new Scrubber([{ name: 'ROCKETRIDE_ANTHROPIC_KEY', value: FAKE_ANTHROPIC }]).keeping([CANARY]);
 	const out = s.scrub(`held ${FAKE_ANTHROPIC} other ${FAKE_OPENAI} canary ${CANARY}`);
 	assert.equal(out, `held [redacted ROCKETRIDE_ANTHROPIC_KEY] other [redacted] canary ${CANARY}`);
-});
-
-test('withoutKeys leaves the dev servers no key under any name, and keeps the rest', () => {
-	const env = withoutKeys({ ANTHROPIC_API_KEY: FAKE_ANTHROPIC, ROCKETRIDE_OPENAI_KEY: FAKE_OPENAI, ROCKETRIDE_BUILD_ROOT: '/home/someone/checkout/build', PATH: '/bin' });
-	assert.deepEqual(env, { ROCKETRIDE_BUILD_ROOT: '/home/someone/checkout/build', PATH: '/bin' });
 });
 
 test('a service log is scrubbed line by line, even when a key is split across two chunks', () => {

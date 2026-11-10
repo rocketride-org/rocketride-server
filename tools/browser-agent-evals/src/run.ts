@@ -36,7 +36,7 @@ import path from 'node:path';
 
 import { DATA_DIR, REPO_ROOT } from './catalog';
 import { modelTitles, parseModel, type ModelPick } from './driver';
-import { findLeaks, heldKeys, Scrubber, type HeldKey } from './evidence';
+import { findLeaks, heldKeys, readModelKeys, Scrubber, type HeldKey } from './evidence';
 import { erroredTrial } from './grade';
 import { LOCAL_APIKEY, openStack, type Stack } from './stack';
 import { Store } from './store';
@@ -51,6 +51,9 @@ import { runTrial } from './trial';
 
 const DEFAULT_MODEL = 'anthropic/claude-haiku-5-5';
 
+/** The env file the model keys come from: .env.local two folders above the checkout, beside the worktrees folder. */
+const DEFAULT_ENV_FILE = path.resolve(REPO_ROOT, '..', '..', '.env.local');
+
 const USAGE = `Usage: EVAL_ARGS="<command> [options]" ./builder browser-agent:eval
    or: node --import tsx src/run.ts <command> [options]   (from tools/browser-agent-evals)
 
@@ -62,9 +65,8 @@ Commands:
                   one prompt, cards answered by the task's policy, the turn
                   stopped at its time limit. Starts the engine (dist/server)
                   and the two dev servers unless --url names a running stack.
-                  The model keys come from ROCKETRIDE_ANTHROPIC_KEY and
-                  ROCKETRIDE_OPENAI_KEY (or ANTHROPIC_API_KEY and
-                  OPENAI_API_KEY) and go to the engine only.
+                  The model keys come from the env file (--env-file) and go
+                  to the engine only.
   check           Grade a hand-made workspace for each picked task with no
                   agent: the engine (started alone) validates and runs its
                   pipelines, and every check reads it as if the turn had
@@ -78,6 +80,13 @@ Commands:
                   answered, seconds, whether the engine lists the key name.
 
 Options:
+  --env-file <file>
+                  run, check, stack, smoke: where the model keys are read
+                  from (default: ${DEFAULT_ENV_FILE}). Only
+                  EVAL_ANTHROPIC_KEY and EVAL_OPENAI_KEY are read, and both
+                  must be set; they become the engine's
+                  ROCKETRIDE_ANTHROPIC_KEY and ROCKETRIDE_OPENAI_KEY. No
+                  process gets a model key from the shell's environment.
   --tasks <dir>   The task set folder (default: tasks/breadth).
   --task <ids>    Only tasks whose id contains one of these, comma-separated.
                   ./builder's --pattern=<id> sets it.
@@ -123,11 +132,12 @@ interface Args {
 	workspace: string | null;
 	allowWipe: boolean;
 	noPreview: boolean;
+	envFile: string;
 	help: boolean;
 }
 
 function parseArgs(argv: string[]): Args {
-	const args: Args = { command: null, tasks: DATA_DIR, only: [], table: false, model: DEFAULT_MODEL, url: null, apikeyEnv: null, out: null, reruns: 2, headed: false, models: [], workspace: null, allowWipe: false, noPreview: false, help: false };
+	const args: Args = { command: null, tasks: DATA_DIR, only: [], table: false, model: DEFAULT_MODEL, url: null, apikeyEnv: null, out: null, reruns: 2, headed: false, models: [], workspace: null, allowWipe: false, noPreview: false, envFile: DEFAULT_ENV_FILE, help: false };
 	for (let i = 0; i < argv.length; i++) {
 		const a = argv[i];
 		const value = () => {
@@ -150,6 +160,7 @@ function parseArgs(argv: string[]): Args {
 		else if (a === '--workspace') args.workspace = path.resolve(value());
 		else if (a === '--allow-wipe') args.allowWipe = true;
 		else if (a === '--no-preview') args.noPreview = true;
+		else if (a === '--env-file') args.envFile = path.resolve(value());
 		else if (a === '--models') args.models.push(...value().split(',').filter(Boolean));
 		else if (a.startsWith('-')) throw new Error(`unknown option ${a}`);
 		else if (args.command === null) args.command = a;
@@ -180,7 +191,7 @@ function validate(args: Args): number {
 	return bad.length ? 1 : 0;
 }
 
-async function run(args: Args): Promise<number> {
+async function run(args: Args, modelKeys: HeldKey[]): Promise<number> {
 	const { valid, bad } = pick(args);
 	if (bad.length) {
 		for (const v of bad) console.log(`INVALID ${v.id}\n${v.problems.map((p) => `  - ${p}`).join('\n')}`);
@@ -210,20 +221,20 @@ async function run(args: Args): Promise<number> {
 		console.error(err instanceof Error ? err.message : String(err));
 		return 2;
 	}
-	const keys = keysFor(args, apiKey);
+	const keys = keysFor(args, apiKey, modelKeys);
 	const scrubber = new Scrubber(keys);
 	const out = args.out ?? path.join(REPO_ROOT, '.verify', 'browser-agent', new Date().toISOString().replace(/[:.]/g, '-'));
 	// every line is scrubbed: card titles and the agent's questions can quote anything
 	const log = (line: string) => console.log(`[eval] ${scrubber.scrub(line)}`);
 	// the engine's keys, for keys-not-leaked: never the account's API key, which the page sends to sign in
 	const accountKeyEnv = apiKeyEnvOf(args);
-	const engineKeys = heldKeys().filter((k) => k.name !== accountKeyEnv && k.value !== apiKey);
+	const engineKeys = heldKeys(modelKeys).filter((k) => k.name !== accountKeyEnv && k.value !== apiKey);
 	log(`${valid.length} task(s), up to ${args.reruns} rerun(s) of each failure, ${model.provider}/${model.model}, output in ${out}`);
 	log(`model keys held: ${keys.map((k) => k.name).join(', ') || 'none'}`);
 
 	let stack: Stack;
 	try {
-		stack = await openStack({ url: args.url ?? undefined, apiKey, dir: path.join(out, 'stack'), scrubber, log });
+		stack = await openStack({ url: args.url ?? undefined, apiKey, modelKeys, dir: path.join(out, 'stack'), scrubber, log });
 	} catch (err) {
 		console.error(`could not start the stack: ${err instanceof Error ? err.message : String(err)}`);
 		return 2;
@@ -332,22 +343,22 @@ function apiKeyOf(args: Args): string {
 }
 
 /** The keys to scrub: the engine's, plus the API key when it comes from a variable. */
-function keysFor(args: Args, apiKey: string): HeldKey[] {
-	const keys = heldKeys();
+function keysFor(args: Args, apiKey: string, modelKeys: HeldKey[]): HeldKey[] {
+	const keys = heldKeys(modelKeys);
 	const name = apiKeyEnvOf(args);
 	if (name && apiKey.length >= 8 && !keys.some((k) => k.value === apiKey)) keys.push({ name, value: apiKey });
 	return keys;
 }
 
-async function holdStack(args: Args): Promise<number> {
-	const keys = heldKeys();
+async function holdStack(args: Args, modelKeys: HeldKey[]): Promise<number> {
+	const keys = heldKeys(modelKeys);
 	const scrubber = new Scrubber(keys);
 	const out = args.out ?? path.join(REPO_ROOT, '.verify', 'browser-agent', `stack-${new Date().toISOString().replace(/[:.]/g, '-')}`);
 	const log = (line: string) => console.log(`[eval] ${scrubber.scrub(line)}`);
 	log(`model keys held: ${keys.map((k) => k.name).join(', ') || 'none'}`);
 	let stack: Stack;
 	try {
-		stack = await openStack({ apiKey: LOCAL_APIKEY, dir: path.join(out, 'stack'), scrubber, log });
+		stack = await openStack({ apiKey: LOCAL_APIKEY, modelKeys, dir: path.join(out, 'stack'), scrubber, log });
 	} catch (err) {
 		console.error(`could not start the stack: ${err instanceof Error ? err.message : String(err)}`);
 		return 2;
@@ -362,7 +373,7 @@ async function holdStack(args: Args): Promise<number> {
 	return 0;
 }
 
-async function check(args: Args): Promise<number> {
+async function check(args: Args, modelKeys: HeldKey[]): Promise<number> {
 	const { valid, bad } = pick(args);
 	if (bad.length || !valid.length) {
 		console.error(bad.length ? `invalid tasks: ${bad.map((v) => v.id).join(', ')}` : `no task in ${args.tasks} matches ${args.only.join(', ')}`);
@@ -379,13 +390,13 @@ async function check(args: Args): Promise<number> {
 		console.error(err instanceof Error ? err.message : String(err));
 		return 2;
 	}
-	const keys = heldKeys();
+	const keys = heldKeys(modelKeys);
 	const scrubber = new Scrubber(keys);
 	const out = args.out ?? path.join(REPO_ROOT, '.verify', 'browser-agent', `check-${new Date().toISOString().replace(/[:.]/g, '-')}`);
 	const log = (line: string) => console.log(`[eval] ${scrubber.scrub(line)}`);
 	let stack: Stack;
 	try {
-		stack = await openStack({ url: args.url ?? undefined, apiKey, dir: path.join(out, 'stack'), scrubber, log, engineOnly: true });
+		stack = await openStack({ url: args.url ?? undefined, apiKey, modelKeys, dir: path.join(out, 'stack'), scrubber, log, engineOnly: true });
 	} catch (err) {
 		console.error(`could not start the engine: ${err instanceof Error ? err.message : String(err)}`);
 		return 2;
@@ -418,7 +429,7 @@ async function check(args: Args): Promise<number> {
 	return failed ? 1 : 0;
 }
 
-async function smoke(args: Args): Promise<number> {
+async function smoke(args: Args, modelKeys: HeldKey[]): Promise<number> {
 	let models: ModelPick[];
 	let apiKey: string;
 	try {
@@ -428,14 +439,14 @@ async function smoke(args: Args): Promise<number> {
 		console.error(err instanceof Error ? err.message : String(err));
 		return 2;
 	}
-	const keys = heldKeys();
+	const keys = heldKeys(modelKeys);
 	const scrubber = new Scrubber(keys);
 	const out = args.out ?? path.join(REPO_ROOT, '.verify', 'browser-agent', `smoke-${new Date().toISOString().replace(/[:.]/g, '-')}`);
 	const log = (line: string) => console.log(`[eval] ${scrubber.scrub(line)}`);
 	log(`model keys held: ${keys.map((k) => k.name).join(', ') || 'none'}`);
 	let stack: Stack;
 	try {
-		stack = await openStack({ url: args.url ?? undefined, apiKey, dir: path.join(out, 'stack'), scrubber, log, engineOnly: true });
+		stack = await openStack({ url: args.url ?? undefined, apiKey, modelKeys, dir: path.join(out, 'stack'), scrubber, log, engineOnly: true });
 	} catch (err) {
 		console.error(`could not start the engine: ${err instanceof Error ? err.message : String(err)}`);
 		return 2;
@@ -467,13 +478,23 @@ async function main(): Promise<number> {
 		return 0;
 	}
 	if (args.command === 'validate') return validate(args);
-	if (args.command === 'run') return await run(args);
-	if (args.command === 'smoke') return await smoke(args);
-	if (args.command === 'check') return await check(args);
-	if (args.command === 'stack') return await holdStack(args);
-	console.error(`${args.command === null ? 'no command' : `unknown command ${args.command}`}\n\n${USAGE}`);
-	return 2;
+	const command = args.command === null ? undefined : KEYED[args.command];
+	if (!command) {
+		console.error(`${args.command === null ? 'no command' : `unknown command ${args.command}`}\n\n${USAGE}`);
+		return 2;
+	}
+	let modelKeys: HeldKey[];
+	try {
+		modelKeys = readModelKeys(args.envFile);
+	} catch (err) {
+		console.error(err instanceof Error ? err.message : String(err));
+		return 2;
+	}
+	return await command(args, modelKeys);
 }
+
+/** The commands that start an engine or grade against one, and so need the model keys. */
+const KEYED: Record<string, (args: Args, modelKeys: HeldKey[]) => Promise<number>> = { run, smoke, check, stack: holdStack };
 
 void main().then((code) => {
 	process.exitCode = code;

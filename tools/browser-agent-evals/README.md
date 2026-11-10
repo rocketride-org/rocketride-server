@@ -40,7 +40,7 @@ EVAL_ARGS="validate --table" ./builder browser-agent:eval
 ./builder browser-agent:eval --pattern=edit-0         # only tasks whose id contains edit-0
 ./builder browser-agent:test                          # unit tests (node:test)
 
-# edit-01 in the browser, with the key in the environment; a failure is rerun twice
+# edit-01 in the browser, with the keys from the env file; a failure is rerun twice
 EVAL_ARGS="run --model anthropic/claude-haiku-5-5" ./builder browser-agent:eval --pattern=edit-01
 EVAL_ARGS="run --model openai/gpt-6-luna --reruns 0 --headed" ./builder browser-agent:eval --pattern=edit-01
 EVAL_ARGS="run --no-preview" ./builder browser-agent:eval --pattern=edit-08     # leave every Design preview closed
@@ -60,7 +60,7 @@ From this folder, `node --import tsx src/run.ts <command>` does the same without
 `run` needs three things:
 
 - **An engine in `dist/server`.** The stack starts it from there. B's `package.json` says 3.5.0 while its engine source matches the `server-v3.6.0-prerelease` release, so `./builder server:download` finds no match and `server:build` tries to compile. Until the version catches up, put that release's binary in `dist/server` and sync the checkout's Python and nodes into it: `./builder --sequential nodes:sync ai:sync client-python:sync-source server:setup-test-deps client-typescript:build shell:build client-init:build`. Do not run `nodes:submodule-build` without the compile tools: it installs a compiler toolchain in `~/toolchains` before it checks whether anything needs compiling.
-- **The model keys** in `ROCKETRIDE_ANTHROPIC_KEY` and `ROCKETRIDE_OPENAI_KEY`, or `ANTHROPIC_API_KEY` and `OPENAI_API_KEY`. They go into the engine's environment and nowhere else. On the OSS engine, the model picker lists exactly the engine's `ROCKETRIDE_*` environment variables, so no account Variables are needed. Without the key for `--model`, the picker says the key is missing and the trial ends as an environment failure, not an agent failure.
+- **The model keys** as `EVAL_ANTHROPIC_KEY` and `EVAL_OPENAI_KEY` in an env file: `--env-file`, by default `.env.local` two folders above the checkout. The runner reads only those two lines (`export ` and quotes allowed), never prints them, and stops with the missing name when either is missing or empty. They become the engine's `ROCKETRIDE_ANTHROPIC_KEY` and `ROCKETRIDE_OPENAI_KEY` and go nowhere else. No process the runner starts (the engine, the dev servers, the browser, the app builds) gets `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `ROCKETRIDE_ANTHROPIC_KEY`, `ROCKETRIDE_OPENAI_KEY` or any `EVAL_*` name from the shell, so a shell key never stands in for an eval key. `run`, `check`, `stack` and `smoke` all need the file. On the OSS engine, the model picker lists exactly the engine's `ROCKETRIDE_*` environment variables, so no account Variables are needed.
 - **Free ports 5565, 3000 and 3010.** A port in use stops the run; the runner never stops what it did not start. `--url` runs against a stack that is already up instead, and needs `--allow-wipe`, local or not, because every trial empties the workspace, the agent sessions and the saved layouts of the API key's account there. A stack the `stack` command started is safe to empty, since its store is in its own run folder. Your dev stack holds your own work.
 
 The stack (`src/stack.ts`) does what the rr-verify-agent skill's `launch.sh` does on `origin/feat/rocket-agent-testing`:

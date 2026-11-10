@@ -46,7 +46,7 @@ import { chromium, type Browser, type BrowserContext, type Locator, type Page } 
 
 import { REPO_ROOT } from './catalog';
 import type { AppUsed } from './checks/appRun';
-import type { Scrubber } from './evidence';
+import { withoutKeys, type Scrubber } from './evidence';
 import { APP_ID } from './store';
 import type { CardAnswer, CardPolicy, DirtyFileAnswer } from './task';
 
@@ -264,7 +264,7 @@ export class Driver {
 	/** Launches Chromium with the sign-in token seeded, and starts recording. */
 	static async open(opts: DriverOptions): Promise<Driver> {
 		fs.mkdirSync(opts.dir, { recursive: true });
-		const browser = await chromium.launch({ headless: !opts.headed });
+		const browser = await chromium.launch({ headless: !opts.headed, env: withoutKeys(process.env) });
 		const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
 		// step: the token the API key screen would store, before the first page loads
 		await context.addInitScript(([key, token]) => (globalThis as unknown as { localStorage: { setItem(k: string, v: string): void } }).localStorage.setItem(key, token), [LS_TOKEN, opts.apiKey]);
