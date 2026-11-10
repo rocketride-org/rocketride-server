@@ -64,7 +64,7 @@ settings. The default is **Gemini 3.1 Pro** (`models/gemini-3.1-pro-preview`).
 | Google: Gemini 3.8 Flash | `models/gemini-3.8-flash` | 1,048,576 | 65,536 |
 | Custom model | _(user-specified)_ | editable | editable |
 
-Models whose titles contain **Image** support image generation output. Models marked
+Models whose titles contain **Image** can generate images at the provider, but this node returns text only: it reads `response.text` and raises when a response carries no text, so it cannot emit a generated image. Models marked
 **(deprecated)** remain selectable for existing pipelines; move new pipelines to a
 current model, for example `models/gemini-3.1-pro-preview` in place of
 `models/gemini-3-pro-preview`, or `models/gemini-3.5-flash` in place of the 2.0 and
