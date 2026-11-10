@@ -72,6 +72,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Res
 from ai.web import Request
 from ai.web.middleware import route_path
 
+from .contract import Page, page_instant
 from .settings import app_url
 
 # Engine binary directory — all static paths are relative to this.
@@ -703,15 +704,13 @@ def sitemap_entries() -> list:
     return [(page.path, page) for page in current().pages() if page.listed]
 
 
-def _lastmod(page) -> str:
+def _lastmod(page: Page) -> str:
     """``<lastmod>``: the page's ``modified`` or ``published`` date, else when its production version went live.
 
     The UTC date of the declared instant; the fallback is the production
     binding time, a W3C datetime in UTC. Omitted when neither is known (the
     legacy pages).
     """
-    from .contract import page_instant
-
     declared = page.modified or page.published
     if declared:
         return f'<lastmod>{page_instant(declared).date().isoformat()}</lastmod>'
@@ -794,6 +793,13 @@ async def robots_txt(request: Request):
     return PlainTextResponse(content, headers={'Cache-Control': CACHE_CONTROL})
 
 
+def _newest_first(page: Page) -> float:
+    """Sort key of an llms.txt section: dated pages newest first, then the undated ones."""
+    if page.published:
+        return -page_instant(page.published).timestamp()
+    return math.inf
+
+
 async def llms_txt(request: Request):
     """
     Serve ``/llms.txt`` — an llmstxt.org index of the public pages.
@@ -818,7 +824,6 @@ async def llms_txt(request: Request):
     Raises:
         HTTPException: 404 when ``RR_APP_URL`` is not configured.
     """
-    from .contract import page_instant
     from .public_pages import current, maybe_refresh
 
     maybe_refresh()
@@ -839,8 +844,8 @@ async def llms_txt(request: Request):
         pages = sections[parent]
         if parent:
             lines += ['', f'## {_md(own_title(listed[parent].title, site.get("title", "")))}', '']
-            # Dated pages newest first, then the rest; the stable sort keeps path order within each.
-            pages.sort(key=lambda p: -page_instant(p.published).timestamp() if p.published else math.inf)
+            # The stable sort keeps path order among pages with the same key.
+            pages.sort(key=_newest_first)
         else:
             lines += ['## Pages', '']
         for page in pages:

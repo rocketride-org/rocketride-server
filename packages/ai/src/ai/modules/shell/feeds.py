@@ -40,7 +40,7 @@ description or author holds.
 
 import re
 from datetime import datetime, timezone
-from typing import Any, List
+from typing import Any, List, Mapping
 from urllib.parse import urlsplit
 from xml.sax.saxutils import escape, quoteattr
 
@@ -66,7 +66,7 @@ def rfc3339(value: str) -> str:
     return value if 'T' in value else f'{value}T00:00:00Z'
 
 
-def entries(feed: Any, pages: List[Page]) -> List[Page]:
+def entries(feed: Mapping[str, str], pages: List[Page]) -> List[Page]:
     """The pages ``feed`` lists, newest first (then by path), at most ``MAX_ENTRIES``."""
     prefix = feed['prefix']
     dated = [p for p in pages if p.listed and p.published and p.path.startswith(prefix) and p.path != prefix]
@@ -74,7 +74,7 @@ def entries(feed: Any, pages: List[Page]) -> List[Page]:
     return dated[:MAX_ENTRIES]
 
 
-def atom(feed: Any, aggregate: Any, base: str) -> str:
+def atom(feed: Mapping[str, str], aggregate: Any, base: str) -> str:
     """The Atom document of ``feed`` over ``aggregate``'s pages, with absolute URLs on ``base`` (RR_APP_URL)."""
     items = entries(feed, aggregate.pages())
     site_title = aggregate.site.get('title', '')
@@ -107,7 +107,10 @@ def atom(feed: Any, aggregate: Any, base: str) -> str:
         if page.description:
             lines.append(f'<summary>{_text(page.description)}</summary>')
         for name, uri in page.authors:
-            lines.append(f'<author><name>{_text(name)}</name>{f"<uri>{_text(uri)}</uri>" if uri else ""}</author>')
+            author = f'<author><name>{_text(name)}</name>'
+            if uri:
+                author += f'<uri>{_text(uri)}</uri>'
+            lines.append(f'{author}</author>')
         lines.append('</entry>')
     lines.append('</feed>')
     return '\n'.join(lines) + '\n'
