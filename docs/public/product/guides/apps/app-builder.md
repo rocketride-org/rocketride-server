@@ -24,15 +24,21 @@ the same loop runs from a terminal or CI.
 - Node and **pnpm**. Use pnpm, not npm: running `npm install` inside an app
   folder can corrupt the workspace layout. Dependencies install once at the
   workspace root.
-- A developer id for your organization. Every app id is
-  `<developerId>.<name>`. Your organization claims its developer id once,
-  on the Deploy tab (lowercase letters and underscores, starting with a
-  letter), and can then deploy
-  only apps inside that namespace. Until the prefix of your app's id
-  matches, the Deploy tab is read-only with a banner. An app still on
-  `local.<name>` can move into your namespace from that banner in VS Code
-  (see [Create](#create-dashboard-tab)); rename any other id by hand.
-  Design and Package always work.
+- A developer id for your organization, on RocketRide Cloud. Every app id
+  is `<developerId>.<name>`. Your organization claims its developer id
+  once, on the Deploy tab or with the npm CLI's
+  `rocketride app developer register <id>`, which talks to the deployment
+  target named by `ROCKETRIDE_DEPLOY_URI` and `ROCKETRIDE_DEPLOY_APIKEY`
+  (the pip CLI has no `app developer` verbs). The id is lowercase letters
+  and underscores, starting with a letter; `local`, the prefix of an app
+  scaffolded before registering, is reserved, so pick another id.
+  Registering is an org admin's step, and permanent. The organization can
+  then deploy only apps inside that namespace. A self-hosted server
+  registers nothing: it publishes under the fixed id `rocketride`. Until
+  the prefix of your app's id matches, the Deploy tab is read-only with a
+  banner. An app still on `local.<name>` can move into your namespace from
+  that banner in VS Code (see [Create](#create-dashboard-tab)); rename any
+  other id by hand. Design and Package always work.
 - Catalog nodes only, if the app is headed for the store. Pipelines in a
   store app use the nodes that ship with the engine and nothing else; see
   [Adding a pipeline to your app](#adding-a-pipeline-to-your-app).
