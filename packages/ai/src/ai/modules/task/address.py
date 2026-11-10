@@ -240,6 +240,33 @@ def check_endpoint_scope(endpoints: Optional[Iterable[str]], address: str) -> No
     raise PermissionError(f'This API key is scoped to other endpoints; {address!r} is not among them')
 
 
+def in_endpoint_scope(endpoints: Optional[Iterable[str]], address: str) -> bool:
+    """
+    Whether an API key's ``endpoints`` scope admits a live run's address.
+
+    The non-raising form of ``check_endpoint_scope`` for the paths that walk
+    many runs at once (task listings, the dashboard snapshot, monitor event
+    delivery): a run outside the scope is skipped there exactly as a run the
+    caller has no permission on is, so a scoped key never learns about a run
+    it could not address directly. A run whose address does not parse is
+    outside every scope.
+
+    Args:
+        endpoints: The key's scope as loaded onto ``AccountInfo.endpoints``.
+        address: The run's full three-segment address.
+
+    Returns:
+        ``True`` for an unscoped key or an address the scope allows.
+    """
+    if endpoints is None:
+        return True
+    try:
+        check_endpoint_scope(endpoints, address)
+    except (PermissionError, TaskError):
+        return False
+    return True
+
+
 def validate_endpoint_patterns(endpoints: Optional[Iterable[str]]) -> Optional[list[str]]:
     """
     Validate the ``endpoints`` list handed to key creation.

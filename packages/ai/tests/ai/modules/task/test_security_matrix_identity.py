@@ -35,6 +35,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from rocketride import EVENT_TYPE
 
 from ai.account.base import AccountBase
 from ai.account.models import AccountInfo
@@ -45,7 +46,8 @@ from ai.modules.task.address import (
     validate_component_ids,
     validate_identity,
 )
-from ai.modules.task.commands.cmd_monitor import owner_key
+from ai.modules.task.commands.cmd_misc import MiscCommands
+from ai.modules.task.commands.cmd_monitor import MonitorCommands, owner_key
 from ai.modules.task.task_server import TASK_CONTROL, TaskServer
 from ai.modules.task.types import TaskError
 
@@ -455,6 +457,42 @@ def test_s10_scoped_key_skips_the_dev_rung_and_is_refused_elsewhere():
     _control(ts, run_kind='deploy', owner_kind='user', source='parsePDF')
     with pytest.raises(PermissionError):
         ts.resolve_control('acme.docBrain.parsePDF', scoped, 'task.data')
+
+
+def test_s10_scoped_key_lists_only_the_runs_inside_its_scope():
+    """The dashboard/list snapshot walks every run: a scoped key sees only its addresses."""
+    ts = _server()
+    inside = _control(ts, run_kind='deploy', owner_kind='user', source='chat')
+    _control(ts, run_kind='deploy', owner_kind='user', source='parsePDF')
+    _control(ts, run_kind='deploy', owner_kind='user', project_id='other', source='chat')
+
+    scoped = SimpleNamespace(_server=ts, _account_info=_account(endpoints=['acme.docBrain.chat']))
+    assert MiscCommands._scoped_state(scoped)[0] == [inside]
+
+    unscoped = SimpleNamespace(_server=ts, _account_info=_account())
+    assert len(MiscCommands._scoped_state(unscoped)[0]) == 3
+
+
+@pytest.mark.asyncio
+async def test_s10_scoped_key_receives_no_events_from_runs_outside_its_scope():
+    """A '*' monitor on a scoped key is still bound to its addresses at delivery."""
+    ts = _server()
+    inside = _control(ts, run_kind='deploy', owner_kind='user', source='chat')
+    outside = _control(ts, run_kind='deploy', owner_kind='user', source='parsePDF')
+    conn = SimpleNamespace(
+        _server=ts,
+        _account_info=_account(endpoints=['acme.docBrain.chat']),
+        _monitors={'*': EVENT_TYPE.TASK},
+        verify_permission=MagicMock(),
+        send_event=AsyncMock(),
+    )
+    event = {'event': 'apaevt_task', 'body': {}}
+
+    await MonitorCommands.send_task_event(conn, EVENT_TYPE.TASK, outside.key, event)
+    conn.send_event.assert_not_awaited()
+
+    await MonitorCommands.send_task_event(conn, EVENT_TYPE.TASK, inside.key, event)
+    conn.send_event.assert_awaited_once()
 
 
 @pytest.mark.asyncio

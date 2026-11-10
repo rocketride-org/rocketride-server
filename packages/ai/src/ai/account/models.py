@@ -374,7 +374,9 @@ def resolve_run_permissions(account_info: AccountInfo, control: Any) -> list[str
 
     The key's ``endpoints`` scope is NOT applied here — it binds a
     credential to ADDRESSES, which the resolver checks once the address is
-    known (``address.check_endpoint_scope``).
+    known (``address.check_endpoint_scope``), and which every path that
+    walks many runs at once (task listings, the dashboard snapshot, monitor
+    event delivery) applies beside this call (``address.in_endpoint_scope``).
 
     Args:
         account_info: The authenticated caller's session.

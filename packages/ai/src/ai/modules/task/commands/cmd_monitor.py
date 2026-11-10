@@ -57,6 +57,7 @@ from typing import TYPE_CHECKING, Dict, Any, List
 from ai.common.dap import DAPConn, TransportBase
 from ai.account.models import resolve_run_permissions, resolve_task_permissions
 from rocketride import EVENT_TYPE, TASK_STATE, TASK_STATUS
+from ..address import in_endpoint_scope
 
 
 # Only import for type checking to avoid circular import errors
@@ -253,8 +254,11 @@ class MonitorCommands(DAPConn):
             self.verify_permission('task.monitor')
 
         # Verify the caller may see this run (run-scoped: a user-owned run
-        # delivers only to its owner; a team-owned run to team members)
+        # delivers only to its owner; a team-owned run to team members; a key
+        # with an endpoints scope receives only the runs inside it)
         if not resolve_run_permissions(self._account_info, control):
+            return
+        if not in_endpoint_scope(getattr(self._account_info, 'endpoints', None), control.address):
             return
 
         # Build the base owner-scoped key: events land on the key of the
@@ -362,10 +366,14 @@ class MonitorCommands(DAPConn):
             try:
                 # Loop through all active tasks the caller has access to
                 tasks: List[Dict[str, Any]] = []
+                endpoints = getattr(self._account_info, 'endpoints', None)
                 for token, target in self._server._task_control.items():
                     # Skip runs the caller may not see (run-scoped: user-owned
-                    # runs are owner-only; team runs need team membership)
+                    # runs are owner-only; team runs need team membership; a
+                    # scoped key sees only the runs inside its endpoints)
                     if not resolve_run_permissions(self._account_info, target):
+                        continue
+                    if not in_endpoint_scope(endpoints, target.address):
                         continue
 
                     # Get the task status once

@@ -52,6 +52,7 @@ from ai.common.dap import DAPConn, TransportBase
 from ai.common.node_config import node_schema, resolve_node_config
 from ai.common.list_rows import paginate_rows
 from ai.account.models import resolve_run_permissions
+from ..address import in_endpoint_scope
 from ..pipeline import MultipleSourcesError, resolve_implied_source, resolve_pipeline_env, substituted_env
 from .. import services_catalog
 from .cmd_monitor import owner_key, owner_wildcard_key
@@ -729,8 +730,14 @@ class MiscCommands(DAPConn):
         caller_user_id = self._account_info.userId
 
         # Snapshot tasks the caller may see (run-scoped: user-owned runs are
-        # owner-only; team-owned runs need permissions on the run's team)
-        task_controls = [c for c in server._task_control.values() if resolve_run_permissions(self._account_info, c)]
+        # owner-only; team-owned runs need permissions on the run's team; a
+        # key with an endpoints scope sees only the runs inside it)
+        endpoints = getattr(self._account_info, 'endpoints', None)
+        task_controls = [
+            c
+            for c in server._task_control.values()
+            if resolve_run_permissions(self._account_info, c) and in_endpoint_scope(endpoints, c.address)
+        ]
         # Connections are user-scoped, so filter by userId
         conn_items = [
             (cid, conn)

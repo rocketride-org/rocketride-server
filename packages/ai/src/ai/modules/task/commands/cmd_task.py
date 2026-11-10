@@ -56,6 +56,7 @@ from ai.common.dap import DAPConn, TransportBase
 from ai.account import account
 from ai.account.models import resolve_run_permissions
 from rocketride import TASK_STATE
+from ..address import in_endpoint_scope
 
 # Only import for type checking to avoid circular import errors
 if TYPE_CHECKING:
@@ -551,9 +552,13 @@ class TaskCommands(DAPConn):
             # runs list for anyone with permissions on the run's team.
             # Authorization is PER RUN — a global verify_permission here
             # would evaluate the caller's current dev-team context and hide
-            # their own private runs after an org or dev-team switch.
+            # their own private runs after an org or dev-team switch. A key
+            # with an endpoints scope lists only the runs inside it.
+            endpoints = getattr(self._account_info, 'endpoints', None)
             for control in self._server._task_control.values():
                 if 'task.monitor' not in resolve_run_permissions(self._account_info, control):
+                    continue
+                if not in_endpoint_scope(endpoints, control.address):
                     continue
 
                 # Get current status for name and status string
