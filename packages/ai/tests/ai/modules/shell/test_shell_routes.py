@@ -1044,6 +1044,17 @@ def test_prerender_capture_served_when_present(web_server, shell_root, monkeypat
     assert 'captured home' in home and '<title>RocketRide</title>' in home
 
 
+def test_captures_and_shell_assets_resolve_behind_a_root_path(web_server, shell_root, monkeypatch):
+    # uvicorn --root-path /api sends scope path '/api/...': the document and the
+    # asset lookups must use the path the router matched, as auth does.
+    _capture(shell_root, 'pricing', 'captured pricing')
+    _start_engine(web_server, monkeypatch)
+    client = TestClient(web_server.app, follow_redirects=False, root_path='/api')
+    assert 'captured pricing' in client.get('/api/pricing').text
+    # A missing hashed bundle is a 404, never index.html under a .js URL.
+    assert client.get('/api/shell/static/missing.js').status_code == 404
+
+
 def test_no_capture_falls_back_to_spa(web_server, shell_root, monkeypatch):
     """No capture for the page: the SPA index, under the page's head."""
     _capture(shell_root, 'pricing', 'captured pricing')

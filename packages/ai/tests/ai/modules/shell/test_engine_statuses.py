@@ -135,6 +135,10 @@ def test_pages_and_redirects_serve_under_a_root_path(engine_under_root_path, ua)
     for path, location in (('/api/terms', '/api/legal/terms'), ('/api/pricing/?a=1', '/api/pricing?a=1')):
         resp = client.get(path, headers={'User-Agent': ua})
         assert resp.status_code == 301 and resp.headers['location'] == location, path
+    # The router's own answers keep the prefix too: a real route's slash twin, a page's other methods.
+    resp = client.get('/api/status/', headers={'User-Agent': ua})
+    assert resp.status_code == 307 and resp.headers['location'] == '/api/status'
+    assert client.post('/api/pricing', headers={'User-Agent': ua}).status_code == 405
 
 
 def test_a_real_routes_slash_twin_redirects_relatively_never_via_the_host_header(engine):
