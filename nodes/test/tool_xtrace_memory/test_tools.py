@@ -192,6 +192,42 @@ def _instance(glb):
 
 
 # ---------------------------------------------------------------------------
+# IGlobal: resolved config
+# ---------------------------------------------------------------------------
+
+
+def test_begin_global_reads_the_resolved_config(monkeypatch):
+    """Starting the node copies every schema leaf off ``self.config``: ids stripped, booleans and bounds as typed.
+
+    The resolver itself (defaults, bounds, ``${ROCKETRIDE_XTRACE_APIKEY}``) is
+    rocketlib's contract, covered by its own matrix; this pins what the node
+    does with the resolved view.
+    """
+    resolved = types.SimpleNamespace(
+        api_key=' xtk_resolved ',
+        org_id=' org_1 ',
+        base_url='https://api.production.xtrace.ai/',
+        user_id=' alice ',
+        agent_id='',
+        app_id='',
+        group_ids='grp_a, grp_b',
+        wait=False,
+        ingest_timeout=45,
+        extract_artifacts=True,
+        search_mode='retrieve',
+        search_limit=5,
+    )
+    monkeypatch.setattr(IGlobal, 'config', property(lambda self: resolved), raising=False)
+    glb = IGlobal()
+    glb.beginGlobal()
+    assert (glb.api_key, glb.org_id, glb.user_id) == ('xtk_resolved', 'org_1', 'alice')
+    assert glb.base_url == 'https://api.production.xtrace.ai'
+    assert glb.group_ids == ['grp_a', 'grp_b']
+    assert (glb.wait, glb.extract_artifacts) == (False, True)
+    assert (glb.ingest_timeout, glb.search_mode, glb.search_limit) == (45, 'retrieve', 5)
+
+
+# ---------------------------------------------------------------------------
 # Pure helpers
 # ---------------------------------------------------------------------------
 

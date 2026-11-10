@@ -35,14 +35,15 @@ from unittest.mock import MagicMock
 import pytest
 
 # ---------------------------------------------------------------------------
-# Bootstrap: when run under a bare interpreter that lacks the engine runtime
-# (rocketlib, ai.common, requests), inject lightweight stubs ONLY for modules
-# that are not already present, import the modules under test, then REMOVE the
-# stubs we added. Restoring is essential: under the full `builder nodes:test-full`
-# run these modules are real and shared across the whole pytest session, so a
-# leaked MagicMock stub would break unrelated nodes' tests. The pure helpers
-# under test hold no runtime dependency on the stubbed modules, so dropping the
-# stubs after import is safe.
+# Bootstrap: stub the engine modules that are not already loaded (ai.common,
+# requests, the rocketlib facade), import the modules under test, then REMOVE
+# the stubs we added. Restoring is essential: under the full `builder
+# nodes:test-full` run these modules are real and shared across the whole
+# pytest session, so a leaked MagicMock stub would break unrelated nodes'
+# tests. The rocketlib stub keeps the REAL IGlobalBase (rocketlib.filters is
+# never stubbed): the _begin tests below resolve a stored config through the
+# engine's schema via self.config, exactly as the node does at startup, and the
+# timeout test imports the real rocketlib.config.ConfigError.
 # ---------------------------------------------------------------------------
 
 import importlib
@@ -134,9 +135,15 @@ class _FakeIInstanceBase:
 
 def _build_import_stubs():
     """Return {module_name: stub} for the deps needed only to import the modules."""
+    # The real base: its ``config`` property resolves self.glb.connConfig against
+    # the engine's schema for tool_n8n (see test_tool_tenki.py for the same split).
+    from rocketlib.filters import IGlobalBase
+
     rocketlib = MagicMock()
     rocketlib.IInstanceBase = _FakeIInstanceBase
-    rocketlib.IGlobalBase = object
+    rocketlib.IGlobalBase = IGlobalBase
+    rocketlib.engine = importlib.import_module('rocketlib.engine')
+    rocketlib.config = importlib.import_module('rocketlib.config')
     rocketlib.Entry = object
     rocketlib.tool_function = lambda **kwargs: lambda f: f  # pass-through decorator
     rocketlib.debug = lambda *a, **kw: None
