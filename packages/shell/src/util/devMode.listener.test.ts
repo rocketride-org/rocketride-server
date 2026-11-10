@@ -185,6 +185,24 @@ afterEach(() => {
 	clearBrowser();
 });
 
+/**
+ * Seeds a known session into the page's token slot, then counts saveToken /
+ * clearToken calls on the manager (the slot itself is asserted separately).
+ * Seeding makes the tests independent of whatever an earlier test left in the
+ * module-level frame token store.
+ */
+function seedAndSpyTokens(seed: string): { cm: ReturnType<Connection['ConnectionManager']['getInstance']>; calls: { saves: string[]; clears: number }; restore: () => void } {
+	const cm = connection.ConnectionManager.getInstance();
+	cm.saveToken(seed);
+	assert.equal(cm.loadToken(), seed, 'the seeded session is in place');
+	const calls = { saves: [] as string[], clears: 0 };
+	const save = cm.saveToken.bind(cm);
+	const clear = cm.clearToken.bind(cm);
+	cm.saveToken = (token: string): void => { calls.saves.push(token); save(token); };
+	cm.clearToken = (): void => { calls.clears++; clear(); };
+	return { cm, calls, restore: () => { cm.saveToken = save; cm.clearToken = clear; } };
+}
+
 const registerRemoteOf = (moduleId: string) => ({ type: 'rrdev:registerRemote', appId: `org.${moduleId}`, moduleId, name: 'X', entry: 'http://localhost:3001/remoteEntry.js' });
 
 test('a foreign framing parent cannot replace the session token (real listener)', async () => {
@@ -208,15 +226,22 @@ test('a foreign framing parent cannot register a dev remote (real listener)', as
 
 test('a window.opener cannot write the token of a top-level tab (real listener)', async () => {
 	const page = await bootShell({ framed: false });
-	const cm = connection.ConnectionManager.getInstance();
-	const before = cm.loadToken();
-	deliver(page, { type: 'rrdev:auth', token: 'attacker-token' }, 'https://attacker.example', page.opener);
-	deliver(page, { type: 'rrdev:auth', token: '' }, 'https://attacker.example', page.opener);
-	assert.equal(cm.loadToken(), before, 'the shared localStorage token is untouched');
-	assert.equal(page.localStorageData.size, 0, 'nothing was written to or cleared from localStorage');
-	assert.equal(page.reloads(), 0);
-	deliver(page, registerRemoteOf('org_opener'), 'https://attacker.example', page.opener);
-	assert.equal(loader.isDevRemote('org_opener'), false);
+	const { cm, calls, restore } = seedAndSpyTokens('existing_session');
+	try {
+		deliver(page, { type: 'rrdev:auth', token: 'attacker_credential' }, 'https://attacker.example', page.opener);
+		assert.equal(cm.loadToken(), 'existing_session', 'the attacker token did not replace the session');
+		assert.deepEqual(calls.saves, [], 'no save was attempted');
+		assert.equal(calls.clears, 0, 'nothing was cleared');
+		assert.equal(page.reloads(), 0, 'no reload after the token message');
+		deliver(page, { type: 'rrdev:auth', token: '' }, 'https://attacker.example', page.opener);
+		assert.equal(cm.loadToken(), 'existing_session', 'the empty message did not clear the session');
+		assert.deepEqual(calls.saves, [], 'still no save');
+		assert.equal(calls.clears, 0, 'no clear after the empty message');
+		assert.deepEqual(Array.from(page.localStorageData.values()), ['existing_session'], 'the shared localStorage still holds only the seeded session');
+		assert.equal(page.reloads(), 0);
+		deliver(page, registerRemoteOf('org_opener'), 'https://attacker.example', page.opener);
+		assert.equal(loader.isDevRemote('org_opener'), false);
+	} finally { restore(); }
 });
 
 test('a loopback parent cannot drive a cloud-served shell (real listener)', async () => {
@@ -337,15 +362,23 @@ test('web App Builder debug tab, exact sequence: a top-level shell opened by the
 
 test('a foreign page that frames a dev shell served from the cloud origin gets nothing: no token, no remote, no console rows, no handshake data', async () => {
 	const page = await bootShell({ framed: true, origin: CLOUD, ancestorOrigin: 'https://attacker.example', search: '?rrdev=1&appid=org.victim' });
-	const cm = connection.ConnectionManager.getInstance();
-	const before = cm.loadToken();
-	deliver(page, { type: 'rrdev:auth', token: 'attacker-token' }, 'https://attacker.example', page.parent);
-	deliver(page, { type: 'rrdev:auth', token: '' }, 'https://attacker.example', page.parent);
+	const { cm, calls, restore } = seedAndSpyTokens('existing_session');
+	try {
+		deliver(page, { type: 'rrdev:auth', token: 'attacker_credential' }, 'https://attacker.example', page.parent);
+		assert.equal(cm.loadToken(), 'existing_session', 'the attacker token did not replace the session');
+		assert.deepEqual(calls.saves, [], 'no save was attempted');
+		assert.equal(calls.clears, 0, 'nothing was cleared');
+		assert.equal(page.reloads(), 0, 'no reload after the token message');
+		deliver(page, { type: 'rrdev:auth', token: '' }, 'https://attacker.example', page.parent);
+		assert.equal(cm.loadToken(), 'existing_session', 'the empty message did not clear the session');
+		assert.deepEqual(calls.saves, [], 'still no save');
+		assert.equal(calls.clears, 0, 'no clear after the empty message');
+		assert.equal(page.reloads(), 0);
+	} finally { restore(); }
 	deliver(page, registerRemoteOf('org_victim_remote'), 'https://attacker.example', page.parent);
 	// the shell's own console output (it prints its href, OAuth ?code= included) is not forwarded
 	console.log('boot href ?code=FAKE-OAUTH-CODE');
 	restoreConsole();
-	assert.equal(cm.loadToken(), before);
 	assert.equal(loader.isDevRemote('org_victim_remote'), false);
 	assert.deepEqual(rows(page, 'shell:devConsole'), []);
 	assert.deepEqual(rows(page, 'shell:devError'), []);
