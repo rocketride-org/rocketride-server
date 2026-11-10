@@ -172,10 +172,6 @@ def _router_miss(request: Request) -> Optional[Response]:
     return None
 
 
-def _not_found() -> Any:
-    raise HTTPException(status_code=404, detail='Not Found')
-
-
 class _FifoCache:
     """An insertion-ordered cache bounded by total size in bytes and by entry count.
 
@@ -274,7 +270,10 @@ async def public_page(request: Request):
         # answers what the router would have without the catch-all.
         if path == '/' or path in aggregate.exact or path in aggregate.redirects:
             raise HTTPException(status_code=405, detail='Method Not Allowed', headers={'Allow': 'GET, HEAD'})
-        return _router_miss(request) or _not_found()
+        miss = _router_miss(request)
+        if miss is None:
+            raise HTTPException(status_code=404, detail='Not Found')
+        return miss
     public_pages.maybe_refresh()  # schedules only: the swap lands on a later request
     target = aggregate.redirects.get(path)
     if target is not None:
@@ -286,7 +285,10 @@ async def public_page(request: Request):
         # A page's trailing-slash twin: one permanent URL per page.
         if path.endswith('/') and path[:-1] in aggregate.exact:
             return _moved(request, path[:-1])
-        return _router_miss(request) or _not_found()
+        miss = _router_miss(request)
+        if miss is None:
+            raise HTTPException(status_code=404, detail='Not Found')
+        return miss
     crawler = classify(request.headers.get('user-agent', '')) == CRAWLER
     document = shell_document_path(request)
     key = (path, crawler, str(document), document.stat().st_mtime_ns, app_url())

@@ -65,7 +65,7 @@ def test_everything_else_is_human(ua):
 def test_unknown_non_browser_uas_are_logged_once_and_bounded(monkeypatch):
     logged = []
     monkeypatch.setattr(crawlers, '_seen_unknown', set())
-    monkeypatch.setattr('rocketlib.debug', lambda msg: logged.append(msg))
+    monkeypatch.setattr(crawlers, 'debug', lambda msg: logged.append(msg))
     classify('SomeNewBot/1.0')
     classify('SomeNewBot/1.0')
     classify(BROWSERS[0])

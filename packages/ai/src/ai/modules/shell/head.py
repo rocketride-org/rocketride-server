@@ -103,7 +103,11 @@ def inject_head(
     # or a '<title>' string in a script, is content. Without a <head>, the
     # region before <body> stands in for it.
     span = _HEAD_SPAN.search(document)
-    start, end = span.span() if span else (0, (_BODY_OPEN.search(document) or re.search(r'$', document)).start())
+    if span:
+        start, end = span.span()
+    else:
+        body = _BODY_OPEN.search(document)
+        start, end = 0, body.start() if body else len(document)
     region = document[start:end]
     for pattern in _REPLACED:
         region = pattern.sub('', region)
