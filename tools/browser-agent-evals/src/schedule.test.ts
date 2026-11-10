@@ -128,7 +128,7 @@ test('--trials runs every task n times in rounds, real- tasks then app tasks fir
 	);
 });
 
-test('an error is retried once after the last round as a new trial, stays recorded, and is left out of k of n', async () => {
+test('an error is retried once, at the end of the queue, as a new trial; it stays recorded and is left out of k of n', async () => {
 	// task-a trial 1 errors and its retry passes; task-b errors every time, so its retry errors too and is not retried again
 	const script: Record<string, RunStatus> = { 'task-a#1': 'error', 'task-a#2': 'fail', 'task-a#3': 'pass', 'task-b#1': 'pass', 'task-b#2': 'error', 'task-b#3': 'error' };
 	const calls: string[] = [];
@@ -193,6 +193,66 @@ test('several workers share one queue: every job runs once, and a stop lets runn
 		{ stop: () => (started >= 4 ? 'the spend cap' : null) }
 	);
 	assert.equal(stopped.length, 4);
+});
+
+test("an error's retry starts as soon as the error ends, while another worker is still in the last round", async () => {
+	const events: string[] = [];
+	const runs = await runTrials(
+		['quick', 'slow'],
+		1,
+		async (job, worker) => {
+			events.push(`start ${job.id}#${job.trial} on ${worker}`);
+			await new Promise((r) => setTimeout(r, job.id === 'slow' ? 60 : 5));
+			events.push(`end ${job.id}#${job.trial}`);
+			return { ...fake(job.id, job.trial, job.id === 'quick' && !job.retryOf ? 'error' : 'pass'), ...(job.retryOf ? { retryOf: job.retryOf } : {}) };
+		},
+		(r) => r.status,
+		() => assert.fail('no trial throws here'),
+		{ workers: 2 }
+	);
+	assert.ok(events.indexOf('start quick#2 on 0') < events.indexOf('end slow#1'), events.join(', '));
+	assert.deepEqual(
+		runs.map((r) => [r.id, [r.first, ...r.reruns].map((t) => `${t.trial} ${t.status}`)]),
+		[
+			['quick', ['1 error', '2 pass']],
+			['slow', ['1 pass']],
+		]
+	);
+});
+
+test('a worker whose stack died takes no more jobs; its errored job is retried on a worker that is still up', async () => {
+	const dead = new Set<number>();
+	const ran: string[] = [];
+	const runs = await runTrials(
+		['a', 'b', 'c', 'd'],
+		1,
+		async (job, worker) => {
+			ran.push(`${job.id}#${job.trial}${job.retryOf ? `<-${job.retryOf}` : ''} on ${worker}`);
+			if (job.id === 'a' && !job.retryOf) {
+				// worker 0's stack dies under its first trial
+				dead.add(worker);
+				return fake(job.id, job.trial, 'error');
+			}
+			await new Promise((r) => setTimeout(r, 10));
+			return { ...fake(job.id, job.trial, 'pass'), ...(job.retryOf ? { retryOf: job.retryOf } : {}) };
+		},
+		(r) => r.status,
+		() => assert.fail('no trial throws here'),
+		{ workers: 2, usable: (w) => !dead.has(w) }
+	);
+	assert.deepEqual(ran, ['a#1 on 0', 'b#1 on 1', 'c#1 on 1', 'd#1 on 1', 'a#2<-1 on 1']);
+	assert.deepEqual(
+		runs.map((r) => [r.id, r.verdict]),
+		[
+			['a', 'pass'],
+			['b', 'pass'],
+			['c', 'pass'],
+			['d', 'pass'],
+		]
+	);
+	// once every worker is out, the jobs still queued do not run
+	const left = await runJobs(trialJobs(['x', 'y', 'z'], 1), async (job) => job.id, () => assert.fail('no job throws here'), { usable: () => false });
+	assert.deepEqual(left, []);
 });
 
 test('the spend cap stops new trials once the finished ones reach it; running trials finish and the report says why', async () => {

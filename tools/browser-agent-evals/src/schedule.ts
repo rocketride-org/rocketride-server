@@ -38,7 +38,7 @@
  * With a fixed trial count (runTrials), every task runs n times in rounds
  * and is scored k of n, with no reruns; only errors are retried, once.
  * Both modes take their trials from one job queue (runJobs), which several
- * workers can share.
+ * workers share: run --slots gives each slot's stack one worker.
  */
 
 import type { RunStatus } from './types';
@@ -90,40 +90,67 @@ export interface Job {
 
 /** How the queue runs: how many workers take from it, and what is asked before each job starts. */
 export interface QueueOptions {
-	/** Workers taking jobs from the one queue (default 1). */
+	/** Workers taking jobs from the one queue (default 1), numbered from 0. */
 	workers?: number;
 	/** Asked before each job starts; a reason stops the queue there. Jobs already running finish. */
 	stop?: () => string | null;
+	/** Asked before a worker takes a job; false retires that worker for good (its slot's stack died), and the others go on. */
+	usable?: (worker: number) => boolean;
+}
+
+/** A job that ran: its value, and the worker that ran it. */
+export interface JobDone<T> {
+	job: Job;
+	result: T;
+	worker: number;
 }
 
 /**
  * Runs jobs from one queue. Each worker takes the next job until the queue
- * is empty or `stop` gives a reason; a job that throws becomes `errored`'s
- * value and the queue goes on.
+ * is empty and no job is running, `stop` gives a reason, or `usable` retires
+ * it. A job that throws becomes `errored`'s value and the queue goes on.
+ * When a job ends, `then` may add jobs to the end of the queue; an idle
+ * worker waits for them while any job is still running.
  *
- * @returns Each job that ran and its value, in the order they finished.
+ * @returns Each job that ran, in the order they finished.
  */
-export async function runJobs<T>(jobs: Job[], run: (job: Job) => Promise<T>, errored: (job: Job, err: unknown) => T, opts: QueueOptions = {}): Promise<Array<{ job: Job; result: T }>> {
+export async function runJobs<T>(jobs: Job[], run: (job: Job, worker: number) => Promise<T>, errored: (job: Job, err: unknown, worker: number) => T, opts: QueueOptions = {}, then: (job: Job, result: T) => Job[] = () => []): Promise<Array<JobDone<T>>> {
 	const queue = [...jobs];
-	const done: Array<{ job: Job; result: T }> = [];
+	const done: Array<JobDone<T>> = [];
 	let stopped = false;
-	const worker = async (): Promise<void> => {
-		while (queue.length && !stopped) {
+	let running = 0;
+	let wake = () => {};
+	let changed = new Promise<void>((r) => (wake = r));
+	const worker = async (w: number): Promise<void> => {
+		for (;;) {
+			if (stopped) return;
+			if (!queue.length) {
+				if (!running) return;
+				await changed;
+				continue;
+			}
+			if (opts.usable && !opts.usable(w)) return;
 			if (opts.stop?.()) {
 				stopped = true;
 				return;
 			}
 			const job = queue.shift() as Job;
+			running++;
 			let result: T;
 			try {
-				result = await run(job);
+				result = await run(job, w);
 			} catch (err) {
-				result = errored(job, err);
+				result = errored(job, err, w);
 			}
-			done.push({ job, result });
+			running--;
+			done.push({ job, result, worker: w });
+			queue.push(...then(job, result));
+			const ended = wake;
+			changed = new Promise<void>((r) => (wake = r));
+			ended();
 		}
 	};
-	await Promise.all(Array.from({ length: Math.max(1, opts.workers ?? 1) }, worker));
+	await Promise.all(Array.from({ length: Math.max(1, opts.workers ?? 1) }, (_, w) => worker(w)));
 	return done;
 }
 
@@ -131,16 +158,16 @@ export async function runJobs<T>(jobs: Job[], run: (job: Job) => Promise<T>, err
  * Runs the schedule.
  *
  * @param ids - The task ids, in run order.
- * @param trial - Runs one trial of a task: its id and the trial number (1 for the first run, 2 and up for reruns).
+ * @param trial - Runs one trial of a task: its id, the trial number (1 for the first run, 2 and up for reruns) and the worker running it.
  * @param statusOf - A trial's status.
- * @param errored - The value of a trial that threw: its id, its number and what it threw. The schedule goes on with the next trial.
+ * @param errored - The value of a trial that threw: its id, its number, what it threw and its worker. The schedule goes on with the next trial.
  * @param reruns - How many times to rerun a failure (default 2).
  * @param opts - The queue's workers, and what stops it. A task whose first run never started is left out.
  * @returns Each task's runs, in the order given.
  */
-export async function runSchedule<T>(ids: string[], trial: (id: string, n: number) => Promise<T>, statusOf: (t: T) => RunStatus, errored: (id: string, n: number, err: unknown) => T, reruns = 2, opts: QueueOptions = {}): Promise<Array<TaskRuns<T>>> {
-	const run = (j: Job) => trial(j.id, j.trial);
-	const fail = (j: Job, err: unknown) => errored(j.id, j.trial, err);
+export async function runSchedule<T>(ids: string[], trial: (id: string, n: number, worker: number) => Promise<T>, statusOf: (t: T) => RunStatus, errored: (id: string, n: number, err: unknown, worker: number) => T, reruns = 2, opts: QueueOptions = {}): Promise<Array<TaskRuns<T>>> {
+	const run = (j: Job, w: number) => trial(j.id, j.trial, w);
+	const fail = (j: Job, err: unknown, w: number) => errored(j.id, j.trial, err, w);
 	// step: the first pass over every task, before any rerun, so the first-run rate is one sitting
 	const firsts = new Map((await runJobs(ids.map((id) => ({ id, trial: 1 })), run, fail, opts)).map((d) => [d.job.id, d.result]));
 	const runs: Array<TaskRuns<T>> = ids.filter((id) => firsts.has(id)).map((id) => ({ id, first: firsts.get(id) as T, reruns: [], verdict: 'pending' }));
@@ -207,30 +234,27 @@ export function scoreOf(statuses: RunStatus[]): TrialScore {
 
 /**
  * Runs every task `trials` times, pass or fail, in rounds, through one job
- * queue. After the last round each trial that ended `error` is retried once,
- * as the task's next trial number, and the errored trial stays recorded.
+ * queue. A trial that ends `error` is retried once: when it ends, its retry
+ * goes to the end of the queue as the task's next trial number, so an idle
+ * worker takes it. The errored trial stays recorded; a retry is not retried.
  *
  * @param ids - The task ids, in round order (roundOrder).
  * @param trials - How many times each task runs.
- * @param trial - Runs one job; a retry carries `retryOf`.
+ * @param trial - Runs one job on a worker; a retry carries `retryOf`.
  * @param statusOf - A trial's status.
  * @param errored - The value of a job that threw.
- * @param opts - The queue's workers, and what stops it. A task none of whose trials started is left out.
+ * @param opts - The queue's workers, and what stops or retires them. A task none of whose trials started is left out.
  * @returns Each task's trials, in the order given: `first` is trial 1 and `reruns` the task's other trials in trial order (no trial here is a rerun of a failure).
  */
-export async function runTrials<T>(ids: string[], trials: number, trial: (job: Job) => Promise<T>, statusOf: (t: T) => RunStatus, errored: (job: Job, err: unknown) => T, opts: QueueOptions = {}): Promise<Array<TaskRuns<T>>> {
-	const done = await runJobs(trialJobs(ids, trials), trial, errored, opts);
-	// step: one retry of each error, after every round, numbered after the task's last trial
+export async function runTrials<T>(ids: string[], trials: number, trial: (job: Job, worker: number) => Promise<T>, statusOf: (t: T) => RunStatus, errored: (job: Job, err: unknown, worker: number) => T, opts: QueueOptions = {}): Promise<Array<TaskRuns<T>>> {
 	const next = new Map(ids.map((id) => [id, trials + 1]));
-	const retries = done
-		.filter((d) => statusOf(d.result) === 'error')
-		.sort((a, b) => ids.indexOf(a.job.id) - ids.indexOf(b.job.id) || a.job.trial - b.job.trial)
-		.map((d) => {
-			const n = next.get(d.job.id) as number;
-			next.set(d.job.id, n + 1);
-			return { id: d.job.id, trial: n, retryOf: d.job.trial };
-		});
-	done.push(...(await runJobs(retries, trial, errored, opts)));
+	const retry = (job: Job, result: T): Job[] => {
+		if (job.retryOf || statusOf(result) !== 'error') return [];
+		const n = next.get(job.id) as number;
+		next.set(job.id, n + 1);
+		return [{ id: job.id, trial: n, retryOf: job.trial }];
+	};
+	const done = await runJobs(trialJobs(ids, trials), trial, errored, opts, retry);
 	return ids.flatMap((id) => {
 		const mine = done.filter((d) => d.job.id === id).sort((a, b) => a.job.trial - b.job.trial);
 		if (!mine.length) return [];

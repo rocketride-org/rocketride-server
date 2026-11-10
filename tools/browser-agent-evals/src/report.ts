@@ -274,9 +274,9 @@ function runRows(results: ResultsFile): string[] {
 		'',
 		`Totals: estimated cost $${t.estimatedCostUsd.toFixed(2)} over ${runs.length} run(s)${t.trialsWithoutCost ? ` (${t.trialsWithoutCost} with no estimate)` : ''}; trial time ${hm(t.trialWallMs)} summed${t.elapsedMs === null ? '' : `, ${hm(t.elapsedMs)} from start to finish`}. The estimated cost is the agent's own meter, the figure its cost limit checks: it counts 4 characters as a token and leaves out thinking, so the provider's bill can be higher. Wall time covers the whole trial, setup and grading included.`,
 		'',
-		'| Task | Trial | Status | Retry of | Steps | Wall s | Est. cost | Cause |',
-		'| --- | --- | --- | --- | --- | --- | --- | --- |',
-		...runs.map(({ task, r }) => `| ${task.id} | ${r.trial} | ${r.status} | ${r.retryOf ?? '-'} | ${r.steps ?? '-'} | ${r.wallMs === null ? '-' : Math.round(r.wallMs / 1000)} | ${r.estimatedCostUsd === null ? '-' : `$${r.estimatedCostUsd.toFixed(2)}`} | ${r.cause?.label ?? '-'} |`),
+		'| Task | Trial | Slot | Status | Retry of | Steps | Wall s | Est. cost | Cause |',
+		'| --- | --- | --- | --- | --- | --- | --- | --- | --- |',
+		...runs.map(({ task, r }) => `| ${task.id} | ${r.trial} | ${r.slot ?? '-'} | ${r.status} | ${r.retryOf ?? '-'} | ${r.steps ?? '-'} | ${r.wallMs === null ? '-' : Math.round(r.wallMs / 1000)} | ${r.estimatedCostUsd === null ? '-' : `$${r.estimatedCostUsd.toFixed(2)}`} | ${r.cause?.label ?? '-'} |`),
 		'',
 	];
 }

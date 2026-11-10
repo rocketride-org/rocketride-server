@@ -52,6 +52,8 @@ export interface ResultsTrial {
 	rerun: boolean;
 	/** The errored trial this one retries, when it is a retry. */
 	retryOf?: number;
+	/** The slot whose stack ran it (run --slots); absent for a run on one stack. */
+	slot?: number;
 	status: RunStatus;
 	why: string;
 	/** The turn's steps (waves), from the saved turn; null when there was no turn. */
@@ -100,7 +102,10 @@ export interface ResultsFile {
 	schedule?: Schedule;
 	/** Why the batch stopped starting trials before its schedule was done (guards.ts), or null when it ran to the end. */
 	stopped?: string | null;
+	/** Slot 0's engine; every slot runs a clone of the same dist/server. */
 	engine: unknown;
+	/** run --slots: each slot's shell, engine and store. */
+	slots?: Array<{ slot: number; shell: string; engine: string; store: string | null }>;
 	checkout: { commit: string; branch: string; dirtyFiles: number };
 	summary: ScheduleSummary & { firstRunStatuses: Record<string, number>; totals: Totals };
 	tasks: ResultsTask[];
@@ -143,6 +148,7 @@ export function buildResults(runs: Array<TaskRuns<TrialResult>>, tasks: Map<stri
 		trial: r.trial,
 		rerun: reruns && later,
 		...(r.retryOf ? { retryOf: r.retryOf } : {}),
+		...(r.slot !== undefined ? { slot: r.slot } : {}),
 		status: r.status,
 		why: r.why,
 		...trialCost(r),

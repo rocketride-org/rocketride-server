@@ -39,7 +39,7 @@ import { modelTitles, parseModel, type ModelPick } from './driver';
 import { findLeaks, heldKeys, readModelKeys, Scrubber, type HeldKey } from './evidence';
 import { erroredTrial, type TrialResult } from './grade';
 import { freeGb, stopReason, type Guards } from './guards';
-import { LOCAL_APIKEY, openStack, type Stack } from './stack';
+import { LOCAL_APIKEY, MAX_SLOTS, openStack, slotPlan, type Stack, type StackOptions } from './stack';
 import { agentSettingsFile, Store, type AgentLimits } from './store';
 import { loadTasks, type Task } from './task';
 import { writeRunReport } from './report';
@@ -78,7 +78,8 @@ Commands:
                   default each task's reference solution.
   stack           Start the local stack (engine, rocket-ui dev remote, shell
                   dev server) and keep it up until Ctrl-C; run --url
-                  <its shell URL> --allow-wipe uses it.
+                  <its shell URL> --allow-wipe uses it. With --slots n,
+                  starts n stacks side by side and prints each shell URL.
   smoke           Ask each model one question the way the Agent tab does
                   (task 0.2), on the engine alone. Prints a table: model,
                   answered, seconds, whether the engine lists the key name.
@@ -120,9 +121,19 @@ Options:
   --trials <n>    run: every task exactly n times, pass or fail, in rounds
                   (every task once, then every task again), with no reruns
                   of failures. Within a round: real-* tasks, then app tasks,
-                  then the rest. After the last round each trial that ended
-                  error is retried once as a new trial (retryOf). The report
-                  shows k of n per task. Without it, --reruns applies.
+                  then the rest. A trial that ends error is retried once as
+                  a new trial (retryOf), added to the end of the queue when
+                  it ends. The report shows k of n per task. Without it,
+                  --reruns applies.
+  --slots <n>     run, stack: n whole stacks side by side (1 to ${MAX_SLOTS},
+                  default 1), each with its own ports, engine clone, store,
+                  dev configs and browser. They take trials from one queue,
+                  in the --trials order; an error's retry joins the queue
+                  when the error ends. A slot whose stack fails to start or
+                  dies takes no more trials, and its running trial ends as
+                  an error and is retried. Needs --trials, and no --url.
+                  Slot 0 keeps 5565, 3010 and 3000; slot k uses 5600+10k
+                  (engine), 3100+10k (shell) and 3101+10k (rocket-ui).
   --max-spend <usd>
                   run: before each trial starts, stop starting trials once
                   the finished trials' estimated cost is at or over this.
@@ -154,6 +165,8 @@ interface Args {
 	reruns: number;
 	/** Every task this many times in rounds, with no reruns (null: reruns mode). */
 	trials: number | null;
+	/** How many stacks run trials side by side. */
+	slots: number;
 	headed: boolean;
 	models: string[];
 	workspace: string | null;
@@ -166,7 +179,7 @@ interface Args {
 }
 
 function parseArgs(argv: string[]): Args {
-	const args: Args = { command: null, tasks: DATA_DIR, only: [], table: false, model: DEFAULT_MODEL, url: null, apikeyEnv: null, out: null, reruns: 2, trials: null, headed: false, models: [], workspace: null, allowWipe: false, noPreview: false, envFile: DEFAULT_ENV_FILE, limits: {}, guards: { maxSpendUsd: null, minFreeGb: DEFAULT_MIN_FREE_GB }, help: false };
+	const args: Args = { command: null, tasks: DATA_DIR, only: [], table: false, model: DEFAULT_MODEL, url: null, apikeyEnv: null, out: null, reruns: 2, trials: null, slots: 1, headed: false, models: [], workspace: null, allowWipe: false, noPreview: false, envFile: DEFAULT_ENV_FILE, limits: {}, guards: { maxSpendUsd: null, minFreeGb: DEFAULT_MIN_FREE_GB }, help: false };
 	for (let i = 0; i < argv.length; i++) {
 		const a = argv[i];
 		const value = () => {
@@ -188,6 +201,9 @@ function parseArgs(argv: string[]): Args {
 		} else if (a === '--trials') {
 			args.trials = Number(value());
 			if (!Number.isInteger(args.trials) || args.trials < 1) throw new Error('--trials needs a whole number of 1 or more');
+		} else if (a === '--slots') {
+			args.slots = Number(value());
+			if (!Number.isInteger(args.slots) || args.slots < 1 || args.slots > MAX_SLOTS) throw new Error(`--slots needs a whole number from 1 to ${MAX_SLOTS}`);
 		} else if (a === '--max-spend') {
 			args.guards.maxSpendUsd = Number(value());
 			if (!Number.isFinite(args.guards.maxSpendUsd) || args.guards.maxSpendUsd <= 0) throw new Error('--max-spend needs a number of US dollars above 0');
@@ -212,6 +228,8 @@ function parseArgs(argv: string[]): Args {
 		else throw new Error(`unexpected argument ${a}`);
 	}
 	if (args.trials !== null && argv.includes('--reruns')) throw new Error('--trials runs every task a fixed number of times with no reruns; leave out --reruns');
+	if (args.slots > 1 && args.url) throw new Error('--slots starts local stacks; leave out --url');
+	if (args.slots > 1 && args.trials === null && args.command === 'run') throw new Error('--slots runs the fixed-trials schedule, where an error is retried on another slot; pass --trials');
 	return args;
 }
 
@@ -282,23 +300,23 @@ async function run(args: Args, modelKeys: HeldKey[]): Promise<number> {
 	log(`agent limits: ${limits ? JSON.stringify(agentSettingsFile(limits).settings) : "the product's defaults"}`);
 	log(`no trial starts once the finished trials' estimated cost reaches ${args.guards.maxSpendUsd === null ? '(no cap)' : `$${args.guards.maxSpendUsd.toFixed(2)}`}, or under ${args.guards.minFreeGb} GB free on the output disk`);
 
-	let stack: Stack;
-	try {
-		stack = await openStack({ url: args.url ?? undefined, apiKey, modelKeys, dir: path.join(out, 'stack'), scrubber, log });
-	} catch (err) {
-		console.error(`could not start the stack: ${err instanceof Error ? err.message : String(err)}`);
-		return 2;
-	}
+	const stacks = await openStacks(args.slots, { url: args.url ?? undefined, apiKey, modelKeys, scrubber, log }, out);
+	if (!stacks.length) return 2;
 	const stopStack = () => {
-		void stack.stop().finally(() => process.exit(130));
+		void Promise.all(stacks.map((s) => s.stop())).finally(() => process.exit(130));
 	};
 	process.once('SIGINT', stopStack);
 	process.once('SIGTERM', stopStack);
+	const slotLog = slotLogger(args.slots, log);
 
-	// step: one known-good call before the first trial: the first model call on a fresh engine loads the
+	// step: one known-good call on each slot before the first trial: the first model call on a fresh engine loads the
 	// provider's node and is slow, which would otherwise land on the first trial; it also shows a broken model early
-	const warm = (await smokeModels(stack.engineUri, apiKey, [model], scrubber).catch((err: unknown) => [{ answered: false, seconds: 0, detail: String(err) }]))[0];
-	log(`known-good call to ${model.provider}/${model.model}: ${warm?.answered ? `answered in ${warm.seconds}s` : `FAILED: ${scrubber.scrub(warm?.detail ?? '').slice(0, 200)}`}`);
+	await Promise.all(
+		stacks.map(async (stack) => {
+			const warm = (await smokeModels(stack.engineUri, apiKey, [model], scrubber).catch((err: unknown) => [{ answered: false, seconds: 0, detail: String(err) }]))[0];
+			slotLog(stack.slot)(`known-good call to ${model.provider}/${model.model}: ${warm?.answered ? `answered in ${warm.seconds}s` : `FAILED: ${scrubber.scrub(warm?.detail ?? '').slice(0, 200)}`}`);
+		})
+	);
 	const startedAt = new Date().toISOString();
 	const byId = new Map(valid.map((t) => [t.id, t]));
 	let failedToRun = 0;
@@ -306,37 +324,48 @@ async function run(args: Args, modelKeys: HeldKey[]): Promise<number> {
 	let stopped: string | null = null;
 	try {
 		const label =(job: Job) => (job.retryOf ? ` (retry of trial ${job.retryOf})` : schedule.mode === 'reruns' && job.trial > 1 ? ' (rerun)' : '');
-		const one = async (job: Job): Promise<TrialResult> => {
+		const one = async (job: Job, worker: number): Promise<TrialResult> => {
+			const stack = stacks[worker] as Stack;
 			const task = byId.get(job.id) as Task;
 			const n = job.trial;
 			const dir = path.join(out, task.id, `trial-${n}`);
 			const { record: r, result: raw } = await runTrial({ task, tasksDir: args.tasks, trial: n, model, stack, dir, headed: args.headed, previews: !args.noPreview, limits, keys, engineKeys, scrubber });
 			if (job.retryOf) raw.retryOf = job.retryOf;
+			raw.slot = stack.slot;
+			// step: a trial whose stack died under it is the environment's error, whatever its grade says; the queue retries it
+			const dead = stack.died();
+			if (dead) {
+				raw.status = 'error';
+				raw.why = `the stack died during the trial: ${dead}`;
+			}
 			// step: the known-good call after every trial the runner drove, recorded with it; a failed trial gets its cause from it too
-			const kg = r.endReason === 'not_supported' ? null : ((await smokeModels(stack.engineUri, apiKey, [model], scrubber).catch(() => null))?.[0] ?? null);
+			const kg = r.endReason === 'not_supported' || dead ? null : ((await smokeModels(stack.engineUri, apiKey, [model], scrubber).catch(() => null))?.[0] ?? null);
 			raw.knownGood = kg ? { model: kg.model, answered: kg.answered, seconds: kg.seconds, detail: kg.detail } : null;
-			if (raw.status !== 'pass' && raw.status !== 'pending') raw.cause = causeOf(raw, r, kg);
+			if (dead) raw.cause = { label: 'environment', evidence: dead };
+			else if (raw.status !== 'pass' && raw.status !== 'pending') raw.cause = causeOf(raw, r, kg);
 			// step: from here on the grade is scrubbed: the log, result.json, results.json and the report all read this copy
 			const result = JSON.parse(scrubber.scrub(JSON.stringify(raw))) as typeof raw;
 			fs.writeFileSync(path.join(dir, 'result.json'), `${JSON.stringify(result, null, '\t')}\n`);
 			const outcome = r.turns[0]?.result?.outcome ?? 'none';
 			const card = r.browser.card ? `card "${r.browser.card.title}"${r.browser.cardMatchesOutcome === false ? ' (DISAGREES)' : ''}` : 'no card';
 			const cards = r.confirms.length ? `, ${r.confirms.length} card(s): ${r.confirms.map((c) => c.answer).join(', ')}` : '';
-			log(`${task.id} trial ${n}${label(job)}: ${result.status.toUpperCase()}, outcome ${outcome}, ${card}${cards}, ${Math.round(r.totalWallMs / 1000)}s: ${result.why.slice(0, 200)}`);
+			slotLog(stack.slot)(`${task.id} trial ${n}${label(job)}: ${result.status.toUpperCase()}, outcome ${outcome}, ${card}${cards}, ${Math.round(r.totalWallMs / 1000)}s: ${result.why.slice(0, 200)}`);
 			log(`  ${dir}`);
-			if (r.endReason === 'runner_error' || r.endReason === 'environment' || r.browser.leaks.length) failedToRun++;
+			if (dead || r.endReason === 'runner_error' || r.endReason === 'environment' || r.browser.leaks.length) failedToRun++;
 			if (result.cause) log(`  cause: ${result.cause.label}: ${result.cause.evidence.slice(0, 200)}`);
 			finished.push(result);
 			return result;
 		};
 		// a trial that threw past its own catch has no record to grade; nothing is written here, since a write may be what failed
-		const fail = (job: Job, err: unknown): TrialResult => {
+		const fail = (job: Job, err: unknown, worker: number): TrialResult => {
 			const task = byId.get(job.id) as Task;
+			const slot = (stacks[worker] as Stack).slot;
 			const leaks = findLeaks(path.join(out, task.id, `trial-${job.trial}`), keys);
 			const leaked = leaks.length ? `; a held key is in the trial folder: ${leaks.map((l) => `${l.key} in ${l.file}`).join(', ')}` : '';
 			const result = erroredTrial(task, job.trial, `${model.provider}/${model.model}`, `${scrubber.scrub((err instanceof Error ? err.message : String(err)).split('\n')[0] ?? '')}${leaked}`);
 			if (job.retryOf) result.retryOf = job.retryOf;
-			log(`${task.id} trial ${job.trial}${label(job)}: ${result.status.toUpperCase()}: ${result.why.slice(0, 200)}`);
+			result.slot = slot;
+			slotLog(slot)(`${task.id} trial ${job.trial}${label(job)}: ${result.status.toUpperCase()}: ${result.why.slice(0, 200)}`);
 			failedToRun++;
 			finished.push(result);
 			return result;
@@ -349,18 +378,34 @@ async function run(args: Args, modelKeys: HeldKey[]): Promise<number> {
 			}
 			return stopped;
 		};
+		// step: a slot whose stack died takes no more trials; the others go on
+		const retired = new Set<number>();
+		const usable = (worker: number): boolean => {
+			const stack = stacks[worker] as Stack;
+			const dead = stack.died();
+			if (dead && !retired.has(worker)) {
+				retired.add(worker);
+				log(`slot ${stack.slot} is out: ${dead}. It takes no more trials; a trial that errored on it is retried on another slot`);
+			}
+			return !dead;
+		};
+		const queue = { workers: stacks.length, stop, usable };
 		const statusOf = (r: TrialResult) => r.status;
 		const runs =
 			schedule.mode === 'trials'
-				? await runTrials(roundOrder(valid), schedule.trials, one, statusOf, fail, { stop })
+				? await runTrials(roundOrder(valid), schedule.trials, one, statusOf, fail, queue)
 				: await runSchedule(
 						valid.map((t) => t.id),
-						(id, n) => one({ id, trial: n }),
+						(id, n, w) => one({ id, trial: n }, w),
 						statusOf,
-						(id, n, err) => fail({ id, trial: n }, err),
+						(id, n, err, w) => fail({ id, trial: n }, err, w),
 						schedule.reruns,
-						{ stop }
+						queue
 					);
+		if (stopped === null && stacks.every((s) => s.died())) {
+			stopped = 'the loss of every slot: each stack died, so the trials still queued did not run';
+			log(`stopping: ${stopped}`);
+		}
 		const results = buildResults(runs, byId, out, {
 			startedAt,
 			finishedAt: new Date().toISOString(),
@@ -368,7 +413,8 @@ async function run(args: Args, modelKeys: HeldKey[]): Promise<number> {
 			taskSet: path.relative(REPO_ROOT, args.tasks),
 			schedule,
 			stopped,
-			engine: stack.engine,
+			engine: (stacks[0] as Stack).engine,
+			...(args.slots > 1 ? { slots: stacks.map((s) => ({ slot: s.slot, shell: s.shellUrl, engine: s.engine.url, store: s.engine.store ?? null })) } : {}),
 			checkout: checkout(),
 		});
 		writeResults(out, results);
@@ -385,9 +431,36 @@ async function run(args: Args, modelKeys: HeldKey[]): Promise<number> {
 	} finally {
 		process.removeListener('SIGINT', stopStack);
 		process.removeListener('SIGTERM', stopStack);
-		await stack.stop();
+		await Promise.all(stacks.map((s) => s.stop()));
 	}
 	return failedToRun ? 1 : 0;
+}
+
+/** Each slot's log line, prefixed with its slot when there are several. */
+function slotLogger(slots: number, log: (line: string) => void): (slot: number) => (line: string) => void {
+	return (slot) => (slots > 1 ? (line) => log(`slot ${slot}: ${line}`) : log);
+}
+
+/**
+ * Starts `slots` stacks side by side (or attaches to --url's), each in its slot's folder of the run folder.
+ * A slot that fails to start is logged and left out; the others go on.
+ *
+ * @returns The stacks that came up, in slot order; none when every slot failed, which is reported.
+ */
+async function openStacks(slots: number, opts: Omit<StackOptions, 'dir' | 'slot'>, out: string): Promise<Stack[]> {
+	const slotLog = slotLogger(slots, opts.log);
+	const opened = await Promise.allSettled(Array.from({ length: slots }, (_, slot) => openStack({ ...opts, slot, dir: path.join(out, slotPlan(slot).dir), log: slotLog(slot) })));
+	const why = (r: PromiseSettledResult<Stack>) => (r.status === 'rejected' ? (r.reason instanceof Error ? r.reason.message : String(r.reason)) : '');
+	if (slots === 1 && opened[0]?.status === 'rejected') {
+		console.error(`could not start the stack: ${why(opened[0])}`);
+		return [];
+	}
+	opened.forEach((r, slot) => {
+		if (r.status === 'rejected') opts.log(`slot ${slot} did not start and runs no trials: ${why(r)}`);
+	});
+	const up = opened.flatMap((r) => (r.status === 'fulfilled' ? [r.value] : []));
+	if (!up.length) console.error('could not start any slot');
+	return up;
 }
 
 /** The checkout under test: its commit, branch and uncommitted file count. */
@@ -433,19 +506,14 @@ async function holdStack(args: Args, modelKeys: HeldKey[]): Promise<number> {
 	const out = args.out ?? path.join(REPO_ROOT, '.verify', 'browser-agent', `stack-${new Date().toISOString().replace(/[:.]/g, '-')}`);
 	const log = (line: string) => console.log(`[eval] ${scrubber.scrub(line)}`);
 	log(`model keys held: ${keys.map((k) => k.name).join(', ') || 'none'}`);
-	let stack: Stack;
-	try {
-		stack = await openStack({ apiKey: LOCAL_APIKEY, modelKeys, dir: path.join(out, 'stack'), scrubber, log });
-	} catch (err) {
-		console.error(`could not start the stack: ${err instanceof Error ? err.message : String(err)}`);
-		return 2;
-	}
-	log(`up: ${stack.shellUrl} (engine ${stack.engineUri}). Ctrl-C stops it.`);
+	const stacks = await openStacks(args.slots, { apiKey: LOCAL_APIKEY, modelKeys, scrubber, log }, out);
+	if (!stacks.length) return 2;
+	for (const stack of stacks) log(`${args.slots > 1 ? `slot ${stack.slot} ` : ''}up: ${stack.shellUrl} (engine ${stack.engineUri}). Ctrl-C stops ${args.slots > 1 ? 'them' : 'it'}.`);
 	await new Promise<void>((resolve) => {
 		process.once('SIGINT', resolve);
 		process.once('SIGTERM', resolve);
 	});
-	await stack.stop();
+	await Promise.all(stacks.map((s) => s.stop()));
 	log('stopped');
 	return 0;
 }

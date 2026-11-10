@@ -226,7 +226,13 @@ export async function runTrial(opts: TrialOptions): Promise<{ record: BrowserTri
 			} else {
 				// steps 3 to 5: the prompt, the cards, the turn's end
 				await driver.send(task.prompt);
-				const during = opts.previews ? newAppPreviews(store, driver, previewed, browser.previewsOpened, steps) : undefined;
+				const previews = opts.previews ? newAppPreviews(store, driver, previewed, browser.previewsOpened, steps) : null;
+				// step: a stack that died ends the turn now, as a runner error the queue retries, not at the time limit
+				const during = async (deadline: number) => {
+					const dead = opts.stack.died();
+					if (dead) throw new Error(`the stack died during the turn: ${dead}`);
+					return previews ? await previews(deadline) : false;
+				};
 				const run = await driver.runTurn(task.cards, task.timeLimitSec * 1000, during);
 				if (midWrite) browser.userEvents.push({ when: midWrite.when, action: midWrite.action, path: midWrite.path, done: driver.heldWrite !== null && !driver.heldWrite.detail.startsWith('failed'), detail: driver.heldWrite ? `held the agent's write ${driver.heldWrite.ms} ms: ${driver.heldWrite.detail}` : 'the agent never wrote the file, so there was no write to hold' });
 				// step: what the user does when the turn is over (save a buffer that is still unsaved)

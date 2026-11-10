@@ -43,7 +43,7 @@ test('each run shows its steps, wall time and estimated cost, and the batch its 
 		const build = { id: 'build-01', type: 'BUILD', target: 'pipeline', judge: [] } as unknown as Task;
 		const ask = { id: 'answer-01', type: 'ANSWER', target: 'pipeline', judge: [] } as unknown as Task;
 		const runs = [
-			{ id: 'build-01', first: trial(1, 'pass', { waves: 12, wallMs: 95_000, estimatedCostUsd: 0.5 }), reruns: [trial(2, 'fail', { waves: 30, wallMs: 185_000, estimatedCostUsd: 1.25 })], verdict: 'flaky' as const },
+			{ id: 'build-01', first: trial(1, 'pass', { waves: 12, wallMs: 95_000, estimatedCostUsd: 0.5 }), reruns: [{ ...trial(2, 'fail', { waves: 30, wallMs: 185_000, estimatedCostUsd: 1.25 }), slot: 1 }], verdict: 'flaky' as const },
 			{ id: 'answer-01', first: erroredTrial(ask, 1, 'm', 'the browser crashed'), reruns: [], verdict: 'error' as const },
 		];
 		const results = buildResults(
@@ -66,8 +66,8 @@ test('each run shows its steps, wall time and estimated cost, and the batch its 
 		assert.deepEqual(results.summary.totals, { estimatedCostUsd: 1.75, trialsWithoutCost: 1, trialWallMs: 280_000, elapsedMs: 5_400_000 });
 		const report = fs.readFileSync(writeRunReport(dir, results), 'utf8');
 		assert.match(report, /^Totals: estimated cost \$1\.75 over 3 run\(s\) \(1 with no estimate\); trial time 0h 5m summed, 1h 30m from start to finish\./m);
-		assert.match(report, /^\| build-01 \| 2 \| fail \| - \| 30 \| 185 \| \$1\.25 \| - \|$/m);
-		assert.match(report, /^\| answer-01 \| 1 \| error \| - \| - \| - \| - \| runner \|$/m);
+		assert.match(report, /^\| build-01 \| 2 \| 1 \| fail \| - \| 30 \| 185 \| \$1\.25 \| - \|$/m);
+		assert.match(report, /^\| answer-01 \| 1 \| - \| error \| - \| - \| - \| - \| runner \|$/m);
 	} finally {
 		fs.rmSync(dir, { recursive: true, force: true });
 	}
