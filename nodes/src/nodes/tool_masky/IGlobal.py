@@ -1,54 +1,40 @@
 # =============================================================================
 # MIT License
 # Copyright (c) 2026 Aparavi Software AG
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
 # =============================================================================
 
 """
-Masky node -- global (shared) state.
+Masky node - global (shared) state.
 
-Reads the node configuration, resolves the API key (the node field first, then
-``ROCKETRIDE_MASKY_KEY``) and creates the ``MaskyDriver`` that serves the
-``masky.*`` tools. The pipeline action settings are parsed here too, so a bad
-value fails the pipeline at start rather than on the first record.
+Reads the resolved node configuration and creates the ``MaskyDriver`` that
+serves the ``masky.*`` tools. The schema types, bounds and pins every setting
+and requires the API key; this module keeps the semantic checks the schema
+cannot express (an https base URL, a finite credit cap, a placeholder that was
+never filled), so a bad value fails the pipeline at start rather than on the
+first record.
 """
 
 from __future__ import annotations
 
 import math
+import re
 import urllib.parse
+from collections.abc import Mapping
 from typing import Any, Dict, List
 
-from ai.common.config import Config, check_credential_resolved
-from ai.common.utils import parse_bool
-from rocketlib import IGlobalBase, OPEN_MODE, warning
+from rocketlib import IGlobalBase, warning
 
 from .masky_client import MaskyClient
-from .masky_core import ACTIONS, ASPECT_RATIOS, ENV_API_KEY, LIMITS, MASKY_BASE_URL, resolve_api_key
+from .masky_core import LIMITS
 from .masky_driver import MaskyDriver
-
-QUALITIES = ('720p-draft', '720p', '1080p-draft', '1080p')
 
 # Plain http is accepted only for these hosts (a local mock server), so the API
 # key, sent as a Bearer header on every request, never crosses a network unencrypted.
 LOCAL_HOSTS = ('localhost', '127.0.0.1', '::1')
+
+# A ${NAME} the task did not fill, or the <REDACTED> the server substitutes
+# for a non-ROCKETRIDE_ placeholder: neither is a key to send anywhere
+_UNRESOLVED_CREDENTIAL = re.compile(r'\$\{([A-Za-z_][A-Za-z0-9_]*)\}|<REDACTED>')
 
 
 def validate_base_url(raw: str) -> str:
@@ -70,92 +56,79 @@ def validate_base_url(raw: str) -> str:
     )
 
 
-def _choice(cfg: Dict[str, Any], name: str, default: str, allowed: tuple) -> str:
-    value = str(cfg.get(name) or default).strip()
-    if value not in allowed:
-        raise ValueError(f'{name} must be one of {", ".join(allowed)} (got {value!r})')
-    return value
+def check_api_key(value: Any) -> str:
+    """Return the stripped key; raise ValueError when it is blank or an unfilled placeholder."""
+    key = str(value or '').strip()
+    if not key:
+        raise ValueError('Masky API key not configured. Get one at https://masky.ai/developer')
+    match = _UNRESOLVED_CREDENTIAL.search(key)
+    if match:
+        raise ValueError(
+            f'tool_masky.apikey is an unfilled placeholder ({match.group(0)}): save the variable it names '
+            'under Environment Variables, or paste the key'
+        )
+    return key
 
 
-def _int(cfg: Dict[str, Any], name: str, default: int, minimum: int, maximum: int | None = None) -> int:
-    raw = cfg.get(name, default)
-    if raw is None or raw == '':
-        return default
-    bound = f'between {minimum} and {maximum}' if maximum is not None else f'>= {minimum}'
-    if isinstance(raw, bool):
-        raise ValueError(f'{name} must be an integer {bound}')
-    try:
-        value = int(raw)
-    except (TypeError, ValueError):
-        raise ValueError(f'{name} must be an integer {bound}') from None
-    if value < minimum or (maximum is not None and value > maximum):
-        raise ValueError(f'{name} must be an integer {bound}')
-    return value
+def read_settings(cfg: Mapping) -> Dict[str, Any]:
+    """Read the node settings from the resolved config; raise ValueError on a semantic problem.
 
-
-def read_settings(cfg: Dict[str, Any]) -> Dict[str, Any]:
-    """Parse and range-check the node settings; raise ValueError on the first bad value."""
-    raw_credits = cfg.get('maxCreditsPerCall', 1.0)
-    try:
-        max_credits = float(1.0 if raw_credits in (None, '') else raw_credits)
-    except (TypeError, ValueError):
-        raise ValueError('maxCreditsPerCall must be a number >= 0') from None
-    if isinstance(raw_credits, bool) or not math.isfinite(max_credits) or max_credits < 0:
+    The resolver has already applied the defaults and checked every type, range
+    and enum, so the view is read as is. What remains is the base URL scheme and
+    a finite credit cap (JSON cannot carry one, a hand-built config can).
+    """
+    max_credits = float(cfg['maxCreditsPerCall'])
+    if not math.isfinite(max_credits) or max_credits < 0:
         raise ValueError('maxCreditsPerCall must be a finite number >= 0')
 
-    fps = _int(cfg, 'fps', 24, 1)
-    if fps not in (24, 48):
-        raise ValueError('fps must be 24 or 48')
-
-    seed_raw = cfg.get('seed')
-    seed = None if seed_raw in (None, '') else _int(cfg, 'seed', 0, 0)
-
     return {
-        'server_name': str(cfg.get('serverName') or 'masky').strip(),
-        'base_url': validate_base_url(str(cfg.get('baseUrl') or MASKY_BASE_URL)),
+        'server_name': cfg['serverName'],
+        'base_url': validate_base_url(cfg['baseUrl']),
         'max_credits_per_call': max_credits,
-        'timeout_sec': _int(cfg, 'timeoutSec', 300, 10),
-        'poll_interval_sec': _int(cfg, 'pollIntervalSec', 3, 1),
-        'default_avatar': str(cfg.get('defaultAvatar') or '').strip(),
-        'default_look': str(cfg.get('defaultLook') or '').strip(),
-        'language': str(cfg.get('language') or 'en').strip(),
-        'include_media_urls': parse_bool(cfg.get('includeMediaUrls', True)),
+        'timeout_sec': cfg['timeoutSec'],
+        'poll_interval_sec': cfg['pollIntervalSec'],
+        'default_avatar': str(cfg['defaultAvatar'] or '').strip(),
+        'default_look': str(cfg['defaultLook'] or '').strip(),
+        'language': cfg['language'].strip(),
+        'include_media_urls': cfg['includeMediaUrls'],
         # Permission switches for agent tools (all off by default). readOnly does not
         # affect the pipeline action; allowPublicSharing also applies to scene_video.
-        'read_only': parse_bool(cfg.get('readOnly', False)),
-        'allow_delete': parse_bool(cfg.get('allowDelete', False)),
-        'allow_public_sharing': parse_bool(cfg.get('allowPublicSharing', False)),
-        'action': _choice(cfg, 'action', 'talking_head', ACTIONS),
+        'read_only': cfg['readOnly'],
+        'allow_delete': cfg['allowDelete'],
+        'allow_public_sharing': cfg['allowPublicSharing'],
+        'action': cfg['action'],
         # talking_head
-        'output': _choice(cfg, 'output', 'video', ('video', 'audio')),
-        'text_mode': _choice(cfg, 'textMode', 'literal', ('literal', 'personality')),
+        'output': cfg['output'],
+        'text_mode': cfg['textMode'],
         # scene_video
-        'quality': _choice(cfg, 'quality', '720p-draft', QUALITIES),
-        'aspect_ratio': _choice(cfg, 'aspectRatio', '16:9', ASPECT_RATIOS),
-        'fps': fps,
-        'duration_sec': _int(cfg, 'durationSec', 5, LIMITS['video_duration_min'], LIMITS['video_duration_max']),
-        'seed': seed,
-        'silent': parse_bool(cfg.get('silent', False)),
-        'expand_prompt': parse_bool(cfg.get('expandPrompt', True)),
-        'share': _choice(cfg, 'share', 'private', ('private', 'public')),
-        'source_image_url': str(cfg.get('sourceImageUrl') or '').strip(),
-        'speech_line': str(cfg.get('speechLine') or '').strip(),
+        'quality': cfg['quality'],
+        'aspect_ratio': cfg['aspectRatio'],
+        'fps': cfg['fps'],
+        'duration_sec': cfg['durationSec'],
+        'seed': cfg['seed'],
+        'silent': cfg['silent'],
+        'expand_prompt': cfg['expandPrompt'],
+        'share': cfg['share'],
+        'source_image_url': str(cfg['sourceImageUrl'] or '').strip(),
+        'speech_line': str(cfg['speechLine'] or '').strip(),
         # image
-        'engine': _choice(cfg, 'engine', 'default', ('default', 'ideogram')),
-        'edit_engine': _choice(cfg, 'editEngine', 'default', ('default', 'qwen')),
+        'engine': cfg['engine'],
+        'edit_engine': cfg['editEngine'],
         # live
-        'conversation': str(cfg.get('conversation') or '').strip(),
-        'turn_mode': _choice(cfg, 'turnMode', 'chat', ('chat', 'speak')),
-        'turn_output': _choice(cfg, 'turnOutput', 'audio', ('audio', 'video')),
-        'wait_for_turn': parse_bool(cfg.get('waitForTurn', True)),
+        'conversation': str(cfg['conversation'] or '').strip(),
+        'turn_mode': cfg['turnMode'],
+        'turn_output': cfg['turnOutput'],
+        'wait_for_turn': cfg['waitForTurn'],
     }
 
 
-def config_warnings(cfg: Dict[str, Any]) -> List[str]:
+def config_warnings(cfg: Mapping) -> List[str]:
     """Problems worth flagging in the editor; never raises."""
     found: List[str] = []
-    if not resolve_api_key(cfg.get('apikey')):
-        found.append(f'API key is required (or set {ENV_API_KEY} on the engine host)')
+    try:
+        check_api_key(cfg['apikey'])
+    except ValueError as e:
+        found.append(str(e))
     try:
         settings = read_settings(cfg)
     except ValueError as e:
@@ -182,25 +155,18 @@ class IGlobal(IGlobalBase):
     settings: Dict[str, Any] | None = None
 
     def beginGlobal(self) -> None:
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
-
         from depends import load_depends
 
         load_depends(__file__)
 
-        cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-
-        api_key = resolve_api_key(cfg.get('apikey'))
-        if not api_key:
-            warning(
-                f'Masky API key is required. Set it on the node or in {ENV_API_KEY}. Get one at https://masky.ai/developer'
-            )
-            raise ValueError('Masky API key not configured')
-        # A ${ROCKETRIDE_...} placeholder with no saved value must not reach Masky as the key.
-        check_credential_resolved(self.glb.logicalType, 'apikey', api_key, self.glb.connConfig)
+        # The resolved config: every setting defaulted, typed and ranged; the
+        # key a required secret (a ${ROCKETRIDE_MASKY_KEY} reference resolved
+        # per call, no process-env fallback)
+        cfg = self.config
 
         try:
+            # A ${ROCKETRIDE_...} placeholder with no saved value must not reach Masky as the key.
+            api_key = check_api_key(cfg.apikey)
             self.settings = read_settings(cfg)
         except ValueError as e:
             warning(str(e))
@@ -219,20 +185,6 @@ class IGlobal(IGlobalBase):
         # One free, unauthenticated pricing read per run, so every later estimate
         # uses Masky's live rates without a request at call time. Never fails start.
         self.driver.load_pricing()
-
-    def validateConfig(self) -> None:
-        try:
-            cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-            for message in config_warnings(cfg):
-                warning(message)
-            try:
-                check_credential_resolved(
-                    self.glb.logicalType, 'apikey', resolve_api_key(cfg.get('apikey')), self.glb.connConfig
-                )
-            except Exception as e:  # noqa: BLE001 - validateConfig only warns
-                warning(str(e))
-        except Exception as e:
-            warning(str(e))
 
     def endGlobal(self) -> None:
         if self.driver is not None:

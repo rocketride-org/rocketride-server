@@ -702,23 +702,23 @@ def test_resolve_account_domain_treats_consumer_domains_as_unknown():
     # A personal account is not an organisation: gmail.com must never become
     # the "own domain" that waves through grants to other consumer addresses.
     token = json.dumps({'email': 'someone@gmail.com'})
-    assert drive_client.resolve_account_domain('user', {'userToken': token}) is None
+    assert drive_client.resolve_account_domain('user', {'userAuth': token}) is None
     assert drive_client.resolve_account_domain('service', {'adminEmail': 'x@googlemail.com'}) is None
 
 
 def test_resolve_account_domain_user_hd_claim():
     token = json.dumps({'scope': 'x', 'hd': 'Corp.com'})
-    assert drive_client.resolve_account_domain('user', {'userToken': token}) == 'corp.com'
+    assert drive_client.resolve_account_domain('user', {'userAuth': token}) == 'corp.com'
 
 
 def test_resolve_account_domain_user_email_claim():
     token = json.dumps({'email': 'me@team.io'})
-    assert drive_client.resolve_account_domain('user', {'userToken': token}) == 'team.io'
+    assert drive_client.resolve_account_domain('user', {'userAuth': token}) == 'team.io'
 
 
 def test_resolve_account_domain_user_no_claim_is_none():
     token = json.dumps({'access_token': 'abc'})
-    assert drive_client.resolve_account_domain('user', {'userToken': token}) is None
+    assert drive_client.resolve_account_domain('user', {'userAuth': token}) is None
 
 
 # ---------------------------------------------------------------------------
@@ -776,30 +776,25 @@ def test_services_json_shape():
     assert data['classType'] == ['tool']
     assert data['capabilities'] == ['invoke']
     assert data['lanes'] == {}
-    assert data['prefix'] == 'drive'
     assert data['path'] == 'nodes.tool_google_workspace.drive'
     assert data['icon'] == 'drive.svg'
-    assert 'drive.access' in data['fields']
-    assert data['fields']['drive.access']['default'] == 'write'
-    assert [row[0] for row in data['fields']['drive.access']['enum']] == ['readonly', 'write']
-    # Both destructive gate fields present (issue AC).
-    assert 'drive.allowPublicSharing' in data['fields']
-    assert 'drive.allowHardDelete' in data['fields']
-    assert data['fields']['drive.allowPublicSharing']['default'] is False
-    assert data['fields']['drive.allowHardDelete']['default'] is False
-    assert data['shape'][0]['properties'] == ['type', 'google.authType', 'drive.access']
+    definitions = data['propertyDefinitions']
+    assert definitions['access']['default'] == 'write'
+    assert [row[0] for row in definitions['access']['enum']] == ['readonly', 'write']
+    # Both destructive gate fields present (issue AC), off by default.
+    assert definitions['allowPublicSharing']['default'] is False
+    assert definitions['allowHardDelete']['default'] is False
+    assert data['properties'] == ['type', 'google.authType', 'access', 'allowPublicSharing', 'allowHardDelete']
     # OAuth node: no dynamic test block.
     assert 'test' not in data
 
 
 def test_services_json_no_secret_defaults():
     data = json.loads(_SERVICES_JSON.read_text(encoding='utf-8'))
-    prof = data['preconfig']['profiles']['default']
-    assert prof.get('serviceKey', '') == ''
-    assert prof.get('userToken', '') == ''
-    # Gate flags are NOT in the profile (absent => False, gmail precedent).
-    assert 'allowPublicSharing' not in prof
-    assert 'allowHardDelete' not in prof
+    # Credentials come from the shared google.* definitions; the node declares none of its own.
+    assert 'preconfig' not in data
+    for name, prop in data['propertyDefinitions'].items():
+        assert not prop.get('secret') and prop.get('type') not in ('oauth2', 'upload'), name
 
 
 # ---------------------------------------------------------------------------
@@ -856,18 +851,18 @@ def test_file_copy_passes_description():
 def test_token_scope_report_covered_missing_absent_and_malformed():
     required = ['https://www.googleapis.com/auth/drive']
     assert drive_client.token_scope_report({}, required) == (set(), True, [])
-    covered_cfg = {'userToken': '{"scope": "https://www.googleapis.com/auth/drive"}'}
+    covered_cfg = {'userAuth': '{"scope": "https://www.googleapis.com/auth/drive"}'}
     granted, covered, missing = drive_client.token_scope_report(covered_cfg, required)
     assert covered is True and missing == []
-    other_cfg = {'userToken': '{"scope": "https://www.googleapis.com/auth/unrelated"}'}
+    other_cfg = {'userAuth': '{"scope": "https://www.googleapis.com/auth/unrelated"}'}
     granted, covered, missing = drive_client.token_scope_report(other_cfg, required)
     assert covered is False and missing == required
     with pytest.raises(ValueError):
-        drive_client.token_scope_report({'userToken': '{bad'}, required)
+        drive_client.token_scope_report({'userAuth': '{bad'}, required)
 
 
 def test_resolve_account_domain_non_dict_token_degrades_to_unknown():
-    cfg = {'userToken': '["not", "an", "object"]'}
+    cfg = {'userAuth': '["not", "an", "object"]'}
     assert drive_client.resolve_account_domain('user', cfg) is None
 
 

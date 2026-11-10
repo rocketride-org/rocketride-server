@@ -37,7 +37,7 @@ from test.zone_audit import audit_time_fields
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'src' / 'nodes'))
 
 
-_STUB_MODULE_NAMES = ('rocketlib', 'ai', 'ai.common', 'ai.common.config', 'ai.common.utils')
+_STUB_MODULE_NAMES = ('rocketlib', 'ai', 'ai.common', 'ai.common.utils')
 
 #: The real argument validators, loaded from source in _install_stubs.
 _TOOL_ARGS = (
@@ -94,25 +94,19 @@ def _install_stubs() -> None:
                     methods[name] = getattr(self, name)
             return methods
 
-    class IGlobalBase:
-        pass
+    # The real base: its ``config`` property resolves self.glb.connConfig against
+    # the engine's schema for tool_gohighlevel (rocketlib.filters is never stubbed).
+    from rocketlib.filters import IGlobalBase
 
     mod_rl.IInstanceBase = IInstanceBase
     mod_rl.IGlobalBase = IGlobalBase
-    mod_rl.OPEN_MODE = Mock()
+    mod_rl.engine = importlib.import_module('rocketlib.engine')
+    mod_rl.config = importlib.import_module('rocketlib.config')
     mod_rl.warning = Mock()
     sys.modules['rocketlib'] = mod_rl
 
     sys.modules['ai'] = types.ModuleType('ai')
     sys.modules['ai.common'] = types.ModuleType('ai.common')
-
-    mod_config = types.ModuleType('ai.common.config')
-
-    class Config:
-        pass
-
-    mod_config.Config = Config
-    sys.modules['ai.common.config'] = mod_config
 
     # The real validators, loaded from their source file rather than re-implemented: a
     # hand-written copy stops tracking the helper the moment it changes, and six tests
@@ -1553,7 +1547,7 @@ _SERVICES_JSON = _NODE_SRC / 'services.json'
 
 
 def _tool_groups_field() -> dict:
-    return json.loads(_SERVICES_JSON.read_text(encoding='utf-8'))['fields']['gohighlevel.toolGroups']
+    return json.loads(_SERVICES_JSON.read_text(encoding='utf-8'))['propertyDefinitions']['gohighlevel.toolGroups']
 
 
 def _group_counts() -> dict[str, int]:
@@ -1689,14 +1683,10 @@ def _iglobal_harness(config: dict) -> Iterator[tuple]:
     original_depends = sys.modules.get('depends')
     sys.modules['depends'] = depends_mod
     try:
-        with (
-            patch.object(iglobal_mod, 'warning', warning_mock),
-            patch.object(iglobal_mod.Config, 'getNodeConfig', staticmethod(lambda *_a: dict(config)), create=True),
-        ):
+        with patch.object(iglobal_mod, 'warning', warning_mock):
             glob = iglobal_mod.IGlobal.__new__(iglobal_mod.IGlobal)
-            glob.glb = Mock()
-            glob.IEndpoint = Mock()
-            glob.IEndpoint.endpoint.openMode = object()  # anything but OPEN_MODE.CONFIG
+            # The stored config; self.config resolves it through the engine's schema.
+            glob.glb = types.SimpleNamespace(logicalType='tool_gohighlevel', connConfig=dict(config))
             yield glob, warning_mock
     finally:
         if original_depends is None:
@@ -1705,24 +1695,21 @@ def _iglobal_harness(config: dict) -> Iterator[tuple]:
             sys.modules['depends'] = original_depends
 
 
-class TestIGlobalGroupWarnings:
+class TestIGlobalGroups:
     @staticmethod
     def _config(**overrides) -> dict:
         cfg = {'privateIntegrationToken': GHL_TEST_TOKEN, 'locationId': LOCATION_ID}
         cfg.update(overrides)
         return cfg
 
-    @staticmethod
-    def _logged(warning_mock: Mock) -> str:
-        return ' '.join(str(arg) for call in warning_mock.call_args_list for arg in call.args)
+    def test_a_typo_is_a_schema_error_naming_the_entry(self):
+        """The schema pins every entry to the groups this node implements, so a typo never narrows silently."""
+        from rocketlib.config import ConfigError
 
-    def test_a_partial_typo_narrows_and_warns_in_the_job_log(self):
-        with _iglobal_harness(self._config(toolGroups=['contacts', 'nope'])) as (glob, warning_mock):
-            glob.beginGlobal()
-            assert glob.tool_groups == frozenset({'contacts'})
-            logged = self._logged(warning_mock)
-            assert 'nope' in logged
-            assert 'contacts' in logged
+        with _iglobal_harness(self._config(toolGroups=['contacts', 'nope'])) as (glob, _warning_mock):
+            with pytest.raises(ConfigError, match='"toolGroups\\[1\\]" must be one of') as raised:
+                glob.beginGlobal()
+        assert "'nope'" in str(raised.value)
 
     def test_a_clean_config_warns_nothing(self):
         with _iglobal_harness(self._config(toolGroups=['contacts'])) as (glob, warning_mock):
@@ -1730,18 +1717,29 @@ class TestIGlobalGroupWarnings:
             assert glob.tool_groups == frozenset({'contacts'})
             warning_mock.assert_not_called()
 
-    def test_a_wholly_unknown_config_stops_startup(self):
-        with _iglobal_harness(self._config(toolGroups=['contatcs'])) as (glob, _warning_mock):
-            with pytest.raises(ValueError, match='matched no known tool group'):
+    def test_an_empty_list_publishes_the_default_set(self):
+        with _iglobal_harness(self._config()) as (glob, _warning_mock):
+            glob.beginGlobal()
+            from tool_gohighlevel.tool_groups import DEFAULT_GROUPS
+
+            assert glob.tool_groups == DEFAULT_GROUPS
+
+    def test_a_missing_token_is_a_schema_error(self):
+        from rocketlib.config import ConfigError
+
+        with _iglobal_harness({'locationId': LOCATION_ID}) as (glob, _warning_mock):
+            with pytest.raises(ConfigError, match='"privateIntegrationToken" is required'):
                 glob.beginGlobal()
 
-    def test_validate_config_flags_a_value_that_would_fail_startup(self):
-        """The editor sees both halves: the unknown names and the startup consequence."""
-        with _iglobal_harness(self._config(toolGroups=['contatcs'])) as (glob, warning_mock):
-            glob.validateConfig()
-            logged = self._logged(warning_mock)
-            assert 'unknown tool group' in logged
-            assert 'fail to start' in logged
+    def test_a_token_without_the_pit_prefix_is_used_with_a_warning(self):
+        with _iglobal_harness(self._config(privateIntegrationToken='agency-token-of-the-wrong-kind')) as (
+            glob,
+            warning_mock,
+        ):
+            glob.beginGlobal()
+            assert glob.token == 'agency-token-of-the-wrong-kind'
+            warning_mock.assert_called_once()
+            assert 'pit-' in warning_mock.call_args.args[0]
 
 
 # ---------------------------------------------------------------------------

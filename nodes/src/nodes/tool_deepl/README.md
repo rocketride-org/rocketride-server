@@ -45,7 +45,7 @@ This optional translation fallback defaults to empty, which omits it and lets th
 
 ## Authentication
 
-Provide **API Key** or set `ROCKETRIDE_DEEPL_KEY`; a non-blank configuration key takes precedence over the environment variable. The node fails startup if neither is set. Keys ending in `:fx` use the free API host; other keys use the standard API host. The key is sent in the authorization header and is not included in returned request errors.
+Provide **API Key** in the node config, normally as a `${ROCKETRIDE_DEEPL_APIKEY}` reference to an account variable, which is resolved when the task starts (or restarts). The node fails startup if it is empty. Keys ending in `:fx` use the free API host; other keys use the standard API host. The key is sent in the authorization header and is not included in returned request errors.
 
 ## Notes
 

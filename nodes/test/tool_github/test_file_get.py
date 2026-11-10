@@ -49,7 +49,7 @@ def response(data, status=200, headers=None) -> requests.Response:
 def node(monkeypatch):
     """A PAT node in read-only mode with only ``requests.request`` mocked."""
     with scoped_stubs():
-        from tool_github import IInstance
+        from tool_github.IInstance import IInstance
         from tool_github import github_client
 
         inst = IInstance()

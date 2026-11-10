@@ -43,6 +43,7 @@ def _build_import_stubs():
     rocketlib = MagicMock()
     rocketlib.IInstanceBase = object
     rocketlib.IGlobalBase = object
+    rocketlib.IValidatorBase = object
     rocketlib.tool_function = lambda **kwargs: lambda f: f
     rocketlib.OPEN_MODE = MagicMock()
     rocketlib.warning = lambda *a, **kw: None
@@ -123,8 +124,10 @@ for _name, _stub in _build_import_stubs().items():
 sheets_iinstance = importlib.import_module('nodes.tool_google_workspace.sheets.IInstance')
 sheets_client = importlib.import_module('nodes.tool_google_workspace.sheets.client')
 sheets_iglobal = importlib.import_module('nodes.tool_google_workspace.sheets.IGlobal')
+sheets_ivalidator = importlib.import_module('nodes.tool_google_workspace.sheets.IValidator')
 workspace_iinstance = importlib.import_module('nodes.tool_google_workspace.IInstance')
 workspace_iglobal = importlib.import_module('nodes.tool_google_workspace.IGlobal')
+workspace_ivalidator = importlib.import_module('nodes.tool_google_workspace.IValidator')
 ga = importlib.import_module('nodes.core.google_access')
 
 for _name in _added:
@@ -383,19 +386,12 @@ def test_check_connection_falls_back_to_grpc_status_without_error_info():
 
 
 def test_check_connection_reports_missing_user_oauth_scope(monkeypatch):
-    monkeypatch.setattr(
-        workspace_iinstance,
-        'Config',
-        types.SimpleNamespace(
-            getNodeConfig=lambda *_args: {
-                'authType': 'user',
-                'userToken': json.dumps({'scope': 'https://www.googleapis.com/auth/drive.file'}),
-            }
-        ),
-    )
-
+    settings = {
+        'authType': 'user',
+        'userAuth': json.dumps({'scope': 'https://www.googleapis.com/auth/drive.file'}),
+    }
+    monkeypatch.setattr(sheets_iinstance.IInstance, 'settings', property(lambda self: settings))
     inst = _make(tier='write')
-    inst.IGlobal.glb = types.SimpleNamespace(logicalType='tool_sheets', connConfig={})
     out = inst.check_connection({})
 
     assert out['connection_ok'] is False
@@ -412,11 +408,10 @@ def test_services_json_shape():
     assert data['classType'] == ['tool']
     assert data['capabilities'] == ['invoke']
     assert data['lanes'] == {}  # tool node: no data lanes
-    assert data['prefix'] == 'sheets'
     assert data['path'] == 'nodes.tool_google_workspace.sheets'
-    assert 'sheets.access' in data['fields']
-    assert data['fields']['sheets.access']['default'] == 'write'
-    assert [row[0] for row in data['fields']['sheets.access']['enum']] == ['readonly', 'write']
+    assert data['propertyDefinitions']['access']['default'] == 'write'
+    assert [row[0] for row in data['propertyDefinitions']['access']['enum']] == ['readonly', 'write']
+    assert data['properties'] == ['type', 'google.authType', 'access']
     # OAuth node: the framework can't drive it without live creds, so no dynamic test block.
     assert 'test' not in data
 
@@ -424,9 +419,10 @@ def test_services_json_shape():
 def test_services_json_no_secret_defaults():
     """Secrets must never carry a real default (gitleaks scans services*.json)."""
     data = json.loads(_SERVICES_JSON.read_text())
-    for prof in data['preconfig']['profiles'].values():
-        assert prof.get('serviceKey', '') == ''
-        assert prof.get('userToken', '') == ''
+    # Credentials come from the shared google.* definitions; the node declares none of its own.
+    assert 'preconfig' not in data
+    for name, prop in data['propertyDefinitions'].items():
+        assert not prop.get('secret') and prop.get('type') not in ('oauth2', 'upload'), name
 
 
 # ---------------------------------------------------------------------------
@@ -686,14 +682,14 @@ def test_all_thirteen_tools_plus_diagnostic_present():
 def test_token_scope_report_covered_missing_absent_and_malformed():
     required = ['https://www.googleapis.com/auth/spreadsheets']
     assert sheets_client.token_scope_report({}, required) == (set(), True, [])
-    covered_cfg = {'userToken': '{"scope": "https://www.googleapis.com/auth/spreadsheets"}'}
+    covered_cfg = {'userAuth': '{"scope": "https://www.googleapis.com/auth/spreadsheets"}'}
     granted, covered, missing = sheets_client.token_scope_report(covered_cfg, required)
     assert covered is True and missing == []
-    other_cfg = {'userToken': '{"scope": "https://www.googleapis.com/auth/unrelated"}'}
+    other_cfg = {'userAuth': '{"scope": "https://www.googleapis.com/auth/unrelated"}'}
     granted, covered, missing = sheets_client.token_scope_report(other_cfg, required)
     assert covered is False and missing == required
     with pytest.raises(ValueError):
-        sheets_client.token_scope_report({'userToken': '{bad'}, required)
+        sheets_client.token_scope_report({'userAuth': '{bad'}, required)
 
 
 # ---------------------------------------------------------------------------
@@ -708,14 +704,9 @@ def test_values_update_rejects_empty_values():
 
 
 def test_check_connection_reports_malformed_token(monkeypatch):
-    class _Cfg:
-        @staticmethod
-        def getNodeConfig(*_a, **_k):
-            return {'authType': 'user', 'userToken': '{bad json'}
-
-    monkeypatch.setattr(workspace_iinstance, 'Config', _Cfg)
+    settings = {'authType': 'user', 'userAuth': '{bad json'}
+    monkeypatch.setattr(sheets_iinstance.IInstance, 'settings', property(lambda self: settings))
     inst = _make()
-    inst.IGlobal.glb = types.SimpleNamespace(logicalType='tool_sheets', connConfig={})
     out = inst.check_connection({})
     assert out['connection_ok'] is False
     assert 'invalid user token' in out['scopeError']
@@ -723,11 +714,8 @@ def test_check_connection_reports_malformed_token(monkeypatch):
 
 def test_validate_config_warns_for_malformed_user_token(monkeypatch):
     warnings = []
-    monkeypatch.setattr(
-        workspace_iglobal.Config, 'getNodeConfig', lambda *a, **k: {'authType': 'user', 'userToken': '{bad json'}
-    )
-    monkeypatch.setattr(workspace_iglobal, 'warning', warnings.append)
-    glb = sheets_iglobal.IGlobal()
-    glb.glb = types.SimpleNamespace(logicalType='sheets', connConfig={})
-    glb.validateConfig()
+    config = {'authType': 'user', 'userAuth': '{bad json'}
+    monkeypatch.setattr(workspace_ivalidator, 'warning', warnings.append)
+    monkeypatch.setattr(sheets_ivalidator.IValidator, 'config', property(lambda self: config))
+    sheets_ivalidator.IValidator().validateConfig()
     assert any('invalid' in message.lower() for message in warnings)

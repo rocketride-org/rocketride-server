@@ -230,7 +230,7 @@ def _is_rate_limit_403(exc: Exception) -> bool:
 
 
 def _decode_blob(value: str) -> str:
-    """Return text from a raw string or a base64 ``data:`` URL (serviceKey/userToken fields)."""
+    """Return text from a raw string or a base64 ``data:`` URL (serviceKey/userAuth fields)."""
     if not value:
         raise ValueError('missing credential value')
     if value.startswith('data:'):
@@ -240,6 +240,13 @@ def _decode_blob(value: str) -> str:
         except (binascii.Error, ValueError) as exc:
             raise ValueError(f'could not decode data-url credential: {exc}') from exc
     return value
+
+
+def access_spec(spec_name: str):
+    """Return the ``nodes.core.google_access`` AccessSpec named ``spec_name`` (deferred: engine-path import)."""
+    from nodes.core import google_access
+
+    return getattr(google_access, spec_name)
 
 
 def _missing_scopes(svc: GoogleService, granted: set[str], required: list[str]) -> list[str]:
@@ -259,7 +266,7 @@ def _missing_scopes(svc: GoogleService, granted: set[str], required: list[str]) 
 
 
 def token_scope_report(svc: GoogleService, cfg: dict, required: list[str]) -> tuple[set[str], bool, list[str]]:
-    """Decode the config's userToken and report (granted, covered, missing) for ``required``.
+    """Decode the config's userAuth token and report (granted, covered, missing) for ``required``.
 
     The single source of truth for scope diagnostics: ``IGlobal.validateConfig``,
     ``IInstance.check_connection``, and ``build_service`` all judge scopes through
@@ -267,7 +274,7 @@ def token_scope_report(svc: GoogleService, cfg: dict, required: list[str]) -> tu
     without a scope field yields (granted, True, []) — nothing to judge. Raises
     ValueError when the token payload is malformed.
     """
-    token_str = str(cfg.get('userToken') or '').strip()
+    token_str = str(cfg.get('userAuth') or '').strip()
     if not token_str:
         return set(), True, []
     info = json.loads(_decode_blob(token_str))
@@ -378,7 +385,7 @@ def build_service(svc: GoogleService, auth_type: str, cfg: dict, scopes: list[st
     """Build a discovery service for ``svc`` from node config, scoped to ``scopes``.
 
     ``auth_type`` selects service-account (serviceKey + optional adminEmail for
-    domain-wide delegation) or user OAuth (userToken JSON).
+    domain-wide delegation) or user OAuth (userAuth token JSON).
     """
     from googleapiclient.discovery import build
 
@@ -387,7 +394,7 @@ def build_service(svc: GoogleService, auth_type: str, cfg: dict, scopes: list[st
 
         from google.oauth2.credentials import Credentials
 
-        info = json.loads(_decode_blob(cfg.get('userToken') or ''))
+        info = json.loads(_decode_blob(cfg.get('userAuth') or ''))
         access_token = info.get('access_token') or info.get('token') or ''
         refresh_token = info.get('refresh_token')
         client_id = info.get('client_id')

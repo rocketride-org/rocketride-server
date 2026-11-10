@@ -20,8 +20,3 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OF OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-
-from .IGlobal import IGlobal
-from .IInstance import IInstance
-
-__all__ = ['IGlobal', 'IInstance']

@@ -9,13 +9,15 @@ from unittest.mock import patch
 
 import pytest
 
-from ._stubs import scoped_stubs
+from rocketlib.config import ConfigError
+
+from ._stubs import conn_config, scoped_stubs
 
 
 def _make_global(IGlobal):
+    """An IGlobal on the stored config the enclosing ``scoped_stubs`` bound; ``self.config`` resolves it."""
     glb = IGlobal()
-    glb.IEndpoint = types.SimpleNamespace(endpoint=types.SimpleNamespace(openMode='open'))
-    glb.glb = types.SimpleNamespace(logicalType='tool_github', connConfig={})
+    glb.glb = types.SimpleNamespace(logicalType='tool_github', connConfig=conn_config())
     return glb
 
 
@@ -31,11 +33,12 @@ def _app_config(rsa_private_key_pem, **overrides):
 
 
 def test_begin_global_pat_default_missing_token_raises():
+    """The token is optional in the schema (a credentialMap may serve every call), so the node names it."""
     with scoped_stubs({'token': ''}):
         from tool_github.IGlobal import IGlobal
 
         glb = _make_global(IGlobal)
-        with pytest.raises(ValueError, match='token is required'):
+        with pytest.raises(ValueError, match='tool_github: token is required'):
             glb.beginGlobal()
 
 
@@ -51,21 +54,34 @@ def test_begin_global_pat_valid():
 
 @pytest.mark.parametrize('auth_type', ['App', 'github_app', 'PAT', 'oauth'])
 def test_begin_global_unknown_auth_type_raises(rsa_private_key_pem, auth_type):
+    """A selector value with no branch is a schema error naming the options."""
     cfg = _app_config(rsa_private_key_pem, authType=auth_type, token='ghp_abc')
     with scoped_stubs(cfg):
         from tool_github.IGlobal import IGlobal
 
         glb = _make_global(IGlobal)
-        with pytest.raises(ValueError, match=f'unknown authType {auth_type!r}; expected "pat" or "app"'):
+        with pytest.raises(ConfigError, match=f"'{auth_type}', which is not one of its options") as raised:
             glb.beginGlobal()
+        assert "'pat'" in str(raised.value) and "'app'" in str(raised.value)
 
 
 def test_begin_global_app_missing_fields_raises():
+    """The App fields are optional in the schema (a credentialMap may serve every call), so the node names them."""
     with scoped_stubs({'authType': 'app', 'appId': '', 'privateKey': '', 'installationId': ''}):
         from tool_github.IGlobal import IGlobal
 
         glb = _make_global(IGlobal)
         with pytest.raises(ValueError, match='App ID, private key required'):
+            glb.beginGlobal()
+
+
+def test_begin_global_app_missing_key_upload_raises(rsa_private_key_pem):
+    """The key is an upload the resolver does not check, so the node reports it missing."""
+    with scoped_stubs(_app_config(rsa_private_key_pem, privateKey='')):
+        from tool_github.IGlobal import IGlobal
+
+        glb = _make_global(IGlobal)
+        with pytest.raises(ValueError, match='private key required for GitHub App auth'):
             glb.beginGlobal()
 
 
@@ -151,16 +167,35 @@ def test_begin_global_app_valid_does_not_call_network(rsa_private_key_pem):
 
 
 # ---------------------------------------------------------------------------
-# validateConfig: warns with the same message beginGlobal raises, never raises
+# Stored shape: the auth leaves live under their branch, the other branch survives
+# ---------------------------------------------------------------------------
+
+
+def test_switching_auth_type_keeps_the_other_branch(rsa_private_key_pem):
+    """A stored App block under a PAT selection is kept, not validated, not read."""
+    with scoped_stubs({'token': 'ghp_abc', 'appId': '', 'installationId': ''}):
+        from tool_github.IGlobal import IGlobal
+
+        glb = _make_global(IGlobal)
+        glb.beginGlobal()
+        assert glb.auth_type == 'pat'
+        assert glb.token == 'ghp_abc'
+        assert glb.app_id == ''
+
+
+# ---------------------------------------------------------------------------
+# validateConfig: the package validator runs the same readers at save time
 # ---------------------------------------------------------------------------
 
 
 def _validate_warnings(cfg) -> list[str]:
+    """The warnings ``IValidator.validateConfig`` emits for ``cfg``; schema errors raise."""
     with scoped_stubs(cfg):
-        from tool_github.IGlobal import IGlobal, warning
+        from rocketlib import warning
+        from tool_github.IValidator import IValidator
 
-        glb = _make_global(IGlobal)
-        glb.validateConfig()
+        validator = _make_global(IValidator)
+        validator.validateConfig()
         return [call.args[0] for call in warning.call_args_list]
 
 
@@ -168,9 +203,10 @@ def test_validate_config_warns_on_missing_pat():
     assert _validate_warnings({'token': ''}) == ['tool_github: token is required']
 
 
-def test_validate_config_warns_on_unknown_auth_type():
-    warnings = _validate_warnings({'authType': 'App', 'token': 'ghp_abc'})
-    assert warnings == ['tool_github: unknown authType \'App\'; expected "pat" or "app"']
+def test_validate_config_refuses_an_unknown_auth_type():
+    """The selector is the schema's: an unknown value is a schema error, not a node warning."""
+    with pytest.raises(ConfigError, match="'App', which is not one of its options"):
+        _validate_warnings({'authType': 'App', 'token': 'ghp_abc'})
 
 
 def test_validate_config_warns_on_missing_app_fields():
@@ -251,7 +287,8 @@ def test_get_token_caches_and_refreshes(rsa_private_key_pem):
 
 def test_get_token_keeps_cached_token_when_early_refresh_fails(rsa_private_key_pem):
     with scoped_stubs(_app_config(rsa_private_key_pem)):
-        from tool_github.IGlobal import IGlobal, warning
+        from rocketlib import warning
+        from tool_github.IGlobal import IGlobal
 
         glb = _make_global(IGlobal)
         glb.beginGlobal()
@@ -281,7 +318,8 @@ def test_get_token_keeps_cached_token_when_early_refresh_fails(rsa_private_key_p
 
 def test_get_token_does_not_retry_refresh_within_backoff_window(rsa_private_key_pem):
     with scoped_stubs(_app_config(rsa_private_key_pem)):
-        from tool_github.IGlobal import IGlobal, warning
+        from rocketlib import warning
+        from tool_github.IGlobal import IGlobal
 
         glb = _make_global(IGlobal)
         glb.beginGlobal()

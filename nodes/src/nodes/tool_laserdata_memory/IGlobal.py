@@ -4,9 +4,9 @@
 # =============================================================================
 
 """
-LaserData memory node — global (per-pipe) state.
+LaserData memory node - global (per-pipe) state.
 
-Owns the LaserData connection lifecycle and the async→sync bridge. The Laser
+Owns the LaserData connection lifecycle and the async-to-sync bridge. The Laser
 SDK is a native (PyO3) async client whose futures must be created from a
 thread with a running event loop, so this module starts one persistent loop
 in a daemon thread and submits every SDK call to it via
@@ -23,17 +23,11 @@ import os
 import threading
 from typing import Any, Coroutine
 
-from ai.common.config import Config
-from ai.common.utils import config_int
-from rocketlib import IGlobalBase, OPEN_MODE, debug, error, warning
+from rocketlib import IGlobalBase, debug, error, warning
 
-# Defaults / bounds (avoid magic constants scattered in the code).
-_DEFAULT_STREAM = 'rocketride-memory'
-_DEFAULT_RECALL_LIMIT = 10
-_MAX_RECALL_LIMIT = 200
-_DEFAULT_OP_TIMEOUT = 30
-_MIN_OP_TIMEOUT = 5
-_MAX_OP_TIMEOUT = 600
+# Bound the instance applies to the agent's per-call recall limit (the schema
+# bounds the configured default the same way).
+MAX_RECALL_LIMIT = 200
 # endGlobal must not hang a pipe teardown on a wedged connection close.
 _CLOSE_TIMEOUT = 5
 
@@ -42,12 +36,12 @@ class IGlobal(IGlobalBase):
     """Global state for tool_laserdata_memory."""
 
     connection_string: str = ''
-    stream: str = _DEFAULT_STREAM
+    stream: str = 'rocketride-memory'
     namespace: str = ''
     allow_namespace_override: bool = True
     folded: bool = True
-    recall_limit: int = _DEFAULT_RECALL_LIMIT
-    op_timeout: int = _DEFAULT_OP_TIMEOUT
+    recall_limit: int = 10
+    op_timeout: int = 30
 
     _loop: asyncio.AbstractEventLoop | None = None
     _loop_thread: threading.Thread | None = None
@@ -62,48 +56,34 @@ class IGlobal(IGlobalBase):
     _pending: Any = None
 
     def beginGlobal(self) -> None:
-        """Validate config and start the bridge loop (once per pipe)."""
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
-
+        """Read the resolved config and start the bridge loop (once per pipe)."""
         # Install the node-local laser-sdk dependency before it is imported
         # (lazily, on the first connect).
         from depends import depends  # type: ignore
 
         depends(os.path.join(os.path.dirname(os.path.realpath(__file__)), 'requirements.txt'))
 
-        cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
+        # The resolved config: the selected deployment's connection string
+        # flattened beside the shared leaves, bounds and types validated
+        cfg = self.config
 
-        connection_string = str(cfg.get('connection_string') or os.environ.get('LASER_CONNECTION_STRING', '')).strip()
+        # The connection string reaches the node through its config (a
+        # ${ROCKETRIDE_LASERDATA_CONNECTION_STRING} reference resolved per call);
+        # there is no process-env fallback
+        connection_string = str(cfg.connection_string or '').strip()
         if not connection_string:
-            error(
-                'laserdata: connection_string is required — set it in node config or the '
-                'LASER_CONNECTION_STRING env var (user:password@host:port)'
-            )
+            error('laserdata: connection_string is required (user:password@host:port)')
             raise ValueError('laserdata: connection_string is required')
         self.connection_string = connection_string
 
         # The Iggy stream the memory topics live in; the SDK requires a default
         # stream pinned at connect before laser.memory() can be used.
-        self.stream = str(cfg.get('stream') or _DEFAULT_STREAM).strip() or _DEFAULT_STREAM
-
-        self.namespace = str(cfg.get('namespace') or '').strip()
-
-        raw_override = cfg.get('allow_namespace_override', True)
-        self.allow_namespace_override = raw_override if isinstance(raw_override, bool) else True
-
-        raw_folded = cfg.get('folded', True)
-        self.folded = raw_folded if isinstance(raw_folded, bool) else True
-
-        # A malformed or non-positive number (e.g. a stray string from a
-        # hand-edited config, or 0 meaning "use default") falls back to the
-        # default rather than crashing pipe startup.
-        self.recall_limit = config_int(
-            cfg, 'recall_limit', _DEFAULT_RECALL_LIMIT, min_value=1, max_value=_MAX_RECALL_LIMIT
-        )
-        self.op_timeout = config_int(
-            cfg, 'op_timeout', _DEFAULT_OP_TIMEOUT, min_value=_MIN_OP_TIMEOUT, max_value=_MAX_OP_TIMEOUT
-        )
+        self.stream = cfg.stream.strip()
+        self.namespace = str(cfg.namespace or '').strip()
+        self.allow_namespace_override = cfg.allow_namespace_override
+        self.folded = cfg.folded
+        self.recall_limit = cfg.recall_limit
+        self.op_timeout = cfg.op_timeout
 
         self._closing = False
         self._pending = set()
@@ -155,18 +135,6 @@ class IGlobal(IGlobalBase):
                 laser = self._laser
         return laser
 
-    def validateConfig(self) -> None:
-        """Warn (without raising) when the connection string is missing."""
-        try:
-            cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-            connection_string = str(
-                cfg.get('connection_string') or os.environ.get('LASER_CONNECTION_STRING', '')
-            ).strip()
-            if not connection_string:
-                warning('connection_string is required')
-        except Exception as e:
-            warning(str(e))
-
     def endGlobal(self) -> None:
         """Close the connection, stop the bridge loop, and clear secrets."""
         self._closing = True
@@ -201,7 +169,7 @@ class IGlobal(IGlobalBase):
 async def _connect(connection_string: str, stream: str) -> Any:
     """Open the Laser connection with a pinned default stream (bridge loop).
 
-    laser-sdk is imported here — after ``depends()`` has installed it and only
+    laser-sdk is imported here - after ``depends()`` has installed it and only
     when a tool call actually needs the connection. The default stream must be
     pinned at connect for ``laser.memory(namespace)`` to resolve its topics.
     """

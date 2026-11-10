@@ -12,24 +12,19 @@
 	"description": ["Makes HTTP requests to public API endpoints, like curl for agents.", "The agent provides the request (method, URL, headers, body); credentials come per call or from the node config, where ${ROCKETRIDE_*} placeholders resolve on the engine.", "The node blocks non-public network destinations, returns 3xx responses without following them automatically, and enforces URL patterns and enabled HTTP methods."],
 	"tile": ["Tool: ${parameters.http_request.serverName}.http_request"],
 	"lanes": {},
-	"preconfig": {
-		"default": "default",
-		"profiles": {
-			"default": {
-				"title": "Default",
-				"serverName": "http"
-			}
-		}
-	},
-	"fields": {
+	//
+	// Optional:
+	//		Local property definitions. The authentication type is the selector; each
+	//		branch carries only the credential fields it sends, so switching the type
+	//		keeps the other branch's values and nothing is silently ignored.
+	//
+	"propertyDefinitions": {
 		"http_request.serverName": {
-			"hidden": true,
-			"type": "string",
+			"type": "constant",
 			"title": "Server name",
 			"description": "Namespace prefix for the tool: <serverName>.http_request",
 			"default": "http"
 		},
-
 		"http_request.allowGET": {
 			"type": "boolean",
 			"title": "GET",
@@ -93,7 +88,6 @@
 				[false, "No"]
 			]
 		},
-
 		"http_request.whitelistPattern": {
 			"type": "string",
 			"title": "URL Pattern (regex)",
@@ -102,7 +96,7 @@
 		},
 		"http_request.urlWhitelist": {
 			"title": "URL Whitelist",
-			"description": "Python regex patterns applied with match() to the final canonical URL after path substitution, regular query parameters, and query-based API-key auth. A request-time source recognizer accepts only exact literal/escaped hosts with supported numeric-port forms, or a deliberate [^/] whole-authority form, followed by an explicit authority boundary. Unsupported or ambiguous authority syntax fails closed even when the regex matches. [] or only blank placeholder rows allows all public destinations; non-public destinations remain blocked. Blank rows mixed with valid patterns are ignored; invalid non-empty regexes, non-string values, and malformed entries fail closed.",
+			"description": "Python regex patterns applied with match() to the final canonical URL after path substitution, regular query parameters, and query-based API-key auth. A request-time source recognizer accepts only exact literal/escaped hosts with supported numeric-port forms, or a deliberate [^/] whole-authority form, followed by an explicit authority boundary. Unsupported or ambiguous authority syntax fails closed even when the regex matches. [] or only blank placeholder rows allows all public destinations; non-public destinations remain blocked. Blank rows mixed with valid patterns are ignored; invalid non-empty regexes and malformed entries fail closed.",
 			"type": "array",
 			"optional": true,
 			"minItems": 0,
@@ -111,67 +105,41 @@
 				"properties": ["http_request.whitelistPattern"]
 			}
 		},
-
-		"http_request.authType": {
-			"type": "string",
-			"title": "Authentication",
-			"description": "Credential applied to every request this node sends. Set it here with a ${ROCKETRIDE_*} placeholder (resolved on the engine from the org, team, and user environment) instead of passing tokens per call. When set, the URL whitelist must be non-empty and every pattern must pin one exact https host, and per-call auth is rejected.",
-			"default": "none",
-			"enum": [
-				["none", "None (caller supplies auth per request)"],
-				["bearer", "Bearer token"],
-				["basic", "Basic (username + password)"],
-				["api_key", "API key header"]
-			]
-		},
 		"http_request.authToken": {
 			"type": "string",
 			"title": "Bearer token",
-			"description": "Sent as \"Authorization: Bearer <token>\" when Authentication is Bearer token. Use a placeholder such as ${ROCKETRIDE_GITHUB_TOKEN} so the secret never leaves the engine.",
-			"default": "",
-			"secure": true,
-			"optional": true,
-			"ui": {
-				"ui:widget": "ApiKeyWidget"
-			}
+			"description": "Sent as \"Authorization: Bearer <token>\". Use a placeholder such as ${ROCKETRIDE_GITHUB_TOKEN} so the secret never leaves the engine.",
+			"secret": true,
+			"env": "ROCKETRIDE_HTTP_REQUEST_TOKEN",
+			"required": true
 		},
 		"http_request.authUsername": {
 			"type": "string",
 			"title": "Basic auth username",
-			"description": "Used when Authentication is Basic.",
-			"default": "",
-			"optional": true
+			"required": true
 		},
 		"http_request.authPassword": {
 			"type": "string",
 			"title": "Basic auth password",
-			"description": "Used when Authentication is Basic. A ${ROCKETRIDE_*} placeholder keeps it on the engine.",
-			"default": "",
-			"secure": true,
-			"optional": true,
-			"ui": {
-				"ui:widget": "ApiKeyWidget"
-			}
+			"description": "A ${ROCKETRIDE_*} placeholder keeps it on the engine. May be empty.",
+			"secret": true,
+			"env": "ROCKETRIDE_HTTP_REQUEST_PASSWORD",
+			"optional": true
 		},
 		"http_request.authHeaderName": {
 			"type": "string",
 			"title": "API key header name",
-			"description": "Header that carries the key when Authentication is API key header, e.g. X-API-Key.",
-			"default": "",
-			"optional": true
+			"description": "Header that carries the key, e.g. X-API-Key.",
+			"required": true
 		},
 		"http_request.authHeaderValue": {
 			"type": "string",
 			"title": "API key value",
 			"description": "Value sent in the API key header. A ${ROCKETRIDE_*} placeholder keeps it on the engine.",
-			"default": "",
-			"secure": true,
-			"optional": true,
-			"ui": {
-				"ui:widget": "ApiKeyWidget"
-			}
+			"secret": true,
+			"env": "ROCKETRIDE_HTTP_REQUEST_APIKEY",
+			"required": true
 		},
-
 		"http_request.headerName": {
 			"type": "string",
 			"title": "Header name",
@@ -193,31 +161,66 @@
 				"properties": ["http_request.headerName", "http_request.headerValue"]
 			}
 		},
-
 		"http_request.rateLimitPerSecond": {
-			"type": "number",
+			"type": "integer",
 			"title": "Max requests per second",
-			"description": "Maximum number of HTTP requests allowed per second. Uses a token-bucket algorithm for smooth enforcement.",
-			"default": 10
+			"description": "Maximum number of HTTP requests allowed per second. Uses a token-bucket algorithm for smooth enforcement. 0 keeps the default; all three limits at 0 disable rate limiting.",
+			"default": 10,
+			"minimum": 0
 		},
 		"http_request.rateLimitPerMinute": {
-			"type": "number",
+			"type": "integer",
 			"title": "Max requests per minute",
-			"description": "Maximum number of HTTP requests allowed per minute. Provides a broader throttle beyond the per-second limit.",
-			"default": 100
+			"description": "Maximum number of HTTP requests allowed per minute. Provides a broader throttle beyond the per-second limit. 0 keeps the default; all three limits at 0 disable rate limiting.",
+			"default": 100,
+			"minimum": 0
 		},
 		"http_request.maxConcurrentRequests": {
-			"type": "number",
+			"type": "integer",
 			"title": "Max concurrent requests",
-			"description": "Maximum number of HTTP requests that can be in-flight simultaneously.",
-			"default": 5
+			"description": "Maximum number of HTTP requests that can be in-flight simultaneously. 0 keeps the default; all three limits at 0 disable rate limiting.",
+			"default": 5,
+			"minimum": 0
 		}
 	},
-	"shape": [
+	"properties": [
+		"type",
+		"http_request.serverName",
+		"http_request.allowGET",
+		"http_request.allowPOST",
+		"http_request.allowPUT",
+		"http_request.allowPATCH",
+		"http_request.allowDELETE",
+		"http_request.allowHEAD",
+		"http_request.allowOPTIONS",
+		"http_request.urlWhitelist",
 		{
-			"section": "Pipe",
-			"title": "HTTP Request",
-			"properties": ["type", "http_request.allowGET", "http_request.allowPOST", "http_request.allowPUT", "http_request.allowPATCH", "http_request.allowDELETE", "http_request.allowHEAD", "http_request.allowOPTIONS", "http_request.urlWhitelist", "http_request.authType", "http_request.authToken", "http_request.authUsername", "http_request.authPassword", "http_request.authHeaderName", "http_request.authHeaderValue", "http_request.defaultHeaders", "http_request.rateLimitPerSecond", "http_request.rateLimitPerMinute", "http_request.maxConcurrentRequests"]
-		}
+			"name": "authType",
+			"type": "string",
+			"title": "Authentication",
+			"description": "Credential applied to every request this node sends. Set it here with a ${ROCKETRIDE_*} placeholder (resolved on the engine from the org, team, and user environment) instead of passing tokens per call. When set, the URL whitelist must be non-empty and every pattern must pin one exact https host, and per-call auth is rejected.",
+			"default": "none",
+			"enum": {
+				"none": {
+					"title": "None (caller supplies auth per request)"
+				},
+				"bearer": {
+					"title": "Bearer token",
+					"properties": ["http_request.authToken"]
+				},
+				"basic": {
+					"title": "Basic (username + password)",
+					"properties": ["http_request.authUsername", "http_request.authPassword"]
+				},
+				"api_key": {
+					"title": "API key header",
+					"properties": ["http_request.authHeaderName", "http_request.authHeaderValue"]
+				}
+			}
+		},
+		"http_request.defaultHeaders",
+		"http_request.rateLimitPerSecond",
+		"http_request.rateLimitPerMinute",
+		"http_request.maxConcurrentRequests"
 	]
 }

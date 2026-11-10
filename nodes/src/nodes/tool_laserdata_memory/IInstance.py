@@ -34,7 +34,7 @@ from rocketlib import IInstanceBase, tool_function
 
 from ai.common.utils import int_arg, normalize_tool_input, optional_str, require_str
 
-from .IGlobal import _MAX_RECALL_LIMIT, IGlobal
+from .IGlobal import MAX_RECALL_LIMIT, IGlobal
 
 
 class IInstance(IInstanceBase):
@@ -153,7 +153,7 @@ class IInstance(IInstanceBase):
         strategy = _opt_str(args, 'recall', 'strategy')
 
         limit = int_arg(
-            args, 'limit', default=cfg.recall_limit, lo=1, hi=_MAX_RECALL_LIMIT, tool_name='laserdata.recall'
+            args, 'limit', default=cfg.recall_limit, lo=1, hi=MAX_RECALL_LIMIT, tool_name='laserdata.recall'
         )
 
         laser = self._laser('recall')

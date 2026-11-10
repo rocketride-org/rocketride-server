@@ -23,6 +23,7 @@ pytest.importorskip('engLib', reason='Run with engine -m pytest for native tool 
 from rocketlib import APERR, Ec  # noqa: E402
 
 from ._fake_github import FakeGitHub, response  # noqa: E402
+from ._stubs import to_conn_config  # noqa: E402
 
 _PACKAGE = '_github_credentials_engine_test'
 TOKEN = 'ghp_sentinel_engine_2592pr3'
@@ -41,19 +42,21 @@ def node(monkeypatch):
     monkeypatch.setattr(requests, 'request', github)
     try:
         spec.loader.exec_module(module)
-        config = sys.modules[f'{_PACKAGE}.IGlobal'].Config
+        # The package __init__ is empty: the classes live in their submodules
+        iglobal = importlib.import_module(f'{_PACKAGE}.IGlobal')
+        iinstance = importlib.import_module(f'{_PACKAGE}.IInstance')
 
         def build(cfg):
-            monkeypatch.setattr(config, 'getNodeConfig', staticmethod(lambda logical_type, conn_config: cfg))
-            glb = module.IGlobal()
+            # The engine's own resolver reads the stored, path-addressed config
+            glb = iglobal.IGlobal()
             glb.IEndpoint = SimpleNamespace(endpoint=SimpleNamespace(openMode='open'))
-            glb.glb = SimpleNamespace(logicalType='tool_github', connConfig={})
+            glb.glb = SimpleNamespace(logicalType='tool_github', connConfig=to_conn_config(cfg))
             glb.beginGlobal()
-            inst = module.IInstance()
+            inst = iinstance.IInstance()
             inst.IGlobal = glb
             return inst
 
-        yield SimpleNamespace(build=build, github=github)
+        yield SimpleNamespace(build=build, github=github, IGlobal=iglobal.IGlobal, IInstance=iinstance.IInstance)
     finally:
         for key in list(sys.modules):
             if key == _PACKAGE or key.startswith(_PACKAGE + '.'):
@@ -86,7 +89,7 @@ def test_a_write_dispatches_with_json_input_and_the_matching_credential(node):
     node.github.routes[('POST', '/repos/acme/api/pulls/7/requested_reviewers')] = response(
         {'number': 7, 'requested_reviewers': [{'login': 'octocat'}], 'requested_teams': []}, 201
     )
-    inst = node.build({'credentialMap': json.dumps({'acme/*': TOKEN, '*': 'ghp_default'})})
+    inst = node.build({'credentialMap': {'acme/*': TOKEN, '*': 'ghp_default'}})
     output = _invoke(inst, 'pr_request_reviewers', {'repo': 'acme/api', 'pr_number': 7, 'reviewers': ['octocat']})
     assert output['status'] == 201
     assert output['data'] == {'number': 7, 'requested_reviewers': ['octocat'], 'requested_teams': []}
@@ -138,41 +141,33 @@ def test_a_legacy_error_is_redacted_through_dispatch(node):
     assert node.github.bearer_for('/repos/acme/api/issues/1') == TOKEN
 
 
-def test_an_object_map_through_the_real_get_node_config(node):
-    # build() is not used, so getNodeConfig is the engine's own: it reads the profile block
-    # through IJson.toDict and merges the service's profile defaults.
-    glb = sys.modules[_PACKAGE].IGlobal()
+def test_an_object_map_is_refused_by_the_schema(node):
+    # The stored credentialMap is the form's rows (an array leaf); a hand-written object map
+    # is not storable in the property model, so the resolver refuses it before the node reads it.
+    from rocketlib.config import ConfigError
+
+    glb = node.IGlobal()
     glb.IEndpoint = SimpleNamespace(endpoint=SimpleNamespace(openMode='open'))
-    conn = {'profile': 'default', 'default': {'credentialMap': {'acme/*': TOKEN, 'beta/web': 'ghp_beta'}}}
+    # Stored as written, not through to_conn_config, which stores a dict as rows
+    conn = {'credentialMap': {'acme/*': TOKEN, 'beta/web': 'ghp_beta'}}
     glb.glb = SimpleNamespace(logicalType='tool_github', connConfig=conn)
-    glb.beginGlobal()
-    inst = sys.modules[_PACKAGE].IInstance()
-    inst.IGlobal = glb
-    node.github.routes[('GET', '/repos/acme/api/labels')] = response([])
-    node.github.routes[('GET', '/repos/beta/web/labels')] = response([])
-    assert _invoke(inst, 'label_list', {'repo': 'acme/api'})['status'] == 200
-    assert _invoke(inst, 'label_list', {'repo': 'beta/web'})['status'] == 200
-    assert node.github.bearer_for('/repos/acme/api/labels') == TOKEN
-    assert node.github.bearer_for('/repos/beta/web/labels') == 'ghp_beta'
-    # Unmatched, and the map has no default entry and the node no token: a result naming it.
-    output = _invoke(inst, 'label_list', {'repo': 'gamma/x'})
-    assert output['status'] is None
-    assert 'gamma/x' in output['message']
+    with pytest.raises(ConfigError, match='"credentialMap" expects array'):
+        glb.beginGlobal()
 
 
-def test_a_rows_map_through_the_real_get_node_config(node):
-    # build() is not used, so getNodeConfig is the engine's own: it reads the profile block
-    # through IJson.toDict and merges the service's profile defaults.
-    glb = sys.modules[_PACKAGE].IGlobal()
+def test_a_rows_map_through_the_real_resolver(node):
+    # build() is not used: the engine's own resolver reads the stored rows through IJson.toDict
+    # and applies the schema's defaults.
+    glb = node.IGlobal()
     glb.IEndpoint = SimpleNamespace(endpoint=SimpleNamespace(openMode='open'))
     rows = [
         {'credentialRepository': 'acme/*', 'credentialValue': TOKEN},
         {'credentialRepository': 'beta/web', 'credentialValue': 'ghp_beta'},
     ]
-    conn = {'profile': 'default', 'default': {'credentialMap': rows}}
+    conn = to_conn_config({'credentialMap': rows})
     glb.glb = SimpleNamespace(logicalType='tool_github', connConfig=conn)
     glb.beginGlobal()
-    inst = sys.modules[_PACKAGE].IInstance()
+    inst = node.IInstance()
     inst.IGlobal = glb
     node.github.routes[('GET', '/repos/acme/api/labels')] = response([])
     node.github.routes[('GET', '/repos/beta/web/labels')] = response([])
