@@ -152,7 +152,7 @@ class IValidator(IValidatorBase):
                     message = self._format_error(status, code, emsg, str(e))
                     # Bedrock surfaces a ValidationException when region is incorrect. Incorrect keys will surface different exceptions.
                     if status == 400 and str(code) == 'ValidationException':
-                        message = f'{message}.. Verify the AWS region matches your account'
+                        message = f'{message.rstrip(".")}. Verify the AWS region matches your account.'
                     warning(message)
                     return
                 if isinstance(

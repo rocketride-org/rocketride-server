@@ -182,7 +182,9 @@ class IValidator(IValidatorBase):
                     except Exception:
                         pass
 
-                message = self._format_error(status, None, None, message)
+                # 3) Nothing structured was found: prefix the raw text with the status
+                if message == raw:
+                    message = self._format_error(status, None, None, raw)
                 warning(message)
                 return
 
@@ -197,7 +199,8 @@ class IValidator(IValidatorBase):
         Build a concise, consistent error string.
 
         - If structured fields are present, formats as: "Error <status>: <type> - <message>"
-        - Otherwise returns the sanitized fallback text.
+        - Otherwise returns the sanitized fallback text, after "Error <status>:"
+          when a status is known.
         - Always collapses whitespace for readability.
 
         Args:
@@ -219,4 +222,7 @@ class IValidator(IValidatorBase):
                 parts.append('-')
             parts.append(str(emsg))
         message = ' '.join(parts) if parts else fallback
+        # A bare status prefix carries no detail, so the fallback text follows it
+        if status and not etype and not emsg and fallback:
+            message = f'{message} {fallback}'
         return re.sub(r'\s+', ' ', message).strip()
