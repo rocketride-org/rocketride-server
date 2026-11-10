@@ -113,6 +113,11 @@ _MAX_TITLE = 300
 _MAX_DESCRIPTION = 1000
 _MAX_REDIRECTS = 100
 
+# The largest snapshot the publish gate accepts and the server reads. A crawler
+# request is cheap to send and its UA trivially spoofed, so every snapshot must
+# fit the snapshot and render caches many times over.
+MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024
+
 # The page keys this engine validates; every other key lands in ``Page.extra``.
 _PAGE_KEYS = frozenset({'path', 'title', 'description', 'listed', 'snapshot', 'data'})
 
