@@ -28,8 +28,10 @@ redirect nor a server route (and is outside the reserved prefixes) answers
 404 with a head titled ``Page not found | <site.title>``, noindex and no
 canonical URL. Crawlers get the snapshot, rendered like a page's (``{{assets}}``
 resolves to the root owner's production version); people get the shell's
-``index.html``, so the app renders its own 404. The response is never cached
-as a page. Without ``site.notFound`` the 404 is unchanged.
+``index.html``, so the app renders its own 404. The body does not depend on
+the path, so the server renders it once per UA class and page map; a fallback
+on a storage error is retried, and warned about, at most once a minute.
+Without ``site.notFound`` the 404 is unchanged.
 """
 
 from __future__ import annotations
@@ -37,6 +39,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import re
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
@@ -45,6 +48,7 @@ from fastapi.testclient import TestClient
 import ai.modules.shell.pages as pages
 import ai.modules.shell.public_pages as pp
 import ai.modules.shell.shell as shell_mod
+from ai.modules.shell.contract import MAX_SNAPSHOT_BYTES
 from ai.modules.shell.pages import FALLBACK_PATH, public_page
 
 from .hostile_fixtures import FILES, HOME_MANIFEST, dist_of, hostile_account, install
@@ -107,6 +111,27 @@ def _head_of(text):
     return text[: text.index('</head>')]
 
 
+def _counted(monkeypatch, owner, name):
+    """Replace ``owner.<name>`` with a wrapper that logs each call; returns the log."""
+    calls = []
+    real = getattr(owner, name)
+
+    def wrapper(*args, **kwargs):
+        calls.append(args)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(owner, name, wrapper)
+    return calls
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    """The monotonic clock ``pages`` reads, moved by hand."""
+    now = [1000.0]
+    monkeypatch.setattr(pages, 'time', SimpleNamespace(monotonic=lambda: now[0]))
+    return now
+
+
 def test_a_crawler_gets_the_not_found_snapshot_with_status_404(monkeypatch, shell_root):
     resp = _serve(monkeypatch).get('/nope', headers={'User-Agent': GOOGLEBOT})
     _assert_branded(resp)
@@ -162,14 +187,34 @@ def test_behind_a_root_path_it_decides_on_the_path_the_router_matched(monkeypatc
     assert resp.status_code == 404 and resp.json() == {'detail': 'Not Found'}
 
 
-def test_it_is_never_cached_as_a_page(monkeypatch, shell_root):
+@pytest.mark.parametrize('ua', [GOOGLEBOT, BROWSER])
+def test_a_second_miss_neither_rereads_nor_rerenders(monkeypatch, shell_root, ua):
     client = _serve(monkeypatch)
-    for ua in (GOOGLEBOT, BROWSER, GOOGLEBOT):
-        assert client.get('/nope', headers={'User-Agent': ua}).status_code == 404
-    assert len(pages._render_cache) == 0
-    # A page served afterwards is cached as before.
+    documents = _counted(monkeypatch, pages.Path, 'read_text')
+    snapshots = _counted(monkeypatch, pp, 'read_artifact_file')
+    renders = _counted(monkeypatch, pages, 'inject_head')
+    first = client.get('/nope', headers={'User-Agent': ua})
+    # Another path, the same body: scanners probing random paths cost one render.
+    second = client.get('/wp-admin/setup.php', headers={'User-Agent': ua})
+    _assert_branded(second)
+    assert second.text == first.text and len(renders) == 1
+    # One read in all: the snapshot for a crawler, index.html for a person.
+    assert len(documents) + len(snapshots) == 1
+
+
+def test_one_cached_response_per_ua_class_dropped_on_a_swap(monkeypatch, shell_root):
+    client = _serve(monkeypatch)
+    for path, ua in (('/nope', GOOGLEBOT), ('/a/b', GOOGLEBOT), ('/nope', BROWSER), ('/.env', BROWSER)):
+        _assert_branded(client.get(path, headers={'User-Agent': ua}))
+    assert sorted(key[:2] for key in pages._render_cache.keys()) == [('site.notFound', False), ('site.notFound', True)]
+    # A page served afterwards is cached beside them, as before.
     client.get('/pricing', headers={'User-Agent': GOOGLEBOT})
-    assert len(pages._render_cache) == 1
+    assert len(pages._render_cache) == 3
+    # A new page map drops them with the pages.
+    _serve(monkeypatch, site_title='RocketRide Cloud')
+    assert len(pages._render_cache) == 0
+    text = client.get('/nope', headers={'User-Agent': GOOGLEBOT}).text
+    assert '<title>Page not found | RocketRide Cloud</title>' in text
 
 
 def test_without_not_found_the_404_is_unchanged(monkeypatch, shell_root):
@@ -179,12 +224,37 @@ def test_without_not_found_the_404_is_unchanged(monkeypatch, shell_root):
         assert resp.status_code == 404 and resp.json() == {'detail': 'Not Found'}
 
 
-def test_an_unreadable_snapshot_serves_crawlers_the_shell_document_still_404(monkeypatch, shell_root, warned):
+def test_an_unreadable_snapshot_is_retried_at_most_once_a_minute(monkeypatch, shell_root, warned, clock):
     # A seeded row never passes the publish gate, so the file may be missing.
-    resp = _serve(monkeypatch, seed=False).get('/nope', headers={'User-Agent': GOOGLEBOT})
-    _assert_branded(resp)
-    assert SHELL_BODY in resp.text and '<title>Page not found | RocketRide</title>' in resp.text
-    assert len(warned) == 1 and "'pages/404.html'" in warned[0] and "'/nope'" in warned[0]
+    client = _serve(monkeypatch, seed=False)
+    for path in ('/nope', '/other'):
+        resp = client.get(path, headers={'User-Agent': GOOGLEBOT})
+        _assert_branded(resp)
+        assert SHELL_BODY in resp.text and '<title>Page not found | RocketRide</title>' in resp.text
+    assert len(warned) == 1 and warned[0].startswith("[public_pages] site.notFound: snapshot 'pages/404.html'")
+    # Once the file is there, the first miss after the retry interval serves it.
+    FILES[f'{DIST}/pages/404.html'] = NOT_FOUND.encode()
+    clock[0] += pages._NOT_FOUND_RETRY_SECONDS - 1
+    assert 'Lost in space' not in client.get('/nope', headers={'User-Agent': GOOGLEBOT}).text
+    clock[0] += 1
+    assert 'Lost in space' in client.get('/nope', headers={'User-Agent': GOOGLEBOT}).text
+    assert len(warned) == 1
+
+
+def test_an_oversized_snapshot_is_warned_about_once_per_version(monkeypatch, shell_root, warned, clock):
+    client = _serve(monkeypatch, seed=False)
+    FILES[f'{DIST}/pages/404.html'] = b'x' * (MAX_SNAPSHOT_BYTES + 1)
+    stats = _counted(monkeypatch, pp, 'artifact_file_info')
+    for path in ('/nope', '/other'):
+        resp = client.get(path, headers={'User-Agent': GOOGLEBOT})
+        _assert_branded(resp)
+        assert SHELL_BODY in resp.text
+    clock[0] += pages._NOT_FOUND_RETRY_SECONDS
+    client.get('/nope', headers={'User-Agent': GOOGLEBOT})
+    # A new page map on the same version: still never read, nor warned about again.
+    _serve(monkeypatch, site_title='RocketRide Cloud', seed=False)
+    assert SHELL_BODY in client.get('/nope', headers={'User-Agent': GOOGLEBOT}).text
+    assert len(stats) == 1 and len(warned) == 1 and 'over the' in warned[0]
 
 
 def test_the_title_is_escaped_and_falls_back_without_a_site_title(monkeypatch, shell_root):
