@@ -93,6 +93,7 @@ def test_extra_calls_are_allowed_unless_forbidden():
 
 def test_the_missing_tool_task_accepts_a_refusal_and_rejects_other_calls():
     assert score(T[8], [], 'done', 'I cannot send SMS messages with the tools available.')[0]
+    assert score(T[8], [], 'done', 'I can\u2019t send the SMS from here.')[0]
     assert not score(T[8], [L('crm.find_customer')], 'done', 'There is no tool for SMS.')[0]
 
 
