@@ -56,8 +56,8 @@ its ID in the resulting error. Starting a session is not retried, avoiding dupli
 ## Configuration
 
 Configure the connection, workspace identity, and default agent before enabling either face.
-The connection fields can use their matching `ROCKETRIDE_GUILD_*` environment variables
-when the node field is blank; run options are read only from node configuration.
+The connection fields and run options are read from the node config only. Supply the
+credentials as `${ROCKETRIDE_GUILD_*}` references in the fields, as the example pipeline does.
 
 ### Agent and Result mode
 
@@ -206,10 +206,11 @@ Example: [`examples/guild-delegate-agent.pipe`](../../../../examples/guild-deleg
 | Max sessions per run | `integer` | Default 10, range 1-1000. Cap on billed Guild sessions per pipeline run. |
 | Verify TLS certificate | `boolean` | Default on. Disable only for a self-hosted Guild with a self-signed certificate. |
 
-The connection fields fall back to an environment variable when left empty: `ROCKETRIDE_GUILD_URL`
-(Base URL), `ROCKETRIDE_GUILD_KEY_ID`, `ROCKETRIDE_GUILD_KEY_SECRET`, `ROCKETRIDE_GUILD_OWNER`,
-`ROCKETRIDE_GUILD_WORKSPACE`, and `ROCKETRIDE_GUILD_AGENT`. The run options (result mode, session
-timeout, max sessions, verify TLS) are read from the node config only.
+The connection fields are read from the node config only; there is no process-environment
+fallback. To take the values from the account variables, put `${ROCKETRIDE_GUILD_KEY_ID}`,
+`${ROCKETRIDE_GUILD_KEY_SECRET}`, `${ROCKETRIDE_GUILD_OWNER}`, `${ROCKETRIDE_GUILD_WORKSPACE}`
+and `${ROCKETRIDE_GUILD_AGENT}` references in the fields, as the example pipeline does. The run
+options (result mode, session timeout, max sessions, verify TLS) are read from the node config too.
 
 Out-of-range or non-numeric timeouts fall back to their defaults rather than failing the run.
 

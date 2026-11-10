@@ -99,12 +99,12 @@ pattern as the Qdrant node) and switches the visible fields and defaults:
 Shared by both modes:
 
 - `namespace`: default memory scope for all connected agents; required here or per call.
-- `stream` (advanced): the Iggy stream the memory topics live in, pinned as the connection's
+- `stream`: the Iggy stream the memory topics live in, pinned as the connection's
   default stream at connect. Defaults to `rocketride-memory`; nodes sharing one memory must match.
-- `allow_namespace_override` (advanced): permit per-call namespaces. Defaults to `true`.
-- `folded` (advanced): overridable per the mode notes above.
-- `recall_limit` (advanced): default recall result limit, 1–200. Defaults to 10.
-- `op_timeout` (advanced): per-operation timeout (including first connect), 5–600 seconds.
+- `allow_namespace_override`: permit per-call namespaces. Defaults to `true`.
+- `folded`: overridable per the mode notes above.
+- `recall_limit`: default recall result limit, 1–200. Defaults to 10.
+- `op_timeout`: per-operation timeout (including first connect), 5–600 seconds.
   Defaults to 30.
 
 ## Notes

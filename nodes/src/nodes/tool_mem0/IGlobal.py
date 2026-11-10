@@ -36,7 +36,13 @@ class IGlobal(IGlobalBase):
         # call, no process-env fallback)
         cfg = self.config
 
+        # Required by the schema, but a whitespace-only value passes `required` and
+        # would only fail later on the first remember/recall call: refuse it here.
         self.api_key = str(cfg.api_key or '').strip()
+        if not self.api_key:
+            raise ValueError(
+                'tool_mem0: api_key is required - set it in the node config (a ${ROCKETRIDE_MEM0_APIKEY} reference)'
+            )
         # Optional override for self-hosted / enterprise deployments; the
         # default is the hosted endpoint (https://api.mem0.ai).
         self.base_url = cfg.base_url.strip().rstrip('/')
