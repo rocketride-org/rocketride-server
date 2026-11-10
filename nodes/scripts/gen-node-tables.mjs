@@ -123,6 +123,162 @@ function formatDefault(field) {
 	return '';
 }
 
+// Property types a pipeline author never writes: a constant always resolves to
+// its default, so it is a fact of the node, not a setting.
+const UNSETTABLE_TYPES = new Set(['constant']);
+
+let sharedDefinitions = null;
+
+/**
+ * The propertyDefinitions of every shared fragment (a services*.json without a
+ * "protocol", e.g. core/services.common.llm.json), which any node may reference
+ * or use as a `base`. Loaded once.
+ */
+function loadSharedDefinitions() {
+	if (sharedDefinitions) return sharedDefinitions;
+	sharedDefinitions = {};
+	for (const name of readdirSync(NODES_DIR)) {
+		const dir = path.join(NODES_DIR, name);
+		let files;
+		try {
+			files = readdirSync(dir).filter((f) => /^services.*\.json$/.test(f));
+		} catch {
+			continue;
+		}
+		for (const filename of files) {
+			for (const entry of [readJsonSync(path.join(dir, filename))].flat()) {
+				if (entry && !entry.protocol && entry.propertyDefinitions)
+					Object.assign(sharedDefinitions, entry.propertyDefinitions);
+			}
+		}
+	}
+	return sharedDefinitions;
+}
+
+/**
+ * Resolve one `properties` entry to { name, descriptor, spec }.
+ *
+ * An entry is an inline descriptor, a bare string naming a propertyDefinitions
+ * key, or `{ base: key, ...overrides }`. A referenced definition is named by its
+ * last dotted segment unless it names itself. `spec` is the entry as written:
+ * two branches share a property only when they use the identical specifier.
+ */
+function resolveProperty(entry, definitions) {
+	const spec = JSON.stringify(entry);
+	if (typeof entry === 'string') {
+		const definition = definitions[entry];
+		if (!definition || typeof definition !== 'object') return null;
+		// A definition may itself extend a base
+		const descriptor =
+			typeof definition.base === 'string' ? resolveProperty(definition, definitions).descriptor : definition;
+		return { name: descriptor.name || entry.split('.').pop(), descriptor, spec };
+	}
+	if (!entry || typeof entry !== 'object') return null;
+	if (typeof entry.base === 'string') {
+		const { base, ...overrides } = entry;
+		const inherited = resolveProperty(base, definitions);
+		const descriptor = { ...(inherited ? inherited.descriptor : {}), ...overrides };
+		return { name: descriptor.name || base.split('.').pop(), descriptor, spec };
+	}
+	return { name: entry.name, descriptor: entry, spec };
+}
+
+/** True when a descriptor is a selector: an enum whose values are property sets. */
+function isSelector(descriptor) {
+	return !!descriptor.enum && typeof descriptor.enum === 'object' && !Array.isArray(descriptor.enum);
+}
+
+/** The Type cell: arrays name their item type, selectors are called out. */
+function formatType(descriptor) {
+	const type = descriptor.type || '';
+	if (type === 'array') {
+		const item = descriptor.item || descriptor.items;
+		return item && item.type ? `array<${item.type}>` : 'array';
+	}
+	if (isSelector(descriptor)) return type ? `${type} (selector)` : 'selector';
+	return type;
+}
+
+/** The Description cell; a selector also lists its options. */
+function formatSelectorDescription(descriptor) {
+	const desc = formatDescription(descriptor);
+	if (!isSelector(descriptor)) return desc;
+	const options = Object.keys(descriptor.enum)
+		.map((key) => `\`${esc(key)}\``)
+		.join(', ');
+	return desc ? `${desc}<br/>One of: ${options}` : `One of: ${options}`;
+}
+
+/**
+ * Walk one level of `properties` and emit a row per settable leaf at its path.
+ *
+ * Paths follow the engine's rule (plan 5.6.1): a plain leaf sits at
+ * `prefix + name`; a group's children at `prefix + group.`; a selector is a leaf
+ * itself and each branch's properties sit at `prefix + branch.`, EXCEPT a
+ * property every branch references by the identical specifier, which is hoisted
+ * to `prefix`. An array of objects lists its item properties at `path[].`.
+ */
+function walkProperties(properties, prefix, definitions, rows) {
+	if (!Array.isArray(properties)) return;
+	for (const entry of properties) {
+		const resolved = resolveProperty(entry, definitions);
+		if (!resolved) continue;
+		const { name, descriptor } = resolved;
+
+		// Step 1: a group (properties without a selector enum) only adds a level
+		if (Array.isArray(descriptor.properties) && !isSelector(descriptor)) {
+			walkProperties(descriptor.properties, name ? `${prefix}${name}.` : prefix, definitions, rows);
+			continue;
+		}
+		if (!name) continue;
+
+		// Step 2: the leaf itself, unless it is a pinned or hidden value
+		const leafPath = `${prefix}${name}`;
+		if (!UNSETTABLE_TYPES.has(descriptor.type) && !descriptor.hidden) {
+			const type = formatType(descriptor);
+			const typeCell = type ? `\`${esc(type)}\`` : '';
+			const desc = formatSelectorDescription(descriptor);
+			const def = formatDefault(descriptor);
+			rows.push(`| \`${esc(leafPath)}\` | ${typeCell} | ${desc} | ${def} |`);
+		}
+
+		// Step 3: an array of objects describes its items one level down
+		if (descriptor.type === 'array' && descriptor.items && Array.isArray(descriptor.items.properties)) {
+			walkProperties(descriptor.items.properties, `${leafPath}[].`, definitions, rows);
+		}
+
+		// Step 4: a selector's branches, with shared properties hoisted to this level
+		if (isSelector(descriptor)) {
+			const branches = Object.entries(descriptor.enum).map(([key, body]) => [
+				key,
+				(body && Array.isArray(body.properties) && body.properties) || [],
+			]);
+			const specsOf = (list) => new Set(list.map((item) => JSON.stringify(item)));
+			let shared = branches.length ? specsOf(branches[0][1]) : new Set();
+			for (const [, list] of branches.slice(1)) {
+				const specs = specsOf(list);
+				shared = new Set([...shared].filter((spec) => specs.has(spec)));
+			}
+			if (branches.length) {
+				walkProperties(
+					branches[0][1].filter((item) => shared.has(JSON.stringify(item))),
+					prefix,
+					definitions,
+					rows
+				);
+			}
+			for (const [key, list] of branches) {
+				walkProperties(
+					list.filter((item) => !shared.has(JSON.stringify(item))),
+					`${prefix}${key}.`,
+					definitions,
+					rows
+				);
+			}
+		}
+	}
+}
+
 function schemaBlock(dir) {
 	const files = readdirSync(dir)
 		.filter((f) => /^services.*\.json$/.test(f))
@@ -133,22 +289,15 @@ function schemaBlock(dir) {
 	for (const filename of files) {
 		const filePath = path.join(dir, filename);
 		const data = readJsonSync(filePath);
-		if (!data.fields) continue;
+		if (!data.protocol || !Array.isArray(data.properties)) continue;
 
 		const title = data.title || '';
 		const heading = files.length > 1 ? (title ? `### ${title} (\`${filename}\`)` : `### \`${filename}\``) : '';
 
-		const fieldKeys = Object.keys(data.fields).sort();
+		// The node's own definitions win over the shared fragments'
+		const definitions = { ...loadSharedDefinitions(), ...(data.propertyDefinitions || {}) };
 		const rows = [];
-		for (const k of fieldKeys) {
-			const field = data.fields[k];
-			if (field && field.object !== undefined) continue; // Skip profile definitions
-
-			const type = field.type || '';
-			const desc = formatDescription(field);
-			const def = formatDefault(field);
-			rows.push(`| \`${esc(k)}\` | ${type ? `\`${esc(type)}\`` : ''} | ${desc} | ${def} |`);
-		}
+		walkProperties(data.properties, '', definitions, rows);
 
 		const sectionParts = [];
 		if (heading) sectionParts.push(heading, '');
