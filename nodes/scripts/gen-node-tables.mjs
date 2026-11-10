@@ -162,21 +162,30 @@ function loadSharedDefinitions() {
  * key, or `{ base: key, ...overrides }`. A referenced definition is named by its
  * last dotted segment unless it names itself. `spec` is the entry as written:
  * two branches share a property only when they use the identical specifier.
+ * `chain` holds the definition names already being resolved, so a `base` cycle
+ * (`x` extending `x`, or `a` -> `b` -> `a`) fails with the chain named instead
+ * of overflowing the stack.
  */
-function resolveProperty(entry, definitions) {
+function resolveProperty(entry, definitions, chain = []) {
 	const spec = JSON.stringify(entry);
 	if (typeof entry === 'string') {
+		// Refuse a definition that is already on the resolution chain
+		if (chain.includes(entry)) {
+			throw new Error(`propertyDefinitions base cycle: ${[...chain, entry].join(' -> ')}`);
+		}
 		const definition = definitions[entry];
 		if (!definition || typeof definition !== 'object') return null;
 		// A definition may itself extend a base
 		const descriptor =
-			typeof definition.base === 'string' ? resolveProperty(definition, definitions).descriptor : definition;
+			typeof definition.base === 'string'
+				? resolveProperty(definition, definitions, [...chain, entry]).descriptor
+				: definition;
 		return { name: descriptor.name || entry.split('.').pop(), descriptor, spec };
 	}
 	if (!entry || typeof entry !== 'object') return null;
 	if (typeof entry.base === 'string') {
 		const { base, ...overrides } = entry;
-		const inherited = resolveProperty(base, definitions);
+		const inherited = resolveProperty(base, definitions, chain);
 		const descriptor = { ...(inherited ? inherited.descriptor : {}), ...overrides };
 		return { name: descriptor.name || base.split('.').pop(), descriptor, spec };
 	}
@@ -289,7 +298,14 @@ function schemaBlock(dir) {
 	for (const filename of files) {
 		const filePath = path.join(dir, filename);
 		const data = readJsonSync(filePath);
-		if (!data.protocol || !Array.isArray(data.properties)) continue;
+		if (!data.protocol) continue;
+
+		// A protocol service without a properties array is unmigrated: say so
+		// instead of silently dropping its Schema section
+		if (!Array.isArray(data.properties)) {
+			console.warn(`nodes:docs-generate: ${filePath} has a protocol but no properties array; Schema skipped`);
+			continue;
+		}
 
 		const title = data.title || '';
 		const heading = files.length > 1 ? (title ? `### ${title} (\`${filename}\`)` : `### \`${filename}\``) : '';
