@@ -1019,10 +1019,11 @@ class WebServer:
             # Keep the catch-all last, or a route added after it (a module
             # loaded through /use, in a worker thread) would never match. One
             # slice assignment, so no request sees a table without it.
-            # Known gap: a request already judged public on the old table (an
-            # unrouted path) is routed on the new one, so for that instant a new
-            # private route can answer it unauthenticated. /use is admin-only;
-            # guard private routes if modules are loaded at runtime in production.
+            # Known gap (tracked in rocketride-org/rocketride-server#3166):
+            # a request already judged public on the old table (an unrouted path)
+            # is routed on the new one, so for that instant a new private route
+            # can answer it unauthenticated. /use is admin-only; guard private
+            # routes if modules are loaded at runtime in production.
             routes = self.app.router.routes
             routes[:] = [r for r in routes if r is not self._catch_all] + [self._catch_all]
 
