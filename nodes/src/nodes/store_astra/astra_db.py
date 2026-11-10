@@ -91,11 +91,12 @@ class Store(DocumentStoreBase):
 
         # check if the similarity matches astra configuration options
         similarity = config.get('similarity', 'cosine')
-        if similarity in ['cosine', 'euclidean', 'dot_product']:
+        supported = ('cosine', 'euclidean', 'dot_product')
+        if similarity in supported:
             self.similarity = similarity
         else:
             raise Exception(
-                'The similarity metric you provided in the config.json does not match required astra configurations'
+                f'Astra DB: unsupported similarity {similarity!r}. Set "similarity" to: {", ".join(supported)}.'
             )
 
         # Strip API key also

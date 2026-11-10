@@ -1,11 +1,12 @@
 """
 Unit tests for ai.common.database.sql_safety.is_sql_safe.
 
-is_sql_safe is the dialect-agnostic gate that filters LLM-generated SQL before
-the relational-DB drivers run it. Only SELECT and WITH (CTE) statements are
-allowed; everything else (mutation, DDL, file IO, CALL, etc.) must be rejected.
-These tests exercise the allowlist, the comment / multi-statement stripping, and
-the SELECT INTO OUTFILE / DUMPFILE side-channel guard.
+is_sql_safe is the shape check that filters LLM-generated SQL before the
+relational-DB drivers run it. Only SELECT (optionally behind EXPLAIN) is
+allowed; everything else (mutation, DDL, WITH, file IO, CALL, etc.) must be
+rejected, and so must a SELECT with INTO or a row lock. These tests exercise
+the allowlist, the masking of literals and comments under PostgreSQL and MySQL
+rules, multi-statement input, and the clauses that make a SELECT write.
 """
 
 import pytest
@@ -28,9 +29,8 @@ from ai.common.database.sql_safety import is_sql_safe
         'SELECT * FROM users JOIN accounts ON users.id = accounts.user_id',
         'EXPLAIN SELECT 1',
         'explain select 1',
-        'SELECT 1; SELECT 2',
-        'SELECT 1;\nSELECT 2;\n',
         'SELECT 1;',
+        'SELECT 1;\n',
     ],
 )
 def test_allows_select_variants(sql):
@@ -108,6 +108,91 @@ def test_rejects_chain_with_any_unsafe_statement(sql):
     assert is_sql_safe(sql) is False
 
 
+@pytest.mark.parametrize(
+    'sql',
+    [
+        'COMMIT; INSERT INTO t VALUES (1)',
+        'ROLLBACK; INSERT INTO t VALUES (1)',
+        'END; DELETE FROM t',
+        'SELECT 1; COMMIT; INSERT INTO t VALUES (1)',
+        'SET TRANSACTION READ WRITE; INSERT INTO t VALUES (1)',
+        'SET default_transaction_read_only = off; COMMIT; DELETE FROM t',
+        'SET statement_timeout = 0; SELECT pg_sleep(100)',
+        "SELECT 1; SELECT set_config('statement_timeout', '0', false); SELECT pg_sleep(100)",
+    ],
+)
+def test_rejects_a_chain_that_would_get_around_a_postgres_read_only_transaction(sql):
+    """On PostgreSQL a ;-chain can end the read-only transaction or lift its time limit, so this check must stop it.
+
+    Args:
+        sql: The SQL under test.
+    """
+    assert is_sql_safe(sql) is False
+
+
+@pytest.mark.parametrize('sql', ['SELECT 1; SELECT 2', 'SELECT 1;\nSELECT 2;\n', 'EXPLAIN SELECT 1; SELECT 2'])
+def test_rejects_more_than_one_statement_even_reads(sql):
+    """A generated query is one statement; a chain of reads is refused too.
+
+    Args:
+        sql: The SQL under test.
+    """
+    assert is_sql_safe(sql) is False
+
+
+@pytest.mark.parametrize(
+    'sql',
+    [
+        # PostgreSQL reads a$$x$ as one name (a name may hold $), so no dollar quote hides the ';', and the #
+        # hides the rest from the MySQL reading
+        'SELECT 1 #2 AS a$$x$; SELECT 2 AS b$$x$',
+        'SELECT 1 #2 AS a$$x$; COMMIT; INSERT INTO t VALUES (1); SELECT 2 AS b$$x$',
+        # A name may hold any non-ASCII character: a no-break space, an arrow, a letter
+        'SELECT 1 #2 AS a\u00a0$x$; COMMIT; INSERT INTO t VALUES (1); SELECT 2 AS b\u00a0$x$',
+        'SELECT 1 #2 AS a\u2192$x$; COMMIT; INSERT INTO t VALUES (1); SELECT 2 AS b\u2192$x$',
+        'SELECT 1 #2 AS a\u00e9$x$; COMMIT; INSERT INTO t VALUES (1); SELECT 2 AS b\u00e9$x$',
+        # A dollar-quote tag may hold non-ASCII characters
+        "SELECT $\u00e9$'$\u00e9$; SELECT 'second'",
+        "SELECT $\u00e9$'$\u00e9$; COMMIT; INSERT INTO t VALUES (1); SELECT 'x' -- '",
+        "SELECT $\u00a0$'$\u00a0$; COMMIT; INSERT INTO t VALUES (1); SELECT 'x' -- '",
+        # An E that continues a name starts no E'...' string, so the backslash escapes nothing
+        "SELECT 1 #2, x\u00a0E'a\\'; COMMIT; INSERT INTO t VALUES (1); SELECT 1 -- '",
+        "SELECT 1 #2, x$E'a\\'; COMMIT; INSERT INTO t VALUES (1); SELECT 1 -- '",
+        # With standard_conforming_strings off, \' is a quote in any string
+        "SELECT 1 #2, 'a\\''; COMMIT; INSERT INTO t VALUES (1); SELECT 'x' -- '",
+    ],
+)
+def test_postgres_names_tags_and_string_settings_cannot_hide_a_statement(sql):
+    """The PostgreSQL reading follows its lexer (scan.l) for names, dollar-quote tags and both string settings.
+
+    Args:
+        sql: The SQL under test.
+    """
+    assert is_sql_safe(sql) is False
+
+
+@pytest.mark.parametrize(
+    'sql',
+    [
+        'SELECT 1 AS a$$x$',
+        'SELECT a\u00a0$x$ FROM t',
+        'SELECT col$1 FROM t',
+        "SELECT 'a;b'",
+        'SELECT $$a$$',
+        "SELECT $\u00e9$'$\u00e9$ AS q",
+        "SELECT E'a\\'b' AS q",
+        "SELECT 'C:\\path' AS p",
+    ],
+)
+def test_postgres_names_with_dollar_or_non_ascii_still_pass(sql):
+    """A name with $ or non-ASCII characters, a non-ASCII tag and a backslash in a string do not reject a read.
+
+    Args:
+        sql: The SQL under test.
+    """
+    assert is_sql_safe(sql) is True
+
+
 # ---------------------------------------------------------------------------
 # Comment-based bypass attempts
 # ---------------------------------------------------------------------------
@@ -163,4 +248,126 @@ def test_into_inside_string_does_not_false_positive():
     """The word 'into' in a string literal should not trigger the OUTFILE block."""
     # Plain SELECT with 'into' as data, not as a clause keyword.
     sql = "SELECT 'shipped into market' AS phrase"
+    assert is_sql_safe(sql) is True
+
+
+# ---------------------------------------------------------------------------
+# Literal- and dialect-aware masking (#2087)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    'sql',
+    [
+        # A '--' inside a literal used to strip the rest of the statement, INTO OUTFILE included
+        "SELECT '--x' INTO OUTFILE '/tmp/export'",
+        "SELECT '--' INTO DUMPFILE '/tmp/x'",
+        # PostgreSQL ends a line comment at a lone CR, so the DROP after it runs
+        'SELECT 1 -- x\r; DROP TABLE t',
+        # MySQL reads --1 as minus minus one, not a comment
+        "SELECT 1--1 INTO OUTFILE '/tmp/f'",
+        # MySQL runs the body of /*! */ and /*M! */, and a /*+ */ hint can lift the time limit
+        "SELECT 1 /*! INTO OUTFILE '/tmp/f' */",
+        "SELECT 1 /*M! INTO OUTFILE '/tmp/f' */",
+        'SELECT /*+ SET_VAR(max_execution_time=0) */ SLEEP(100)',
+        # A backslash closes nothing in a PostgreSQL string, so the INTO here is real on PostgreSQL
+        "SELECT 'a\\' INTO new_t FROM t -- '",
+        # A dollar-quoted string hides a quote from a reader that does not know dollar quoting
+        "SELECT $$'$$ INTO new_t FROM t",
+    ],
+)
+def test_literals_and_comments_cannot_hide_a_clause(sql):
+    """Masking follows each database's reading of quotes and comments, so nothing real is hidden.
+
+    Args:
+        sql: The SQL under test.
+    """
+    assert is_sql_safe(sql) is False
+
+
+@pytest.mark.parametrize(
+    'sql',
+    [
+        'SELECT * INTO new_t FROM t',
+        'SELECT * INTO new_t FROM t WHERE a > 1',
+        'SELECT a INTO @v FROM t',
+        'SELECT * FROM t FOR UPDATE',
+        'SELECT * FROM t FOR NO KEY UPDATE',
+        'SELECT * FROM t FOR SHARE',
+        'SELECT * FROM t LOCK IN SHARE MODE',
+    ],
+)
+def test_select_that_writes_or_locks_is_rejected(sql):
+    """SELECT INTO creates a table (PostgreSQL) or a file (MySQL); FOR UPDATE / SHARE take row locks.
+
+    Args:
+        sql: The SQL under test.
+    """
+    assert is_sql_safe(sql) is False
+
+
+@pytest.mark.parametrize(
+    'sql',
+    [
+        'SELECT 1 SETTINGS max_execution_time = 0',
+        'select count() from t settings max_threads=1, max_execution_time=0',
+        'SELECT * FROM (SELECT 1 SETTINGS max_execution_time = 0)',
+        'SELECT 1 SETTINGS\n  max_execution_time\n  = 0',
+        'SELECT 1 SETTINGS/* x */max_execution_time = 0',
+        'SELECT 1 SETTINGS `max_execution_time` = 0',
+        'SELECT 1 SETTINGS "max_execution_time" = 0',
+        'EXPLAIN SELECT 1 SETTINGS max_execution_time = 0',
+    ],
+)
+def test_a_clickhouse_settings_clause_is_rejected(sql):
+    """ClickHouse's SETTINGS clause lets a readonly=2 user lift the time limit the node sets.
+
+    Args:
+        sql: The SQL under test.
+    """
+    assert is_sql_safe(sql) is False
+
+
+@pytest.mark.parametrize(
+    'sql',
+    [
+        'SELECT settings FROM t',
+        "SELECT * FROM settings WHERE name = 'x'",
+        'SELECT * FROM settings s WHERE s.id = 1',
+        'SELECT a FROM t JOIN settings ON t.id = settings.id',
+        'SELECT a FROM t WHERE settings = 1',
+        "SELECT 'SETTINGS max_execution_time = 0' AS q",
+        'SELECT 1 -- SETTINGS max_execution_time = 0',
+        'SELECT my_settings x FROM t',
+    ],
+)
+def test_the_word_settings_alone_is_not_a_settings_clause(sql):
+    """A table, column or text named settings is not the clause.
+
+    Args:
+        sql: The SQL under test.
+    """
+    assert is_sql_safe(sql) is True
+
+
+@pytest.mark.parametrize(
+    'sql',
+    [
+        "SELECT 'it''s' AS q",
+        "SELECT E'it's' AS q",
+        "SELECT $$'$$ AS q",
+        'SELECT 5 # 3',
+        'SELECT `into` FROM t',
+        'SELECT "into" FROM t',
+        "SELECT 'a; DROP TABLE t' AS q",
+        "SELECT name FROM t WHERE note = 'for update'",
+        'SELECT 1 -- INTO OUTFILE\nFROM t',
+    ],
+)
+def test_ordinary_reads_with_quotes_and_comments_pass(sql):
+    """Quoted text, identifiers and comments that only look like a clause do not reject a read.
+
+    Args:
+        sql: The SQL under test.
+    """
     assert is_sql_safe(sql) is True

@@ -6,8 +6,6 @@
 """Filtered HNSW regressions for both PostgreSQL vector stores and their tools.
 
 Uses the same RR_TEST_PG_DSN / RR_REQUIRE_DB_TESTS setup as the write suite.
-Deliberately not named *_full.py: Linux CI provisions pgvector but the normal
-nodes:test runner excludes that suffix. Other platforms skip without a DB.
 The fixture deliberately puts more excluded neighbours ahead of the eligible
 documents than HNSW's default candidate budget. EXPLAIN checks the executed
 query, so a sequential scan cannot accidentally make the regression pass.
@@ -17,12 +15,17 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from .test_vector_store_listing_full import _tools
-from .test_vector_store_writes_full import _doc
-from .test_vector_store_writes_full import store_env as _shared_store_env
+from .test_vector_store_listing_live import _tools
+from .test_vector_store_writes_live import _doc
+from .test_vector_store_writes_live import store_env as _shared_store_env
 
 store_env = _shared_store_env
-pytestmark = pytest.mark.parametrize('store_env', ['rocketride_vector', 'store_postgres'], indirect=True)
+# One xdist worker runs every module that creates tables in the RR_TEST_PG_DSN
+# database (see the group in test_rocketride_db_live.py).
+pytestmark = [
+    pytest.mark.parametrize('store_env', ['rocketride_vector', 'store_postgres'], indirect=True),
+    pytest.mark.xdist_group('rocketride_pg_live'),
+]
 
 
 @pytest.fixture(params=['cosine', 'l2', 'inner_product'])
@@ -328,12 +331,21 @@ def test_legacy_fallback_recovers_matches_after_trash(indexed_store):
 
 
 def test_failed_iterative_query_releases_transaction_and_local_setting(indexed_store):
-    """A failed search leaves the shared connection usable and unpinned."""
+    """A failed search leaves the shared connection usable and unpinned.
+
+    Args:
+        indexed_store (tuple): store, raw connection, table, query vector and the
+            recorded searches, from the ``indexed_store`` fixture.
+    """
     import psycopg2
     from ai.common.schema import DocFilter, QuestionText
 
     store, _, _, query, _ = indexed_store
-    with pytest.raises(psycopg2.DataError, match='different vector dimensions'):
+    # pgvector reports a dimension mismatch from one of two checks, both SQLSTATE
+    # 22000: the distance check ("different vector dimensions 2 and 32") or the
+    # check against the column type vector(N) ("expected 32 dimensions, not 2").
+    # Which one fires depends on the pgvector version and the query path.
+    with pytest.raises(psycopg2.DataError, match=r'different vector dimensions|expected \d+ dimensions, not \d+'):
         store.searchSemantic(QuestionText(text='bad dimensions', embedding=[1.0, 0.0]), DocFilter(limit=5))
     assert store.client.autocommit is True
     assert store.client.get_transaction_status() == 0

@@ -40,7 +40,7 @@
 //   - Browser-specific session storage for auth phase tracking
 // =============================================================================
 
-import { takeSignupProperties, currentSignupProperties, clearSignupProperties } from '../util/signupAttribution';
+import { takeSignupProperties, currentSignupProperties, clearSignupProperties, signupFromState } from '../util/signupAttribution';
 import { RocketRideClient, ConnectResult, AuthenticationException, LoginAttemptCancelledError, type PkceCredential, type SignupProperties } from 'rocketride';
 import type { DAPMessage } from 'rocketride';
 import type { ShellConnectionEventMap, IConnectionManager } from '../types/shell';
@@ -916,6 +916,31 @@ export class ConnectionManager implements IConnectionManager {
 			}
 		}
 
+		// ── Identity provider error return ────────────────────────────────
+		// The generic OAuth `error`/`error_description` params can reach the
+		// app (the registered redirect URIs are origin roots), but honoring them
+		// would let any unrelated app deep-link (`/app?error=…`) into a false
+		// sign-in banner, so they are never a sign-in failure. A return from OUR
+		// authorize redirect (its PKCE verifier is still stored) carries `state`,
+		// which may hold a cookieless signup context: strip it before the
+		// transport wait, which can fail and return early. Only the OAuth params
+		// go; the rest of the query and the fragment stay for the app.
+		{
+			const returnParams = new URLSearchParams(window.location.search);
+			if (!returnParams.get('code') && !returnParams.get('auth_error') && returnParams.has('error') && returnParams.has('state') && getStoredVerifier()) {
+				clearSignupProperties();
+				for (const key of ['error', 'error_description', 'error_uri', 'state', 'iss']) {
+					returnParams.delete(key);
+				}
+				let url = window.location.pathname;
+				const rest = returnParams.toString();
+				if (rest) {
+					url += `?${rest}`;
+				}
+				window.history.replaceState({ ...(window.history.state ?? {}) }, '', url + String(window.location.hash ?? ''));
+			}
+		}
+
 		// Ensure the transport is attached before any login attempt. The native
 		// attach timeout closes a timed-out handshake before this promise rejects.
 		try {
@@ -934,12 +959,9 @@ export class ConnectionManager implements IConnectionManager {
 
 		const params = new URLSearchParams(window.location.search);
 		const code = params.get('code');
-		// Only honor `auth_error`: it is set exclusively by our own OAuth
-		// callback (the registered redirect_uri is the server callback, which
-		// wraps every Zitadel failure as `auth_error` before redirecting here).
-		// The generic OAuth `error`/`error_description` params never legitimately
-		// reach the app this way, so reading them would let any unrelated app
-		// deep-link (`/app?error=…`) hijack bootstrap into a false sign-in banner.
+		// Only `auth_error` is honored as a sign-in failure: our own OAuth
+		// callback sets it. Identity provider `error` returns are stripped
+		// above, before the transport wait.
 		const errorDescription = params.get('auth_error');
 
 		if (errorDescription) {
@@ -963,7 +985,7 @@ export class ConnectionManager implements IConnectionManager {
 
 		// ── OAuth callback — exchange authorization code for a session ────
 		if (code) {
-			const signup = takeSignupProperties();
+			const signup = takeSignupProperties() ?? signupFromState(params.get('state'));
 			const verifier = getStoredVerifier();
 			clearStoredVerifier();
 			// Strip the ?code= from the URL so refreshes don't re-exchange.

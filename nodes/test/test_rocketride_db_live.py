@@ -34,14 +34,17 @@ Requires a container on the live pin (PG16 + pgvector), e.g.::
 
     docker run -d --name rr-pg-phase1 -p 55432:5432 \
         -e POSTGRES_PASSWORD=rrpass -e POSTGRES_USER=rruser -e POSTGRES_DB=rrtenant \
-        pgvector/pgvector:pg16
+        pgvector/pgvector:0.8.0-pg16
     docker exec rr-pg-phase1 psql -U rruser -d rrtenant -c 'CREATE EXTENSION IF NOT EXISTS vector;'
 
 Configuration via environment variables:
-    RR_TEST_PG_DSN — libpq URL of the test database
-                     (default: postgresql://rruser:rrpass@localhost:55432/rrtenant)
+    RR_TEST_PG_DSN      — libpq URL of the test database, for example
+                          postgresql://rruser:rrpass@localhost:55432/rrtenant
+    RR_REQUIRE_DB_TESTS — when set, a missing or unreachable database fails
+                          instead of skipping
 
-Skips cleanly when the database is unreachable.
+Runs in ``nodes:test``. Skips when RR_TEST_PG_DSN is not set or the database
+is unreachable.
 """
 
 from __future__ import annotations
@@ -63,11 +66,14 @@ _REPO = Path(__file__).resolve().parents[2]
 _AI_SRC = _REPO / 'packages' / 'ai' / 'src'
 _RRDB_PATH = _AI_SRC / 'ai' / 'common' / 'rocketride_db.py'
 _DB_BASE_DIR = _AI_SRC / 'ai' / 'common' / 'database'
+_STORE_DIR = _AI_SRC / 'ai' / 'common' / 'store'
 _UTILS_DIR = _AI_SRC / 'ai' / 'common' / 'utils'
 _SQL_NODE_DIR = _REPO / 'nodes' / 'src' / 'nodes' / 'rocketride_sql'
 _VEC_NODE_DIR = _REPO / 'nodes' / 'src' / 'nodes' / 'rocketride_vector'
 
-TEST_DSN = os.environ.get('RR_TEST_PG_DSN', 'postgresql://rruser:rrpass@localhost:55432/rrtenant')
+# No default address: a plain nodes:test run must not reach a database the
+# developer did not point it at.
+TEST_DSN = os.environ.get('RR_TEST_PG_DSN', '')
 # Derived, not hardcoded: the suite must also run against a provisioned tenant
 # DSN (e.g. t_<slug>_<hash> through a pooler), not just the default container.
 TEST_DB_NAME = urllib.parse.urlparse(TEST_DSN).path.lstrip('/')
@@ -90,6 +96,8 @@ else:
 
 
 def _db_reachable() -> bool:
+    if not TEST_DSN:
+        return False
     try:
         conn = psycopg2.connect(TEST_DSN, connect_timeout=3)
         conn.close()
@@ -98,10 +106,21 @@ def _db_reachable() -> bool:
         return False
 
 
-if _DB_TESTS_REQUIRED and not _db_reachable():
-    pytest.fail(f'RR_REQUIRE_DB_TESTS is set but the test database is not reachable at {TEST_DSN}', pytrace=False)
+# Names the variable, never its value: the DSN may carry a password.
+_DB_MISSING = 'RocketRide test database in RR_TEST_PG_DSN is not reachable' if TEST_DSN else 'RR_TEST_PG_DSN is not set'
 
-pytestmark = pytest.mark.skipif(not _db_reachable(), reason=f'RocketRide test database not reachable at {TEST_DSN}')
+if _DB_TESTS_REQUIRED and not _db_reachable():
+    pytest.fail(f'RR_REQUIRE_DB_TESTS is set but: {_DB_MISSING}', pytrace=False)
+
+# Every module that creates tables in the RR_TEST_PG_DSN database shares this
+# group, so one xdist worker runs them one after another (nodes:test passes
+# --dist loadgroup). The SQL node reads every table in the database when it
+# starts, and a table another worker drops during that read fails it; the
+# tests here also share fixed table names (rr_sql_e2e, rr_vec_e2e).
+pytestmark = [
+    pytest.mark.skipif(not _db_reachable(), reason=_DB_MISSING),
+    pytest.mark.xdist_group('rocketride_pg_live'),
+]
 
 
 def _load_from_path(name: str, path: Path, *, is_package: bool = False, register: bool = True):
@@ -241,6 +260,10 @@ def _build_rr_env(monkeypatch):
     monkeypatch.setitem(sys.modules, 'ai.common.config', config)
     monkeypatch.setitem(sys.modules, 'ai.common.transform', transform)
     monkeypatch.setitem(sys.modules, 'ai.common.store', store_mod)
+
+    # The driver asks its base which objects a batch replaces: give the stub the real rule, not a copy of it
+    document_store = _load_from_path('ai.common.store.document_store', _STORE_DIR / 'document_store.py', register=False)
+    _StubDocumentStoreBase.objectIdsToReplace = staticmethod(document_store.DocumentStoreBase.objectIdsToReplace)
 
     config_utils = _load_from_path(
         'ai.common.utils.config_utils',

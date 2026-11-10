@@ -56,6 +56,8 @@ import { IFormData, IServiceSchema } from 'shell';
 import ThemedForm, { translate } from './rjsf-widgets/theme';
 import { getSecuredFormData, removeRequired, setUiSchemaProperty } from './rjsf';
 import { commonStyles } from 'shell';
+import StoredArrayField from './StoredArrayField';
+import { storedArrays, preserveStoredArrays, replaceStoredArray } from './storedArrays';
 
 // =============================================================================
 // Styles
@@ -143,25 +145,42 @@ export interface INodeConfigFormProps {
  * @param props - {@link INodeConfigFormProps}.
  * @returns The themed RJSF form element.
  */
-const NodeConfigForm = forwardRef<INodeConfigFormHandle, INodeConfigFormProps>(function NodeConfigForm(
-	{ provider, schema, formData, onChange, onSubmit, onError, envKeys = [], disabled = false, nodeId, formDataErrors, googlePickerDeveloperKey, googlePickerClientId },
-	ref
-) {
+const NodeConfigForm = forwardRef<INodeConfigFormHandle, INodeConfigFormProps>(function NodeConfigForm({ provider, schema, formData, onChange, onSubmit, onError, envKeys = [], disabled = false, nodeId, formDataErrors, googlePickerDeveloperKey, googlePickerClientId }, ref) {
 	const formRef = useRef<Form | null>(null);
 	useImperativeHandle(ref, () => ({ submit: () => formRef.current?.submit() }), []);
 
 	// --- Secured field transforms -------------------------------------------
 	// Fields currently holding secured values render encrypted and drop their
 	// required-ness (the stored value satisfies the requirement).
-	const securedFormData = getSecuredFormData(formData);
-	const _schema = useMemo(() => removeRequired(schema.schema, securedFormData), [schema.schema, securedFormData]);
-	const _uiSchema = useMemo(() => setUiSchemaProperty(schema.ui, securedFormData, { 'ui:encrypted': true }), [schema.ui, securedFormData]);
+	const securedFormData = useMemo(() => getSecuredFormData(formData), [formData]);
+	const stored = useMemo(() => storedArrays(schema.schema, formData), [schema.schema, formData]);
+	const _schema = useMemo(() => {
+		const storedPaths: [string[], string[]][] = stored.map(({ path }) => [path.slice(0, -1), path.slice(-1)]);
+		return removeRequired(schema.schema, [...securedFormData, ...storedPaths]);
+	}, [schema.schema, securedFormData, stored]);
+	const _uiSchema = useMemo(() => {
+		const ui = setUiSchemaProperty(schema.ui, securedFormData, { 'ui:encrypted': true });
+		for (const { path } of stored) {
+			let field = ui;
+			for (const segment of path) {
+				Object.defineProperty(field, segment, { value: { ...(Object.hasOwn(field, segment) ? field[segment] : {}) }, enumerable: true, configurable: true, writable: true });
+				field = field[segment];
+			}
+			Object.assign(field, {
+				'ui:field': 'StoredArrayField',
+				'ui:storedArrayPath': path,
+			});
+		}
+		return ui;
+	}, [schema.ui, securedFormData, stored]);
 
 	// --- Friendly auth error messages + env var bypass -----------------------
 	const transformErrors = useCallback(
 		(errors: RJSFValidationError[]) => {
 			return errors
 				.filter((error) => {
+					// The engine validates the stored value; the browser only has its opaque blob.
+					if (stored.some(({ path }) => error.property === `.${path.join('.')}` || error.property?.startsWith(`.${path.join('.')}.`))) return false;
 					// Suppress validation errors for fields whose value is an env var reference
 					if (error.property) {
 						const fieldPath = error.property.replace(/^\./, '').split('.');
@@ -180,13 +199,14 @@ const NodeConfigForm = forwardRef<INodeConfigFormHandle, INodeConfigFormProps>(f
 					return error;
 				});
 		},
-		[formData]
+		[formData, stored]
 	);
 
 	return (
 		<>
 			<ThemedForm
 				ref={formRef}
+				fields={{ StoredArrayField }}
 				schema={_schema}
 				uiSchema={{
 					..._uiSchema,
@@ -198,6 +218,7 @@ const NodeConfigForm = forwardRef<INodeConfigFormHandle, INodeConfigFormProps>(f
 				}}
 				formData={formData}
 				formContext={{
+					replaceStoredArray: (path: string[]) => onChange(replaceStoredArray(formData, path)),
 					formValues: formData,
 					compactDescriptions: _uiSchema?.['ui:options']?.compactDescriptions === true,
 					hideFor: formData.parameters?.authType,
@@ -212,8 +233,8 @@ const NodeConfigForm = forwardRef<INodeConfigFormHandle, INodeConfigFormProps>(f
 				validator={validator}
 				transformErrors={transformErrors}
 				onError={onError}
-				onSubmit={({ formData: submitted }: Partial<{ formData: IFormData }>) => onSubmit(submitted ?? {})}
-				onChange={({ formData: changed }: Partial<{ formData: IFormData }>) => onChange(changed ?? {})}
+				onSubmit={({ formData: submitted }: Partial<{ formData: IFormData }>) => onSubmit(preserveStoredArrays(submitted ?? {}, formData, stored))}
+				onChange={({ formData: changed }: Partial<{ formData: IFormData }>) => onChange(preserveStoredArrays(changed ?? {}, formData, stored))}
 				translateString={translate}
 			/>
 

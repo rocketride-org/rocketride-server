@@ -1916,6 +1916,86 @@ for (const mode of ['provider', 'direct'] as const) {
 	}
 }
 
+// The providerless legacy path was removed on develop (#2625): the provider is the one entry point.
+for (const mode of ['provider', 'direct'] as const) {
+	for (const scenario of ['undecided', 'expired', 'rejected', 'accepted', 'private', 'unreadable'] as const) {
+		test(`${mode} OAuth puts a cookieless context in the OAuth state only for an undecided visitor (${scenario}), never in site storage`, async () => {
+			const signup: SignupProperties = { ...signupContext(), consent_state: 'undecided' };
+			const session = recordingSession([['rr:auth:signup', 'stale context']]);
+			const records: Array<[string, string]> = [];
+			if (scenario === 'rejected' || scenario === 'accepted') records.push(['rr_consent_v1', JSON.stringify({ v: 1, choice: scenario, at: Date.now() })]);
+			// An expired record no longer counts as a choice.
+			if (scenario === 'expired') records.push(['rr_consent_v1', JSON.stringify({ v: 1, choice: 'rejected', at: Date.now() - 366 * 24 * 60 * 60 * 1000 })]);
+			const local = recordingSession(records);
+			let localStorage: object = local.storage;
+			if (scenario === 'unreadable') localStorage = { getItem: () => { throw new Error('storage denied'); } };
+			const redirects: string[] = [];
+			const win = topLevelWindow({ location: { search: '', pathname: '/', origin: 'https://shell.example.test', assign: (url: string) => redirects.push(url) } });
+			await withGlobals({ window: win, sessionStorage: session.storage, localStorage, navigator: { globalPrivacyControl: scenario === 'private' } }, async () => {
+				const provider = CloudAuthProvider.getInstance();
+				provider.initialize({ zitadelUrl: 'https://idp.example.test', clientId: 'test-client' });
+				const { manager } = createTestManager();
+				manager.authProvider = provider;
+				if (mode === 'direct') await provider.signIn(undefined, true, signup);
+				else await manager.startOAuth(true, { signupProperties: signup });
+				assert.deepEqual(session.writes.filter((write) => write.endsWith('rr:auth:signup')), ['remove:rr:auth:signup']);
+				assert.equal(local.writes.length, 0);
+				assert.equal(redirects.length, 1);
+				const state = new URL(redirects[0]).searchParams.get('state');
+				if (scenario === 'undecided' || scenario === 'expired') assert.deepEqual(JSON.parse(atob(state!)), { v: 1, signup });
+				else assert.equal(state, null);
+				provider.dispose();
+			});
+		});
+	}
+}
+
+test('a cookieless signup completion reads its context from the OAuth state envelope only', async () => {
+	const signup: SignupProperties = { ...signupContext(), consent_state: 'undecided' };
+	const consented = signupContext();
+	const accepted = { v: 1, choice: 'accepted', at: Date.now() };
+	const rejected = { v: 1, choice: 'rejected', at: Date.now() };
+	const envelope = (value: unknown) => btoa(JSON.stringify(value));
+	// [name, state, expected context, consent record in the browser at the callback]
+	const cases: Array<[string, string | null, SignupProperties | null, object | null]> = [
+		['undecided envelope', envelope({ v: 1, signup }), signup, null],
+		['undecided envelope after the visitor rejected', envelope({ v: 1, signup }), null, rejected],
+		['undecided envelope after the visitor accepted', envelope({ v: 1, signup }), null, accepted],
+		['undecided envelope with an expired record', envelope({ v: 1, signup }), signup, { ...rejected, at: Date.now() - 366 * 24 * 60 * 60 * 1000 }],
+		['bare context without the envelope', envelope(signup), null, null],
+		['envelope without a version', envelope({ signup }), null, null],
+		['envelope of another version', envelope({ v: 2, signup }), null, null],
+		['consented context in the envelope, even under consent', envelope({ v: 1, signup: consented }), null, accepted],
+		['rejected consent state', envelope({ v: 1, signup: { ...signup, consent_state: 'rejected' } }), null, null],
+		['unknown consent state', envelope({ v: 1, signup: { ...signup, consent_state: 'accepted' } }), null, null],
+		['malformed', '%%%not-base64', null, null],
+		['oversized', envelope({ v: 1, signup }).padEnd(4096, 'A'), null, null],
+		['absent', null, null, null],
+	];
+	for (const [name, state, expected, record] of cases) {
+		const page = callbackPage();
+		const location = (page.globals.window as { location: { search: string } }).location;
+		if (state !== null) location.search = `?code=abc&state=${encodeURIComponent(state)}`;
+		const local = recordingSession();
+		if (record) local.storage.setItem('rr_consent_v1', JSON.stringify(record));
+		await withGlobals({ ...page.globals, localStorage: local.storage, navigator: {} }, async () => {
+			const { manager, exchanged } = callbackManager({ ...authenticatedResult, isNewUser: true });
+			await manager.bootstrap();
+			assert.equal(exchanged.length, 1, `${name}: auth still proceeds`);
+			const credential = exchanged[0];
+			assert.ok(typeof credential === 'object');
+			const resolveSignup = credential.signupProperties;
+			if (expected) {
+				assert.ok(typeof resolveSignup === 'function', name);
+				assert.deepEqual(resolveSignup(), expected, name);
+			} else {
+				assert.equal(resolveSignup, undefined, name);
+			}
+			assert.equal(page.session.writes.some((write) => write.startsWith('set:rr:auth:signup')), false, `${name}: nothing stored`);
+		});
+	}
+});
+
 test('startOAuth in an embedded dev shell does not touch host signup storage', async () => {
 	const signup = signupContext();
 	const session = recordingSession([['rr:auth:signup', 'host context']]);
@@ -1995,6 +2075,70 @@ test('OAuth error discards pending signup context without reading it', async () 
 	});
 });
 
+
+/** A page load at `search`/`hash`, recording every URL replaceState writes. */
+function errorReturnPage(search: string, hash = '') {
+	const urls: string[] = [];
+	const win = topLevelWindow({
+		location: { search, hash, pathname: '/' },
+		history: { state: null, replaceState: (_state: unknown, _title: string, url: string) => urls.push(url) },
+	});
+	return { urls, win };
+}
+
+const errorReturnState = encodeURIComponent(btoa(JSON.stringify({ v: 1, signup: { ...signupContext(), consent_state: 'undecided' } })));
+
+test('an identity provider error return strips its state from the URL without a sign-in failure', async () => {
+	const { urls, win } = errorReturnPage(`?error=access_denied&state=${errorReturnState}`);
+	const session = recordingSession([['rr:pkce_verifier', 'verifier-1']]);
+	await withGlobals({ window: win, sessionStorage: session.storage, localStorage: recordingSession().storage, navigator: {} }, async () => {
+		const { manager } = createTestManager();
+		manager.client = testClient();
+		manager._attachPromise = Promise.resolve();
+		await manager.bootstrap();
+		assert.deepEqual(urls, ['/']);
+		assert.notEqual(manager.connectionStatus.state, ConnectionState.AUTH_FAILED);
+	});
+});
+
+test('an identity provider error return is stripped even when the transport attach fails', async () => {
+	const { urls, win } = errorReturnPage(`?error=access_denied&state=${errorReturnState}`);
+	const session = recordingSession([['rr:pkce_verifier', 'verifier-1']]);
+	const fetch = async () => {
+		throw new Error('offline');
+	};
+	await withGlobals({ window: win, sessionStorage: session.storage, localStorage: recordingSession().storage, navigator: {}, fetch }, async () => {
+		const { manager } = createTestManager();
+		manager.client = testClient();
+		manager._attachPromise = Promise.reject(new Error('attach failed'));
+		assert.equal(await manager.bootstrap(), null);
+		assert.deepEqual(urls, ['/']);
+	});
+});
+
+test('an identity provider error return keeps the rest of the query and the fragment', async () => {
+	const { urls, win } = errorReturnPage(`?tab=2&error=access_denied&error_description=denied&state=${errorReturnState}`, '#section');
+	const session = recordingSession([['rr:pkce_verifier', 'verifier-1']]);
+	await withGlobals({ window: win, sessionStorage: session.storage, localStorage: recordingSession().storage, navigator: {} }, async () => {
+		const { manager } = createTestManager();
+		manager.client = testClient();
+		manager._attachPromise = Promise.resolve();
+		await manager.bootstrap();
+		assert.deepEqual(urls, ['/?tab=2#section']);
+	});
+});
+
+test('an error and state the shell did not start (no stored verifier) are left for the app', async () => {
+	const { urls, win } = errorReturnPage('?error=access_denied&state=app-owned');
+	await withGlobals({ window: win, sessionStorage: recordingSession().storage, localStorage: recordingSession().storage, navigator: {} }, async () => {
+		const { manager } = createTestManager();
+		manager.client = testClient();
+		manager._attachPromise = Promise.resolve();
+		await manager.bootstrap();
+		assert.deepEqual(urls, []);
+		assert.notEqual(manager.connectionStatus.state, ConnectionState.AUTH_FAILED);
+	});
+});
 
 test('startOAuth omits a throwing signup getter and allows retry after provider failure', async () => {
 	const session = recordingSession();
@@ -2382,3 +2526,20 @@ test('the CloudAuthProvider relay redirects through the relay origin only in a t
 		}
 	}
 });
+
+test('a dev relay owns the OAuth state, so an undecided visitor\'s cookieless context is not sent through it', async () => {
+	const signup: SignupProperties = { ...signupContext(), consent_state: 'undecided' };
+	const redirects: string[] = [];
+	const win = topLevelWindow({ location: { search: '', pathname: '/', origin: 'http://localhost:5173', assign: (url: string) => redirects.push(url) } });
+	await withGlobals({ window: win, sessionStorage: recordingSession().storage, localStorage: recordingSession().storage, navigator: {} }, async () => {
+		const provider = CloudAuthProvider.getInstance();
+		provider.initialize({ zitadelUrl: 'https://idp.example.test', clientId: 'test-client', relayOrigin: 'https://relay.example.test' });
+		await provider.signIn(undefined, true, signup);
+		assert.equal(redirects.length, 1);
+		const url = new URL(redirects[0]);
+		assert.equal(url.searchParams.get('redirect_uri'), 'https://relay.example.test');
+		assert.equal(url.searchParams.get('state'), 'rrdev:http://localhost:5173');
+		provider.dispose();
+	});
+});
+

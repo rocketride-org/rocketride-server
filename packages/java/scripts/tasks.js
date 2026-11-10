@@ -33,6 +33,7 @@ const {
 	getState,
 	setState,
 	downloadFile,
+	downloadFileFrom,
 	extractArchive,
 	removeDirs,
 	removeFile,
@@ -89,8 +90,14 @@ async function loadPackageJson() {
 // Helpers
 // =============================================================================
 
-function getMavenUrl() {
-	return `https://archive.apache.org/dist/maven/maven-3/${MAVEN_VERSION}/binaries/apache-maven-${MAVEN_VERSION}-bin.tar.gz`;
+// The same file is on Maven Central (served by a CDN) and in the Apache archive;
+// Central is tried first.
+function getMavenUrls() {
+	const file = `apache-maven-${MAVEN_VERSION}-bin.tar.gz`;
+	return [
+		`https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/${MAVEN_VERSION}/${file}`,
+		`https://archive.apache.org/dist/maven/maven-3/${MAVEN_VERSION}/binaries/${file}`,
+	];
 }
 
 function getJdkUrl() {
@@ -165,7 +172,7 @@ function makeSetupMavenAction(options = {}) {
 			task.output = `Downloading Maven ${mavenVersion}...`;
 
 			await withLock('java-maven', async () => {
-				const archivePath = await downloadFile(getMavenUrl(), `maven-${mavenVersion}.tar.gz`, task);
+				const archivePath = await downloadFileFrom(getMavenUrls(), `maven-${mavenVersion}.tar.gz`, task);
 				task.output = 'Extracting...';
 				await extractArchive(archivePath, MAVEN_DIR, { stripLevels: 1 });
 				await setState('java.maven', 'installed');
