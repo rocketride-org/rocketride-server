@@ -115,7 +115,7 @@ node --import tsx src/run.ts judge \
   --app apps/expenses-ui \
   --checklist checklist.txt \
   --out .verify/browser-agent/<batch>/judge/<task>/round-1 \
-  [--runs 3]
+  [--runs 3] [--keep-store]
 ```
 
 It needs what `run` needs (the engine, the env file, free ports), plus `claude` on `PATH` and the judge's browser, installed with the command in `judge/README.md`. Without that browser every line comes back `not_tested`. Its steps:
@@ -125,11 +125,11 @@ It needs what `run` needs (the engine, the env file, free ports), plus `claude` 
 3. Deploy the app the way the App Builder's Deploy button does (`deploy.addApp`), wait for the engine's build, and publish it to the signed-in user (`@me`).
 4. Open `<shell>/?appid=<id>` in the runner's browser with the sign-in token seeded, and keep a screenshot in `<out>/served/`. If the shell says it could not load the app, it stops here and spends nothing on the judge.
 5. Run `judgeApp` on that URL, with the same token in the judge's browser (without it the page can hang at "Initialising..."). The sessions run on `EVAL_ANTHROPIC_KEY` alone.
-6. Write `result.json` (the judge's result, plus where the app was served from) and `summary.md` (each line's verdict, its runs, and what the judge saw in the run that decided it), stop the stack, and scan `<out>` for a held key.
+6. Write `result.json` (the judge's result, plus where the app was served from) and `summary.md` (each line's verdict, its runs, and what the judge saw in the run that decided it), stop the stack, clear its store (unless `--keep-store`), and scan `<out>` for a held key.
 
 The app is not judged in its Design preview, because the preview's frame is a `blob:` URL that no other browser can open. The published app is what a user gets, built by the engine with the platform's config rather than the app's own `rsbuild.config.mts`.
 
-`<out>` also keeps each session's transcript (`run-N.jsonl`, `run-N.stderr`). Don't commit it, because it holds whatever the app showed. `<out>/stack/store` is about 250 MB, almost all of it the apps the engine seeds. Each run costs at most the judge's `--max-budget-usd`, $0.60 by default. On real-01's 12-line checklist, a whole command took about 90 seconds and $0.20 for 3 runs. The exit code is 0 for `pass`, 1 for `fail`, and 2 for `inconclusive` or an app that could not be served.
+`<out>` also keeps each session's transcript (`run-N.jsonl`, `run-N.stderr`). Don't commit it, because it holds whatever the app showed. `<out>/stack/store` is about 250 MB, almost all of it the apps the engine seeds, so it is cleared when the judge is done; the stack's logs stay. Each run costs at most the judge's `--max-budget-usd`, $0.60 by default. On real-01's 12-line checklist, a whole command took about 90 seconds and $0.20 for 3 runs. The exit code is 0 for `pass`, 1 for `fail`, and 2 for `inconclusive` or an app that could not be served.
 
 ## Grading
 

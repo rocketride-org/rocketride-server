@@ -33,7 +33,7 @@ import { test } from 'node:test';
 import type { JudgeResult } from '../judge/judge.mjs';
 import { sessionEnv } from '../judge/session.mjs';
 import { readModelKeys } from './evidence';
-import { judgeKey, judgePlan, judgeSummary } from './judge';
+import { clearStore, judgeKey, judgePlan, judgeSummary } from './judge';
 
 /** A workspace with one app whose package.json says `manifest`, and a checklist file holding `checklist`. */
 function fixture(manifest: unknown, checklist: string): { workspace: string; checklist: string } {
@@ -114,4 +114,23 @@ test("summary.md gives each line's verdict with the evidence of the run that dec
 	assert.match(summary, /Verdict: \*\*fail\*\* over 3 run\(s\), \$0\.30/);
 	assert.match(summary, /\| 1 \| Adding shows it\. \| inconclusive \| pass pass invalid \| run 3 invalid: timed out after 600000 ms \|/);
 	assert.match(summary, /\| 2 \| The total adds up\. \| fail \| pass fail invalid \| run 2: run 2 line 2: Total \\\| \$30\.10 shown \|/);
+});
+
+test("the stack's store is cleared when the judge is done, its logs kept, unless --keep-store", () => {
+	// each judge run's store is about 250 MB of the engine's own copies; 16 runs would fill this disk
+	const make = () => {
+		const out = fs.mkdtempSync(path.join(os.tmpdir(), 'judge-out-'));
+		fs.mkdirSync(path.join(out, 'stack', 'store', 'apps'), { recursive: true });
+		fs.writeFileSync(path.join(out, 'stack', 'store', 'apps', 'big.bin'), 'x');
+		fs.writeFileSync(path.join(out, 'stack', 'engine.log'), 'log');
+		return out;
+	};
+	const cleared = make();
+	clearStore(cleared, false);
+	assert.deepEqual(fs.readdirSync(path.join(cleared, 'stack')), ['engine.log']);
+	const kept = make();
+	clearStore(kept, true);
+	assert.deepEqual(fs.readdirSync(path.join(kept, 'stack')).sort(), ['engine.log', 'store']);
+	// nothing to clear is not an error
+	clearStore(fs.mkdtempSync(path.join(os.tmpdir(), 'judge-out-')), false);
 });

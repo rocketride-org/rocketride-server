@@ -62,6 +62,8 @@ export interface JudgeArgs {
 	out: string;
 	/** Judge sessions; null keeps judgeApp's default. */
 	runs: number | null;
+	/** Keep the stack's store when the judge is done (--keep-store). */
+	keepStore?: boolean;
 }
 
 /** What one judge command does, checked. */
@@ -76,6 +78,19 @@ export interface JudgePlan {
 	checklist: string[];
 	out: string;
 	runs: number | null;
+	keepStore: boolean;
+}
+
+/**
+ * Removes the stack's store under `out`, keeping the stack's logs beside it.
+ * The store is the engine's working copy, about 250 MB a run, and the judge's
+ * result never reads it.
+ *
+ * @param out - The judge's output folder.
+ * @param keep - Leave the store in place (--keep-store).
+ */
+export function clearStore(out: string, keep: boolean): void {
+	if (!keep) fs.rmSync(path.join(out, 'stack', 'store'), { recursive: true, force: true });
 }
 
 /**
@@ -102,7 +117,7 @@ export function judgePlan(args: JudgeArgs): JudgePlan {
 	const checklistFile = path.resolve(args.checklist as string);
 	const checklist = parseChecklist(fs.readFileSync(checklistFile, 'utf8'));
 	if (!checklist.length) throw new Error(`--checklist ${checklistFile} has no lines`);
-	return { workspace, app: app.split(path.sep).join('/'), appId, checklistFile, checklist, out: path.resolve(args.out), runs: args.runs };
+	return { workspace, app: app.split(path.sep).join('/'), appId, checklistFile, checklist, out: path.resolve(args.out), runs: args.runs, keepStore: args.keepStore ?? false };
 }
 
 /**
@@ -249,6 +264,7 @@ export async function judgeCommand(plan: JudgePlan, modelKeys: HeldKey[]): Promi
 		console.error(`judge: ${scrubber.scrub(err instanceof Error ? err.message : String(err))}`);
 	} finally {
 		await stack.stop();
+		clearStore(plan.out, plan.keepStore);
 	}
 	const leaks = findLeaks(plan.out, keys);
 	if (leaks.length) {
