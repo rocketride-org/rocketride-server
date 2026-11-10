@@ -50,19 +50,17 @@ in ``RR_PUBLIC_ROOT_APPS`` (deployment config, default the home app): a
 non-root platform app gets no root-mounted pages.
 """
 
-import os
 import re
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
+from .settings import public_root_apps
+
 # The platform org's developer id: the namespace that makes an app a platform
 # (privileged) app. Matches the OSS account's fixed developerId and the SaaS
 # platform org's claim.
 PLATFORM_DEVELOPER_ID = 'rocketride'
-
-# Root claimants when RR_PUBLIC_ROOT_APPS is unset: the home app.
-_DEFAULT_ROOT_APPS = 'rocketride.home'
 
 # Paths no page may claim, segment-aware: every root route the engine serves
 # outside its public pages, and the three crawler files. test_reserved_routes
@@ -146,15 +144,9 @@ def is_privileged(app_id: str) -> bool:
     return app_id == PLATFORM_DEVELOPER_ID or app_id.startswith(PLATFORM_DEVELOPER_ID + '.')
 
 
-def _root_apps() -> frozenset:
-    """The app ids allowed to claim the root origin's paths (``RR_PUBLIC_ROOT_APPS``, default the home app)."""
-    raw = os.environ.get('RR_PUBLIC_ROOT_APPS', _DEFAULT_ROOT_APPS)
-    return frozenset(a.strip() for a in raw.split(',') if a.strip())
-
-
 def may_claim_root(app_id: str) -> bool:
     """Whether ``app_id`` may mount pages on the root origin's path space."""
-    return is_privileged(app_id) and app_id in _root_apps()
+    return is_privileged(app_id) and app_id in public_root_apps()
 
 
 def path_error(path: Any) -> Optional[str]:
