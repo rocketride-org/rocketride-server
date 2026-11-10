@@ -41,9 +41,13 @@ A page is the document the shell boots from (the route's prerendered
 capture when the shell build carries one, else ``index.html``) with the
 page's head metadata injected (title, description, canonical URL, robots),
 for people and crawlers alike, so the shell boots and routes as before.
+
+Rendered responses are cached per (path, UA class) under a byte budget and
+dropped on every aggregate swap.
 """
 
-from typing import Any, Optional
+import sys
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -162,6 +166,76 @@ def _not_found() -> Any:
     raise HTTPException(status_code=404, detail='Not Found')
 
 
+class _FifoCache:
+    """An insertion-ordered cache bounded by total size in bytes and by entry count.
+
+    The oldest entries are evicted first until a new one fits. A value larger
+    than the whole budget is never stored.
+    """
+
+    def __init__(self, max_bytes: int, max_entries: int = sys.maxsize) -> None:
+        self.max_bytes = max_bytes
+        self.max_entries = max_entries
+        self.total = 0
+        self._entries: Dict[Any, Tuple[Any, int]] = {}
+
+    def __len__(self) -> int:
+        return len(self._entries)
+
+    def __contains__(self, key: Any) -> bool:
+        return key in self._entries
+
+    def keys(self) -> List[Any]:
+        """The keys, oldest first."""
+        return list(self._entries)
+
+    def get(self, key: Any) -> Any:
+        """The value stored under ``key``, or None."""
+        hit = self._entries.get(key)
+        return None if hit is None else hit[0]
+
+    def put(self, key: Any, value: Any, size: int) -> None:
+        """Store ``value`` (``size`` bytes), evicting the oldest entries until it fits."""
+        if size > self.max_bytes:
+            return
+        self._drop(key)
+        while self._entries and (self.total + size > self.max_bytes or len(self._entries) >= self.max_entries):
+            self._drop(next(iter(self._entries)))
+        self._entries[key] = (value, size)
+        self.total += size
+
+    def clear(self) -> None:
+        """Drop every entry."""
+        self._entries.clear()
+        self.total = 0
+
+    def _drop(self, key: Any) -> None:
+        hit = self._entries.pop(key, None)
+        if hit is not None:
+            self.total -= hit[1]
+
+
+# Rendered page responses: (path, UA class, shell document, its mtime,
+# RR_APP_URL) -> (body bytes, headers). Cleared on every aggregate swap, so
+# the shell file is read and rewritten once per page and build, not per request.
+_RENDER_CACHE_MAX_BYTES = 32 * 1024 * 1024
+_RENDER_CACHE_MAX = 4096
+_render_cache = _FifoCache(_RENDER_CACHE_MAX_BYTES, _RENDER_CACHE_MAX)
+
+# Bumped by every swap: a render that started before one is served, not cached.
+_generation = 0
+
+
+def _clear_rendered(old: Any, new: Any) -> None:
+    """Swap listener: renders of the previous page map are stale."""
+    global _generation
+    _generation += 1
+    _render_cache.clear()
+
+
+public_pages.on_swap(_clear_rendered)
+
+
 def _moved(request: Request, path: str) -> Response:
     """301 to ``path`` on this origin with the request's query kept.
 
@@ -202,20 +276,28 @@ async def public_page(request: Request):
         if path.endswith('/') and path[:-1] in aggregate.exact:
             return _moved(request, path[:-1])
         return _router_miss(request) or _not_found()
-    body = inject_head(
-        shell_document_path(request).read_text(encoding='utf-8'),
-        title=page.head_title or page.title,
-        description=page.description,
-        canonical=canonical_url(path),
-        noindex=not page.listed,
-    )
-    # Crawler responses may sit in shared caches; people's never do (the
-    # document names the current build's bundles), so caches key on the UA.
     crawler = classify(request.headers.get('user-agent', '')) == CRAWLER
-    headers = {'Vary': 'User-Agent', 'Cache-Control': _CACHE_CONTROL if crawler else 'private, no-cache'}
-    if not page.listed:
-        headers['X-Robots-Tag'] = 'noindex'
-    return HTMLResponse(body, headers=headers)
+    document = shell_document_path(request)
+    key = (path, crawler, str(document), document.stat().st_mtime_ns, _app_url())
+    cached = _render_cache.get(key)
+    if cached is None:
+        generation = _generation
+        body = inject_head(
+            document.read_text(encoding='utf-8'),
+            title=page.head_title or page.title,
+            description=page.description,
+            canonical=canonical_url(path),
+            noindex=not page.listed,
+        )
+        # Crawler responses may sit in shared caches; people's never do (the
+        # document names the current build's bundles), so caches key on the UA.
+        headers = {'Vary': 'User-Agent', 'Cache-Control': _CACHE_CONTROL if crawler else 'private, no-cache'}
+        if not page.listed:
+            headers['X-Robots-Tag'] = 'noindex'
+        cached = (body.encode('utf-8'), headers)
+        if generation == _generation:
+            _render_cache.put(key, cached, len(cached[0]))
+    return HTMLResponse(cached[0], headers=dict(cached[1]))
 
 
 async def register_public_pages(server: Any) -> None:

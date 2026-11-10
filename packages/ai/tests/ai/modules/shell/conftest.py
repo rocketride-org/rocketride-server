@@ -48,6 +48,9 @@ def _public_pages_state(monkeypatch):
     fresh.listeners.extend(pp.page_map.listeners)
     monkeypatch.setattr(pp, 'page_map', fresh)
     monkeypatch.setattr(pages, '_web_server', None)
+    monkeypatch.setattr(
+        pages, '_render_cache', pages._FifoCache(pages._RENDER_CACHE_MAX_BYTES, pages._RENDER_CACHE_MAX)
+    )
     FILES.clear()
     monkeypatch.setattr(pp, 'read_artifact_file', read_file)
     monkeypatch.setattr(pp, 'artifact_file_info', file_info)
