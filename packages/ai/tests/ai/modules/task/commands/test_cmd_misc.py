@@ -1624,3 +1624,36 @@ async def test_on_rrext_resolve_config_propagates_an_unknown_service(monkeypatch
     conn = _make_conn()
     with pytest.raises(Exception, match='was not found'):
         await MiscCommands.on_rrext_resolve_config(conn, {'arguments': {'provider': 'nope'}})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('single', [False, True])
+async def test_validation_expands_encrypted_reference_without_echoing_secrets(monkeypatch, single):
+    import sys
+
+    component = {
+        'id': 'auth0',
+        'provider': 'tool_auth0',
+        'config': {'parameters': {'secureParameters': {'secure': ['clientSecret'], 'token': 'opaque-token'}}},
+    }
+
+    def decode(pipeline):
+        result = copy.deepcopy(pipeline)
+        result['components'][0]['config']['parameters'] = {'clientSecret': SERVICE_TOKEN_REF}
+        return result
+
+    monkeypatch.setattr(sys.modules['rocketlib'], 'resolveSecureParameters', decode, raising=False)
+    calls = []
+
+    def validate(payload):
+        calls.append(copy.deepcopy(payload))
+        return {**payload, 'warnings': [{'message': f'credential: {SERVICE_TOKEN_VALUE}'}]}
+
+    monkeypatch.setattr(cmd_misc, 'validatePipeline', validate)
+    conn = _validate_conn(monkeypatch)
+    config = {'component': component} if single else {'components': [component]}
+    reply = await _reply(conn, config)
+    assert SERVICE_TOKEN_VALUE in json.dumps(calls[0])
+    assert SERVICE_TOKEN_VALUE not in json.dumps(reply)
+    assert SERVICE_TOKEN_REF not in json.dumps(reply)
+    assert reply['warnings'][0]['message'] == 'Pipeline validation warning for config with secure parameters.'

@@ -84,3 +84,31 @@ def substituted_env(pipeline: Dict[str, Any], env: Dict[str, str]) -> Dict[str, 
         if name.startswith(ALLOWED_ENV_PREFIX) and env.get(name, reference) != reference:
             found[name] = env[name]
     return found
+
+
+def resolve_parameter_tokens(pipeline: Dict[str, Any]) -> Dict[str, Any]:
+    """Decode parameter tokens in the engine before environment substitution.
+
+    Both deployment-key and legacy tokens can contain environment references.
+    The child never needs the deployment key. Only the active profile and
+    parameters are decoded, matching the engine's credential precedence.
+    """
+    components = pipeline.get('components', [])
+
+    def has_token(component: Any) -> bool:
+        if not isinstance(component, dict) or not isinstance(component.get('config'), dict):
+            return False
+        config = component['config']
+        profile = config.get('profile')
+        sections = (config.get('parameters'), config.get(profile) if isinstance(profile, str) else None)
+        return any(isinstance(section, dict) and 'secureParameters' in section for section in sections)
+
+    if not isinstance(components, list) or not any(has_token(component) for component in components):
+        return pipeline
+
+    from rocketlib import resolveSecureParameters
+
+    try:
+        return resolveSecureParameters(pipeline)
+    except Exception:
+        raise ValueError('Unable to decode secure pipeline parameters.') from None

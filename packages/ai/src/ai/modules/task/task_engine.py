@@ -86,7 +86,7 @@ from rocketride import (
     EVENT_TYPE,
 )
 from .dbg_stdio import DbgStdio
-from .pipeline import references_env, resolve_pipeline_env
+from .pipeline import references_env, resolve_pipeline_env, resolve_parameter_tokens
 from .types import LAUNCH_TYPE, TaskError
 from .task_conn import TaskConn
 from .task_metrics import TaskMetrics
@@ -328,6 +328,8 @@ def filter_subprocess_env(environ: Mapping[str, str]) -> Dict[str, str]:
     allowed: Dict[str, str] = {}
     for name, value in environ.items():
         key = name.upper()
+        if key == 'RR_PARAM_TOKEN_SECRET':
+            continue
         if key in CONST_SUBPROCESS_ENV_NAMES or key in opt_names or key.startswith(prefixes):
             allowed[name] = value
     return allowed
@@ -336,25 +338,6 @@ def filter_subprocess_env(environ: Mapping[str, str]) -> Dict[str, str]:
 # Deployment secret the engine derives the parameter token key from. Like the
 # other deployment keys it is not in the subprocess allowlist above.
 CONST_PARAM_TOKEN_SECRET_ENV = 'RR_PARAM_TOKEN_SECRET'
-
-
-def resolve_parameter_tokens(pipeline: Dict[str, Any], environ: Mapping[str, str] = os.environ) -> Dict[str, Any]:
-    """Return ``pipeline`` with its parameter tokens decoded, when a deployment secret is set.
-
-    With ``RR_PARAM_TOKEN_SECRET`` set, the engine encrypts new parameter
-    tokens (``secureParameters.token``) with a key derived from it. The task
-    subprocess never gets that variable, so the engine decodes the tokens here
-    and drops the ``secureParameters`` blocks; the subprocess then reads plain
-    values from its owner-only task file, like resolved ``${...}`` values.
-    Without the variable the pipeline is returned unchanged and the subprocess
-    decodes the tokens itself.
-    """
-    if not environ.get(CONST_PARAM_TOKEN_SECRET_ENV):
-        return pipeline
-
-    from rocketlib import resolveSecureParameters
-
-    return resolveSecureParameters(pipeline)
 
 
 # Nodes a hosted (SaaS) engine refuses to launch. The canvas already hides
@@ -819,6 +802,7 @@ class Task(DAPBase):
 
     async def _load_env(self, pipeline: Dict[str, Any]) -> Dict[str, str]:
         """Load the values for the pipeline's placeholders; nothing is loaded when it has none."""
+        pipeline = resolve_parameter_tokens(pipeline)
         if not references_env(pipeline):
             return {}
         return await self._env_source()
@@ -829,6 +813,7 @@ class Task(DAPBase):
         Uses the values a restart already loaded, if any. Delegates to
         :func:`pipeline.resolve_pipeline_env`.
         """
+        pipeline = resolve_parameter_tokens(pipeline)
         env, self._restart_env = self._restart_env, None
         if env is None:
             env = await self._load_env(pipeline)
@@ -2829,9 +2814,6 @@ class Task(DAPBase):
             # come from what runs, not self._pipeline: ${...} expansion can
             # rewrite any string, a node's provider included.
             db_access = self._db_access(resolved)
-
-            # Decode parameter tokens the subprocess has no key for
-            resolved = resolve_parameter_tokens(resolved)
 
             # Write it out, then let `resolved` go out of scope
             self._tmpfile = await self._write_task_file(resolved)
