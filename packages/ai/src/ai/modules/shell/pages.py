@@ -64,6 +64,7 @@ also dropped when that source is invalidated, and expires after
 what is left of that time, so the TTL bounds staleness end to end. Snapshot
 bytes, immutable per version, are cached by store path under their own byte
 budget. A snapshot over ``MAX_SNAPSHOT_BYTES`` (sized by a stat) is never read.
+A feed's document is built once per page map.
 """
 
 import asyncio
@@ -328,17 +329,22 @@ _render_cache = _FifoCache(_RENDER_CACHE_MAX_BYTES, _RENDER_CACHE_MAX)
 # shortcut: a capture added without rewriting the cached document is served from the next swap on.
 _documents: Dict[Tuple[str, bool], Tuple[Path, int, int]] = {}
 
+# Atom documents: (feed path, RR_APP_URL) -> the document. A feed reads only
+# the page map, so it is built once per page map; cleared on every swap.
+_atom_cache: Dict[Tuple[str, str], str] = {}
+
 # Bumped by every swap and data-source invalidation: a render that started
 # before one is served, not cached.
 _generation = 0
 
 
 def _clear_rendered(old: Any, new: Any) -> None:
-    """Swap listener (installed by ``register_public_pages``): renders and resolved documents of the previous page map are stale."""
+    """Swap listener (installed by ``register_public_pages``): renders, resolved documents and feeds of the previous page map are stale."""
     global _generation
     _generation += 1
     _render_cache.clear()
     _documents.clear()
+    _atom_cache.clear()
 
 
 def _drop_rendered_for(source: str) -> None:
@@ -559,12 +565,22 @@ def _storage_warning_due(path: str) -> bool:
 
 
 def _feed(aggregate: Any, feed: Any) -> Response:
-    """The Atom document of ``feed``; 404 without ``RR_APP_URL``, the only source of its absolute URLs."""
+    """The Atom document of ``feed``, built once per page map; 404 without ``RR_APP_URL``.
+
+    ``RR_APP_URL`` is the only source of the feed's absolute URLs.
+    ``aggregate`` is the current page map: the caller reads it with no await
+    in between, so no swap can land between that read and the memo.
+    """
     base = app_url()
     if not base:
         raise HTTPException(status_code=404, detail='Not Found')
+    key = (feed['path'], base)
+    document = _atom_cache.get(key)
+    if document is None:
+        document = atom(feed, aggregate, base)
+        _atom_cache[key] = document
     return Response(
-        atom(feed, aggregate, base),
+        document,
         media_type='application/atom+xml; charset=utf-8',
         headers={'Cache-Control': CACHE_CONTROL},
     )

@@ -42,6 +42,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+import ai.modules.shell.pages as pages_mod
 import ai.modules.shell.public_pages as pp
 import ai.modules.shell.shell as shell_mod
 from ai.modules.shell.pages import FALLBACK_PATH, public_page
@@ -270,6 +271,25 @@ def test_a_feed_titled_with_a_lone_surrogate_is_refused_and_pages_still_serve(sh
         for ua in (GOOGLEBOT, BROWSER):
             resp = client.get(path, headers={'User-Agent': ua})
             assert resp.status_code == 200 and 'application/atom+xml' not in resp.text, (path, ua)
+
+
+def test_a_feed_is_built_once_per_page_map(blog, monkeypatch):
+    built = []
+    real_atom = pages_mod.atom
+
+    def counting_atom(feed, aggregate, base):
+        built.append(feed['path'])
+        return real_atom(feed, aggregate, base)
+
+    monkeypatch.setattr(pages_mod, 'atom', counting_atom)
+    first = blog.get('/blog/feed.xml').content
+    assert blog.head('/blog/feed.xml').status_code == 200
+    assert blog.get('/blog/feed.xml').content == first and built == ['/blog/feed.xml']
+    # A swap drops it: the next request builds from the new page map.
+    home = copy.deepcopy(BLOG_HOME)
+    home['site']['feeds'] = [{**FEED, 'title': 'News'}]
+    _publish(monkeypatch, home)
+    assert _feed(blog).findtext(f'{A}title') == 'News' and built == ['/blog/feed.xml'] * 2
 
 
 def test_feed_404_without_rr_app_url(shell_root, monkeypatch):

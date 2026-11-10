@@ -37,9 +37,9 @@ def _public_pages_state(monkeypatch):
     swap and data-source invalidation, as after startup; swap and data-source
     listeners a test adds are dropped with it. The artifact store is the
     hostile fixture's in-memory ``FILES`` (empty unless a test seeds it), so
-    unit tests never touch a real store. The render and snapshot caches, the
-    unusable-snapshot memory and the storage-warning memory start empty, with
-    their production budgets.
+    unit tests never touch a real store. The render, snapshot and feed
+    caches, the unusable-snapshot memory and the storage-warning memory start
+    empty, with their production budgets.
     """
     import ai.modules.shell.data_sources as ds
     import ai.modules.shell.pages as pages
@@ -55,6 +55,7 @@ def _public_pages_state(monkeypatch):
         pages, '_render_cache', pages._FifoCache(pages._RENDER_CACHE_MAX_BYTES, pages._RENDER_CACHE_MAX)
     )
     monkeypatch.setattr(pages, '_snapshot_cache', pages._FifoCache(pages._SNAPSHOT_CACHE_MAX_BYTES))
+    monkeypatch.setattr(pages, '_atom_cache', {})
     monkeypatch.setattr(
         pages, '_unusable_snapshots', pages._FifoCache(pages._UNUSABLE_SNAPSHOTS_MAX, pages._UNUSABLE_SNAPSHOTS_MAX)
     )
