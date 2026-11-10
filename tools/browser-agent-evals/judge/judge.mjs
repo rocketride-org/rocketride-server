@@ -111,6 +111,14 @@ async function judgeOnce(run, { url, checklist, model, budgetUsd, timeoutMs, out
 	return { run, verdict: invalidReason ? 'inconclusive' : runVerdict(parsed.lines, parsed.overall), ...parsed, invalidReason, durationMs, exit: finished.exit, transcript };
 }
 
+/** A checklist file's text as its lines: one expectation per line, trimmed, blank lines left out. */
+export function parseChecklist(text) {
+	return text
+		.split('\n')
+		.map((line) => line.trim())
+		.filter(Boolean);
+}
+
 /**
  * Judges a running app against a person-written checklist, one fresh `claude -p`
  * session per run with only browser tools, limited to the URL's origin.

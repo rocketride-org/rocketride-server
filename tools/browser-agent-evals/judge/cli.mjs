@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { explainFailure } from './explain.mjs';
-import { judgeApp } from './judge.mjs';
+import { judgeApp, parseChecklist } from './judge.mjs';
 
 const USAGE = `usage: cli.mjs --url <url> --checklist <file> --out <dir> [--runs 3] [--model claude-sonnet-5-5] [--budget-usd 0.6] [--timeout-ms 600000] [--local-storage <json file>]
        cli.mjs --explain <trial dir> --failed <json file> --out <dir> [--model claude-sonnet-5-5] [--budget-usd 0.5] [--timeout-ms 300000]`;
@@ -23,11 +23,7 @@ const apiKey = process.env.EVAL_ANTHROPIC_KEY;
 async function judge(values) {
 	if (!values.url || !values.checklist || !values.out) throw new Error(USAGE);
 
-	const checklist = fs
-		.readFileSync(values.checklist, 'utf8')
-		.split('\n')
-		.map((line) => line.trim())
-		.filter(Boolean);
+	const checklist = parseChecklist(fs.readFileSync(values.checklist, 'utf8'));
 	// A file, so a token never shows up in the process list.
 	const localStorage = values['local-storage'] ? JSON.parse(fs.readFileSync(values['local-storage'], 'utf8')) : undefined;
 

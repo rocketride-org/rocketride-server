@@ -27,7 +27,7 @@ Not done:
 
 - App checks: the half that uses an app and reads its pipeline's runs on the engine is built, but no agent trial has run it yet, because no model key was available. It ran live on build-13's reference app with an invented key, which proved the failure path: the app's own pipeline ran, and the 401 failed the check. A passing run still needs a real key.
 - build-13 cannot pass as written. Its `pipe-imported` check asks the app to import its `.pipe` file, which the app template's `global.d.ts` and `rsbuild.config.mts` both offer, but the Design preview cannot link a `.pipe` import ("Cannot resolve ./askclaude.pipe"), so the preview build and check_app's build fail. That is a product bug in the preview's linker, on `develop` too. The live check above used a copy of the reference app that imports the same JSON from a `.ts` module.
-- The judge: the ASK tasks and each task's `judge` questions are kept as written, but this tool runs no judge and nothing here is calibrated against one. `results.json` leaves `judge` null for the judge to fill.
+- The judge: `judge` judges one trial's app live against a checklist (Judging an app, below). The ASK tasks and each task's `judge` questions are kept as written, but no command asks them yet, and `results.json` leaves `judge` null.
 - Two follow-ups on the agent's model choice wait for an earlier proof run's failure results, which are not in this repo.
 
 ## Commands
@@ -50,6 +50,9 @@ EVAL_ARGS="run --no-preview" ./builder browser-agent:eval --pattern=edit-08     
 EVAL_ARGS="check" ./builder browser-agent:eval --pattern=build-0
 EVAL_ARGS="check --workspace /path/to/workspace" ./builder browser-agent:eval --pattern=edit-01
 
+# serve one trial's app from its final workspace and judge it live against a checklist
+EVAL_ARGS="judge --workspace <trial>/final --app apps/expenses-ui --checklist <checklist.txt> --out <dir>" ./builder browser-agent:eval
+
 # ask each eval model one question through the engine (task 0.2)
 EVAL_ARGS="smoke" ./builder browser-agent:eval
 ```
@@ -61,7 +64,7 @@ From this folder, `node --import tsx src/run.ts <command>` does the same without
 `run` needs three things:
 
 - **An engine in `dist/server`.** The stack starts it from there. B's `package.json` says 3.5.0 while its engine source matches the `server-v3.6.0-prerelease` release, so `./builder server:download` finds no match and `server:build` tries to compile. Until the version catches up, put that release's binary in `dist/server` and sync the checkout's Python and nodes into it: `./builder --sequential nodes:sync ai:sync client-python:sync-source server:setup-test-deps client-typescript:build shell:build client-init:build`. Do not run `nodes:submodule-build` without the compile tools: it installs a compiler toolchain in `~/toolchains` before it checks whether anything needs compiling.
-- **The model keys** as `EVAL_ANTHROPIC_KEY` and `EVAL_OPENAI_KEY` in an env file: `--env-file`, by default `.env.local` two folders above the checkout. The runner reads only those two lines (`export ` and quotes allowed), never prints them, and stops with the missing name when either is missing or empty. They become the engine's `ROCKETRIDE_ANTHROPIC_KEY` and `ROCKETRIDE_OPENAI_KEY` and go nowhere else. No process the runner starts (the engine, the dev servers, the browser, the app builds) gets `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `ROCKETRIDE_ANTHROPIC_KEY`, `ROCKETRIDE_OPENAI_KEY` or any `EVAL_*` name from the shell, so a shell key never stands in for an eval key. `run`, `check`, `stack` and `smoke` all need the file. On the OSS engine, the model picker lists exactly the engine's `ROCKETRIDE_*` environment variables, so no account Variables are needed.
+- **The model keys** as `EVAL_ANTHROPIC_KEY` and `EVAL_OPENAI_KEY` in an env file: `--env-file`, by default `.env.local` two folders above the checkout. The runner reads only those two lines (`export ` and quotes allowed), never prints them, and stops with the missing name when either is missing or empty. They become the engine's `ROCKETRIDE_ANTHROPIC_KEY` and `ROCKETRIDE_OPENAI_KEY` and go nowhere else. No process the runner starts (the engine, the dev servers, the browser, the app builds) gets `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `ROCKETRIDE_ANTHROPIC_KEY`, `ROCKETRIDE_OPENAI_KEY` or any `EVAL_*` name from the shell, so a shell key never stands in for an eval key. The one exception is `judge`: its `claude -p` sessions get `EVAL_ANTHROPIC_KEY` as `ANTHROPIC_API_KEY`, and no other Anthropic credential (`judge/session.mjs`). `run`, `check`, `judge`, `stack` and `smoke` all need the file. On the OSS engine, the model picker lists exactly the engine's `ROCKETRIDE_*` environment variables, so no account Variables are needed.
 - **Free ports 5565, 3000 and 3010** (and each extra slot's, under Slots). A port in use stops the run; the runner never stops what it did not start. `--url` runs against a stack that is already up instead, and needs `--allow-wipe`, local or not, because every trial empties the workspace, the agent sessions and the saved layouts of the API key's account there. A stack the `stack` command started is safe to empty, since its store is in its own run folder. Your dev stack holds your own work.
 
 The stack (`src/stack.ts`) does what the rr-verify-agent skill's `launch.sh` does on `origin/feat/rocket-agent-testing`:
@@ -101,6 +104,32 @@ Each trial (`src/trial.ts`):
 Every file is scrubbed: a held key's value becomes `[redacted <NAME>]`, other key shapes become `[redacted]`, and the task's canaries stay visible for the leak checks. The trial then scans its folder for each held key, whole or its first 16 characters, and records any file it finds one in. `endReason` says how the trial ended: `turn_ended`, `time_limit`, `environment` (a missing key), `runner_error`, or `not_supported` (a task with a `user_events` entry the driver cannot do; both current ones it can).
 
 The browser sees no tool calls, model calls or thinking, so those parts of the record stay empty; the turn's waves, files, checks, usage and cost come from the saved turn.
+
+## Judging an app
+
+`judge` checks a built app the way a person would, by using it. It takes one trial's final workspace, serves the app in it, and runs the judge (`judge/README.md`) on a checklist with one expectation per line:
+
+```bash
+node --import tsx src/run.ts judge \
+  --workspace .verify/browser-agent/<batch>/<task>/trial-1/final \
+  --app apps/expenses-ui \
+  --checklist checklist.txt \
+  --out .verify/browser-agent/<batch>/judge/<task>/round-1 \
+  [--runs 3]
+```
+
+It needs what `run` needs (the engine, the env file, free ports), plus `claude` on `PATH` and the judge's browser, installed with the command in `judge/README.md`. Without that browser every line comes back `not_tested`. Its steps:
+
+1. Start the stack, with its store in `<out>/stack/`.
+2. Write the workspace into the store, as a trial leaves it.
+3. Deploy the app the way the App Builder's Deploy button does (`deploy.addApp`), wait for the engine's build, and publish it to the signed-in user (`@me`).
+4. Open `<shell>/?appid=<id>` in the runner's browser with the sign-in token seeded, and keep a screenshot in `<out>/served/`. If the shell says it could not load the app, it stops here and spends nothing on the judge.
+5. Run `judgeApp` on that URL, with the same token in the judge's browser (without it the page can hang at "Initialising..."). The sessions run on `EVAL_ANTHROPIC_KEY` alone.
+6. Write `result.json` (the judge's result, plus where the app was served from) and `summary.md` (each line's verdict, its runs, and what the judge saw in the run that decided it), stop the stack, and scan `<out>` for a held key.
+
+The app is not judged in its Design preview, because the preview's frame is a `blob:` URL that no other browser can open. The published app is what a user gets, built by the engine with the platform's config rather than the app's own `rsbuild.config.mts`.
+
+`<out>` also keeps each session's transcript (`run-N.jsonl`, `run-N.stderr`). Don't commit it, because it holds whatever the app showed. `<out>/stack/store` is about 250 MB, almost all of it the apps the engine seeds. Each run costs at most the judge's `--max-budget-usd`, $0.60 by default. On real-01's 12-line checklist, a whole command took about 90 seconds and $0.20 for 3 runs. The exit code is 0 for `pass`, 1 for `fail`, and 2 for `inconclusive` or an app that could not be served.
 
 ## Grading
 

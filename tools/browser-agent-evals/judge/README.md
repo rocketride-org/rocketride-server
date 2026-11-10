@@ -2,7 +2,7 @@
 
 `judgeApp` grades a running app against a checklist a person approved. Each run is a fresh `claude -p` session that uses the app through a browser and gives every line `pass`, `fail` or `not_tested`, with what it did and what it saw. The verdict is advisory. The report shows it beside the checks, and it doesn't change the result.
 
-The runner serves the app and passes the URL. This folder doesn't deploy anything.
+The runner's `judge` command serves the app and passes the URL (the runner's README, Judging an app). This folder doesn't deploy anything.
 
 ## Run it by hand
 

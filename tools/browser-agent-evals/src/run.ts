@@ -46,6 +46,7 @@ import { writeRunReport } from './report';
 import { findResults, mergeResults } from './merge';
 import { buildResults, spentUsd, writeResults, type ResultsFile, type Schedule } from './results';
 import { checkWorkspace, readTree, referenceWorkspace } from './references';
+import { judgeCommand, judgePlan } from './judge';
 import { causeOf } from './cause';
 import { roundOrder, runSchedule, runTrials, type Job } from './schedule';
 import { SMOKE_MODELS, smokeModels, smokeTable } from './smoke-models';
@@ -81,6 +82,16 @@ Commands:
                   dev server) and keep it up until Ctrl-C; run --url
                   <its shell URL> --allow-wipe uses it. With --slots n,
                   starts n stacks side by side and prints each shell URL.
+  judge           Serve one trial's app from its saved workspace and judge
+                  it live (judge/README.md): start the stack, load
+                  --workspace into its store, deploy and build --app as
+                  the Deploy button does, publish it to the signed-in
+                  user, open <shell>/?appid=<id>, and run judgeApp on
+                  --checklist. Writes result.json, summary.md and each
+                  judge session's transcript to --out, then stops the
+                  stack. The judge's claude sessions run on
+                  EVAL_ANTHROPIC_KEY alone. Exits 0 pass, 1 fail,
+                  2 inconclusive or not served.
   smoke           Ask each model one question the way the Agent tab does
                   (task 0.2), on the engine alone. Prints a table: model,
                   answered, seconds, whether the engine lists the key name.
@@ -93,12 +104,14 @@ Commands:
 
 Options:
   --env-file <file>
-                  run, check, stack, smoke: where the model keys are read
-                  from (default: ${DEFAULT_ENV_FILE}). Only
+                  run, check, judge, stack, smoke: where the model keys are
+                  read from (default: ${DEFAULT_ENV_FILE}). Only
                   EVAL_ANTHROPIC_KEY and EVAL_OPENAI_KEY are read, and both
                   must be set; they become the engine's
-                  ROCKETRIDE_ANTHROPIC_KEY and ROCKETRIDE_OPENAI_KEY. No
-                  process gets a model key from the shell's environment.
+                  ROCKETRIDE_ANTHROPIC_KEY and ROCKETRIDE_OPENAI_KEY, and
+                  judge's sessions get EVAL_ANTHROPIC_KEY as
+                  ANTHROPIC_API_KEY. No process gets a model key from the
+                  shell's environment.
   --tasks <dir>   The task set folder (default: tasks/breadth).
   --task <ids>    Only tasks whose id contains one of these, comma-separated.
                   ./builder's --pattern=<id> sets it.
@@ -156,6 +169,12 @@ Options:
                   app the agent creates as soon as it is written.
   --workspace <dir>
                   check: the workspace folder to grade (one task).
+                  judge: the trial's final workspace (its final/ folder).
+  --app <dir>     judge: the app folder, relative to --workspace
+                  (apps/<name>).
+  --checklist <file>
+                  judge: the checklist, one expectation per line.
+  --runs <n>      judge: judge sessions, one after another (default 3).
   --models <p/m,...>
                   smoke: the models to ask (default: ${SMOKE_MODELS.join(', ')}).
   --help          This text.`;
@@ -177,6 +196,12 @@ interface Args {
 	headed: boolean;
 	models: string[];
 	workspace: string | null;
+	/** judge: the app folder, relative to the workspace. */
+	app: string | null;
+	/** judge: the checklist file. */
+	checklist: string | null;
+	/** judge: judge sessions (null: the judge's default). */
+	runs: number | null;
 	allowWipe: boolean;
 	noPreview: boolean;
 	envFile: string;
@@ -186,7 +211,7 @@ interface Args {
 }
 
 function parseArgs(argv: string[]): Args {
-	const args: Args = { command: null, tasks: DATA_DIR, only: [], table: false, model: DEFAULT_MODEL, url: null, apikeyEnv: null, out: null, reruns: 2, trials: null, slots: 1, headed: false, models: [], workspace: null, allowWipe: false, noPreview: false, envFile: DEFAULT_ENV_FILE, limits: {}, guards: { maxSpendUsd: null, minFreeGb: DEFAULT_MIN_FREE_GB }, help: false };
+	const args: Args = { command: null, tasks: DATA_DIR, only: [], table: false, model: DEFAULT_MODEL, url: null, apikeyEnv: null, out: null, reruns: 2, trials: null, slots: 1, headed: false, models: [], workspace: null, app: null, checklist: null, runs: null, allowWipe: false, noPreview: false, envFile: DEFAULT_ENV_FILE, limits: {}, guards: { maxSpendUsd: null, minFreeGb: DEFAULT_MIN_FREE_GB }, help: false };
 	for (let i = 0; i < argv.length; i++) {
 		const a = argv[i];
 		const value = () => {
@@ -219,6 +244,12 @@ function parseArgs(argv: string[]): Args {
 			if (!Number.isFinite(args.guards.minFreeGb) || args.guards.minFreeGb < 0) throw new Error('--min-free-disk needs a number of GB, 0 or more');
 		} else if (a === '--headed') args.headed = true;
 		else if (a === '--workspace') args.workspace = path.resolve(value());
+		else if (a === '--app') args.app = value();
+		else if (a === '--checklist') args.checklist = path.resolve(value());
+		else if (a === '--runs') {
+			args.runs = Number(value());
+			if (!Number.isInteger(args.runs) || args.runs < 1) throw new Error('--runs needs a whole number of 1 or more');
+		}
 		else if (a === '--allow-wipe') args.allowWipe = true;
 		else if (a === '--no-preview') args.noPreview = true;
 		else if (a === '--env-file') args.envFile = path.resolve(value());
@@ -619,6 +650,16 @@ async function check(args: Args, modelKeys: HeldKey[]): Promise<number> {
 	return failed ? 1 : 0;
 }
 
+async function judge(args: Args, modelKeys: HeldKey[]): Promise<number> {
+	try {
+		const out = args.out ?? path.join(REPO_ROOT, '.verify', 'browser-agent', `judge-${new Date().toISOString().replace(/[:.]/g, '-')}`);
+		return await judgeCommand(judgePlan({ workspace: args.workspace, app: args.app, checklist: args.checklist, out, runs: args.runs }), modelKeys);
+	} catch (err) {
+		console.error(err instanceof Error ? err.message : String(err));
+		return 2;
+	}
+}
+
 async function smoke(args: Args, modelKeys: HeldKey[]): Promise<number> {
 	let models: ModelPick[];
 	let apiKey: string;
@@ -684,8 +725,8 @@ async function main(): Promise<number> {
 	return await command(args, modelKeys);
 }
 
-/** The commands that start an engine or grade against one, and so need the model keys. */
-const KEYED: Record<string, (args: Args, modelKeys: HeldKey[]) => Promise<number>> = { run, smoke, check, stack: holdStack };
+/** The commands that start an engine or grade against one, and so need the model keys (judge's sessions run on EVAL_ANTHROPIC_KEY too). */
+const KEYED: Record<string, (args: Args, modelKeys: HeldKey[]) => Promise<number>> = { run, smoke, check, judge, stack: holdStack };
 
 void main().then((code) => {
 	process.exitCode = code;
