@@ -31,13 +31,14 @@ the same loop runs from a terminal or CI.
   target named by `ROCKETRIDE_DEPLOY_URI` and `ROCKETRIDE_DEPLOY_APIKEY`
   (the pip CLI has no `app developer` verbs). The id is lowercase letters
   and underscores, starting with a letter; `local`, the prefix of an app
-  scaffolded before registering, is reserved, so pick another id and rename
-  the app's prefix. Registering is an org admin's step, and permanent. The
-  organization can then deploy only apps inside that namespace. A
-  self-hosted server registers nothing: it publishes under the fixed id
-  `rocketride`. Until the prefix of your app's id
-  matches, the Deploy tab is read-only with a banner; the fix is to rename
-  the id in `package.json`. Design and Package always work.
+  scaffolded before registering, is reserved, so pick another id.
+  Registering is an org admin's step, and permanent. The organization can
+  then deploy only apps inside that namespace. A self-hosted server
+  registers nothing: it publishes under the fixed id `rocketride`. Until
+  the prefix of your app's id matches, the Deploy tab is read-only with a
+  banner. An app still on `local.<name>` can move into your namespace from
+  that banner in VS Code (see [Create](#create-dashboard-tab)); rename any
+  other id by hand. Design and Package always work.
 - Catalog nodes only, if the app is headed for the store. Pipelines in a
   store app use the nodes that ship with the engine and nothing else; see
   [Adding a pipeline to your app](#adding-a-pipeline-to-your-app).
@@ -56,7 +57,7 @@ this way; a hand-made folder fails later with symptoms far from the cause.
 The scaffold starts the id at `local.<slug>` until your organization has a
 developer id; renaming the id later makes it a different app.
 
-The `<name>.rrapp` file it creates is empty on purpose. Opening it opens
+The `<name>.rrapp` file it creates holds only the app id. Opening it opens
 the App Builder; the app's identity lives in `package.json`.
 
 What you will edit:
@@ -78,6 +79,17 @@ the developer id from your account. The command reads the account from the
 credentials in `.env`, so run `rocketride login` (or `rocketride init`)
 first. Without an account it warns and uses `local`; pass
 `--developer <id>` to choose one yourself.
+
+An app created as `local.<slug>` can move into your organization's
+namespace once the organization has a developer id: in VS Code, the
+read-only banner on the Store and Deploy tabs offers **Move to
+`<developerId>.<slug>`**. After you confirm, it rewrites the id in
+`package.json` (plus the publisher and package name, if they still hold
+the scaffold's values), and in the `.rrapp` file and
+`src/AppDescriptor.ts` where they carry it, then reopens the App Builder
+on the new id. Nothing on the server is renamed: the app's saved settings in
+the App Builder and the preview start fresh. Only `local.` ids move this
+way; rename any other id by hand in the same files.
 
 ### Design
 
