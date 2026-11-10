@@ -26,6 +26,7 @@
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 
@@ -66,6 +67,42 @@ function doneRecord(task: Task, finalFiles: Record<string, string>, extra: Parti
 }
 
 const FILE_TYPES = new Set(['json_parses', 'pipe_static_valid', 'providers_present', 'providers_absent', 'count', 'edge', 'reaches', 'control', 'config_value', 'same_config', 'any_config_matches', 'extract_fields', 'secrets_are_placeholders', 'project_id_unchanged', 'file_unchanged', 'file_exists', 'file_absent', 'glob_count', 'file_matches', 'file_not_matches', 'json_value', 'only_changed', 'user_edit_kept']);
+
+test('an ANSWER task loads, passes when the agent said done and changed nothing, and is never pending for its type', () => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'answer-'));
+	fs.mkdirSync(path.join(dir, 'fixtures'));
+	fs.writeFileSync(path.join(dir, 'fixtures', 'chat.pipe'), '{"components": []}\n');
+	const answer = {
+		id: 'answer-01',
+		type: 'ANSWER',
+		target: 'pipeline',
+		prompt: 'Which model does this pipeline use?',
+		files: [{ path: 'pipelines/chat.pipe', from: 'fixtures/chat.pipe' }],
+		cards: 'deny',
+		timeLimitSec: 3600,
+		variables: [],
+		checks: [
+			{ id: 'said-done', type: 'outcome', expect: 'done' },
+			{ id: 'nothing-changed', type: 'only_changed', globs: [] },
+		],
+		judge: [],
+	};
+	fs.writeFileSync(path.join(dir, 'answer-01.json'), JSON.stringify(answer));
+	const loaded = loadTasks(dir);
+	assert.deepEqual(loaded.invalid, []);
+	const task = loaded.tasks[0] as Task;
+	const start = { 'pipelines/chat.pipe': '{"components": []}\n' };
+
+	const answered = gradeTrial(task, doneRecord(task, start), { start }, null);
+	assert.equal(answered.status, 'pass', answered.why);
+	const changed = gradeTrial(task, doneRecord(task, { ...start, 'pipelines/new.pipe': '{}' }), { start }, null);
+	assert.deepEqual([changed.status, changed.why], ['fail', 'failed: nothing-changed']);
+	const asked = gradeTrial(task, doneRecord(task, start, { turns: [{ result: { outcome: 'needs_input', reason: 'ask_user', files: [], checks: [], usage: { waves: 1, modelRequests: 1, toolCalls: 0 } } }] } as never), { start }, null);
+	assert.equal(asked.status, 'needs_input');
+	// the same task typed ASK waits for the judge
+	assert.equal(gradeTrial({ ...task, type: 'ASK' }, doneRecord(task, start), { start }, null).status, 'pending');
+	fs.rmSync(dir, { recursive: true });
+});
 
 test('every reference solution passes the file checks of its task', () => {
 	// an ASK reference is the workspace after the follow-up answer, which a one-turn browser trial never reaches

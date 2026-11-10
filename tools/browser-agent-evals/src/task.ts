@@ -45,8 +45,8 @@ import { pyRegex } from './score';
 // TYPES
 // =============================================================================
 
-/** What a task asks for, for filtering and the report. */
-export type TaskType = 'BUILD' | 'EDIT' | 'ASK' | 'STOP' | 'SECRET';
+/** What a task asks for, for filtering and the report. ANSWER: the agent should answer and change nothing; it is graded like BUILD and EDIT, by its checks, while an ASK trial waits for the judge. */
+export type TaskType = 'BUILD' | 'EDIT' | 'ANSWER' | 'ASK' | 'STOP' | 'SECRET';
 
 /** What the task works on. */
 export type TaskTarget = 'pipeline' | 'app';
@@ -143,7 +143,7 @@ export interface Task {
 // =============================================================================
 
 const FIELDS = new Set(['id', 'type', 'target', 'title', 'prompt', 'files', 'cards', 'timeLimitSec', 'input', 'variables', 'canaries', 'user_events', 'checks', 'judge', 'hard_because']);
-const TYPES = new Set(['BUILD', 'EDIT', 'ASK', 'STOP', 'SECRET']);
+const TYPES = new Set(['BUILD', 'EDIT', 'ANSWER', 'ASK', 'STOP', 'SECRET']);
 const TARGETS = new Set(['pipeline', 'app']);
 const CARD_ANSWERS = new Set(['approve', 'deny']);
 const DIRTY_FILE_ANSWERS = new Set(['save_mine_first', 'discard_mine', 'keep_mine']);
@@ -319,7 +319,7 @@ export function validateTask(id: string, dir: string = DATA_DIR): Validation {
 
 	for (const key of Object.keys(t)) need(FIELDS.has(key), `unknown field ${key}`);
 	need(t.id === id, `id ${JSON.stringify(t.id)} does not match the file name`);
-	need(TYPES.has(String(t.type)), `type ${JSON.stringify(t.type)} is not BUILD, EDIT, ASK, STOP or SECRET`);
+	need(TYPES.has(String(t.type)), `type ${JSON.stringify(t.type)} is not BUILD, EDIT, ANSWER, ASK, STOP or SECRET`);
 	need(TARGETS.has(String(t.target)), `target ${JSON.stringify(t.target)} is not pipeline or app`);
 	need(t.title === undefined || typeof t.title === 'string', 'title must be text');
 	need(isText(t.prompt), 'prompt is empty');
