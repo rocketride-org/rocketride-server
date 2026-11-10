@@ -21,10 +21,14 @@
 # SOFTWARE.
 # =============================================================================
 
-from .IGlobal import IGlobal
-from .IInstance import IInstance
+"""OneDrive tool node save-time validation backed by the shared Microsoft 365 validator."""
 
-__all__ = [
-    'IGlobal',
-    'IInstance',
-]
+from ..IValidator import MicrosoftToolValidatorBase
+from .client import SERVICE
+
+
+class IValidator(MicrosoftToolValidatorBase):
+    """Save-time validation for OneDrive: schema, then credential and scope coverage."""
+
+    SERVICE = SERVICE
+    SPEC_NAME = 'ONEDRIVE'

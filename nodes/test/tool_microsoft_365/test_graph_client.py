@@ -48,7 +48,7 @@ if str(_NODES_SRC) not in sys.path:
 from unittest.mock import MagicMock
 
 _added = []
-for _name in ('depends', 'rocketlib', 'ai', 'ai.common', 'ai.common.utils', 'ai.common.config'):
+for _name in ('depends', 'rocketlib', 'ai', 'ai.common', 'ai.common.utils'):
     if _name not in sys.modules:
         _stub = MagicMock()
         if _name == 'depends':
@@ -153,7 +153,7 @@ class TestBrokerUserAuth:
             'scope': 'Files.ReadWrite Mail.Read',
         }
         p.update(over)
-        return {'userToken': json.dumps(p)}
+        return {'userAuth': json.dumps(p)}
 
     def test_refresh_posts_refresh_token_to_broker(self):
         auth = gc.build_auth(SVC, 'user', self._payload(), ['Files.ReadWrite'])

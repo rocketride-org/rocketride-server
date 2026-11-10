@@ -12,40 +12,30 @@
 	"description": ["Exposes Slack workspace operations as agent tools.", "Post messages to channels or threads, list public channels, read channel history,", "and verify the connection. Authenticates with a bot token, or an incoming-webhook", "URL for zero-scope post-only setups."],
 	"tile": ["Slack${parameters.slack.webhookUrl ? ' (webhook)' : ''}"],
 	"lanes": {},
-	"preconfig": {
-		"default": "default",
-		"profiles": {
-			"default": {
-				"title": "Slack",
-				"token": "",
-				"webhookUrl": ""
-			}
-		}
-	},
-	"fields": {
+	//
+	// Optional:
+	//		Local property definitions. Exactly one of the two credentials is set (the
+	//		node checks that); each is a secret the account variable supplies.
+	//
+	"propertyDefinitions": {
 		"slack.token": {
 			"type": "string",
 			"title": "Bot User OAuth Token",
 			"description": "Slack bot token (starts with xoxb-) from your app's OAuth & Permissions page. Needs chat:write to post, channels:read to list channels, and channels:history to read history. Leave empty when using a webhook URL.",
-			"default": "",
-			"secure": true,
-			"optional": true,
-			"ui": {
-				"ui:widget": "ApiKeyWidget"
-			}
+			"secret": true,
+			"env": "ROCKETRIDE_SLACK_TOKEN",
+			"optional": true
 		},
 		"slack.webhookUrl": {
 			"type": "string",
 			"title": "Incoming Webhook URL",
 			"description": "Slack incoming-webhook URL for zero-scope setups. Enables ONLY message_post, and messages always go to the channel the webhook was created for. Configure either this or a bot token, not both.",
-			"default": "",
-			"secure": true,
-			"optional": true,
-			"ui": {
-				"ui:widget": "ApiKeyWidget"
-			}
+			"secret": true,
+			"env": "ROCKETRIDE_SLACK_WEBHOOK_URL",
+			"optional": true
 		}
 	},
+	"properties": ["type", "slack.token", "slack.webhookUrl"],
 	"test": {
 		"profiles": ["default"],
 		"outputs": [],
@@ -55,12 +45,5 @@
 				"text": "test message"
 			}
 		]
-	},
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "Slack",
-			"properties": ["type", "slack.token", "slack.webhookUrl"]
-		}
-	]
+	}
 }

@@ -1,6 +1,4 @@
 # =============================================================================
-# RocketRide Engine
-# =============================================================================
 # MIT License
 # Copyright (c) 2026 Aparavi Software AG
 #
@@ -24,7 +22,7 @@
 # =============================================================================
 
 """
-tool_pipe node — global (shared) state.
+tool_pipe node - global (shared) state.
 
 Reads the tool configuration at startup so IInstance can route tool
 invocations to the correct output lane on every call.
@@ -32,11 +30,7 @@ invocations to the correct output lane on every call.
 
 from __future__ import annotations
 
-from ai.common.config import Config
-from rocketlib import IGlobalBase, OPEN_MODE, warning
-
-
-VALID_RETURN_TYPES = {'text', 'answers', 'documents', 'table'}
+from rocketlib import IGlobalBase
 
 
 class IGlobal(IGlobalBase):
@@ -46,25 +40,10 @@ class IGlobal(IGlobalBase):
     return_type: str = 'text'
 
     def beginGlobal(self) -> None:
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
-
-        cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-
-        self.tool_description = str(cfg.get('tool_description') or '').strip()
-        self.return_type = str(cfg.get('return_type') or '').strip() or 'text'
-
-        if self.return_type not in VALID_RETURN_TYPES:
-            raise Exception(f'tool_pipe: return_type must be one of {sorted(VALID_RETURN_TYPES)}')
-
-    def validateConfig(self) -> None:
-        try:
-            cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-            return_type = str(cfg.get('return_type') or '').strip() or 'text'
-            if return_type not in VALID_RETURN_TYPES:
-                warning(f'tool_pipe: return_type must be one of {sorted(VALID_RETURN_TYPES)}')
-        except Exception as e:
-            warning(str(e))
+        # The resolved config: return_type pinned to its enum by the schema
+        cfg = self.config
+        self.tool_description = str(cfg.tool_description or '').strip()
+        self.return_type = cfg.return_type
 
     def endGlobal(self) -> None:
         pass

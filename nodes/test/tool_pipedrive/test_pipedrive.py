@@ -26,7 +26,7 @@ from test.zone_audit import audit_time_fields
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'src' / 'nodes'))
 
 
-_STUB_MODULE_NAMES = ('rocketlib', 'ai', 'ai.common', 'ai.common.config', 'ai.common.utils')
+_STUB_MODULE_NAMES = ('rocketlib', 'ai', 'ai.common', 'ai.common.utils')
 
 # Obviously fake. A real personal token is 40 hex characters, but a literal one
 # here trips secret scanners, so use a placeholder of the same shape class:
@@ -67,14 +67,6 @@ def _install_stubs() -> None:
 
     sys.modules['ai'] = types.ModuleType('ai')
     sys.modules['ai.common'] = types.ModuleType('ai.common')
-
-    mod_config = types.ModuleType('ai.common.config')
-
-    class Config:
-        pass
-
-    mod_config.Config = Config
-    sys.modules['ai.common.config'] = mod_config
 
     mod_utils = types.ModuleType('ai.common.utils')
 
@@ -926,7 +918,7 @@ class TestToolGroupsField:
     since `checkboxes` would switch the same schema to a checkbox list.
     """
 
-    field = _MANIFEST['fields']['pipedrive.toolGroups']
+    field = _MANIFEST['propertyDefinitions']['pipedrive.toolGroups']
 
     def test_renders_as_a_multi_select_dropdown(self):
         assert self.field['type'] == 'array'

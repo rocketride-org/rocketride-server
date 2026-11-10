@@ -65,7 +65,7 @@ if str(_NODES_SRC) not in sys.path:
 # normalize_tool_input/require_str/etc. behave exactly as in production
 # instead of returning MagicMocks.
 _added = []
-for _name in ('depends', 'rocketlib', 'ai', 'ai.common', 'ai.common.config'):
+for _name in ('depends', 'rocketlib', 'ai', 'ai.common'):
     if _name not in sys.modules:
         _stub = types.ModuleType(_name)
         if _name == 'depends':
@@ -76,8 +76,6 @@ for _name in ('depends', 'rocketlib', 'ai', 'ai.common', 'ai.common.config'):
             _stub.OPEN_MODE = types.SimpleNamespace(CONFIG='CONFIG')
             _stub.warning = lambda *a, **k: None
             _stub.tool_function = lambda **kw: lambda f: f
-        if _name == 'ai.common.config':
-            _stub.Config = object
         sys.modules[_name] = _stub
         _added.append(_name)
 
