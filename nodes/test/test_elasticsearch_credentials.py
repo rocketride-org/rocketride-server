@@ -12,7 +12,7 @@ on: without it the password is never sent. The clients are stand-ins.
 
 import sys
 import types
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -40,7 +40,6 @@ def _iglobal(logical_type, conn_config):
     glb.IEndpoint = MagicMock()
     glb.search_enabled = False
     glb.store = None
-    glb.getConnConfig = lambda: conn_config
     return glb
 
 
@@ -69,10 +68,7 @@ def test_opensearch_with_basic_auth_stops_on_an_unfilled_password(monkeypatch):
     module, client = _client_module()
     monkeypatch.setitem(sys.modules, OPENSEARCH_CLIENT, module)
 
-    with (
-        patch('nodes.store_elasticsearch.IGlobal.IGlobalTransform.beginGlobal', return_value=None),
-        pytest.raises(UnresolvedCredentialError, match=MISSING),
-    ):
+    with pytest.raises(UnresolvedCredentialError, match=MISSING):
         _iglobal('opensearch', conn_config)._begin_opensearch(conn_config)
 
     client.assert_not_called()
@@ -88,8 +84,7 @@ def test_opensearch_without_basic_auth_never_reads_the_password(monkeypatch):
     module, client = _client_module()
     monkeypatch.setitem(sys.modules, OPENSEARCH_CLIENT, module)
 
-    with patch('nodes.store_elasticsearch.IGlobal.IGlobalTransform.beginGlobal', return_value=None):
-        _iglobal('opensearch', conn_config)._begin_opensearch(conn_config)
+    _iglobal('opensearch', conn_config)._begin_opensearch(conn_config)
 
     assert client.call_args.kwargs['password'] is None
 
@@ -98,10 +93,11 @@ def test_the_opensearch_save_time_ping_is_not_sent_with_an_unfilled_password(mon
     """The save-time ping is not sent with an unfilled password; a warning names the variable.
 
     Args:
-        monkeypatch (pytest.MonkeyPatch): installs the stand-in client module.
+        monkeypatch (pytest.MonkeyPatch): stubs the node config and installs the stand-in client module.
         warnings (list): warnings logged by the save-time helper.
     """
     conn_config = _opensearch_config(auth_enabled=True)
+    monkeypatch.setattr(Config, 'getNodeConfig', staticmethod(lambda logical_type, cc: dict(conn_config)))
     module, client = _client_module()
     monkeypatch.setitem(sys.modules, OPENSEARCH_CLIENT, module)
 

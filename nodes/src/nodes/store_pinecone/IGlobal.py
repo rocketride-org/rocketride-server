@@ -95,10 +95,6 @@ class IGlobal(StoreGlobalBase):
 
         return Store(logical_type, conn_config, bag)
 
-    def _sub_key(self) -> str:
-        """Return the transform sub-key: host/port/collection."""
-        return f'{self.store.host}/{self.store.port}/{self.store.collection}'
-
     def _probe_connection(self, config: Dict[str, Any]) -> None:
         """
         Validate the configuration for Pinecone vector store.

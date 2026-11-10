@@ -553,15 +553,11 @@ def _vector_store_cls(monkeypatch):
     store_mod.CONTROL_OBJECT_ID = bases.CONTROL_OBJECT_ID
     config = types.ModuleType('ai.common.config')
     config.Config = types.SimpleNamespace(getNodeConfig=lambda provider, connConfig: dict(connConfig))
-    transform = types.ModuleType('ai.common.transform')
-    for name in ('IGlobalTransform', 'IInstanceTransform', 'IEndpointTransform'):
-        setattr(transform, name, type(name, (), {}))
     monkeypatch.setitem(sys.modules, 'ai', ai_pkg)
     monkeypatch.setitem(sys.modules, 'ai.common', common_pkg)
     monkeypatch.setitem(sys.modules, 'ai.common.schema', schema)
     monkeypatch.setitem(sys.modules, 'ai.common.store', store_mod)
     monkeypatch.setitem(sys.modules, 'ai.common.config', config)
-    monkeypatch.setitem(sys.modules, 'ai.common.transform', transform)
 
     rrdb_mod = _load_from_path('ai.common.rocketride_db', _RRDB_PATH)
     monkeypatch.setitem(sys.modules, 'ai.common.rocketride_db', rrdb_mod)

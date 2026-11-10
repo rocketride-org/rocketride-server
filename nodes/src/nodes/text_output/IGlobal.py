@@ -34,7 +34,7 @@ class IGlobal(IGlobalBase):
     def beginGlobal(self):
         """Call from engLib, task startup hook.
 
-        Intentionally a no-op: `endpoint.py` resolves this node's dependencies
+        Intentionally a no-op: `IEndpoint.py` resolves this node's dependencies
         with `depends()` at module import time, so there is nothing left to
         prepare once the task begins.
         """

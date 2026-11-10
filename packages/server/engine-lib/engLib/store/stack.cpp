@@ -871,21 +871,6 @@ Error IServiceEndpoint::buildPipeStack() noexcept {
             break;
         }
 
-        case OPEN_MODE::INDEX:
-        case OPEN_MODE::SOURCE_INDEX: {
-            // These require a source endpoint
-            if (config.serviceMode != SERVICE_MODE::SOURCE)
-                return APERR(Ec::InvalidParam,
-                             "The service is not a source service");
-
-            // Autopipe will figure out what to do here.. Essnetially, it
-            // will add the index and vecorizer to enumerate the documents
-            // from the wordDB, the vectorDB, endpoint or just the endpoint
-            // if in SOURCE_INDEX mode
-            pushString("autopipe");
-            break;
-        }
-
         case OPEN_MODE::CLASSIFY: {
             // These require a target endpoint
             if (config.serviceMode != SERVICE_MODE::TARGET)
@@ -901,39 +886,6 @@ Error IServiceEndpoint::buildPipeStack() noexcept {
             // on the writeText interface and classify the incoming
             // documents classification
             pushString(filterClassify);
-            break;
-        }
-
-        case OPEN_MODE::INSTANCE: {
-            // These require a target endpoint
-            if (config.serviceMode != SERVICE_MODE::TARGET)
-                return APERR(Ec::InvalidParam,
-                             "The service is not a target service");
-
-            // These require a hash filter
-            if (!filterHash)
-                return APERR(Ec::InvalidCommand,
-                             "The hash node is not available");
-
-            // Add the hash driver in case one of the paths asked for signing
-            pushString(filterHash);
-
-            // Add autopipe to figure out what to do, what to remote or not
-            // This will typically add the parser, optional ocr, indexer if
-            // any of the paths have index selected, vectorizer if any of
-            // the paths have vectorize set. The configuration should be
-            // in config.autopipe
-            pushString("autopipe");
-
-            // We can classify at the same time if desired
-            if (config.taskConfig.lookup<bool>("enableClassification")) {
-                // These require a classify filter
-                if (!filterClassify)
-                    return APERR(Ec::InvalidCommand,
-                                 "The classify node is not available");
-
-                pushString(filterClassify);
-            }
             break;
         }
 
@@ -973,19 +925,6 @@ Error IServiceEndpoint::buildPipeStack() noexcept {
 
             // Don't need much, just the hasher
             pushString(filterHash);
-            break;
-        }
-
-        case OPEN_MODE::TRANSFORM: {
-            // These require a target endpoint
-            if (config.serviceMode != SERVICE_MODE::TARGET)
-                return APERR(Ec::InvalidParam,
-                             "The service is not a target service");
-
-            // The endpoint was asked (via getPipeFilters) the additional
-            // filters to add. Relativity added some, and transform targets like
-            // qdrant added autopipe. The configuration for autopipe should be
-            // in parameters.autopipe
             break;
         }
 
