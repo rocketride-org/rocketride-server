@@ -303,7 +303,7 @@ def test_sitemap_ignores_forwarded_headers(app_url):
     assert f'<loc>{BASE}/pricing</loc>' in resp.text
 
 
-def test_lastmod_prefers_page_dates(app_url):
+def test_lastmod_is_the_page_date_and_absent_without_one(app_url):
     bound = 1_700_000_100.0  # 2023-11-14T22:15:00Z
     _use(
         Page('/', 'rocketride.home', 'Home', published_at=bound),
@@ -313,8 +313,9 @@ def test_lastmod_prefers_page_dates(app_url):
         Page('/unbound', 'rocketride.home', 'U'),
     )
     text = _client().get('/sitemap.xml').text
-    # The page's own date (its UTC date); else when its app's version went live.
-    assert f'<url><loc>{BASE}/</loc><lastmod>2023-11-14T22:15:00+00:00</lastmod></url>' in text
+    # The page's own date (its UTC date). A page without one has no lastmod:
+    # when its app's version went live is a deploy, not a content change.
+    assert f'<url><loc>{BASE}/</loc></url>' in text
     assert f'<url><loc>{BASE}/blog/a</loc><lastmod>2026-11-10</lastmod></url>' in text
     assert f'<url><loc>{BASE}/blog/b</loc><lastmod>2026-10-02</lastmod></url>' in text
     assert f'<url><loc>{BASE}/blog/c</loc><lastmod>2026-09-30</lastmod></url>' in text

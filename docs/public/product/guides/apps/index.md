@@ -417,7 +417,8 @@ cannot be read, crawlers get the page without it.
 `/sitemap.xml` and `/llms.txt` list the listed pages, and `/llms.txt` takes
 its heading, blurb and docs link from `site`; redirects never appear in
 either. Each sitemap entry's `<lastmod>` is the date of the page's `modified`,
-else `published`, else the time its app's production version went live. In
+else `published`; a page with neither has no `<lastmod>`, since a deploy is
+not a content change. In
 `/llms.txt`, a page whose parent path (`/blog` for `/blog/x`) is a listed page
 is listed in that parent's section, headed by the parent's title without a
 trailing ` | <site.title>`, with dated pages newest first and the rest by

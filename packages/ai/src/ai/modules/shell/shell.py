@@ -60,7 +60,6 @@ import posixpath
 import re
 import sys
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlsplit
@@ -705,19 +704,16 @@ def sitemap_entries() -> list:
 
 
 def _lastmod(page: Page) -> str:
-    """``<lastmod>``: the page's ``modified`` or ``published`` date, else when its production version went live.
+    """``<lastmod>``: the UTC date of the page's ``modified``, else ``published``; '' when it declares neither.
 
-    The UTC date of the declared instant; the fallback is the production
-    binding time, a W3C datetime in UTC. Omitted when neither is known (the
-    legacy pages).
+    A deploy is not a content change. Falling back to when the app's version
+    went live would move every undated page's date on each deploy, and search
+    engines stop trusting ``lastmod`` site-wide when it is not accurate.
     """
     declared = page.modified or page.published
-    if declared:
-        return f'<lastmod>{page_instant(declared).date().isoformat()}</lastmod>'
-    if page.published_at is None:
+    if not declared:
         return ''
-    stamp = datetime.fromtimestamp(page.published_at, tz=timezone.utc).isoformat(timespec='seconds')
-    return f'<lastmod>{stamp}</lastmod>'
+    return f'<lastmod>{page_instant(declared).date().isoformat()}</lastmod>'
 
 
 async def sitemap_xml(request: Request):
