@@ -86,9 +86,13 @@ class IValidator(IValidatorBase):
             try:
                 client = OpenAI(api_key=apikey)
 
-                # Newer models use max_completion_tokens instead of max_tokens
-                newer_models = ['gpt-5', 'gpt-5.1', 'gpt-5-mini', 'gpt-5-nano']
-                uses_max_completion_tokens = any(model.startswith(m) for m in newer_models)
+                # Reasoning models (the branch's "reasoning" constant) and newer
+                # models reject max_tokens and take max_completion_tokens; the prefix
+                # list also covers a custom model id, whose branch has no constant
+                newer_models = ['gpt-5', 'o1', 'o3', 'o4']
+                uses_max_completion_tokens = bool(config.get('reasoning')) or any(
+                    model.startswith(m) for m in newer_models
+                )
 
                 # Make sure model is using the correct parameters
                 if uses_max_completion_tokens:
