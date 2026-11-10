@@ -42,6 +42,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from rocketride import EVENT_TYPE, TASK_STATE
 from ai.modules.task.task_conn import TaskConn
 from ai.modules.task.task_server import TaskServer
 
@@ -49,6 +50,10 @@ from .test_task_conn import _make_account_info, _make_conn
 
 TASK_TOKEN = 'tk_00000000000000000000000000000001'
 PUBLIC_KEY = 'pk_00000000000000000000000000000001'
+
+# The run's source component and the pipeline that declares it a chat endpoint.
+PUBLIC_SOURCE = 'chat_1'
+PUBLIC_PIPELINE = {'components': [{'id': PUBLIC_SOURCE, 'provider': 'chat'}]}
 
 # Commands a pk_ (task.data) socket legitimately sends: the SDK handshake
 # (auth/deauth), liveness/identity, and the data pipe the chat widget and
@@ -99,11 +104,36 @@ DENIED_FOR_TASK_KEYS = [
 ]
 
 
-async def _task_identity(prefix: str):
-    """Authenticate through the production TaskServer.authenticate."""
-    control = SimpleNamespace(userId='launching-user', orgId='org-1', teamId='team-1', public_auth=PUBLIC_KEY)
+def _task_control(**extra):
+    """Build the one running task both keys belong to.
+
+    Its source is a public endpoint (chat): the kind of run a ``pk_`` key is
+    issued for, and the only kind it authenticates against.
+
+    Args:
+        **extra: further TASK_CONTROL attributes a test reads.
+    """
+    return SimpleNamespace(
+        userId='launching-user',
+        orgId='org-1',
+        teamId='team-1',
+        public_auth=PUBLIC_KEY,
+        source=PUBLIC_SOURCE,
+        pipeline=PUBLIC_PIPELINE,
+        **extra,
+    )
+
+
+def _task_server(control=None):
+    """Build a real TaskServer (``__init__`` bypassed) with the one task registered."""
     server = TaskServer.__new__(TaskServer)
-    server._task_control = {TASK_TOKEN: control}
+    server._task_control = {TASK_TOKEN: control or _task_control()}
+    return server
+
+
+async def _task_identity(prefix: str, server=None):
+    """Authenticate through the production TaskServer.authenticate."""
+    server = server or _task_server()
     credential = PUBLIC_KEY if prefix == 'pk_' else TASK_TOKEN
     info = await server.authenticate(credential)
     assert info.auth == credential
@@ -121,10 +151,12 @@ def _install_spies(conn, commands):
 
 
 def _sent(conn):
+    """Return every message the connection wrote to its transport, in order."""
     return [call.args[0] for call in conn._transport.send.await_args_list]
 
 
 async def _dispatch(conn, cmd, arguments=None):
+    """Send one DAP request through the real TaskConn.on_receive."""
     await TaskConn.on_receive(conn, {'type': 'request', 'command': cmd, 'seq': 1, 'arguments': arguments or {}})
 
 
@@ -251,6 +283,7 @@ def _web_server_with_authenticators(task_identity_server):
     from ai.web.server import WebServer
 
     async def full_user_authenticator(authorization):
+        """Accept ``rr_`` credentials as a full user; pass on anything else."""
         if not authorization.startswith('rr_'):
             return None
         info = _make_account_info(auth=authorization)
@@ -260,13 +293,6 @@ def _web_server_with_authenticators(task_identity_server):
     web = WebServer.__new__(WebServer)
     web._authenticators = [task_identity_server.authenticate, full_user_authenticator]
     return web
-
-
-def _task_server():
-    control = SimpleNamespace(userId='launching-user', orgId='org-1', teamId='team-1', public_auth=PUBLIC_KEY)
-    server = TaskServer.__new__(TaskServer)
-    server._task_control = {TASK_TOKEN: control}
-    return server
 
 
 def _wire_real_auth(conn):
@@ -326,3 +352,69 @@ async def test_gate_follows_the_connection_through_reauth_and_deauth():
     assert conn._account_info.auth == 'rr_fullusertoken'
     await _dispatch(conn, 'rrext_deploy_app')
     assert spies['rrext_deploy_app'].await_count == 2
+
+
+# ---------------------------------------------------------------------------
+# rrext_monitor stays on the pk_ list (the data pipe subscribes for SSE through
+# it), so what a subscription sends back is part of the gate. These two run the
+# REAL rrext_monitor handler: no spy.
+# ---------------------------------------------------------------------------
+
+
+def _monitored_run():
+    """Build the running task with what the real rrext_monitor handler reads.
+
+    Its status carries the run's private token in a note, as the status of a
+    chat, dropper or webhook source does.
+    """
+    status = SimpleNamespace(
+        state=TASK_STATE.RUNNING.value,
+        name='run',
+        model_dump=lambda: {'state': TASK_STATE.RUNNING.value, 'notes': [{'token-key': TASK_TOKEN}]},
+    )
+    return _task_control(
+        id='task-1',
+        token=TASK_TOKEN,
+        project_id='proj-1',
+        run_kind='dev',
+        owner_kind='user',
+        owner_id='launching-user',
+        task=SimpleNamespace(get_status=lambda: status, _pipeline=PUBLIC_PIPELINE),
+    )
+
+
+async def _monitor_conn(prefix: str):
+    """Build a real TaskConn authenticated as ``prefix`` against a real TaskServer."""
+    server = _task_server(_monitored_run())
+    server.broadcast_server_event = AsyncMock()
+    conn = _make_conn(account_info=await _task_identity(prefix, server), server=server)
+    conn._monitors = {}
+    return conn
+
+
+@pytest.mark.asyncio
+async def test_public_key_subscription_is_sent_no_status_or_task_list():
+    """A pk_ socket may subscribe, but subscribing sends it neither the run's status nor the task list."""
+    conn = await _monitor_conn('pk_')
+
+    await _dispatch(conn, 'rrext_monitor', {'types': ['SUMMARY', 'TASK', 'SSE']})
+
+    # The subscription itself is accepted and acknowledged...
+    assert list(conn._monitors.values()) == [EVENT_TYPE.SUMMARY | EVENT_TYPE.TASK | EVENT_TYPE.SSE]
+    sent = _sent(conn)
+    assert sent == [{'type': 'response', 'body': None}]
+    # ...and nothing sent carries the private token.
+    assert TASK_TOKEN not in repr(sent)
+
+
+@pytest.mark.asyncio
+async def test_task_token_subscription_is_still_sent_status_and_task_list():
+    """A tk_ socket holds task.monitor, so subscribing still sends the catch-up events."""
+    conn = await _monitor_conn('tk_')
+
+    await _dispatch(conn, 'rrext_monitor', {'types': ['SUMMARY', 'TASK']})
+
+    events = {m['event']: m['body'] for m in _sent(conn) if m['type'] == 'event'}
+    assert list(events) == ['apaevt_status_update', 'apaevt_task']
+    assert events['apaevt_status_update']['state'] == TASK_STATE.RUNNING.value
+    assert [task['id'] for task in events['apaevt_task']['tasks']] == ['task-1']
