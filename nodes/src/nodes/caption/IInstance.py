@@ -45,16 +45,17 @@ class IInstance(IInstanceBase):
         super().__init__(*args, **kwargs)
         self._image_data = None
 
-    def _emit(self, image):
-        """Caption one image and write the result to the text lane.
+    def _caption(self, image) -> str:
+        """Caption one decoded image under the node's device lock.
 
         Args:
             image: Decoded input PIL image for this frame.
+
+        Returns:
+            The caption string.
         """
-        if self.instance.hasListener('text'):
-            with self.IGlobal.device_lock:
-                caption_text = self.IGlobal.captioner.caption(image)
-            self.instance.writeText(caption_text)
+        with self.IGlobal.device_lock:
+            return self.IGlobal.captioner.caption(image)
 
     def writeImage(self, action: int, mimeType: str, buffer: bytes):
         """Accumulate an inbound image stream and caption it on END.
@@ -73,10 +74,17 @@ class IInstance(IInstanceBase):
             self._image_data += buffer
         elif action == AVI_ACTION.END:
             try:
-                image = ImageProcessor.load_image_from_bytes(self._image_data)
-                self._emit(image)
-            except Exception as e:
-                raise RuntimeError('caption failed for the input frame') from e
+                listening = self.instance.hasListener('text')
+                try:
+                    image = ImageProcessor.load_image_from_bytes(self._image_data)
+                    caption_text = self._caption(image) if listening else None
+                except Exception as e:
+                    # The engine reports only str() of this error, not its
+                    # __cause__, so the message carries the cause itself.
+                    raise RuntimeError(f'caption: could not caption the image ({type(e).__name__}: {e})') from e
+                # Outside the try: a downstream write error is not a caption failure.
+                if listening:
+                    self.instance.writeText(caption_text)
             finally:
                 self._image_data = None
             return self.preventDefault()

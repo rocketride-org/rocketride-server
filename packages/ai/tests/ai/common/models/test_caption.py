@@ -1,7 +1,10 @@
 """Unit tests for the caption loader + facade (no torch/transformers needed)."""
 
 import io
+import logging
 import threading
+import time
+import types
 
 import pytest
 
@@ -110,16 +113,19 @@ def test_timeout_does_not_admit_another_native_worker(monkeypatch, local_caption
 
     monkeypatch.setattr(local_captioner, '_infer_local', infer)
     try:
-        for i in range(3):
-            with pytest.raises(TimeoutError):
+        with pytest.raises(TimeoutError, match='caption inference timed out after'):
+            local_captioner._caption_local(0, 'caption')
+        for i in (1, 2):
+            with pytest.raises(TimeoutError, match='caption inference still busy with a previous image after'):
                 local_captioner._caption_local(i, 'caption')
-        assert started.is_set()
+        assert started.wait(5)
         assert calls == [0]
         assert not local_captioner._local_gate.acquire(blocking=False)
     finally:
         release.set()
     assert local_captioner._local_gate.acquire(timeout=5)
     local_captioner._local_gate.release()
+    monkeypatch.setattr(capmod, 'INFERENCE_TIMEOUT', 5)
     monkeypatch.setattr(local_captioner, '_infer_local', lambda *a: 'recovered')
     assert local_captioner._caption_local(None, 'caption') == 'recovered'
 
@@ -136,11 +142,15 @@ def test_forward_exception_releases_worker_slot(monkeypatch, local_captioner):
 
 
 def test_worker_start_failure_returns_slot(monkeypatch, local_captioner):
+    """A worker thread that cannot start gives the slot back."""
+
     def fail_start(*args, **kwargs):
         raise RuntimeError('cannot start thread')
 
+    # Only caption.py sees the failing Thread; the process keeps the real threading module.
+    caption_threading = types.SimpleNamespace(**{**vars(threading), 'Thread': fail_start})
     with monkeypatch.context() as scoped:
-        scoped.setattr(capmod.threading, 'Thread', fail_start)
+        scoped.setattr(capmod, 'threading', caption_threading)
         with pytest.raises(RuntimeError, match='cannot start thread'):
             local_captioner._caption_local(None, 'caption')
     assert local_captioner._local_gate.acquire(blocking=False)
@@ -162,3 +172,71 @@ def test_disconnect_does_not_release_timed_out_worker(monkeypatch, local_caption
         release.set()
     assert local_captioner._local_gate.acquire(timeout=5)
     local_captioner._local_gate.release()
+
+
+def test_slot_wait_does_not_consume_the_next_inference_budget(monkeypatch, local_captioner):
+    """After a timeout the next image waits for the slot, then still gets its own full budget."""
+    monkeypatch.setattr(capmod, 'INFERENCE_TIMEOUT', 1.0)
+    first_release = threading.Event()
+    first_done = threading.Event()
+    started_after_first = []
+
+    def infer(image, task):
+        """Hold image 0 until released; image 1 records whether image 0 had finished, then takes 0.5 s."""
+        if image == 0:
+            assert first_release.wait(5)
+            first_done.set()
+            return 'slow'
+        started_after_first.append(first_done.is_set())
+        time.sleep(0.5)
+        return 'ok'
+
+    monkeypatch.setattr(local_captioner, '_infer_local', infer)
+    with pytest.raises(TimeoutError):
+        local_captioner._caption_local(0, 'caption')
+    # Image 0 finishes 0.6 s into image 1's wait; 0.6 s + 0.5 s is past one shared 1.0 s deadline.
+    timer = threading.Timer(0.6, first_release.set)
+    timer.start()
+    try:
+        assert local_captioner._caption_local(1, 'caption') == 'ok'
+    finally:
+        first_release.set()
+        timer.cancel()
+    assert started_after_first == [True]
+
+
+def test_timed_out_inference_logs_once_when_it_finishes(monkeypatch, local_captioner):
+    """A worker that outlives its caller logs one warning when it returns; an on-time call logs none."""
+    monkeypatch.setattr(capmod, 'INFERENCE_TIMEOUT', 0.05)
+    release = threading.Event()
+    logged = threading.Event()
+    messages = []
+
+    class Recorder(logging.Handler):
+        """Collect warning messages from the caption logger and signal the first one."""
+
+        def emit(self, record):
+            """Record one message and wake the test."""
+            messages.append(record.getMessage())
+            logged.set()
+
+    handler = Recorder(logging.WARNING)
+    previous_level = capmod.logger.level
+    capmod.logger.setLevel(logging.WARNING)
+    capmod.logger.addHandler(handler)
+    try:
+        monkeypatch.setattr(local_captioner, '_infer_local', lambda *args: release.wait(5) and 'late')
+        with pytest.raises(TimeoutError, match='timed out after'):
+            local_captioner._caption_local(None, 'caption')
+        release.set()
+        assert logged.wait(5)
+        assert len(messages) == 1
+        assert 'caption: a timed-out inference finished after' in messages[0]
+        monkeypatch.setattr(capmod, 'INFERENCE_TIMEOUT', 5)
+        monkeypatch.setattr(local_captioner, '_infer_local', lambda *args: 'ok')
+        assert local_captioner._caption_local(None, 'caption') == 'ok'
+        assert len(messages) == 1
+    finally:
+        release.set()
+        capmod.logger.removeHandler(handler)
+        capmod.logger.setLevel(previous_level)
