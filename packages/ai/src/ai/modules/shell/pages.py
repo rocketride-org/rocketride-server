@@ -37,16 +37,23 @@ private API routes included, to anonymous callers. The web server consults
 (the catch-all answers them with a page, a redirect or a 404) skip
 authentication; a path any real route matches still needs credentials.
 
-A page is the document the shell boots from (the route's prerendered
-capture when the shell build carries one, else ``index.html``) with the
-page's head metadata injected (title, description, canonical URL, robots),
-for people and crawlers alike, so the shell boots and routes as before.
+A page answers people with the document the shell boots from (the route's
+prerendered capture when the shell build carries one, else ``index.html``),
+so the shell boots and routes as before. A crawler (``crawlers.classify``)
+gets the page's ``snapshot`` instead: that file of the production version's
+build output, rendered by the restricted template engine (``template.py``)
+with ``assets``, the version's URL base. A page without a snapshot, or with
+one that cannot be read or rendered, serves crawlers the shell document too.
+Either way the page's head metadata (title, description, canonical URL,
+robots) is injected.
 
 Rendered responses are cached per (path, UA class) under a byte budget and
-dropped on every aggregate swap.
+dropped on every aggregate swap; snapshot bytes, immutable per version, are
+cached by store path under its own byte budget.
 """
 
 import asyncio
+import sys
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -57,12 +64,15 @@ from starlette.routing import Route, WebSocketRoute
 from ai.web import Request, WebServer
 from ai.web.middleware import route_path
 
+from rocketlib import warning
+
 from . import public_pages
-from .contract import Page, with_slash_twin
+from .contract import Page, snapshot_error, with_slash_twin
 from .crawlers import CRAWLER, classify
 from .head import inject_head
 from .settings import app_url
-from .shell import shell_document_path, shell_static
+from .shell import CACHE_CONTROL, shell_document_path, shell_static
+from .template import render
 
 # The web server whose route table the auth predicate and the live-route
 # collision check read (set by initModule).
@@ -229,7 +239,7 @@ class _FifoCache:
     than the whole budget is never stored.
     """
 
-    def __init__(self, max_bytes: int, max_entries: int) -> None:
+    def __init__(self, max_bytes: int, max_entries: int = sys.maxsize) -> None:
         self.max_bytes = max_bytes
         self.max_entries = max_entries
         self.total = 0
@@ -237,6 +247,9 @@ class _FifoCache:
 
     def __len__(self) -> int:
         return len(self._entries)
+
+    def __contains__(self, key: Any) -> bool:
+        return key in self._entries
 
     def keys(self) -> List[Any]:
         """The keys, oldest first."""
@@ -295,6 +308,65 @@ def _clear_rendered(old: Any, new: Any) -> None:
     _generation += 1
     _render_cache.clear()
     _documents.clear()
+
+
+# Snapshot bytes by store path. A version's build output never changes, so
+# entries are only ever evicted, never invalidated.
+_SNAPSHOT_CACHE_MAX_BYTES = 16 * 1024 * 1024
+_snapshot_cache = _FifoCache(_SNAPSHOT_CACHE_MAX_BYTES)
+
+
+def snapshot_path(page: Page) -> str:
+    """The store path of a page's snapshot inside its production version's build output.
+
+    The snapshot grammar (a relative path without dot segments, re-checked
+    here) keeps the path inside that tree.
+
+    Raises:
+        ValueError: the page has no production version, or the snapshot path
+            is malformed.
+    """
+    if not page.dist_dir or page.version is None:
+        raise ValueError('the page has no production version to read a snapshot from')
+    if snapshot_error(page.snapshot):
+        raise ValueError(f'unusable snapshot path {page.snapshot!r}')
+    return f'{page.dist_dir.rstrip("/")}/{page.snapshot}'
+
+
+def assets_base(page: Page) -> str:
+    """The URL of the page's production build output, ``/apps/<appId>/v<N>``: the snapshot's ``{{assets}}``."""
+    return f'/apps/{page.app_id}/v{page.version}'
+
+
+async def _snapshot_bytes(page: Page) -> bytes:
+    path = snapshot_path(page)
+    raw = _snapshot_cache.get(path)
+    if raw is None:
+        raw = await public_pages.read_artifact_file(path)
+        _snapshot_cache.put(path, raw, len(raw))
+    return raw
+
+
+async def _crawler_document(page: Page, document: Path) -> Tuple[str, bool]:
+    """The page's rendered snapshot for crawlers, else the shell document: ``(html, cacheable)``.
+
+    Every fallback is logged as a warning. Only a malformed snapshot path (or
+    a page without a production version, ``ValueError``) falls back
+    cacheably: that never changes for the page. Any other failure falls back
+    uncached, so the next request tries again: a storage error, a snapshot
+    the store does not have (yet), or a template the engine refuses.
+    """
+    if not page.snapshot:
+        return document.read_text(encoding='utf-8'), True
+    try:
+        raw = await _snapshot_bytes(page)
+        return render(raw.decode('utf-8', errors='replace'), {'assets': assets_base(page)}), True
+    except Exception as exc:
+        cacheable = isinstance(exc, ValueError)
+        warning(
+            f'[public_pages] {page.path}: snapshot {page.snapshot!r} unavailable, serving the shell document: {exc}'
+        )
+    return document.read_text(encoding='utf-8'), cacheable
 
 
 def _moved(request: Request, path: str) -> Response:
@@ -397,8 +469,9 @@ async def _render_page(request: Request, path: str, page: Page) -> Response:
     """The page from the render cache, rendered off the event loop on a miss.
 
     Keyed by (path, UA class, shell document, its mtime and size,
-    ``RR_APP_URL``), so a new shell build or origin renders afresh. A render
-    that a swap overtook is served, not cached.
+    ``RR_APP_URL``), so a new shell build or origin renders afresh. A
+    crawler's copy is the page's snapshot (``_crawler_document``). A render
+    that falls back uncacheably, or that a swap overtook, is served, not cached.
 
     Returns:
         The page's response.
@@ -412,8 +485,17 @@ async def _render_page(request: Request, path: str, page: Page) -> Response:
     cached = _render_cache.get(key)
     if cached is None:
         generation = _generation
-        cached = await asyncio.to_thread(_render, path, page, crawler, document)
-        if generation == _generation:
+        body = None
+        cacheable = True
+        if crawler:
+            body, cacheable = await _crawler_document(page, document)
+        # A crawler's copy of a page with a snapshot may sit in shared caches;
+        # the shell document of a page without one never does (it names the
+        # current build's bundles), and neither does a fallback this server
+        # would not keep itself.
+        shared = crawler and cacheable and bool(page.snapshot)
+        cached = await asyncio.to_thread(_render, path, page, document, body, shared)
+        if cacheable and generation == _generation:
             _render_cache.put(key, cached, len(cached[0]))
     return HTMLResponse(cached[0], headers=dict(cached[1]))
 
@@ -450,21 +532,24 @@ def _unchanged(document: Path, mtime_ns: int, size: int) -> bool:
     return stat.st_mtime_ns == mtime_ns and stat.st_size == size
 
 
-def _render(path: str, page: Page, crawler: bool, document: Path) -> Tuple[bytes, Dict[str, str]]:
+def _render(path: str, page: Page, document: Path, body: Optional[str], shared: bool) -> Tuple[bytes, Dict[str, str]]:
     """Render one page as the render cache holds it: ``(body, headers)``.
 
-    The body is the shell document with the page's head metadata injected.
+    ``body`` is a crawler's copy (``_crawler_document``); people's (None) is
+    the shell document. Either way the page's head metadata is injected.
+    ``shared`` lets shared caches keep the response.
     """
+    if body is None:
+        body = document.read_text(encoding='utf-8')
     body = inject_head(
-        document.read_text(encoding='utf-8'),
+        body,
         title=page.head_title or page.title,
         description=page.description,
         canonical=canonical_url(path),
         noindex=not page.listed,
     )
-    # No shared cache may keep either class's copy: the document names the
-    # current build's hashed bundles, which a deploy removes. Caches key on the UA.
-    headers = {'Vary': 'User-Agent', 'Cache-Control': 'private, no-cache'}
+    # Caches key on the UA.
+    headers = {'Vary': 'User-Agent', 'Cache-Control': CACHE_CONTROL if shared else 'private, no-cache'}
     if not page.listed:
         headers['X-Robots-Tag'] = 'noindex'
     return body.encode('utf-8'), headers
