@@ -37,7 +37,7 @@ import path from 'node:path';
 
 import type { RocketRideClient } from 'rocketride';
 
-import { pyRegex } from './score';
+import { expectationFailures, type PipelineOutput } from './expect';
 import { inputPath } from './task';
 import type { RunOutputResult, ScenarioCheck } from './types';
 
@@ -64,7 +64,7 @@ function texts(v: unknown): string[] {
 }
 
 /** A result's answers and text, by the lane types it declares. */
-function outputs(result: Record<string, unknown> | undefined): { answers: string[]; text: string[] } {
+function outputs(result: Record<string, unknown> | undefined): PipelineOutput {
 	const out = { answers: [] as string[], text: [] as string[] };
 	if (!result) return out;
 	const types = (result.result_types ?? {}) as Record<string, string>;
@@ -119,34 +119,6 @@ function withLimit<T>(work: Promise<T>, what: string): Promise<T> {
 }
 
 /**
- * Applies a check's `expect` to what the pipeline produced.
- *
- * @param expect - The scenario's expectations.
- * @param out - The answers and text.
- * @param inputChars - The length of what was sent.
- * @returns The failures; empty when every expectation holds.
- */
-export function expectationFailures(expect: Record<string, unknown>, out: { answers: string[]; text: string[] }, inputChars: number): string[] {
-	const fails: string[] = [];
-	const answers = out.answers.join('\n');
-	const all = [...out.answers, ...out.text].join('\n');
-	// every answer must match: a translate pipeline that also answers the question in English is the failure build-05 looks for,
-	// and build-10's two models must both say it
-	if (typeof expect.answers_match === 'string') {
-		const re = pyRegex(expect.answers_match, 's');
-		const misses = out.answers.map((a, i) => (re.test(a) ? 0 : i + 1)).filter(Boolean);
-		if (!out.answers.length) fails.push(`no answer, wanted one matching ${expect.answers_match}`);
-		else if (misses.length) fails.push(`answer ${misses.join(', ')} of ${out.answers.length} does not match ${expect.answers_match}`);
-	}
-	if (typeof expect.answers_not_match === 'string' && pyRegex(expect.answers_not_match, 's').test(answers)) fails.push(`an answer matches ${expect.answers_not_match}`);
-	for (const re of (expect.answers_match_all as string[]) ?? []) if (!pyRegex(re, 's').test(answers)) fails.push(`no answer matches ${re}`);
-	if (expect.nonempty && !all.trim()) fails.push('the output is empty');
-	if (expect.shorter_than_input && !(all.trim().length > 0 && all.length < inputChars)) fails.push(`the output (${all.length} characters) is not shorter than the input (${inputChars})`);
-	if (typeof expect.answers_count_at_least === 'number' && out.answers.length < expect.answers_count_at_least) fails.push(`${out.answers.length} answers, wanted at least ${expect.answers_count_at_least}`);
-	return fails;
-}
-
-/**
  * Runs one run_output check.
  *
  * @param client - The connected client.
@@ -172,7 +144,7 @@ export async function runOutputCheck(client: RocketRideClient, ck: ScenarioCheck
 	const sourceOf = (provider: string) => comps.find((c) => c.provider === provider)?.id;
 	const send = (ck.send ?? {}) as Record<string, Send | string>;
 	let inputChars = 0;
-	const out = { answers: [] as string[], text: [] as string[] };
+	const out: PipelineOutput = { answers: [], text: [] };
 	try {
 		for (const [provider, what] of Object.entries(send)) {
 			const isChat = provider === 'chat' || provider === 'then_chat';

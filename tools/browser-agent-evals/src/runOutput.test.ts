@@ -27,9 +27,14 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
+import path from 'node:path';
+
 import type { RocketRideClient } from 'rocketride';
 
-import { expectationFailures, runOutputCheck, type OwnedRun } from './runOutput';
+import { EVAL_DIR } from './catalog';
+import { expectationFailures } from './expect';
+import { runOutputCheck, type OwnedRun } from './runOutput';
+import { loadTask } from './task';
 
 test('the summary length counts each output once', () => {
 	const expect = { nonempty: true, shorter_than_input: true };
@@ -37,6 +42,29 @@ test('the summary length counts each output once', () => {
 	assert.deepEqual(expectationFailures(expect, { answers: [], text: ['abcdef'] }, 10), []);
 	assert.deepEqual(expectationFailures(expect, { answers: ['abcdef'], text: ['ghij'] }, 10), ['the output (11 characters) is not shorter than the input (10)']);
 	assert.deepEqual(expectationFailures(expect, { answers: [], text: [] }, 10), ['the output is empty', 'the output (0 characters) is not shorter than the input (10)']);
+});
+
+/** An output check's expect in tasks/batch-1, as the task file has it. */
+function batchExpect(id: string): Record<string, unknown> {
+	const ck = loadTask(id, path.join(EVAL_DIR, '..', 'tasks', 'batch-1')).checks.find((c) => c.type === 'output');
+	return ck?.expect as Record<string, unknown>;
+}
+
+test("text_match passes only when the pipeline's text matches", () => {
+	const echo = batchExpect('build-15-echo-minimal');
+	assert.deepEqual(expectationFailures(echo, { answers: [], text: ['echo check 5521: the quick brown fox'] }, 36), []);
+	assert.deepEqual(expectationFailures(echo, { answers: [], text: ['the quick brown fox'] }, 36), ['the text does not match echo check 5521']);
+	assert.deepEqual(expectationFailures(echo, { answers: [], text: [] }, 36), ['no text or answer came back, wanted text matching echo check 5521']);
+	// a vision model answers rather than returning text
+	const receipt = batchExpect('build-16-vision-receipt');
+	assert.deepEqual(expectationFailures(receipt, { answers: ['Store: Corner Market\nTotal: $27.14'], text: [] }, 1000), []);
+	assert.equal(expectationFailures(receipt, { answers: ['Store: Corner Market\nTotal: $31.00'], text: [] }, 1000).length, 1);
+});
+
+test('text_not_match fails when the text still holds what it must not', () => {
+	const redact = batchExpect('build-06-redact-pii');
+	assert.deepEqual(expectationFailures(redact, { answers: [], text: ['Please call <PERSON> at <PHONE> or email <EMAIL> about the order.'] }, 90), []);
+	assert.equal(expectationFailures(redact, { answers: [], text: ['Please call Jane Smith at <PHONE> or email <EMAIL> about the order.'] }, 90).length, 1);
 });
 
 /** A client with the one engine rule run_output meets here: a second start of a running pipeline and source is refused. */

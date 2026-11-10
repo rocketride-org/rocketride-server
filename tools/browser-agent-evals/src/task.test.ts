@@ -30,13 +30,39 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 
-import { DATA_DIR } from './catalog';
+import { DATA_DIR, EVAL_DIR } from './catalog';
 import { loadTasks, validateTask } from './task';
 
 test('every task in tasks/breadth is valid', () => {
 	const { tasks, invalid } = loadTasks(DATA_DIR);
 	assert.deepEqual(invalid, []);
 	assert.equal(tasks.length, 30);
+});
+
+test('every task in tasks/batch-1 is valid', () => {
+	const { tasks, invalid } = loadTasks(path.join(EVAL_DIR, '..', 'tasks', 'batch-1'));
+	assert.deepEqual(invalid, []);
+	assert.equal(tasks.length, 59);
+});
+
+test('an output check whose expect the runner would not read is refused', () => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'eval-tasks-'));
+	try {
+		const id = 'build-02-summarize-webhook';
+		const task = JSON.parse(fs.readFileSync(path.join(DATA_DIR, `${id}.json`), 'utf8')) as Record<string, unknown>;
+		const output = (task.checks as Array<Record<string, unknown>>).find((c) => c.type === 'output') as Record<string, unknown>;
+		output.expect = { text_matches: 'summary', text_match: '(', answers_count_at_least: 'two' };
+		fs.writeFileSync(path.join(dir, `${id}.json`), JSON.stringify(task));
+		for (const from of [...(task.files as Array<{ from: string }>).map((f) => f.from), 'inputs']) fs.cpSync(path.join(DATA_DIR, from), path.join(dir, from), { recursive: true });
+
+		const { problems } = validateTask(id, dir);
+		assert.deepEqual(
+			problems.map((p) => p.replace(/; the runner reads .*/, '')),
+			[`check ${output.id} (output) expect has unknown key text_matches`, `check ${output.id} (output) expect text_match must be a regex`, `check ${output.id} (output) expect answers_count_at_least must be a whole number`]
+		);
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
 });
 
 test('a hand-broken copy of a task is refused, with each problem named', () => {

@@ -39,6 +39,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { DATA_DIR } from './catalog';
+import { expectProblems } from './expect';
 import { pyRegex } from './score';
 
 // =============================================================================
@@ -283,6 +284,7 @@ function validateOutput(ck: Record<string, unknown>, label: string, task: Record
 		if (!isText(ck.path)) problems.push(`${label} (output) needs path`);
 		if (!isObject(ck.send)) problems.push(`${label} (output) send must be an object of source to what to send`);
 		if (!isObject(ck.expect)) problems.push(`${label} (output) needs expect`);
+		else problems.push(...expectProblems(ck.expect).map((p) => `${label} (output) ${p}`));
 		if (ck.pending === undefined && isObject(ck.send)) {
 			for (const what of Object.values(ck.send)) {
 				const file = isObject(what) ? what.file : undefined;

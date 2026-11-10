@@ -8,7 +8,7 @@ Two runner changes this set relies on: the `ANSWER` type (answer-only tasks: end
 
 Every extra also loses `level` and `needs`, its `about` becomes `title`, its judge lines become `{ id, question, options, pass_on }` with the text unchanged, and its fixtures move to Krish's layout (`fixtures/<name>/<workspace path>`), reusing his copy where the file is identical.
 
-Not graded by code: the old keyword checks, the agent's tool calls, and the level-4 features. Answers and level-4 builds are read by hand. An `output` check's `text_match` is not an expect key the runner reads (`src/runOutput.ts` `expectationFailures`), so build-08, build-09, build-15, build-16 and rename-keeps-project's output checks pass on any run that ends without an error.
+Not graded by code: the old keyword checks, the agent's tool calls, and the level-4 features. Answers and level-4 builds are read by hand. An `output` check's `text_match` and `text_not_match` read the pipeline's text, or its answers when no text came back (`src/expect.ts`).
 
 | Task | Source | Type | Target | Cards | Changed from the source |
 | --- | --- | --- | --- | --- | --- |
