@@ -64,9 +64,37 @@ PLATFORM_DEVELOPER_ID = 'rocketride'
 # Root claimants when RR_PUBLIC_ROOT_APPS is unset: the home app.
 _DEFAULT_ROOT_APPS = 'rocketride.home'
 
-# Paths no page may claim, segment-aware: the API, shell and app serving
-# trees, the task API, the MCP endpoint, and the three crawler files.
-RESERVED_PREFIXES = ('/api', '/shell', '/apps', '/task', '/mcp', '/sitemap.xml', '/robots.txt', '/llms.txt')
+# Paths no page may claim, segment-aware: every root route the engine serves
+# outside its public pages, and the three crawler files. test_reserved_routes
+# fails when a registered root route is missing here. /ping, /use, /shutdown,
+# /remote and /pipe belong to other server configurations.
+RESERVED_PREFIXES = (
+    '/.well-known',
+    '/api',
+    '/apps',
+    '/auth',
+    '/chat',
+    '/client',
+    '/docs',
+    '/dropper',
+    '/llms.txt',
+    '/mcp',
+    '/openapi.json',
+    '/ping',
+    '/pipe',
+    '/redoc',
+    '/remote',
+    '/robots.txt',
+    '/services',
+    '/shell',
+    '/shutdown',
+    '/sitemap.xml',
+    '/status',
+    '/task',
+    '/use',
+    '/version',
+    '/webhook',
+)
 
 # A page's ``data`` entries name the server data a page binds: ``plans`` (the
 # declaring app's plans), ``plans:<appId>`` (a named app's plans) and

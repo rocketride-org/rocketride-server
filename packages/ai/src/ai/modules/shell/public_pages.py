@@ -331,14 +331,14 @@ async def gate_errors(app_id: str, manifest: Mapping[str, Any], dist_dir: str, a
             return [f'{exc}; emit {{"publicPages": [...], "site": {{...}}}} or drop the file']
     if 'publicPages' not in manifest and 'site' not in manifest:
         return []
-    pages, _, errors = check_manifest(app_id, manifest)
+    pages, _, errors = check_manifest(app_id, manifest, _live_conflict)
     if not pages:
         # Nothing to collide or snapshot (a third party, or every page invalid):
         # never read, or echo a failure of, the other platform apps' storage.
         return errors
     # The publishing app's own current version is being replaced: never read it.
     others = await load_published(acct, strict=True, exclude=app_id)
-    exact, _ = _claims(others)
+    exact, _ = _claims(others, _live_conflict)
     for page in pages:
         owner = exact.get(page.path)
         if owner is not None:
@@ -377,6 +377,7 @@ STARTUP_BUILD_SECONDS = 10.0
 BUILD_SECONDS = 60.0
 
 _current: Optional[Aggregate] = None
+_live_conflict: Optional[Callable[[str], Optional[str]]] = None
 _on_swap: List[Callable[[Aggregate, Aggregate], None]] = []
 _rebuild_lock = asyncio.Lock()
 _rebuild_task: Any = None
@@ -389,6 +390,17 @@ def current() -> Aggregate:
     if _current is None:
         _current = legacy_aggregate()
     return _current
+
+
+def set_live_conflict(fn: Optional[Callable[[str], Optional[str]]]) -> None:
+    """Install the live-route collision check (the shell module installs ``pages.live_route_conflict``)."""
+    global _live_conflict
+    _live_conflict = fn
+
+
+def live_conflict() -> Optional[Callable[[str], Optional[str]]]:
+    """The installed live-route collision check, or None."""
+    return _live_conflict
 
 
 def on_swap(callback: Callable[[Aggregate, Aggregate], None]) -> None:
@@ -432,7 +444,7 @@ async def rebuild(acct: Any = None) -> bool:
                 if kept is not None:
                     warning(f'[public_pages] {app_id}: unreadable this build, keeping its current pages')
                     published.append(kept)
-            aggregate = build_aggregate(published)
+            aggregate = build_aggregate(published, _live_conflict)
         except asyncio.TimeoutError:
             warning(f'[public_pages] rebuild timed out after {BUILD_SECONDS:g}s, keeping the previous aggregate')
             return False

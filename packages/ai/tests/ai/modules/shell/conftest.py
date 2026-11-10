@@ -42,6 +42,7 @@ def _public_pages_state(monkeypatch):
     from .hostile_fixtures import FILES, read_file
 
     monkeypatch.setattr(pp, '_current', None)
+    monkeypatch.setattr(pp, '_live_conflict', None)
     monkeypatch.setattr(pp, '_on_swap', list(pp._on_swap))
     monkeypatch.setattr(pp, '_rebuild_lock', asyncio.Lock())
     monkeypatch.setattr(pp, '_rebuild_task', None)
