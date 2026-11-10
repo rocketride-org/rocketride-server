@@ -233,9 +233,6 @@ async def _visible_rows_of(conn: Any, account: Any, org_id: str, app_id: Optiona
     return rows
 
 
-# Audience precedence for cross-publisher arbitration (most specific wins).
-
-
 async def _home_org_of(conn: Any, account: Any, org_id: str, app_id: str) -> 'tuple[str, bool]':
     """(home_org, developer) — which org's rail owns this app for the caller.
 
