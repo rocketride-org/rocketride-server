@@ -206,51 +206,54 @@ class IInstance(IInstanceBase):
         if self._watermark:
             image = self._apply_watermark(image, format_seconds(time_stamp))
 
-        if self.instance.hasListener('table'):
-            # One table covers the whole object, so the Frame column carries the ordinal
-            # rather than the position in the video: several videos would otherwise each
-            # contribute a row 0, a row 1, and so on, with nothing to tell them apart.
-            self._start_times.append([self._frame_ordinal, time_stamp, format_seconds(time_stamp)])
+        try:
+            if self.instance.hasListener('table'):
+                # One table covers the whole object, so the Frame column carries the ordinal
+                # rather than the position in the video: several videos would otherwise each
+                # contribute a row 0, a row 1, and so on, with nothing to tell them apart.
+                self._start_times.append([self._frame_ordinal, time_stamp, format_seconds(time_stamp)])
 
-        if self.instance.hasListener('documents'):
-            # Create the default metadata for the document
-            metadata = DocMetadata(self)
+            if self.instance.hasListener('documents'):
+                # Create the default metadata for the document
+                metadata = DocMetadata(self)
 
-            # chunkId is the frame's ordinal within the object, not its position in the
-            # video: one object can carry several video streams, whose positions both
-            # start at 0. `frame_number` keeps the true position.
-            metadata.chunkId = self._frame_ordinal
-            metadata.frame_number = frame_number
-            metadata.time_stamp = time_stamp
+                # chunkId is the frame's ordinal within the object, not its position in the
+                # video: one object can carry several video streams, whose positions both
+                # start at 0. `frame_number` keeps the true position.
+                metadata.chunkId = self._frame_ordinal
+                metadata.frame_number = frame_number
+                metadata.time_stamp = time_stamp
 
-            # Provenance: the source video's media detail under `source` + a per-frame
-            # name '<video-stem>.frame<N>.png' (identity/backlink is already on this
-            # frame's own metadata). Both no-op when no descriptor was received.
-            attach_source(metadata, self._source_descriptor)
-            attach_name(metadata, self._source_descriptor, index=self._frame_ordinal, marker='frame', ext='png')
+                # Provenance: the source video's media detail under `source` + a per-frame
+                # name '<video-stem>.frame<N>.png' (identity/backlink is already on this
+                # frame's own metadata). Both no-op when no descriptor was received.
+                attach_source(metadata, self._source_descriptor)
+                attach_name(metadata, self._source_descriptor, index=self._frame_ordinal, marker='frame', ext='png')
 
-            # Create the document object and save the base64 encoded image
-            doc = Doc(type='Image', page_content=base64.b64encode(image).decode('utf-8'), metadata=metadata)
+                # Create the document object and save the base64 encoded image
+                doc = Doc(type='Image', page_content=base64.b64encode(image).decode('utf-8'), metadata=metadata)
 
-            # Save it
-            self.instance.writeDocuments([doc])
+                # Save it
+                self.instance.writeDocuments([doc])
 
-        if self.instance.hasListener('image'):
-            # The BEGIN buffer carries stream-descriptor enrichment (the frame's own
-            # detail + origin + name, with the source video nested); the engine merges
-            # it into the ImageStream descriptor for this frame.
-            width, height = image_dims(image)
-            self.instance.writeImage(
-                AVI_ACTION.BEGIN,
-                'image/png',
-                self._image_begin_payload(self._frame_ordinal, len(image), width, height),
-            )
-            self.instance.writeImage(AVI_ACTION.WRITE, 'image/png', image)
-            self.instance.writeImage(AVI_ACTION.END, 'image/png')
-
-        # Counted per frame, not per listener: both lanes above name the frame by this
-        # ordinal, so it advances once for the frame regardless of who is listening.
-        self._frame_ordinal += 1
+            if self.instance.hasListener('image'):
+                # The BEGIN buffer carries stream-descriptor enrichment (the frame's own
+                # detail + origin + name, with the source video nested); the engine merges
+                # it into the ImageStream descriptor for this frame.
+                width, height = image_dims(image)
+                self.instance.writeImage(
+                    AVI_ACTION.BEGIN,
+                    'image/png',
+                    self._image_begin_payload(self._frame_ordinal, len(image), width, height),
+                )
+                self.instance.writeImage(AVI_ACTION.WRITE, 'image/png', image)
+                self.instance.writeImage(AVI_ACTION.END, 'image/png')
+        finally:
+            # Counted per frame, not per listener: both lanes above name the frame by this
+            # ordinal, so it advances once for the frame regardless of who is listening.
+            # In a `finally` so a frame that a downstream node failed still uses up its
+            # ordinal, and the next frame does not reuse its chunk id and name.
+            self._frame_ordinal += 1
 
     def _apply_watermark(self, image: bytes, timestamp_text: str) -> bytes:
         """Apply a watermark to the image.

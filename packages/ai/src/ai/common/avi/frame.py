@@ -190,11 +190,15 @@ class VideoFrameExtractor(AVIReader):
                 warning(f'[{self._name}]: no showinfo entry for a complete frame after {_FRAME_INFO_TIMEOUT}s')
                 return
 
+            # Remove the frame from the buffer before the callback runs. Its showinfo
+            # entry is already consumed, so a callback that raises (a downstream node
+            # failing the frame) must not leave the PNG here: the reader carries on with
+            # the next chunk, and the same PNG would be sent again under the next frame's
+            # number and timestamp.
+            self._buffer = self._buffer[end_offset:]
+
             # Callback with complete PNG frame
             self._frame_callback(png_data, frame_number, start_time + self._start_time)
-
-            # Remove processed bytes from buffer
-            self._buffer = self._buffer[end_offset:]
 
     def onData(self, chunk: bytes = None):
         # Add the bytes to the existing buffer

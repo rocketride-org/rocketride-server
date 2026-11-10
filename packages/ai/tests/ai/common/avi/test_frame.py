@@ -10,15 +10,19 @@ the shared node base stops the reader at the end of one stream and starts it aga
 the next. What ``start()`` fails to clear therefore leaks from one video into the next.
 
 Covers the two failure modes behind #1963: showinfo entries surviving a restart, and a
-complete frame waiting forever for an entry that never comes.
+complete frame waiting forever for an entry that never comes. Also covers a frame
+callback that raises, as it does when a downstream node fails the frame: the failed frame
+must not be sent again under the next frame's number and timestamp.
 """
 
+import io
 import queue
 import struct
 import zlib
 
 import pytest
 from ai.common.avi import frame as F
+from ai.common.avi import reader as R
 from ai.common.avi.frame import VideoFrameExtractor
 
 
@@ -165,3 +169,138 @@ def test_queue_module_error_is_the_one_being_caught():
     q = queue.Queue()
     with pytest.raises(queue.Empty):
         q.get(timeout=0.01)
+
+
+def _info(number, seconds):
+    """A showinfo line for frame `number` at `seconds`, as ffmpeg writes it to stderr."""
+    return f'[Parsed_showinfo_0 @ 0x0] n: {number} pts: {number * 90000} pts_time: {seconds:.6f}'
+
+
+class _ChunkedStdout(io.RawIOBase):
+    """Feeds fixed chunks to `_data_process`, whatever size it asks for."""
+
+    def __init__(self, chunks):
+        """Keep the chunks to hand out, in order."""
+        self._chunks = list(chunks)
+
+    def read(self, _size=-1):
+        """Return the next chunk, then an empty read for end of stream."""
+        return self._chunks.pop(0) if self._chunks else b''
+
+
+def _drive(extractor, chunks):
+    """Run the reader's data thread loop over `chunks`, without ffmpeg.
+
+    `_data_process` is what hands decoded bytes to `onData()` in production, and it is
+    where a frame callback's exception is caught, logged and kept for `stop()`.
+    """
+    extractor.stdout = _ChunkedStdout(chunks)
+    extractor._data_process()
+
+
+class _FailingConsumer:
+    """A frame callback that raises for the frames `fails` picks, and records every call."""
+
+    def __init__(self, fails):
+        """`fails(attempt)` says whether the call with that 0-based index raises."""
+        self.attempts = []
+        self.ended = False
+        self._fails = fails
+
+    def __call__(self, image, number, ts):
+        """Record the frame, then raise as a failing downstream node would."""
+        if image is None:
+            self.ended = True
+            return
+        self.attempts.append((image, number, ts))
+        if self._fails(len(self.attempts) - 1):
+            raise RuntimeError(f'downstream node failed frame {number}')
+
+
+def _failing_extractor(consumer):
+    """An extractor whose frame callback is `consumer`."""
+    return VideoFrameExtractor(consumer, name='FrameGrabber', config={'type': 'interval', 'fps': 1.0})
+
+
+def test_a_frame_whose_callback_raises_leaves_the_buffer(monkeypatch):
+    """The failed frame is gone from the buffer, so the next frame gets its own bytes.
+
+    The frame's showinfo entry is taken before the callback runs. When the callback
+    raised before the PNG was trimmed, the next pass found the same PNG again and paired
+    it with the next frame's entry.
+    """
+    monkeypatch.setattr(F, '_FRAME_INFO_TIMEOUT', 1.0)
+    first, second = _png(width=1), _png(width=2)
+    consumer = _FailingConsumer(fails=lambda attempt: attempt == 0)
+    extractor = _failing_extractor(consumer)
+    extractor.onInfo(_info(1, 1.0))
+    extractor.onInfo(_info(2, 2.0))
+    extractor._buffer = bytearray()
+
+    # The reader catches this one level up (`_data_process`); here it must propagate.
+    with pytest.raises(RuntimeError, match='frame 1'):
+        extractor.onData(first + second)
+
+    assert extractor._buffer == bytearray(second), 'the failed frame must not stay buffered'
+
+    extractor._processBuffer()  # what the reader's next chunk does
+
+    assert consumer.attempts == [(first, 1, 1.0), (second, 2, 2.0)], (
+        'the second call must carry the second frame, not the failed one under number 2'
+    )
+    assert extractor._buffer == bytearray()
+
+
+def test_one_failed_frame_does_not_shift_the_frames_after_it(monkeypatch):
+    """Through the reader's data loop: one failure, every other frame keeps its numbers.
+
+    Before the fix the failed frame was sent again as frame 2, frame 2 as frame 3, and
+    the last frame waited for an entry that no longer existed and was never sent.
+    """
+    monkeypatch.setattr(F, '_FRAME_INFO_TIMEOUT', 0.05)
+    warnings, errors = [], []
+    monkeypatch.setattr(F, 'warning', warnings.append)
+    monkeypatch.setattr(R, 'rocketlib_error', errors.append)
+
+    pngs = [_png(width=w) for w in (1, 2, 3, 4)]
+    consumer = _FailingConsumer(fails=lambda attempt: attempt == 1)
+    extractor = _failing_extractor(consumer)
+    extractor.start()  # AVIReader.start only resets state; ffmpeg starts on the first write
+    for number in range(4):
+        extractor.onInfo(_info(number, float(number)))
+
+    _drive(extractor, pngs)
+
+    assert consumer.attempts == [(png, n, float(n)) for n, png in enumerate(pngs)]
+    assert consumer.ended, 'the end-of-stream marker still reaches the callback'
+    assert len(errors) == 1, 'the reader logs the one failure'
+    assert warnings == [], 'no frame was left waiting for a showinfo entry'
+    assert extractor._buffer == bytearray()
+    with pytest.raises(RuntimeError, match='frame 1'):
+        extractor.stop()  # the video still fails, with the frame's own error
+
+
+def test_a_persistent_failure_never_sends_the_same_frame_twice(monkeypatch):
+    """Every frame after the first fails: each is tried once, under its own number.
+
+    Before the fix the first failed PNG was retried on every later chunk with the next
+    entry each time, and the frames behind it never reached the callback.
+    """
+    monkeypatch.setattr(F, '_FRAME_INFO_TIMEOUT', 0.05)
+    monkeypatch.setattr(F, 'warning', lambda message: None)
+    monkeypatch.setattr(R, 'rocketlib_error', lambda message: None)
+
+    pngs = [_png(width=w) for w in (1, 2, 3, 4)]
+    consumer = _FailingConsumer(fails=lambda attempt: attempt >= 1)
+    extractor = _failing_extractor(consumer)
+    extractor.start()
+    for number in range(4):
+        extractor.onInfo(_info(number, float(number)))
+
+    _drive(extractor, pngs)
+
+    images = [image for image, _number, _ts in consumer.attempts]
+    assert len(images) == len(set(images)), 'a frame was sent to the callback more than once'
+    assert consumer.attempts == [(png, n, float(n)) for n, png in enumerate(pngs)]
+    with pytest.raises(RuntimeError, match='frame 1'):
+        extractor.stop()  # the first error is the one kept
