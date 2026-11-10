@@ -126,6 +126,17 @@ def test_auth_decides_on_the_path_the_router_matches(engine_under_root_path):
     assert client.get('/api/nope/nope').status_code == 404
 
 
+@pytest.mark.parametrize('ua', [GOOGLEBOT, BROWSER])
+def test_pages_and_redirects_serve_under_a_root_path(engine_under_root_path, ua):
+    client = engine_under_root_path
+    resp = client.get('/api/pricing', headers={'User-Agent': ua})
+    assert resp.status_code == 200 and '<title>Pricing | RocketRide</title>' in resp.text
+    # Locations keep the prefix the proxy routes on.
+    for path, location in (('/api/terms', '/api/legal/terms'), ('/api/pricing/?a=1', '/api/pricing?a=1')):
+        resp = client.get(path, headers={'User-Agent': ua})
+        assert resp.status_code == 301 and resp.headers['location'] == location, path
+
+
 def test_a_real_routes_slash_twin_redirects_relatively_never_via_the_host_header(engine):
     for path, location in (('/status/', '/status'), ('/status/?a=1', '/status?a=1')):
         resp = engine.get(path, headers={'host': 'evil.example'})
