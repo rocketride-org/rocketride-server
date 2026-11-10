@@ -166,6 +166,11 @@ function escapeRe(text: string): string {
 	return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+/** Monaco's Find and Replace shortcut for a browser, chosen as Monaco chooses it (a Macintosh user agent gets the Mac keys; there Control+H deletes a character). */
+export function replaceShortcut(userAgent: string): string {
+	return userAgent.includes('Macintosh') ? 'Meta+Alt+f' : 'Control+h';
+}
+
 // =============================================================================
 // the driver
 // =============================================================================
@@ -791,10 +796,11 @@ export class Driver {
 					.innerText()
 					.catch(() => '')
 			).trim();
+		const shortcut = replaceShortcut((await this.page.evaluate('navigator.userAgent')) as string);
 		for (const [find, by] of Object.entries(replace)) {
 			// Monaco's text area is invisible by design, so find the visible editor first
 			await this.page.locator('.monaco-editor').filter({ visible: true }).first().getByRole('textbox', { name: 'Editor content' }).focus();
-			await this.page.keyboard.press('Control+h');
+			await this.page.keyboard.press(shortcut);
 			await widget.getByRole('textbox', { name: 'Find' }).fill(find);
 			await widget.getByRole('textbox', { name: 'Replace' }).fill(by);
 			await this.page.waitForTimeout(300);

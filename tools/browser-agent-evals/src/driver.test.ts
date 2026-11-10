@@ -33,7 +33,7 @@ import { test } from 'node:test';
 import { pathToFileURL } from 'node:url';
 
 import { EVAL_DIR, REPO_ROOT } from './catalog';
-import { cardAnswer, dirtyFileAnswer, isWriteOpen, modelTitles, parseModel } from './driver';
+import { cardAnswer, dirtyFileAnswer, isWriteOpen, modelTitles, parseModel, replaceShortcut } from './driver';
 import { engineEnv, findLeaks, heldKeys, readModelKeys, Scrubber, scrubbedLines, withoutKeys } from './evidence';
 import { AGENT_SETTINGS_FILE, agentSettingsFile, APP_ID, scopePrefix, storePath } from './store';
 import { loadTask } from './task';
@@ -226,4 +226,9 @@ test('the driver runs both user-event tasks, and names an event it cannot do', (
 	for (const id of ['edit-05-user-saves-mid-turn', 'edit-07-app-dirty-buffer']) assert.ok((loadTask(id).user_events ?? []).every(supportedEvent), id);
 	assert.ok(!supportedEvent({ when: 'between_freshness_check_and_write', path: 'pipelines/x.pipe', action: 'save' }), 'a save with no change');
 	assert.ok(!supportedEvent({ when: 'start', path: 'apps/x/src/App.tsx', action: 'save' }));
+});
+
+test("an unsaved edit opens Monaco's Find and Replace with the keys of the browser's platform", () => {
+	assert.equal(replaceShortcut('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/145.0.0.0 Safari/537.36'), 'Meta+Alt+f');
+	assert.equal(replaceShortcut('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/145.0.0.0 Safari/537.36'), 'Control+h');
 });
