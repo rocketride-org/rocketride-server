@@ -16,7 +16,10 @@ The connection has two layers you can drive together or separately:
   requests are available on an anonymous attachment.
 - **Login** authenticates over the attachment, restores monitor subscriptions, and
   returns a `ConnectResult` carrying your full identity (user, organizations, apps,
-  teams).
+  teams). Its `endpoints` field is the API key's task-address scope: the
+  `developerId.pipelineId.source` (or `developerId.pipelineId.*`) patterns a
+  scoped key may reach, or `null`/absent for an unscoped key. It is not
+  `ServerInfoResult.endpoints`, which holds the server's `api` and `ui` URLs.
 
 `connect()` performs attach + login as one foreground operation; `disconnect()` does
 a best-effort logout, cancels pending work, and detaches. The state probes mirror
