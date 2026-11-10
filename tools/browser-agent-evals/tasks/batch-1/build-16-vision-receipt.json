@@ -76,11 +76,14 @@
 			"type": "providers_present",
 			"path": "pipelines/receipt-reader.pipe",
 			"all": [
-				"dropper",
 				"parse",
 				"image_vision_openai"
 			],
 			"any": [
+				[
+					"dropper",
+					"webhook"
+				],
 				[
 					"response_text",
 					"response"
@@ -123,7 +126,7 @@
 			"type": "output",
 			"path": "pipelines/receipt-reader.pipe",
 			"send": {
-				"dropper": {
+				"upload": {
 					"file": "inputs/receipt.png"
 				}
 			},

@@ -100,10 +100,10 @@
 			"path": "apps/notes-ui/src/LegacyList.tsx"
 		},
 		{
-			"id": "total-fixed",
+			"id": "not-silenced",
 			"type": "file_not_matches",
 			"path": "apps/notes-ui/src/App.tsx",
-			"regex": "length\\.toString\\(\\)"
+			"regex": "@ts-(ignore|expect-error|nocheck)|as any\\b"
 		},
 		{
 			"id": "format-call-fixed",

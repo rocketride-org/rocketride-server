@@ -101,7 +101,7 @@
 			"type": "output",
 			"path": "pipelines/meeting-transcript.pipe",
 			"send": {
-				"dropper": {
+				"upload": {
 					"file": "inputs/meeting-30s.wav"
 				}
 			},

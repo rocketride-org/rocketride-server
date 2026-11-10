@@ -48,6 +48,9 @@ const SEND_LIMIT_MS = 180_000;
 /** A file's mimetype by its extension. */
 const MIMETYPES: Record<string, string> = { '.txt': 'text/plain', '.wav': 'audio/wav', '.png': 'image/png', '.pdf': 'application/pdf' };
 
+/** The sources a `send` keyed `upload` may use, in this order: a prompt that only says "upload" fits either. */
+const UPLOAD_SOURCES = ['dropper', 'webhook'];
+
 interface Send {
 	file?: string;
 	text?: string;
@@ -146,10 +149,11 @@ export async function runOutputCheck(client: RocketRideClient, ck: ScenarioCheck
 	let inputChars = 0;
 	const out: PipelineOutput = { answers: [], text: [] };
 	try {
-		for (const [provider, what] of Object.entries(send)) {
-			const isChat = provider === 'chat' || provider === 'then_chat';
-			const source = sourceOf(isChat ? 'chat' : provider);
-			if (!source) return { status: 'fail', detail: `the pipeline has no ${isChat ? 'chat' : provider} source` };
+		for (const [key, what] of Object.entries(send)) {
+			const providers = key === 'chat' || key === 'then_chat' ? ['chat'] : key === 'upload' ? UPLOAD_SOURCES : [key];
+			const source = providers.map(sourceOf).find(Boolean);
+			if (!source) return { status: 'fail', detail: `the pipeline has no ${providers.join(' or ')} source` };
+			const isChat = providers[0] === 'chat';
 			await endOwnedRuns(client, owned, (s) => s.project_id === String(pipeline.project_id ?? '') && s.source === source);
 			const started = await client.use({ pipeline: pipeline as never, source, useExisting: false });
 			// step: every run started here is ended here, whatever the send does

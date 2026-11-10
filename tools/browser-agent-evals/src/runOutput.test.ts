@@ -132,3 +132,20 @@ test("an output check sends its input file from the task's own folder", async ()
 		[{ name: 'receipt.png', mimetype: 'image/png', same: true }]
 	);
 });
+
+test('an upload send uses a webhook when the pipeline has no dropper, and fails with neither', async () => {
+	// build-09's prompt only says "upload"; both its batch-1 runs built a webhook and failed a dropper-only check
+	const ck: Record<string, unknown> = { ...batchCheck('build-09-ocr-receipt'), kind: 'run_output' };
+	const pipe = (provider: string) => ({ [String(ck.path)]: JSON.stringify({ project_id: 'receipt-text', components: [{ id: `${provider}_1`, provider }] }) });
+	const used: string[] = [];
+	const client = {
+		use: async ({ source }: { source: string }) => (used.push(source), { token: 'task-1', reused: false }),
+		getTaskStatus: async () => ({}),
+		terminate: async () => {},
+		send: async () => ({ result_types: { text: 'text' }, text: ['TOTAL 27.14'] }),
+	} as unknown as RocketRideClient;
+
+	assert.equal((await runOutputCheck(client, ck as never, BATCH_1, pipe('webhook'), [], [])).status, 'pass');
+	assert.deepEqual(used, ['webhook_1']);
+	assert.equal((await runOutputCheck(client, ck as never, BATCH_1, pipe('chat'), [], [])).detail, 'the pipeline has no dropper or webhook source');
+});

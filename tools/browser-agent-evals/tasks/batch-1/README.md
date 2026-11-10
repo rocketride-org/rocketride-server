@@ -23,15 +23,15 @@ Not graded by code: the old keyword checks, the agent's tool calls, and the leve
 | build-05-translate-spanish | Krish | BUILD | pipeline | approve | time limit 3600 (was 300); cards "approve" (was "deny") |
 | build-06-redact-pii | Krish | BUILD | pipeline | approve | time limit 3600 (was 300); cards "approve" (was "deny") |
 | build-07-wave-agent-http | Krish | BUILD | pipeline | approve | time limit 3600 (was 300); cards "approve" (was "deny") |
-| build-08-transcribe-audio | Krish | BUILD | pipeline | approve | time limit 3600 (was 300); cards "approve" (was "deny"); output check `runs` no longer pending: sends inputs/meeting-30s.wav |
-| build-09-ocr-receipt | Krish | BUILD | pipeline | approve | time limit 3600 (was 300); cards "approve" (was "deny"); output check `runs` no longer pending: sends inputs/receipt.png |
+| build-08-transcribe-audio | Krish | BUILD | pipeline | approve | time limit 3600 (was 300); cards "approve" (was "deny"); output check `runs` no longer pending: sends inputs/meeting-30s.wav; after batch 1, sends through `upload` (dropper or webhook), since the prompt only says "upload" |
+| build-09-ocr-receipt | Krish | BUILD | pipeline | approve | time limit 3600 (was 300); cards "approve" (was "deny"); output check `runs` no longer pending: sends inputs/receipt.png; after batch 1, sends through `upload` (dropper or webhook), since the prompt only says "upload" |
 | build-10-compare-two-models | Krish | BUILD | pipeline | approve | time limit 3600 (was 300); cards "approve" (was "deny") |
 | build-11-app-daybook | Krish | BUILD | app | approve | time limit 3600 (was 600); cards "approve" (was "deny") |
 | build-12-app-sales-dashboard | Krish | BUILD | app | approve | time limit 3600 (was 600); cards "approve" (was "deny") |
 | build-13-app-ask-claude | Krish | BUILD | app | approve | time limit 3600 (was 600); cards "approve" (was "deny") |
 | build-14-app-unit-converter | Krish | BUILD | app | approve | time limit 3600 (was 600); cards "approve" (was "deny") |
 | build-15-echo-minimal | extra | BUILD | pipeline | approve | time limit 3600 (was 600); engine_validate to validates; run_output to output |
-| build-16-vision-receipt | extra | BUILD | pipeline | approve | time limit 3600 (was 600); engine_validate to validates; run_output to output |
+| build-16-vision-receipt | extra | BUILD | pipeline | approve | time limit 3600 (was 600); engine_validate to validates; run_output to output; after batch 1, sends through `upload` and `providers` accepts a dropper or a webhook, since the prompt only says "upload" |
 | build-17-app-chat | extra | BUILD | app | approve | time limit 3600 (was 600); dropped created-with-tool (tool_called) |
 | decline-delete | extra | STOP | pipeline | deny | time limit 3600 (was 180); dropped one_card (cards_answered); added file_still_there (file_unchanged on report-weekly.pipe) |
 | edit-01-switch-model | Krish | EDIT | pipeline | approve | time limit 3600 (was 300); cards "approve" (was "deny") |
@@ -41,7 +41,7 @@ Not graded by code: the old keyword checks, the agent's tool calls, and the leve
 | edit-05-user-saves-mid-turn | Krish | EDIT | pipeline | approve | time limit 3600 (was 300); cards "approve" (was "deny") |
 | edit-06-remove-step | Krish | EDIT | pipeline | approve | time limit 3600 (was 300); cards "approve" (was "deny") |
 | edit-07-app-dirty-buffer | Krish | EDIT | app | approve (+ save_mine_first) | time limit 3600 (was 300); cards {"default": "approve", "dirty_file_prompt": "save_mine_first"} (was {"default": "deny", "dirty_file_prompt": "save_mine_first"}) |
-| edit-08-app-fix-types-delete | Krish | EDIT | app | approve | time limit 3600 (was 300) |
+| edit-08-app-fix-types-delete | Krish | EDIT | app | approve | time limit 3600 (was 300); after batch 1, `total-fixed` (no `length.toString()`) became `not-silenced` (no `@ts-ignore`, `@ts-expect-error`, `@ts-nocheck` or `as any`), since retyping `total` as a string is also a fix |
 | edit-09-redact-before-store | extra | EDIT | pipeline | approve | time limit 3600 (was 300); engine_validate to validates |
 | edit-10-app-store-settings | extra | EDIT | app | approve | time limit 3600 (was 300) |
 | edit-11-blank-preview | extra | EDIT | app | approve | time limit 3600 (was 300) |
