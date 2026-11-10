@@ -12,55 +12,49 @@ Provides text generation against an Ollama server running on your own hardware. 
 | ----------- | --------- | ---------------------------------------------------- |
 | `questions` | `answers` | Send a question directly, receive a generated answer |
 
-## Profiles
-
-Default: **Llama 3.3** (`llama3_3`).
-
-| Profile | Model | Context |
-| ------- | ----- | ------- |
-| `llama3_3` **(default)** | `llama3.3:latest` | 128,000 |
-| `llama4-latest` | `llama4:latest` | 10,000,000 |
-| `qwen3-latest` | `qwen3:latest` | 128,000 |
-
-<details>
-<summary><strong>View 20 more models</strong></summary>
-
-| Profile | Model | Context |
-| ------- | ----- | ------- |
-| `custom` | _(user-specified)_ | 16,385 |
-| `llama3_1-8b` | `llama3.1:8b` | 128,000 |
-| `llama3_1-70b` | `llama3.1:70b` | 128,000 |
-| `llama3_1-405b` | `llama3.1:405b` | 128,000 |
-| `phi4-14b` | `phi4` | 16,000 |
-| `llama3_2-3b` | `llama3.2` | 128,000 |
-| `llama3_2-1b` | `llama3.2:1b` | 128,000 |
-| `mistral-7b` | `mistral` | 32,000 |
-| `qwen2_5-7b` | `qwen2.5` | 128,000 |
-| `qwen2_5-0_5b` | `qwen2.5:0.5b` | 128,000 |
-| `qwen2_5-1_5b` | `qwen2.5:1.5b` | 128,000 |
-| `qwen2_5-3b` | `qwen2.5:3b` | 128,000 |
-| `qwen2_5-14b` | `qwen2.5:14b` | 128,000 |
-| `qwen2_5-32b` | `qwen2.5:32b` | 128,000 |
-| `qwen2_5-72b` | `qwen2.5:72b` | 128,000 |
-| `deepseek-r1-1_5b` | `deepseek-r1:1.5b` | 128,000 |
-| `deepseek-r1-7b` | `deepseek-r1:7b` | 128,000 |
-| `deepseek-r1-14b` | `deepseek-r1:14b` | 128,000 |
-| `deepseek-r1-32b` | `deepseek-r1:32b` | 128,000 |
-| `deepseek-r1-671b` | `deepseek-r1:671b` | 128,000 |
-
-</details>
-
 ## Configuration
 
-Pick a profile to prefill the Ollama model, context limit, and server URL. Use `custom` to supply another Ollama tag, context token count, output limit, and endpoint; its initial context value is 16,385 tokens and its output limit 4,096.
+Choose a model from the **Model** selector to set the Ollama model id and context
+limit. The default is **Llama 3.3** (`llama3.3:latest`). Listed models pin no output
+limit, so the node's default of 4,096 output tokens applies. Select **Custom model** to
+supply another Ollama tag, a context token count, and an output limit; its initial
+context value is 16,385 tokens, and an empty output limit keeps the 4,096 default.
+
+### Models
+
+| Model | Model id | Context tokens | Output tokens |
+| ----- | -------- | -------------- | ------------- |
+| Llama 3.3 **(default)** | `llama3.3:latest` | 128,000 | — |
+| Llama 3.1 8B | `llama3.1:8b` | 128,000 | — |
+| Llama 3.1 70B | `llama3.1:70b` | 128,000 | — |
+| Llama 3.1 405B | `llama3.1:405b` | 128,000 | — |
+| Phi 4 14B | `phi4` | 16,000 | — |
+| Llama 3.2 3B | `llama3.2` | 128,000 | — |
+| Llama 3.2 1B | `llama3.2:1b` | 128,000 | — |
+| Llama 4 Latest | `llama4:latest` | 10,000,000 | — |
+| Mistral 7B | `mistral` | 32,000 | — |
+| Qwen 2.5 7B | `qwen2.5` | 128,000 | — |
+| Qwen 2.5 0.5B | `qwen2.5:0.5b` | 128,000 | — |
+| Qwen 2.5 1.5B | `qwen2.5:1.5b` | 128,000 | — |
+| Qwen 2.5 3B | `qwen2.5:3b` | 128,000 | — |
+| Qwen 2.5 14B | `qwen2.5:14b` | 128,000 | — |
+| Qwen 2.5 32B | `qwen2.5:32b` | 128,000 | — |
+| Qwen 2.5 72B | `qwen2.5:72b` | 128,000 | — |
+| Qwen 3 Latest | `qwen3:latest` | 128,000 | — |
+| DeepSeek R1 1.5B | `deepseek-r1:1.5b` | 128,000 | — |
+| DeepSeek R1 7B | `deepseek-r1:7b` | 128,000 | — |
+| DeepSeek R1 14B | `deepseek-r1:14b` | 128,000 | — |
+| DeepSeek R1 32B | `deepseek-r1:32b` | 128,000 | — |
+| DeepSeek R1 671B | `deepseek-r1:671b` | 128,000 | — |
+| Custom model | _(user-specified)_ | editable | editable |
 
 ### Server base URL
 
-Point the node at the Ollama server, normally `http://localhost:11434`. If the URL does not end in `/v1`, the node appends it automatically, so both `http://localhost:11434` and `http://localhost:11434/v1` work.
+Point the node at the Ollama server; the default is `http://localhost:11434/v1`. If the URL does not end in `/v1`, the node appends it automatically, so both `http://localhost:11434` and `http://localhost:11434/v1` work.
 
 ### Temperature and reasoning effort
 
-Temperature defaults to `0`. When it is left unset for a reasoning model such as `gpt-oss`, the node uses `1.0`; set `reasoning_effort` to `low`, `medium`, or `high` when the selected model supports that control.
+Temperature is unset by default, and the node chooses it by model: `0` for standard models and `1.0` for reasoning models, detected by a stamped reasoning capability or a model name containing `gpt-oss`, `deepseek-r1`, `qwen3`, `qwq`, `magistral`, or `-thinking`. Reasoning models also send `reasoning_effort` `low` unless you set `low`, `medium`, or `high` yourself; non-reasoning models send none unless one is set. An explicit temperature always wins.
 
 The OpenAI client requires a non-empty API key, so the node sends the placeholder `dummy-key`, which Ollama ignores.
 

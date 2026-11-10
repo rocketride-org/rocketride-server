@@ -6,9 +6,9 @@ A RocketRide filter node that sends images to Google Gemini vision-capable model
 
 Sends images to Google Gemini vision models and returns text analysis: image description, OCR, visual understanding, and scene description. Accepts either a single streamed image (via the `image` lane) or a stream of image documents such as frames from a frame grabber (via the `documents` lane). Metadata such as frame number and timestamp is preserved on the `documents` output.
 
-Uses the **google-genai** SDK (`>=1.14.0`). Each inference call runs in its own client and worker thread with a **30-second hard timeout**, plus one automatic retry with exponential backoff for transient errors (timeouts, connection failures, 5xx responses). If no analysis prompt is configured, the node defaults to `Describe this image in detail.`
+Uses the **google-genai** SDK (`>=1.14.0`). Each inference call runs in its own client and worker thread with a **30-second hard timeout**, plus one automatic retry with exponential backoff for transient errors (timeouts, connection failures, 5xx responses). The **Prompt** field defaults to `Describe this image in detail.`
 
-Most profiles support a 1 million token context window, making this node well-suited for high-volume frame analysis pipelines where many images are processed in sequence. The exception is Gemini 3.1 Flash Image Preview, which has a 131,072-token limit.
+Most models support a 1 million token context window, making this node well-suited for high-volume frame analysis pipelines where many images are processed in sequence. The exception is Gemini 3.1 Flash Image Preview, which has a 131,072-token limit.
 
 When both lanes are connected for the same frame, the node calls Gemini once and reuses the cached answer for the second lane, so you are not billed twice per image.
 
@@ -19,29 +19,37 @@ When both lanes are connected for the same frame, the node calls Gemini once and
 | `image`     | `text`      | Analyze a single streamed image, receive the model's text response               |
 | `documents` | `documents` | Analyze image documents, return text analysis with original metadata preserved   |
 
-## Profiles
+## Configuration
 
-Default: **Gemini 2.5 Flash - Fast Vision (1M tokens)** (`gemini-2_5-flash`).
+Choose a vision model from the **Model** selector, then provide the API key and prompts
+for the analysis task. Each listed model pins its model id and context limit. The
+default is **Gemini 2.5 Flash - Fast Vision (1M tokens)** (`models/gemini-2.5-flash`).
 
-| Profile | Model | Context tokens |
-| ------- | ----- | -------------- |
-| `gemini-2_5-flash` **(default)** | `models/gemini-2.5-flash` | 1,048,576 |
-| `gemini-2_5-pro` | `models/gemini-2.5-pro` | 1,048,576 |
-| `gemini-2_5-flash-lite` | `models/gemini-2.5-flash-lite` | 1,048,576 |
-| `gemini-3_1-pro-preview` | `models/gemini-3.1-pro-preview` | 1,048,576 |
-| `gemini-3_1-flash-image-preview` | `models/gemini-3.1-flash-image-preview` | 131,072 |
+### Models
 
-### Choosing a profile
+| Model | Model id | Context tokens | Output tokens |
+| ----- | -------- | -------------- | ------------- |
+| Gemini 2.5 Flash - Fast Vision (1M tokens) **(default)** | `models/gemini-2.5-flash` | 1,048,576 | — |
+| Gemini 2.5 Pro - High Quality Vision (1M tokens) | `models/gemini-2.5-pro` | 1,048,576 | — |
+| Gemini 2.5 Flash Lite - Fastest & Cheapest (1M tokens) | `models/gemini-2.5-flash-lite` | 1,048,576 | — |
+| Gemini 3.1 Pro - Latest Vision (1M tokens) | `models/gemini-3.1-pro-preview` | 1,048,576 | — |
+| Gemini 3.1 Flash Image Preview (131k tokens) | `models/gemini-3.1-flash-image-preview` | 131,072 | — |
+| Custom model | _(user-specified)_ | editable | editable |
+
+#### Choosing a model
 
 - **Flash Lite**: fastest and cheapest; good for high-throughput frame pipelines where speed matters more than detail
 - **Flash**: balanced speed and quality; the recommended default for most vision tasks
 - **Pro**: highest quality analysis; use when accuracy is critical and latency is acceptable
 - **3.1 Pro Preview / Flash Image Preview**: latest generation previews; expect higher capability but potential instability as models are still in preview
 
-## Configuration
+### Custom model
 
-Choose a vision profile, then provide the API key and prompts for the analysis task.
-The profile supplies the model identifier and context limit.
+Select **Custom model** to enter a Gemini model id such as `models/gemini-2.5-pro`, its
+total context length in tokens (default 1,048,576), and optionally its output token
+limit (at least 1,024). Choose a model that accepts image input.
+
+### Documents and images
 
 On the `documents` lane, each incoming `Image` document is replaced by a `Text`
 document containing the model's answer, carrying the original metadata. The document
@@ -53,18 +61,18 @@ warning.
 If inference fails for a document, the node logs a warning and continues with the next
 one: a single bad frame does not stop the pipeline.
 
-### System Instructions and Analysis Prompt
+### System prompt and Prompt
 
-Use **System Instructions** to define the model's role; the node sends that value as
-Gemini's `system_instruction` on every request. Use **Analysis Prompt** for the task to
-perform on each image. When the analysis prompt is empty, the node uses
+Use **System prompt** to define the model's role; when it is set, the node sends that
+value as Gemini's `system_instruction` on every request. Use **Prompt** for the task
+to perform on each image. The **Prompt** field defaults to
 `Describe this image in detail.`
 
 ## Authentication
 
 Get a key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey). Keys are free for development use and grant access to all Gemini models listed above.
 
-The node validates the key format at startup: keys beginning with `sk-` are rejected immediately with a clear message indicating that the key appears to be an OpenAI key. When the configuration is saved, the node also runs a minimal API probe against the selected model and surfaces any provider error (invalid key, missing model, quota exceeded, etc.) as a warning. The probe is skipped while the key is still blank.
+The node validates the key format at startup: keys beginning with `sk-` are rejected immediately with a clear message indicating that the key appears to be an OpenAI key. When the configuration is saved, the node also runs a minimal API probe against the selected model and surfaces any provider error (invalid key, missing model, quota exceeded, etc.) as a warning. The probe never runs with a blank API key: the key is required, so configuration resolution rejects it first.
 
 ## Notes
 
@@ -73,12 +81,6 @@ The node validates the key format at startup: keys beginning with `sk-` are reje
 API errors are mapped to user-friendly messages: authentication failures, rate limits, billing and quota issues, safety-filter blocks, model unavailability, timeouts, and 5xx service errors each produce a clear explanation instead of a raw stack trace.
 
 Retry behavior: one retry for transient errors (timeout, connection, `500`/`502`/`503`/`504`, service unavailable) with exponential backoff starting at 1 second. Repeated timeouts are not retried beyond the second attempt, so a hung request costs at most two 30-second waits before the error is surfaced.
-
-### Model sync
-
-Profiles are maintained by the `sync_models` tooling (`llm_vision_gemini` provider, `ROCKETRIDE_GEMINI_KEY`). The Gemini API does not say which models accept images, so the sync asks OpenRouter first, then LiteLLM, and takes the first answer it gets: a model is added only when that answer is yes, and a `no` from OpenRouter settles it without asking LiteLLM. Each new model is then verified with a real image; TTS, audio and embedding variants are filtered out before that.
-
-The sync runs **only** with that key, and is skipped without it, leaving this file untouched — see [Why some providers need their own key](https://github.com/rocketride-org/rocketride-server/blob/develop/tools/sync_models/README.md#why-some-providers-need-their-own-key).
 
 ## Upstream docs
 

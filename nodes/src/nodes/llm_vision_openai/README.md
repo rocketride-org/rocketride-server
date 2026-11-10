@@ -6,7 +6,7 @@ A RocketRide filter node that sends images to OpenAI's vision-capable models and
 
 Accepts single image frames or streams of image documents and calls OpenAI's Chat Completions API with each image encoded as a base64 data URL (with `detail: "auto"`), returning the model's text response. Supports the GPT-4.1 and GPT-4o model families for use cases including image analysis, OCR, visual understanding, and scene description.
 
-Uses the official **`openai` Python SDK** (`>=2.38.0`). If no analysis prompt is configured, the node defaults to `"Describe this image in detail."`.
+Uses the official **`openai` Python SDK** (`>=2.38.0`). The **Prompt** field defaults to `"Describe this image in detail."`.
 
 Each API call runs in a daemon thread with a **30-second hard timeout** and is retried **once** on retryable errors (rate limits, connection errors, timeouts, 5xx responses). Rate-limit retries honor the `retry-after` response header (default 60 s); other retries use exponential backoff starting at 1 s. A fresh HTTP client is created per attempt to avoid exhausting the connection pool from a prior timed-out attempt. API errors are translated to user-friendly messages covering authentication failure, rate limits, quota or billing issues, invalid input, model not found, timeout, and server unavailability.
 
@@ -19,22 +19,30 @@ When both lanes carry the same frame, the node makes only **one** API call per f
 | `image`     | `text`      | Analyze a single image frame and emit the model's text response                  |
 | `documents` | `documents` | Analyze image documents and emit text analysis with original metadata preserved  |
 
-## Profiles
-
-Default: **GPT-4.1** (`openai-4-1`).
-
-| Profile | Model | Context tokens |
-| ------- | ----- | -------------- |
-| `openai-4-1` **(default)** | `gpt-4.1` | 1,047,576 |
-| `openai-4-1-mini` | `gpt-4.1-mini` | 1,047,576 |
-| `openai-4-1-nano` | `gpt-4.1-nano` | 1,047,576 |
-| `openai-4o` | `gpt-4o` | 128,000 |
-| `openai-4o-mini` | `gpt-4o-mini` | 128,000 |
-
 ## Configuration
 
-Choose a profile, then provide the API key and prompts for the analysis task. The
-profile supplies the model identifier and context limit.
+Choose a model from the **Model** selector, then provide the API key and prompts for the
+analysis task. Each listed model pins its model id and context limit. The default is
+**GPT-4.1** (`gpt-4.1`).
+
+### Models
+
+| Model | Model id | Context tokens | Output tokens |
+| ----- | -------- | -------------- | ------------- |
+| GPT-4.1 **(default)** | `gpt-4.1` | 1,047,576 | — |
+| GPT-4.1-mini | `gpt-4.1-mini` | 1,047,576 | — |
+| GPT-4.1-nano | `gpt-4.1-nano` | 1,047,576 | — |
+| GPT-4o | `gpt-4o` | 128,000 | — |
+| GPT-4o-mini | `gpt-4o-mini` | 128,000 | — |
+| Custom model | _(user-specified)_ | editable | editable |
+
+### Custom model
+
+Select **Custom model** to enter an OpenAI model id exactly as OpenAI names it, its
+total context length in tokens (default 1,047,576), and optionally its output token
+limit (at least 1,024). Choose a model that accepts image input.
+
+### Documents and images
 
 On the `documents` lane, each incoming `Image` document is replaced by a `Text`
 document containing the model's answer, with the original frame, timestamp, and chunk
@@ -46,23 +54,15 @@ If inference fails for a document after retries, the node logs a warning and con
 with the next document. On the `image` lane, a failure logs a warning and emits nothing
 for that frame. Empty image frames are also skipped with a warning.
 
-### System Instructions and Analysis Prompt
+### System prompt and Prompt
 
-Use **System Instructions** to define the model's role and **Analysis Prompt** to
-describe the task for each image. When no analysis prompt is configured, the node uses
+Use **System prompt** to define the model's role; when it is set, the node sends it as
+the system message. Use **Prompt** to describe the task for each image; it defaults to
 `Describe this image in detail.`
 
 ## Authentication
 
-Provide an OpenAI API key in `image_vision_openai.apikey`. The key is validated at pipeline start: it must be present and must begin with `sk-`, otherwise the node raises a configuration error before any image is processed.
-
-## Notes
-
-### Model sync
-
-Profiles are maintained by the `sync_models` tooling (`llm_vision_openai` provider, `ROCKETRIDE_OPENAI_KEY`). OpenAI's model list does not say which models accept images, so the sync asks OpenRouter first, then LiteLLM, and takes the first answer it gets: a model is added only when that answer is yes, and a `no` from OpenRouter settles it without asking LiteLLM. Each new model is then verified with a real image, so text-only models such as `o3-mini` never land here.
-
-The sync runs **only** with that key, and is skipped without it, leaving this file untouched — see [Why some providers need their own key](https://github.com/rocketride-org/rocketride-server/blob/develop/tools/sync_models/README.md#why-some-providers-need-their-own-key).
+Provide an OpenAI API key in `apikey`. The key is validated at pipeline start: it must be present and must begin with `sk-`, otherwise the node raises a configuration error before any image is processed.
 
 ## Upstream docs
 

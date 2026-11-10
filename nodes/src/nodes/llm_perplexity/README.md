@@ -14,30 +14,35 @@ Uses `langchain-openai` (`ChatOpenAI`) against Perplexity's OpenAI-compatible en
 | ----------- | --------- | ---------------------------------------------------- |
 | `questions` | `answers` | Send a question directly, receive a generated answer |
 
-## Profiles
-
-Default: **Sonar** (`sonar`).
-
-| Profile | Model | Context tokens | Output tokens | Model source |
-| ------- | ----- | -------------- | ------------- | ------------ |
-| `sonar` **(default)** | `sonar` | 127,072 | 114,364 | manual |
-| `sonar-pro` | `sonar-pro` | 200,000 | 8,000 | manual |
-| `sonar-reasoning-pro` | `sonar-reasoning-pro` | 128,000 | 115,200 | manual |
-| `sonar-reasoning` | `sonar-reasoning` | 128,000 | 4,096 | manual |
-| `sonar-deep-research` | `sonar-deep-research` | 128,000 | 115,200 | manual |
-| `sonar-pro-search` | `sonar-pro-search` | 200,000 | 8,000 | OpenRouter |
-
-All profiles except `sonar-pro-search` use manually configured model metadata. The `sonar-pro-search` profile pulls token limits from OpenRouter.
-
 ## Configuration
 
-Choose a Sonar profile for the search and reasoning depth the pipeline needs. The
-profile supplies the model ID, context window, and output budget; only the Perplexity
-API key normally needs to be supplied.
+Choose a Sonar model from the **Model** selector for the search and reasoning depth
+the pipeline needs. Each listed model pins its model id, context window, and output
+budget; only the Perplexity API key normally needs to be supplied. The default is
+**Sonar** (`sonar`).
+
+### Models
+
+| Model | Model id | Context tokens | Output tokens |
+| ----- | -------- | -------------- | ------------- |
+| Sonar **(default)** | `sonar` | 127,072 | 114,364 |
+| Sonar Pro | `sonar-pro` | 200,000 | 8,000 |
+| Sonar Reasoning Pro | `sonar-reasoning-pro` | 128,000 | 115,200 |
+| Sonar Reasoning | `sonar-reasoning` | 128,000 | 4,096 |
+| Sonar Deep Research | `sonar-deep-research` | 128,000 | 115,200 |
+| Perplexity: Sonar Pro Search | `sonar-pro-search` | 200,000 | 8,000 |
+| Custom model | _(user-specified)_ | editable | editable |
+
+### Custom model
+
+Select **Custom model** to enter a Perplexity model id exactly as Perplexity names it,
+its total context length in tokens, and its output token limit (at least 1,024). The
+custom defaults are 127,072 total tokens and 114,364 output tokens; set both to the
+actual limits of the model you select.
 
 ## Authentication
 
-Set `apikey` to a valid Perplexity AI API key in the selected profile's config panel. The key is validated at save time by sending a minimal 10-token probe request (`"Hi"`) to `https://api.perplexity.ai`. If the probe fails, a concise warning is surfaced rather than a raw error dump. For HTTP 401 responses that return an HTML page (a known Perplexity behavior), the node extracts the page title or `<h1>` text and formats it into a readable message.
+Set `apikey` to a valid Perplexity AI API key. The key is validated at save time by sending a minimal 10-token probe request (`"Hi"`) to `https://api.perplexity.ai`. If the probe fails, a concise warning is surfaced rather than a raw error dump. For HTTP 401 responses that return an HTML page (a known Perplexity behavior), the node extracts the page title or `<h1>` text and formats it into a readable message.
 
 To obtain an API key, visit [https://www.perplexity.ai/settings/api](https://www.perplexity.ai/settings/api).
 

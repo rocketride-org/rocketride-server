@@ -6,7 +6,7 @@ A RocketRide LLM node that connects Moonshot AI's Kimi models to a pipeline thro
 
 Provides chat completion using Kimi and Moonshot models as an `llm`-class invoke filter. It can be wired directly via lanes or consumed by any agent or node that needs an LLM backend.
 
-Built on **langchain-openai** (`ChatOpenAI`) pointed at the Moonshot endpoint; the **openai** SDK is used only for the save-time configuration probe. The request's `max_tokens` is set from the active profile's output token limit.
+Built on **langchain-openai** (`ChatOpenAI`) pointed at the Moonshot endpoint; the **openai** SDK is used only for the save-time configuration probe. The request's `max_tokens` is set from the selected model's output token limit.
 
 Temperature is set automatically per model family: Kimi K2 models run at temperature `1` (the API rejects any other value with "invalid temperature: only 1 is allowed for this model"), while the classic Moonshot v1 models run at temperature `0` for deterministic pipeline output.
 
@@ -18,43 +18,41 @@ When the node configuration is saved, cloud Moonshot endpoints (where `serverbas
 | ----------- | --------- | ---------------------------------------------------- |
 | `questions` | `answers` | Send a question directly, receive a generated answer |
 
-## Profiles
+## Configuration
 
-Default: **Kimi K2.6** (`kimi-k2-6`).
+Choose a model from the **Model** selector. Each listed model pins its model id,
+context window, and output limit, so the UI requires no additional model settings.
+The default is **Kimi K2.6** (`kimi-k2.6`).
 
-| Profile | Model | Context tokens | Output tokens |
-| ------- | ----- | -------------- | ------------- |
+### Models
+
+| Model | Model id | Context tokens | Output tokens |
+| ----- | -------- | -------------- | ------------- |
 | Kimi K2.6 **(default)** | `kimi-k2.6` | 262,144 | 16,384 |
-| MoonshotAI: Kimi K3 | `kimi-k3` | 1,048,576 | 943,718 |
-| MoonshotAI: Kimi K2.7 Code | `kimi-k2.7-code` | 262,144 | 235,929 |
-
-<details>
-<summary><strong>View 9 more models</strong></summary>
-
-| Profile | Model | Context tokens | Output tokens |
-| ------- | ----- | -------------- | ------------- |
 | Kimi K2.5 | `kimi-k2.5` | 262,144 | 16,384 |
 | Moonshot v1 8K | `moonshot-v1-8k` | 8,192 | 4,096 |
 | Moonshot v1 32K | `moonshot-v1-32k` | 32,768 | 4,096 |
 | Moonshot v1 128K | `moonshot-v1-128k` | 131,072 | 4,096 |
 | MoonshotAI: Kimi K2 0711 | `kimi-k2` | 131,072 | 100,352 |
 | MoonshotAI: Kimi K2 0905 | `kimi-k2-0905` | 262,144 | 100,352 |
+| MoonshotAI: Kimi K2.7 Code | `kimi-k2.7-code` | 262,144 | 235,929 |
 | MoonshotAI: Kimi K2 Thinking | `kimi-k2-thinking` | 262,144 | 100,352 |
 | MoonshotAI Kimi Latest | `kimi-latest` | 1,048,576 | 943,718 |
-| `kimi-k3-batch` | `kimi-k3:batch` | 1,048,576 | 943,718 |
+| MoonshotAI: Kimi K3 | `kimi-k3` | 1,048,576 | 943,718 |
+| Custom model | _(user-specified)_ | editable | editable |
 
-</details>
+### Custom model
 
-The last collapsed profile is **deprecated**: `kimi-k3:batch` is an OpenRouter routing
-alias, not a Moonshot model ID, so the Moonshot API has nothing to answer with. It stays
-selectable so saved pipelines keep loading; use `kimi-k3` instead. It arrived through
-OpenRouter fallback discovery in the model sync, the same way the deprecated profiles in
-`llm_qwen` did.
+Select **Custom model** to enter a Moonshot model id the list does not include, its
+combined input and output token limit, and its output token limit. The custom defaults
+are 262,144 total tokens and 16,384 output tokens; set both to the actual limits of the
+model you select.
 
-## Configuration
+### Server URL
 
-Choose a model profile. The profile supplies the model identifier, context window,
-and output limit, so the UI requires no additional model settings.
+`serverbase` defaults to `https://api.moonshot.ai/v1`. Point it at a self-hosted
+OpenAI-compatible endpoint to run Kimi models there. `kimi.py` refuses to start with an
+empty URL.
 
 ## Authentication
 
@@ -63,14 +61,6 @@ Cloud Moonshot endpoints require an API key starting with `sk-`. Any other forma
 If no API key is configured (typical for self-hosted OpenAI-compatible endpoints), a placeholder key (`sk-local-dummy-key`) is sent instead because the OpenAI client requires a non-empty value.
 
 ## Notes
-
-### Model sync
-
-Profiles are maintained by the `sync_models` tooling (`llm_kimi` provider,
-`ROCKETRIDE_KIMI_KEY`). Every profile must carry `serverbase`: `kimi.py` refuses to
-start without it, and this node defines no field for it, so there is no default to fall
-back on. The provider's `extra_profile_fields` writes the Moonshot endpoint into each
-new profile for that reason.
 
 ### Text-only models
 

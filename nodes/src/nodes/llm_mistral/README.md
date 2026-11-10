@@ -15,7 +15,7 @@ decides output length.
 Prompts are validated against the model's context window before sending. Token counts are
 estimated heuristically (about 1.25 tokens per word, adjusted for punctuation and long
 words); no tokenizer round-trip is made. The context limit comes from the selected
-profile's `modelTotalTokens`; if not configured, a built-in per-model default is used,
+model's `modelTotalTokens`; if not configured, a built-in per-model default is used,
 falling back to 32,768 tokens for unknown models.
 
 Failed API calls are retried automatically with exponential backoff (see
@@ -32,68 +32,66 @@ Validation failures surface as warnings with the provider's error detail.
 | ----------- | --------- | ---------------------------------------------------- |
 | `questions` | `answers` | Send a question directly, receive a generated answer |
 
-## Profiles
-
-Default: **Mistral Large 3** (`mistral-large`).
-
-| Profile | Model | Context | Output |
-| ------- | ----- | ------- | ------ |
-| `mistral-large` **(default)** | `mistral-large-2512` | 262,144 | 209,715 |
-| `mistral-medium-2604` | `mistral-medium-2604` | 16,384 | 4,096 |
-| `mistral-small-2603` | `mistral-small-2603` | 262,144 | 209,715 |
-
-<details>
-<summary><strong>View 41 more models</strong></summary>
-
-| Profile | Model | Context | Output |
-| ------- | ----- | ------- | ------ |
-| `custom` | _(user-specified)_ | 32,768 | editable |
-| `mistral-medium` | `mistral-medium-2508` | 131,072 | 4,096 |
-| `mistral-small` | `mistral-small-2506` | 131,072 | 4,096 |
-| `codestral` | `codestral-2508` | 256,000 | 204,800 |
-| `magistral-medium` | `magistral-medium-2509` | 40,000 | 40,000 |
-| `magistral-small` | `magistral-small-2509` | 40,960 | 4,096 |
-| `devstral-medium` | `devstral-medium-2507` | 128,000 | 128,000 |
-| `devstral-small` | `devstral-small-2507` | 128,000 | 128,000 |
-| `ministral-14b` | `ministral-14b-2512` | 262,144 | 209,715 |
-| `ministral-8b` | `ministral-8b-2512` | 262,144 | 209,715 |
-| `ministral-3b` | `ministral-3b-2512` | 131,072 | 104,857 |
-| `codestral-latest` | `codestral-latest` | 8,191 | 8,191 |
-| `devstral-2512` | `devstral-2512` | 262,144 | 209,715 |
-| `devstral-latest` | `devstral-latest` | 256,000 | 256,000 |
-| `devstral-medium-latest` | `devstral-medium-latest` | 256,000 | 256,000 |
-| `magistral-medium-latest` | `magistral-medium-latest` | 40,000 | 40,000 |
-| `magistral-small-latest` | `magistral-small-latest` | 40,000 | 40,000 |
-| `ministral-14b-latest` | `ministral-14b-latest` | 16,384 | 4,096 |
-| `ministral-3b-latest` | `ministral-3b-latest` | 16,384 | 4,096 |
-| `ministral-8b-latest` | `ministral-8b-latest` | 16,384 | 4,096 |
-| `mistral-large-2411` | `mistral-large-2411` | 131,072 | 128,000 |
-| `mistral-large-latest` | `mistral-large-latest` | 32,000 | 4,096 |
-| `mistral-medium-2505` | `mistral-medium-2505` | 8,191 | 8,191 |
-| `mistral-medium-3` | `mistral-medium-3` | 131,072 | 104,857 |
-| `mistral-medium-3-5` | `mistral-medium-3-5` | 262,144 | 209,715 |
-| `mistral-medium-c21211-r0-75` | `mistral-medium-c21211-r0-75` | 16,384 | 4,096 |
-| `mistral-medium-latest` | `mistral-medium-latest` | 131,072 | 131,072 |
-| `mistral-small-latest` | `mistral-small-latest` | 131,072 | 131,072 |
-| `mistral-tiny-2407` | `mistral-tiny-2407` | 16,384 | 4,096 |
-| `mistral-tiny-latest` | `mistral-tiny-latest` | 16,384 | 4,096 |
-| `mistral-vibe-cli-fast` | `mistral-vibe-cli-fast` | 16,384 | 4,096 |
-| `mistral-vibe-cli-latest` | `mistral-vibe-cli-latest` | 16,384 | 4,096 |
-| `mistral-vibe-cli-with-tools` | `mistral-vibe-cli-with-tools` | 16,384 | 4,096 |
-| `mistral-large-2407` | `mistral-large-2407` | 131,072 | 104,857 |
-| `mistral-medium-3-1` | `mistral-medium-3.1` | 131,072 | 104,857 |
-| `mistral-nemo` | `mistral-nemo` | 131,072 | 16,384 |
-| `mistral-saba` | `mistral-saba` | 32,768 | 26,214 |
-| `mistral-small-24b-instruct-2501` | `mistral-small-24b-instruct-2501` | 32,768 | 16,384 |
-| `mistral-small-3-1-24b-instruct` | `mistral-small-3.1-24b-instruct` | 128,000 | 102,400 |
-| `mistral-small-3-2-24b-instruct` | `mistral-small-3.2-24b-instruct` | 131,072 | 16,384 |
-| `mistral-medium-3-5-batch` | `mistral-medium-3-5:batch` | 32,768 | 26,214 |
-
-</details>
-
 ## Configuration
 
-Choose a profile to pin the Mistral model and its declared context and output limits. Most users only need to select a profile and supply an API key; choose `custom` to enter another Mistral model ID and context limit, and use an explicit context limit only when you need to override the built-in per-model value.
+Choose a model from the **Model** selector to pin the Mistral model id and its declared
+context and output limits. Most users only need to select a model and supply an API
+key. The default is **Mistral Large 3** (`mistral-large-2512`).
+
+### Models
+
+| Model | Model id | Context tokens | Output tokens |
+| ----- | -------- | -------------- | ------------- |
+| Mistral Large 3 **(default)** | `mistral-large-2512` | 262,144 | 209,715 |
+| Mistral Medium 3.1 | `mistral-medium-2508` | 131,072 | 4,096 |
+| Mistral Small 3.2 | `mistral-small-2506` | 131,072 | 4,096 |
+| Codestral | `codestral-2508` | 256,000 | 204,800 |
+| Magistral Medium 1.2 | `magistral-medium-2509` | 40,000 | 40,000 |
+| Magistral Small 1.2 | `magistral-small-2509` | 40,960 | 4,096 |
+| Devstral Medium 1.0 | `devstral-medium-2507` | 128,000 | 128,000 |
+| Devstral Small 1.1 | `devstral-small-2507` | 128,000 | 128,000 |
+| Ministral 3 14B | `ministral-14b-2512` | 262,144 | 209,715 |
+| Ministral 3 8B | `ministral-8b-2512` | 262,144 | 209,715 |
+| Ministral 3 3B | `ministral-3b-2512` | 131,072 | 104,857 |
+| Codestral-latest | `codestral-latest` | 8,191 | 8,191 |
+| Mistral: Devstral 2 2512 | `devstral-2512` | 262,144 | 209,715 |
+| Devstral-latest | `devstral-latest` | 256,000 | 256,000 |
+| Devstral-medium-latest | `devstral-medium-latest` | 256,000 | 256,000 |
+| Magistral-medium-latest | `magistral-medium-latest` | 40,000 | 40,000 |
+| Magistral-small-latest | `magistral-small-latest` | 40,000 | 40,000 |
+| Ministral-14b-latest | `ministral-14b-latest` | 16,384 | 4,096 |
+| Ministral-3b-latest | `ministral-3b-latest` | 16,384 | 4,096 |
+| Ministral-8b-latest | `ministral-8b-latest` | 16,384 | 4,096 |
+| Mistral Large 2411 | `mistral-large-2411` | 131,072 | 128,000 |
+| Mistral Large Latest | `mistral-large-latest` | 32,000 | 4,096 |
+| Mistral Medium 2505 | `mistral-medium-2505` | 8,191 | 8,191 |
+| Mistral Medium 2604 | `mistral-medium-2604` | 16,384 | 4,096 |
+| Mistral: Mistral Medium 3 | `mistral-medium-3` | 131,072 | 104,857 |
+| Mistral Medium 3.5 | `mistral-medium-3-5` | 262,144 | 209,715 |
+| Mistral Medium C21211 R0 75 | `mistral-medium-c21211-r0-75` | 16,384 | 4,096 |
+| Mistral Medium Latest | `mistral-medium-latest` | 131,072 | 131,072 |
+| Mistral: Mistral Small 4 | `mistral-small-2603` | 262,144 | 209,715 |
+| Mistral Small Latest | `mistral-small-latest` | 131,072 | 131,072 |
+| Mistral Tiny 2407 | `mistral-tiny-2407` | 16,384 | 4,096 |
+| Mistral Tiny Latest | `mistral-tiny-latest` | 16,384 | 4,096 |
+| Mistral Vibe Cli Fast | `mistral-vibe-cli-fast` | 16,384 | 4,096 |
+| Mistral Vibe Cli Latest | `mistral-vibe-cli-latest` | 16,384 | 4,096 |
+| Mistral Vibe Cli With Tools | `mistral-vibe-cli-with-tools` | 16,384 | 4,096 |
+| Mistral Large 2407 | `mistral-large-2407` | 131,072 | 104,857 |
+| Mistral: Mistral Medium 3.1 | `mistral-medium-3.1` | 131,072 | 104,857 |
+| Mistral: Mistral Nemo | `mistral-nemo` | 131,072 | 16,384 |
+| Mistral: Saba | `mistral-saba` | 32,768 | 26,214 |
+| Mistral: Mistral Small 3 | `mistral-small-24b-instruct-2501` | 32,768 | 16,384 |
+| Mistral: Mistral Small 3.1 24B | `mistral-small-3.1-24b-instruct` | 128,000 | 102,400 |
+| Mistral: Mistral Small 3.2 24B | `mistral-small-3.2-24b-instruct` | 131,072 | 16,384 |
+| Custom model | _(user-specified)_ | editable | editable |
+
+### Custom model
+
+Select **Custom model** to enter another Mistral model id, its context limit, and its
+output limit. The custom defaults are 32,768 context tokens and 209,715 output tokens;
+set the context limit to the model's actual window so oversized prompts are rejected
+before sending.
 
 ## Authentication
 
