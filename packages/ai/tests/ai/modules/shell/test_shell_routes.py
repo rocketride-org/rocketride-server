@@ -196,6 +196,14 @@ def test_legal_index_description_mirrors_the_client_manifest():
     )
 
 
+def test_careers_description_mirrors_the_client_manifest():
+    # It describes the page, not a roster: the page lists no roles when there are none.
+    assert LEGACY.exact['/careers'].description == (
+        'How the RocketRide team works and what we build: the leading AI meta-harness for agents that '
+        'scale in production. Open roles are listed here when we have them.'
+    )
+
+
 def test_superfans_page_is_an_exact_public_listed_page():
     assert '/superfans' in LEGACY.exact
     assert '/superfans' in LISTED_PATHS

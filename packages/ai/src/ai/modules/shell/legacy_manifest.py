@@ -115,7 +115,8 @@ _LEGACY_ROUTES = [
     (
         '/careers',
         'Careers',
-        'Join the team building RocketRide. Open roles across engineering, product, and go-to-market.',
+        'How the RocketRide team works and what we build: the leading AI meta-harness for agents that '
+        'scale in production. Open roles are listed here when we have them.',
     ),
     (
         '/contact',
