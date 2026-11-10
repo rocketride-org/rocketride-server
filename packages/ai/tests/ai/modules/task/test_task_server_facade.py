@@ -44,11 +44,19 @@ from ai.modules.task.task_server_facade import start_server_task_as_team
 # ============================================================================
 
 
-async def _dispatch(ttl):
+async def _dispatch(ttl, *, owner_kind='team', owner_user_id='', controls=None):
     """Run a dispatch with a capture stub in place of the DAP request.
 
+    Args:
+        ttl: The schedule window handed to the facade.
+        owner_kind: ``'team'`` (@team deploy) or ``'user'`` (@me deploy).
+        owner_user_id: The owning user of a @me deploy.
+        controls: The live registry the server answers ``control_by_key``
+            from; defaults to the one deploy control this dispatch starts.
+
     Returns:
-        Tuple of (execute arguments dict, the synthetic AccountInfo used).
+        Dict with the execute ``arguments``, the synthetic ``account_info``,
+        the returned ``key`` and the ``server`` stub.
     """
     captured = {}
 
@@ -61,10 +69,15 @@ async def _dispatch(ttl):
         # Step 2: answer like a successful execute (the address in the token slot).
         return {'success': True, 'body': {'token': 'acme.proj-1.src-1'}}
 
-    # The server resolves the returned address back to the control whose
-    # KEY the facade hands its in-process callers.
+    # The server's live registry, by key. The facade must look its run up by
+    # the deploy key and never walk the caller rungs (resolve_control).
+    owner_id = owner_user_id if owner_kind == 'user' else 'team-1'
+    if controls is None:
+        key = f'deploy.{owner_id}.acme.proj-1.src-1'
+        controls = {key: SimpleNamespace(key=key)}
     server = MagicMock()
-    server.resolve_control = MagicMock(return_value=SimpleNamespace(key='deploy.team-1.acme.proj-1.src-1'))
+    server.control_by_key = MagicMock(side_effect=lambda key: controls[key])
+    server.resolve_control = MagicMock(side_effect=AssertionError('the facade must not resolve through the rungs'))
 
     # The connection constructor needs a real server; stub it out entirely —
     # this is a wire-shape test, not a TaskConn test. The org's developer id
@@ -74,17 +87,18 @@ async def _dispatch(ttl):
         patch.object(facade_mod._InProcessConn, 'request', fake_request),
         patch.object(ai.account.account, 'get_developer_id', AsyncMock(return_value='acme'), create=True),
     ):
-        key = await start_server_task_as_team(
+        captured['key'] = await start_server_task_as_team(
             server,
             {'components': []},
             org_id='org-1',
             team_id='team-1',
             trigger='schedule',
             ttl=ttl,
+            owner_kind=owner_kind,
+            owner_user_id=owner_user_id,
         )
-    captured['key'] = key
-    captured['resolve'] = server.resolve_control.call_args
-    return captured['arguments'], captured['account_info']
+    captured['server'] = server
+    return captured
 
 
 # ============================================================================
@@ -95,21 +109,21 @@ async def _dispatch(ttl):
 @pytest.mark.asyncio
 async def test_no_window_sends_ttl_zero():
     """No schedule window -> ttl=0 on the wire (run until the pipeline exits)."""
-    arguments, _ = await _dispatch(None)
+    arguments = (await _dispatch(None))['arguments']
     assert arguments['ttl'] == 0
 
 
 @pytest.mark.asyncio
 async def test_fixed_window_sends_ttl_seconds():
     """A fixed window -> its seconds ride the wire verbatim."""
-    arguments, _ = await _dispatch(1800)
+    arguments = (await _dispatch(1800))['arguments']
     assert arguments['ttl'] == 1800
 
 
 @pytest.mark.asyncio
 async def test_pipeline_and_team_ride_alongside_ttl():
     """The execute arguments carry pipeline + teamId + ttl, nothing implicit."""
-    arguments, _ = await _dispatch(None)
+    arguments = (await _dispatch(None))['arguments']
     assert arguments['pipeline'] == {'components': []}
     assert arguments['teamId'] == 'team-1'
     assert set(arguments) == {'pipeline', 'teamId', 'ttl'}
@@ -122,10 +136,34 @@ async def test_deploy_dispatch_carries_no_human_identity():
     Deploy runs must be identical regardless of who deployed or fired them —
     who did lives in the audit log and deployment history, never on the run.
     """
-    _, account_info = await _dispatch(None)
+    account_info = (await _dispatch(None))['account_info']
     assert account_info.userId == ''
     assert account_info.displayName == ''
     assert account_info.email == ''
     assert account_info.devTeam == 'team-1'
     # The address namespace rides the synthetic org: it is the org's, not a human's.
     assert account_info.organization['developerId'] == 'acme'
+
+
+@pytest.mark.asyncio
+async def test_team_deploy_returns_the_team_deploy_key():
+    """A @team deploy hands back the key of the run it started: deploy.<team>.<address>."""
+    captured = await _dispatch(None)
+    assert captured['key'] == 'deploy.team-1.acme.proj-1.src-1'
+    captured['server'].control_by_key.assert_called_once_with('deploy.team-1.acme.proj-1.src-1')
+    captured['server'].resolve_control.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_me_deploy_returns_its_own_key_while_the_owner_plays_the_same_pipeline():
+    """A @me deploy shares its address with the owner's dev run of the same pipeline.
+    The facade must hand back the DEPLOY run's key, never the Play'd dev run's.
+    """
+    controls = {
+        'dev.user-7.acme.proj-1.src-1': SimpleNamespace(key='dev.user-7.acme.proj-1.src-1'),
+        'deploy.user-7.acme.proj-1.src-1': SimpleNamespace(key='deploy.user-7.acme.proj-1.src-1'),
+    }
+    captured = await _dispatch(None, owner_kind='user', owner_user_id='user-7', controls=controls)
+    assert captured['key'] == 'deploy.user-7.acme.proj-1.src-1'
+    assert captured['account_info'].userId == 'user-7'
+    captured['server'].resolve_control.assert_not_called()

@@ -175,8 +175,13 @@ async def start_server_task_as_team(
     exec_response = await conn.request('execute', arguments=arguments)
 
     # The response carries the address; the in-process callers hold the key.
-    control = server.resolve_control(exec_response['body']['token'], conn._account_info, 'task.control')
-    return control.key
+    # The deploy run's key is built from its owner, never resolved through the
+    # caller rungs: for a @me deploy the synthetic account IS the owning user,
+    # so the resolver would try @dev first and hand back that user's Play'd
+    # run of the same pipeline (same address) instead of this deploy run.
+    address = exec_response['body']['token']
+    owner_id = owner_user_id if owner_kind == 'user' else team_id
+    return server.control_by_key(f'deploy.{owner_id}.{address}').key
 
 
 # =============================================================================
