@@ -23,25 +23,21 @@
 
 import os
 from typing import Callable
+
+from depends import depends
+
+depends(os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt')
+
 from rocketlib import IGlobalBase
-from ai.common.config import Config
+
+from .process import process_image
 
 
 class IGlobal(IGlobalBase):
     process: Callable[[str, bytes], tuple[str, bytes]]
 
     def beginGlobal(self) -> None:
-        # Get the confif info
-        config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-        config
-
-        from depends import depends
-
-        requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
-        depends(requirements)
-
-        from .process import process_image
-
+        """Bind the pure cleanup function; the node has no configuration."""
         self.process = process_image
 
     def endGlobal(self) -> None:

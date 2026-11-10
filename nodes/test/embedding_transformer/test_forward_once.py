@@ -89,7 +89,6 @@ def _load_iinstance():
         'ai': types.ModuleType('ai'),
         'ai.common': types.ModuleType('ai.common'),
         'ai.common.schema': types.ModuleType('ai.common.schema'),
-        'ai.common.config': types.ModuleType('ai.common.config'),
         'ai.common.embedding': types.ModuleType('ai.common.embedding'),
     }
     stubs['rocketlib'].IInstanceBase = FakeIInstanceBase
@@ -98,7 +97,6 @@ def _load_iinstance():
     stubs['ai.common.schema'].Doc = FakeDoc
     stubs['ai.common.schema'].Question = FakeQuestion
     stubs['ai.common.embedding'].EmbeddingBase = FakeEmbeddingBase
-    stubs['ai.common.config'].Config = type('FakeConfig', (), {'getNodeConfig': staticmethod(lambda lt, cc: {})})
 
     for name, stub in stubs.items():
         saved[name] = sys.modules.get(name)

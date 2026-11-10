@@ -23,19 +23,16 @@
 
 from typing import List
 from rocketlib import IGlobalBase, warning
-from ai.common.config import Config
 
 
 class IGlobal(IGlobalBase):
     fields: List = []
 
     def beginGlobal(self) -> None:
-        # Get the confif info
-        config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-
+        """Keep the well-formed field definitions from the resolved config."""
         # Filter out fields with empty name or type
         self.fields = []
-        for field in config.get('fields', []):
+        for field in self.config.fields:
             field_name = field.get('column', '')
             field_type = field.get('type', '')
             if not field_name or not field_type:

@@ -40,6 +40,14 @@ _NODE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../src/n
 _SERVICES_JSON = os.path.join(_NODE_DIR, 'services.json')
 
 
+def _parameters_group(schema):
+    """The "parameters" group of the converted definition: the ordered property references it shows."""
+    for prop in schema['properties']:
+        if isinstance(prop, dict) and prop.get('name') == 'parameters':
+            return prop['properties']
+    raise AssertionError('services.json has no "parameters" group')
+
+
 def _load_services_json():
     """Parse services.json, which is JSONC: its whole-line ``//`` comments are dropped first."""
     with open(_SERVICES_JSON, 'r', encoding='utf-8') as handle:
@@ -2530,9 +2538,9 @@ class TestTeamMentionAlias:
     def test_services_json_declares_the_field(self):
         schema = _load_services_json()
 
-        field = schema['fields']['discord.teamMentionAlias']
+        field = schema['propertyDefinitions']['discord.teamMentionAlias']
         assert field['default'] == ''
-        assert 'discord.teamMentionAlias' in schema['fields']['Pipe.source.parameters']['properties']
+        assert 'discord.teamMentionAlias' in _parameters_group(schema)
 
 
 class TestNonAnswerRetry:
@@ -2686,10 +2694,10 @@ class TestNonAnswerRetry:
     def test_services_json_declares_the_field(self):
         schema = _load_services_json()
 
-        field = schema['fields']['discord.nonAnswerRetries']
+        field = schema['propertyDefinitions']['discord.nonAnswerRetries']
         assert field['default'] == 1
         assert (field['minimum'], field['maximum']) == (0, 3)
-        assert 'discord.nonAnswerRetries' in schema['fields']['Pipe.source.parameters']['properties']
+        assert 'discord.nonAnswerRetries' in _parameters_group(schema)
 
 
 class TestEmptyAnswerRetry:
@@ -3789,7 +3797,7 @@ class TestNumericAndMentionConfig:
         [('backfillLimit', 100), ('threadHistoryLimit', 100), ('threadHistoryMaxChars', 20000)],
     )
     def test_the_schema_bounds_the_support_numbers(self, field, maximum):
-        declared = _load_services_json()['fields'][f'discord.{field}']
+        declared = _load_services_json()['propertyDefinitions'][f'discord.{field}']
 
         assert declared['minimum'] == 0
         assert declared['maximum'] == maximum
@@ -4296,8 +4304,8 @@ class TestNumberedChunks:
     def test_services_json_declares_the_field(self):
         schema = _load_services_json()
 
-        assert schema['fields']['discord.numberChunks']['default'] is False
-        assert 'discord.numberChunks' in schema['fields']['Pipe.source.parameters']['properties']
+        assert schema['propertyDefinitions']['discord.numberChunks']['default'] is False
+        assert 'discord.numberChunks' in _parameters_group(schema)
 
 
 # ---------------------------------------------------------------------------
@@ -5079,10 +5087,10 @@ class TestPipelineTimeout:
     def test_services_json_declares_the_field_off(self):
         schema = _load_services_json()
 
-        field = schema['fields']['discord.pipelineTimeoutSeconds']
+        field = schema['propertyDefinitions']['discord.pipelineTimeoutSeconds']
         assert field['default'] == 0
         assert field['minimum'] == 0
-        assert 'discord.pipelineTimeoutSeconds' in schema['fields']['Pipe.source.parameters']['properties']
+        assert 'discord.pipelineTimeoutSeconds' in _parameters_group(schema)
 
 
 class TestDeliveryAndShutdownEdges:
@@ -5276,7 +5284,7 @@ class TestConcurrentMessages:
         assert TestNumericAndMentionConfig._parse({'maxAttachmentBytes': 1})._max_attachment_bytes == 1
 
     def test_the_schema_sets_the_attachment_size_minimum(self):
-        assert _load_services_json()['fields']['discord.maxAttachmentBytes']['minimum'] == 1
+        assert _load_services_json()['propertyDefinitions']['discord.maxAttachmentBytes']['minimum'] == 1
 
     @pytest.mark.parametrize(
         ('configured', 'expected'),
@@ -5409,12 +5417,12 @@ class TestConcurrentMessages:
 
     def test_services_json_declares_the_settings(self):
         schema = _load_services_json()
-        field = schema['fields']['discord.maxConcurrentMessages']
+        field = schema['propertyDefinitions']['discord.maxConcurrentMessages']
         assert field['type'] == 'number'
         assert (field['default'], field['minimum'], field['maximum']) == (4, 1, 32)
         assert field['title'] and field['description']
-        assert 'discord.maxConcurrentMessages' in schema['fields']['Pipe.source.parameters']['properties']
-        assert schema['fields']['discord.maxAttachmentBytes']['maximum'] == 104857600
+        assert 'discord.maxConcurrentMessages' in _parameters_group(schema)
+        assert schema['propertyDefinitions']['discord.maxAttachmentBytes']['maximum'] == 104857600
 
         with open(_SERVICES_JSON, 'r', encoding='utf-8') as handle:
             lines = handle.read().split('\n')

@@ -35,37 +35,13 @@ the TTL is a backstop, not a substitute for deleting explicitly.
 
 from __future__ import annotations
 
-import os
 import threading
 import uuid
 from typing import Any, Dict, Optional
 
-from ai.common.config import Config
-from rocketlib import IGlobalBase, OPEN_MODE, debug, warning
+from rocketlib import IGlobalBase, debug, warning
 
 from .hotdata_client import HotdataClient
-
-
-#: Smallest async_after_ms the API accepts. Anything lower is answered with
-#: 400 "async_after_ms must be at least 1000", which failed every single query
-#: for a pipeline configured below it. services.json advertises the same floor.
-ASYNC_AFTER_MS_MIN = 1000
-
-
-def _int_or(value: Any, default: int, *, lo: int, hi: int) -> int:
-    try:
-        n = int(value)
-    except (TypeError, ValueError):
-        return default
-    return max(lo, min(n, hi))
-
-
-def _bool_or(value: Any, default: bool) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        return value.strip().lower() in ('1', 'true', 'yes', 'on')
-    return default
 
 
 class IGlobal(IGlobalBase):
@@ -100,47 +76,38 @@ class IGlobal(IGlobalBase):
     async_after_ms: int = 5000
 
     def beginGlobal(self) -> None:
-        """Read the node config and build the REST client; the database itself is created lazily."""
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
+        """Read the resolved config and build the REST client; the database itself is created lazily.
 
+        The schema marks the API key and workspace required and bounds every
+        numeric setting (async_after_ms at the API's floor of 1000), so the
+        resolver has refused anything this method could not run with.
+        """
         self._db_lock = threading.Lock()
         self._loaded = {}
         # A reopened global must not inherit the previous run's database handle.
         self.database = None
 
-        cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
+        cfg = self.config
 
-        # Config keys arrive unprefixed here ('apikey', not 'hotdata.apikey').
-        self.apikey = str(cfg.get('apikey') or '').strip() or os.environ.get('HOTDATA_API_KEY', '').strip()
-        self.workspace_id = (
-            str(cfg.get('workspace_id') or '').strip() or os.environ.get('HOTDATA_WORKSPACE', '').strip()
-        )
-        self.database_id = (
-            str(cfg.get('database_id') or '').strip() or os.environ.get('HOTDATA_DATABASE_ID', '').strip()
-        )
+        self.apikey = cfg.apikey.strip()
+        self.workspace_id = cfg.workspace_id.strip()
+        self.database_id = cfg.database_id.strip()
         self.attached = False
 
-        if not self.apikey:
-            raise Exception('db_hotdata: apikey is required')
-        if not self.workspace_id:
-            raise Exception('db_hotdata: workspace_id is required')
-
-        api_url = str(cfg.get('api_url') or '').strip()
-        self.ttl = str(cfg.get('ttl') or '24h').strip() or '24h'
-        self.table = str(cfg.get('table') or 'pipeline_data').strip() or 'pipeline_data'
-        self.db_description = str(cfg.get('db_description') or '').strip()
-        self.max_attempts = _int_or(cfg.get('max_attempts'), 3, lo=1, hi=10)
-        self.max_execute_rows = _int_or(cfg.get('max_execute_rows'), 25000, lo=1, hi=25000)
-        self.allow_execute = _bool_or(cfg.get('allow_execute'), False)
-        self.allow_destructive_load = _bool_or(cfg.get('allow_destructive_load'), False)
-        self.job_timeout_secs = _int_or(cfg.get('job_timeout_secs'), 300, lo=10, hi=3600)
-        self.async_after_ms = _int_or(cfg.get('async_after_ms'), 5000, lo=ASYNC_AFTER_MS_MIN, hi=60000)
+        self.ttl = cfg.ttl
+        self.table = cfg.table.strip()
+        self.db_description = cfg.db_description.strip()
+        self.max_attempts = cfg.max_attempts
+        self.max_execute_rows = cfg.max_execute_rows
+        self.allow_execute = cfg.allow_execute
+        self.allow_destructive_load = cfg.allow_destructive_load
+        self.job_timeout_secs = cfg.job_timeout_secs
+        self.async_after_ms = cfg.async_after_ms
 
         self.client = HotdataClient(
             apikey=self.apikey,
             workspace_id=self.workspace_id,
-            base_url=api_url,
+            base_url=cfg.api_url.strip(),
             retry_budget_s=float(self.job_timeout_secs),
         )
 
@@ -220,16 +187,6 @@ class IGlobal(IGlobalBase):
                 # replacement database report deduplicated without loading.
                 if self._loaded:
                     self._loaded.clear()
-
-    def validateConfig(self) -> None:
-        try:
-            cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-            if not str(cfg.get('apikey') or '').strip() and not os.environ.get('HOTDATA_API_KEY', '').strip():
-                warning('apikey is required')
-            if not str(cfg.get('workspace_id') or '').strip() and not os.environ.get('HOTDATA_WORKSPACE', '').strip():
-                warning('workspace_id is required')
-        except Exception as e:
-            warning(str(e))
 
     def endGlobal(self) -> None:
         if self.database is not None and self.client is not None:

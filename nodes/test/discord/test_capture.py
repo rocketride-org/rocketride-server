@@ -46,6 +46,14 @@ _NODE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../src/n
 _SERVICES_JSON = os.path.join(_NODE_DIR, 'services.json')
 
 
+def _parameters_group(schema):
+    """The "parameters" group of the converted definition: the ordered property references it shows."""
+    for prop in schema['properties']:
+        if isinstance(prop, dict) and prop.get('name') == 'parameters':
+            return prop['properties']
+    raise AssertionError('services.json has no "parameters" group')
+
+
 def _load_capture():
     """Load the node's capture module from its file path, inside a synthetic package.
 
@@ -2756,11 +2764,11 @@ class TestServicesJson:
             'discord.captureSource': '',
         }
         for field, default in defaults.items():
-            assert field in schema['fields'], field
-            assert schema['fields'][field]['default'] == default, field
+            assert field in schema['propertyDefinitions'], field
+            assert schema['propertyDefinitions'][field]['default'] == default, field
 
     def test_the_capture_fields_are_registered_in_the_ui(self, schema):
-        properties = schema['fields']['Pipe.source.parameters']['properties']
+        properties = _parameters_group(schema)
         for field in (
             'discord.captureEvents',
             'discord.captureNodeId',
@@ -2778,20 +2786,24 @@ class TestServicesJson:
         assert 'invoke' not in schema['capabilities']
 
     def test_the_default_table_matches_the_contract(self, schema):
-        assert schema['fields']['discord.captureTable']['default'] == capture.DEFAULT_TABLE == 'discord_events'
+        assert (
+            schema['propertyDefinitions']['discord.captureTable']['default']
+            == capture.DEFAULT_TABLE
+            == 'discord_events'
+        )
 
     def test_the_table_description_states_the_real_length_limit(self, schema):
-        description = schema['fields']['discord.captureTable']['description']
+        description = schema['propertyDefinitions']['discord.captureTable']['description']
         assert f'at most {capture.MAX_TABLE_NAME_CHARS} characters' in description
 
     def test_the_capture_events_description_names_the_options_each_row_needs(self, schema):
         """A reader must not expect outbound/no_reply/reaction rows for free."""
-        description = schema['fields']['discord.captureEvents']['description']
+        description = schema['propertyDefinitions']['discord.captureEvents']['description']
         for option in ('emitOutbound', 'emitNoReply', 'emitReactions'):
             assert option in description, option
 
     def test_the_capture_events_description_says_postgres_only_and_the_rights(self, schema):
-        description = schema['fields']['discord.captureEvents']['description']
+        description = schema['propertyDefinitions']['discord.captureEvents']['description']
         assert 'PostgreSQL only' in description
         assert 'INSERT' in description
         assert 'CREATE' in description
@@ -2800,14 +2812,14 @@ class TestServicesJson:
     @pytest.mark.parametrize('field', ['discord.captureEvents', 'discord.captureNodeId'])
     def test_the_capture_descriptions_warn_about_allow_execute(self, schema, field):
         """The editor description is all a pipeline builder sees; it must say not to reuse an agent's node."""
-        description = schema['fields'][field]['description']
+        description = schema['propertyDefinitions'][field]['description']
         assert 'Allow direct query execution' in description
         assert 'raw SQL to every caller of that node' in description
         assert 'never one an agent can reach' in description
 
     def test_the_capture_source_description_gives_the_real_default(self, schema):
         """``endpoint.key`` is the node's logical type, so the default is discord:discord."""
-        description = schema['fields']['discord.captureSource']['description']
+        description = schema['propertyDefinitions']['discord.captureSource']['description']
         assert 'discord:<node type>' in description
         assert 'component id' not in description
 

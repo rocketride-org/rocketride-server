@@ -37,8 +37,8 @@ from arango import ArangoClient
 from arango.exceptions import ArangoError, ServerConnectionError
 
 from rocketlib import IGlobalBase, debug, error, warning
-from ai.common.config import Config
 
+from .IValidator import open_database
 from .utils import _is_aql_safe, _plan_is_modification
 
 DEFAULT_MAX_EXECUTE_ROWS = 25000
@@ -76,43 +76,29 @@ class IGlobal(IGlobalBase):
     # ------------------------------------------------------------------
 
     def beginGlobal(self) -> None:
-        """Open the ArangoDB client, verify connectivity, and cache the schema."""
+        """Open the ArangoDB client, verify connectivity, and cache the schema.
+
+        The resolver applied the defaults, bounded max_attempts and
+        max_execute_rows to the schema's ranges, and flattened the selected
+        authentication branch (user/password or token).
+        """
         self.graph_schema = {'collections': {}, 'graphs': [], 'views': []}
-        config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
+        config = self.config
 
-        self.endpoint = config.get('endpoint', 'http://localhost:8529').strip()
-        self.database = config.get('database', '_system').strip() or '_system'
-        self.db_description = config.get('db_description', '')
-
-        try:
-            # Clamp to the services.json bounds [1, 20]: non-UI configs (pipe JSON,
-            # SDK) bypass the schema, so enforce the limit at runtime too.
-            self.max_validation_attempts = max(1, min(20, int(config.get('max_attempts', 5))))
-        except (ValueError, TypeError):
-            self.max_validation_attempts = 5
-
+        self.endpoint = config.endpoint.strip()
+        self.database = config.database.strip()
+        self.db_description = config.db_description
+        self.max_validation_attempts = config.max_attempts
         # EXECUTE path is opt-in: a caller passing QuestionType.EXECUTE bypasses
         # the LLM translation + _is_aql_safe gate, so the node owner must
-        # explicitly enable the capability. Strings like 'false' / '0' must not
-        # be truthy here, so don't use bool() directly.
-        allow_execute = config.get('allow_execute', False)
-        if isinstance(allow_execute, str):
-            self.allow_execute = allow_execute.strip().lower() in {'1', 'true', 'yes', 'on'}
-        else:
-            self.allow_execute = bool(allow_execute)
-
-        try:
-            # Clamp to the services.json bounds [1, 1_000_000] (see note above).
-            self.max_execute_rows = max(
-                1, min(1_000_000, int(config.get('max_execute_rows', DEFAULT_MAX_EXECUTE_ROWS)))
-            )
-        except (TypeError, ValueError):
-            self.max_execute_rows = DEFAULT_MAX_EXECUTE_ROWS
+        # explicitly enable the capability.
+        self.allow_execute = config.allow_execute
+        self.max_execute_rows = config.max_execute_rows
 
         try:
             self.client = ArangoClient(hosts=self.endpoint)
             # verify=True pings the server and authenticates, raising on failure.
-            self.db = self._open_database(self.client, config, verify=True)
+            self.db = open_database(self.client, config, verify=True)
             # Probe the configured database explicitly so a wrong name or missing
             # permissions fail fast rather than mid-pipeline.
             self.db.aql.execute('RETURN 1')
@@ -221,36 +207,6 @@ class IGlobal(IGlobalBase):
             return False, 'Query performs data modification; this node is read-only.'
         return True, ''
 
-    def validateConfig(self) -> None:
-        """Test connectivity with a trivial read query; safe to call at save-time.
-
-        Surfaces driver error messages via ``warning()`` so the user sees exactly
-        what went wrong (wrong password, unreachable host, bad database name).
-        """
-        config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-        endpoint = config.get('endpoint', 'http://localhost:8529').strip()
-
-        client = None
-        try:
-            client = ArangoClient(hosts=endpoint)
-            db = self._open_database(client, config, verify=True)
-            db.aql.execute('RETURN 1')
-        except ServerConnectionError as e:
-            warning(f'Could not connect to ArangoDB at {endpoint}: {e}')
-            return
-        except ArangoError as e:
-            warning(str(e))
-            return
-        except Exception as e:
-            warning(str(e))
-            return
-        finally:
-            if client is not None:
-                try:
-                    client.close()
-                except Exception:
-                    pass
-
     # ------------------------------------------------------------------
     # Schema reflection
     # ------------------------------------------------------------------
@@ -339,26 +295,6 @@ class IGlobal(IGlobalBase):
         except ArangoError as e:
             warning(f'View reflection failed: {e}')
         return views
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _open_database(client: ArangoClient, config: Dict[str, Any], *, verify: bool = False) -> Any:
-        """Open a database handle, honouring the ``auth_method`` field.
-
-        ``'token'`` → JWT user-token auth, anything else (default ``'userpass'``)
-        → username/password. ``verify=True`` pings the server and authenticates,
-        raising ``ServerConnectionError`` on failure.
-        """
-        database = config.get('database', '_system').strip() or '_system'
-        auth_method = config.get('auth_method', 'userpass').strip()
-        if auth_method == 'token':
-            return client.db(database, user_token=config.get('token', ''), verify=verify)
-        user = config.get('user', 'root').strip() or 'root'
-        password = config.get('password', '')
-        return client.db(database, username=user, password=password, verify=verify)
 
 
 # ---------------------------------------------------------------------------

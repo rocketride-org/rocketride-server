@@ -70,22 +70,9 @@
 		"text": ["documents"]
 	},
 	//
-	// Optional:
-	//		Local fields definitions - these define fields only for the
-	//		current service. You may specify them here, or directly
-	//		in the shape
-	//
-	"fields": {},
-	//
 	// Required:
-	//		Defines the fields (shape) of the service. Either source or target
-	//		map be specified, or both, but at least one is required
+	//		Defines the properties shown in the pipeline builder side panel, in
+	//		order. This node has no configuration of its own.
 	//
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "Dictionary",
-			"properties": []
-		}
-	]
+	"properties": []
 }

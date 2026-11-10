@@ -10,7 +10,7 @@ Verifies that when MediaPipe's native lib can't dlopen a system dep (e.g.
 ``libGLESv2.so.2``), the node re-raises an actionable error. The lib is never
 actually removed — a synthetic ``OSError`` is fed to the mapping and
 ``create_from_options`` is stubbed to raise. The node is loaded by file path
-with ``depends`` / ``ai.common.config`` stubbed, so no engine venv or mediapipe
+with ``depends`` stubbed, so no engine venv or mediapipe
 install is needed.
 
 Usage: ./builder nodes:test --pytest-pattern=face_detection
@@ -27,15 +27,7 @@ from typing import Iterator
 import pytest
 
 _MODULE_PATH = Path(__file__).parent.parent.parent / 'src' / 'nodes' / 'face_detection' / 'face_detection.py'
-_STUB_NAMES = ('ai', 'ai.common', 'ai.common.config', 'depends')
-
-
-class _Config:
-    """Stand-in for ``ai.common.config.Config`` (only ``getNodeConfig`` is called)."""
-
-    @staticmethod
-    def getNodeConfig(*_a: object, **_kw: object) -> dict:
-        return {}
+_STUB_NAMES = ('depends',)
 
 
 def _install_min_stubs() -> None:
@@ -44,16 +36,6 @@ def _install_min_stubs() -> None:
     depends.load_depends = lambda *_a, **_kw: None
     depends.model_cache_dir = lambda *_a, **_kw: tempfile.gettempdir()
     sys.modules['depends'] = depends
-
-    ai = types.ModuleType('ai')
-    ai.__path__ = []  # mark as package so sub-imports resolve
-    sys.modules['ai'] = ai
-    ai_common = types.ModuleType('ai.common')
-    ai_common.__path__ = []
-    sys.modules['ai.common'] = ai_common
-    ai_config = types.ModuleType('ai.common.config')
-    ai_config.Config = _Config
-    sys.modules['ai.common.config'] = ai_config
 
 
 @contextlib.contextmanager

@@ -30,30 +30,19 @@
 			]
 		}
 	],
-	"preconfig": {
-		"default": "rfdetr",
-		"profiles": {
-			"rfdetr": {
-				"title": "RF-DETR — Common Objects (COCO, 80 classes, default)",
-				"engine": "rfdetr",
-				"model": "PekingU/rtdetr_r50vd",
-				"threshold": 0.3,
-				"prompt": ""
-			},
-			"mmgdino": {
-				"title": "MM-Grounding-DINO — Open-Vocabulary (any prompt)",
-				"engine": "mmgdino",
-				"model": "IDEA-Research/grounding-dino-tiny",
-				"threshold": 0.3,
-				"prompt": ""
-			}
-		}
-	},
-	"fields": {
+	//
+	// Optional:
+	//		Local property definitions. The model is the selector; each
+	//		profile pins its backend engine as a constant. The threshold is
+	//		shared by every model (one definition referenced in every
+	//		branch, so it hoists beside the selector); the prompt exists
+	//		only for the open-vocabulary model and is required there.
+	//
+	"propertyDefinitions": {
 		"detect.threshold": {
 			"type": "number",
 			"title": "Confidence threshold",
-			"description": "Minimum confidence score (0.0–1.0) to include a detection",
+			"description": "Minimum confidence score (0.0-1.0) to include a detection",
 			"default": 0.3,
 			"minimum": 0.0,
 			"maximum": 1.0
@@ -62,28 +51,42 @@
 			"type": "string",
 			"format": "textarea",
 			"title": "Detection prompt",
-			"description": "Example: \"person . car . dog\" (period or comma-separated list) or \"red car\" / \"person in a hat\" (described object). Returns all matching regions. Matches objects and attributes — not spatial relationships, so \"the car on the left\" returns all cars, not just the left one.",
-			"optional": false,
+			"description": "Example: \"person . car . dog\" (period or comma-separated list) or \"red car\" / \"person in a hat\" (described object). Returns all matching regions. Matches objects and attributes, not spatial relationships, so \"the car on the left\" returns all cars, not just the left one.",
+			"required": true,
 			"minLength": 1
-		},
-		"detect.profile": {
-			"title": "Model",
-			"type": "string",
-			"default": "rfdetr",
-			"enum": ["*>preconfig.profiles.*.title"],
-			"conditional": [
-				{ "value": "rfdetr", "properties": ["detect.threshold"] },
-				{ "value": "mmgdino", "properties": ["detect.prompt", "detect.threshold"] }
-			]
 		}
 	},
-	"shape": [
+	//
+	// Required:
+	//		Defines the properties shown in the pipeline builder side panel, in order
+	//
+	"properties": [
 		{
-			"section": "Pipe",
-			"title": "Object Detection",
-			"properties": ["detect.profile"]
+			"name": "profile",
+			"type": "string",
+			"title": "Model",
+			"default": "rfdetr",
+			"enum": {
+				"rfdetr": {
+					"title": "RF-DETR - Common Objects (COCO, 80 classes, default)",
+					"properties": [{ "name": "engine", "type": "constant", "default": "rfdetr" }, "detect.threshold"]
+				},
+				"mmgdino": {
+					"title": "MM-Grounding-DINO - Open-Vocabulary (any prompt)",
+					"properties": [
+						{ "name": "engine", "type": "constant", "default": "mmgdino" },
+						"detect.prompt",
+						"detect.threshold"
+					]
+				}
+			}
 		}
 	],
+	//
+	//	Test configuration for automated node testing. "profiles" lists
+	//	values of the "profile" selector; a group's "config" is the node
+	//	config in its stored shape (the prompt lives under "mmgdino").
+	//
 	"test": {
 		"profiles": ["rfdetr"],
 		"requiresHardware": { "cuda": { "vramGb": 2 }, "mps": { "ramGb": 4 }, "cpu": { "ramGb": 4 } },
@@ -118,7 +121,7 @@
 		{
 			"profiles": ["mmgdino"],
 			"requiresHardware": { "cuda": { "vramGb": 3 }, "mps": { "ramGb": 6 }, "cpu": { "ramGb": 6 } },
-			"config": { "detect.prompt": "person . face" },
+			"config": { "mmgdino": { "prompt": "person . face" } },
 			"outputs": ["text"],
 			"timeout": 180,
 			"cases": [

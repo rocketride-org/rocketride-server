@@ -24,9 +24,10 @@
 # ------------------------------------------------------------------------------
 # This class controls the data shared between all threads for the task
 # ------------------------------------------------------------------------------
-from rocketlib import IGlobalBase, OPEN_MODE
-from ai.common.config import Config
+from rocketlib import IGlobalBase
 from ai.common.embedding import EmbeddingBase
+
+from .OpenAIEmbeddingWrapper import OpenAIEmbeddingWrapper
 
 
 # ----------------------------------
@@ -39,23 +40,14 @@ class IGlobal(IGlobalBase):
     # Common methods
     # ----------------------------------
     def beginGlobal(self):
-        # Are we in config mode or some other mode?
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            # We are going to get a call to configureService but
-            # we don't actually need to load the driver for that
-            pass
-        else:
-            # Import what we need
-            from .OpenAIEmbeddingWrapper import OpenAIEmbeddingWrapper
+        """Build the OpenAI embedding client from the resolved config.
 
-            # Get our bag
-            bag = self.IEndpoint.endpoint.bag
-
-            # Get this nodes config
-            config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-
-            # Get the embedding
-            self.embedding = OpenAIEmbeddingWrapper(self.glb.logicalType, config, bag)
+        The model is the selector and the API key a required leaf, so both are
+        set by the time this runs; the key arrives through the node config (a
+        ${ROCKETRIDE_EMBEDDING_OPENAI_APIKEY} reference resolved per call).
+        """
+        bag = self.IEndpoint.endpoint.bag
+        self.embedding = OpenAIEmbeddingWrapper(self.glb.logicalType, self.config, bag)
 
     def endGlobal(self):
         # Destroy the embedding module

@@ -20,18 +20,3 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-
-# ------------------------------------------------------------------------------
-# Main module
-# ------------------------------------------------------------------------------
-# Bootstrap the node's runtime dependency (requests) BEFORE importing node code, so the
-# node loads on workers that don't already have it (matches db_neo4j / db_arango). tenacity
-# comes transitively via ai.common.utils, so requirements.txt only lists requests.
-from depends import load_depends
-
-load_depends(__file__)  # installs the sibling requirements.txt
-
-from .IGlobal import IGlobal  # noqa: E402
-from .IInstance import IInstance  # noqa: E402
-
-__all__ = ['IGlobal', 'IInstance']

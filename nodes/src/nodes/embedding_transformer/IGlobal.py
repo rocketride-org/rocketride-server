@@ -22,7 +22,6 @@
 # =============================================================================
 
 from rocketlib import IGlobalBase
-from ai.common.config import Config
 from ai.common.embedding import EmbeddingBase
 
 
@@ -30,17 +29,17 @@ class IGlobal(IGlobalBase):
     embedding: EmbeddingBase | None = None
 
     def beginGlobal(self):
-        # Import what we need
+        """Load the sentence-transformers model named by the resolved config.
+
+        The selected profile pins the model; the custom profile adds the
+        truncation and prefix knobs, which the resolver defaults elsewhere.
+        """
+        # Imported here: the module installs and loads sentence-transformers
+        # (torch) as a side effect of being imported.
         from .sentenceTransformer import Embedding
 
-        # Get our bag
         bag = self.IEndpoint.endpoint.bag
-
-        # Get this nodes config
-        config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-
-        # Get the embedding
-        self.embedding = Embedding(self.glb.logicalType, config, bag)
+        self.embedding = Embedding(self.glb.logicalType, self.config, bag)
 
     def endGlobal(self):
         # Destroy the embedding module

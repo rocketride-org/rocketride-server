@@ -32,7 +32,7 @@ Parses PDFs, images, and spreadsheets (XLSX/CSV) into Markdown and tables.
 
 | Field   | Description                                          |
 | ------- | ---------------------------------------------------- |
-| API Key | ADE API key (falls back to `ROCKETRIDE_LANDING_AI_KEY`)   |
+| API Key | ADE API key, normally `${ROCKETRIDE_LANDING_AI_APIKEY}` |
 | Model   | Parse model (default `dpt-2-latest`)                 |
 | Region  | `US (production)` or `EU (eu-west-1)` deployment      |
 

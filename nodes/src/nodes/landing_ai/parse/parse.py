@@ -28,7 +28,7 @@ from ai.common.reader import ReaderBase
 from ai.common.utils import guess_filename
 from rocketlib import debug, warning, error
 
-from ..landing_ai_base import build_client, get_node_config, resolve_api_key
+from ..landing_ai_base import build_client, resolve_api_key
 
 
 class Parser(ReaderBase):
@@ -39,12 +39,11 @@ class Parser(ReaderBase):
         super().__init__(provider, connConfig, bag)
         self.bag = bag
 
-        config = get_node_config(provider, connConfig)
+        # The resolved node config: model and region are schema enums with defaults
+        config = connConfig
         self._api_key: Optional[str] = resolve_api_key(config)
-        self._model: str = config.get('model') or 'dpt-2-latest'
-        self._region: str = config.get('region') or 'production'
-        if self._region not in ('production', 'eu'):
-            self._region = 'production'
+        self._model: str = config['model']
+        self._region: str = config['region']
 
         debug(
             f'Landing.ai Parse: initialized (model={self._model}, region={self._region}, '

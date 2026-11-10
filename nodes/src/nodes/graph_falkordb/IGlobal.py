@@ -33,12 +33,21 @@ from the base class.
 
 from __future__ import annotations
 
+import os
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
+from depends import depends
+
+# redis and falkordb are imported at module scope, so the requirements are
+# installed before that happens. This module is only imported on the run path
+# (config mode imports the validator alone), so the install never runs while a
+# user is merely opening the node's settings panel.
+depends(os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt')
+
 from redis.exceptions import RedisError
 
-from rocketlib import OPEN_MODE, debug, warning
+from rocketlib import debug, warning
 
 from ai.common.graph import GraphGlobalBase
 from ai.common.utils import config_int, parse_bool
@@ -75,12 +84,6 @@ class IGlobal(GraphGlobalBase):
     allow_writes: bool = False
     max_rows: int = 250
     query_timeout_ms: int = DEFAULT_TIMEOUT_MS
-
-    def beginGlobal(self) -> None:
-        # Config-mode opens the node for editing only; no server round-trip.
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
-        super().beginGlobal()
 
     # ------------------------------------------------------------------
     # Driver hooks

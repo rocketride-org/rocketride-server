@@ -42,24 +42,13 @@
 			]
 		}
 	],
-	"preconfig": {
-		"default": "short",
-		"profiles": {
-			"short": {
-				"title": "BlazeFace Short-Range",
-				"profile": "short",
-				"threshold": 0.5,
-				"emit_landmarks": true
-			}
-		}
-	},
-	"fields": {
-		"face_detection.profile": {
-			"title": "Model",
-			"type": "string",
-			"default": "short",
-			"enum": ["*>preconfig.profiles.*.title"]
-		},
+	//
+	// Optional:
+	//		Local property definitions. The model is the selector (one
+	//		BlazeFace bundle today, no per-model settings); the threshold
+	//		and keypoint toggle are shared and stored flat.
+	//
+	"propertyDefinitions": {
 		"face_detection.threshold": {
 			"type": "number",
 			"title": "Confidence threshold",
@@ -75,13 +64,27 @@
 			"default": true
 		}
 	},
-	"shape": [
+	//
+	// Required:
+	//		Defines the properties shown in the pipeline builder side panel, in order
+	//
+	"properties": [
 		{
-			"section": "Pipe",
-			"title": "Face Detection",
-			"properties": ["face_detection.profile", "face_detection.threshold", "face_detection.emit_landmarks"]
-		}
+			"name": "profile",
+			"type": "string",
+			"title": "Model",
+			"default": "short",
+			"enum": {
+				"short": { "title": "BlazeFace Short-Range" }
+			}
+		},
+		"face_detection.threshold",
+		"face_detection.emit_landmarks"
 	],
+	//
+	//	Test configuration for automated node testing. "profiles" lists
+	//	values of the "profile" selector.
+	//
 	"test": {
 		"profiles": ["short"],
 		"requiresLibs": { "Linux": ["libGLESv2.so.2", "libEGL.so.1"] },

@@ -24,45 +24,38 @@
 			"min": 0
 		}
 	},
-	"preconfig": {
-		"default": "default",
-		"profiles": {
-			"default": {
-				"title": "Hotdata",
-				"apikey": ""
-			}
-		}
-	},
-	"fields": {
+	//
+	// Optional:
+	//		Local property definitions. Every field is stored flat; the API
+	//		key and workspace are required, the key a secret an account
+	//		variable can supply.
+	//
+	"propertyDefinitions": {
 		"hotdata.apikey": {
 			"type": "string",
 			"title": "API Key",
 			"description": "Hotdata API key.",
-			"default": "",
-			"secure": true,
-			"ui": {
-				"ui:widget": "ApiKeyWidget"
-			}
+			"secret": true,
+			"env": "ROCKETRIDE_DB_HOTDATA_APIKEY",
+			"required": true
 		},
 		"hotdata.workspace_id": {
 			"type": "string",
 			"title": "Workspace ID",
 			"description": "Hotdata workspace ID.",
-			"default": ""
+			"required": true
 		},
 		"hotdata.database_id": {
 			"type": "string",
 			"title": "Existing database ID",
 			"description": "Leave empty to create a fresh ephemeral database per run (the default). Set an existing database ID so agents in separate pipeline runs share one database. An attached database is never deleted by this node, and indexes cannot be built on one.",
-			"default": "",
-			"optional": true
+			"default": ""
 		},
 		"hotdata.api_url": {
 			"type": "string",
 			"title": "API URL",
 			"description": "Hotdata API base URL. Leave empty for https://api.hotdata.dev.",
-			"default": "",
-			"optional": true
+			"default": ""
 		},
 		"hotdata.ttl": {
 			"type": "string",
@@ -79,14 +72,14 @@
 			"type": "string",
 			"title": "Table",
 			"description": "Table that rows arriving on the answers lane are loaded into. Created on first use.",
-			"default": "pipeline_data"
+			"default": "pipeline_data",
+			"minLength": 1
 		},
 		"hotdata.db_description": {
 			"type": "string",
 			"title": "Database description",
 			"description": "Schema and domain hints for natural-language SQL generation.",
-			"default": "",
-			"optional": true
+			"default": ""
 		},
 		"hotdata.max_attempts": {
 			"type": "integer",
@@ -127,12 +120,37 @@
 		"hotdata.async_after_ms": {
 			"type": "integer",
 			"title": "Run asynchronously after (milliseconds)",
-			"description": "Wait this long before a query continues as an asynchronous job.",
+			"description": "Wait this long before a query continues as an asynchronous job. The API refuses anything below 1000.",
 			"default": 5000,
 			"minimum": 1000,
 			"maximum": 60000
 		}
 	},
+	//
+	// Required:
+	//		Defines the properties shown in the pipeline builder side panel, in order
+	//
+	"properties": [
+		"type",
+		"hotdata.apikey",
+		"hotdata.workspace_id",
+		"hotdata.database_id",
+		"hotdata.api_url",
+		"hotdata.ttl",
+		"hotdata.table",
+		"hotdata.db_description",
+		"hotdata.max_attempts",
+		"hotdata.max_execute_rows",
+		"hotdata.allow_execute",
+		"hotdata.allow_destructive_load",
+		"hotdata.job_timeout_secs",
+		"hotdata.async_after_ms"
+	],
+	//
+	// Optional:
+	//		Test configuration for automated node testing. The credentials
+	//		come from the named variables and are stored flat.
+	//
 	"test": {
 		"requires": ["ROCKETRIDE_DB_HOTDATA_KEY", "ROCKETRIDE_DB_HOTDATA_WORKSPACE_ID"],
 		"profiles": ["default"],
@@ -143,27 +161,5 @@
 				"questions": "test query"
 			}
 		]
-	},
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "Hotdata",
-			"properties": [
-				"type",
-				"hotdata.apikey",
-				"hotdata.workspace_id",
-				"hotdata.database_id",
-				"hotdata.api_url",
-				"hotdata.ttl",
-				"hotdata.table",
-				"hotdata.db_description",
-				"hotdata.max_attempts",
-				"hotdata.max_execute_rows",
-				"hotdata.allow_execute",
-				"hotdata.allow_destructive_load",
-				"hotdata.job_timeout_secs",
-				"hotdata.async_after_ms"
-			]
-		}
-	]
+	}
 }

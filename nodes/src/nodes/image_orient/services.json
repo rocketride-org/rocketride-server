@@ -93,33 +93,9 @@
 		}
 	],
 	//
-	//	Optional:
-	//		Profile section are configuration optoins used by the driver
-	//		itself.
-	//
-	//		One profile only: unlike scan_cropper there is no "what did you
-	//		scan" choice to make here, so the fields stay flat and the
-	//		getNodeConfig profile-nesting rule never comes into play.
-	//
-	"preconfig": {
-		// Define the values that will be merged into any profile configuration
-		// specified, unless the profile is 'absolute'
-		"default": "default",
-		// Defines profiles used with the "profile": key
-		"profiles": {
-			"default": {
-				"title": "Default"
-			}
-		}
-	},
-	//
 	// Optional:
-	//		Local fields definitions - these define fields only for the
-	//		current service.
-	//
-	//		NOTE: the "image_orient." prefix is UI-schema only. The config dict
-	//		the node receives is keyed on the bare name ("margin", not
-	//		"image_orient.margin").
+	//		Local property definitions. Every tunable is stored flat under
+	//		its short name ("margin", not "image_orient.margin").
 	//
 	//		The defaults below are measured, not guessed. Over 98 real album
 	//		photographs the node corrects 37 and gets none wrong, because two
@@ -127,7 +103,7 @@
 	//		(see vote.decide). Without that agreement rule the same coverage
 	//		cost 2 wrong rotations.
 	//
-	"fields": {
+	"propertyDefinitions": {
 		"image_orient.margin": {
 			"type": "number",
 			"title": "How sure before rotating",
@@ -185,20 +161,15 @@
 	},
 	//
 	// Required:
-	//		Defines the fields (shape) of the service.
+	//		Defines the properties shown in the pipeline builder side panel, in order
 	//
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "Image Orient",
-			"properties": ["image_orient.margin", "image_orient.minFaces", "image_orient.confidenceWeight", "image_orient.minConfidence", "image_orient.detectSize", "image_orient.quality"]
-		}
-	],
+	"properties": ["image_orient.margin", "image_orient.minFaces", "image_orient.confidenceWeight", "image_orient.minConfidence", "image_orient.detectSize", "image_orient.quality"],
 	//
 	// Optional:
 	//		Declarative test. The fixtures are rotations of a portrait the face
 	//		detector is known to find - face_detection's own test block uses the
-	//		same image. minFaces is 1 because there is only one face in it.
+	//		same image. minFaces is 1 because there is only one face in it; the
+	//		group's "config" is the node config in its stored shape.
 	//
 	//		Assertions are on the text lane: the harness can only check an image
 	//		for notEmpty, so the record is the only place the decision is
