@@ -299,6 +299,27 @@ async def read_artifact_file(path: str) -> bytes:
     return await Store.instance().raw_store().read_bytes(path)
 
 
+async def artifact_file_info(path: str) -> Dict[str, Any]:
+    """Stat one file of a version's store tree without reading its body.
+
+    ``get_file_info`` is a stat on the filesystem store and a HEAD on S3 and
+    Azure, so proving a snapshot exists never downloads it.
+
+    Args:
+        path: The file's store path.
+
+    Returns:
+        ``{'size': <bytes>, 'modified': <epoch seconds>}``.
+
+    Raises:
+        StorageNotFoundError: the file does not exist.
+        StorageError: any other storage failure.
+    """
+    from ai.account.store import Store
+
+    return await Store.instance().raw_store().get_file_info(path)
+
+
 # =============================================================================
 # THE PUBLISH GATE: called where kind:'app' publishes are validated
 # =============================================================================
@@ -364,7 +385,7 @@ async def gate_errors(app_id: str, manifest: Mapping[str, Any], dist_dir: str, a
         if not page.snapshot:
             continue
         try:
-            await read_artifact_file(f'{dist_dir}/{page.snapshot}')
+            await artifact_file_info(f'{dist_dir}/{page.snapshot}')
         except StorageNotFoundError:
             errors.append(
                 f'publicPages path {page.path!r}: snapshot {page.snapshot!r} is not in the built version; '

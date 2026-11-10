@@ -39,7 +39,7 @@ def _public_pages_state(monkeypatch):
 
     import ai.modules.shell.public_pages as pp
 
-    from .hostile_fixtures import FILES, read_file
+    from .hostile_fixtures import FILES, file_info, read_file
 
     monkeypatch.setattr(pp, '_current', None)
     monkeypatch.setattr(pp, '_live_conflict', None)
@@ -49,3 +49,4 @@ def _public_pages_state(monkeypatch):
     monkeypatch.setattr(pp, '_rebuild_pending', False)
     FILES.clear()
     monkeypatch.setattr(pp, 'read_artifact_file', read_file)
+    monkeypatch.setattr(pp, 'artifact_file_info', file_info)
