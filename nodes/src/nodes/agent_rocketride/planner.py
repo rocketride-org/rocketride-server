@@ -15,6 +15,10 @@ Owns the single-phase planning cycle:
     - ``{"thought": "...", "scratch": "...", "tool_calls": [{...}, ...]}``
     - ``{"thought": "...", "scratch": "...", "done": true, "answer": "..."}``
 
+  With a ``ToolView`` (the node's tool catalog budget is exceeded), the prompt lists
+  every tool as one ``name: summary`` line plus ``tools.load``, and shows the full
+  schemas of the loaded tools in Context.
+
 Usage::
 
     from .planner import plan
@@ -36,6 +40,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from rocketlib import debug
 
 from ai.common.agent import AgentBase, AgentContext
+from ai.common.agent.tool_catalog import LOAD_TOOL, ToolView, catalog_lines
 from ai.common.schema import Question
 
 from ai.common.utils import safe_str
@@ -71,6 +76,65 @@ _CHECK_ARGS_RULE = """
         - The check is {tool} called with exactly these arguments: {args}. A call to {tool}
         with any other arguments counts as a change, not a check."""
 
+# The local step that loads tool schemas when the catalog is shown compactly. The
+# executor answers it itself; it never reaches a tool node.
+_LOAD_TOOL_DESCRIPTOR = json.dumps(
+    {
+        'name': LOAD_TOOL,
+        'description': (
+            'Load the full schema of tools you are going to call. Give exact names from the catalog above, '
+            "or a query (words from a tool's name or purpose) to load the best matches, or both. "
+            'Loaded schemas appear under "Loaded tool schemas" in Context from your next step on.'
+        ),
+        'inputSchema': {
+            'type': 'object',
+            'properties': {
+                'names': {
+                    'type': 'array',
+                    'items': {'type': 'string'},
+                    'description': 'Exact tool names from the catalog (at most 20 per call)',
+                },
+                'query': {
+                    'type': 'string',
+                    'description': 'Words to match against tool names, descriptions and argument names',
+                },
+                'limit': {'type': 'integer', 'description': 'Most tools a query may add (default 5, at most 20)'},
+            },
+        },
+    },
+    ensure_ascii=False,
+)
+
+# Added to the Rules only when the catalog is shown compactly.
+_LOAD_RULE = """
+        - Load before you call: a tool's schema must be loaded (tools.load) in an earlier step than
+        the first call to it. Load every tool the task will need in one tools.load call, in your
+        first step when you can, alongside calls to tools that are already loaded. A call to a tool
+        whose schema is not loaded does not run: it is skipped, and its schema is loaded for your
+        next step. memory.peek and tools.load never need loading."""
+
+# The Rules around the check rule. The load rule goes after "Only use the tools ...".
+_RULES_HEAD = """\
+        - Think things through thoroughly. Plan accordingly. Prefer the simplest
+        approach that answers the question — do not over-analyze.
+"""
+
+_RULES_MIDDLE = """
+        - Once all the information needed to complete the goal is available in scratch or
+        previous results, write the answer now and set done=true. Presenting the answer is
+        not a future plan step — it happens in the same response where you recognize the
+        data is ready.
+        - Only use the tools listed in Available Tools. Do not invent or modify tool names."""
+
+_RULES_TAIL = """
+        - Check before fetching: Before any tool call — including memory.peek — check scratch and
+        the result previews first. If the values you need are already there, do not fetch them.
+        Missing secondary fields (units, labels, timestamps) are not blockers; if the primary
+        values are known, set done=true. A plan unchanged from the previous response means you
+        are not making progress — stop or change approach.
+        - Remove peek results in the same response you capture their data in scratch. Do not
+        carry transient peek results forward into subsequent steps."""
+
 # ---------------------------------------------------------------------------
 # Private helpers — formatting
 # ---------------------------------------------------------------------------
@@ -98,6 +162,15 @@ def _build_all_tool_descriptions(context: AgentContext) -> str:
         lines.append(json.dumps(td, ensure_ascii=False))
 
     return '\n'.join(lines) if lines else '(none)'
+
+
+def _build_tool_catalog(view: ToolView) -> str:
+    """The compact Available Tools block: a header, one line per tool, then tools.load."""
+    header = (
+        f'{len(view.catalog)} tools are connected. Each line is "name: what it does"; full schemas are shown only '
+        'for loaded tools, under "Loaded tool schemas" in Context. Load a tool with tools.load before you call it.'
+    )
+    return '\n'.join([header, *catalog_lines(view.catalog), _LOAD_TOOL_DESCRIPTOR])
 
 
 def _json_default(obj: Any) -> Any:
@@ -130,9 +203,14 @@ def _build_wave_question(
     scratch: str = '',
     verify_tool: str = '',
     verify_args: Optional[Dict[str, Any]] = None,
+    tool_view: Optional[ToolView] = None,
 ) -> Question:
     """
     Build the wave-planning Question sent to the LLM each iteration.
+
+    With *tool_view* None every tool's full descriptor is in Available Tools. With a
+    view, Available Tools lists the view's catalog compactly and the loaded tools'
+    descriptors go in Context, outside the part of the prompt a provider may cache.
 
     Deep-copies the user's original question (preserving attached documents,
     context blocks, examples, etc.) then augments it with:
@@ -168,7 +246,7 @@ def _build_wave_question(
 
     # Collect all tool descriptors from connected nodes via the host's tool
     # discovery mechanism.  Each descriptor is one compact JSON line.
-    tools_block = _build_all_tool_descriptions(context)
+    tools_block = _build_all_tool_descriptions(context) if tool_view is None else _build_tool_catalog(tool_view)
 
     # memory.peek is injected separately from regular tools because:
     # 1. It is executed locally in the executor (not routed through the tool
@@ -369,24 +447,7 @@ def _build_wave_question(
         check_rule += _CHECK_ARGS_RULE.format(tool=verify_tool, args=json.dumps(verify_args, ensure_ascii=False))
     q.addInstruction(
         'Rules',
-        """\
-        - Think things through thoroughly. Plan accordingly. Prefer the simplest
-        approach that answers the question — do not over-analyze.
-"""
-        + check_rule
-        + """
-        - Once all the information needed to complete the goal is available in scratch or
-        previous results, write the answer now and set done=true. Presenting the answer is
-        not a future plan step — it happens in the same response where you recognize the
-        data is ready.
-        - Only use the tools listed in Available Tools. Do not invent or modify tool names.
-        - Check before fetching: Before any tool call — including memory.peek — check scratch and
-        the result previews first. If the values you need are already there, do not fetch them.
-        Missing secondary fields (units, labels, timestamps) are not blockers; if the primary
-        values are known, set done=true. A plan unchanged from the previous response means you
-        are not making progress — stop or change approach.
-        - Remove peek results in the same response you capture their data in scratch. Do not
-        carry transient peek results forward into subsequent steps.""",
+        _RULES_HEAD + check_rule + _RULES_MIDDLE + (_LOAD_RULE if tool_view is not None else '') + _RULES_TAIL,
     )
 
     #    - No-progress: If you have made two or more tool calls that return structurally
@@ -406,6 +467,14 @@ def _build_wave_question(
     # exactly where it left off: remembered memory keys, extracted values,
     # intermediate calculations, observations about tool results.
     # Only injected when non-empty to avoid a meaningless empty context block.
+    # The full schemas of the tools loaded so far, when the catalog is shown compactly.
+    # In Context, so loading a tool never changes the start of the prompt.
+    if tool_view is not None and tool_view.loaded:
+        q.addContext(
+            'Loaded tool schemas (call these with the arguments their inputSchema requires):\n'
+            + '\n'.join(json.dumps(td, ensure_ascii=False) for td in tool_view.loaded)
+        )
+
     if scratch:
         q.addContext(f'Scratch (your working notes from previous steps):\n{scratch}')
 
@@ -576,11 +645,13 @@ def plan(
     current_scratch: str = '',
     verify_tool: str = '',
     verify_args: Optional[Dict[str, Any]] = None,
+    tool_view: Optional[ToolView] = None,
 ) -> Dict[str, Any]:
     """
     Run the single-phase planning cycle and return the plan dict.
 
-    Presents full tool descriptions for all available tools in one LLM call.
+    Presents full tool descriptions for all available tools in one LLM call, or,
+    with *tool_view*, one line per tool and the full schemas of the loaded ones.
     The LLM either plans a wave of tool calls or returns a final answer directly.
 
     Args:
@@ -592,6 +663,7 @@ def plan(
         current_scratch: The LLM's working notes from the previous iteration.
         verify_tool: The tool that checks the work (node config), or '' for none.
         verify_args: The exact arguments of the check call (node config), or None for any.
+        tool_view: The compact catalog and loaded schemas for this prompt, or None for every schema.
 
     Returns:
         The reply checked by ``normalize_plan``, plus ``problems`` (calls that were
@@ -605,6 +677,7 @@ def plan(
         scratch=current_scratch,
         verify_tool=verify_tool,
         verify_args=verify_args,
+        tool_view=tool_view,
     )
     debug(f'plan: request {wave_prompt.getPrompt()}')
 

@@ -543,3 +543,79 @@ def test_no_stop_reason_when_the_trace_has_none(raw):
     payload = driver.run_agent(_FakeIInstance(), _FakeQuestion())
 
     assert 'stop_reason' not in payload['meta']
+
+
+# ---------------------------------------------------------------------------
+# Token usage and the driver trace in the envelope a caller of the agent gets
+# ---------------------------------------------------------------------------
+
+
+def test_envelope_meta_carries_the_turn_usage():
+    """The envelope holds the same turn total as the answers lane."""
+    from ai.web.metrics.metrics import metrics
+
+    metrics.reset()
+    ii = _FakeIInstance()
+    payload = _make_driver(_report_two_calls, require_tool_call=False).run_agent(
+        ii, _FakeQuestion(), emit_answers_lane=True
+    )
+
+    usage = payload['meta']['usage']
+    assert usage == ii.instance.written[0].tokens
+    assert usage['calls'] == 2
+    assert len(usage['breakdown']) == 2
+
+
+def test_envelope_meta_carries_a_single_call_record_without_the_answers_lane():
+    """Called as a tool (no answers lane), one model call is the record itself, with no calls key."""
+    from ai.web.metrics.metrics import metrics
+
+    def one_call(_driver, _context, _question):
+        report_llm_tokens(100, 10, model='fake', cache_creation_tokens=5000)
+        return ('done', {'raw': 'ok'})
+
+    metrics.reset()
+    ii = _FakeIInstance()
+    payload = _make_driver(one_call, require_tool_call=False).run_agent(ii, _FakeQuestion(), emit_answers_lane=False)
+
+    assert payload['meta']['usage'] == {
+        'input': 100,
+        'output': 10,
+        'cache_read': 0,
+        'cache_creation': 5000,
+        'model': 'fake',
+    }
+    assert 'calls' not in payload['meta']['usage']
+    assert ii.instance.written == []
+
+
+def test_envelope_meta_has_no_usage_when_none_was_reported():
+    payload = _make_driver(lambda self, ctx, q: ('ok', None), require_tool_call=False).run_agent(
+        _FakeIInstance(), _FakeQuestion(), emit_answers_lane=False
+    )
+
+    assert 'usage' not in payload['meta']
+
+
+def test_envelope_stack_carries_the_driver_trace_fields():
+    """The Wave trace's catalog fields reach a caller through the stack's framework output."""
+    trace = {
+        'stop_reason': 'done',
+        'tool_catalog': {
+            'mode': 'full',
+            'collision': 'tools.load',
+            'fallback_step': 2,
+            'loaded_before_fallback': ['a'],
+        },
+        'loaded_tools': None,
+        'planning_steps': 2,
+        'waves': [],
+    }
+    payload = _make_driver(lambda self, ctx, q: ('ok', trace), require_tool_call=False).run_agent(
+        _FakeIInstance(), _FakeQuestion(), emit_answers_lane=False
+    )
+
+    raw = payload['stack'][0]['payload']
+    assert raw['tool_catalog'] == trace['tool_catalog']
+    assert raw['loaded_tools'] is None
+    assert raw['planning_steps'] == 2
