@@ -67,13 +67,15 @@ const ENGINE_DIR = path.join(REPO_ROOT, 'dist', 'server');
 const UI_DIR = path.join(REPO_ROOT, 'apps', 'rocket-ui');
 const SHELL_DIR = path.join(REPO_ROOT, 'packages', 'shell');
 
-/** The most stacks run --slots starts side by side. */
-export const MAX_SLOTS = 8;
+/** The most stacks run --slots starts side by side: each engine's 10,000-port task window has to fit below 60,000. */
+export const MAX_SLOTS = 4;
 
 /** Where one slot lives on the machine. Slot 0 is the stack as it always ran. */
 export interface SlotPlan {
 	slot: number;
 	enginePort: number;
+	/** The engine's --base_port: its pipeline tasks take ports from here to here + 9,999, so two engines sharing a window race for the same ports. */
+	taskBasePort: number;
 	uiPort: number;
 	shellPort: number;
 	/** The generated dev config, relative to each dev server's package folder. */
@@ -84,12 +86,14 @@ export interface SlotPlan {
 
 /**
  * A slot's ports, config file name and folder. Slot 0 keeps 5565, 3010 and
- * 3000; slot k keeps to 5600 + 10k for the engine and 3100 + 10k for the shell,
- * with rocket-ui one above it.
+ * 3000 and the engine's default task window from 20000; slot k keeps to
+ * 5600 + 10k for the engine, 3100 + 10k for the shell with rocket-ui one above
+ * it, and a task window from 20000 + 10000k.
  */
 export function slotPlan(slot: number): SlotPlan {
-	if (slot === 0) return { slot, enginePort: 5565, uiPort: 3010, shellPort: 3000, wrapper: '.rocketride/browser-agent-evals.rsbuild.config.mts', dir: 'stack' };
-	return { slot, enginePort: 5600 + 10 * slot, uiPort: 3101 + 10 * slot, shellPort: 3100 + 10 * slot, wrapper: `.rocketride/browser-agent-evals-${slot}.rsbuild.config.mts`, dir: `stack-${slot}` };
+	const taskBasePort = 20000 + 10000 * slot;
+	if (slot === 0) return { slot, enginePort: 5565, taskBasePort, uiPort: 3010, shellPort: 3000, wrapper: '.rocketride/browser-agent-evals.rsbuild.config.mts', dir: 'stack' };
+	return { slot, enginePort: 5600 + 10 * slot, taskBasePort, uiPort: 3101 + 10 * slot, shellPort: 3100 + 10 * slot, wrapper: `.rocketride/browser-agent-evals-${slot}.rsbuild.config.mts`, dir: `stack-${slot}` };
 }
 
 /** What the trial records about the engine. */
@@ -205,7 +209,7 @@ async function startLocal(opts: StackOptions): Promise<Stack> {
 		}
 		// step: the engine, the env file's model keys in its environment only, its store in the run folder
 		const env: NodeJS.ProcessEnv = { ...engineEnv(opts.modelKeys), RR_STORE_URL: `filesystem://${store}` };
-		begin('engine', './engine', ['ai/eaas.py', `--port=${plan.enginePort}`], engineDir, env);
+		begin('engine', './engine', ['ai/eaas.py', `--port=${plan.enginePort}`, `--base_port=${plan.taskBasePort}`], engineDir, env);
 		opts.log(`starting the engine from ${path.relative(REPO_ROOT, engineDir)} on ${plan.enginePort}, store ${store}`);
 		const engineUri = `http://127.0.0.1:${plan.enginePort}`;
 		const version = await waitFor('the engine to answer /version', 300_000, () => httpJson(`${engineUri}/version`), started);

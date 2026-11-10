@@ -56,11 +56,15 @@ async function loadWrapper(text: string): Promise<LoadedConfig> {
 }
 
 test('slot 0 keeps the stack it always had, and no two slots share a port, a config file or a folder', () => {
-	assert.deepEqual(slotPlan(0), { slot: 0, enginePort: 5565, uiPort: 3010, shellPort: 3000, wrapper: '.rocketride/browser-agent-evals.rsbuild.config.mts', dir: 'stack' });
-	assert.deepEqual([slotPlan(1).enginePort, slotPlan(1).shellPort, slotPlan(1).uiPort], [5610, 3110, 3111]);
+	assert.deepEqual(slotPlan(0), { slot: 0, enginePort: 5565, taskBasePort: 20000, uiPort: 3010, shellPort: 3000, wrapper: '.rocketride/browser-agent-evals.rsbuild.config.mts', dir: 'stack' });
+	assert.deepEqual([slotPlan(1).enginePort, slotPlan(1).shellPort, slotPlan(1).uiPort, slotPlan(1).taskBasePort], [5610, 3110, 3111, 30000]);
 	const plans = Array.from({ length: MAX_SLOTS }, (_, k) => slotPlan(k));
 	const ports = plans.flatMap((p) => [p.enginePort, p.uiPort, p.shellPort]);
 	assert.equal(new Set(ports).size, ports.length);
+	const windows = plans.map((p) => [p.taskBasePort, p.taskBasePort + 9999]).sort((a, b) => a[0] - b[0]);
+	for (let k = 1; k < windows.length; k++) assert.ok(windows[k][0] > windows[k - 1][1], `task windows ${windows[k - 1]} and ${windows[k]} overlap`);
+	assert.ok(windows.at(-1)![1] <= 65535, 'the last task window fits below 65536');
+	assert.ok(windows.every(([lo]) => !ports.some((p) => p >= lo && p <= lo + 9999)), 'no stack port sits in a task window');
 	assert.equal(new Set(plans.map((p) => p.wrapper)).size, MAX_SLOTS);
 	assert.equal(new Set(plans.map((p) => p.dir)).size, MAX_SLOTS);
 });
