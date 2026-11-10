@@ -717,7 +717,8 @@ export class WebDevSession {
 				await this.refreshRegistrationMeta(pkg as Record<string, unknown>);
 			}
 
-			// step: emit + instrument every source module; css rides verbatim
+			// step: emit + instrument every source module; css rides verbatim; a
+			// .pipe is JSON, linked as its default export as deployed builds do
 			const linkInputs = new Map<string, LinkModule>();
 			for (const [path, model] of this.models) {
 				if (/\.(ts|tsx)$/.test(path) && !path.endsWith('.d.ts')) {
@@ -730,6 +731,8 @@ export class WebDevSession {
 					}
 				} else if (path.endsWith('.css')) {
 					linkInputs.set(path, { js: model.getValue() });
+				} else if (path.endsWith('.pipe')) {
+					linkInputs.set(path, { js: `export default ${model.getValue()};` });
 				}
 			}
 			if (!linkInputs.has(ENTRY_PATH)) {
