@@ -1014,6 +1014,12 @@ class WebServer:
 
         # Add the route to the FastAPI application's router
         self.app.router.add_api_route(path, routeHandler, methods=methods, deprecated=deprecated)
+        catch_all = getattr(self, '_catch_all', None)
+        if catch_all is not None:
+            # Keep the catch-all last, or a route added after it (a module
+            # loaded through /use) would never match.
+            self.app.router.routes.remove(catch_all)
+            self.app.router.routes.append(catch_all)
 
         # Record the pairs only once the router has accepted them, so a
         # rejected registration stays retryable.
@@ -1033,6 +1039,11 @@ class WebServer:
             self._private_paths.append(path)
             # Invalidate the compiled cache so it is rebuilt on the next is_public_route() call
             self._compiled_private_paths = None
+
+    def add_catch_all(self, route: Any) -> None:
+        """Register ``route`` to match after every other route, including routes ``add_route`` adds later."""
+        self._catch_all = route
+        self.app.router.routes.append(route)
 
     def add_socket(
         self,

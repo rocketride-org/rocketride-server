@@ -309,8 +309,8 @@ async def register_public_pages(server: Any) -> None:
     """Register the catch-all last and build the first aggregate.
 
     Call at the end of server startup, after every module's initModule and
-    the account layer's init_account, and before serving. Routes registered
-    after this are shadowed, for every method, by the catch-all.
+    the account layer's init_account, and before serving. Routes that
+    ``add_route`` registers later still match first: it keeps the catch-all last.
 
     Until the first build lands (it is bounded, see
     ``public_pages.build_at_startup``), the legacy page list serves, filtered
@@ -324,6 +324,6 @@ async def register_public_pages(server: Any) -> None:
     # match a claimed path that the auth predicate already exempted.
     route = Route(FALLBACK_PATH, public_page, include_in_schema=False)
     route.methods = None
-    server.app.router.routes.append(route)
+    server.add_catch_all(route)
     public_pages.swap(public_pages.legacy_aggregate(public_pages.live_conflict()))
     await public_pages.build_at_startup()
