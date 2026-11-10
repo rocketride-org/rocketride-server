@@ -33,6 +33,28 @@ assert SPEC.loader
 SPEC.loader.exec_module(VALIDATOR)
 
 
+def selector_properties(profiles, default):
+    """Express a profile map as the root-level selector the validator reads.
+
+    Each profile becomes one branch of a `profile` selector: the branch title
+    and flags carry over, and every other metadata value (`model`,
+    `modelTotalTokens`, `modelOutputTokens`) becomes a `constant` leaf of
+    that branch, which is how a service declares a profile's fixed values.
+    """
+    branches = {}
+    for key, metadata in profiles.items():
+        body = {k: v for k, v in metadata.items() if k in ('title', 'deprecated')}
+        constants = [
+            {'name': name, 'type': 'constant', 'default': value}
+            for name, value in metadata.items()
+            if name not in ('title', 'deprecated')
+        ]
+        if constants:
+            body['properties'] = constants
+        branches[key] = body
+    return [{'name': 'profile', 'type': 'string', 'title': 'Profile', 'default': default, 'enum': branches}]
+
+
 def write_node(tmp_path, *, class_type=('llm',), profiles, default, profile_section):
     node = tmp_path / 'fixture_node'
     node.mkdir()
@@ -41,8 +63,7 @@ def write_node(tmp_path, *, class_type=('llm',), profiles, default, profile_sect
         'classType': list(class_type),
         'capabilities': [],
         'lanes': {},
-        'fields': {},
-        'preconfig': {'default': default, 'profiles': profiles},
+        'properties': selector_properties(profiles, default),
     }
     (node / 'services.json').write_text(json.dumps(service))
     (node / 'README.md').write_text(
@@ -337,21 +358,21 @@ def test_profiles_reject_mismatched_model_identifier(tmp_path):
     profile_section = VALUE_SECTION_ALIASES.replace('`model-b`', '`wrong-model`')
     node = write_node(tmp_path, profiles=VALUE_PROFILES, default='profile-a', profile_section=profile_section)
 
-    assert any(check == 'Profiles model matches preconfig' for check, _ in failures(node))
+    assert any(check == 'Profiles model matches the selector' for check, _ in failures(node))
 
 
 def test_profiles_reject_mismatched_context_tokens(tmp_path):
     profile_section = VALUE_SECTION_ALIASES.replace('1,000,000', '999,999')
     node = write_node(tmp_path, profiles=VALUE_PROFILES, default='profile-a', profile_section=profile_section)
 
-    assert any(check == 'Profiles context tokens match preconfig' for check, _ in failures(node))
+    assert any(check == 'Profiles context tokens match the selector' for check, _ in failures(node))
 
 
 def test_profiles_reject_mismatched_output_tokens(tmp_path):
     profile_section = VALUE_SECTION_ALIASES.replace('64,000', '63,999')
     node = write_node(tmp_path, profiles=VALUE_PROFILES, default='profile-a', profile_section=profile_section)
 
-    assert any(check == 'Profiles output tokens match preconfig' for check, _ in failures(node))
+    assert any(check == 'Profiles output tokens match the selector' for check, _ in failures(node))
 
 
 def test_profiles_reject_missing_value_in_present_semantic_column(tmp_path):
@@ -360,7 +381,7 @@ def test_profiles_reject_missing_value_in_present_semantic_column(tmp_path):
     )
     node = write_node(tmp_path, profiles=VALUE_PROFILES, default='profile-a', profile_section=profile_section)
 
-    assert any(check == 'Profiles output tokens match preconfig' for check, _ in failures(node))
+    assert any(check == 'Profiles output tokens match the selector' for check, _ in failures(node))
 
 
 def test_profiles_accept_header_aliases_and_thousands_separators(tmp_path):
@@ -454,23 +475,20 @@ def write_multi_service_node(tmp_path, *, profile_section, class_type=('llm',)):
         'classType': list(class_type),
         'capabilities': [],
         'lanes': {},
-        'fields': {},
     }
     primary = {
         **base,
         'protocol': 'fixture_primary',
-        'preconfig': {
-            'default': 'primary-a',
-            'profiles': {'primary-a': {'title': 'Primary A'}, 'primary-b': {'title': 'Primary B'}},
-        },
+        'properties': selector_properties(
+            {'primary-a': {'title': 'Primary A'}, 'primary-b': {'title': 'Primary B'}}, 'primary-a'
+        ),
     }
     secondary = {
         **base,
         'protocol': 'fixture_secondary',
-        'preconfig': {
-            'default': 'secondary-a',
-            'profiles': {'secondary-a': {'title': 'Secondary A'}, 'secondary-b': {'title': 'Secondary B'}},
-        },
+        'properties': selector_properties(
+            {'secondary-a': {'title': 'Secondary A'}, 'secondary-b': {'title': 'Secondary B'}}, 'secondary-a'
+        ),
     }
     (node / 'services.json').write_text(json.dumps(primary))
     (node / 'services.secondary.json').write_text(json.dumps(secondary))
