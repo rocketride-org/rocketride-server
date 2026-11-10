@@ -3339,9 +3339,9 @@ export class RocketRideClient extends DAPClient {
 	 * }
 	 * ```
 	 */
-	async getServices(): Promise<ServicesResponse>;
-	async getServices(options: { definitions: true }): Promise<ServiceDefinitionsResponse>;
-	async getServices(options?: { definitions?: boolean }): Promise<ServicesResponse | ServiceDefinitionsResponse>;
+	getServices(): Promise<ServicesResponse>;
+	getServices(options: { definitions: true }): Promise<ServiceDefinitionsResponse>;
+	getServices(options?: { definitions?: boolean }): Promise<ServicesResponse | ServiceDefinitionsResponse>;
 	async getServices(options?: { definitions?: boolean }): Promise<ServicesResponse | ServiceDefinitionsResponse> {
 		// definitions: every entry is the FULL definition (configuration
 		// schema included) and there is no icons table — the bulk form of
