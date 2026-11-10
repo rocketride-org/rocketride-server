@@ -90,7 +90,7 @@ key. The default is **Mistral Large 3** (`mistral-large-2512`).
 
 Select **Custom model** to enter another Mistral model id, its context limit, and its
 output limit. The custom defaults are 32,768 context tokens and 209,715 output tokens;
-set the context limit to the model's actual window: the node logs a warning when a prompt
+set the context limit to the model's actual window: the node logs a debug-level message when a prompt
 exceeds it, but still sends the prompt, and Mistral may then reject the request. The output limit is not sent to Mistral (requests carry no
 `max_tokens` cap); the node lowers it to the context limit, requires at least 1,024,
 and reports it to nodes that ask for the model's output length.
