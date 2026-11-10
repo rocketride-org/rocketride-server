@@ -30,6 +30,11 @@ It supports exactly three things, Mustache-style:
                                renders once for any other truthy value, and
                                renders nothing for an absent, empty or false one
 
+There is no ``{{.}}`` (the current list item): it is an unsupported tag. A
+list item that is not a mapping adds no names, so a tag inside its section
+resolves against the enclosing contexts, as in Mustache: ``{{b}}`` inside
+``{{#a}}`` over ``['x']`` renders the root ``b``.
+
 A tag is one short line (at most 128 characters between the braces, none of
 them a brace): a stray ``{{`` is plain text and never swallows the markup that
 follows, and parsing stays linear in the template's size.
@@ -53,6 +58,8 @@ import html
 import re
 from typing import Any, Callable, List, Mapping, Optional, Tuple
 
+from rocketlib import debug
+
 _TAG = re.compile(r'\{\{(\{?)([^{}\n]{0,128})(\}?)\}\}')
 _NAME = re.compile(r'^[A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z_][A-Za-z0-9_-]*)*$')
 _MISSING = object()
@@ -73,8 +80,6 @@ Node = Tuple[Any, ...]
 
 
 def _log(issue: str) -> None:
-    from rocketlib import debug
-
     debug(f'[public_pages] template: {issue}')
 
 
@@ -85,12 +90,27 @@ def html_escape(value: str) -> str:
     safe in a URL attribute (``href``, ``src``, ...), an event handler,
     ``style``, ``<script>`` or an unquoted attribute: only server-derived
     values (``assets``) go there.
+
+    Args:
+        value: The text to substitute.
+
+    Returns:
+        ``value`` with ``&``, ``<``, ``>``, ``"`` and ``'`` escaped.
     """
     return html.escape(value, quote=True)
 
 
 def parse(template: str, on_issue: Callable[[str], None] = _log) -> List[Node]:
     """Parse a template into nodes; unsupported tags are dropped and reported.
+
+    Args:
+        template: The template text.
+        on_issue: Called with a description of each tag dropped or section
+            left open (default: a debug log line).
+
+    Returns:
+        The top-level nodes: ``('text', str)``, ``('var', name)`` and
+        ``('section', name, children)``.
 
     Raises:
         TemplateError: sections nest deeper than ``MAX_SECTION_DEPTH``.
@@ -154,31 +174,64 @@ def _scalar(value: Any) -> Optional[str]:
     return None
 
 
-def _render(nodes: List[Node], contexts: List[Any], escape: Callable[[str], str], on_issue, out: List[str]) -> None:
+def _render(
+    nodes: List[Node],
+    contexts: List[Any],
+    escape: Callable[[str], str],
+    on_issue: Callable[[str], None],
+    out: List[str],
+) -> None:
+    """Append the rendering of ``nodes`` to ``out``; ``contexts`` is the lookup stack, innermost last."""
     for node in nodes:
-        kind = node[0]
-        if kind == 'text':
+        if node[0] == 'text':
             out.append(node[1])
-        elif kind == 'var':
-            value = _lookup(contexts, node[1])
-            text = None if value is _MISSING else _scalar(value)
-            if text is None:
-                on_issue(f'{{{{{node[1]}}}}} names an unknown or non-scalar field (rendered empty)')
-                continue
-            out.append(escape(text))
+        elif node[0] == 'var':
+            _render_var(node[1], contexts, escape, on_issue, out)
         else:
-            value = _lookup(contexts, node[1])
-            if value is _MISSING:
-                on_issue(f'section {{{{#{node[1]}}}}} names an unknown field (rendered empty)')
-                continue
-            if isinstance(value, list):
-                for item in value:
-                    _render(node[2], contexts + [item], escape, on_issue, out)
-            elif isinstance(value, Mapping):
-                if value:
-                    _render(node[2], contexts + [value], escape, on_issue, out)
-            elif value:
-                _render(node[2], contexts, escape, on_issue, out)
+            _render_section(node[1], node[2], contexts, escape, on_issue, out)
+
+
+def _render_var(
+    name: str,
+    contexts: List[Any],
+    escape: Callable[[str], str],
+    on_issue: Callable[[str], None],
+    out: List[str],
+) -> None:
+    """Append the escaped scalar ``name`` resolves to; an unknown or non-scalar field renders empty (reported)."""
+    # _MISSING is not a scalar either.
+    text = _scalar(_lookup(contexts, name))
+    if text is None:
+        on_issue(f'{{{{{name}}}}} names an unknown or non-scalar field (rendered empty)')
+        return
+    out.append(escape(text))
+
+
+def _render_section(
+    name: str,
+    children: List[Node],
+    contexts: List[Any],
+    escape: Callable[[str], str],
+    on_issue: Callable[[str], None],
+    out: List[str],
+) -> None:
+    """Append ``children`` once per list item, once inside a non-empty mapping, or once for any other truthy value.
+
+    An unknown field renders nothing (reported). Each list item is pushed as
+    a context; one that is not a mapping adds no names (see the module
+    docstring).
+    """
+    value = _lookup(contexts, name)
+    if value is _MISSING:
+        on_issue(f'section {{{{#{name}}}}} names an unknown field (rendered empty)')
+        return
+    if isinstance(value, list):
+        for item in value:
+            _render(children, contexts + [item], escape, on_issue, out)
+    elif isinstance(value, Mapping) and value:
+        _render(children, contexts + [value], escape, on_issue, out)
+    elif value:
+        _render(children, contexts, escape, on_issue, out)
 
 
 def render(
@@ -188,6 +241,17 @@ def render(
     on_issue: Callable[[str], None] = _log,
 ) -> str:
     """Render ``template`` against ``context``, escaping every substituted value with ``escape``.
+
+    Args:
+        template: The template text (a snapshot, decoded).
+        context: The root context: the names the server provides
+            (``ROOT_NAMES``) and the page's bound data.
+        escape: Applied to every substituted value (default: ``html_escape``).
+        on_issue: Called with a description of each dropped tag and each
+            unknown or non-scalar field (default: a debug log line).
+
+    Returns:
+        The rendered text.
 
     Raises:
         TemplateError: sections nest deeper than ``MAX_SECTION_DEPTH``.

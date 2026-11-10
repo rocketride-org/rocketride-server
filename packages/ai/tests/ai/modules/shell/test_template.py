@@ -65,6 +65,13 @@ def test_outer_context_visible_inside_sections():
     assert render('{{#apps}}{{plan.price}}{{/apps}}', CTX) == '2020'
 
 
+def test_a_list_item_that_is_not_a_mapping_falls_through_to_the_outer_context():
+    issues = []
+    out = render('{{#a}}[{{b}}{{.}}]{{/a}}', {'a': ['x', 'y'], 'b': 'B'}, on_issue=issues.append)
+    assert out == '[B][B]'
+    assert len(issues) == 1 and '{{.}}' in issues[0]
+
+
 def test_unknown_fields_render_empty_and_log():
     issues = []
     out = render('a{{nope}}b{{plan.nope}}c{{#ghost}}x{{/ghost}}d{{apps}}e', CTX, on_issue=issues.append)

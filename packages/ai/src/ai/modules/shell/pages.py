@@ -333,6 +333,13 @@ def snapshot_path(page: Page) -> str:
     The snapshot grammar (a relative path without dot segments, re-checked
     here) keeps the path inside that tree.
 
+    Args:
+        page: A page of the aggregate, with its production version's
+            ``dist_dir`` and ``version``.
+
+    Returns:
+        The snapshot's store path, ``<dist_dir>/<snapshot>``.
+
     Raises:
         ValueError: the page has no production version, or the snapshot path
             is malformed.
@@ -345,7 +352,14 @@ def snapshot_path(page: Page) -> str:
 
 
 def assets_base(page: Page) -> str:
-    """The URL of the page's production build output, ``/apps/<appId>/v<N>``: the snapshot's ``{{assets}}``."""
+    """The URL of the page's production build output: the snapshot's ``{{assets}}``.
+
+    Args:
+        page: A page of the aggregate, with its production ``version``.
+
+    Returns:
+        ``/apps/<appId>/v<N>``, where that version's build output is served.
+    """
     return f'/apps/{page.app_id}/v{page.version}'
 
 
