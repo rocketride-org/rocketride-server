@@ -23,7 +23,9 @@ synchronous ``TestClient``:
 from __future__ import annotations
 
 import asyncio
+import os
 import re
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -506,6 +508,26 @@ def test_crawler_gets_the_same_document_with_cache_headers(shell_root, app_url):
     assert resp.text == human.text and '<title>Pricing</title>' in resp.text
     assert resp.headers['cache-control'] == 'public, max-age=3600'
     assert resp.headers['vary'] == 'User-Agent'
+
+
+def test_the_shell_document_is_read_once_per_page_and_build(shell_root, app_url, monkeypatch):
+    # Reading and rewriting the shell file on every request would put disk I/O
+    # and regex passes on the hottest public path.
+    reads = []
+    real = Path.read_text
+    monkeypatch.setattr(Path, 'read_text', lambda self, *a, **k: reads.append(self.name) or real(self, *a, **k))
+    _use(Page('/pricing', 'rocketride.home', 'Pricing', 'Plans.'))
+    client = _client()
+    for _ in range(3):
+        assert client.get('/pricing', headers={'User-Agent': BROWSER}).status_code == 200
+    assert reads == ['index.html']
+    _use(Page('/pricing', 'rocketride.home', 'Pricing v2', 'Plans.'))  # a swap
+    assert '<title>Pricing v2</title>' in client.get('/pricing', headers={'User-Agent': BROWSER}).text
+    index = shell_root / 'index.html'
+    stat = index.stat()
+    os.utime(index, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))  # a new shell build
+    client.get('/pricing', headers={'User-Agent': BROWSER})
+    assert reads == ['index.html'] * 3
 
 
 @pytest.mark.parametrize('ua', [GOOGLEBOT, BROWSER])
