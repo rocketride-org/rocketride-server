@@ -40,7 +40,8 @@ block goes back only when nothing in it is in use, and the cuBLAS workspace a th
 with its first matrix product lives as long as the thread's handle; allocated inside a
 large cached block, it would keep the whole block. So the guard creates that workspace,
 when a thread first enters on a GPU, in a memory pool of its own, and an idle process
-keeps its models and one workspace per thread (8 MiB, 32 MiB on Hopper).
+keeps its models and one workspace per thread (8 MiB, 32 MiB on Hopper). A thread that
+ran a matrix product before it first entered keeps its workspace where it was.
 
 With ``--modelserver`` inference runs in the server, which has its own dispatcher, and
 the guard is a no-op.
@@ -166,7 +167,7 @@ def _cuda_warm(device: str) -> Warm:
     return warm
 
 
-def _busy_pids(pynvml: Any, handle: Any, window_s: float) -> Optional[Set[int]]:
+def _busy_pids(pynvml: Any, handle: Any, window_s: float) -> Set[int]:
     """Find the processes NVML saw busy on a GPU in the last ``window_s`` seconds.
 
     Args:
@@ -176,13 +177,18 @@ def _busy_pids(pynvml: Any, handle: Any, window_s: float) -> Optional[Set[int]]:
 
     Returns:
         The pids with a utilisation sample above zero; empty when NVML has no sample at all
-        (nothing ran); ``None`` when it cannot report per-process utilisation.
+        (nothing ran).
+
+    Raises:
+        Exception: Any other NVML error, a missing call included, when it cannot report
+            per-process utilisation.
     """
     try:
         samples = pynvml.nvmlDeviceGetProcessUtilization(handle, int((time.time() - window_s) * 1e6))
     except Exception as e:
         # NVML answers "not found" when no process had a sample in the window
-        if getattr(e, 'value', None) == getattr(pynvml, 'NVML_ERROR_NOT_FOUND', None):
+        not_found = getattr(pynvml, 'NVML_ERROR_NOT_FOUND', None)
+        if not_found is not None and getattr(e, 'value', None) == not_found:
             return set()
         raise
     return {s.pid for s in samples if s.smUtil > 0 or s.memUtil > 0}
@@ -271,7 +277,7 @@ def _nvml_neighbours(device: str) -> Neighbours:
         """Tell whether another engine process busy on the device may hold it.
 
         Returns:
-            True if NVML lists one, or cannot tell.
+            True if NVML lists one that counts (see ``_has_neighbour``), or cannot be read.
         """
         try:
             import psutil

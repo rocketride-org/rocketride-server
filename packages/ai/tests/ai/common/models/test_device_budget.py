@@ -449,22 +449,23 @@ def test_a_failed_memory_read_leaves_the_queue():
 
 def test_the_cache_is_released_once_the_device_stays_idle(monkeypatch):
     """The cache goes back only after the last call left and the device stayed idle."""
-    monkeypatch.setattr(budgetmod, 'IDLE_RELEASE_S', 0.05)
+    clock = _Clock(monkeypatch)
     release = _Release()
     budget = _gpu(_Probe(free=4000), release=release)
     first, second = _Call(budget, 1000), _Call(budget, 1000)
     assert first.enters() and second.enters()
 
     first.leave()
-    time.sleep(_STAYS_OUT)
+    clock.advance(budget, budgetmod.IDLE_RELEASE_S)
     assert release.count == 0  # a call is still inside
     second.leave()
-    assert _wait_for(lambda: release.count == 1)
+    clock.advance(budget, budgetmod.IDLE_RELEASE_S)
+    assert release.count == 1
 
 
 def test_the_cache_is_kept_for_a_waiting_call(monkeypatch):
     """A call that leaves while another waits keeps the cache for it."""
-    monkeypatch.setattr(budgetmod, 'IDLE_RELEASE_S', 0.05)
+    clock = _Clock(monkeypatch)
     release = _Release()
     budget = _gpu(_Probe(free=1000), release=release)
     first = _Call(budget, 1000)
@@ -474,10 +475,11 @@ def test_the_cache_is_kept_for_a_waiting_call(monkeypatch):
 
     first.leave()
     assert second.enters()
-    time.sleep(_STAYS_OUT)
+    clock.advance(budget, budgetmod.IDLE_RELEASE_S)
     assert release.count == 0
     second.leave()
-    assert _wait_for(lambda: release.count == 1)
+    clock.advance(budget, budgetmod.IDLE_RELEASE_S)
+    assert release.count == 1
 
 
 def test_back_to_back_calls_keep_the_cache(monkeypatch):
@@ -515,17 +517,20 @@ def test_a_call_inside_when_the_idle_spell_ends_keeps_the_cache(monkeypatch):
 
 def test_each_idle_spell_releases_once(monkeypatch):
     """A release follows every idle spell, and only one per spell."""
-    monkeypatch.setattr(budgetmod, 'IDLE_RELEASE_S', 0.05)
+    clock = _Clock(monkeypatch)
     release = _Release()
     budget = _gpu(_Probe(free=1e6), release=release)
     with budget.reserve(100):
         pass
-    assert _wait_for(lambda: release.count == 1)
-    time.sleep(_STAYS_OUT)
+    clock.advance(budget, budgetmod.IDLE_RELEASE_S)
+    assert release.count == 1
+    for _ in range(3):
+        clock.advance(budget, budgetmod.IDLE_RELEASE_S)
     assert release.count == 1  # still idle: nothing more to hand back
     with budget.reserve(100):
         pass
-    assert _wait_for(lambda: release.count == 2)
+    clock.advance(budget, budgetmod.IDLE_RELEASE_S)
+    assert release.count == 2
 
 
 def test_drains_do_not_start_a_thread_each(monkeypatch):
@@ -876,6 +881,18 @@ def test_another_utilisation_error_is_not_an_empty_answer():
         raise RuntimeError('not supported')
 
     nvml = types.SimpleNamespace(nvmlDeviceGetProcessUtilization=util, NVML_ERROR_NOT_FOUND=6)
+    with pytest.raises(RuntimeError):
+        budgetmod._busy_pids(nvml, 'handle', 10.0)
+
+
+def test_an_error_is_not_an_empty_answer_without_the_not_found_code():
+    """A binding without NVML's not-found code cannot tell "nothing ran", so every error is raised."""
+
+    def util(handle, since):
+        """Raise an error that carries no NVML code."""
+        raise RuntimeError('not supported')
+
+    nvml = types.SimpleNamespace(nvmlDeviceGetProcessUtilization=util)
     with pytest.raises(RuntimeError):
         budgetmod._busy_pids(nvml, 'handle', 10.0)
 
