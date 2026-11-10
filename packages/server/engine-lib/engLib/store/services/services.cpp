@@ -47,6 +47,13 @@ static constexpr size_t MaxExpanded = 100000;
 
 //-------------------------------------------------------------------------
 /// @details
+///		The most JSON values the custom services of one call may expand
+///		to together, the registered nodes resolved again with them included
+//-------------------------------------------------------------------------
+static constexpr size_t MaxExpandedPerCall = 10 * MaxExpanded;
+
+//-------------------------------------------------------------------------
+/// @details
 ///		The JSON values one more expansion of this field copies
 //-------------------------------------------------------------------------
 static size_t weigh(const json::Value &value) noexcept {
@@ -634,10 +641,16 @@ ErrorOr<IServices::ServiceSchema> IServices::getField(
     // listed many times is copied again each time, with no cycle
     const auto expand = localfcn(size_t count)->Error {
         context.expanded += count;
-        if (context.expanded <= MaxExpanded) return {};
-        return APERR(Ec::InvalidParam, "The fields of",
-                     context.def.logicalType, "expand to more than",
-                     MaxExpanded, "JSON values");
+        if (context.expanded > MaxExpanded)
+            return APERR(Ec::InvalidParam, "The fields of",
+                         context.def.logicalType, "expand to more than",
+                         MaxExpanded, "JSON values");
+        if (!context.total) return {};
+        *context.total += count;
+        if (*context.total <= MaxExpandedPerCall) return {};
+        return APERR(Ec::InvalidParam,
+                     "The custom services expand to more than",
+                     MaxExpandedPerCall, "JSON values together");
     };
 
     // Process a reference
@@ -1470,6 +1483,9 @@ Error IServices::updateDefinitions(ServiceDefinitions &services) {
         return _mv(value);
     };
 
+    // JSON values expanded by every definition of a call, re-passes included
+    size_t total = 0;
+
     //
     // Generate the serviceSchema for the given service definition
     //
@@ -1477,6 +1493,7 @@ Error IServices::updateDefinitions(ServiceDefinitions &services) {
         // Create the context we pass around
         ServiceContext context(def);
         context.scope = &services;
+        context.total = &services != &m_services ? &total : nullptr;
 
         // Default to resolved
         def.isResolved = true;

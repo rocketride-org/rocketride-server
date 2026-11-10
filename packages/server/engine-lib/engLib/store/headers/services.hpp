@@ -236,8 +236,10 @@ private:
         const ServiceDefinitions *scope = nullptr;
         std::vector<iText> chain;
 
-        // JSON values expanded so far for this definition
+        // JSON values expanded so far for this definition, and by every
+        // definition of the call (nullptr on the start-up scan)
         size_t expanded = 0;
+        size_t *total = nullptr;
     };
 
     //-------------------------------------------------------------

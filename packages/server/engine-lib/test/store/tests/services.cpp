@@ -216,6 +216,23 @@ TEST_CASE("store::Services") {
             pickSection["properties"].append("custom_za.pick");
         picks["shape"].append(pickSection);
 
+        // Each definition stays under its own budget (about 60 000 JSON
+        // values); twenty of them together go past the call's
+        json::Value many = json::arrayValue;
+        for (int copy = 0; copy < 20; copy++) {
+            const auto name = _ts("custom_many", copy);
+            auto def = customNode(name.c_str());
+            auto &field = def["fields"][_ts(name, ".big")];
+            field["type"] = "string";
+            for (int value = 0; value < 1000; value++)
+                field["enum"].append(_ts("v", value));
+            json::Value section = R"({"section": "Pipe"})"_json;
+            for (int ref = 0; ref < 60; ref++)
+                section["properties"].append(_ts(name, ".big"));
+            def["shape"].append(section);
+            many.append(def);
+        }
+
         // Two combos that each wait for the other never resolve
         auto waitsA = customNode("custom_n");
         waitsA["classType"] = customList({"custom_kind_n"});
@@ -256,6 +273,7 @@ TEST_CASE("store::Services") {
             customList({heavy}),
             customList({inlineBig, picks}),
             customList({waitsA, waitsB}),
+            many,
         };
         for (const auto &custom : refused)
             REQUIRE_FALSE(IServices::withCustomServices(custom));
@@ -275,6 +293,14 @@ TEST_CASE("store::Services") {
             CHECK(std::string{expanded.ccode().message()}.find(
                       "expand to more than") != std::string::npos);
         }
+
+        // One of them alone is accepted; the call's budget names the list
+        REQUIRE(IServices::withCustomServices(customList({many[0]})));
+        auto together = IServices::withCustomServices(many);
+        REQUIRE_FALSE(together);
+        CHECK(std::string{together.ccode().message()}.find(
+                  "expand to more than 1000000 JSON values together") !=
+              std::string::npos);
 
         // A registered type keeps its own definition
         REQUIRE(IServices::getServiceDefinition(registeredType()));
