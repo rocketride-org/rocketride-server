@@ -103,7 +103,8 @@ def build_context(wave, tools: List[Dict[str, Any]], *, invoke: Callable = None,
     )
 
 
-def _question(wave, *, rich: bool):
+def question(wave, *, rich: bool = False):
+    """The scenarios' question; *rich* adds an instruction, history, context and a document."""
     from ai.common.schema import Doc, QuestionHistory
 
     q = wave.planner.Question()
@@ -129,7 +130,7 @@ def capture_prompts(wave, *, tools, replies: List[Dict[str, Any]], budget: Any =
 
     driver.call_llm_json = call_llm_json
     driver.call_llm = lambda context, question: 'OK'
-    driver._run(context=build_context(wave, tools), question=_question(wave, rich=rich))
+    driver._run(context=build_context(wave, tools), question=question(wave, rich=rich))
     return prompts
 
 
