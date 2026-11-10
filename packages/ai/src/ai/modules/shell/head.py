@@ -73,7 +73,17 @@ def inject_head(
     Existing tags of the same kinds are removed first; the new block goes
     right after the head's charset declaration, which must stay within the
     document's first 1024 bytes, else right after <head> (or after <html>,
-    or at the very start).
+    or at the very start). Every value is HTML-escaped.
+
+    Args:
+        document: The HTML document (the shell's, or a page snapshot).
+        title: The document title; also ``og:title``.
+        description: The meta description and ``og:description``; none when empty.
+        canonical: The absolute canonical URL and ``og:url``; none when empty.
+        noindex: Whether to add ``<meta name="robots" content="noindex">``.
+
+    Returns:
+        The document with the new block in its head.
     """
     # Only the head's tags are replaced: an inline SVG <title> in the body,
     # or a '<title>' string in a script, is content. Without a <head>, the

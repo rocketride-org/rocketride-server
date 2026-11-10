@@ -116,6 +116,13 @@ def is_public_path(path: str) -> bool:
     a 401. A path any real route's pattern matches stays private, whatever
     the aggregate claims. A route the check cannot reason about (no path
     pattern) fails closed.
+
+    Args:
+        path: The path the router matches (``route_path``: ``root_path`` stripped).
+
+    Returns:
+        True when a page handler answers ``path``; False when a real route
+        does, or the check cannot tell.
     """
     route = _first_route_matching(path, _real_routes(_web_server))
     return route is not None and getattr(route, 'endpoint', None) is public_page

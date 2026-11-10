@@ -1049,6 +1049,10 @@ class WebServer:
         """Register ``route`` to match after every other route, including routes ``add_route`` adds later.
 
         A route appended to ``app.router.routes`` directly is not moved ahead of it.
+
+        Args:
+            route: The catch-all route (the public-page handler), registered
+                once at the end of startup.
         """
         self._catch_all = route
         self.app.router.routes.append(route)

@@ -12,6 +12,13 @@ def route_path(scope: Scope) -> str:
 
     Must match Starlette's router (``starlette._utils.get_route_path``), or
     the auth decision and the route that serves the request see different paths.
+
+    Args:
+        scope: The ASGI scope of an HTTP or websocket request.
+
+    Returns:
+        The path below ``root_path``; ``''`` when the path is ``root_path``
+        itself, and the full path when it is not under ``root_path``.
     """
     path: str = scope['path']
     root_path = scope.get('root_path', '')
