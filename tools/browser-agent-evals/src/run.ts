@@ -346,6 +346,7 @@ async function run(args: Args, modelKeys: HeldKey[]): Promise<number> {
 				.map(([v, n]) => `${n} ${v}`)
 				.join(', ')}`
 		);
+		log(`estimated cost $${s.totals.estimatedCostUsd.toFixed(2)}, trial time ${Math.round(s.totals.trialWallMs / 60_000)} min summed`);
 		log(`report: ${report}`);
 	} finally {
 		process.removeListener('SIGINT', stopStack);

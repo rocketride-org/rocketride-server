@@ -54,6 +54,12 @@ export interface ResultsTrial {
 	retryOf?: number;
 	status: RunStatus;
 	why: string;
+	/** The turn's steps (waves), from the saved turn; null when there was no turn. */
+	steps: number | null;
+	/** The trial's wall time, setup and grading included. */
+	wallMs: number | null;
+	/** The turn's estimated cost in US dollars, the agent's own meter (the figure its cost limit checks); null when there was none. */
+	estimatedCostUsd: number | null;
 	checks: Array<{ id: string; type: string; status: string; detail: string; blocker: boolean; soft?: boolean }>;
 	/** The guides the agent read (guides.ts): how many reads, which guide files, how many catalog calls. */
 	guides: { reads: number; files: string[]; catalogCalls: number } | null;
@@ -94,8 +100,29 @@ export interface ResultsFile {
 	schedule?: Schedule;
 	engine: unknown;
 	checkout: { commit: string; branch: string; dirtyFiles: number };
-	summary: ScheduleSummary & { firstRunStatuses: Record<string, number> };
+	summary: ScheduleSummary & { firstRunStatuses: Record<string, number>; totals: Totals };
 	tasks: ResultsTask[];
+}
+
+/** The batch's totals: the summed estimated cost and trial wall time, and the time from start to finish. */
+export interface Totals {
+	estimatedCostUsd: number;
+	/** Trials with no cost estimate (no saved turn). */
+	trialsWithoutCost: number;
+	trialWallMs: number;
+	/** finishedAt minus startedAt; with several workers it is less than the summed trial time. */
+	elapsedMs: number | null;
+}
+
+/** A trial's steps, wall time and estimated cost, from its grade's diagnostics. */
+export function trialCost(r: TrialResult): { steps: number | null; wallMs: number | null; estimatedCostUsd: number | null } {
+	const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+	return { steps: num(r.diagnostics.waves), wallMs: num(r.diagnostics.wallMs), estimatedCostUsd: num(r.diagnostics.estimatedCostUsd) };
+}
+
+/** The summed estimated cost of some trials, in US dollars. */
+export function spentUsd(results: TrialResult[]): number {
+	return results.reduce((usd, r) => usd + (trialCost(r).estimatedCostUsd ?? 0), 0);
 }
 
 /**
@@ -116,6 +143,7 @@ export function buildResults(runs: Array<TaskRuns<TrialResult>>, tasks: Map<stri
 		...(r.retryOf ? { retryOf: r.retryOf } : {}),
 		status: r.status,
 		why: r.why,
+		...trialCost(r),
 		checks: r.checks.map((c) => ({ id: c.id, type: c.kind, status: c.status, detail: c.detail, blocker: c.blocker, ...(c.soft ? { soft: true } : {}) })),
 		cause: r.cause ?? null,
 		knownGood: r.knownGood ?? null,
@@ -126,10 +154,18 @@ export function buildResults(runs: Array<TaskRuns<TrialResult>>, tasks: Map<stri
 	});
 	const firstRunStatuses: Record<string, number> = {};
 	for (const r of runs) firstRunStatuses[r.first.status] = (firstRunStatuses[r.first.status] ?? 0) + 1;
+	const every = runs.flatMap((r) => [r.first, ...r.reruns]);
+	const elapsed = Date.parse(meta.finishedAt) - Date.parse(meta.startedAt);
+	const totals: Totals = {
+		estimatedCostUsd: spentUsd(every),
+		trialsWithoutCost: every.filter((r) => trialCost(r).estimatedCostUsd === null).length,
+		trialWallMs: every.reduce((ms, r) => ms + (trialCost(r).wallMs ?? 0), 0),
+		elapsedMs: Number.isFinite(elapsed) ? elapsed : null,
+	};
 	return {
 		schema: RESULTS_SCHEMA,
 		...meta,
-		summary: { ...summarize(runs, (t) => t.status), firstRunStatuses },
+		summary: { ...summarize(runs, (t) => t.status), firstRunStatuses, totals },
 		tasks: runs.map((r) => {
 			const t = tasks.get(r.id);
 			const all = [r.first, ...r.reruns];

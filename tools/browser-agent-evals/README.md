@@ -79,8 +79,10 @@ Each trial (`src/trial.ts`):
 
 ```text
 .verify/browser-agent/<time>/
-├── results.json           every task: its verdict, and each run's status, checks and paths (the judge annotates it)
-├── report.md              first-run pass rate and flake rate side by side, then one row per task
+├── results.json           every task: its verdict and k of n, and each run's status, steps, wall time, estimated cost, checks and paths;
+│                          the batch's totals (the judge annotates it)
+├── report.md              first-run pass rate and flake rate side by side (k of n with --trials), one row per task,
+│                          then the totals and one row per run with its steps, wall time and estimated cost
 ├── stack/                 engine.log, rocket-ui.log, shell.log, store/ (the engine's files)
 └── <task id>/trial-<n>/
     ├── record.json        the trial record (types.ts TrialRecord), plus `browser`: the result card, whether it matches the saved outcome, the model shown, the cards answered, the key scan, leaks found

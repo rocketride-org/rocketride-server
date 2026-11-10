@@ -254,8 +254,30 @@ export function writeRunReport(dir: string, results: ResultsFile): string {
 	];
 	const body = results.schedule?.mode === 'trials' ? trialsSummary(results, results.schedule.trials) : rerunsSummary(results);
 	const file = path.join(dir, 'report.md');
-	fs.writeFileSync(file, [...head, ...body].join('\n'));
+	fs.writeFileSync(file, [...head, ...body, ...runRows(results)].join('\n'));
 	return file;
+}
+
+/** Milliseconds as hours and minutes. */
+function hm(ms: number): string {
+	const min = Math.round(ms / 60_000);
+	return `${Math.floor(min / 60)}h ${min % 60}m`;
+}
+
+/** The batch's totals, then one row per run: its status, steps, wall time and estimated cost. */
+function runRows(results: ResultsFile): string[] {
+	const t = results.summary.totals;
+	const runs = results.tasks.flatMap((task) => task.trials.map((r) => ({ task, r })));
+	return [
+		'## Runs',
+		'',
+		`Totals: estimated cost $${t.estimatedCostUsd.toFixed(2)} over ${runs.length} run(s)${t.trialsWithoutCost ? ` (${t.trialsWithoutCost} with no estimate)` : ''}; trial time ${hm(t.trialWallMs)} summed${t.elapsedMs === null ? '' : `, ${hm(t.elapsedMs)} from start to finish`}. The estimated cost is the agent's own meter, the figure its cost limit checks: it counts 4 characters as a token and leaves out thinking, so the provider's bill can be higher. Wall time covers the whole trial, setup and grading included.`,
+		'',
+		'| Task | Trial | Status | Retry of | Steps | Wall s | Est. cost | Cause |',
+		'| --- | --- | --- | --- | --- | --- | --- | --- |',
+		...runs.map(({ task, r }) => `| ${task.id} | ${r.trial} | ${r.status} | ${r.retryOf ?? '-'} | ${r.steps ?? '-'} | ${r.wallMs === null ? '-' : Math.round(r.wallMs / 1000)} | ${r.estimatedCostUsd === null ? '-' : `$${r.estimatedCostUsd.toFixed(2)}`} | ${r.cause?.label ?? '-'} |`),
+		'',
+	];
 }
 
 /** A report cell: scrubbed, on one line, with its pipes escaped. */
