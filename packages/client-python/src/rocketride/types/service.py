@@ -100,12 +100,14 @@ class SERVICE_SUMMARY(TypedDict, total=False):
 
 class SERVICE_DEFINITION(SERVICE_SUMMARY, total=False):
     """
-    A FULL service definition, returned by ``get_service()``.
+    A FULL service definition, returned by ``get_service()`` or
+    ``get_services(definitions=True)``.
 
-    Extends the summary with dynamic configuration section keys (e.g.
-    "Pipe", "Source", "Global") that each hold a SERVICE_SECTION with
-    ``schema`` and ``ui``. TypedDict cannot express dynamic keys, so
-    access sections via ``definition.get(section_name)``.
+    Extends the summary with the resolved configuration: ``properties``
+    (every leaf with its dotted ``path``) and ``params`` (the
+    param-flagged property descriptors, in schema order). TypedDict does
+    not declare these keys; read them with ``definition.get('properties')``
+    and ``definition.get('params')``.
     """
 
 
