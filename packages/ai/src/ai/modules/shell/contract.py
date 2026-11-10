@@ -355,7 +355,13 @@ def _redirect_source_error(
         return 'must be a string'
     if '//' in source:
         return 'must not contain an empty segment ("//")'
-    err = path_error(source[:-1] if len(source) > 1 and source.endswith('/') else source) or _reserved_error(source)
+    bare = source
+    if len(source) > 1 and source.endswith('/'):
+        bare = source[:-1]
+    err = path_error(bare)
+    if err:
+        return err
+    err = _reserved_error(source)
     if err:
         return err
     paths = {p.path for p in pages}

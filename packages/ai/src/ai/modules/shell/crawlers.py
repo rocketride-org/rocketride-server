@@ -33,6 +33,8 @@ docs/docusaurus/static/robots.txt; its named groups follow the same intent.
 
 from typing import Tuple
 
+from rocketlib import debug
+
 # (user-agent token, category). Matching is a case-insensitive substring
 # test: real UAs embed the token (Bing sends 'bingbot/2.0', lowercase).
 # Robots-only tokens (Google-Extended) never appear in a UA; listing them
@@ -81,14 +83,23 @@ def classify(user_agent: str) -> str:
     ua = (user_agent or '').lower()
     if any(token in ua for token in _TOKENS):
         return CRAWLER
-    if (not ua or 'mozilla/' not in ua or any(h in ua for h in _NON_BROWSER_HINTS)) and len(_seen_unknown) < _MAX_SEEN:
-        key = ua[:200]
-        if key not in _seen_unknown:
-            _seen_unknown.add(key)
-            from rocketlib import debug
-
-            debug(f'[public_pages] unrostered non-browser user agent (served the human document): {key!r}')
+    if not _looks_like_browser(ua):
+        _note_unrostered(ua)
     return HUMAN
+
+
+def _looks_like_browser(ua: str) -> bool:
+    """Whether a lowercased user agent reads like a browser: ``mozilla/`` and none of the bot hints."""
+    return 'mozilla/' in ua and not any(hint in ua for hint in _NON_BROWSER_HINTS)
+
+
+def _note_unrostered(ua: str) -> None:
+    """Log an unrostered non-browser user agent once, up to ``_MAX_SEEN`` of them, for roster upkeep."""
+    key = ua[:200]
+    if key in _seen_unknown or len(_seen_unknown) >= _MAX_SEEN:
+        return
+    _seen_unknown.add(key)
+    debug(f'[public_pages] unrostered non-browser user agent (served the human document): {key!r}')
 
 
 def robots_groups(rule: str) -> str:
