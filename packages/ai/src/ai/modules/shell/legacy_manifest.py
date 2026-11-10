@@ -36,7 +36,7 @@ from typing import Any, Dict
 _LEGACY_SITE_TITLE = 'RocketRide'
 
 
-def _legacy_manifest() -> Dict[str, Any]:
+def legacy_page_manifest() -> Dict[str, Any]:
     """The shell's route list in the publicPages + site contract shape."""
     from .shell import PUBLIC_ROUTE_MANIFEST, UNLISTED_ROUTES
 

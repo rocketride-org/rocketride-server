@@ -47,10 +47,10 @@ import pytest
 
 from ai.account import account as account_singleton
 from ai.account import manifest_push
+from ai.account.app_rows import serving_block_of
 from ai.account.app_deploy import (
     _REPLY_MAX_CHARS,
     _publisher_of,
-    _serving_block_of,
     entitled_version_dirs,
     handle_app_add,
     handle_deploy_app,
@@ -1606,7 +1606,7 @@ def _binding(audience, binding='enabled', deployment='ready', build='ok'):
 )
 def test_serving_block_of_names_why_a_binding_does_not_serve(row, ladder, expected):
     """#2461: one gate decides serving for the manifest AND the owner's view."""
-    assert _serving_block_of(row, ladder) == expected
+    assert serving_block_of(row, ladder) == expected
 
 
 @pytest.mark.asyncio

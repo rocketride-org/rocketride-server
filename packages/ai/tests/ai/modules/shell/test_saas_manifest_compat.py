@@ -39,7 +39,7 @@ import pytest
 
 import ai.modules.shell.public_pages as pp
 from ai.modules.shell.contract import check_manifest
-from ai.modules.shell.legacy_manifest import _legacy_manifest
+from ai.modules.shell.legacy_manifest import legacy_page_manifest
 from ai.modules.shell.public_pages import load_published
 
 from .hostile_fixtures import FILES, HostileAccount, dist_of
@@ -50,14 +50,14 @@ PLATFORM = '00000000-platform'
 def _emitted():
     """The saas emitter's output for home-ui: the legacy 25 paths, named data entries, the pricing snapshot."""
     pages = []
-    for page in _legacy_manifest()['publicPages']:
+    for page in legacy_page_manifest()['publicPages']:
         page = dict(page)
         if page['path'] == '/pricing':
             page.update(data=['plans:rocketride.pipeBuilder'], snapshot='pages/pricing.html')
         if page['path'] == '/':
             page.update(data=['app:rocketride.pipeBuilder'])
         pages.append(page)
-    return {'publicPages': pages, 'site': dict(_legacy_manifest()['site'])}
+    return {'publicPages': pages, 'site': dict(legacy_page_manifest()['site'])}
 
 
 def _newer():

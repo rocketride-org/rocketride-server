@@ -43,6 +43,14 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Tuple
 
 from rocketlib import debug, warning
 
+from ai.account.app_rows import (
+    dist_dir_of,
+    holds_required_permissions,
+    manifest_of,
+    precedence_sorted,
+    serving_block_of,
+)
+
 from .contract import Page, check_manifest, is_privileged, may_claim_root
 
 
@@ -129,9 +137,9 @@ def legacy_aggregate(live_conflict: Optional[Callable[[str], Optional[str]]] = N
 
     Filtered through ``live_conflict`` like any claim, when one is given.
     """
-    from .legacy_manifest import _legacy_manifest, legacy_head_title
+    from .legacy_manifest import legacy_head_title, legacy_page_manifest
 
-    manifest = _legacy_manifest()
+    manifest = legacy_page_manifest()
     exact: Dict[str, Page] = {}
     for raw in manifest['publicPages']:
         conflict = live_conflict(raw['path']) if live_conflict else None
@@ -181,17 +189,15 @@ async def load_published(
     if acct is None:
         from ai.account import account as acct
 
-    from ai.account.app_deploy import _dist_dir_of, _holds_required_permissions, _precedence_sorted, _serving_block_of
-
     org = '' if 'saas' in getattr(acct, 'capabilities', ()) else 'local'
     winners: Dict[str, Dict[str, Any]] = {}
-    for row in _precedence_sorted(await acct.publish_list(org, 'app', [{'type': 'public', 'id': ''}])):
+    for row in precedence_sorted(await acct.publish_list(org, 'app', [{'type': 'public', 'id': ''}])):
         winners[str(row.get('appId') or '')] = row
     out: List[Published] = []
     for app_id, row in sorted(winners.items()):
         if app_id == exclude or (row.get('audience') or {}).get('type') != 'public' or not is_privileged(app_id):
             continue
-        if _serving_block_of(row, getattr(acct, 'review_ladder', True)) or not _holds_required_permissions(row, set()):
+        if serving_block_of(row, getattr(acct, 'review_ladder', True)) or not holds_required_permissions(row, set()):
             continue
         if (row.get('snapshot') or {}).get('public', True) is False:
             continue
@@ -201,11 +207,11 @@ async def load_published(
             if not isinstance(version, int) or not artifact_path:
                 raise ValueError(f'malformed public row (version {version!r}, artifactPath {artifact_path!r})')
             artifact = await acct.deployments_artifact(str(row.get('orgId') or org), app_id, version)
-            metadata = (artifact or {}).get('metadata') if isinstance((artifact or {}).get('metadata'), dict) else {}
-            if (metadata.get('manifest') or {}).get('public', True) is False:
+            stored = manifest_of(artifact or {})
+            if stored.get('public', True) is False:
                 continue
-            dist_dir = _dist_dir_of(artifact_path)
-            manifest = await page_manifest(metadata.get('manifest'), dist_dir)
+            dist_dir = dist_dir_of(artifact_path)
+            manifest = await page_manifest(stored, dist_dir)
         except Exception as exc:
             # One unreadable app must not freeze the map (a later unpublish
             # elsewhere would never apply): it contributes nothing this build.
