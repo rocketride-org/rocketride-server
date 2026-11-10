@@ -624,8 +624,11 @@ async def _not_found_page(request: Request, aggregate: Any) -> Optional[Response
     body = rendered
     if body is None:
         body = await asyncio.to_thread(index.read_text, encoding='utf-8')
+    title = 'Page not found'
     site_title = aggregate.site.get('title', '')
-    body = inject_head(body, title=f'Page not found | {site_title}' if site_title else 'Page not found', noindex=True)
+    if site_title:
+        title = f'{title} | {site_title}'
+    body = inject_head(body, title=title, noindex=True)
     headers = {'Vary': 'User-Agent', 'Cache-Control': 'private, no-cache', 'X-Robots-Tag': 'noindex'}
     return HTMLResponse(body, status_code=404, headers=headers)
 
