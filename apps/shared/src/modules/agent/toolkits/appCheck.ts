@@ -149,9 +149,9 @@ const TYPES_STEP = 'types';
 
 const TYPES_RAN = "read the TypeScript errors Monaco keeps for the app's open files";
 
-const NOT_OPEN_SUMMARY = 'types not checked until the app is open or deployed';
+const NOT_OPEN_SUMMARY = "types not checked: the app's files could not be loaded";
 
-const NOT_OPEN_OUTPUT = "None of the app's TypeScript files are loaded in the editor, so there are no TypeScript errors to read. Open the app, or deploy it, to check its types.";
+const NOT_OPEN_OUTPUT = "The app's files could not be loaded into the type checker, so its types were not checked.";
 
 // =============================================================================
 // TYPES
@@ -513,11 +513,12 @@ export function validateNote(validation: SaveValidation, hide: (text: string) =>
 
 /**
  * An app check records two halves, in order: `types` (Monaco's settled TypeScript markers), then `build`,
- * `runtime` and `console` (a rebuild in the Design preview; with no preview, one `not_run` item). Both always
- * run, so a failed type check does not hide a failed build. Anything that cannot run is a named `not_run`,
- * never a pass or a failure. A missing, broken or id-less manifest is a `manifest` fail because the agent can
- * fix it; an unreadable `package.json` throws instead, since the manifest may be fine. Reports are filed under
- * the manifest id (else the folder), so the checks line has one entry per app.
+ * `runtime` and `console` (a rebuild in a preview the host lends for the check; when none can start, one
+ * `not_run` item that says why). Both always run, so a failed type check does not hide a failed build.
+ * Anything that cannot run is a named `not_run`, never a pass or a failure. A missing, broken or id-less
+ * manifest is a `manifest` fail because the agent can fix it; an unreadable `package.json` throws instead,
+ * since the manifest may be fine. Reports are filed under the manifest id (else the folder), so the checks
+ * line has one entry per app.
  */
 
 // =============================================================================
@@ -600,7 +601,8 @@ function noIdEvidence(app: AppEntry): CheckEvidence[] {
 }
 
 /**
- * Checks one app: its types, then a rebuild in its Design preview. Returns every step's evidence in run order.
+ * Checks one app: its types, then a rebuild in a preview the host lends for the check. Returns every step's
+ * evidence in run order.
  * @throws When the app's package.json cannot be read; nothing was checked then.
  */
 async function checkApp(host: AgentHost, markers: () => Promise<MarkerSource | null>, app: AppEntry, opts: AppCheckOptions): Promise<CheckEvidence[]> {
@@ -610,9 +612,15 @@ async function checkApp(host: AgentHost, markers: () => Promise<MarkerSource | n
 
 	const hide = opts.hide ?? ((text: string) => text);
 	const files = await typeScriptFiles(host.vfs, app.path);
-	const types = await typesStep(app, markers, { ...opts.types, signal: opts.signal }, files, hide);
-	const build = await appBuildEvidence(host.devSession(app.id), { ...opts.build, signal: opts.signal }, hide);
-	return [types, ...build];
+	const lease = await host.leasePreview({ id: app.id, folder: app.folder, name: app.name ?? app.folder }, opts.signal);
+	try {
+		// step: the lease's session has loaded the app's files as models, which the types step reads
+		const types = await typesStep(app, markers, { ...opts.types, signal: opts.signal }, files, hide);
+		const build = lease.ok ? await appBuildEvidence(lease.session, { ...opts.build, signal: opts.signal }, hide) : [notRun('build', BUILD_RAN, previewFailedOutput(hide(lease.why)), `build not checked: ${brief(hide(lease.why))}`)];
+		return [types, ...build];
+	} finally {
+		if (lease.ok) lease.release();
+	}
 }
 
 // =============================================================================
@@ -620,8 +628,8 @@ async function checkApp(host: AgentHost, markers: () => Promise<MarkerSource | n
 // =============================================================================
 
 /**
- * The build half of an app check: rebuild the app in its Design preview and report the build, runtime and
- * console. The dev session builds only while a preview is attached, so with none nothing is built.
+ * The build half of an app check: rebuild the app in the preview the host lent and report the build, runtime
+ * and console. The dev session builds only while a preview is attached, so one closed mid-check builds nothing.
  * - `rebuild()` queues and coalesces, so the wait is on the watch state: the result is the last `ok` or
  *   `error` that no `building`/`installing` follows within `settleMs`.
  * - Every feed replays its backlog on subscribe; the replay is dropped so an earlier build is never this
@@ -656,10 +664,6 @@ const RUNTIME_RAN = 'watch the preview for runtime errors from the rebuild until
 
 const CONSOLE_RAN = "read the preview's console errors from the rebuild";
 
-const OPEN_PREVIEW = "ask the user to open the app's Design preview in the App Builder, then run check_app again";
-
-const PREVIEW_CLOSED_OUTPUT = `The app's Design preview is not open, and the app is built only while it is, so nothing was built and no runtime or console errors were read. To include them, ${OPEN_PREVIEW}.`;
-
 // =============================================================================
 // TYPES
 // =============================================================================
@@ -688,6 +692,11 @@ function notRun(step: string, ran: string, output: string, summary: string): Che
 	return { step, ran, output, status: 'not_run', summary };
 }
 
+/** The build output when no preview could be used: none could be lent, or the lent one closed. */
+function previewFailedOutput(why: string): string {
+	return `No preview of the app could be used (${why}), so nothing was built and no runtime or console errors were read.`;
+}
+
 /** Writes a wait as a person would: `60 s`, or `150 ms` under a second. */
 function describeWait(ms: number): string {
 	return ms >= 1000 ? `${Math.round(ms / 1000)} s` : `${ms} ms`;
@@ -708,12 +717,12 @@ function listText(lines: string[], hide: (text: string) => string): string {
 // =============================================================================
 
 /**
- * Rebuilds the app in its Design preview and reports `build`, then `runtime` when the build is OK, then
- * `console` only when it has errors (reported, never failing). No preview, or a build that does not start or
- * settle, is one `not_run` item. Never throws.
+ * Rebuilds the app in the lent preview and reports `build`, then `runtime` when the build is OK, then
+ * `console` only when it has errors (reported, never failing). A preview closed since it was lent, or a build
+ * that does not start or settle, is one `not_run` item. Never throws.
  */
-async function appBuildEvidence(session: AgentDevSession | null, opts: AppBuildOptions, hide: (text: string) => string): Promise<CheckEvidence[]> {
-	if (!session || !session.previewAttached) return [notRun('build', 'rebuild the app in its Design preview', PREVIEW_CLOSED_OUTPUT, 'preview closed: build not checked')];
+async function appBuildEvidence(session: AgentDevSession, opts: AppBuildOptions, hide: (text: string) => string): Promise<CheckEvidence[]> {
+	if (!session.previewAttached) return [notRun('build', BUILD_RAN, previewFailedOutput('the preview closed before the build started'), 'build not checked: the preview closed')];
 
 	const buildWaitMs = opts.buildWaitMs ?? DEFAULT_BUILD_WAIT_MS;
 	const settleMs = opts.settleMs ?? DEFAULT_SETTLE_MS;
@@ -774,7 +783,7 @@ async function appBuildEvidence(session: AgentDevSession | null, opts: AppBuildO
 		if (outcome.kind === 'stopped') return [notRun('build', BUILD_RAN, 'The run was stopped before the build finished, so the build was not checked.', 'build not checked: run stopped')];
 		if (outcome.kind === 'timeout') {
 			const wait = describeWait(buildWaitMs);
-			if (!outcome.started) return [notRun('build', BUILD_RAN, `No build started within ${wait} of the rebuild request, so nothing was built or checked. The preview may be paused or closed; ${OPEN_PREVIEW}.`, `no build started within ${wait}`)];
+			if (!outcome.started) return [notRun('build', BUILD_RAN, `No build started within ${wait} of the rebuild request, so nothing was built or checked. The preview may have paused or closed; run check_app again.`, `no build started within ${wait}`)];
 			return [notRun('build', BUILD_RAN, `The build did not finish within ${wait}, so it was not seen to pass or fail. It may still be running; check again in a moment.`, `build still running after ${wait}`)];
 		}
 		if (outcome.kind === 'unstarted') return [notRun('build', BUILD_RAN, `The rebuild could not run: ${outcome.message}`, `build not run: ${brief(hide(outcome.message))}`)];
@@ -837,7 +846,7 @@ Don't use it:
 - after each small edit: saving an app file already returns its type errors;
 - on a pipeline: saving a .pipe file already validates it, and you test a pipeline by running it with rocketride_client and reading its log.
 
-Steps that could not run (for example, "preview closed: build not checked") are named in the result; say so plainly in your answer.
+Steps that could not run (for example, "build not checked: the preview did not start within 30 s") are named in the result; say so plainly in your answer.
 
 Example: after editing the app "daybook-ui", call check_app { "app": "daybook-ui" }.`;
 

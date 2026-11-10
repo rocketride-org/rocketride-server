@@ -32,6 +32,7 @@
 import type { RocketRideClient } from 'shell';
 import { DEFAULT_MODEL, modelSetting, parseModelChoice, type ModelChoice } from 'shared/modules/agent/model';
 import { DEFAULT_LIMITS, type AgentDevSession, type AgentHost, type AgentLimits, type ApprovalControls, type ApprovalPrefs, type ApprovalSettings, type Grant } from 'shared/modules/agent/host';
+import { messageOf } from 'shared/modules/agent/toolkits/common';
 import type { FrameOptions } from 'shared/tools/appdev';
 import { scaffoldApp } from '../surfaces/preview/session/appStore';
 import { findDevSession, type WebDevSession } from '../surfaces/preview/session/devSession';
@@ -39,6 +40,7 @@ import { packAppSource } from '../surfaces/preview/session/pack';
 import { openWorkspaceFile } from '../surfaces/workspace/vfs/openWorkspaceFile';
 import { getWorkspace, type Workspace } from '../surfaces/workspace/vfs/workspace';
 import { editorControl } from './editorControls';
+import { bootHiddenPreview } from './hiddenPreview';
 
 // =============================================================================
 // SCAFFOLD DEFAULTS
@@ -217,6 +219,18 @@ export function createRocketAgentHost(client: RocketRideClient, ws: Workspace): 
 			if (!current()) return null;
 			const session = findDevSession(appId);
 			return session ? agentDevSession(session) : null;
+		},
+		// step: the user's attached preview when there is one, else a hidden one that lives only for the check
+		leasePreview: async (app, signal) => {
+			if (!current()) return { ok: false, why: 'the team changed while the check was starting' };
+			const open = findDevSession(app.id);
+			if (open?.previewAttached) return { ok: true, session: agentDevSession(open), release: () => {} };
+			try {
+				const hidden = await bootHiddenPreview(client, app, { signal });
+				return { ok: true, session: agentDevSession(hidden.session), release: hidden.dispose };
+			} catch (err) {
+				return { ok: false, why: messageOf(err) };
+			}
 		},
 		approvals: { run: approvalFeed.run, controls: approvalFeed.controls },
 		limits: { read: () => limits },
