@@ -40,7 +40,7 @@ from depends import depends
 requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
 depends(requirements)
 
-from typing import List, Callable, Dict, Any, cast
+from typing import List, Callable, Dict, Any, Mapping, cast
 
 import psycopg2
 from pgvector.psycopg2 import register_vector
@@ -49,9 +49,8 @@ from rocketlib import warning
 from ai.common.schema import Doc, DocFilter, DocMetadata, QuestionText
 from ai.common.store import CONTROL_OBJECT_ID
 from ai.common.store.pgvector_store import MIN_SIMILARITY_SCORE, PgVectorStoreBase
-from ai.common.config import Config
 from ai.common.rocketride_db import db_target, parse_dsn_fields, resolve_rocketride_dsn
-from .IGlobal import VALID_TABLE
+from .IValidator import VALID_TABLE
 
 # Default PostgreSQL port
 DEFAULT_POSTGRES_PORT = 5432
@@ -129,53 +128,34 @@ class Store(PgVectorStoreBase):
     # not use the index.
     opclassDict: dict = {'<=>': 'vector_cosine_ops', '<->': 'vector_l2_ops', '<#>': 'vector_ip_ops'}
 
-    def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
+    def __init__(self, provider: str, config: Mapping, bag: Dict[str, Any]):
         """
         Initialize the RocketRide cloud vector store.
 
         @param provider: The name of the provider.
-        @param connConfig: The connection configuration.
+        @param config: The resolved node config (defaults applied, keys by short name).
         @param bag: A dictionary of additional parameters.
         """
         # Init the base
-        super().__init__(provider, connConfig, bag)
+        super().__init__(provider, config, bag)
 
-        # Get our configuration
-        config = Config.getNodeConfig(provider, connConfig)
-
-        # Save our parameters — validate to prevent SQL injection via .format()
-        self.collection = ((config.get('table') or config.get('collection')) or '').strip()
+        # Save our parameters - validate to prevent SQL injection via .format()
+        self.collection = (config['collection'] or '').strip()
         if not self.collection or not VALID_TABLE.fullmatch(self.collection):
             raise ValueError(
                 f'Invalid collection name: {self.collection!r}. Must be a valid PostgreSQL identifier (letters, digits, underscores; max 63 chars).'
             )
 
-        self.renderChunkSize = config.get('renderChunkSize', self.renderChunkSize)
-        self.threshold_search = config.get('score', 0.5)
+        self.threshold_search = config['score']
 
-        # check if the similarity matches the pgvector configuration options
-        similarity = config.get('similarity', 'cosine')
-        supported = tuple(self.similarityDict)
-        if similarity in supported:
-            self.similarity = self.similarityDict[similarity]
-        else:
-            raise Exception(
-                f'RocketRide Vector: unsupported similarity {similarity!r}. '
-                f'Set "similarity" to: {", ".join(supported)}.'
-            )
+        # The similarity metric is an enum of the schema: the operator class follows it
+        self.similarity = self.similarityDict[config['similarity']]
 
-        # HNSW index build parameters (overridable via config), clamped to
-        # pgvector's supported ranges: m in [2, 100], ef_construction in
-        # [4, 1000] and >= 2 * m — out-of-range values error at CREATE INDEX.
-        try:
-            self.hnsw_m = min(100, max(2, int(config.get('hnsw_m', 16))))
-        except (TypeError, ValueError):
-            self.hnsw_m = 16
-        try:
-            self.hnsw_ef_construction = min(1000, max(4, int(config.get('hnsw_ef_construction', 64))))
-        except (TypeError, ValueError):
-            self.hnsw_ef_construction = 64
-        self.hnsw_ef_construction = max(self.hnsw_ef_construction, 2 * self.hnsw_m)
+        # HNSW index build parameters. The schema bounds them (m in [2, 100],
+        # ef_construction in [4, 1000]); pgvector also needs ef_construction
+        # >= 2 * m, or CREATE INDEX errors.
+        self.hnsw_m = int(config['hnsw_m'])
+        self.hnsw_ef_construction = max(int(config['hnsw_ef_construction']), 2 * self.hnsw_m)
 
         # RocketRide cloud: no host/user/password fields. Read the DSN the
         # task engine delivered for this node's scope / target and connect
@@ -188,7 +168,7 @@ class Store(PgVectorStoreBase):
         self.database = fields['database']
 
         # Bounded connect so an unreachable pooler fails fast (matches the
-        # 3s timeout IGlobal.validateConfig uses) instead of the OS TCP timeout.
+        # 3s timeout the save-time probe in IValidator uses) instead of the OS TCP timeout.
         self.client = psycopg2.connect(dsn, connect_timeout=3)
 
         # Autocommit, so reads (and register_vector's type lookup) never open a

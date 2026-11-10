@@ -21,30 +21,14 @@
 # SOFTWARE.
 # =============================================================================
 
-from rocketlib import IGlobalBase, OPEN_MODE
-from ai.common.config import Config
+from rocketlib import IGlobalBase
 
 
 class IGlobal(IGlobalBase):
-    config = None
+    """The instructions live in the resolved config (``self.config.instructions``); nothing is shared beyond it."""
 
     def beginGlobal(self):
-        # Are we in config mode or some other mode?
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            # We are going to get a call to configureService but
-            # we don't actually need to load the driver for that
-            pass
-        else:
-            import os
-            from depends import depends  # type: ignore
-
-            # Load the requirements
-            requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
-            depends(requirements)
-
-            # Get the configuration
-            self.config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
+        """Nothing to prepare: the instances read the instructions from the resolved config."""
 
     def endGlobal(self):
-        # Clean up any resources if needed
-        self.config = None
+        """Nothing to release."""

@@ -22,11 +22,7 @@
 # =============================================================================
 
 import os
-from typing import Any, Dict
-
-from rocketlib import warning
-
-from ai.common.config import Config
+from typing import Dict, Mapping
 
 from depends import depends
 
@@ -37,13 +33,7 @@ from depends import depends
 depends(os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt')
 
 from ai.common.database import DatabaseGlobalBase
-from ai.common.rocketride_db import (
-    DsnNotDelivered,
-    db_target,
-    parse_dsn_fields,
-    resolve_rocketride_dsn,
-    to_sqlalchemy_url,
-)
+from ai.common.rocketride_db import db_target, parse_dsn_fields, resolve_rocketride_dsn, to_sqlalchemy_url
 
 
 class IGlobal(DatabaseGlobalBase):
@@ -52,9 +42,10 @@ class IGlobal(DatabaseGlobalBase):
     Identical to the generic PostgreSQL node in every respect except one: it
     takes **no** connection config. Instead of reading host/user/password, it
     reads the DSN the task engine delivered for its ``scope`` / ``target``
-    (see ``ai.common.rocketride_db``). Everything else — schema reflection,
+    (see ``ai.common.rocketride_db``). Everything else - schema reflection,
     EXPLAIN validation, the structured query surface, and the raw EXECUTE
-    path — is inherited unchanged from the base.
+    path - is inherited unchanged from the base. Save-time validation lives
+    in ``IValidator.py``.
     """
 
     # PgBouncer already pools, capping each tenant database at 3 server connections per pooler.
@@ -62,27 +53,11 @@ class IGlobal(DatabaseGlobalBase):
     MAX_OVERFLOW = 2
 
     # Cache the resolved DSN between the paired _connection_params /
-    # _build_connection_url calls the base makes in beginGlobal and
-    # validateConfig, so both come from a single resolution.
+    # _build_connection_url calls the base makes in beginGlobal, so both come
+    # from a single resolution.
     _dsn: str = ''
 
-    def validateConfig(self):
-        """Save-time probe. Outside a task no DSN is delivered (the server
-        process has no run identity), so only the static checks run and
-        connectivity is checked when the pipeline runs. Inside a task the
-        base's SELECT 1 probe runs against the delivered DSN.
-        """
-        try:
-            config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-            resolve_rocketride_dsn(*db_target(config))
-        except DsnNotDelivered:
-            return
-        except ValueError as e:
-            warning(str(e))
-            return
-        super().validateConfig()
-
-    def _connection_params(self, config: Dict[str, Any]) -> Dict[str, str]:
+    def _connection_params(self, config: Mapping) -> Dict[str, str]:
         """Read the delivered cloud DSN and expose the pieces the base needs.
 
         There are no host/user/password fields; the DSN is the one the task
@@ -99,7 +74,7 @@ class IGlobal(DatabaseGlobalBase):
             'user': fields['user'],
             'password': fields['password'],
             'database': fields['database'] or 'rocketride',
-            'table': config.get('table', 'table').strip(),
+            'table': config['table'].strip(),
         }
 
     def _build_connection_url(self, params: Dict[str, str]) -> str:
@@ -112,13 +87,10 @@ class IGlobal(DatabaseGlobalBase):
             raise RuntimeError('_connection_params must run before _build_connection_url')
         return to_sqlalchemy_url(self._dsn)
 
-    def _max_validation_attempts(self, config: Dict[str, Any]) -> int:
-        """Return the EXPLAIN-validation retry count from config (default 5)."""
-        try:
-            return int(config.get('max_attempts', 5))
-        except (ValueError, TypeError):
-            return 5
+    def _max_validation_attempts(self, config: Mapping) -> int:
+        """Return the EXPLAIN-validation retry count; the schema bounds it to [1, 20]."""
+        return int(config['max_attempts'])
 
-    def _db_description(self, config: Dict[str, Any]) -> str:
+    def _db_description(self, config: Mapping) -> str:
         """Return the user-provided database description (empty string if unset)."""
-        return config.get('db_description', '')
+        return config['db_description']

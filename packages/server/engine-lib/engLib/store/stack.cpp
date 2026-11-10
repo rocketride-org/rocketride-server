@@ -24,40 +24,6 @@
 #include <engLib/eng.h>
 
 namespace engine::store {
-Error IServiceEndpoint::buildBreakpoints() noexcept {
-    // Get the pipeline information
-    const auto &pipeline = config.pipeline.root();
-
-    // Determine if we have breakpoints specified
-    if (!pipeline.isMember("breakpoints")) return {};
-
-    // If there are no breakpoints, return empty
-    const auto &breakpoints = pipeline["breakpoints"];
-    if (!breakpoints.isArray()) return {};
-
-    // Add all the breakpoints
-    std::string any = "*";
-
-    for (const auto &bp : breakpoints) {
-        // Make sure it is valid
-        if (!bp.isMember("from") || !bp["from"].isString())
-            continue;  // skip invalid entries
-
-        // Get the breakpoint
-        std::string from = bp["from"].asString();
-        std::string to = bp.isMember("to") && bp["to"].isString()
-                             ? bp["to"].asString()
-                             : any;
-        std::string lane = bp.isMember("lane") && bp["lane"].isString()
-                               ? bp["lane"].asString()
-                               : any;
-
-        // Put it into the breakpoint list
-        debugger.taskBreakpointAdd(from, to, lane);
-    }
-
-    return {};
-}
 
 //-------------------------------------------------------------------------
 /// @details

@@ -59,7 +59,7 @@
 	//  Optional:
 	//      Rendering hints to the UI which indicate which fields of
 	//      the configuration should be used to display information
-	"tile": ["Host/Port: ${parameters.atlas.host}:${parameters.atlas.port}", "Collection: ${parameters.atlas.collection}"],
+	"tile": ["Database: ${parameters.atlas.database}", "Collection: ${parameters.atlas.collection}"],
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes
@@ -70,32 +70,24 @@
 		"questions": ["documents", "answers", "questions"]
 	},
 	//
-	//	Optional:
-	//		Profile section are configuration optoins used by the driver
-	//		itself
-	//
-	"preconfig": {
-		// Define the values that will be merged into any profile configuration
-		// specified, unless the profile is 'absolute'
-		"default": "default",
-		// Defines profiles used with the "profile": key
-		"profiles": {
-			"default": {
-				"serverName": "atlas"
-			}
-		}
-	},
-	//
 	// Optional:
-	//     Local fields definitions - these define fields only for the
-	//     current service. You may specify them here, or directly
-	//     in the shape
+	//     Local property definitions. Atlas has one host type, so every
+	//     property is stored flat. The connection string carries the user
+	//     name and password, so it is the credential of this node.
 	//
-	"fields": {
-		"vector.cloud.host": {
-			"description": "Enter the server IP address e.g. <your-instance-name>.<region>.atlas.io"
+	"propertyDefinitions": {
+		"atlas.host": {
+			"base": "vector.host",
+			"title": "Connection string",
+			"description": "Enter the MongoDB SRV connection string e.g. mongodb+srv://<user>:<password>@<cluster>.<id>.mongodb.net/?retryWrites=true",
+			"secret": true,
+			"env": "ROCKETRIDE_ATLAS_HOST",
+			"required": true
 		},
-		"vector.database": {
+		"atlas.database": {
+			"type": "string",
+			"title": "Database",
+			"description": "Enter the name of the database",
 			"default": "rocketride_db"
 		},
 		"atlas.serverName": {
@@ -104,41 +96,11 @@
 			"description": "Label for this store in tool-response messages (for example, a refused write names atlas.delete). Pipeline agents address the available functions as node-id.function; apps use the function name and node ID. Changing this label does not change those addresses. See the node README for the available functions and their tool-exposure and write-permission settings.",
 			"default": "atlas",
 			"minLength": 1
-		},
-		"atlas.provider": {
-			"type": "string",
-			"const": "atlas",
-			"default": "atlas"
-		},
-		"atlas.store": {
-			"object": "store",
-			"title": "Store",
-			"properties": ["atlas.provider"]
-		},
-		"atlas.target.autopipe": {
-			"object": "parameters",
-			"properties": ["remote", "atlas.store", "all.embedding"]
-		},
-		"atlas.target.parameters": {
-			"object": "parameters",
-			"properties": ["atlas.target.autopipe"]
 		}
 	},
 	//
 	// Required:
-	//     Defines the fields (shape) of the service. Either source or target
-	//     map be specified, or both, but at least one is required
+	//     Defines the properties shown in the node's config panel, in order
 	//
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "MongoDB Atlas Vector Store",
-			"properties": ["vector.cloud.host", "vector.apikey", "vector.score", "vector.database", "vector.collection", "atlas.serverName"]
-		},
-		{
-			"section": "Transform",
-			"title": "MongoDB Atlas",
-			"properties": ["type", "atlas.target.parameters", "target.mode"]
-		}
-	]
+	"properties": ["atlas.host", "vector.score", "atlas.database", "vector.collection", "atlas.serverName"]
 }

@@ -133,7 +133,6 @@ def _load_iinstance_class():
     stubs['rocketlib'].error = lambda message, *a, **kw: LOGGED_ERRORS.append(str(message))
     stubs['rocketlib'].OPEN_MODE = types.SimpleNamespace(CONFIG='config')
     stubs['ai.common.schema'].Question = FakeQuestion
-    stubs['ai.common.config'].Config = types.SimpleNamespace(getNodeConfig=lambda *a: {})
 
     for name, stub in stubs.items():
         saved[name] = sys.modules.get(name)
@@ -194,8 +193,9 @@ def build():
         IInstance = _load_iinstance_class()
 
         inst = IInstance()
+        # The resolved config the instance reads through IGlobal.config
         inst.IGlobal = types.SimpleNamespace(
-            config={'instructions': _INSTRUCTIONS if instructions is None else instructions}
+            config=types.SimpleNamespace(instructions=_INSTRUCTIONS if instructions is None else instructions)
         )
 
         # What reaches the next node, per lane: the node's own writes and the
@@ -385,7 +385,7 @@ def test_a_failed_turn_does_not_leak_into_the_next(build):
     """
     inst, captured = build()
 
-    inst.IGlobal = types.SimpleNamespace(config=None)  # config.get(...) raises
+    inst.IGlobal = types.SimpleNamespace(config=None)  # config.instructions raises
     LOGGED_ERRORS.clear()
 
     inst.open(None)
@@ -400,7 +400,7 @@ def test_a_failed_turn_does_not_leak_into_the_next(build):
     assert len(LOGGED_ERRORS) == 1
     assert 'AttributeError' in LOGGED_ERRORS[0]
 
-    inst.IGlobal = types.SimpleNamespace(config={'instructions': _INSTRUCTIONS})
+    inst.IGlobal = types.SimpleNamespace(config=types.SimpleNamespace(instructions=_INSTRUCTIONS))
     _turn(inst, 'the turn after')
 
     assert len(captured.questions) == 1

@@ -2298,12 +2298,12 @@ class Task(DAPBase):
         # Handle pipeline trace events to build summary and flow events
         elif event_type == 'apaevt_trace':
             operation = body.get('op', '')
-            total_pipes = body.get('total_pipes', 0)
-            pipe_index = body.get('id', '')
-            component_name = body.get('pipe_id', '')
+            total_pipes = body.get('totalPipes', 0)
+            pipe_index = body.get('pipeId', '')
+            component_name = body.get('componentId', '')
             raw_trace = body.get('trace', {})
 
-            # total_pipes=0 marks a synthetic trace (tool-call events emit it
+            # totalPipes=0 marks a synthetic trace (tool-call events emit it
             # as "unknown") — keep the data lane's real pipe count.
             if total_pipes:
                 self._status.pipeflow.totalPipes = total_pipes

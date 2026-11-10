@@ -26,22 +26,24 @@
 """Abstract IGlobal layer shared by every vector store node.
 
 Vector stores differ in transport (Qdrant REST/gRPC, Weaviate, Pinecone, ...)
-and in how they validate a collection name, but they share a lifecycle: skip the
-driver in CONFIG mode, resolve the tool namespace, open the store, wire an
-and expose the agent tools.
-That lifecycle lives here; the driver-specific pieces live in the hooks below.
+and in how they validate a collection name, but they share a lifecycle: read
+the resolved config, resolve the tool namespace and the two tool switches,
+check the credentials, open the store and expose the agent tools. That
+lifecycle lives here; the driver-specific piece lives in the hook below.
 
-A concrete node implements ``_open_store`` and ``_probe_connection``
-and inherits the rest. See ``nodes/src/nodes/store_qdrant/IGlobal.py`` for a
-worked example.
+A concrete node implements ``_open_store`` and inherits the rest. See
+``nodes/src/nodes/store_qdrant/IGlobal.py`` for a worked example. Save-time
+validation is not part of this class: the engine imports the package's
+``IValidator`` alone in CONFIG mode, so a driver with a connectivity probe
+ships it in ``IValidator.py``.
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
-from rocketlib import IGlobalBase, OPEN_MODE, getServiceDefinition, warning
+from rocketlib import IGlobalBase
 
-from ai.common.config import Config, check_credential_resolved
+from ai.common.config import check_credential_resolved
 
 from .document_store import DocumentStoreBase
 
@@ -50,21 +52,21 @@ class StoreGlobalBase(IGlobalBase, ABC):
     """Abstract base for the IGlobal layer of any vector store node."""
 
     # Namespace prefix for agent-facing tool names (``<serverName>.search`` ...).
-    # Overridden by the driver and, when present, by the merged node config.
+    # Overridden by the driver and, when present, by the resolved node config.
     serverName: str = ''
 
     # Whether the write tools (upsert, delete, soft_delete, restore) may change
     # the store (read by VectorStoreToolMixin). True keeps every existing driver as it was; a
     # driver whose store is shared or managed sets the class default to False
     # and lets the node owner opt in through an ``allow_write`` config field.
-    # Resolved from the merged node config in beginGlobal, like serverName.
+    # Resolved from the node config in beginGlobal, like serverName.
     allow_write: bool = True
 
     # Whether the node offers its tool surface at all (read by
     # VectorStoreToolMixin). True keeps every existing driver as it was; a
     # driver whose store is shared or managed sets the class default to False
     # and lets the node owner opt in through an ``expose_tools`` config field.
-    # Resolved from the merged node config in beginGlobal, like allow_write.
+    # Resolved from the node config in beginGlobal, like allow_write.
     expose_tools: bool = True
 
     # The live store, opened in beginGlobal and read by StoreInstanceBase.
@@ -78,121 +80,66 @@ class StoreGlobalBase(IGlobalBase, ABC):
     embed_model_name: Optional[str] = None
 
     # ------------------------------------------------------------------
-    # Abstract interface — every store driver must implement these
+    # Abstract interface - every store driver must implement this
     # ------------------------------------------------------------------
 
     @abstractmethod
-    def _open_store(self, logical_type: str, conn_config: Dict[str, Any], bag: Dict[str, Any]) -> DocumentStoreBase:
+    def _open_store(self, logical_type: str, config: Mapping, bag: Dict[str, Any]) -> DocumentStoreBase:
         """Instantiate and return the driver's ``DocumentStoreBase`` for this node.
 
-        Called once per pipeline start (outside CONFIG mode). Must raise if the
-        store cannot be constructed so the failure surfaces at pipeline start.
-        ``conn_config`` is the resolved ``ConfigView`` for a converted node
-        (no ``preconfig`` in its definition) and the stored config, to
-        re-resolve through ``Config.getNodeConfig``, for an unconverted one.
+        Called once per pipeline start. Must raise if the store cannot be
+        constructed so the failure surfaces at pipeline start. ``config`` is
+        the resolved ``ConfigView``: defaults applied, the active branch
+        flattened, keys read by their short name.
         """
 
     # The config fields holding what the driver sends its server to sign in.
     # A driver that uses one in some modes only overrides ``_credentials``.
     credential_fields: Tuple[str, ...] = ()
 
-    def _credentials(self, config: Dict[str, Any]) -> List[Tuple[str, Any]]:
+    def _credentials(self, config: Mapping) -> List[Tuple[str, Any]]:
         """The credentials this config has the driver send, as ``(field, value)``."""
         return [(field, config.get(field)) for field in self.credential_fields]
 
-    def _check_credentials(self, config: Dict[str, Any], connConfig: Any) -> None:
+    def _check_credentials(self, config: Mapping) -> None:
         """Raise when a credential is still a ${...} that no saved variable filled.
 
         Sent as is, the server's "unauthorized" reply would not say which variable is missing.
         """
         for field, value in self._credentials(config):
-            check_credential_resolved(self.glb.logicalType, field, value, connConfig)
-
-    @abstractmethod
-    def _probe_connection(self, config: Dict[str, Any]) -> None:
-        """Save-time connectivity/format probe. Report problems with ``warning()``.
-
-        Must not raise: this runs while the user is still editing the node, so a
-        bad host or collection name should produce a readable warning, not a
-        stack trace.
-        """
+            check_credential_resolved(self.glb.logicalType, field, value)
 
     # ------------------------------------------------------------------
-    # Lifecycle — identical across vector stores
+    # Lifecycle - identical across vector stores
     # ------------------------------------------------------------------
-
-    def _effective_config(self) -> Tuple[Any, bool, Any]:
-        """The node's effective config as ``(cfg, converted, written)``.
-
-        A converted node (its definition has no "preconfig") reads the
-        resolver's view: defaults applied, the active branch flattened, keys
-        read by path. An unconverted node keeps the preconfig merge until
-        this base is converted for real: ONE ``getNodeConfig`` pass over the
-        stored config (a second pass over the merged result would have lost
-        ``profile`` and read the default profile's block over the active one).
-        ``written`` is what the pipeline stored, for the unfilled-placeholder
-        message and for the driver's own merge; the resolver already read that
-        tree by path, so a converted node passes None.
-        """
-        definition = getServiceDefinition(self.glb.logicalType)
-        converted = definition is not None and 'preconfig' not in definition
-        if converted:
-            return self.config, True, None
-        written = self.glb.connConfig
-        return Config.getNodeConfig(self.glb.logicalType, written), False, written
 
     def beginGlobal(self) -> None:
-        """Open the store, unless in CONFIG mode."""
-        # CONFIG mode only needs configureService; the driver is not loaded.
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
-
+        """Open the store from the resolved config."""
         self.store = None
         bag = self.IEndpoint.endpoint.bag
 
-        cfg, converted, written = self._effective_config()
+        # The resolved config: defaults applied, the active branch flattened
+        config = self.config
 
-        # Resolve the namespace used for agent-facing tool names from the merged
-        # config so it honors both profile defaults and user overrides.
-        resolved_name = cfg.get('serverName') if hasattr(cfg, 'get') else None
+        # Resolve the namespace used for agent-facing tool names; the schema
+        # supplies the driver's default and the user may override it.
+        resolved_name = config.get('serverName')
         if isinstance(resolved_name, str) and resolved_name.strip():
             self.serverName = resolved_name.strip()
 
-        # Same source for the two tool switches: profile defaults and user
-        # overrides both count, strings such as 'false' / '0' stay off, and an
-        # absent or unrecognised value falls back to the driver's class default.
-        # Imported here: ai.common.utils pulls requests and tenacity at import
-        # time, which every store node would otherwise load.
-        from ai.common.utils import parse_bool
-
-        raw_expose_tools = cfg.get('expose_tools') if hasattr(cfg, 'get') else None
-        self.expose_tools = parse_bool(raw_expose_tools, default=type(self).expose_tools)
-        raw_allow_write = cfg.get('allow_write') if hasattr(cfg, 'get') else None
-        self.allow_write = parse_bool(raw_allow_write, default=type(self).allow_write)
+        # The two tool switches: a driver that declares them reads the
+        # resolved boolean; one that does not keeps its class default.
+        if 'expose_tools' in config:
+            self.expose_tools = bool(config['expose_tools'])
+        if 'allow_write' in config:
+            self.allow_write = bool(config['allow_write'])
 
         # A key left as an unfilled ${ROCKETRIDE_...} fails here, before the driver sends it.
-        self._check_credentials(cfg, written)
+        self._check_credentials(config)
 
-        # Open the driver's store. A converted driver reads the resolved view
-        # directly; an unconverted one receives the stored config and
-        # re-resolves it via Config.getNodeConfig, so the profile merge stays
-        # in one place.
-        self.store = self._open_store(self.glb.logicalType, cfg if converted else written, bag)
+        # Open the driver's store on the resolved view
+        self.store = self._open_store(self.glb.logicalType, config, bag)
 
     def endGlobal(self) -> None:
         """Drop the store."""
         self.store = None
-
-    def validateConfig(self) -> None:
-        """Save-time validation: probe the server so the user sees errors immediately.
-
-        Reads the config the same way ``beginGlobal`` does, so a converted node
-        (resolver view, no preconfig) and an unconverted one both validate.
-        """
-        try:
-            config, _converted, written = self._effective_config()
-            # An unfilled credential is reported as such, and the probe does not send it.
-            self._check_credentials(config, written)
-            self._probe_connection(config)
-        except Exception as e:
-            warning(str(e))

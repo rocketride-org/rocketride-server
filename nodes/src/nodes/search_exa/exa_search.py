@@ -9,16 +9,14 @@ import ipaddress
 import json
 import os
 import socket
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Mapping
 from urllib.parse import urlparse
 
 import requests
 
 from ai.common.chat import ChatBase
-from ai.common.config import Config
 from ai.common.schema import Answer, Question
 
-from ai.common.utils import parse_bool
 
 _EXA_SEARCH_URL = 'https://api.exa.ai/search'
 _URL_FIELDS = {'url', 'image', 'favicon'}
@@ -44,24 +42,21 @@ def _get_question_texts(question: Question) -> List[str]:
 class ExaSearch(ChatBase):
     """Search backend that sends a single user query to Exa and returns raw JSON."""
 
-    def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
+    def __init__(self, provider: str, config: Mapping, bag: Dict[str, Any]):
         """
         Initialize the ExaSearch node.
 
         Args:
             provider: The provider name.
-            connConfig: The connection configuration.
+            config: The resolved node config (apikey, type, numResults, includeHighlights, highlightChars).
             bag: The bag to store the node instance.
         """
-        super().__init__(provider, connConfig, bag)
-        config = Config.getNodeConfig(provider, connConfig)
-        self._apikey = str(
-            config.get('apikey') or connConfig.get('apikey') or os.environ.get('ROCKETRIDE_EXA_KEY') or ''
-        ).strip()
-        self._search_type = str(config.get('type') or 'auto').strip() or 'auto'
-        self._num_results = int(config.get('numResults') or 5)
-        self._include_highlights = parse_bool(config.get('includeHighlights'), True)
-        self._highlight_chars = int(config.get('highlightChars') or 600)
+        super().__init__(provider, config, bag)
+        self._apikey = config['apikey'].strip()
+        self._search_type = config['type']
+        self._num_results = int(config['numResults'])
+        self._include_highlights = bool(config['includeHighlights'])
+        self._highlight_chars = int(config['highlightChars'])
         bag['search_exa'] = self
 
     def getTokens(self, value: str) -> int:

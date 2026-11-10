@@ -21,11 +21,15 @@
 # SOFTWARE.
 # =============================================================================
 
-"""Whether a Milvus config talks to a local server, read the same way by the key check and the driver."""
+"""Whether a store config talks to a local server, read the same way by the key check and the driver."""
 
-from typing import Any, Dict
+from typing import Mapping
 
 
-def is_local(config: Dict[str, Any]) -> bool:
-    """True for a local server, which gets no token; any other mode is a cloud server."""
-    return config.get('mode') == 'local'
+def is_local(config: Mapping) -> bool:
+    """True for a local server, which gets no key; False for a cloud server.
+
+    The resolved node config carries the host type in ``profile``, the
+    selector's own value.
+    """
+    return config['profile'] == 'local'

@@ -61,6 +61,7 @@ from .config import ConfigError
 from .config import ConfigView
 from .config import resolveConfig
 from .config import TenancyViolation
+from .filters import BindingLogger
 from .filters import IEndpointBase
 from .filters import IGlobalBase
 from .filters import IInstanceBase
@@ -123,6 +124,7 @@ __all__ = [
     'getTask',
     'isCancelled',
     'getVersion',
+    'BindingLogger',
     'IControl',
     'IDict',
     'IEndpointBase',

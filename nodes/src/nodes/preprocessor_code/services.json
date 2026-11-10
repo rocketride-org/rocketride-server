@@ -69,42 +69,42 @@
 		"text": ["documents"]
 	},
 	//
-	//	Optional:
-	//		Profile section are configuration optoins used by the driver
-	//		itself
+	// Optional:
+	//		Local property definitions. The language is the selector (one value
+	//		per parser, no branch-specific settings); the chunk length is
+	//		shared and stored flat.
 	//
-	"preconfig": {
-		// Define the values that will be merged into any profile configuration
-		// specified, unless the profile is 'absolute'
-		"default": "auto",
-		// Defines profiles used with the "profile": key
-		"profiles": {
-			"auto": {
-				"language": "auto",
-				"strlen": 512
-			},
-			"c": {
-				"language": "c",
-				"strlen": 512
-			},
-			"cpp": {
-				"language": "cpp",
-				"strlen": 512
-			},
-			"python": {
-				"language": "python",
-				"strlen": 512
-			},
-			"javascript": {
-				"language": "javascript",
-				"strlen": 512
-			},
-			"typescript": {
-				"language": "typescript",
-				"strlen": 512
-			}
+	"propertyDefinitions": {
+		"code.splitter.strlen": {
+			"type": "integer",
+			"title": "Maximum string length",
+			"description": "Longest chunk, in characters, a code unit is split into",
+			"default": 512,
+			"minimum": 1
 		}
 	},
+	//
+	// Required:
+	//		Defines the properties shown in the pipeline builder side panel, in order
+	//
+	"properties": [
+		{
+			"name": "language",
+			"type": "string",
+			"title": "Language",
+			"description": "The parser used to split the source. Auto detect recognises the language from the source text itself and emits no chunks when it cannot tell.",
+			"default": "auto",
+			"enum": {
+				"auto": { "title": "Auto detect - recognise the language from the source text" },
+				"c": { "title": "C source" },
+				"cpp": { "title": "C++ source" },
+				"python": { "title": "Python source" },
+				"javascript": { "title": "Javascript source" },
+				"typescript": { "title": "Typescript source" }
+			}
+		},
+		"code.splitter.strlen"
+	],
 	//
 	//	Test configuration for automated node testing
 	//
@@ -121,118 +121,5 @@
 				}
 			}
 		]
-	},
-	//
-	// Optional:
-	//		Local fields definitions - these define fields only for the
-	//		current service. You may specify them here, or directly
-	//		in the shape
-	//
-	"fields": {
-		"code.splitter.strlen": {
-			"type": "number",
-			"title": "Maximum string length",
-			"default": 512
-		},
-		"code.splitter.auto.language": {
-			"type": "string",
-			"const": "auto",
-			"default": "auto"
-		},
-		"code.splitter.auto": {
-			"object": "auto",
-			"properties": ["code.splitter.auto.language", "code.splitter.strlen"]
-		},
-		"code.splitter.c.language": {
-			"type": "string",
-			"const": "c",
-			"default": "c"
-		},
-		"code.splitter.c": {
-			"object": "c",
-			"properties": ["code.splitter.c.language", "code.splitter.strlen"]
-		},
-		"code.splitter.cpp.language": {
-			"type": "string",
-			"const": "cpp",
-			"default": "cpp"
-		},
-		"code.splitter.cpp": {
-			"object": "cpp",
-			"properties": ["code.splitter.cpp.language", "code.splitter.strlen"]
-		},
-		"code.splitter.python.language": {
-			"type": "string",
-			"const": "python",
-			"default": "python"
-		},
-		"code.splitter.python": {
-			"object": "python",
-			"properties": ["code.splitter.python.language", "code.splitter.strlen"]
-		},
-		"code.splitter.javascript.language": {
-			"type": "string",
-			"const": "javascript",
-			"default": "javascript"
-		},
-		"code.splitter.javascript": {
-			"object": "javascript",
-			"properties": ["code.splitter.javascript.language", "code.splitter.strlen"]
-		},
-		"code.splitter.typescript.language": {
-			"type": "string",
-			"const": "typescript",
-			"default": "typescript"
-		},
-		"code.splitter.typescript": {
-			"object": "typescript",
-			"properties": ["code.splitter.typescript.language", "code.splitter.strlen"]
-		},
-		"code.splitter.profile": {
-			"type": "string",
-			"title": "Code splitter profile",
-			"default": "auto",
-			"enum": [
-				["auto", "Auto detect - autodetect language based on filename extension"],
-				["c", "C/C++ source"],
-				["python", "Python source"],
-				["javascript", "Javascript source"],
-				["typescript", "Typescript source"]
-			],
-			"conditional": [
-				{
-					"value": "auto",
-					"properties": ["code.splitter.auto"]
-				},
-				{
-					"value": "c",
-					"properties": ["code.splitter.c"]
-				},
-				{
-					"value": "python",
-					"properties": ["code.splitter.python"]
-				},
-				{
-					"value": "javascript",
-					"properties": ["code.splitter.javascript"]
-				},
-				{
-					"value": "typescript",
-					"properties": ["code.splitter.typescript"]
-				}
-			]
-		}
-	},
-	//
-	// Required:
-	//		Defines the fields (shape) of the service. Either source or target
-	//		map be specified, or both, but at least one is required
-	//
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "Code",
-			"properties": ["code.splitter.profile"]
-		}
-	]
+	}
 }
