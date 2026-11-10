@@ -46,6 +46,16 @@ own key for these tokens:
 Without the variable, tokens use the original format, which every engine
 reads.
 
+## Public pages
+
+An engine that serves a public site builds its page map from the
+`publicPages` of published platform apps (see
+[Public pages](/guides/apps#public-pages-platform-apps)).
+
+| Variable              | Effect                                                                                                                                                                      |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `RR_PUBLIC_ROOT_APPS` | The app ids allowed to declare pages, separated by commas. Default `rocketride.home`. An id outside the `rocketride` developer namespace never may, even when it is listed. |
+
 ## Related
 
 - [Self-hosting overview](/operate/self-hosting): install and run the engine.
