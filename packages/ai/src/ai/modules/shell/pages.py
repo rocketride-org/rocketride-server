@@ -419,6 +419,8 @@ async def register_public_pages(server: Any) -> None:
     # (405, not 404), and a non-GET route appended after it (straight to
     # ``router.routes``; ``add_route`` keeps the catch-all last) would fully
     # match a claimed path that the auth predicate already exempted.
+    # Starlette defaults a function endpoint to GET and HEAD, hence the
+    # override; test_unknown_methods_404_off_pages_and_405_on_them pins it.
     route = Route(FALLBACK_PATH, public_page, include_in_schema=False)
     route.methods = None
     server.add_catch_all(route)
