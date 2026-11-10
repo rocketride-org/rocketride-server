@@ -641,9 +641,11 @@ async function check(args: Args, modelKeys: HeldKey[]): Promise<number> {
 					log(`${task.id}: no reference solution to grade (pass --workspace)`);
 					continue;
 				}
-				const r = await checkWorkspace(store.client, task, args.tasks, final, keys, variables, path.join(out, 'app-check'));
+				const { result: r, record } = await checkWorkspace(store.client, task, args.tasks, final, keys, variables, path.join(out, 'app-check'));
 				fs.mkdirSync(out, { recursive: true });
 				fs.writeFileSync(path.join(out, `${task.id}.json`), `${scrubber.scrub(JSON.stringify(r, null, '\t'))}\n`);
+				// the grade keeps 100 characters of each answer; the record keeps them whole (runOutput.<id>.output), as a trial's record.json does
+				fs.writeFileSync(path.join(out, `${task.id}.record.json`), `${scrubber.scrub(JSON.stringify(record, null, '\t'))}\n`);
 				log(`${task.id}: ${r.status.toUpperCase()}: ${scrubber.scrub(r.why).slice(0, 200)}`);
 				for (const c of r.checks) if (c.status !== 'pass') log(`  ${c.status} ${c.id} (${c.kind}): ${scrubber.scrub(c.detail).slice(0, 200)}`);
 				if (r.status !== 'pass') failed++;

@@ -136,8 +136,9 @@ export function handMadeRecord(task: Task, final: Record<string, string>, model:
  * @param keys - The keys the engine holds.
  * @param engineVariables - The Variable names the engine has.
  * @param workDir - Where app checks lay apps out; removed after each.
+ * @returns The grade, and the record it read, which keeps each output check's whole output.
  */
-export async function checkWorkspace(client: RocketRideClient, task: Task, tasksDir: string, final: Record<string, string>, keys: HeldKey[], engineVariables: string[], workDir: string): Promise<TrialResult> {
+export async function checkWorkspace(client: RocketRideClient, task: Task, tasksDir: string, final: Record<string, string>, keys: HeldKey[], engineVariables: string[], workDir: string): Promise<{ result: TrialResult; record: BrowserTrialRecord }> {
 	const start = startFiles(task, tasksDir);
 	const record = handMadeRecord(task, final, 'none (hand-made workspace)');
 	record.engineVariables = engineVariables;
@@ -150,5 +151,5 @@ export async function checkWorkspace(client: RocketRideClient, task: Task, tasks
 	record.browser.keyScan = scans.keyScan();
 	const apps = appsToCheck(task.checks, start, final);
 	if (apps.length) record.browser.appChecks = await checkApps(apps, final, workDir);
-	return gradeTrial(task, record, { start, appChecks: record.browser.appChecks }, null);
+	return { result: gradeTrial(task, record, { start, appChecks: record.browser.appChecks }, null), record };
 }
