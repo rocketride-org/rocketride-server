@@ -29,7 +29,8 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from ai.web.metrics import metrics
 from ai.common.utils.cuda_utils import model_gpu_gb
 from ..base import BaseLoader, get_model_server_address, ModelClient
-from .utils import preprocess_image_transparency
+from ..device_budget import device_budget
+from .utils import preprocess_image_transparency, raise_on_error, with_error_field
 
 logger = logging.getLogger('rocketlib.models.surya')
 
@@ -185,12 +186,12 @@ class SuryaLoader(BaseLoader):
         recognition_predictor = models['recognition_predictor']
         images = preprocessed['images']
 
-        results = []
+        def read(batch):
+            results = []
 
-        try:
             # New API: recognition_predictor accepts det_predictor parameter
             # and handles both detection and recognition in one call
-            predictions = recognition_predictor(images, det_predictor=detection_predictor)
+            predictions = recognition_predictor(batch, det_predictor=detection_predictor)
 
             # Format results - Surya returns line-level results
             for prediction in predictions:
@@ -216,12 +217,24 @@ class SuryaLoader(BaseLoader):
                         'boxes': boxes,
                     }
                 )
+            return results
 
+        try:
+            return read(images)
         except Exception as e:
-            logger.error(f'Surya inference failed: {e}')
-            for _ in images:
-                results.append({'text': '', 'boxes': [], 'error': str(e)})
+            if len(images) == 1:
+                logger.error(f'Surya inference failed: {e}')
+                return [{'text': '', 'boxes': [], 'error': str(e)}]
+            # a model-server batch mixes tasks: read each image alone so one failure stays with its image
+            logger.warning(f'Surya inference of {len(images)} images failed ({e}); reading each alone')
 
+        results = []
+        for image in images:
+            try:
+                results += read([image])
+            except Exception as e:
+                logger.error(f'Surya inference failed: {e}')
+                results.append({'text': '', 'boxes': [], 'error': str(e)})
         return results
 
     @staticmethod
@@ -313,20 +326,30 @@ class Surya:
         return results[0] if single_input else results
 
     def _read_local(self, images: List[bytes]) -> List[Dict]:
-        """Execute local OCR with perf timing."""
+        """Run OCR in this process and report its timings; inference waits in its device's ``device_budget``.
+
+        Args:
+            images: Encoded images.
+
+        Returns:
+            One result per image, as ``read`` returns them.
+        """
         # Preprocess phase — decode images and prepare for model
         t0 = time.perf_counter()
         preprocessed = SuryaLoader.preprocess(self._model, images, self._metadata)
         t_pre = (time.perf_counter() - t0) * 1000
 
-        # GPU inference phase — run OCR detection and recognition
+        # GPU inference phase — wait for the device (cost not measured: alone), then run OCR
         t0 = time.perf_counter()
-        raw_output = SuryaLoader.inference(self._model, preprocessed, self._metadata)
-        t_gpu = (time.perf_counter() - t0) * 1000
+        with device_budget(self._model['device']).reserve(SuryaLoader.inference_cost_mb(preprocessed)):
+            t_wait = (time.perf_counter() - t0) * 1000
+            t0 = time.perf_counter()
+            raw_output = SuryaLoader.inference(self._model, preprocessed, self._metadata)
+            t_gpu = (time.perf_counter() - t0) * 1000
 
         # Postprocess phase — extract text and layout results
         t0 = time.perf_counter()
-        results = SuryaLoader.postprocess(self._model, raw_output, len(images), self.output_fields)
+        results = SuryaLoader.postprocess(self._model, raw_output, len(images), with_error_field(self.output_fields))
         t_post = (time.perf_counter() - t0) * 1000
 
         # Report all perf counters — same keys as model server response
@@ -336,7 +359,7 @@ class Surya:
                 'gpu_preprocess': t_pre,
                 'gpu_compute': t_gpu,
                 'gpu_postprocess': t_post,
-                'gpu_queue_wait': 0,
+                'gpu_queue_wait': t_wait,
                 'gpu_memory': model_gpu_gb(self._model) * inference_sec,
             }
         )
@@ -350,7 +373,7 @@ class Surya:
             result = self._client.send_command(
                 'rrext_ms_inference',
                 {
-                    'output_fields': self.output_fields,
+                    'output_fields': with_error_field(self.output_fields),
                     'data': image_bytes,
                 },
             )
@@ -360,6 +383,7 @@ class Surya:
 
     def _format_result(self, result: Dict) -> Dict:
         """Format result to consistent output."""
+        raise_on_error('Surya', result)
         return {
             'text': result.get('$text') or result.get('text', ''),
             'boxes': result.get('$boxes') or result.get('boxes', []),

@@ -55,17 +55,17 @@ _pygit2_stub.GitError = type('GitError', (Exception,), {})
 _pygit2_stub.RemoteCallbacks = object
 _pygit2_stub.Signature = MagicMock()
 
-# Stub the two opaque modules rocketlib needs at import time:
-#   - engLib: the C++ engine binding, only built into the engine runtime.
-#   - depends: rocketlib's dep-bootstrapper, which writes to a Python-install-
-#     adjacent cache dir (admin-only on default Windows installs). Our stub
-#     turns the dep bootstrap into a no-op.
-# With these in place, `import rocketlib` works and we get the real
-# tool_function / normalize_tool_input / require_int / require_bool.
-sys.modules['engLib'] = MagicMock()
-_depends_stub = MagicMock()
+# Stand-ins for the two engine modules tool_git needs while it loads:
+#   - engLib: the C++ engine binding, only built into the engine runtime;
+#     without the engine, `import rocketlib` needs it.
+#   - depends: git_repo.py calls depends() at import to install pygit2, which
+#     these tests stub; the stand-in makes that call a no-op.
+# They are in sys.modules only for the import below. Afterwards sys.modules
+# holds what it held before (under the engine, the real modules), so later
+# tests still install and load packages through the real depends().
+_englib_stub = MagicMock()
+_depends_stub = ModuleType('depends')
 _depends_stub.depends = lambda *args, **kwargs: None
-sys.modules['depends'] = _depends_stub
 
 _ai_config_stub = MagicMock()
 _ai_common_stub = MagicMock()
@@ -92,6 +92,8 @@ _ai_utils_stub.parse_bool = _config_utils['parse_bool']
 with patch.dict(
     sys.modules,
     {
+        'engLib': _englib_stub,
+        'depends': _depends_stub,
         'pygit2': _pygit2_stub,
         'pygit2.credentials': _pygit2_stub,
         'ai': _ai_stub,

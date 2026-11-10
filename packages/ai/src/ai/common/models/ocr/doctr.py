@@ -29,7 +29,8 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from ai.web.metrics import metrics
 from ai.common.utils.cuda_utils import model_gpu_gb
 from ..base import BaseLoader, get_model_server_address, ModelClient
-from .utils import preprocess_image_transparency
+from ..device_budget import device_budget
+from .utils import preprocess_image_transparency, raise_on_error, with_error_field
 
 logger = logging.getLogger('rocketlib.models.doctr')
 
@@ -57,7 +58,21 @@ class DocTRLoader(BaseLoader):
         pretrained: bool = True,
         **kwargs,
     ) -> Tuple[Dict[str, Any], Dict[str, Any], int]:
-        """Load docTR OCR predictor."""
+        """Load docTR OCR predictor.
+
+        Args:
+            model_name: Ignored; docTR's models are ``detection_model`` and ``recognition_model``.
+            device: ``'cpu'``, ``'cuda'`` or ``'cuda:N'``; the CUDA default when None.
+            allocate_gpu: The model server's allocator, called with the memory needed; it picks the GPU.
+            exclude_gpus: GPUs ``allocate_gpu`` must not pick.
+            detection_model: The docTR detection architecture.
+            recognition_model: The docTR recognition architecture.
+            pretrained: Whether to load pretrained weights.
+            **kwargs: Ignored.
+
+        Returns:
+            (model bundle with the predictor and its device, metadata, GPU index or -1 on CPU).
+        """
         DocTRLoader._ensure_dependencies()
 
         # Import opencv BEFORE doctr - this ensures opencv-contrib-python-headless
@@ -96,7 +111,8 @@ class DocTRLoader(BaseLoader):
                 pretrained=pretrained,
             )
             if torch_device != 'cpu':
-                predictor = predictor.cuda()
+                # .cuda() would take the current device, not the one chosen above
+                predictor = predictor.to(torch_device)
         except Exception as e:
             logger.error(f'Failed to load docTR: {e}')
             raise
@@ -137,6 +153,20 @@ class DocTRLoader(BaseLoader):
                 raise ValueError(f'Unsupported input type: {type(inp)}')
 
         return {'images': images, 'batch_size': len(inputs)}
+
+    @staticmethod
+    def inference_cost_mb(preprocessed: Dict[str, Any]) -> Optional[float]:
+        """Peak device memory of ``inference``: about 0.4 GB allocated, 0.9 GB reserved at any page size.
+
+        Measured on torch 2.10, python-doctr 1.1.0; the predictor resizes each page to 1024 px.
+
+        Args:
+            preprocessed: The output of ``preprocess``; the cost does not depend on it.
+
+        Returns:
+            900 MB.
+        """
+        return 900.0
 
     @staticmethod
     def inference(
@@ -273,20 +303,30 @@ class DocTR:
         return results[0] if single_input else results
 
     def _read_local(self, images: List[bytes]) -> List[Dict]:
-        """Execute local OCR with perf timing."""
+        """Run OCR in this process and report its timings; inference waits in its device's ``device_budget``.
+
+        Args:
+            images: Encoded images.
+
+        Returns:
+            One result per image, as ``read`` returns them.
+        """
         # Preprocess phase — decode images and prepare for model
         t0 = time.perf_counter()
         preprocessed = DocTRLoader.preprocess(self._model, images, self._metadata)
         t_pre = (time.perf_counter() - t0) * 1000
 
-        # GPU inference phase — run OCR detection and recognition
+        # GPU inference phase — wait for room on the device, then run OCR detection and recognition
         t0 = time.perf_counter()
-        raw_output = DocTRLoader.inference(self._model, preprocessed, self._metadata)
-        t_gpu = (time.perf_counter() - t0) * 1000
+        with device_budget(self._model['device']).reserve(DocTRLoader.inference_cost_mb(preprocessed)):
+            t_wait = (time.perf_counter() - t0) * 1000
+            t0 = time.perf_counter()
+            raw_output = DocTRLoader.inference(self._model, preprocessed, self._metadata)
+            t_gpu = (time.perf_counter() - t0) * 1000
 
         # Postprocess phase — extract text and bounding boxes
         t0 = time.perf_counter()
-        results = DocTRLoader.postprocess(self._model, raw_output, len(images), self.output_fields)
+        results = DocTRLoader.postprocess(self._model, raw_output, len(images), with_error_field(self.output_fields))
         t_post = (time.perf_counter() - t0) * 1000
 
         # Report all perf counters — same keys as model server response
@@ -296,7 +336,7 @@ class DocTR:
                 'gpu_preprocess': t_pre,
                 'gpu_compute': t_gpu,
                 'gpu_postprocess': t_post,
-                'gpu_queue_wait': 0,
+                'gpu_queue_wait': t_wait,
                 'gpu_memory': model_gpu_gb(self._model) * inference_sec,
             }
         )
@@ -310,7 +350,7 @@ class DocTR:
             result = self._client.send_command(
                 'rrext_ms_inference',
                 {
-                    'output_fields': self.output_fields,
+                    'output_fields': with_error_field(self.output_fields),
                     'data': image_bytes,
                 },
             )
@@ -320,6 +360,7 @@ class DocTR:
 
     def _format_result(self, result: Dict) -> Dict:
         """Format result to consistent output."""
+        raise_on_error('docTR', result)
         return {
             'text': result.get('$text') or result.get('text', ''),
             'boxes': result.get('$boxes') or result.get('boxes', []),

@@ -12,8 +12,8 @@
 import type { App } from '@modelcontextprotocol/ext-apps';
 import React, { useMemo, useState } from 'react';
 
-import { RequestRow } from '@app-shared/components/trace/Trace';
-import { TraceDetail } from '@app-shared/components/trace/TraceDetail';
+import { RequestRow } from '@app-shared/components/trace';
+import { TraceDetail } from '@app-shared/components/trace';
 import { EmptyState } from 'shell';
 
 import { parseListPayload, type ListPayload, type ToolContext } from './adapter';

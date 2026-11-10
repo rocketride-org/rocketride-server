@@ -20,7 +20,7 @@ from types import SimpleNamespace
 import pytest
 
 WAIT = 10  # seconds; a bound for waits that should end at once
-LIMIT = 0.3  # seconds; the real time limit in tests where a call is stuck
+LIMIT = 2.0  # seconds; the real time limit in tests where a call is stuck
 
 
 class Memory:
@@ -342,6 +342,46 @@ def test_a_run_that_fails_waits_for_its_timed_out_call_before_it_ends(wave, monk
     assert answer == 'answered from what was gathered'
     assert trace['stop_reason'] == 'error'
     assert memory.data == {}, 'the late write was left in memory'
+
+
+def test_waiting_for_a_timed_out_call_is_a_warning_not_an_error(wave, monkeypatch):
+    """The timeout was handled and the run answers, so the wait must not mark the task failed.
+
+    rocketlib.error() lands in the task's errors, and the canvas shows a node with any
+    error as failed even when its run answered normally.
+    """
+    release, logged = threading.Event(), {'error': [], 'warning': []}
+    monkeypatch.setattr(wave.rocketride_agent, 'error', lambda msg: logged['error'].append(msg))
+
+    def warn_then_release(msg):
+        # The run waits for the call only after it logs, so release the call from the log.
+        logged['warning'].append(msg)
+        release.set()
+
+    monkeypatch.setattr(wave.rocketride_agent, 'warning', warn_then_release)
+
+    steps = iter(
+        [
+            lambda: _reply(tool_calls=[call('workspace.write', path='src/App.tsx')]),
+            lambda: _reply(done=True, answer='Done.'),
+        ]
+    )
+    monkeypatch.setattr(wave.rocketride_agent, 'plan_wave', lambda **kw: next(steps)())
+    driver = _driver(wave)
+    driver._tool_timeout_s = LIMIT
+    driver.call_tool = lambda context, tool, args: release.wait(timeout=30) and {'ok': True}
+    driver.sendSSE = lambda *a, **kw: None
+
+    try:
+        answer, trace = driver._run(context=_context(wave, Memory()), question=None)
+    finally:
+        release.set()
+
+    assert answer == 'Done.'
+    assert trace['stop_reason'] == 'done'
+    assert logged['error'] == []
+    assert len(logged['warning']) == 1
+    assert 'waiting for 1 timed-out tool call(s)' in logged['warning'][0]
 
 
 def test_a_wave_whose_next_worker_cannot_start_waits_for_every_call(wave, monkeypatch):

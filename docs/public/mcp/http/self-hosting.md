@@ -26,6 +26,7 @@ do, OAuth requires `MCP_EXPECTED_AUDIENCE` (below); API-key auth
 | `MCP_EXPECTED_AUDIENCE` | _(unset)_ | Audience OAuth tokens must carry — for the default Zitadel setup this is a **project id**, not a URL. When unset, OAuth tokens are accepted only on loopback binds. |
 | `MCP_JWKS_URL` | `<issuer>/oauth/v2/keys` | Where token signing keys are fetched from. |
 | `ROCKETRIDE_URI` | _(derived)_ | Engine address MCP tools connect back to; also the origin of widget CSP and upload/dropper links. When unset: `ws://127.0.0.1:<port>` (or `ws://[::1]:<port>`) on a loopback bind, otherwise the origin of `MCP_RESOURCE_IDENTIFIER` with `https`→`wss` / `http`→`ws` (default `wss://api.rocketride.ai`). The engine logs the resolved value at startup. |
+| `MCP_OPENAI_APPS_CHALLENGE_TOKEN` | _(unset)_ | Served as the plain-text body of `GET /.well-known/openai-apps-challenge` for OpenAI's plugin domain verification. Unset: the route answers 404. |
 
 Three related guards to know about:
 
@@ -59,6 +60,14 @@ to authenticate. Publishing it does not open `/mcp` itself. (Its path is
 derived from `MCP_RESOURCE_IDENTIFIER`; if you set a resource identifier with
 no `/mcp` path, the document moves to `/.well-known/oauth-protected-resource`
 accordingly.)
+
+### OpenAI domain verification
+
+OpenAI's plugin portal verifies the MCP host by fetching
+`/.well-known/openai-apps-challenge` and comparing the body with the token it
+generated. Set `MCP_OPENAI_APPS_CHALLENGE_TOKEN` to that token; the engine serves
+it as plain text, publicly, with surrounding whitespace removed. The route is
+always registered and answers 404 while the variable is unset.
 
 ## Security notes for operators
 

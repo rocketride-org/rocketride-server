@@ -69,7 +69,7 @@ _Drop pipelines into any Python or TypeScript app with a few lines of code, no i
 
 | Feature                           | Description                                                                                                                                                                                                                          |
 | :-------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Visual Pipeline Builder**       | Drag, connect, and configure nodes in VS Code, no boilerplate. Real-time observability tracks token usage, LLM calls, latency, and execution. Pipelines are portable JSON, version-controllable, shareable, and runnable anywhere. |
+| **Rocket Builder**                | Drag, connect, and configure nodes visually, no boilerplate. Real-time observability tracks token usage, LLM calls, latency, and execution. Pipelines are portable JSON, version-controllable, shareable, and runnable anywhere. |
 | **High-Performance C++ Runtime**  | Native multithreading purpose-built for the throughput demands of AI and data workloads. No bottlenecks, no compromises for production scale.                                                                                        |
 | **100+ Pipeline Nodes**           | 15+ LLM providers, 9 vector databases, OCR, NER, PII anonymization, chunking strategies, embedding models, and more. All nodes are Python-extensible, build and publish your own.                                                    |
 | **Multi-Agent Workflows**         | Built-in CrewAI and LangChain support. Chain agents, share memory across pipeline runs, and manage multi-step reasoning at scale.                                                                                                    |
@@ -182,6 +182,7 @@ _Whether you build web apps, integrate APIs, or run backend services, you alread
      ```bash
      docker pull ghcr.io/rocketride-org/rocketride-engine:latest
      docker create --name rocketride-engine -p 5565:5565 ghcr.io/rocketride-org/rocketride-engine:latest
+     docker start rocketride-engine
      ```
 
    - **Local Deployment** - Download your preferred runtime as a standalone process from the **Deploy** page in the `Connection Manager`.

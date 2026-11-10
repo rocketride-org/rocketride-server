@@ -15,26 +15,12 @@ Usage:
 
 import importlib
 import importlib.util
+import re
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-
-# ---------------------------------------------------------------------------
-# Mock heavy dependencies BEFORE importing the atlas module
-# ---------------------------------------------------------------------------
-
-for mod_name in (
-    'pymongo',
-    'pymongo.collection',
-    'pymongo.database',
-    'pymongo.errors',
-    'pymongo.operations',
-):
-    sys.modules.setdefault(mod_name, MagicMock())
-
-sys.modules.setdefault('numpy', MagicMock())
 
 
 # ---------------------------------------------------------------------------
@@ -65,12 +51,32 @@ class DocFilter:
 # Load atlas.py directly by file path (bypasses atlas/__init__.py)
 # ---------------------------------------------------------------------------
 
+# pymongo is stubbed only while atlas.py runs: the module binds the names it uses
+# at import, and the tests patch atlas_mod.MongoClient. Afterwards sys.modules
+# holds what it held before (the real pymongo or nothing).
 # Do NOT stub pydantic: atlas.py imports ai.common.store -> rocketlib, and
 # rocketlib.types needs the real pydantic (BaseModel, ConfigDict, Field).
-_atlas_path = Path(__file__).parent.parent.parent / 'src' / 'nodes' / 'store_atlas' / 'atlas.py'
-_spec = importlib.util.spec_from_file_location('_atlas_direct', _atlas_path)
-atlas_mod = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(atlas_mod)
+_PYMONGO_MODULES = (
+    'pymongo',
+    'pymongo.collection',
+    'pymongo.database',
+    'pymongo.errors',
+    'pymongo.operations',
+)
+_saved_modules = {name: sys.modules.get(name) for name in _PYMONGO_MODULES}
+for _name in _PYMONGO_MODULES:
+    sys.modules[_name] = MagicMock()
+try:
+    _atlas_path = Path(__file__).parent.parent.parent / 'src' / 'nodes' / 'store_atlas' / 'atlas.py'
+    _spec = importlib.util.spec_from_file_location('_atlas_direct', _atlas_path)
+    atlas_mod = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(atlas_mod)
+finally:
+    for _name, _module in _saved_modules.items():
+        if _module is None:
+            sys.modules.pop(_name, None)
+        else:
+            sys.modules[_name] = _module
 
 Store = atlas_mod.Store
 
@@ -204,3 +210,45 @@ class TestEmptyListGuards:
             {'meta.objectId': {'$in': ['id-1']}},
             {'$set': {'meta.isDeleted': False}},
         )
+
+
+def test_trash_round_trip_filters_paths_before_paging(store):
+    class Cursor(list):
+        def skip(self, offset):
+            return Cursor(self[offset:])
+
+        def limit(self, limit):
+            return Cursor(self[:limit])
+
+    rows = [
+        {'meta': {'objectId': oid, 'chunkId': chunk, 'parent': f'/{oid}', 'isDeleted': oid == 'schema'}}
+        for oid, chunk in [('a', 0), ('a', 1), ('b', 0), ('schema', 0)]
+    ]
+
+    def find(query):
+        def matches(row):
+            for field, value in query.items():
+                actual = row['meta'][field.removeprefix('meta.')]
+                if isinstance(value, dict):
+                    if not re.search(value['$regex'], actual, re.IGNORECASE):
+                        return False
+                elif actual != value:
+                    return False
+            return True
+
+        return Cursor(row for row in rows if matches(row))
+
+    def update_many(query, update):
+        for row in rows:
+            if row['meta']['objectId'] in query['meta.objectId']['$in']:
+                row['meta']['isDeleted'] = update['$set']['meta.isDeleted']
+
+    store.collection.find.side_effect = find
+    store.collection.update_many.side_effect = update_many
+    store.markDeleted(['a'])
+    assert store.getPaths(limit=1) == {'/b': 'b'}
+    assert store.getPaths(parent='/a') == {}
+    assert store.getPaths(offset=1, limit=1) == {}
+    store.markActive(['a'])
+    assert store.getPaths(parent='/A') == {'/a': 'a'}
+    assert store.getPaths() == {'/a': 'a', '/b': 'b'}

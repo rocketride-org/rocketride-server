@@ -174,9 +174,8 @@ def test_run_exposes_shutdown_event_for_external_signaling():
     # because attribute assignment happens before .wait() in the source.
     import time
 
-    for _ in range(20):
-        if hasattr(ep, '_shutdown_event'):
-            break
+    deadline = time.monotonic() + 5
+    while not hasattr(ep, '_shutdown_event') and time.monotonic() < deadline:
         time.sleep(0.01)
 
     assert hasattr(ep, '_shutdown_event'), '_run() did not set _shutdown_event attribute'

@@ -32,17 +32,17 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { useShellConnection } from 'shell';
 import { Banner, Button, Card, ConfirmDialog, ContentHeader, EmptyState, InputField, Section, StatusBadge, TabControl, TabPanel } from 'shell';
 import type { ViewMenu } from 'shell';
 import { commonStyles } from 'shell';
-import type { ISqlEndpoint, ISqlSchemaColumn, ISqlSchemaResponse, SqlDialect } from '../connect';
+import type { SqlEndpoint, SqlSchemaColumn, SqlSchemaResponse, SqlDialect } from '../connect';
 import { buildRelationGraph, inboundReferences } from '../schema/relations';
-import { getSession, refreshSchema, useSchema } from '../schema/schemaStore';
-import type { AlterOp, IColumnSpec } from '../sql/ddl';
+import { refreshSchema, useSchema } from '../schema/schemaStore';
+import { useSqlEnv } from '../sqlEnv';
+import type { AlterOp, ColumnSpec } from '../sql/ddl';
 import { FK_ACTIONS, describeOp, generateAlterStatements, generateCreateTable } from '../sql/ddl';
 import { ALLOW_EXECUTE_OFF_TEXT, DATABASE_SAID_LABEL, GENERIC_ERROR_TEXT, describeFailure } from '../sql/failure';
-import type { INamedForeignKey } from '../sql/introspect';
+import type { NamedForeignKey } from '../sql/introspect';
 import { fetchForeignKeyNames } from '../sql/introspect';
 import { DatabaseIcon } from '../icons';
 
@@ -51,15 +51,15 @@ import { DatabaseIcon } from '../icons';
 // =============================================================================
 
 /** Props for the {@link TableDesignView} component. */
-export interface ITableDesignViewProps {
+export interface TableDesignViewProps {
 	/** The connection the table lives on. */
-	endpoint: ISqlEndpoint;
+	endpoint: SqlEndpoint;
 	/** The table being altered, or null for create-table mode. */
 	table: string | null;
 }
 
 /** The banner shown after an Apply, composed once the snapshot has landed. */
-interface IApplyOutcome {
+interface ApplyOutcome {
 	/** Banner severity. */
 	variant: 'info' | 'warning' | 'error';
 	/** The whole message, already assembled. */
@@ -72,7 +72,7 @@ interface IApplyOutcome {
 }
 
 /** An Apply whose outcome is waiting to be described against the snapshot. */
-interface IPendingApply {
+interface PendingApply {
 	/** Wall-clock ms the statements finished at. */
 	at: number;
 	/** Failure detail, or null when every statement ran. */
@@ -89,7 +89,7 @@ interface IPendingApply {
 }
 
 /** One display row of the columns page (snapshot + staged ops applied). */
-interface IEffectiveColumn {
+interface EffectiveColumn {
 	/** Stable row identity (survives renames; React keys must not shift). */
 	id: string;
 	/** Current (possibly renamed) column name. */
@@ -331,7 +331,7 @@ export function changedColumns(ops: AlterOp[]): { snapshotName: string; finalNam
  * @param ops - The staged operations.
  * @returns The impact sentences, in column order.
  */
-export function inboundImpact(schema: ISqlSchemaResponse | null, table: string, ops: AlterOp[]): string[] {
+export function inboundImpact(schema: SqlSchemaResponse | null, table: string, ops: AlterOp[]): string[] {
 	const graph = buildRelationGraph(schema);
 	const inbound = inboundReferences(graph, table);
 	const lines: string[] = [];
@@ -354,7 +354,7 @@ export function inboundImpact(schema: ISqlSchemaResponse | null, table: string, 
  * @param failure - The failure detail recorded by Apply.
  * @returns The banner text.
  */
-function describeApplyFailure(failure: NonNullable<IPendingApply['failure']>): { text: string; verbatim: string | null } {
+function describeApplyFailure(failure: NonNullable<PendingApply['failure']>): { text: string; verbatim: string | null } {
 	const { committed, total, remaining, message } = failure;
 	const failedAt = committed + 1;
 	const parts: string[] = [];
@@ -390,7 +390,7 @@ function describeApplyFailure(failure: NonNullable<IPendingApply['failure']>): {
 // =============================================================================
 
 /** Blank column spec for the add/create forms. */
-function blankSpec(): IColumnSpec {
+function blankSpec(): ColumnSpec {
 	return { name: '', type: '', nullable: true, defaultExpr: '', primaryKey: false };
 }
 
@@ -402,10 +402,10 @@ function blankSpec(): IColumnSpec {
  * @param ops - The staged operations.
  * @returns The effective display rows (dropped rows stay, marked).
  */
-function effectiveColumns(base: ISqlSchemaColumn[], pk: string[], ops: AlterOp[]): IEffectiveColumn[] {
+function effectiveColumns(base: SqlSchemaColumn[], pk: string[], ops: AlterOp[]): EffectiveColumn[] {
 	// Snapshot rows carry a base: identity keyed by the ORIGINAL name so the
 	// row keeps its React key across staged renames.
-	const rows: IEffectiveColumn[] = base.map((c) => ({
+	const rows: EffectiveColumn[] = base.map((c) => ({
 		id: `base:${c.column}`,
 		name: c.column,
 		type: c.type,
@@ -439,8 +439,8 @@ function effectiveColumns(base: ISqlSchemaColumn[], pk: string[], ops: AlterOp[]
  * column and FK operations against the schema snapshot; create mode drafts a
  * column list for a new table. The DDL page previews exactly what Apply runs.
  */
-export const TableDesignView: React.FC<ITableDesignViewProps> = ({ endpoint, table }) => {
-	const { client, isConnected } = useShellConnection();
+export const TableDesignView: React.FC<TableDesignViewProps> = ({ endpoint, table }) => {
+	const env = useSqlEnv();
 	const snapshot = useSchema(endpoint.key);
 	const createMode = table === null;
 
@@ -449,16 +449,16 @@ export const TableDesignView: React.FC<ITableDesignViewProps> = ({ endpoint, tab
 	const [activePage, setActivePage] = useState('columns');
 	const [ops, setOps] = useState<AlterOp[]>([]);
 	const [createName, setCreateName] = useState('');
-	const [createColumns, setCreateColumns] = useState<IColumnSpec[]>([]);
+	const [createColumns, setCreateColumns] = useState<ColumnSpec[]>([]);
 	const [selected, setSelected] = useState<string | null>(null);
 
 	// Column form (add in both modes; doubles as the edit target in alter mode).
-	const [draft, setDraft] = useState<IColumnSpec>(blankSpec());
+	const [draft, setDraft] = useState<ColumnSpec>(blankSpec());
 	const [editName, setEditName] = useState('');
 	const [editType, setEditType] = useState('');
 
 	// FK form + fetched constraint names.
-	const [fkNames, setFkNames] = useState<INamedForeignKey[] | null>(null);
+	const [fkNames, setFkNames] = useState<NamedForeignKey[] | null>(null);
 	const [fkError, setFkError] = useState<string | null>(null);
 	const [fkDraft, setFkDraft] = useState({ name: '', column: '', refTable: '', refColumn: '', onUpdate: 'CASCADE', onDelete: 'RESTRICT' });
 
@@ -467,15 +467,15 @@ export const TableDesignView: React.FC<ITableDesignViewProps> = ({ endpoint, tab
 	// node re-read the database or served its task-start reflection again.
 	const [confirmOpen, setConfirmOpen] = useState(false);
 	const [applying, setApplying] = useState(false);
-	const [pendingApply, setPendingApply] = useState<IPendingApply | null>(null);
-	const [applyOutcome, setApplyOutcome] = useState<IApplyOutcome | null>(null);
+	const [pendingApply, setPendingApply] = useState<PendingApply | null>(null);
+	const [applyOutcome, setApplyOutcome] = useState<ApplyOutcome | null>(null);
 	// The verbatim driver text starts collapsed on every new outcome.
 	const [showVerbatim, setShowVerbatim] = useState(false);
 
 	// ── Derived data ─────────────────────────────────────────────────────────
 
 	const tableDef = !createMode ? snapshot.schema?.tables?.[table] ?? null : null;
-	const columns = useMemo<IEffectiveColumn[]>(() => {
+	const columns = useMemo<EffectiveColumn[]>(() => {
 		if (createMode) {
 			// Drafts are positional: identity by index, not (possibly duplicated) name.
 			return createColumns.map((c, i) => ({ id: `draft:${i}`, name: c.name, type: c.type, primaryKey: c.primaryKey, pending: 'added' as const }));
@@ -511,17 +511,17 @@ export const TableDesignView: React.FC<ITableDesignViewProps> = ({ endpoint, tab
 	// ── Foreign key names (alter mode, lazy on first FK page visit) ──────────
 
 	useEffect(() => {
-		if (createMode || activePage !== 'fks' || fkNames !== null || !client || snapshot.status !== 'ready') return;
+		if (createMode || activePage !== 'fks' || fkNames !== null || !env.ready || snapshot.status !== 'ready') return;
 		// Cancellation flag: a response landing after unmount/re-run must not
 		// set state for the wrong table.
 		let cancelled = false;
 		setFkError(null);
-		const session = getSession(client, endpoint);
+		const session = env.getSession(endpoint);
 		fetchForeignKeyNames(session, snapshot.dialect, table)
 			.then((names) => { if (!cancelled) setFkNames(names); })
 			.catch((err) => { if (!cancelled) setFkError(err instanceof Error ? err.message : String(err)); });
 		return () => { cancelled = true; };
-	}, [createMode, activePage, fkNames, client, snapshot.status, snapshot.dialect, endpoint, table]);
+	}, [createMode, activePage, fkNames, env, snapshot.status, snapshot.dialect, endpoint, table]);
 
 	// ── Gestures ─────────────────────────────────────────────────────────────
 
@@ -544,7 +544,7 @@ export const TableDesignView: React.FC<ITableDesignViewProps> = ({ endpoint, tab
 	 *
 	 * @param col - The row the user activated.
 	 */
-	const selectColumn = useCallback((col: IEffectiveColumn): void => {
+	const selectColumn = useCallback((col: EffectiveColumn): void => {
 		if (createMode || col.pending === 'dropped') return;
 		setSelected(col.name);
 		setEditName(col.name);
@@ -580,7 +580,7 @@ export const TableDesignView: React.FC<ITableDesignViewProps> = ({ endpoint, tab
 	 * the snapshot the refresh produced.
 	 */
 	const apply = useCallback(async (): Promise<void> => {
-		if (!client || statements.length === 0) return;
+		if (!env.ready || statements.length === 0) return;
 		const total = statements.length;
 		setApplying(true);
 		setApplyOutcome(null);
@@ -589,7 +589,7 @@ export const TableDesignView: React.FC<ITableDesignViewProps> = ({ endpoint, tab
 		// statement, so a failed batch leaves a committed prefix behind.
 		let done = 0;
 		try {
-			const session = getSession(client, endpoint);
+			const session = env.getSession(endpoint);
 			// Statements run in op order; the first failure stops the batch and
 			// `done` counts what committed so the plan can drop it.
 			for (const sql of statements) {
@@ -601,7 +601,7 @@ export const TableDesignView: React.FC<ITableDesignViewProps> = ({ endpoint, tab
 			setOps([]);
 			setCreateColumns([]);
 			setFkNames(null);
-			await refreshSchema(client, endpoint, { fresh: true });
+			await refreshSchema(env.getSession(endpoint), { fresh: true });
 			setPendingApply({ at: Date.now(), failure: null });
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
@@ -610,7 +610,7 @@ export const TableDesignView: React.FC<ITableDesignViewProps> = ({ endpoint, tab
 				// is actually left to run, then re-reflect the mutated schema.
 				setOps((prev) => prev.slice(done));
 				setFkNames(null);
-				await refreshSchema(client, endpoint, { fresh: true }).catch(() => undefined);
+				await refreshSchema(env.getSession(endpoint), { fresh: true }).catch(() => undefined);
 			}
 			setPendingApply({
 				at: Date.now(),
@@ -620,7 +620,7 @@ export const TableDesignView: React.FC<ITableDesignViewProps> = ({ endpoint, tab
 			setApplying(false);
 			setConfirmOpen(false);
 		}
-	}, [client, statements, endpoint, createMode]);
+	}, [env, statements, endpoint, createMode]);
 
 	// ── Outcome banner (composed against the post-refresh snapshot) ──────────
 
@@ -706,7 +706,7 @@ export const TableDesignView: React.FC<ITableDesignViewProps> = ({ endpoint, tab
 						<Button
 							variant="primary"
 							onClick={() => setConfirmOpen(true)}
-							disabled={pendingCount === 0 || applying || !client || !isConnected}
+							disabled={pendingCount === 0 || applying || !env.ready}
 						>
 							{applying ? 'Applying...' : 'Apply'}
 						</Button>

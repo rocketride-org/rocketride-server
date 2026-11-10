@@ -23,18 +23,27 @@
 // =============================================================================
 // ACCOUNT VIEW — thin shell wrapper around shared AccountView.
 //
-// Owns all DAP fetching, shell auth, and event wiring. Passes pure data
+// Owns all account/billing data fetching and event wiring; passes pure data
 // and async callbacks down to the host-agnostic AccountView.
+//
+// REALM-AGNOSTIC BY CONSTRUCTION: every engine call goes through the
+// realm's own RocketRideClient (`client.account.*` / `client.billing.*`).
+// At a framework root that is the real client; in a socketless webview
+// realm it is the realm client, whose requests ride the bridge to the
+// root's socket. Identity falls back from ShellIdentityContext (cloud
+// Shell) to the realm's mirrored account info, and the workspace manifest
+// is optional, so the SAME component renders in the cloud overlay and in a
+// VS Code page webview unchanged.
 // =============================================================================
 
-import React, { useState, useEffect, useCallback, CSSProperties } from 'react';
+import React, { useState, useEffect, useCallback, useRef, CSSProperties } from 'react';
 import AccountView from '../modules/account/AccountView';
 import type { IDataGridPageRequest } from '../components/data-grid/DataGrid';
 import type { ConnectResult, AccountSection, ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, ProfileUpdate, BillingDetail, CreditBalance, TransactionsResult, UsageRollup } from 'rocketride';
 import { useShellConnection } from '../connection/ConnectionContext';
 import { useAuthUser, useLogout } from '../hooks/useAuthUser';
 import { ConnectionManager } from '../connection/connection';
-import { useWorkspace } from '../components/workspace/WorkspaceContext';
+import { useOptionalWorkspace } from '../components/workspace/WorkspaceContext';
 
 // =============================================================================
 // STYLES
@@ -52,21 +61,42 @@ const accountStyles = {
 // COMPONENT
 // =============================================================================
 
+/** Optional host wiring. */
+export interface IAccountProviderProps {
+	/** Starts a subscription flow (e.g. emit shell:subscribe toward a mounted
+	 *  CheckoutFlow). Absent = no subscribe CTA, matching prior behavior. */
+	onSubscribe?: () => void;
+	/** Render ONE collapsed pane (the Settings page's Account group) instead
+	 *  of the classic 6-tab view, and load only that pane's data. */
+	embeddedSection?: 'profile' | 'billing' | 'api-keys';
+	/** Settings-nav navigation for embedded cross-links (workspace chip). */
+	onNavigateSection?: (sectionId: string) => void;
+	/** Pre-switch guard: a false return aborts a workspace switch (the
+	 *  Settings page uses it so a dirty draft is never saved into the wrong
+	 *  workspace — confirm-and-discard before the switch commits). */
+	confirmWorkspaceSwitch?: () => boolean;
+}
+
 /**
- * Cloud-UI AccountView wrapper.
+ * AccountView wrapper for any framework realm.
  *
- * Fetches account data via DAP commands (`rrext_account_*`) and delegates
- * all rendering to the shared AccountView. Listens for `shell:accountUpdate`
- * bus events to keep the profile in sync with server-pushed updates.
+ * Fetches account data via brokered `client.account.*` / `client.billing.*`
+ * bus ops and delegates all rendering to the shared AccountView. Listens for
+ * `shell:accountUpdate` events to keep the profile in sync with
+ * server-pushed updates (socket-fed at a root; mirror-fed in a spoke realm).
  */
-const AccountProvider: React.FC = () => {
-	const { client, isConnected } = useShellConnection();
-	const authUser = useAuthUser();
+const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embeddedSection, onNavigateSection, confirmWorkspaceSwitch }) => {
+	// The realm's own client — null until connected AND (off-root) mirrored.
+	const { client: shellClient, isConnected } = useShellConnection();
+	const client = isConnected ? shellClient : null;
+	const ctxUser = useAuthUser();
 	const logout = useLogout();
-	const { appManifest } = useWorkspace();
+	const appManifest = useOptionalWorkspace()?.appManifest ?? [];
 
 	// ── Navigation state ────────────────────────────────────────────────────
-	const [section, setSection] = useState<AccountSection>('profile');
+	// Embedded mode pins the section (the Settings nav owns navigation), which
+	// also keys the per-section refresh map and the billing event monitor.
+	const [section, setSection] = useState<AccountSection>(embeddedSection ?? 'profile');
 	const [activeTeamId, setActiveTeamId] = useState<string | null>(null);
 
 	// ── Data ────────────────────────────────────────────────────────────────
@@ -76,6 +106,11 @@ const AccountProvider: React.FC = () => {
 	const [members, setMembers] = useState<MemberRecord[]>([]);
 	const [teams, setTeams] = useState<TeamRecord[]>([]);
 	const [teamDetail, setTeamDetail] = useState<TeamDetail | null>(null);
+
+	// Identity: the cloud Shell injects it via context; a page realm has no
+	// Shell in its tree, so fall back to the mirrored/cached account info.
+	const [mirrorUser, setMirrorUser] = useState<ConnectResult | null>(() => ConnectionManager.getInstance().getAccountInfo() ?? null);
+	const authUser = ctxUser ?? mirrorUser;
 
 	// ── Billing data ────────────────────────────────────────────────────────
 	const [subscriptions, setSubscriptions] = useState<BillingDetail[]>([]);
@@ -97,6 +132,7 @@ const AccountProvider: React.FC = () => {
 		() =>
 			ConnectionManager.getInstance().on('shell:accountUpdate', (data) => {
 				setProfile(data);
+				setMirrorUser(data);
 				setReloadCounter((n) => n + 1);
 			}),
 		[]
@@ -114,14 +150,27 @@ const AccountProvider: React.FC = () => {
 	/** Extracts a human-readable message from a thrown value. */
 	const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
-	/** Fetches the current user's profile from the server. */
-	const loadProfile = useCallback(async () => {
-		if (!client) return;
+	/**
+	 * Fetches the current user's profile from the server. Resolves true on
+	 * success; a failure is surfaced as sectionError and resolves false so a
+	 * caller that depends on the refresh (e.g. leaving an org) can tell.
+	 * Only the most recent request may update state: an older response that
+	 * lands after a newer one (e.g. a refresh started before a leave) is
+	 * dropped so it cannot restore a membership that no longer exists.
+	 */
+	const profileRequestSeq = useRef(0);
+	const loadProfile = useCallback(async (): Promise<boolean> => {
+		if (!client) return false;
+		const seq = ++profileRequestSeq.current;
 		try {
 			const body = await client.account.getProfile();
+			if (seq !== profileRequestSeq.current) return true;
 			setProfile(body);
+			return true;
 		} catch (e) {
+			if (seq !== profileRequestSeq.current) return false;
 			setSectionError(errMsg(e));
+			return false;
 		}
 	}, [client]);
 
@@ -188,10 +237,9 @@ const AccountProvider: React.FC = () => {
 
 	// ── Load billing data ───────────────────────────────────────────────────
 
-	/** Fetches subscriptions, credit balance, and credit packs in parallel. */
 	/** Fetches all billing data in one shot: subscriptions, balance, plans, transactions, usage. */
 	const loadBilling = useCallback(async () => {
-		if (!client || !isConnected || !orgId) {
+		if (!client || !orgId) {
 			setBillingLoading(false);
 			return;
 		}
@@ -203,7 +251,7 @@ const AccountProvider: React.FC = () => {
 					return [] as BillingDetail[];
 				}),
 				client.billing.getCreditBalance(orgId).catch(() => null),
-				client.billing.getProductPrices('rocketride.pipeBuilder').catch(() => []),
+				client.billing.getProductPrices('rocketride.pipeBuilder').catch(() => [] as any[]),
 				client.billing.getTransactions(orgId, { page: 1, pageSize: 20 }).catch(() => null),
 				client.billing.getUsageByUser(orgId).catch(() => [] as UsageRollup[]),
 				client.billing.getUsageByTeam(orgId).catch(() => [] as UsageRollup[]),
@@ -218,7 +266,7 @@ const AccountProvider: React.FC = () => {
 			setBillingLoading(false);
 			setDashboardLoading(false);
 		}
-	}, [client, isConnected, orgId]);
+	}, [client, orgId]);
 
 	/** Fetches just the transactions page (legacy pagination callback). */
 	const handleTransactionPage = useCallback(
@@ -240,17 +288,15 @@ const AccountProvider: React.FC = () => {
 	 * failure resolves null and the grid keeps its prior rows.
 	 */
 	const fetchTransactions = useCallback(
-		async (req: IDataGridPageRequest): Promise<TransactionsResult | null> => {
+		async (reqst: IDataGridPageRequest): Promise<TransactionsResult | null> => {
 			if (!client || !orgId) return null;
-			return client.billing
-				.getTransactions(orgId, {
-					page: req.page,
-					pageSize: req.size,
-					sort: req.sort,
-					filters: req.filters,
-					search: req.search,
-				})
-				.catch(() => null);
+			return client.billing.getTransactions(orgId, {
+				page: reqst.page,
+				pageSize: reqst.size,
+				sort: reqst.sort,
+				filters: reqst.filters,
+				search: reqst.search,
+			}).catch(() => null);
 		},
 		[client, orgId]
 	);
@@ -292,21 +338,43 @@ const AccountProvider: React.FC = () => {
 		[client, orgId, loadBilling]
 	);
 
-	// ── Load ALL data upfront on connect (badges, counts, billing) ──────────
+	// ── Load data upfront on connect ─────────────────────────────────────────
+	// Classic view loads EVERYTHING (tab badges need the counts); an embedded
+	// pane has no badges, so it loads only what it renders.
 	useEffect(() => {
-		if (!isConnected || !client) return;
+		if (!client) return;
+		if (embeddedSection === 'profile') {
+			loadProfile();
+			loadOrg();
+			loadMembers();
+			loadTeams();
+			return;
+		}
+		if (embeddedSection === 'billing') {
+			loadProfile();
+			loadBilling();
+			return;
+		}
+		if (embeddedSection === 'api-keys') {
+			loadProfile();
+			loadKeys();
+			loadTeams();
+			return;
+		}
 		loadProfile();
 		loadKeys();
 		loadOrg();
 		loadMembers();
 		loadTeams();
 		loadBilling();
-	}, [isConnected, client]);
+	}, [client, orgId, embeddedSection]);
 
 	// ── Subscribe to billing events when billing tab is active ──────────────
 	useEffect(() => {
-		if (!client || !isConnected || section !== 'billing') return;
-		// Subscribe to billing ledger events via the wildcard monitor
+		if (!client || section !== 'billing') return;
+		// Subscribe to billing ledger events via the wildcard monitor (the
+		// realm client forwards monitors to the root broker, which refcounts
+		// across realms; only edges reach the engine).
 		client.addMonitor({ token: '*' }, ['billing']).catch(() => {});
 		// Listen for billing update events via ConnectionManager and re-fetch
 		const unsub = ConnectionManager.getInstance().on('shell:event', ({ event }: any) => {
@@ -318,14 +386,22 @@ const AccountProvider: React.FC = () => {
 			client.removeMonitor({ token: '*' }, ['billing']).catch(() => {});
 			unsub();
 		};
-	}, [section, client, isConnected]);
+	}, [section, client]);
 
 	// ── Reload current section on refresh signal ─────────────────────────────
 	useEffect(() => {
-		if (!reloadCounter || !isConnected || !client) return;
+		if (!reloadCounter || !client) return;
 		setSectionError(null);
-		if (section === 'profile') loadProfile();
-		else if (section === 'billing') loadBilling();
+		if (section === 'profile') {
+			loadProfile();
+			// The embedded Profile pane renders org, member, and team data
+			// too (see the upfront loader) — keep them fresh as well.
+			if (embeddedSection === 'profile') {
+				loadOrg();
+				loadMembers();
+				loadTeams();
+			}
+		} else if (section === 'billing') loadBilling();
 		else if (section === 'api-keys') {
 			loadProfile();
 			loadKeys();
@@ -341,14 +417,14 @@ const AccountProvider: React.FC = () => {
 
 	// ── Load team detail when a team is selected or data changes ────────────
 	useEffect(() => {
-		if (!activeTeamId || !isConnected) return;
+		if (!activeTeamId || !client) return;
 		loadTeamDetail(activeTeamId);
 		loadMembers();
-	}, [activeTeamId, isConnected, reloadCounter]);
+	}, [activeTeamId, client, reloadCounter]);
 
 	// ── Callbacks ────────────────────────────────────────────────────────────
 
-	/** Persists updated profile fields via the SDK. */
+	/** Persists updated profile fields. */
 	const handleSaveProfile = useCallback(
 		async (fields: ProfileUpdate) => {
 			if (!client) return;
@@ -367,13 +443,125 @@ const AccountProvider: React.FC = () => {
 		[client]
 	);
 
-	/** Switches the user's active organization. */
+	/** Switches the user's active organization. The guard runs FIRST — a
+	 *  dirty settings draft must be confirmed-and-discarded before the switch
+	 *  commits (a workspace-A draft must never save into workspace B). */
 	const handleSetDefaultOrg = useCallback(
 		async (orgId: string) => {
 			if (!client) return;
-			await client.account.setDefaultOrg(orgId);
+			if (confirmWorkspaceSwitch && !confirmWorkspaceSwitch()) return;
+			// The switch started HERE (the Profile picker), so after the rescope
+			// the shell should land back on the Profile section — in
+			// sessionStorage (not state) because the rescope remounts this whole
+			// tree, and its reload FALLBACK replaces the page outright. A
+			// push-initiated switch from another tab sets no flag and lands on
+			// the workbench as before. Key literal = OverlayManager's
+			// WORKSPACE_SWITCH_LAND_KEY (importing it would cycle:
+			// OverlayManager → SettingsProvider → AccountProvider).
+			try { window.sessionStorage.setItem('rr:workspace-switch-land', '1'); } catch { /* storage unavailable — land on the workbench */ }
+			try {
+				await client.account.setDefaultOrg(orgId);
+			} catch (err) {
+				// A failed switch must not leave the landing flag armed — the
+				// next unrelated mount would open Settings at Profile.
+				try { window.sessionStorage.removeItem('rr:workspace-switch-land'); } catch { /* ignore */ }
+				throw err;
+			}
+		},
+		[client, confirmWorkspaceSwitch]
+	);
+
+	/** Renames ANY workspace the user administers (manage-workspaces drawer).
+	 *  Re-fetches the profile so the memberships list reflects the new name. */
+	const handleRenameWorkspace = useCallback(
+		async (targetOrgId: string, name: string) => {
+			if (!client) return;
+			await client.account.updateOrgName(targetOrgId, name);
+			if (targetOrgId === orgId) setOrg((c) => (c ? { ...c, name } : c));
+			await loadProfile();
+		},
+		[client, orgId, loadProfile]
+	);
+
+	/** Creates a new workspace. The server makes the caller its admin, switches
+	 *  their default org, and pushes `apaext_org_changed` — the shell's rescope
+	 *  path takes over from there, so the only client work is the landing flag
+	 *  (the switch started here, so land back on Profile). */
+	const handleCreateWorkspace = useCallback(
+		async (name: string) => {
+			if (!client) return;
+			// Same literal as OverlayManager's WORKSPACE_SWITCH_LAND_KEY (an
+			// import would cycle; see handleSetDefaultOrg).
+			try { window.sessionStorage.setItem('rr:workspace-switch-land', '1'); } catch { /* storage unavailable — land on the workbench */ }
+			try {
+				await client.account.createOrg(name);
+			} catch (err) {
+				// The switch never happened — don't leave a stale landing flag
+				// to hijack the NEXT unrelated mount of the settings overlay.
+				try { window.sessionStorage.removeItem('rr:workspace-switch-land'); } catch { /* ignore */ }
+				throw err;
+			}
 		},
 		[client]
+	);
+
+	/** Leaves a workspace. Leaving the CURRENT one makes the server re-point
+	 *  the default and push `apaext_org_changed` (the rescope takes over);
+	 *  leaving another just needs the memberships list re-read. The leave has
+	 *  already succeeded by then: a failed re-read is reported as such, never
+	 *  as a failed leave. */
+	const handleLeaveWorkspace = useCallback(
+		async (targetOrgId: string) => {
+			if (!client) return;
+			const leavingCurrent = targetOrgId === authUser?.organization?.id;
+			if (leavingCurrent) {
+				try { window.sessionStorage.setItem('rr:workspace-switch-land', '1'); } catch { /* storage unavailable */ }
+			}
+			try {
+				await client.account.leaveOrg(targetOrgId);
+			} catch (err) {
+				if (leavingCurrent) {
+					try { window.sessionStorage.removeItem('rr:workspace-switch-land'); } catch { /* ignore */ }
+				}
+				throw err;
+			}
+			if (!leavingCurrent && !(await loadProfile())) {
+				throw new Error('You left the workspace, but the workspace list could not be refreshed. Reload the page.');
+			}
+		},
+		[client, authUser, loadProfile]
+	);
+
+	/** Dry-run for the delete confirm dialog: member count + billing blocker. */
+	const handleDeleteWorkspacePrecheck = useCallback(
+		async (targetOrgId: string) => {
+			if (!client) throw new Error('Not connected');
+			return client.account.deleteOrgPrecheck(targetOrgId);
+		},
+		[client]
+	);
+
+	/** Deletes a workspace (admin-gated, destroys its data for all members).
+	 *  Same landing split as leave: current org → rescope path; another org →
+	 *  memberships re-read. */
+	const handleDeleteWorkspace = useCallback(
+		async (targetOrgId: string) => {
+			if (!client) return;
+			const deletingCurrent = targetOrgId === authUser?.organization?.id;
+			if (deletingCurrent) {
+				try { window.sessionStorage.setItem('rr:workspace-switch-land', '1'); } catch { /* storage unavailable */ }
+			}
+			try {
+				await client.account.deleteOrg(targetOrgId);
+			} catch (err) {
+				if (deletingCurrent) {
+					try { window.sessionStorage.removeItem('rr:workspace-switch-land'); } catch { /* ignore */ }
+				}
+				throw err;
+			}
+			if (!deletingCurrent) await loadProfile();
+		},
+		[client, authUser, loadProfile]
 	);
 
 	/** Deletes the user account. */
@@ -531,12 +719,15 @@ const AccountProvider: React.FC = () => {
 		[client, orgId]
 	);
 
-	/** Opens the Stripe customer portal for payment method management. */
+	/** Opens the Stripe customer portal for payment method management.
+	 *  The return URL is HOST POLICY (`host.stripeReturnUrl`), and the open
+	 *  itself is a host op — a webview realm cannot reach the real browser. */
 	const handleOpenPortal = useCallback(async () => {
 		if (!client || !orgId) return;
-		const returnUrl = `${window.location.origin}${window.location.pathname}`;
+		const cm = ConnectionManager.getInstance();
+		const { url: returnUrl } = await cm.request('host.stripeReturnUrl', {}) as { url: string };
 		const { url } = await client.billing.createPortalSession(orgId, returnUrl);
-		window.open(url, '_blank', 'noopener');
+		await cm.request('host.openExternal', { url });
 	}, [client, orgId]);
 
 	// ── Render ──────────────────────────────────────────────────────────────
@@ -559,6 +750,7 @@ const AccountProvider: React.FC = () => {
 				apps={appManifest}
 				onCancelSubscription={handleCancelSubscription}
 				onOpenPortal={handleOpenPortal}
+				onSubscribe={onSubscribe}
 				transactions={transactions}
 				usageByUser={usageByUser}
 				usageByTeam={usageByTeam}
@@ -575,6 +767,13 @@ const AccountProvider: React.FC = () => {
 				onSectionChange={setSection}
 				activeTeamId={activeTeamId}
 				onActiveTeamIdChange={setActiveTeamId}
+				{...(embeddedSection !== undefined ? { embeddedSection } : {})}
+				{...(onNavigateSection !== undefined ? { onNavigateSection } : {})}
+				onRenameWorkspace={handleRenameWorkspace}
+				onCreateWorkspace={handleCreateWorkspace}
+				onLeaveWorkspace={handleLeaveWorkspace}
+				onDeleteWorkspace={handleDeleteWorkspace}
+				onDeleteWorkspacePrecheck={handleDeleteWorkspacePrecheck}
 				onSaveProfile={handleSaveProfile}
 				onSetDevTeam={handleSetDevTeam}
 				onSetDefaultOrg={handleSetDefaultOrg}

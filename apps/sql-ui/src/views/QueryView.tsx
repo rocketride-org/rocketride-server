@@ -48,13 +48,14 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { useShellConnection, usePrefs } from 'shell';
+import { usePrefs } from 'shell';
 import type { GridCellComponent, GridColumnDefinition } from 'shell';
 import { Banner, Button, Card, CardDataGrid, ConfirmDialog, ContentHeader, EmptyState, StatusBadge, ToggleGroup, commonStyles, monoEl, mutedEl } from 'shell';
-import type { ISqlEndpoint, SqlDialect } from '../connect';
-import { getSession, useSchema } from '../schema/schemaStore';
+import type { SqlEndpoint, SqlDialect } from '../connect';
+import { useSchema } from '../schema/schemaStore';
+import { useSqlEnv } from '../sqlEnv';
 import SqlEditor from '../components/SqlEditor';
-import type { IDecorationRange, IEditorCursorState, ISqlEditorHandle } from '../components/SqlEditor';
+import type { DecorationRange, EditorCursorState, SqlEditorHandle } from '../components/SqlEditor';
 import StatementStrip from '../components/StatementStrip';
 import CellInspector from '../components/CellInspector';
 import HistoryPanel from '../components/HistoryPanel';
@@ -62,9 +63,9 @@ import ExplainPanel from '../components/ExplainPanel';
 import { announce } from '../a11y/announce';
 import { splitStatements, splitStatementsIn, statementAtOffset } from '../sql/split';
 import { classifyStatement, patternCheck } from '../sql/classify';
-import type { IPatternFinding } from '../sql/classify';
+import type { PatternFinding } from '../sql/classify';
 import { applyRowLimit, formatBatchOutcome, formatElapsed, formatPriorStatements, hasStatementInFlight, leadingVerb } from '../sql/batch';
-import type { IStatementRun, RunOutcome } from '../sql/batch';
+import type { StatementRun, RunOutcome } from '../sql/batch';
 import {
 	ALLOW_EXECUTE_OFF_TEXT,
 	DATABASE_SAID_LABEL,
@@ -73,12 +74,12 @@ import {
 	describeFailure,
 	maxRowsText,
 } from '../sql/failure';
-import type { IFailureNotice } from '../sql/failure';
+import type { FailureNotice } from '../sql/failure';
 import { inferColumnTypes } from '../sql/resultTypes';
 import { buildCompletionModel } from '../sql/completion';
 import { buildExplain } from '../sql/explain';
 import { emitRun } from '../history/runEvents';
-import type { IHistoryEntry } from '../history/types';
+import type { HistoryEntry } from '../history/types';
 import { DatabaseIcon } from '../icons';
 
 // =============================================================================
@@ -86,9 +87,9 @@ import { DatabaseIcon } from '../icons';
 // =============================================================================
 
 /** Props for the {@link QueryView} component. */
-export interface IQueryViewProps {
+export interface QueryViewProps {
 	/** The connection this query document executes against. */
-	endpoint: ISqlEndpoint;
+	endpoint: SqlEndpoint;
 	/** Tab label ("Query 3") for the page header. */
 	label: string;
 	/** Text to seed the editor with (a generated query, a reloaded entry). */
@@ -104,7 +105,7 @@ export interface IQueryViewProps {
  * editor: a rerun from the history drawer has no place in the buffer, and
  * inventing line 1 for it would decorate and name unrelated text.
  */
-interface IRunTarget {
+interface RunTarget {
 	/** The statement text. */
 	sql: string;
 	/** Start offset in the editor buffer, when it has one. */
@@ -118,17 +119,17 @@ interface IRunTarget {
 }
 
 /** A pending pattern-check confirmation, and the resolver waiting on it. */
-interface IPatternPrompt {
+interface PatternPrompt {
 	/** The statement the check fired on. */
-	run: IStatementRun;
+	run: StatementRun;
 	/** What the check saw. */
-	finding: IPatternFinding;
+	finding: PatternFinding;
 }
 
 /** A failed statement, and where in the batch it was. */
-interface IFailureState {
+interface FailureState {
 	/** What the failure means and what to show. */
-	notice: IFailureNotice;
+	notice: FailureNotice;
 	/** Zero-based index of the statement that failed. */
 	index: number;
 	/** Line range of the failing statement; '' when it has no editor position. */
@@ -291,8 +292,8 @@ function resultCellEl(value: unknown): HTMLElement {
  * @param run - The finished statement.
  * @returns The entry.
  */
-function toHistoryEntry(run: IStatementRun): IHistoryEntry {
-	const outcome: IHistoryEntry['outcome'] =
+function toHistoryEntry(run: StatementRun): HistoryEntry {
+	const outcome: HistoryEntry['outcome'] =
 		run.outcome === 'rows' || run.outcome === 'affected' || run.outcome === 'abandoned' ? run.outcome : 'error';
 	return {
 		id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
@@ -323,11 +324,11 @@ function toHistoryEntry(run: IStatementRun): IHistoryEntry {
  * is named in text under the editor before the key is pressed, because a
  * decoration alone is not an answer for anyone who cannot see it.
  *
- * @param props - {@link IQueryViewProps}.
+ * @param props - {@link QueryViewProps}.
  * @returns The query document element.
  */
-export const QueryView: React.FC<IQueryViewProps> = ({ endpoint, label, initialSql, origin }) => {
-	const { client, isConnected } = useShellConnection();
+export const QueryView: React.FC<QueryViewProps> = ({ endpoint, label, initialSql, origin }) => {
+	const env = useSqlEnv();
 	const snapshot = useSchema(endpoint.key);
 	const prefs = usePrefs();
 
@@ -335,14 +336,14 @@ export const QueryView: React.FC<IQueryViewProps> = ({ endpoint, label, initialS
 	const [sql, setSql] = useState(initialSql ?? '');
 	const [limit, setLimit] = useState<string>('1000');
 	const [running, setRunning] = useState(false);
-	const [runs, setRuns] = useState<IStatementRun[]>([]);
+	const [runs, setRuns] = useState<StatementRun[]>([]);
 	const [selectedRun, setSelectedRun] = useState<number | null>(null);
 	const [activeIndex, setActiveIndex] = useState(0);
-	const [cursor, setCursor] = useState<IEditorCursorState>({ offset: 0, selectionText: '', selectionStart: 0, selectionEnd: 0 });
+	const [cursor, setCursor] = useState<EditorCursorState>({ offset: 0, selectionText: '', selectionStart: 0, selectionEnd: 0 });
 	const [lastRun, setLastRun] = useState<{ index: number; at: number; start?: number; end?: number } | null>(null);
 
 	// ── Notices ──────────────────────────────────────────────────────────────
-	const [failure, setFailure] = useState<IFailureState | null>(null);
+	const [failure, setFailure] = useState<FailureState | null>(null);
 	const [showVerbatim, setShowVerbatim] = useState(false);
 	const [abandonNotice, setAbandonNotice] = useState<string | null>(null);
 	const [txRefused, setTxRefused] = useState(false);
@@ -356,20 +357,20 @@ export const QueryView: React.FC<IQueryViewProps> = ({ endpoint, label, initialS
 	const [explainSql, setExplainSql] = useState('');
 	const [pendingLoad, setPendingLoad] = useState<string | null>(null);
 	const [inspected, setInspected] = useState<{ row: Record<string, unknown>; number: number } | null>(null);
-	const [patternPrompt, setPatternPrompt] = useState<IPatternPrompt | null>(null);
+	const [patternPrompt, setPatternPrompt] = useState<PatternPrompt | null>(null);
 	const [patternChecksOn, setPatternChecksOn] = useState<boolean>(() => {
 		const bag = prefs.getPref(PATTERN_CHECK_PREF) as Record<string, boolean> | undefined;
 		return bag?.[endpoint.key] !== false;
 	});
 
 	// ── Refs ─────────────────────────────────────────────────────────────────
-	const editorRef = useRef<ISqlEditorHandle>(null);
+	const editorRef = useRef<SqlEditorHandle>(null);
 	// Monotonic run id. Every await re-checks it: a response whose sequence has
 	// moved on belongs to a run the user abandoned and is DROPPED, never landed.
 	const runSeqRef = useRef(0);
 	const runningRef = useRef(false);
 	const runStartedRef = useRef(0);
-	const runsRef = useRef<IStatementRun[]>([]);
+	const runsRef = useRef<StatementRun[]>([]);
 	const activeIndexRef = useRef(0);
 	const mountedRef = useRef(true);
 	const patternResolverRef = useRef<((answer: 'run' | 'always' | 'cancel') => void) | null>(null);
@@ -450,7 +451,7 @@ export const QueryView: React.FC<IQueryViewProps> = ({ endpoint, label, initialS
 	 *
 	 * @returns The statements to run (possibly empty).
 	 */
-	const currentTarget = useCallback((): IRunTarget[] => {
+	const currentTarget = useCallback((): RunTarget[] => {
 		const selection = editorRef.current?.getSelection();
 		if (selection && selection.text.trim()) {
 			// A selection is NOT necessarily one statement — `SELECT …; DELETE …`
@@ -467,10 +468,10 @@ export const QueryView: React.FC<IQueryViewProps> = ({ endpoint, label, initialS
 	}, [sql, dialect, cursor.offset]);
 
 	// The pre-run line and the editor decoration, always saying the same thing.
-	const preview = useMemo((): { text: string; decorations: IDecorationRange[] } => {
+	const preview = useMemo((): { text: string; decorations: DecorationRange[] } => {
 		if (running) {
 			const run = runs[activeIndex];
-			const decorations: IDecorationRange[] = run?.start !== undefined && run.end !== undefined
+			const decorations: DecorationRange[] = run?.start !== undefined && run.end !== undefined
 				? [{ start: run.start, end: run.end, className: 'sql-ui-stmt-running' }]
 				: [];
 			return { text: `Running statement ${activeIndex + 1} of ${runs.length}…`, decorations };
@@ -492,7 +493,7 @@ export const QueryView: React.FC<IQueryViewProps> = ({ endpoint, label, initialS
 		if (!sql.trim()) return { text: 'Will run: nothing (editor is empty)', decorations: [] };
 		const statement = statements.length > 0 ? statementAtOffset(sql, cursor.offset, dialect) : null;
 		if (!statement) return { text: 'Will run: nothing (no statement found)', decorations: [] };
-		const decorations: IDecorationRange[] = [{ start: statement.start, end: statement.end, className: 'sql-ui-stmt-active' }];
+		const decorations: DecorationRange[] = [{ start: statement.start, end: statement.end, className: 'sql-ui-stmt-active' }];
 		if (lastRun?.start !== undefined && lastRun.end !== undefined && lastRun.start !== statement.start) {
 			decorations.push({ start: lastRun.start, end: lastRun.end, className: 'sql-ui-stmt-last' });
 		}
@@ -544,7 +545,7 @@ export const QueryView: React.FC<IQueryViewProps> = ({ endpoint, label, initialS
 	 * @param finding - What the pattern check saw.
 	 * @returns The user's choice.
 	 */
-	const askPatternConfirm = useCallback((run: IStatementRun, finding: IPatternFinding): Promise<'run' | 'always' | 'cancel'> => {
+	const askPatternConfirm = useCallback((run: StatementRun, finding: PatternFinding): Promise<'run' | 'always' | 'cancel'> => {
 		return new Promise((resolve) => {
 			patternResolverRef.current = resolve;
 			setPatternPrompt({ run, finding });
@@ -571,7 +572,7 @@ export const QueryView: React.FC<IQueryViewProps> = ({ endpoint, label, initialS
 	 *
 	 * @param run - The finished statement.
 	 */
-	const record = useCallback((run: IStatementRun): void => {
+	const record = useCallback((run: StatementRun): void => {
 		if (!mountedRef.current) return;
 		emitRun(endpoint.key, toHistoryEntry(run));
 	}, [endpoint.key]);
@@ -581,7 +582,7 @@ export const QueryView: React.FC<IQueryViewProps> = ({ endpoint, label, initialS
 	 *
 	 * @param next - The new run list.
 	 */
-	const publishRuns = useCallback((next: IStatementRun[]): void => {
+	const publishRuns = useCallback((next: StatementRun[]): void => {
 		runsRef.current = next;
 		setRuns(next);
 	}, []);
@@ -591,8 +592,8 @@ export const QueryView: React.FC<IQueryViewProps> = ({ endpoint, label, initialS
 	 *
 	 * @param targets - The statements to send, in order.
 	 */
-	const runTargets = useCallback(async (targets: IRunTarget[], opts?: { fromEditor?: boolean }): Promise<void> => {
-		if (!client || runningRef.current || targets.length === 0) return;
+	const runTargets = useCallback(async (targets: RunTarget[], opts?: { fromEditor?: boolean }): Promise<void> => {
+		if (!env.ready || runningRef.current || targets.length === 0) return;
 
 		// Transaction control cannot work through per-call autocommit, so it is
 		// refused before anything is sent rather than run and misunderstood.
@@ -615,7 +616,7 @@ export const QueryView: React.FC<IQueryViewProps> = ({ endpoint, label, initialS
 		setSelectedRun(null);
 		setInspected(null);
 
-		const list: IStatementRun[] = targets.map((target, index) => ({
+		const list: StatementRun[] = targets.map((target, index) => ({
 			index,
 			sql: target.sql,
 			kind: classifyStatement(target.sql, dialect),
@@ -628,7 +629,7 @@ export const QueryView: React.FC<IQueryViewProps> = ({ endpoint, label, initialS
 		}));
 		publishRuns(list);
 
-		const session = getSession(client, endpoint);
+		const session = env.getSession(endpoint);
 		const results = [...list];
 		let failedAt = -1;
 
@@ -719,7 +720,7 @@ export const QueryView: React.FC<IQueryViewProps> = ({ endpoint, label, initialS
 		if (results.length > 1) announce(`${results.length} statements: ${formatBatchOutcome(results)}`);
 		else if (failedAt < 0 && shown?.outcome === 'rows') announce(`Statement returned ${(shown.rows?.length ?? 0).toLocaleString()} rows`);
 		else if (failedAt < 0 && shown?.outcome === 'affected') announce(`Statement affected ${(shown.affected ?? 0).toLocaleString()} rows`);
-	}, [client, dialect, endpoint, limit, sql, askPatternConfirm, publishRuns, record, setPatternChecks]);
+	}, [env, dialect, endpoint, limit, sql, askPatternConfirm, publishRuns, record, setPatternChecks]);
 
 	/** Run the selection, or the statement at the caret. */
 	const runOne = useCallback((): void => { void runTargets(currentTarget(), { fromEditor: true }); }, [runTargets, currentTarget]);
@@ -783,14 +784,14 @@ export const QueryView: React.FC<IQueryViewProps> = ({ endpoint, label, initialS
 		// nothing can be explained, say why: Ctrl/Cmd+Shift+E has no tooltip,
 		// and a keybinding that does nothing at all reads as a broken app.
 		const sent = targetSqlAsSent();
-		const refusal = explainRefusal(dialect, sent, Boolean(client) && isConnected);
+		const refusal = explainRefusal(dialect, sent, env.ready);
 		if (refusal) {
 			announce(refusal);
 			return;
 		}
 		setExplainSql(sent);
 		setExplainOpen(true);
-	}, [targetSqlAsSent, dialect, client, isConnected]);
+	}, [targetSqlAsSent, dialect, env.ready]);
 
 	/**
 	 * Whether Explain can run right now, and why not when it cannot. Derived
@@ -803,12 +804,12 @@ export const QueryView: React.FC<IQueryViewProps> = ({ endpoint, label, initialS
 			: '';
 		const statement = selected || statementAtOffset(sql, cursor.offset, dialect)?.sql || '';
 		const candidate = statement ? applyRowLimit(statement, limit, dialect).sql : '';
-		const refusal = explainRefusal(dialect, candidate, Boolean(client) && isConnected);
+		const refusal = explainRefusal(dialect, candidate, env.ready);
 		return {
 			disabled: refusal !== null,
 			title: refusal ?? "Show the database's plan for the statement Run would send (Ctrl+Shift+E)",
 		};
-	}, [client, isConnected, cursor, sql, dialect, limit]);
+	}, [env.ready, cursor, sql, dialect, limit]);
 
 	/**
 	 * Put a statement into the editor, asking first when doing so would throw
@@ -850,7 +851,7 @@ export const QueryView: React.FC<IQueryViewProps> = ({ endpoint, label, initialS
 	 *
 	 * @param entry - The history entry to run again.
 	 */
-	const rerunEntry = useCallback((entry: IHistoryEntry): void => {
+	const rerunEntry = useCallback((entry: HistoryEntry): void => {
 		// No start/end/line: this statement has no place in the editor buffer.
 		void runTargets([{ sql: entry.sql }]);
 	}, [runTargets]);
@@ -922,7 +923,7 @@ export const QueryView: React.FC<IQueryViewProps> = ({ endpoint, label, initialS
 				: 'Statement executed';
 
 	const batchLine = runs.length > 1 ? formatBatchOutcome(runs) : '';
-	const canRun = Boolean(client) && isConnected && !running && sql.trim().length > 0;
+	const canRun = env.ready && !running && sql.trim().length > 0;
 
 	// ── Render ───────────────────────────────────────────────────────────────
 

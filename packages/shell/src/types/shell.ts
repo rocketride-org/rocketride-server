@@ -32,9 +32,10 @@
 // defines canonical event names and payload types that both hosts agree on.
 // =============================================================================
 
-import type { ConnectResult, DAPMessage } from 'rocketride';
+import type { ConnectResult, DAPMessage, SignupProperties } from 'rocketride';
 import type { ConnectionStatus } from './connection';
 import type { CheckoutPlan, PromoValidation } from '../modules/checkout/types';
+import type { TelemetryFact } from '../util/telemetryChannel';
 
 // =============================================================================
 // APP ENTRY — minimal shape for app catalog events
@@ -62,6 +63,32 @@ export interface ShellAppEntry {
 	/** Optional description. */
 	description?: string;
 }
+
+// =============================================================================
+// PLATFORM NOTIFICATIONS
+// =============================================================================
+
+/**
+ * One platform notification (the `shell:notify` payload).
+ *
+ * A discriminated union — narrow on `kind`. New notification kinds are
+ * APPENDED as union members; existing members never change shape, so
+ * consumer narrowing stays valid (the same append-only rule as the event
+ * map itself).
+ *
+ * Today every producer is PAGE-LOCAL (the event never rides the wire); a
+ * server-pushed feed may later emit the same event, so consumers must not
+ * assume the producer shares their realm beyond what the payload carries.
+ */
+export type ShellNotification =
+	/**
+	 * A store-VFS file changed — any write through the app-dev VFS seam.
+	 * `uri` is the full store path; `origin` identifies the writer (a
+	 * dev-session id, or a verb like 'scaffold') so writers can skip their
+	 * own echo; `rev` is a page-monotonic write counter so a consumer
+	 * hearing one change over several transports can dedupe.
+	 */
+	{ kind: 'onFsChange'; uri: string; origin: string; rev: number };
 
 // =============================================================================
 // EVENT MAP
@@ -143,6 +170,23 @@ export interface ShellConnectionEventMap {
 	'shell:orgChanged': { orgId: string };
 
 	/**
+	 * The shell is about to RESCOPE to a different workspace in-process (the
+	 * browser shell's reaction to `shell:orgChanged` — reconnect + remount
+	 * instead of a page reload). Subscribers holding per-workspace work (dev
+	 * sessions, running previews, retained per-workspace topics) should stop
+	 * and release it now: the workspace subtree unmounts right after.
+	 */
+	'shell:workspaceWillChange': { orgId: string };
+
+	/**
+	 * The in-process workspace rescope finished: the connection is
+	 * re-authenticated under the new default org and the workspace subtree
+	 * has remounted against its stores. Counterpart of
+	 * `shell:workspaceWillChange`.
+	 */
+	'shell:workspaceChanged': { orgId: string };
+
+	/**
 	 * Emitted when the service catalog is fetched or refreshed.
 	 *
 	 * Contains the full services map, the summary's deduplicated icon
@@ -164,6 +208,41 @@ export interface ShellConnectionEventMap {
 	 */
 	'shell:appsUpdated': { apps: ShellAppEntry[] };
 
+	// ── Platform notifications ───────────────────────────────────────────
+
+	/**
+	 * The general platform notification bus — a typed union; narrow on
+	 * `kind` (see {@link ShellNotification}). Page-local today: emitted by
+	 * in-page producers (the app-dev VFS seam), never by the server.
+	 */
+	'shell:notify': ShellNotification;
+
+	// ── Dev tools ────────────────────────────────────────────────────────
+
+	/**
+	 * A dev tool's sidebar tab was selected in the host's sidebar chrome.
+	 *
+	 * Fired on EVERY selection (no deduplication). What activation means is
+	 * the TOOL's decision, made in its devToolSidebar code: a single-pane
+	 * tool opens its pane (`documents.open('', name)`); a per-document tool
+	 * ignores the event. The FIRST selection is also what lazily mounts the
+	 * tool's sidebar, so it arrives before the subscription exists — a tool
+	 * that opens on activation therefore also opens on MOUNT (mounting IS
+	 * the first activation) and uses this event for re-activations only.
+	 */
+	'shell:toolSidebarActivated': { appId: string };
+
+	/**
+	 * A dev tool's sidebar tab stopped being the selected one — the user
+	 * selected a different tab (another tool's, or a fixed mode). Fired
+	 * before the successor's `shell:toolSidebarActivated`, and only on a
+	 * real change: re-selecting the same tab deactivates nothing, and a
+	 * sidebar reload or an externally synced highlight emits neither event.
+	 * Typical use: a controller pauses discretionary work (polling,
+	 * watchers) while its panel is out of view.
+	 */
+	'shell:toolSidebarDeactivated': { appId: string };
+
 	// ── Auth ─────────────────────────────────────────────────────────────
 
 	/**
@@ -181,10 +260,12 @@ export interface ShellConnectionEventMap {
 	 * Sign-in request initiated by the UI (e.g. "Get Started" button).
 	 *
 	 * Optional `appId` specifies which app to navigate to after auth completes.
-	 * Optional `register` requests Zitadel's sign-up form instead of sign-in
-	 * (used by "Get Started" CTAs vs. "Sign In" controls).
+	 * Optional `register` marks a sign-up intent ("Get Started" CTAs vs. "Sign In"
+	 * controls); it no longer changes the destination. `auto` marks a request
+	 * the shell raised itself (the auth gate of an app that requires sign-in)
+	 * rather than a click; it is reported on the auth:start telemetry fact.
 	 */
-	'shell:loginRequest': { appId?: string; register?: boolean };
+	'shell:loginRequest': { appId?: string; register?: boolean; auto?: boolean; signupProperties?: SignupProperties };
 
 	/** Sign-out request initiated by the UI (e.g. "Sign Out" button). */
 	'shell:logoutRequest': Record<string, never>;
@@ -215,11 +296,26 @@ export interface ShellConnectionEventMap {
 	'shell:myApps': Record<string, never>;
 
 	/**
+	 * A product-telemetry fact the shell observed (`auth:complete`). The shell
+	 * has no analytics transport; the active app forwards these to its own.
+	 * `auth:start` is never delivered here (the OAuth redirect follows at once):
+	 * it is kept in the connection manager's buffer, as are facts raised before
+	 * any app subscribed or whose last listener left before their dispatch, and
+	 * handed over by `drainTelemetry()`.
+	 */
+	'shell:telemetry': TelemetryFact;
+
+	/**
 	 * Request the shell open a built-in overlay (e.g. from a guest app's
 	 * profile/account menu, which can't render the shell's overlays directly).
 	 * The `id` selects which overlay to show.
 	 */
-	'shell:openOverlay': { id: 'account' | 'settings' | 'environment' };
+	'shell:openOverlay': {
+		id: 'account' | 'settings' | 'environment';
+		/** Optional deep link: the settings nav section to open at (a registry
+		 *  section id or a rich-section id). Ignored by other overlays. */
+		section?: string;
+	};
 
 	/** Sidebar is starting to collapse — dependent UI can prepare. */
 	'shell:sidebarCollapsing': Record<string, never>;

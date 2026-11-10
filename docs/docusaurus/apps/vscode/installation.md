@@ -15,10 +15,9 @@ sidebar_position: 2
 
 On first launch, the extension shows a **Welcome** page to guide you through setup:
 
-1. **Choose a connection mode**: Cloud, on-premises, or local.
-2. **Enter your server URL**: For on-premises or local mode (default: `http://localhost:5565`).
-3. **Enter your API key**: Your RocketRide authentication token. This is stored securely in VS Code's secret storage.
-4. **Click Connect**: The extension tests the connection and shows status in the status bar.
+1. **Choose a connection mode**: Local, Docker, Service, Direct Connect (your own server; the `onprem` setting value) or RocketRide Cloud. [Connection Modes](/clients/vscode/usage#connection-modes) says what runs where in each mode and what it allows.
+2. **Fill in the panel for that mode**: Direct Connect takes the server's host URL and API key; the key is stored in VS Code's secret storage. Cloud signs in with your RocketRide account in the browser. Local takes nothing. Docker and Service take no URL or key, but the first time you click **Install** on their panel, since **Save & Connect** does not install them. Until you save, the status bar reads `RocketRide: Setup`; after saving it reads `RocketRide: Disconnected` until the install is done.
+3. **Click Save & Connect**: The extension connects and shows the result in the status bar, for example `RocketRide: Connected (Local)`. [The Status Bar](/clients/vscode/usage#the-status-bar) lists the other texts and where to find the host.
 
 After initial setup, the extension auto-connects on startup.
 
@@ -30,12 +29,12 @@ Open VS Code settings (`Ctrl+,` / `Cmd+,`) and search for `rocketride` to config
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `rocketride.development.connectionMode` | `local` | Development connection mode: `cloud`, `docker`, `service`, `onprem`, or `local` |
-| `rocketride.development.hostUrl` | - | Host URL for the development connection (onprem/docker/service modes) |
+| `rocketride.development.connectionMode` | `local` | Development connection mode: `cloud`, `docker`, `service`, `onprem` (Direct Connect in the UI), or `local`. See [Connection Modes](/clients/vscode/usage#connection-modes) |
+| `rocketride.development.hostUrl` | - | Host URL for the development connection; used only by Direct Connect (`onprem`) |
 | `rocketride.development.useCustomServer` | `false` | Cloud mode: connect to `cloudUrl` instead of RocketRide Cloud |
 | `rocketride.development.cloudUrl` | `https://api.rocketride.ai` | Cloud mode: the server targeted when `useCustomServer` is enabled |
 | `rocketride.deployment.connectionMode` | `null` | Deployment connection mode (`null` = share the development connection) |
-| `rocketride.deployment.hostUrl` | - | Host URL for the deployment connection (onprem/docker/service modes) |
+| `rocketride.deployment.hostUrl` | - | Host URL for the deployment connection; used only by Direct Connect (`onprem`) |
 | `rocketride.deployment.useCustomServer` | `false` | Cloud mode: deploy to `cloudUrl` instead of RocketRide Cloud |
 | `rocketride.deployment.cloudUrl` | `https://api.rocketride.ai` | Cloud mode: the server targeted when `useCustomServer` is enabled |
 
@@ -46,29 +45,17 @@ its OAuth code against the same effective server.
 
 > Credentials are not a settings key. Enter your API key with the **Settings** page command `rocketride.page.settings.setupCredentials` (update or clear it via `rocketride.page.settings.updateApiKey` / `rocketride.page.settings.clearApiKey`). It is held in VS Code SecretStorage, not in `settings.json`.
 
-### Pipeline
-
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `rocketride.defaultPipelinePath` | - | Default directory for new pipeline files |
-| `rocketride.pipelineRestartBehavior` | - | Restart behavior: `auto`, `manual`, or `prompt` |
-| `rocketride.taskArguments` | - | Additional command-line arguments passed to each pipeline task |
-| `rocketride.pipelineDebugOutput` | `false` | Enable full debug output for pipeline tasks (`--trace=debugOut`) |
-
 ### Local Engine
 
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `rocketride.development.local.engineVersion` | `latest` | Engine version: `latest`, `prerelease`, or a specific tag |
 
-### Integrations
+### Everything else
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `rocketride.integrations.autoAgentIntegration` | `true` | Automatically detect and install RocketRide documentation for coding agents (Copilot, Claude Code, Cursor, Windsurf) on startup |
-| `rocketride.integrations.copilot` | - | Enable GitHub Copilot integration for pipeline development |
-| `rocketride.integrations.claudeCode` | - | Enable Claude Code integration |
-| `rocketride.integrations.cursor` | - | Enable Cursor IDE integration |
-| `rocketride.integrations.windsurf` | - | Enable Windsurf integration |
-| `rocketride.integrations.claudeMd` | - | Install RocketRide instructions to CLAUDE.md at the repo root |
-| `rocketride.integrations.agentsMd` | - | Install RocketRide instructions to AGENTS.md at the repo root |
+Pipeline defaults (TTL, trace level, restart behavior, task arguments, debug
+output, default paths) and the agent integrations (Copilot, Claude Code,
+Cursor, Windsurf, CLAUDE.md, AGENTS.md) are **workspace settings**, edited in
+the RocketRide Settings page (*RocketRide: Settings* → Rocket Builder /
+Integrations). They are stored on the connected server and follow you between
+VS Code and the cloud workbench — they are not VS Code configuration keys.

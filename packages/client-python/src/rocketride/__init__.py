@@ -137,6 +137,7 @@ from .types.account import (
     AccountOrgTeam,
     ApiKeyRecord,
     OrgDetail,
+    DeleteOrgPrecheck,
     MemberRecord,
     TeamRecord,
     TeamDetail,
@@ -145,6 +146,8 @@ from .types.account import (
     CreateKeyParams,
     CreateKeyResult,
     InviteMemberParams,
+    InvitedMember,
+    TeamAssignment,
     TeamMemberParams,
 )
 from .types.billing import (
@@ -162,6 +165,18 @@ from .core.exceptions import AuthenticationException
 # Import identity types returned by connect()
 from .types.client import TeamInfo, OrgInfo, ConnectResult, ServerInfoResult
 
+# Pure deploy/publish helpers shared by every host (teams, versions, names)
+from .deploy_helpers import (
+    DeployTeamRef,
+    parse_registry_version,
+    pick_publish_version,
+    pipeline_name_from_path,
+    resolve_deploy_teams,
+    resolve_team_arg,
+    team_name_of,
+    wire_team_id_of,
+)
+
 # Import the run-log DVR session class (the codec stays internal — only the
 # session and its user-facing types are public surface).
 from .log_stream import LogEventStream
@@ -175,6 +190,7 @@ from .core.constants import (
     CONST_DEFAULT_WEB_LOCAL,
     CONST_DEFAULT_WEB_PORT,
     CONST_DEFAULT_WEB_PROTOCOL,
+    CONST_ENV_MASK,
     CONST_SOCKET_TIMEOUT,
     CONST_WS_PING_INTERVAL,
     CONST_WS_PING_TIMEOUT,
@@ -193,6 +209,14 @@ __all__ = [
     'RocketRideClientConfig',
     'RocketRideException',
     'LogEventStream',
+    'DeployTeamRef',
+    'parse_registry_version',
+    'pick_publish_version',
+    'pipeline_name_from_path',
+    'resolve_deploy_teams',
+    'resolve_team_arg',
+    'team_name_of',
+    'wire_team_id_of',
     'AuthenticationException',
     'CONST_DEFAULT_SERVICE',
     'CONST_DEFAULT_WEB_CLOUD',
@@ -200,6 +224,7 @@ __all__ = [
     'CONST_DEFAULT_WEB_LOCAL',
     'CONST_DEFAULT_WEB_PORT',
     'CONST_DEFAULT_WEB_PROTOCOL',
+    'CONST_ENV_MASK',
     'CONST_SOCKET_TIMEOUT',
     'CONST_WS_PING_INTERVAL',
     'CONST_WS_PING_TIMEOUT',
@@ -257,6 +282,7 @@ __all__ = [
     'AccountOrgTeam',
     'ApiKeyRecord',
     'OrgDetail',
+    'DeleteOrgPrecheck',
     'MemberRecord',
     'TeamRecord',
     'TeamDetail',
@@ -265,6 +291,8 @@ __all__ = [
     'CreateKeyParams',
     'CreateKeyResult',
     'InviteMemberParams',
+    'InvitedMember',
+    'TeamAssignment',
     'TeamMemberParams',
     # Billing types
     'BillingDetail',

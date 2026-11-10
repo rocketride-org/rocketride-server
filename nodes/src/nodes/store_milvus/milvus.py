@@ -46,6 +46,7 @@ import engLib
 from ai.common.schema import Doc, DocFilter, DocMetadata, QuestionText
 from ai.common.store import DocumentStoreBase
 from ai.common.config import Config
+from nodes.store_milvus.mode import is_local
 
 # Default batch size for bulk upsert operations
 DEFAULT_BULK_INSERT_BATCH_SIZE = 50
@@ -53,10 +54,49 @@ DEFAULT_BULK_INSERT_BATCH_SIZE = 50
 # Default connection timeout in seconds
 DEFAULT_TIMEOUT = 60
 
+# Plain reads (search, get, paths, count, render) see every write of this process at once, and
+# what the server already holds of other processes' writes. The collection's default level
+# (Bounded) reads a view up to 5 s old, so a chunk written a moment ago is not found yet.
+READ_CONSISTENCY = 'Session'
+
+# Reads that must see every completed write, from any process: the rows markDeleted and
+# markActive change, a control row a Session read did not find, and all reads of a collection
+# configured as Strong. A Strong read waits for the server's next time tick (about 0.4 s).
+STRONG_CONSISTENCY = 'Strong'
+
 
 def _escape_milvus_str(value: object) -> str:
-    """Escape a value for safe interpolation into a Milvus filter expression."""
-    return str(value).replace('\\', '\\\\').replace("'", "\\'")
+    """Escape a value for a single-quoted Milvus string literal.
+
+    The filter grammar rejects a raw backslash, quote, CR or LF inside the literal.
+
+    Args:
+        value: The value to put in the literal.
+
+    Returns:
+        The literal's text, without the quotes.
+    """
+    return str(value).replace('\\', '\\\\').replace("'", "\\'").replace('\r', '\\r').replace('\n', '\\n')
+
+
+def _like_contains(text: str) -> str:
+    """Build a Milvus LIKE pattern that matches content containing text.
+
+    A backslash makes ``%`` and ``_`` literal. Milvus trims the trailing ``%`` of a
+    pattern before it reads escapes, so an escaped ``%`` at the end would match nothing:
+    for text that ends with ``%``, every ``%``, ``_`` and backslash becomes the
+    one-character wildcard ``_``, and the search can also return content that has
+    another character in those places.
+
+    Args:
+        text: The text to look for.
+
+    Returns:
+        The pattern, still to be escaped as a string literal.
+    """
+    if text.endswith('%'):
+        return '%' + re.sub(r'[\\%_]', '_', text) + '%'
+    return '%' + text.replace('%', '\\%').replace('_', '\\_') + '%'
 
 
 class Store(DocumentStoreBase):
@@ -69,6 +109,9 @@ class Store(DocumentStoreBase):
     vectorSizePos: int = 1
     vectorIndexType: str = 'IVF_FLAT'
     scalarIndexType: str = 'STL_SORT'
+    # The level of plain reads: Strong once the collection turns out to be configured as Strong
+    readConsistency: str = READ_CONSISTENCY
+    levelChecked: bool = False
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
         """
@@ -99,8 +142,6 @@ class Store(DocumentStoreBase):
         self.timeout = max(int(config.get('timeout', DEFAULT_TIMEOUT)), 1)
         self.bulkInsertBatchSize = max(int(config.get('bulkInsertBatchSize', DEFAULT_BULK_INSERT_BATCH_SIZE)), 1)
 
-        profile = config.get('mode')
-
         # check if the similarity matches milvus configuration options
         similarity = config.get('similarity', 'COSINE')
         if similarity in ['L2', 'IP', 'COSINE', 'JACCARD', 'HAMMING', 'BM25']:
@@ -110,7 +151,8 @@ class Store(DocumentStoreBase):
 
         # Establish a connection to the Milvus instance with configurable timeout
         try:
-            if profile != 'local':
+            # Read the same way as the key check (IGlobal._credentials).
+            if not is_local(config):
                 # Init the store (host was stripped of protocol at line 87, so always add https://)
                 self.client = MilvusClient(uri=f'https://{self.host}', token=self.apikey, timeout=self.timeout)
             else:
@@ -136,10 +178,23 @@ class Store(DocumentStoreBase):
     def _doesCollectionExist(self) -> bool:
         """
         Check if the collection exists.
+
+        The first time it finds the collection, it reads the level the collection is configured
+        with, so that reads of a Strong collection stay Strong.
+
+        Returns:
+            True if the collection exists.
         """
         if self.client is None:
             return False
-        return self.client.has_collection(collection_name=self.collection)
+        if not self.client.has_collection(collection_name=self.collection):
+            return False
+        if not self.levelChecked:
+            # describe_collection reports the level as an int, and 0 is Strong
+            level = self.client.describe_collection(collection_name=self.collection).get('consistency_level')
+            self.readConsistency = STRONG_CONSISTENCY if level in (0, STRONG_CONSISTENCY) else READ_CONSISTENCY
+            self.levelChecked = True
+        return True
 
     def _createCollection(self, vectorSize: int) -> bool:
         """
@@ -199,18 +254,19 @@ class Store(DocumentStoreBase):
         if docFilter.nodeId is not None:
             must_conditions.append(f"meta['nodeId'] == '{_escape_milvus_str(docFilter.nodeId)}'")
 
+        # meta holds isTable as a bool and tableId/permissionId as ints: a quoted value never matches
         if docFilter.isTable is not None:
-            (must_conditions.append(f"meta['isTable'] == '{_escape_milvus_str(docFilter.isTable)}'"),)
+            must_conditions.append(f"meta['isTable'] == {bool(docFilter.isTable)}")
 
         if docFilter.tableIds is not None:
-            table_ids = ', '.join(f"'{_escape_milvus_str(t)}'" for t in docFilter.tableIds)
+            table_ids = ', '.join(str(int(t)) for t in docFilter.tableIds)
             must_conditions.append(f"meta['tableId'] in [{table_ids}]")
 
         if docFilter.parent is not None:
             must_conditions.append(f"meta['parent'] == '{_escape_milvus_str(docFilter.parent)}'")
 
         if docFilter.permissions is not None:
-            permission_ids = ', '.join(f"'{_escape_milvus_str(p)}'" for p in docFilter.permissions)
+            permission_ids = ', '.join(str(int(p)) for p in docFilter.permissions)
             must_conditions.append(f"meta['permissionId'] in [{permission_ids}]")
 
         if docFilter.objectIds is not None:
@@ -298,7 +354,9 @@ class Store(DocumentStoreBase):
             return 0
 
         # Get cound documents using query
-        res = self.client.query(collection_name=self.collection, output_fields=['count(*)'])
+        res = self.client.query(
+            collection_name=self.collection, output_fields=['count(*)'], consistency_level=self.readConsistency
+        )
 
         # Parse query result
         return res[0]['count(*)']
@@ -319,7 +377,7 @@ class Store(DocumentStoreBase):
         must_conditions = self._convertFilter(docFilter=docFilter)
 
         # Append it
-        must_conditions.append(f"content like '%{_escape_milvus_str(query)}%'")
+        must_conditions.append(f"content like '{_escape_milvus_str(_like_contains(query.text))}'")
 
         # Combine all conditions into a single filter expression
         filter_expression = ' and '.join(must_conditions) if must_conditions else None
@@ -330,6 +388,7 @@ class Store(DocumentStoreBase):
             filter=filter_expression,
             limit=docFilter.limit,
             output_fields=['meta', 'content'],
+            consistency_level=self.readConsistency,
         )
 
         docs = self._convertToDocs(points)
@@ -374,6 +433,7 @@ class Store(DocumentStoreBase):
             filter=filter_expression,
             limit=25 if docFilter.limit <= 10 else docFilter.limit,
             output_fields=['meta', 'content'],
+            consistency_level=self.readConsistency,
         )
 
         docs = self._convertToDocs(points[0])
@@ -399,14 +459,30 @@ class Store(DocumentStoreBase):
         # Combine all conditions into a single filter expression
         filter_expression = ' and '.join(must_conditions) if must_conditions else None
 
-        # Perform the query
-        results = self.client.query(
-            collection_name=self.collection,
-            filter=filter_expression,
-            output_fields=['meta', 'content'],
-            offset=docFilter.offset,
-            limit=docFilter.limit,
-        )
+        def query(level: str) -> List[dict]:
+            """Run the query at a consistency level.
+
+            Args:
+                level: The consistency level of the read.
+
+            Returns:
+                The matching rows.
+            """
+            return self.client.query(
+                collection_name=self.collection,
+                filter=filter_expression,
+                output_fields=['meta', 'content'],
+                offset=docFilter.offset,
+                limit=docFilter.limit,
+                consistency_level=level,
+            )
+
+        results = query(self.readConsistency)
+
+        # checkCollection=False is the control-row check: a Session read may not show yet the
+        # control row another process wrote a moment ago, and a missing row fails the store
+        if not results and not checkCollection and self.readConsistency != STRONG_CONSISTENCY:
+            results = query(STRONG_CONSISTENCY)
 
         # Convert results to Docs
         return self._convertToDocs(results)
@@ -421,7 +497,7 @@ class Store(DocumentStoreBase):
             return {}
 
         # Base filter: Only chunk 0
-        filter_expr = "meta['chunkId'] == 0"
+        filter_expr = "meta['chunkId'] == 0 and meta['isDeleted'] == false"
 
         # If parent specified, add condition
         if parent is not None:
@@ -429,7 +505,12 @@ class Store(DocumentStoreBase):
 
         # Perform the query
         results = self.client.query(
-            collection_name=self.collection, filter=filter_expr, output_fields=['meta'], offset=offset, limit=limit
+            collection_name=self.collection,
+            filter=filter_expr,
+            output_fields=['meta'],
+            offset=offset,
+            limit=limit,
+            consistency_level=self.readConsistency,
         )
 
         # Build paths dictionary
@@ -447,6 +528,11 @@ class Store(DocumentStoreBase):
     def addChunks(self, chunks: List[Doc], checkCollection: bool = True) -> None:
         """
         Add document chunks to the document store using batched bulk upsert.
+
+        Args:
+            chunks: The batch to write.
+            checkCollection: Create the collection if it is missing and check that the chunks match its
+                embedding model and vector size; createCollection passes False when it writes its control row.
         """
         # If no documents present, get out
         if not len(chunks):
@@ -456,18 +542,13 @@ class Store(DocumentStoreBase):
         if checkCollection and not self.createCollection(chunks):
             return
 
-        # Clear the object id list
-        objectIds: Dict = {}
+        # The objects this batch starts over
+        objectIds = self.objectIdsToReplace(chunks)
 
-        # For each document
-        for chunk in chunks:
-            # Save this object id
-            objectIds[chunk.metadata.objectId] = True
-
-        # Erase all documents/chunks associated with that ObjectId in one operation
+        # Erase all documents/chunks associated with those ObjectIds in one operation
         # so we can cleanly insert the new version
-        if len(objectIds.keys()):
-            filter_condition = f"meta['objectId'] in [{', '.join(json.dumps(k) for k in objectIds.keys())}]"
+        if len(objectIds):
+            filter_condition = f"meta['objectId'] in [{', '.join(json.dumps(k) for k in objectIds)}]"
             try:
                 # Delete entities
                 self.client.delete(collection_name=self.collection, filter=filter_condition)
@@ -503,7 +584,10 @@ class Store(DocumentStoreBase):
                 'id': np.int64(((uuid.uuid1().time & 0x1FFFFFFFF) << 27) | random.getrandbits(27)),
                 'vector': embedding,
                 'content': chunk.page_content,
-                'meta': chunk.metadata,
+                # A plain dict without the None fields: pymilvus encodes the JSON field itself, and Doc
+                # rejects a None it reads back for a field such as nodeId (the control row has many).
+                # A chunk without isDeleted is live: default reads match only isDeleted == False.
+                'meta': {'isDeleted': False, **chunk.metadata.toDict()},
             }
 
             batch.append(tmp_struct)
@@ -587,7 +671,11 @@ class Store(DocumentStoreBase):
             return
 
         results = self.client.query(
-            collection_name=self.collection, filter=filter_expression, output_fields=['id', 'vector', 'content', 'meta']
+            collection_name=self.collection,
+            filter=filter_expression,
+            output_fields=['id', 'vector', 'content', 'meta'],
+            # These rows decide what to change, so they include other processes' writes
+            consistency_level=STRONG_CONSISTENCY,
         )
 
         # Batch-update instead of one-at-a-time to avoid performance bottleneck
@@ -617,7 +705,11 @@ class Store(DocumentStoreBase):
             return
 
         results = self.client.query(
-            collection_name=self.collection, filter=filter_expression, output_fields=['id', 'vector', 'content', 'meta']
+            collection_name=self.collection,
+            filter=filter_expression,
+            output_fields=['id', 'vector', 'content', 'meta'],
+            # These rows decide what to change, so they include other processes' writes
+            consistency_level=STRONG_CONSISTENCY,
         )
 
         # Batch-update instead of one-at-a-time to avoid performance bottleneck
@@ -647,7 +739,10 @@ class Store(DocumentStoreBase):
             must_condition = f"(meta['objectId'] == '{_escape_milvus_str(objectId)}') && ({offset - 1} < meta['chunkId'] < {offset + self.renderChunkSize})"
 
             results = self.client.query(
-                collection_name=self.collection, filter=must_condition, output_fields=['meta', 'content']
+                collection_name=self.collection,
+                filter=must_condition,
+                output_fields=['meta', 'content'],
+                consistency_level=self.readConsistency,
             )
 
             # Create a renderChunkSize array with empty
@@ -659,7 +754,7 @@ class Store(DocumentStoreBase):
 
             for point in results:
                 content = point['content']
-                chunk = point['chunkId']
+                chunk = point['meta']['chunkId']
                 index = chunk - offset
 
                 # Should never happen since we gave it an offset

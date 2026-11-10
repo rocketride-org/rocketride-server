@@ -54,6 +54,10 @@ class CredField:
     required: bool
     suggests: str
     review: bool = False
+    # False: described, never auto-wired or required by MCP readiness/setup. The node
+    # reads the field elsewhere (for example inside list rows), so a top-level binding
+    # would be ignored. Catalog parsing normalizes required to False for these fields.
+    auto_wire: bool = True
 
 
 @dataclass(frozen=True)
@@ -67,6 +71,7 @@ class Integration:
 
 
 def catalog_from_dict(raw: dict) -> Dict[str, Integration]:
+    """Parse the catalog, treating fields excluded from auto-wiring as optional for MCP setup."""
     out: Dict[str, Integration] = {}
     for name, entry in raw.items():
         if not isinstance(entry, dict):
@@ -76,9 +81,10 @@ def catalog_from_dict(raw: dict) -> Dict[str, Integration]:
                 path=f['path'],
                 title=f.get('title', f['path']),
                 kind=f.get('kind', 'secret'),
-                required=bool(f.get('required', True)),
+                required=bool(f.get('required', True)) and bool(f.get('auto_wire', True)),
                 suggests=f['suggests'],
                 review=bool(f.get('review', False)),
+                auto_wire=bool(f.get('auto_wire', True)),
             )
             for f in entry.get('fields', [])
             if isinstance(f, dict) and f.get('path') and f.get('suggests')
@@ -139,7 +145,9 @@ def evaluate(spec: Integration, env_keys: Optional[List[str]]) -> dict:
     have = set(env_keys)
     missing = [f.suggests for f in required if f.suggests not in have]
     if not missing:
-        wiring = {f.path: '${' + f.suggests + '}' for f in spec.fields if f.required or f.suggests in have}
+        wiring = {
+            f.path: '${' + f.suggests + '}' for f in spec.fields if f.auto_wire and (f.required or f.suggests in have)
+        }
         return {'status': 'configured', 'env_error': False, 'missing': [], 'candidates': [], 'wiring': wiring}
     tokens = node_tokens(spec.name)
     # Match on name *parts*, not raw substrings: a part must start with the

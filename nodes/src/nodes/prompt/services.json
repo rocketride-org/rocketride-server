@@ -100,11 +100,14 @@
 				},
 				"expect": {
 					"questions": {
+						"contains": "What is 2+2?",
 						"property": {
-							"path": "[1].instructions[0].instructions",
+							"path": "[0].instructions[0].instructions",
 							"contains": "Please provide a detailed and helpful response"
 						},
-						"notEmpty": true
+						"notEmpty": true,
+						"minLength": 1,
+						"maxLength": 1
 					}
 				}
 			},
@@ -115,7 +118,13 @@
 				"expect": {
 					"questions": {
 						"contains": "capital of France",
-						"notEmpty": true
+						"property": {
+							"path": "[0].instructions[0].instructions",
+							"contains": "Please provide a detailed and helpful response"
+						},
+						"notEmpty": true,
+						"minLength": 1,
+						"maxLength": 1
 					}
 				}
 			}

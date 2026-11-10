@@ -1,0 +1,199 @@
+// MIT License
+//
+// Copyright (c) 2026 Aparavi Software AG
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+import { isEmbeddedDevShell } from './devGate';
+import { normalizeSignupProperties, type SignupProperties } from 'rocketride';
+
+/** Tab-scoped, single-use signup context retained across the native OAuth redirect. */
+export const SIGNUP_CONTEXT_KEY = 'rr:auth:signup';
+
+// Written by the SaaS consent banner in localStorage. Shared schema:
+// { v: 1, choice: 'accepted' | 'rejected', at: number (milliseconds since epoch) }.
+// Coordinate changes with rocketride-saas; this shell only reads the record.
+const CONSENT_STORAGE_KEY = 'rr_consent_v1';
+const CONSENT_LIFETIME_MS = 365 * 24 * 60 * 60 * 1000;
+const CONSENT_CLOCK_SKEW_MS = 60 * 1000;
+const MAX_STORED_CONTEXT_LENGTH = 2048;
+// Version of the OAuth state envelope `{ v, signup }` that carries a cookieless context.
+const SIGNUP_STATE_VERSION = 1;
+
+function isPrivacySignal(value: unknown): boolean {
+	return value === true || value === 1 || value === '1' || value === 'yes';
+}
+
+function hasPrivacySignal(): boolean {
+	try {
+		const browserNavigator = navigator as Navigator & { globalPrivacyControl?: unknown; msDoNotTrack?: unknown };
+		const browserWindow = window as Window & { doNotTrack?: unknown };
+		if (isPrivacySignal(browserNavigator.doNotTrack)) return true;
+		if (isPrivacySignal(browserNavigator.msDoNotTrack)) return true;
+		if (isPrivacySignal(browserNavigator.globalPrivacyControl)) return true;
+		return isPrivacySignal(browserWindow.doNotTrack);
+	} catch {
+		return true;
+	}
+}
+
+/**
+ * The visitor's choice on the SaaS consent banner, read from its record.
+ *
+ * @returns The choice of a valid, current record; 'undecided' when the record is missing, malformed or expired;
+ *          null when storage cannot be read, which shows neither a choice nor its absence.
+ */
+function consentChoice(): 'accepted' | 'rejected' | 'undecided' | null {
+	let raw: string | null;
+	try {
+		raw = localStorage.getItem(CONSENT_STORAGE_KEY);
+	} catch {
+		return null;
+	}
+	try {
+		const consent = JSON.parse(raw ?? 'null');
+		if (consent?.v !== 1) return 'undecided';
+		if (consent.choice !== 'accepted' && consent.choice !== 'rejected') return 'undecided';
+		if (typeof consent.at !== 'number') return 'undecided';
+		if (!Number.isFinite(consent.at)) return 'undecided';
+		const now = Date.now();
+		if (now - consent.at > CONSENT_LIFETIME_MS) return 'undecided';
+		if (consent.at > now + CONSENT_CLOCK_SKEW_MS) return 'undecided';
+		return consent.choice;
+	} catch {
+		return 'undecided';
+	}
+}
+
+function hasConsent(): boolean {
+	if (hasPrivacySignal()) return false;
+	return consentChoice() === 'accepted';
+}
+
+/**
+ * Recheck consent, privacy signals and expiry at each asynchronous auth boundary.
+ *
+ * @param value - Untrusted signup properties to validate under current consent.
+ * @returns Valid context, or null when consent, privacy, expiry or the dev gate disallows it. A cookieless
+ *          context (consent_state set) is valid only while the visitor is undecided: no privacy signal and no
+ *          valid, current consent record.
+ */
+export function currentSignupProperties(value: unknown): SignupProperties | null {
+	if (isEmbeddedDevShell()) return null;
+	const context = normalizeSignupProperties(value);
+	if (!context) return null;
+	// A cookieless context needs no opt-in, but any choice on the banner or a privacy signal drops it.
+	if (context.consent_state) {
+		if (hasPrivacySignal()) return null;
+		if (consentChoice() !== 'undecided') return null;
+		return context;
+	}
+	if (!hasConsent()) return null;
+	return context;
+}
+
+/**
+ * Retain optional context across a native redirect. Consented context stays in session storage, out of the IdP
+ * URL. Cookieless context is not written to site storage; it rides the OAuth state instead (signupState), which
+ * is part of the authorize URL.
+ *
+ * @param value - Candidate context; absent or invalid context clears a stale pending signup.
+ * @returns The retained context, or null when consent, validation or storage disallows it.
+ */
+export function stashSignupProperties(value: unknown): SignupProperties | null {
+	if (isEmbeddedDevShell()) return null;
+	try {
+		sessionStorage.removeItem(SIGNUP_CONTEXT_KEY);
+		const context = currentSignupProperties(value);
+		if (context && !context.consent_state) {
+			sessionStorage.setItem(SIGNUP_CONTEXT_KEY, JSON.stringify(context));
+		}
+		return context;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * The OAuth state that carries a cookieless context through the identity provider and back.
+ *
+ * The state is base64 JSON `{ v: 1, signup }`. It is readable and unsigned: PKCE already prevents a forged
+ * callback, so a forged state can only change attribution. A nonce can be added later under the same envelope.
+ * Nothing is written to site storage, but the authorize URL, state included, stays in this browser's history
+ * (sign-in keeps that entry with assign()) and reaches the identity provider's request logs.
+ *
+ * @param context - Context returned by stashSignupProperties.
+ * @returns The state for a cookieless context; undefined for none or a consented one (which stays in storage).
+ */
+export function signupState(context: SignupProperties | null): string | undefined {
+	if (!context?.consent_state) return undefined;
+	return btoa(JSON.stringify({ v: SIGNUP_STATE_VERSION, signup: context }));
+}
+
+/**
+ * Read a cookieless context back from the callback's OAuth state envelope (see signupState) and recheck it.
+ *
+ * @param state - The callback's `state` query value.
+ * @returns Valid cookieless context, or null; a consented context is never accepted from the URL.
+ */
+export function signupFromState(state: string | null): SignupProperties | null {
+	if (isEmbeddedDevShell()) return null;
+	try {
+		if (!state || state.length > MAX_STORED_CONTEXT_LENGTH) return null;
+		const envelope = JSON.parse(atob(state));
+		if (envelope?.v !== SIGNUP_STATE_VERSION) return null;
+		const context = currentSignupProperties(envelope.signup);
+		if (!context?.consent_state) return null;
+		return context;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Discard pending analytics context without reading or validating it.
+ *
+ * @returns Nothing; unavailable optional storage does not interrupt authentication.
+ */
+export function clearSignupProperties(): void {
+	if (isEmbeddedDevShell()) return;
+	try {
+		sessionStorage.removeItem(SIGNUP_CONTEXT_KEY);
+	} catch {
+		// Optional analytics storage must not prevent authentication.
+	}
+}
+
+/**
+ * Consume pending context once after the identity provider round trip and recheck consent.
+ *
+ * @returns Valid context, or null when storage, consent or validation disallows it.
+ */
+export function takeSignupProperties(): SignupProperties | null {
+	if (isEmbeddedDevShell()) return null;
+	try {
+		const raw = sessionStorage.getItem(SIGNUP_CONTEXT_KEY);
+		sessionStorage.removeItem(SIGNUP_CONTEXT_KEY);
+		if (!raw) return null;
+		if (raw.length > MAX_STORED_CONTEXT_LENGTH) return null;
+		return currentSignupProperties(JSON.parse(raw));
+	} catch {
+		return null;
+	}
+}

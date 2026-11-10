@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV7 — never edit by hand
 // =============================================================================
-// Generated:     2026-10-26T18:50:17.707Z
-// Source commit: 8e04b882054d428f07e45eca9db969c08a027b87
+// Generated:     2026-10-27T23:30:07.217Z
+// Source commit: 574919e6007b0a46984b56f4528385c1c77a49fe
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -517,156 +517,6 @@ export declare class DocGroupHelper {
     static splitByChunkRange(group: DocGroup, chunkSize: number): DocGroup[];
 }
 /**
- * MIT License
- *
- * Copyright (c) 2026 Aparavi Software AG
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- */
-/**
- * Response structures from RocketRide pipeline data processing operations.
- *
- * These interfaces represent the different types of responses returned when data
- * is sent through pipelines, depending on the processing method and MIME type handling.
- */
-/**
- * Pipeline response structure with optional processing information.
- *
- * This is returned from all pipeline operations. When data is sent without
- * MIME type specification, only basic fields are present. When MIME type
- * is specified and processing occurs, additional result_types and dynamic
- * fields are included.
- */
-export interface PIPELINE_RESULT {
-    /** Unique identifier for this processing result (UUID format) */
-    name: string;
-    /** File path context (typically empty for direct data sends) */
-    path: string;
-    /** Unique object identifier for tracking processed items (UUID format) */
-    objectId: string;
-    /**
-     * Map of field names to their data type identifiers.
-     *
-     * The key is the name of a field that exists in this response object.
-     * The value indicates what type of data that field contains.
-     *
-     * Examples:
-     * - { "text": "text" } → look for response.text containing string array
-     * - { "my_text": "text", "my_answers": "answers" } → look for response.my_text and response.my_answers
-     * - { "answers": "answers" } → look for response.answers containing AI-generated responses
-     */
-    result_types?: Record<string, string>;
-    /**
-     * Dynamic fields containing processed data based on result_types mapping.
-     *
-     * Field names and types are determined by the result_types object:
-     * - Fields with type "text": string[] (array of text segments)
-     * - Fields with type "answers": string[] (AI-generated chat responses)
-     * - Other types: depends on pipeline configuration
-     *
-     * Common field names: "text", "output", "content", "data", "result", "answers"
-     */
-    [key: string]: any;
-}
-/**
- * File upload result structure with processing outcome and metadata.
- *
- * This represents the complete result of a file upload operation, including
- * upload statistics, processing results, and any error information.
- */
-export interface UPLOAD_RESULT {
-    /** Upload completion status - 'complete' indicates successful upload and processing */
-    action: "open" | "write" | "close" | "complete" | "error";
-    /** Original filename as provided during upload */
-    filepath: string;
-    /** Number of bytes successfully transmitted to the server */
-    bytes_sent: number;
-    /** Total size of the uploaded file in bytes */
-    file_size: number;
-    /** Time taken for the upload operation in seconds */
-    upload_time: number;
-    /**
-     * Processing result from the pipeline after successful upload.
-     * Contains the same structure as PIPELINE_RESULT with processed content.
-     * Only present when action is 'complete' and processing succeeded.
-     */
-    result?: PIPELINE_RESULT;
-    /** Error message if upload or processing failed (when action is 'error') */
-    error?: string;
-}
-/**
- * A tool the model may call in a turn-mode Question. `name` is yours and may contain
- * dots; the engine maps it to a name the provider accepts and maps calls back.
- */
-export interface Tool {
-    name: string;
-    description?: string;
-    /** JSON Schema with `type: 'object'` at the top. */
-    inputSchema: Record<string, unknown>;
-}
-/** Plain text inside a message. */
-export interface TextBlock {
-    type: "text";
-    text: string;
-}
-/**
- * A call the model asked for. Answer it with a ToolResultBlock carrying the same `id`.
- * `args` is the raw string when the provider's arguments were not valid JSON.
- */
-export interface ToolCallBlock {
-    type: "tool_call";
-    id: string;
-    name: string;
-    args: Record<string, unknown> | string;
-}
-/** The result of one tool call, sent back in the next user message. */
-export interface ToolResultBlock {
-    type: "tool_result";
-    callId: string;
-    content: string;
-    isError?: boolean;
-}
-/** Model reasoning the provider needs back. `text` is for display; keep `state` unchanged. */
-export interface ReasoningBlock {
-    type: "reasoning";
-    text: string;
-    state?: unknown;
-}
-/** A user turn: text, and the results of the calls in the assistant turn before it. */
-export interface UserMessage {
-    role: "user";
-    content: string | Array<TextBlock | ToolResultBlock>;
-}
-/** A model turn: text, tool calls and reasoning. Append it to `Question.messages` as is. */
-export interface AssistantMessage {
-    role: "assistant";
-    content: string | Array<TextBlock | ToolCallBlock | ReasoningBlock>;
-}
-/** One turn of a turn-mode conversation. */
-export type Message = UserMessage | AssistantMessage;
-export type StopReason = "end_turn" | "tool_use" | "max_tokens" | "stop_sequence" | "refusal";
-/** Why a turn produced no message. `tools_unsupported` is decided before any provider call. */
-export interface AnswerError {
-    code: "tools_unsupported" | "provider_error";
-    message: string;
-}
-/**
  * Defines different types of questions and queries you can ask.
  */
 export declare enum QuestionType {
@@ -718,22 +568,7 @@ export interface QuestionText {
  * Handles AI responses from RocketRide chat operations.
  */
 export declare class Answer {
-    /** Set only for a turn-mode Question: the model's turn. */
-    message?: AssistantMessage;
-    /** Why the model stopped. `tool_use` means `toolCalls` are waiting for results. */
-    stopReason?: StopReason;
-    /** Set instead of `message` when the turn failed. */
-    error?: AnswerError;
-    /** Token usage of the turn. */
-    tokens?: Record<string, unknown>;
     constructor(expectJson?: boolean);
-    /**
-     * Read the answer a turn-mode `client.chat()` call returned (the last entry under `key`).
-     * A text entry, which an engine that predates turn mode returns, gives a text Answer.
-     */
-    static fromResult(result: PIPELINE_RESULT, key?: string): Answer;
-    /** The calls in this turn, in the order the model made them. Empty for a text answer. */
-    get toolCalls(): ToolCallBlock[];
     /**
      * Extract Python code from AI response.
      */
@@ -743,7 +578,7 @@ export declare class Answer {
      */
     setAnswer(value: string | object | unknown[]): void;
     /**
-     * Get the response as plain text. For a turn, the text of `message`.
+     * Get the response as plain text.
      */
     getText(): string;
     /**
@@ -776,15 +611,6 @@ export declare class Question {
     goals: string[];
     documents: Doc[];
     questions: QuestionText[];
-    /**
-     * The conversation, sent as real provider turns. Non-empty switches the Question to
-     * turn mode: the system prompt is role + instructions + examples, context, documents
-     * and goals are added to the last user message, and history, questions and
-     * expectJson are not allowed.
-     */
-    messages: Message[];
-    /** Tools the model may call. Turn mode only. */
-    tools: Tool[];
     constructor(options?: {
         type?: QuestionType;
         filter?: DocFilter;
@@ -816,15 +642,6 @@ export declare class Question {
      * Add a question to ask the AI.
      */
     addQuestion(question: string): void;
-    /**
-     * Append a message to the conversation, switching the Question to turn mode.
-     */
-    addMessage(message: Message): void;
-    /**
-     * Add the result of a tool call to the user message that answers it, opening that
-     * message after an assistant turn. Throws if no assistant turn before it made the call.
-     */
-    addToolResult(callId: string, content: string, isError?: boolean): void;
     /**
      * Add specific documents for the AI to reference.
      */
@@ -2556,6 +2373,100 @@ interface DashboardMonitorChanged extends DashboardEventBase {
 }
 /** Discriminated union of all dashboard activity events. */
 export type DashboardEvent = DashboardConnectionAdded | DashboardConnectionRemoved | DashboardTaskStarted | DashboardTaskStopped | DashboardTaskRemoved | DashboardTaskError | DashboardAuthFailed | DashboardMonitorChanged;
+/**
+ * MIT License
+ *
+ * Copyright (c) 2026 Aparavi Software AG
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+/**
+ * Response structures from RocketRide pipeline data processing operations.
+ *
+ * These interfaces represent the different types of responses returned when data
+ * is sent through pipelines, depending on the processing method and MIME type handling.
+ */
+/**
+ * Pipeline response structure with optional processing information.
+ *
+ * This is returned from all pipeline operations. When data is sent without
+ * MIME type specification, only basic fields are present. When MIME type
+ * is specified and processing occurs, additional result_types and dynamic
+ * fields are included.
+ */
+export interface PIPELINE_RESULT {
+    /** Unique identifier for this processing result (UUID format) */
+    name: string;
+    /** File path context (typically empty for direct data sends) */
+    path: string;
+    /** Unique object identifier for tracking processed items (UUID format) */
+    objectId: string;
+    /**
+     * Map of field names to their data type identifiers.
+     *
+     * The key is the name of a field that exists in this response object.
+     * The value indicates what type of data that field contains.
+     *
+     * Examples:
+     * - { "text": "text" } → look for response.text containing string array
+     * - { "my_text": "text", "my_answers": "answers" } → look for response.my_text and response.my_answers
+     * - { "answers": "answers" } → look for response.answers containing AI-generated responses
+     */
+    result_types?: Record<string, string>;
+    /**
+     * Dynamic fields containing processed data based on result_types mapping.
+     *
+     * Field names and types are determined by the result_types object:
+     * - Fields with type "text": string[] (array of text segments)
+     * - Fields with type "answers": string[] (AI-generated chat responses)
+     * - Other types: depends on pipeline configuration
+     *
+     * Common field names: "text", "output", "content", "data", "result", "answers"
+     */
+    [key: string]: any;
+}
+/**
+ * File upload result structure with processing outcome and metadata.
+ *
+ * This represents the complete result of a file upload operation, including
+ * upload statistics, processing results, and any error information.
+ */
+export interface UPLOAD_RESULT {
+    /** Upload completion status - 'complete' indicates successful upload and processing */
+    action: "open" | "write" | "close" | "complete" | "error";
+    /** Original filename as provided during upload */
+    filepath: string;
+    /** Number of bytes successfully transmitted to the server */
+    bytes_sent: number;
+    /** Total size of the uploaded file in bytes */
+    file_size: number;
+    /** Time taken for the upload operation in seconds */
+    upload_time: number;
+    /**
+     * Processing result from the pipeline after successful upload.
+     * Contains the same structure as PIPELINE_RESULT with processed content.
+     * Only present when action is 'complete' and processing succeeded.
+     */
+    result?: PIPELINE_RESULT;
+    /** Error message if upload or processing failed (when action is 'error') */
+    error?: string;
+}
 /**
  * Event type enumeration for sophisticated client subscription and event routing.
  *
@@ -4402,8 +4313,10 @@ declare class DeployApi {
      *   (default: `process.cwd()`).
      * @param options.comment - "What changed" note kept in the registry.
      * @param options.metadata - Extra metadata merged over the packed
-     *   defaults (e.g. projectId provenance); `appRoot` is always set from
-     *   the pack.
+     *   defaults; `appRoot` is always set from the pack, and `projectId`
+     *   provenance defaults to the working copy's appManifest projectId.
+     *   Deploying never writes it — the id is stamped at creation and by
+     *   the editor, so CI and read-only checkouts deploy unchanged.
      * @param options.onProgress - Receives one line per pack step (include
      *   checks, per-file adds, totals) for hosts that surface progress.
      * @returns The artifact entry for the new version.
@@ -4417,7 +4330,7 @@ declare class DeployApi {
     /**
      * Scaffolds a new app in the workspace — the programmatic twin of the
      * App Builder's New App wizard, rendering the identical templates
-     * (Node.js only). Writes `./apps/<slug>`, ensures the pnpm workspace
+     * (Node.js only). Writes `./apps/<slug>-ui`, ensures the pnpm workspace
      * file and ignore hygiene, vendors the connected server's shell +
      * client packages, and runs the workspace install. Scaffolding only —
      * nothing is deployed; the normal lifecycle (edit → `verifyApp` →
@@ -4425,8 +4338,10 @@ declare class DeployApi {
      *
      * @param slug - The app-name slug (lowercase; digits/-/_ after the
      *   first character). The id becomes `<developerId>.<slug>`.
-     * @param options - Template, display name, developer id (default
-     *   'local'), frame options, install toggle, `onProgress`, and
+     * @param options - Template, display name, developer id (default: this
+     *   client's organization developer id, else 'local' — the same
+     *   resolution as the New App wizard and `rocketride app create`),
+     *   frame options, install toggle, `onProgress`, and
      *   `workspaceRoot` (default `process.cwd()`). The server base URL for
      *   vendoring defaults to this client's own connection.
      * @returns The created app's identity and a report of what ran.
@@ -5833,6 +5748,46 @@ export declare class RocketRideClient extends DAPClient {
         state: string;
         deployedAt?: number;
     }>>;
+    /**
+     * Wait for one app version's server build to finish — deploying returns
+     * at once with `buildStatus: 'queued'`, and publish/submit/serve all
+     * gate on a finished ('ok') build. Polls the version rail.
+     *
+     * @param appId - App id
+     * @param registryVersion - Registry version number from the rail
+     * @param options.timeoutMs - Give up after this long (default 10 minutes)
+     * @param options.intervalMs - Poll interval (default 3 seconds)
+     * @param options.onStatus - Called whenever the build status changes
+     * @returns The version's rail entry once its build is 'ok'
+     * @throws Error when the build failed, the version is unknown, or the wait timed out
+     */
+    waitForAppBuild(appId: string, registryVersion: number, options?: {
+        timeoutMs?: number;
+        intervalMs?: number;
+        onStatus?: (status: string) => void;
+    }): Promise<Awaited<ReturnType<RocketRideClient["listDeployments"]>>[number]>;
+    /**
+     * The caller org's developer namespace — the `<developerId>` half of
+     * every app id it owns. Readable on both editions (OSS answers the
+     * fixed namespace its sessions carry; there is no Stripe Connect there).
+     *
+     * @returns `{developerId, stripeAccountId, stripeAccountStatus}`;
+     *   `developerId` is null until an org admin registers one
+     */
+    developerStatus(): Promise<{
+        developerId: string | null;
+        stripeAccountId: string | null;
+        stripeAccountStatus: string;
+    }>;
+    /**
+     * Claim the caller org's developer id slug (org.admin, self-service,
+     * SaaS only). Apps are then created as `<developerId>.<name>` and can
+     * publish beyond the workspace.
+     *
+     * @param developerId - The slug to claim (lowercase letters/underscores)
+     * @returns The server's registration record
+     */
+    registerDeveloper(developerId: string): Promise<Record<string, unknown>>;
     /** Read a file as a UTF-8 string. */
     fsReadString(path: string): Promise<string>;
     /** Write a UTF-8 string to a file. */
@@ -6106,6 +6061,104 @@ export declare class RocketRideClient extends DAPClient {
         timeout?: number;
     }): Promise<T>;
 }
+/**
+ * Parses a registry version argument, rejecting anything that is not a
+ * positive integer. A missing or non-numeric value would otherwise become
+ * NaN (null over JSON) or 0 — silently changing deployment state against an
+ * unspecified version.
+ *
+ * @param value - The raw version (number or numeric string).
+ * @returns The validated registry version (v1 is the first).
+ * @throws Error when the value is not a positive integer.
+ */
+export declare function parseRegistryVersion(value: unknown): number;
+/** The version-rail fields version picking reads. */
+export interface AppRailVersion {
+    registryVersion: number;
+    state: string;
+    buildStatus: string;
+}
+/**
+ * Picks the version a bare "publish this app" means: the NEWEST version that
+ * has not failed (review state or build). A newer version that is still
+ * building is the pick — callers wait for its build rather than silently
+ * publishing an older one.
+ *
+ * @param rows - The app's version rail (`listDeployments`), any order.
+ * @returns The picked row, or null when every version failed or none exist.
+ */
+export declare function pickPublishVersion<T extends AppRailVersion>(rows: T[]): T | null;
+/** One deploy target the caller can address. */
+export interface DeployTeamRef {
+    /** Team id, or '@me' for the caller's personal space. */
+    id: string;
+    /** Display name. */
+    name: string;
+    /** Caller holds task.control on this team (may deploy/pause/schedule). */
+    canControl: boolean;
+}
+/**
+ * Resolves the caller's deploy targets (names + control rights) from the
+ * authenticated identity:
+ *
+ * - '@me' (the personal space) comes first for any signed-in user — it
+ *   exists even with zero team memberships.
+ * - org.admin (and sys.admin) implies the FULL team permission set — the
+ *   server resolver's documented expansion; per-team rows only carry
+ *   explicit task.* grants for regular members.
+ * - Rosterless identities (the OSS single-team server) derive refs from the
+ *   deployment rows with control assumed — the server enforces the real
+ *   permission on every call. Personal (`user~`) rows never become targets.
+ *
+ * @param client - A connected client (its cached ConnectResult is read), or none.
+ * @param deployments - Deployment rows used as the rosterless fallback.
+ * @returns The addressable team refs.
+ */
+export declare function resolveDeployTeams(client: {
+    getAccountInfo(): ConnectResult | undefined;
+} | null | undefined, deployments: Deployment[]): DeployTeamRef[];
+/**
+ * Resolves a team id to its display name, falling back to the id. Personal
+ * (`user~`) owner keys render as "Me" for the caller's own space and
+ * "Personal" for another user's (admin visibility) — the raw guid never
+ * reaches a label.
+ *
+ * @param teams - The resolved team refs.
+ * @param teamId - The team id (or owner key) to resolve.
+ * @param ownUserId - The caller's user id ('' when unknown).
+ * @returns The display name, or the id when unknown.
+ */
+export declare function teamNameOf(teams: DeployTeamRef[], teamId: string, ownUserId?: string): string;
+/**
+ * Translates a row's owner key into the ADDRESSABLE team ref for API calls:
+ * the caller's own `user~{uid}` row is addressed as '@me' (the server never
+ * accepts raw owner keys); everything else passes through.
+ *
+ * @param teamId - The row's team id / owner key.
+ * @param ownUserId - The caller's user id ('' when unknown).
+ * @returns The team id to put on the wire.
+ */
+export declare function wireTeamIdOf(teamId: string, ownUserId: string): string;
+/**
+ * Resolves what a person typed as a team — '@me', a team id, or a team
+ * display name (case-insensitive) — to the id to send. An unknown value
+ * passes through unchanged (the server validates it; an admin may address
+ * a team outside their own roster).
+ *
+ * @param input - The typed team ('' = unscoped/default).
+ * @param teams - The caller's resolved team refs.
+ * @returns The team id to put on the wire.
+ * @throws Error when a name matches more than one team.
+ */
+export declare function resolveTeamArg(input: string, teams: DeployTeamRef[]): string;
+/**
+ * The registry name for a pipeline file whose JSON carries none — `.pipe`
+ * names live in FILENAMES, and every deploy surface renders pipelineName.
+ *
+ * @param filePath - The pipeline file path (either separator).
+ * @returns The basename without its `.pipe` / `.pipe.json` extension.
+ */
+export declare function pipelineNameFromPath(filePath: string): string;
 interface ShellConnectionState {
     /** The shared RocketRideClient instance, or `null` if not yet initialised. */
     client: RocketRideClient | null;
@@ -7891,77 +7944,6 @@ export interface IUsePollingOptions {
     gate?: "shell" | "none";
 }
 export declare function usePolling(fetcher: () => void | Promise<void>, interval: number, options?: IUsePollingOptions): void;
-/** Wrapper for activity events from either channel. */
-export type ActivityEvent = {
-    source: "task";
-    body: TaskEvent;
-    receivedAt: number;
-} | {
-    source: "dashboard";
-    body: DashboardEvent;
-    receivedAt: number;
-};
-interface IMonitorViewProps {
-    /**
-     * Document display name for the page header. When provided, the view
-     * renders a stock {@link ContentHeader} titled with this name (matching
-     * the host's tab title), pinned between the page strip and the scrolling
-     * page bodies. No header renders without it.
-     */
-    documentTitle?: string;
-    /** Full dashboard snapshot from rrext_dashboard response, or null if not yet loaded. */
-    data: DashboardResponse | null;
-    /** Activity events pushed from the server (newest first). */
-    events: ActivityEvent[];
-    /** Whether the client is connected to the server. */
-    isConnected: boolean;
-    /** Callback to request a manual data refresh from the host. */
-    onRefresh?: () => void;
-    /**
-     * Optional server-paginated connections fetcher — presence switches the
-     * Connections grid to REMOTE mode (host binds it to `listConnections`).
-     */
-    listConnections?: (req: ListPageRequest) => Promise<ListPageResponse<DashboardConnection>>;
-    /**
-     * Optional server-paginated tasks fetcher — presence switches the Tasks
-     * grid to REMOTE mode (host binds it to `listTasks`).
-     */
-    listTasks?: (req: ListPageRequest) => Promise<ListPageResponse<DashboardTask>>;
-    /**
-     * Receives ONE combined refetch that silently re-requests the current
-     * page of every remote grid — the host polls it (usePolling, 3s) the way
-     * the admin views poll their own grids.
-     */
-    onRefetchReady?: (refetch: () => void) => void;
-}
-export declare const MonitorView: React$1.FC<IMonitorViewProps>;
-/**
- * Parse a raw server event into a monitor ActivityEvent.
- *
- * @param raw - Raw event object from the server WebSocket.
- * @returns ActivityEvent if the event is dashboard or task related, null otherwise.
- */
-export declare function parseActivityEvent(raw: unknown): ActivityEvent | null;
-/** Data returned by the useDashboardData hook. */
-export interface DashboardData {
-    /** Latest dashboard snapshot, or null if not yet loaded. */
-    data: DashboardResponse | null;
-    /** Activity events (newest first). */
-    events: ActivityEvent[];
-    /** Last fetch failure (e.g. a permission denial), or null when healthy. */
-    error: string | null;
-    /** Trigger a manual refresh. */
-    refresh: () => void;
-}
-/**
- * Shared hook that provides server dashboard data and activity events.
- *
- * Uses a module-level singleton: the first consumer starts polling, the last
- * one to unmount stops it. Data persists across view switches.
- *
- * @returns Dashboard data, events, and a manual refresh callback.
- */
-export declare function useDashboardData(): DashboardData;
 /**
  * Returns the current ConnectionStatus with automatic re-renders on changes.
  *
@@ -11710,111 +11692,6 @@ export declare function getAppVersionOverride(appId: string): AppVersionOverride
  * @returns 'ready' when the switch can proceed in-place, else 'reload-required'.
  */
 export declare function applyAppVersionOverride(appId: string, moduleId: string, override: AppVersionOverride | null): "ready" | "reload-required";
-interface IOverviewGridProps {
-    /** Full dashboard snapshot, or null while it has not loaded yet. */
-    data: DashboardResponse | null;
-    /** Optional manual refresh callback — renders the header's Refresh action. */
-    onRefresh?: () => void;
-}
-/**
- * Overview grid — the unified Connections & Tasks CardDataGrid: connections
- * first, then running tasks, then the five most recent completed ones, with
- * CPU/Memory gauges and status badges. Clicking a client row opens the
- * connection record panel; clicking a task row opens the task record panel.
- *
- * @param props - {@link IOverviewGridProps}.
- * @returns The card-hosted grid plus both record panels.
- */
-export declare const OverviewGrid: React$1.FC<IOverviewGridProps>;
-interface IConnectionsPanelProps {
-    /**
-     * Snapshot connection rows (the dashboard snapshot). LOCAL mode renders
-     * exactly these; with `listConnections` present the fetched pages take
-     * over and this prop is unused.
-     */
-    connections?: DashboardConnection[];
-    /**
-     * Optional server-paginated fetcher — presence switches the grid to
-     * REMOTE mode. Hosts bind it to their client's `listConnections`.
-     */
-    listConnections?: (req: ListPageRequest) => Promise<ListPageResponse<DashboardConnection>>;
-    /**
-     * Receives the grid's silent current-page refetch trigger (REMOTE mode
-     * only) so the HOST owns the polling cadence.
-     */
-    onRefetchReady?: (refetch: () => void) => void;
-}
-/**
- * Connections grid — every active client connection as a CardDataGrid with
- * identity, client label, traffic counters, subscription counts, and auth
- * status; clicking a row opens the connection record panel.
- *
- * @param props - {@link IConnectionsPanelProps}.
- * @returns The card-hosted grid plus its record panel.
- */
-export declare const ConnectionsPanel: React$1.FC<IConnectionsPanelProps>;
-interface ITasksPanelProps {
-    /**
-     * Snapshot task rows (the dashboard snapshot): feeds the header's
-     * running/completed counts in both modes, and the grid rows plus record
-     * panel in LOCAL mode. Null while the snapshot has not loaded yet (the
-     * header counts stay hidden).
-     */
-    tasks?: DashboardTask[] | null;
-    /**
-     * Optional server-paginated fetcher — presence switches the grid to
-     * REMOTE mode. Hosts bind it to their client's `listTasks`.
-     */
-    listTasks?: (req: ListPageRequest) => Promise<ListPageResponse<DashboardTask>>;
-    /**
-     * Receives the grid's silent current-page refetch trigger (REMOTE mode
-     * only) so the HOST owns the polling cadence.
-     */
-    onRefetchReady?: (refetch: () => void) => void;
-}
-/**
- * Tasks grid — all pipeline tasks as a CardDataGrid with CPU/Memory gauges,
- * elapsed time, completion counts, TTL/idle time, and status badges;
- * clicking a row opens the task record panel.
- *
- * @param props - {@link ITasksPanelProps}.
- * @returns The card-hosted grid plus its record panel.
- */
-export declare const TasksPanel: React$1.FC<ITasksPanelProps>;
-/** Semantic tone of an event, keyed off what happened (not who reported it). */
-export type EventTone = "connection" | "task" | "warning" | "system";
-interface IEventDisplay {
-    /** Semantic tone (drives the badge / feed color). */
-    tone: EventTone;
-    /** Short category label (connect, disconnect, task, security, system). */
-    label: string;
-    /** Human-readable one-line summary. */
-    message: string;
-    /** Epoch-milliseconds arrival time of the event at this client. */
-    timestamp: number;
-}
-interface IActivityPanelProps {
-    /** Accumulated activity events (newest first, as delivered by the host). */
-    events: ActivityEvent[];
-}
-/**
- * Describe one activity event from either channel (task / dashboard) as its
- * display fields. Exported for the Overview surfaces' Recent Activity feeds,
- * which render the same events in card form.
- *
- * @param event - The wrapped activity event.
- * @returns Tone, label, message, and the arrival timestamp (epoch ms).
- */
-export declare function getEventDisplay(event: ActivityEvent): IEventDisplay;
-/**
- * Activity grid — live stream of server events (connections, task lifecycle,
- * errors) as a CardDataGrid fed by the host's event feed (LOCAL mode: each
- * poll / push hands down a new events array, applied silently).
- *
- * @param props - {@link IActivityPanelProps}.
- * @returns The card-hosted grid.
- */
-export declare const ActivityPanel: React$1.FC<IActivityPanelProps>;
 /**
  * Formatting utilities for the Server Monitor module.
  */
@@ -12301,7 +12178,6 @@ export declare const shellApi: {
     readonly useIframeBridge: typeof useIframeBridge;
     readonly useSubscriptions: typeof useSubscriptions;
     readonly usePolling: typeof usePolling;
-    readonly useDashboardData: typeof useDashboardData;
     readonly useConnectionStatus: typeof useConnectionStatus;
     readonly useShellApiConfig: typeof useShellApiConfig;
     readonly useAppComponent: typeof useAppComponent;
@@ -12411,7 +12287,7 @@ export type ShellApiShape = typeof shellApi;
  * @returns The frozen `shellApi` object.
  */
 export declare function getShellApi(): ShellApiShape;
-export { AppManifestEntry$1 as AppManifestEntry, ConnectResult as AuthUser, Document$1 as Document, Explorer as DocExplorer, ExplorerChild as DocEntryChild, ExplorerConfig as DocExplorerConfig, ExplorerEntry as DocEntry, ExplorerStatus as DocEntryStatus, IConfirmDialogProps as ConfirmDialogProps, IExplorerProps as DocExplorerProps, PipelineControlConnection as IControlConnection, PipelineInputConnection as IInputConnection, PromoRedemption$1 as PromoRedemption, PromoValidation$1 as PromoValidation, ShellConnectionEventMap as ShellEventMap, TASK_STATE as ITaskState, TASK_STATUS as ITaskStatus, TASK_STATUS_FLOW as IFlowData, };
-export {};
+export { AppManifestEntry$1 as AppManifestEntry, ConnectResult as AuthUser, Document$1 as Document, Explorer as DocExplorer, ExplorerChild as DocEntryChild, ExplorerConfig as DocExplorerConfig, ExplorerEntry as DocEntry, ExplorerStatus as DocEntryStatus, IConfirmDialogProps as ConfirmDialogProps, IExplorerProps as DocExplorerProps, PipelineControlConnection as IControlConnection, PipelineInputConnection as IInputConnection, PromoRedemption$1 as PromoRedemption, PromoValidation$1 as PromoValidation, ShellConnectionEventMap as ShellEventMap, TASK_STATE as ITaskState, TASK_STATUS as ITaskStatus, TASK_STATUS_FLOW as IFlowData };
+
 // ===== END FROZEN BUNDLE =====
 export type ShellApiV7 = ShellApiShape;

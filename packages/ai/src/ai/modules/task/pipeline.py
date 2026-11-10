@@ -12,6 +12,10 @@ ALLOWED_ENV_PREFIX = 'ROCKETRIDE_'
 PLACEHOLDER = re.compile(r'\$\{([^}]+)\}')
 
 
+class MultipleSourcesError(ValueError):
+    """Source inference requires an explicit choice between multiple source components."""
+
+
 def resolve_pipeline_env(pipeline: Dict[str, Any], env: Dict[str, str]) -> Dict[str, Any]:
     """Replace ``${KEY}`` placeholders in a pipeline dict with environment values.
 
@@ -66,7 +70,17 @@ def resolve_implied_source(pipeline: Dict[str, Any]) -> Optional[str]:
         config = component.get('config', {})
         if config.get('mode', '') == 'Source':
             if seen_source:
-                raise ValueError('Pipeline has multiple source components, please specify one explicitly')
+                raise MultipleSourcesError('Pipeline has multiple source components, please specify one explicitly')
             seen_source = True
             source_id = component.get('id', None)
     return source_id
+
+
+def substituted_env(pipeline: Dict[str, Any], env: Dict[str, str]) -> Dict[str, str]:
+    """Map each ``${NAME}`` that :func:`resolve_pipeline_env` fills in ``pipeline`` to its value."""
+    found = {}
+    for name in PLACEHOLDER.findall(json.dumps(pipeline)):
+        reference = '${' + name + '}'
+        if name.startswith(ALLOWED_ENV_PREFIX) and env.get(name, reference) != reference:
+            found[name] = env[name]
+    return found

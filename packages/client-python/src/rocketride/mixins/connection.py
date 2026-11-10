@@ -54,7 +54,13 @@ import asyncio
 import os
 import urllib.parse
 from typing import Any, Dict, Optional
-from ..core import DAPClient, TransportWebSocket, CONST_DEFAULT_WEB_PORT, CONST_DEFAULT_WEB_PROTOCOL
+from ..core import (
+    DAPClient,
+    TransportWebSocket,
+    CONST_DEFAULT_WEB_HOST,
+    CONST_DEFAULT_WEB_PORT,
+    CONST_DEFAULT_WEB_PROTOCOL,
+)
 from ..core.exceptions import AuthenticationException
 from ..types.client import ConnectResult
 
@@ -375,6 +381,11 @@ class ConnectionMixin(DAPClient):
     @staticmethod
     def normalize_uri(uri: str) -> str:
         """Normalize a user-provided URI into a fully-formed HTTP/HTTPS URL."""
+        # A bare port ('5590') names that port on this host. Without a host,
+        # urlparse would read the digits as a hostname and add the default port.
+        if uri and uri.isdigit():
+            uri = f'{CONST_DEFAULT_WEB_HOST}:{uri}'
+
         if uri and '://' not in uri:
             uri = f'{CONST_DEFAULT_WEB_PROTOCOL}{uri}'
 

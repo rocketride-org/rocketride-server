@@ -139,11 +139,13 @@ LEGAL_PAGES = (
     '/legal/acceptable-use',
     '/legal/subprocessors',
     '/legal/trademark-policy',
+    '/legal/cookie-policy',
+    '/legal/marketplace-terms',
 )
 
 
 def test_legal_pages_are_public_routes_and_listed():
-    # The legal index and the six published documents serve the SPA on a hard
+    # The legal index and the published documents serve the SPA on a hard
     # reload and are advertised like the other pages.
     for route in LEGAL_PAGES:
         assert route in PUBLIC_ROUTES
@@ -197,11 +199,24 @@ def test_mcp_api_paths_are_not_shell_pages():
 
 
 def test_unlisted_routes_are_served_but_not_listed():
-    # routes.ts marks /oss and /mcp-server `unlisted` (client stamps noindex), and
-    # /store is the legacy alias canonicalized to /marketplace — all three must
-    # keep serving while staying out of the advertised subset.
+    # routes.ts marks /oss, /mcp-server, /marketplace and /build-publish-earn
+    # `unlisted` (client stamps noindex), and /store is the legacy alias
+    # canonicalized to /marketplace — all of them must keep serving while
+    # staying out of the advertised subset.
     for route in UNLISTED_ROUTES:
         assert route in PUBLIC_ROUTES
+        assert route not in LISTED_ROUTES
+
+
+def test_marketplace_pair_is_hidden_for_now():
+    # The Marketplace pair (browse page + its /store alias, and the producer-side
+    # /build-publish-earn page) is pulled from the site until it relaunches:
+    # still served on a hard reload, absent from /sitemap.xml and /llms.txt.
+    # Named explicitly so the hide cannot be undone server-side by accident;
+    # re-launching means dropping these three from UNLISTED_ROUTES on purpose.
+    for route in ('/marketplace', '/store', '/build-publish-earn'):
+        assert route in PUBLIC_ROUTES
+        assert route in UNLISTED_ROUTES
         assert route not in LISTED_ROUTES
 
 
@@ -352,6 +367,16 @@ def test_sitemap_and_llms_list_the_legal_and_superfans_pages(app_url):
         '/legal/trademark-policy': (
             'Trademark & Brand Usage Policy',
             'How the RocketRide name, logo, and brand assets may and may not be used.',
+        ),
+        '/legal/cookie-policy': (
+            'Cookie Policy',
+            'How RocketRide uses cookies, similar technologies, and website analytics on its websites and '
+            'RocketRide Cloud, and the choices you have.',
+        ),
+        '/legal/marketplace-terms': (
+            'Marketplace Publisher Terms',
+            'The terms for publishing apps on the RocketRide Marketplace, including eligibility, revenue share, '
+            'payouts, and taxes.',
         ),
         '/superfans': (
             'Superfans',
