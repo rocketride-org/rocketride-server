@@ -236,6 +236,42 @@ def test_s4_a_foreign_developer_prefix_is_not_the_callers_dev_rung():
     assert ts.resolve_control(control.address, _account(developer_id='acme'), 'task.data') is control
 
 
+def test_s4_two_teams_deploying_one_address_resolve_to_the_active_team():
+    """The address carries no owner, so two teams can each run it. A member of both
+    reaches the run of their development team; with neither on it, the lookup is
+    ambiguous and names the teams instead of asking for a source already given.
+    """
+    ts = _server()
+    run_1 = _control(ts, run_kind='deploy', owner_kind='team', user_id='', team_id='team-1')
+    run_2 = _control(ts, run_kind='deploy', owner_kind='team', user_id='', team_id='team-2')
+    perms = ['task.control', 'task.data', 'task.monitor']
+
+    def member(dev_team: str) -> AccountInfo:
+        return AccountInfo(
+            auth='rr_key',
+            userId='user-a',
+            devTeam=dev_team,
+            organization={
+                'id': 'org-1',
+                'name': 'Acme',
+                'permissions': [],
+                'teams': [
+                    {'id': 'team-1', 'name': 'One', 'permissions': perms},
+                    {'id': 'team-2', 'name': 'Two', 'permissions': perms},
+                    {'id': 'team-3', 'name': 'Three', 'permissions': perms},
+                ],
+                'developerId': 'acme',
+            },
+        )
+
+    assert ts.resolve_control(run_1.address, member('team-1'), 'task.monitor') is run_1
+    assert ts.resolve_control(run_2.address, member('team-2'), 'task.monitor') is run_2
+    with pytest.raises(TaskError) as err:
+        ts.resolve_control(run_1.address, member('team-3'), 'task.monitor')
+    assert err.value.code == TaskError.AMBIGUOUS
+    assert err.value.teams == ['team-1', 'team-2']
+
+
 # =============================================================================
 # S6 — address grammar: dot-free segments, validated at execute AND publish
 # =============================================================================

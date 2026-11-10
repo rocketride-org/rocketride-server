@@ -759,7 +759,9 @@ class TaskServer(DAPBase):
 
         Raises:
             TaskError: TASK_INVALID_ARGUMENT (grammar), TASK_SOURCE_REQUIRED,
-                or TASK_NOT_REGISTERED when no rung answers.
+                TASK_AMBIGUOUS (several of the caller's teams run the address
+                and none is the caller's development team), or
+                TASK_NOT_REGISTERED when no rung answers.
             PermissionError: Unauthenticated, no permission, or outside the
                 key's endpoints scope.
         """
@@ -819,18 +821,32 @@ class TaskServer(DAPBase):
             check_endpoint_scope(endpoints, control.address)
             return self._verify_control(control, account_info, require)
 
-        # @team: a team-owned deployment run the caller may reach.
+        # @team: a team-owned deployment run the caller may reach. The address
+        # carries no owner, so two of the caller's teams can each have it live:
+        # the caller's active (development) team answers; with neither run on
+        # it the choice is the caller's, so the lookup is ambiguous, not a guess.
         rungs.append('@team')
-        control = _pick(
-            [
-                c
-                for c in self._task_control.values()
-                if c.run_kind == 'deploy'
-                and c.owner_kind != 'user'
-                and _matches(c)
-                and resolve_run_permissions(account_info, c)
-            ]
-        )
+        team_runs = [
+            c
+            for c in self._task_control.values()
+            if c.run_kind == 'deploy'
+            and c.owner_kind != 'user'
+            and _matches(c)
+            and resolve_run_permissions(account_info, c)
+        ]
+        teams = sorted({c.owner_id for c in team_runs})
+        if len(teams) > 1:
+            active_team = getattr(account_info, 'devTeam', None)
+            team_runs = [c for c in team_runs if c.owner_id == active_team]
+            if not team_runs:
+                raise TaskError(
+                    TaskError.AMBIGUOUS,
+                    f'{address!r} is deployed by several of your teams ({", ".join(teams)}); '
+                    'make the one you mean your development team',
+                    address=address,
+                    teams=teams,
+                )
+        control = _pick(team_runs)
         if control is not None:
             check_endpoint_scope(endpoints, control.address)
             return self._verify_control(control, account_info, require)
