@@ -61,7 +61,7 @@ import { findLeaks, type HeldKey, type Scrubber } from './evidence';
 import { gradeTrial, type TrialResult } from './grade';
 import { guideReads, type GuideReads } from './guides';
 import type { Stack } from './stack';
-import { Store, storePath, type SavedSession, type SavedTurn } from './store';
+import { Store, storePath, type AgentLimits, type SavedSession, type SavedTurn } from './store';
 import { pyRegex } from './score';
 import type { AppUse, Task, UserEvent } from './task';
 import type { TrialRecord, TurnRecord, TurnResultRecord } from './types';
@@ -102,6 +102,8 @@ export interface BrowserTrial {
 	appRuns: Record<string, AppRun>;
 	/** What the runner did as the user, from the task's user_events, in order. */
 	userEvents: Array<{ when: UserEvent['when']; action: UserEvent['action']; path: string; done: boolean; detail: string }>;
+	/** Rocket Builder's workspace file after the turn (Store.agentSettings): its settings, and whether the page saved it, which shows the page loaded the limits the record's `settings` hold. Null when there was no file. */
+	agentSettingsAfter: { settings: Record<string, unknown>; savedByPage: boolean } | null;
 }
 
 export type BrowserTrialRecord = TrialRecord & { endReason: EndReason; browser: BrowserTrial };
@@ -129,6 +131,8 @@ export interface TrialOptions {
 	headed: boolean;
 	/** Keep each app's Design preview open, as a user watching would: each app the task starts with before the session, and each app the agent creates as soon as its package.json names it. Off (--no-preview), check_app cannot build (task 1.2). */
 	previews: boolean;
+	/** The agent's limits to set before the page opens, or null to leave the product's defaults. */
+	limits: AgentLimits | null;
 	/** Every key the runner holds: what the evidence must not contain (the engine's keys and the account's API key). */
 	keys: HeldKey[];
 	/** The keys the engine holds: keys-not-leaked looks for these. The account's API key is not one; the page sends it to sign in. */
@@ -170,6 +174,11 @@ export async function runTrial(opts: TrialOptions): Promise<{ record: BrowserTri
 			await store.reset();
 			await store.seed(Object.entries(start).map(([p, text]) => ({ path: p, text })));
 			steps('reset the store and write the task files', `${task.files.length} files: ${task.files.map((f) => f.path).join(', ') || 'none'}`);
+			// step: the agent's limits, in Rocket Builder's settings before the page loads them
+			if (opts.limits) {
+				record.settings = await store.setAgentLimits(opts.limits);
+				steps('set the agent limits', JSON.stringify(record.settings));
+			}
 			const variable = modelTitles(opts.model).variable;
 			if (!record.engineVariables.includes(variable)) steps('engine variables', `no ${variable}: the picker will say the key is missing`);
 
@@ -281,6 +290,7 @@ export async function runTrial(opts: TrialOptions): Promise<{ record: BrowserTri
 				else scans.feed('catalog', catalog);
 				scans.feed('page_text', await driver.pageText());
 
+				browser.agentSettingsAfter = await store.agentSettings();
 				rawFinal = await store.readWorkspace();
 				record.pipes = await validatePipes(store.client, task, start, rawFinal);
 				record.runOutput = await runOutputs(store.client, task, start, rawFinal, record.engineVariables);
@@ -466,7 +476,7 @@ function emptyRecord(opts: TrialOptions): BrowserTrialRecord {
 		session: { saved: false, messages: 0 },
 		infraError: null,
 		replay: null,
-		browser: { card: null, banner: null, cardMatchesOutcome: null, modelShown: null, modelKey: null, approvalMode: null, stoppedAtLimit: false, cards: [], leaks: [], keyScan: null, guides: null, appChecks: {}, appLoads: {}, appRuns: {}, previewsOpened: [], userEvents: [] },
+		browser: { card: null, banner: null, cardMatchesOutcome: null, modelShown: null, modelKey: null, approvalMode: null, stoppedAtLimit: false, cards: [], leaks: [], keyScan: null, guides: null, appChecks: {}, appLoads: {}, appRuns: {}, previewsOpened: [], userEvents: [], agentSettingsAfter: null },
 	};
 }
 

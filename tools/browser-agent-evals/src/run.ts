@@ -39,7 +39,7 @@ import { modelTitles, parseModel, type ModelPick } from './driver';
 import { findLeaks, heldKeys, readModelKeys, Scrubber, type HeldKey } from './evidence';
 import { erroredTrial } from './grade';
 import { LOCAL_APIKEY, openStack, type Stack } from './stack';
-import { Store } from './store';
+import { agentSettingsFile, Store, type AgentLimits } from './store';
 import { loadTasks, type Task } from './task';
 import { writeRunReport } from './report';
 import { buildResults, writeResults } from './results';
@@ -106,6 +106,13 @@ Options:
   --out <dir>     run: where trial folders go (default: .verify/browser-agent/<time>).
   --reruns <n>    run: how many times to rerun a task whose first run failed
                   (default: 2). Flaky: a rerun passed. Failing: every run failed.
+  --step-limit <n>
+                  run: the agent's step limit per turn, set in Rocket
+                  Builder's settings before every trial (0: no limit).
+                  Without it the product's default applies.
+  --cost-limit <usd>
+                  run: the agent's estimated cost limit per turn, in US
+                  dollars, set the same way (0: no limit).
   --headed        run: show the browser.
   --no-preview    run: leave every Design preview closed. By default the
                   runner opens each app's preview as a user watching would:
@@ -133,11 +140,12 @@ interface Args {
 	allowWipe: boolean;
 	noPreview: boolean;
 	envFile: string;
+	limits: AgentLimits;
 	help: boolean;
 }
 
 function parseArgs(argv: string[]): Args {
-	const args: Args = { command: null, tasks: DATA_DIR, only: [], table: false, model: DEFAULT_MODEL, url: null, apikeyEnv: null, out: null, reruns: 2, headed: false, models: [], workspace: null, allowWipe: false, noPreview: false, envFile: DEFAULT_ENV_FILE, help: false };
+	const args: Args = { command: null, tasks: DATA_DIR, only: [], table: false, model: DEFAULT_MODEL, url: null, apikeyEnv: null, out: null, reruns: 2, headed: false, models: [], workspace: null, allowWipe: false, noPreview: false, envFile: DEFAULT_ENV_FILE, limits: {}, help: false };
 	for (let i = 0; i < argv.length; i++) {
 		const a = argv[i];
 		const value = () => {
@@ -161,6 +169,13 @@ function parseArgs(argv: string[]): Args {
 		else if (a === '--allow-wipe') args.allowWipe = true;
 		else if (a === '--no-preview') args.noPreview = true;
 		else if (a === '--env-file') args.envFile = path.resolve(value());
+		else if (a === '--step-limit') {
+			args.limits.steps = Number(value());
+			if (!Number.isInteger(args.limits.steps) || args.limits.steps < 0) throw new Error('--step-limit needs a whole number of 0 or more (0: no limit)');
+		} else if (a === '--cost-limit') {
+			args.limits.costUsd = Number(value());
+			if (!Number.isFinite(args.limits.costUsd) || args.limits.costUsd < 0) throw new Error('--cost-limit needs a number of US dollars, 0 or more (0: no limit)');
+		}
 		else if (a === '--models') args.models.push(...value().split(',').filter(Boolean));
 		else if (a.startsWith('-')) throw new Error(`unknown option ${a}`);
 		else if (args.command === null) args.command = a;
@@ -231,6 +246,8 @@ async function run(args: Args, modelKeys: HeldKey[]): Promise<number> {
 	const engineKeys = heldKeys(modelKeys).filter((k) => k.name !== accountKeyEnv && k.value !== apiKey);
 	log(`${valid.length} task(s), up to ${args.reruns} rerun(s) of each failure, ${model.provider}/${model.model}, output in ${out}`);
 	log(`model keys held: ${keys.map((k) => k.name).join(', ') || 'none'}`);
+	const limits = Object.keys(args.limits).length ? args.limits : null;
+	log(`agent limits: ${limits ? JSON.stringify(agentSettingsFile(limits).settings) : "the product's defaults"}`);
 
 	let stack: Stack;
 	try {
@@ -258,7 +275,7 @@ async function run(args: Args, modelKeys: HeldKey[]): Promise<number> {
 			async (id, n) => {
 				const task = byId.get(id) as Task;
 				const dir = path.join(out, task.id, `trial-${n}`);
-				const { record: r, result: raw } = await runTrial({ task, tasksDir: args.tasks, trial: n, model, stack, dir, headed: args.headed, previews: !args.noPreview, keys, engineKeys, scrubber });
+				const { record: r, result: raw } = await runTrial({ task, tasksDir: args.tasks, trial: n, model, stack, dir, headed: args.headed, previews: !args.noPreview, limits, keys, engineKeys, scrubber });
 				// step: the known-good call after every trial the runner drove, recorded with it; a failed trial gets its cause from it too
 				const kg = r.endReason === 'not_supported' ? null : ((await smokeModels(stack.engineUri, apiKey, [model], scrubber).catch(() => null))?.[0] ?? null);
 				raw.knownGood = kg ? { model: kg.model, answered: kg.answered, seconds: kg.seconds, detail: kg.detail } : null;

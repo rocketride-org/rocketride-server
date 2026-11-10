@@ -30,11 +30,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
+import { pathToFileURL } from 'node:url';
 
-import { EVAL_DIR } from './catalog';
+import { EVAL_DIR, REPO_ROOT } from './catalog';
 import { cardAnswer, dirtyFileAnswer, isWriteOpen, modelTitles, parseModel } from './driver';
 import { engineEnv, findLeaks, heldKeys, readModelKeys, Scrubber, scrubbedLines, withoutKeys } from './evidence';
-import { scopePrefix, storePath } from './store';
+import { AGENT_SETTINGS_FILE, agentSettingsFile, APP_ID, scopePrefix, storePath } from './store';
 import { loadTask } from './task';
 import { cardMatches, setPointer, supportedEvent } from './trial';
 
@@ -101,6 +102,33 @@ test("the engine gets the env file's keys and no shell key; the other processes 
 	assert.deepEqual(withoutKeys(SHELL_WITH_KEYS), { ROCKETRIDE_BUILD_ROOT: '/home/someone/checkout/build', PATH: '/bin' });
 	// held, so scrubbed and scanned for: the file's keys and the engine's other ROCKETRIDE_ secrets, never a shell's model key
 	assert.deepEqual(heldKeys(modelKeys, { ...SHELL_WITH_KEYS, ROCKETRIDE_SHORT_KEY: 'x' }), [...modelKeys, { name: 'ROCKETRIDE_DB_BROKER_TOKEN', value: 'broker-token-value' }]);
+});
+
+/** The parts of the shell's workspace store (packages/shell) the limits test drives. */
+interface ShellStoreModule {
+	WorkspaceStore: new (o: { defaultAppId: string }) => { setConnection(client: unknown, connected: boolean): void; getSnapshot(): { settings: Record<string, unknown> } };
+	partitionPath(dir: string, partition: string): string;
+	appPartition(appId: string): string;
+}
+
+test("the shell loads the agent limits the runner writes, as Rocket Builder's settings", async () => {
+	// loaded at run time, so this tool's type-check stays inside its own folder
+	const { WorkspaceStore, partitionPath, appPartition } = (await import(pathToFileURL(path.join(REPO_ROOT, 'packages/shell/src/workspace/workspaceStore.ts')).href)) as ShellStoreModule;
+	assert.equal(partitionPath('.workspace', appPartition(APP_ID)), AGENT_SETTINGS_FILE);
+	const files: Record<string, unknown> = { [AGENT_SETTINGS_FILE]: agentSettingsFile({ steps: 0, costUsd: 3 }) };
+	const client = {
+		fsReadJson: async (p: string) => {
+			if (p in files) return files[p];
+			throw new Error(`ENOENT ${p}`);
+		},
+		fsWriteJson: async () => {},
+	};
+	const shell = new WorkspaceStore({ defaultAppId: APP_ID });
+	shell.setConnection(client as never, true);
+	for (let i = 0; i < 10; i++) await Promise.resolve();
+	assert.deepEqual(shell.getSnapshot().settings, { 'rocketride.pipeBuilder.agentStepLimit': 0, 'rocketride.pipeBuilder.agentCostLimit': 3 });
+	// a limit not given keeps the product's default: the file leaves it out
+	assert.deepEqual(agentSettingsFile({ costUsd: 3 }).settings, { 'rocketride.pipeBuilder.agentCostLimit': 3 });
 });
 
 test('the scrubber names a held key, blanks other key shapes, and keeps canaries', () => {

@@ -120,7 +120,7 @@ export function handMadeRecord(task: Task, final: Record<string, string>, model:
 		session: { saved: false, messages: 0 },
 		infraError: null,
 		replay: null,
-		browser: { card: null, banner: null, cardMatchesOutcome: null, modelShown: null, modelKey: null, approvalMode: null, stoppedAtLimit: false, cards: [], leaks: [], keyScan: null, guides: null, appChecks: {}, appLoads: {}, appRuns: {}, previewsOpened: [], userEvents: [] },
+		browser: { card: null, banner: null, cardMatchesOutcome: null, modelShown: null, modelKey: null, approvalMode: null, stoppedAtLimit: false, cards: [], leaks: [], keyScan: null, guides: null, appChecks: {}, appLoads: {}, appRuns: {}, previewsOpened: [], userEvents: [], agentSettingsAfter: null },
 	};
 }
 

@@ -70,7 +70,7 @@ The stack (`src/stack.ts`) does what the rr-verify-agent skill's `launch.sh` doe
 
 Each trial (`src/trial.ts`):
 
-1. Empties the store (workspace, agent sessions, saved layouts) and writes the task's files.
+1. Empties the store (workspace, agent sessions, saved layouts) and writes the task's files. With `--step-limit` or `--cost-limit` it also writes Rocket Builder's workspace file (`.workspace/rocketride.pipeBuilder.workspace.json`) with those limits as its settings (`rocketride.pipeBuilder.agentStepLimit`, `rocketride.pipeBuilder.agentCostLimit`; 0 is no limit), which the page loads when it opens. `record.json` keeps what was written in `settings`, and the file after the turn in `browser.agentSettingsAfter`; its `savedByPage` says the page saved the file again, so it had the limits loaded.
 2. Opens Rocket Builder with the sign-in token seeded, starts a new session, keeps the approval mode at "Ask first", and picks the model through the picker.
 3. Sends the prompt. It never types into the composer again.
 4. Answers each "Needs your OK" card by the task's `cards` policy.

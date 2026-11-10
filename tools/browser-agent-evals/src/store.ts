@@ -47,6 +47,37 @@ const AGENTS = '.agents';
 const DIR_MARKER = '.dirmarker';
 const SAFE_TEAM_ID = /^[A-Za-z0-9_-]+$/;
 
+/** The agent's per-turn limits, as the runner sets them; 0 turns a limit off, and an absent one keeps the product's default. */
+export interface AgentLimits {
+	steps?: number;
+	costUsd?: number;
+}
+
+/** The workspace settings behind the limits (apps/shared/src/tools/toolSettings.ts, apps/rocket-ui agentHost.ts LIMIT_KEYS). */
+export const LIMIT_KEYS: Readonly<Record<keyof AgentLimits, string>> = {
+	steps: 'rocketride.pipeBuilder.agentStepLimit',
+	costUsd: 'rocketride.pipeBuilder.agentCostLimit',
+};
+
+/**
+ * Rocket Builder's workspace file. The shell keeps a setting in its owner's
+ * partition file, and Rocket Builder's settings belong to APP_ID's
+ * (packages/shell workspaceStore.ts partitionPath).
+ */
+export const AGENT_SETTINGS_FILE = `.workspace/${APP_ID}.workspace.json`;
+
+/** The prefs a new app partition starts with (packages/shell workspaceStore.ts defaultPrefs); the shell ignores a file without prefs. */
+const DEFAULT_PREFS = { activeView: 'welcome', activeActivity: 'explorer', sidePanelOpen: true, theme: 'rocketride-light' };
+
+/**
+ * Rocket Builder's workspace file for a fresh store with these limits set:
+ * the shell's new-partition defaults, plus the limits as settings.
+ */
+export function agentSettingsFile(limits: AgentLimits): { prefs: typeof DEFAULT_PREFS; appState: Record<string, never>; settings: Record<string, number> } {
+	const settings = Object.fromEntries((Object.keys(LIMIT_KEYS) as Array<keyof AgentLimits>).filter((k) => limits[k] !== undefined).map((k) => [LIMIT_KEYS[k], limits[k] as number]));
+	return { prefs: DEFAULT_PREFS, appState: {}, settings };
+}
+
 /** The workspace scope the page uses, from the account info (workspace.ts resolveWorkspaceScope). */
 export function scopePrefix(info: { devTeam?: string; organization?: { teams?: Array<{ id: string }> } | null } | null | undefined): string {
 	const devTeam = info?.devTeam;
@@ -138,6 +169,34 @@ export class Store {
 		const left = await this.workspaceFiles();
 		const sessions = await this.files(AGENTS, false);
 		if (left.length || sessions.length) throw new Error(`the store reset left ${left.length} workspace files and ${sessions.length} session files`);
+	}
+
+	/**
+	 * Writes Rocket Builder's workspace file with the agent's limits as its
+	 * settings, the way the shell saves a changed setting, so the page loads
+	 * them when it opens. Run it after reset() and before the page opens.
+	 *
+	 * @returns The settings written.
+	 */
+	async setAgentLimits(limits: AgentLimits): Promise<Record<string, number>> {
+		const file = agentSettingsFile(limits);
+		await this.rr.fsWriteJson(AGENT_SETTINGS_FILE, file);
+		return file.settings;
+	}
+
+	/**
+	 * Rocket Builder's workspace file as it stands: its settings, and whether
+	 * the page saved it after the runner wrote it (its prefs changed, as they
+	 * do when the page opens the Agent view), which shows the page loaded the
+	 * settings and kept them. Null when there is no file.
+	 */
+	async agentSettings(): Promise<{ settings: Record<string, unknown>; savedByPage: boolean } | null> {
+		try {
+			const file = await this.rr.fsReadJson<{ prefs?: unknown; settings?: Record<string, unknown> }>(AGENT_SETTINGS_FILE);
+			return { settings: file?.settings ?? {}, savedByPage: JSON.stringify(file?.prefs) !== JSON.stringify(DEFAULT_PREFS) };
+		} catch {
+			return null;
+		}
 	}
 
 	/**
