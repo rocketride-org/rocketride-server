@@ -94,8 +94,10 @@ loopback (`localhost`, `*.localhost`, `127.0.0.0/8`, `[::1]`). In a dev build on
 a top-level shell that is NOT loopback-served the fragment is ignored and
 stripped from the URL; a framed shell, or a production build, never reads or
 strips it. The `rrauthorigin` sign-in relay is armed only on `http://localhost`
-and `http://127.0.0.1`, the shells its OAuth bounce can return to; on any other
-shell (the HTTPS `pnpm start` server, `[::1]`, `*.localhost`) it is not armed.
+and `http://127.0.0.1`, the shells its OAuth bounce can return to (any port; the
+`pnpm start` server is `http://localhost:3000`, so it is armed there); on any
+other shell (an `https://` origin, `[::1]`, `*.localhost`, other `127.x.x.x`
+addresses) it is not armed.
 
 Deliberate compatibility costs of a closed set, so nobody is surprised:
 browser-hosted VS Code and Codespaces (webview origins on `*.vscode-cdn.net`)
