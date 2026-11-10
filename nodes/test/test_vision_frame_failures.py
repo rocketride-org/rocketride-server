@@ -37,6 +37,9 @@ _MODEL_CALLS = {
     'detect': ('detector', 'detect'),
     'depth_estimate': ('estimator', 'estimate'),
     'detect_segment': ('segmenter', 'segment'),
+    'background_removal': ('remover', 'remove'),
+    'pose_estimation': ('pose_estimator', 'estimate'),
+    'face_detection': ('detector', 'detect'),
 }
 
 NODES = list(_MODEL_CALLS)
@@ -102,6 +105,8 @@ def _model_result(node, image):
     """Return what the node's model returns for a frame with nothing found in it."""
     if node == 'depth_estimate':
         return np.zeros((image.height, image.width), dtype=np.float32)
+    if node == 'background_removal':
+        return np.zeros((image.height, image.width), dtype=np.uint8)
     return []
 
 
@@ -119,6 +124,7 @@ def _stubs(package):
             warning=lambda *a, **kw: None,
         ),
         'ai.common.image': types.SimpleNamespace(
+            Image=Image,
             ImageProcessor=types.SimpleNamespace(load_image_from_bytes=_decode, get_bytes=lambda *a, **kw: b'encoded'),
         ),
         'ai.common.image.dense_resize': types.SimpleNamespace(
@@ -129,6 +135,7 @@ def _stubs(package):
         'ai.common.avi.descriptor': types.SimpleNamespace(
             descriptor_from_payload=lambda data: {}, forward_enriched_image=_forward_enriched_image
         ),
+        'ai.common.models.vision.pose': types.SimpleNamespace(COCO_17_EDGES=[]),
     }
 
 
@@ -166,6 +173,7 @@ def handler(monkeypatch):
         instance.IGlobal = types.SimpleNamespace(
             device_lock=threading.Lock(),
             max_edge=1024,
+            threshold=0.5,
             **{attr: types.SimpleNamespace(mode='instance', **{method: model})},
         )
         instance.writeImage(_BEGIN, 'image/png', b'')
@@ -198,6 +206,8 @@ def test_frame_failure_fails_the_object_with_the_cause(handler, node, failure):
     assert instance._image_data is None
     assert instance.IGlobal.device_lock.acquire(blocking=False), 'device_lock is still held after the failure'
     instance.IGlobal.device_lock.release()
+    if node == 'face_detection':
+        assert instance._chunk_id == 1, 'the frame counter did not move past the failed frame'
 
 
 @pytest.mark.parametrize('node', NODES)
