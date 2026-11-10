@@ -693,6 +693,9 @@ def _boot(monkeypatch, load):
         def use(self, module):
             events.append('module')
 
+        def add_catch_all(self, route):
+            self.app.router.routes.append(route)
+
         async def serve(self):
             events.append(('serve', pp.current()))
 

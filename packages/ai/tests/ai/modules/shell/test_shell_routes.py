@@ -676,6 +676,20 @@ def _start_engine(web_server, monkeypatch, *, before_fallback=()):
     return TestClient(web_server.app, follow_redirects=False)
 
 
+def test_a_route_added_after_the_catch_all_still_matches(web_server, shell_root, monkeypatch):
+    # A module loaded at runtime (POST /use) registers after the catch-all;
+    # it must not be shadowed into a 405.
+    client = _start_engine(web_server, monkeypatch)
+
+    async def late(request: Request):
+        return PlainTextResponse('late')
+
+    web_server.add_route('/late', late, ['POST'], public=True)
+    resp = client.post('/late')
+    assert resp.status_code == 200 and resp.text == 'late'
+    assert web_server.app.router.routes[-1].path == FALLBACK_PATH
+
+
 def test_page_routes_answer_404_off_their_exact_paths(web_server, shell_root, monkeypatch):
     # The routes as initModule + register_public_pages register them, behind
     # the server's own auth middleware: each page serves the SPA without
@@ -708,21 +722,14 @@ def test_fallback_registers_last_and_loses_to_every_real_route(web_server, shell
     assert SHELL_BODY in client.get('/pricing').text
 
 
-def test_a_route_added_after_the_fallback_is_shadowed(web_server, shell_root, monkeypatch):
-    # Why the ordering is load-bearing: GET routes registered AFTER the
-    # catch-all never match. eaas registers the catch-all after init_account.
-    client = _start_engine(web_server, monkeypatch)
-    _use(Page('/late', 'rocketride.home', 'Late'))
-    web_server.add_route('/late', _real_route, ['GET'], public=True)
-    assert client.get('/late').text != 'real route'
-
-
-def test_a_late_non_get_route_never_rides_a_claimed_paths_auth_exemption(web_server, shell_root, monkeypatch):
+def test_a_late_private_route_on_a_page_path_stays_behind_auth(web_server, shell_root, monkeypatch):
+    # The late route matches before the catch-all, so the path is no longer
+    # a page as far as auth is concerned: it never rides the page's exemption.
     client = _start_engine(web_server, monkeypatch)
     _use(Page('/late', 'rocketride.home', 'Late'))
     web_server.add_route('/late', _real_route, ['POST'])  # private, registered after the catch-all
     resp = client.post('/late')
-    assert resp.status_code == 405 and resp.text != 'real route'
+    assert resp.status_code == 401 and resp.text != 'real route'
 
 
 def test_fallback_never_makes_a_private_route_public(web_server, shell_root, monkeypatch):
