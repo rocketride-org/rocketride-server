@@ -257,8 +257,7 @@ both sections in `app-manifest.json` at the root of its output, next to the
 page snapshots; the server reads that file in preference to the registered
 manifest. Both sections are optional and append-only: fields are never
 repurposed or removed, and the server ignores keys it does not know, so an
-older server accepts a newer manifest. This release checks the sections at
-publish and builds the map; it does not serve the map's pages yet.
+older server accepts a newer manifest.
 
 ```typescript
 interface PublicPage {
