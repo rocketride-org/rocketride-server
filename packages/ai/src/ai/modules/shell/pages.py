@@ -54,6 +54,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from starlette.routing import Route, WebSocketRoute
 
 from ai.web import Request
+from ai.web.middleware import route_path
 
 from . import public_pages
 from .crawlers import CRAWLER, classify
@@ -125,9 +126,12 @@ def canonical_url(path: str) -> str:
 
 
 def _relative_location(request: Request, path: str) -> str:
-    """``path`` plus the request's query: a Location on this origin, never built from the Host header."""
+    """``path`` under the request's ``root_path``, plus its query: a Location on this origin, never built from the Host header."""
+    location = request.scope.get('root_path', '').rstrip('/') + path
     query = request.url.query
-    return f'{path}?{query}' if query else path
+    if query:
+        return f'{location}?{query}'
+    return location
 
 
 def _router_miss(request: Request) -> Optional[Response]:
@@ -143,7 +147,7 @@ def _router_miss(request: Request) -> Optional[Response]:
     server = _web_server
     if server is None:
         return None
-    path = request.url.path
+    path = route_path(request.scope)
     routes = [r for r in _real_routes(server) if getattr(r, 'endpoint', None) is not public_page]
     for route in routes:
         regex = getattr(route, 'path_regex', None)
@@ -254,7 +258,8 @@ async def public_page(request: Request):
     ``/`` keeps its dedicated route: when the aggregate does not claim it,
     it serves the shell exactly as ``shell_static`` does.
     """
-    path = request.url.path
+    # The path the router matched (root_path stripped), as the auth middleware decided on.
+    path = route_path(request.scope) or '/'
     aggregate = public_pages.current()
     # HEAD is GET without the body (the server drops it; status and headers
     # stay identical): link checkers and unfurl prefetches send it.
