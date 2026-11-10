@@ -1,6 +1,6 @@
 # =============================================================================
 # MIT License
-# Copyright (c) 2024 RocketRide Inc.
+# Copyright (c) 2026 Aparavi Software AG
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -22,19 +22,16 @@
 # =============================================================================
 
 """
-Bland AI tool node — global (shared) state.
+Bland AI tool node - global (shared) state.
 
-Reads the node configuration (API key, default voice, etc.) and creates a
-``BlandDriver`` that exposes make_call, get_call, and analyze_call tools
-for agent invocation.
+Reads the resolved node configuration (API key, default voice, etc.) and
+creates a ``BlandDriver`` that exposes make_call, get_call, and analyze_call
+tools for agent invocation.
 """
 
 from __future__ import annotations
 
-from ai.common.config import Config
-from rocketlib import IGlobalBase, OPEN_MODE, warning
-
-from ai.common.utils import parse_bool
+from rocketlib import IGlobalBase, warning
 
 from .bland_driver import BlandDriver
 
@@ -45,60 +42,27 @@ class IGlobal(IGlobalBase):
     driver: BlandDriver | None = None
 
     def beginGlobal(self) -> None:
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
+        # The resolved config: defaults applied, types and the maxDuration
+        # minimum already validated, the key a required secret
+        cfg = self.config
 
-        cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-
-        api_key = str(cfg.get('apikey') or '').strip()
+        api_key = str(cfg.apikey or '').strip()
         if not api_key:
             warning('Bland AI API key is required. Get one at https://www.bland.ai')
             raise ValueError('Bland AI API key not configured')
 
-        server_name = str(cfg.get('serverName') or 'bland').strip()
-        default_voice = str(cfg.get('voice') or 'June').strip()
-        raw_max_duration = cfg.get('maxDuration', 5)
-        if isinstance(raw_max_duration, bool):
-            raise ValueError('maxDuration must be a positive integer')
-        try:
-            max_duration = int(raw_max_duration)
-        except (TypeError, ValueError):
-            raise ValueError('maxDuration must be a positive integer') from None
-        if max_duration <= 0:
-            raise ValueError('maxDuration must be a positive integer')
-        record = parse_bool(cfg.get('record', True))
-        language = str(cfg.get('language') or 'en').strip()
-
         try:
             self.driver = BlandDriver(
-                server_name=server_name,
+                server_name=cfg.serverName,
                 api_key=api_key,
-                default_voice=default_voice,
-                max_duration=max_duration,
-                record=record,
-                language=language,
+                default_voice=cfg.voice,
+                max_duration=cfg.maxDuration,
+                record=cfg.record,
+                language=cfg.language,
             )
         except Exception as e:
             warning(str(e))
             raise
-
-    def validateConfig(self) -> None:
-        try:
-            cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-            api_key = str(cfg.get('apikey') or '').strip()
-            if not api_key:
-                warning('API key is required')
-            raw_max = cfg.get('maxDuration', 5)
-            if isinstance(raw_max, bool):
-                warning('maxDuration must be a positive integer')
-            else:
-                try:
-                    if int(raw_max) <= 0:
-                        warning('maxDuration must be a positive integer')
-                except (TypeError, ValueError):
-                    warning('maxDuration must be a positive integer')
-        except Exception as e:
-            warning(str(e))
 
     def endGlobal(self) -> None:
         self.driver = None

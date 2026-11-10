@@ -1,6 +1,4 @@
 # =============================================================================
-# RocketRide Engine
-# =============================================================================
 # MIT License
 # Copyright (c) 2026 Aparavi Software AG
 #
@@ -26,28 +24,28 @@
 """
 Daytona tool node - global (shared) state.
 
-Reads the Daytona API key from config and creates a Daytona client.
-The sandbox itself is created lazily on the first tool call (creating one
-costs money and time, and a pipeline may never invoke the tool) and is
+Reads the Daytona API key from the resolved node config and creates a Daytona
+client. The sandbox itself is created lazily on the first tool call (creating
+one costs money and time, and a pipeline may never invoke the tool) and is
 deleted in ``endGlobal``. Tool logic lives on IInstance via @tool_function.
 """
 
 from __future__ import annotations
 
+import os
 import threading
 
-from ai.common.config import Config
-from rocketlib import IGlobalBase, OPEN_MODE, debug, warning
+from rocketlib import IGlobalBase, debug, warning
+
+from depends import depends
+
+# daytona is imported at module scope, so the requirements are installed before
+# that happens. This module is only imported on the run path (config mode
+# imports the validator alone), so the install never runs while a user is merely
+# opening the node's settings panel.
+depends(os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt')
 
 from daytona import CreateSandboxFromSnapshotParams, Daytona, DaytonaConfig, Sandbox
-
-
-def _int_or(value, default: int, *, lo: int, hi: int) -> int:
-    try:
-        n = int(value)
-    except (TypeError, ValueError):
-        return default
-    return max(lo, min(n, hi))
 
 
 class IGlobal(IGlobalBase):
@@ -59,7 +57,8 @@ class IGlobal(IGlobalBase):
     # deepagent's asyncio.gather fan-out), and an unsynchronized check-then-act
     # would create two billed sandboxes and orphan one.
     _sandbox_lock: threading.Lock | None = None
-    # Safety bounds for agent-driven execution; overridable from config.
+    # Safety bounds for agent-driven execution; the schema supplies the
+    # defaults and the ranges, so the values arrive validated.
     snapshot: str = ''
     language: str = 'python'
     auto_stop_minutes: int = 5
@@ -67,26 +66,25 @@ class IGlobal(IGlobalBase):
     max_output_chars: int = 50000
 
     def beginGlobal(self) -> None:
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
-
         self._sandbox_lock = threading.Lock()
 
-        cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-        apikey = str((cfg.get('apikey') or '')).strip()
+        cfg = self.config
 
+        # The key reaches the node through its config (a ${ROCKETRIDE_DAYTONA_APIKEY}
+        # reference resolved per call); the schema marks it required
+        apikey = str(cfg.apikey or '').strip()
         if not apikey:
             raise Exception('tool_daytona: apikey is required')
 
-        api_url = str((cfg.get('api_url') or '')).strip()
-        target = str((cfg.get('target') or '')).strip()
-        self.snapshot = str((cfg.get('snapshot') or '')).strip()
-        self.language = str((cfg.get('language') or 'python')).strip() or 'python'
-        # auto_stop_interval=0 would disable the inactivity stop entirely;
-        # floor at 1 minute so an abandoned sandbox always shuts itself down.
-        self.auto_stop_minutes = _int_or(cfg.get('auto_stop_minutes'), 5, lo=1, hi=120)
-        self.exec_timeout_secs = _int_or(cfg.get('exec_timeout_secs'), 120, lo=1, hi=1200)
-        self.max_output_chars = _int_or(cfg.get('max_output_chars'), 50000, lo=1000, hi=1000000)
+        api_url = str(cfg.api_url or '').strip()
+        target = str(cfg.target or '').strip()
+        self.snapshot = str(cfg.snapshot or '').strip()
+        self.language = cfg.language
+        # auto_stop_interval=0 would disable the inactivity stop entirely; the
+        # schema minimum of 1 minute keeps an abandoned sandbox shutting down.
+        self.auto_stop_minutes = cfg.auto_stop_minutes
+        self.exec_timeout_secs = cfg.exec_timeout_secs
+        self.max_output_chars = cfg.max_output_chars
 
         config_kwargs = {'api_key': apikey}
         if api_url:
@@ -128,15 +126,6 @@ class IGlobal(IGlobalBase):
         with self._sandbox_lock:
             if self.sandbox is sandbox:
                 self.sandbox = None
-
-    def validateConfig(self) -> None:
-        try:
-            cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-            apikey = str((cfg.get('apikey') or '')).strip()
-            if not apikey:
-                warning('apikey is required')
-        except Exception as e:
-            warning(str(e))
 
     def endGlobal(self) -> None:
         if self.sandbox is not None:

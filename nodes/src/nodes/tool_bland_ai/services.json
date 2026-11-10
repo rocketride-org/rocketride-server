@@ -12,19 +12,14 @@
 	"description": ["Make and manage AI-powered phone calls via Bland AI.", "The agent can initiate outbound calls, retrieve call transcripts, and analyze completed calls.", "Requires a Bland AI API key from https://www.bland.ai"],
 	"tile": ["Tool: ${parameters.bland_ai.serverName}"],
 	"lanes": {},
-	"preconfig": {
-		"default": "default",
-		"profiles": {
-			"default": {
-				"title": "Default",
-				"serverName": "bland"
-			}
-		}
-	},
-	"fields": {
+	//
+	// Optional:
+	//		Local property definitions. The server name is a pinned constant (the tool
+	//		namespace); the API key is a required secret the account variable supplies.
+	//
+	"propertyDefinitions": {
 		"bland_ai.serverName": {
-			"hidden": true,
-			"type": "string",
+			"type": "constant",
 			"title": "Server name",
 			"description": "Namespace prefix for the tools: <serverName>.make_call, <serverName>.get_call, <serverName>.analyze_call",
 			"default": "bland"
@@ -33,11 +28,9 @@
 			"type": "string",
 			"title": "API Key",
 			"description": "Bland AI API key (org_xxx). Get one at https://www.bland.ai",
-			"default": "",
-			"secure": true,
-			"ui": {
-				"ui:widget": "ApiKeyWidget"
-			}
+			"secret": true,
+			"env": "ROCKETRIDE_BLAND_AI_APIKEY",
+			"required": true
 		},
 		"bland_ai.voice": {
 			"type": "string",
@@ -83,11 +76,5 @@
 			]
 		}
 	},
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "Bland AI Voice Agent",
-			"properties": ["type", "bland_ai.apikey", "bland_ai.voice", "bland_ai.maxDuration", "bland_ai.language", "bland_ai.record"]
-		}
-	]
+	"properties": ["type", "bland_ai.serverName", "bland_ai.apikey", "bland_ai.voice", "bland_ai.maxDuration", "bland_ai.language", "bland_ai.record"]
 }

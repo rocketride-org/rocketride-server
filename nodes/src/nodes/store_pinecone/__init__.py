@@ -20,29 +20,3 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-
-# ------------------------------------------------------------------------------
-# Main module
-# ------------------------------------------------------------------------------
-# Import the filters
-from .IEndpoint import IEndpoint
-from .IGlobal import IGlobal
-from .IInstance import IInstance
-
-
-# Allow direct access to the underlying store
-def getStore():
-    """
-    Return the store class.
-    """
-    from .pinecone import Store
-
-    return Store
-
-
-__all__ = [
-    'IEndpoint',
-    'IInstance',
-    'IGlobal',
-    'getStore',
-]

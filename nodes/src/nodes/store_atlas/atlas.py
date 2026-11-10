@@ -31,7 +31,7 @@ from depends import depends
 requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
 depends(requirements)
 
-from typing import List, Callable, Dict, Any, Optional
+from typing import List, Callable, Dict, Any, Mapping, Optional
 from uuid import uuid4
 import sys
 import numpy as np
@@ -47,7 +47,6 @@ from pydantic import ValidationError
 
 from ai.common.schema import Doc, DocFilter, DocMetadata, QuestionText
 from ai.common.store import DocumentStoreBase
-from ai.common.config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -86,23 +85,17 @@ class Store(DocumentStoreBase):
     vector_index_name: str = 'vector_index'
     text_index_name: str = 'text_index'
 
-    def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
+    def __init__(self, provider: str, config: Mapping, bag: Dict[str, Any]):
         """Initialize the MongoDB Atlas vector store."""
-        super().__init__(provider, connConfig, bag)
+        super().__init__(provider, config, bag)
 
         # Get configuration
-        config = Config.getNodeConfig(provider, connConfig)
 
         # Store configuration
-        self.database_name = config.get('database')
-        self.collection_name = config.get('collection')
-        self.host = config.get('host', '').strip()
-        self.vector_index_name = config.get('vectorIndexName', 'vector_index')
-        self.text_index_name = config.get('textIndexName', 'text_index')
-        self.similarity = config.get('similarity', 'cosine').lower()
-        self.threshold_search = config.get('score', 0.5)
-        self.payload_limit = config.get('payloadLimit', 32 * 1024 * 1024)
-        self.renderChunkSize = config.get('renderChunkSize', 32 * 1024 * 1024)
+        self.database_name = config['database']
+        self.collection_name = config['collection']
+        self.host = (config['host'] or '').strip()
+        self.threshold_search = config['score']
 
         # Validate similarity metric
         if self.similarity not in ['cosine', 'euclidean', 'dotproduct']:

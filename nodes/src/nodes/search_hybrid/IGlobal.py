@@ -24,9 +24,7 @@
 # ------------------------------------------------------------------------------
 # This class controls the data shared between all threads for the task
 # ------------------------------------------------------------------------------
-import os
-from rocketlib import IGlobalBase, OPEN_MODE, warning
-from ai.common.config import Config
+from rocketlib import IGlobalBase
 
 from .hybrid_search import HybridSearchEngine
 
@@ -38,52 +36,17 @@ class IGlobal(IGlobalBase):
     top_k: int = 10
     rrf_k: int = 60
 
-    def validateConfig(self):
-        """Validate that the rank_bm25 dependency is available."""
-        try:
-            from depends import depends
-
-            requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
-            depends(requirements)
-        except Exception as e:  # noqa: BLE001 - intentional broad catch for dependency probing
-            raise RuntimeError(f'Failed to install hybrid search dependencies: {e}') from e
-
     def beginGlobal(self):
-        """Initialize shared search state for the current node lifecycle."""
-        # Are we in config mode or some other mode?
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            # We are going to get a call to configureService but
-            # we don't actually need to load the engine for that
-            pass
-        else:
-            # Get this node's config
-            config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
+        """Create the hybrid search engine from the resolved config.
 
-            # Read parameters from config
-            alpha = float(config.get('alpha', 0.5))
-            self.top_k = int(config.get('top_k', 10))
-            self.rrf_k = int(config.get('rrf_k', 60))
-
-            # Fail fast on out-of-range integer parameters so a misconfigured
-            # profile surfaces at config load time instead of silently producing
-            # empty result slices (top_k <= 0) or runtime divide errors (rrf_k < 0).
-            if self.top_k < 1:
-                raise ValueError(f'search_hybrid: top_k must be >= 1 (got {self.top_k})')
-            if self.rrf_k < 0:
-                raise ValueError(f'search_hybrid: rrf_k must be >= 0 (got {self.rrf_k})')
-
-            # Validate alpha range — clamp to [0, 1] but warn loudly so a
-            # misconfigured profile is visible in the logs instead of being
-            # silently coerced.
-            if not 0.0 <= alpha <= 1.0:
-                clamped = max(0.0, min(1.0, alpha))
-                warning(f'search_hybrid: alpha={alpha} is outside [0.0, 1.0]; clamping to {clamped}')
-                alpha = clamped
-
-            # Create the hybrid search engine
-            self.engine = HybridSearchEngine(alpha=alpha)
+        The schema bounds alpha to [0, 1], top_k to >= 1 and rrf_k to >= 0,
+        so the values are read as they are.
+        """
+        config = self.config
+        self.top_k = int(config.top_k)
+        self.rrf_k = int(config.rrf_k)
+        self.engine = HybridSearchEngine(alpha=float(config.alpha))
 
     def endGlobal(self):
         """Release shared search state."""
-        # Release the engine
         self.engine = None

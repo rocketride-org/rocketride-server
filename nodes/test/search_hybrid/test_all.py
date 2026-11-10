@@ -843,66 +843,44 @@ class TestIGlobalAlphaClamp:
     the module.
     """
 
-    def test_alpha_clamp_logs_warning(self):
-        import importlib
-        import types
-
-        # Import the IGlobal *module* (not the re-exported class) so we can patch
-        # its module-level ``warning`` symbol. ``search_hybrid.__init__`` binds
-        # ``IGlobal`` to the class, so ``importlib.import_module`` is used to get
-        # the submodule object reliably.
-        iglobal_mod = importlib.import_module('search_hybrid.IGlobal')
-
-        warnings_seen: list = []
-        original = iglobal_mod.warning
-        iglobal_mod.warning = lambda msg, *a, **kw: warnings_seen.append(msg)
-        try:
-            IGlobal = iglobal_mod.IGlobal
-            ig = IGlobal.__new__(IGlobal)
-
-            from rocketlib import OPEN_MODE
-
-            class _Endpoint:
-                class endpoint:
-                    openMode = OPEN_MODE.RUN if hasattr(OPEN_MODE, 'RUN') else 'run'
-
-            ig.IEndpoint = _Endpoint
-            ig.glb = types.SimpleNamespace(logicalType='search_hybrid', connConfig={'alpha': 2.5})
-
-            ig.beginGlobal()
-
-            assert any('alpha' in m for m in warnings_seen), warnings_seen
-            assert ig.engine is not None
-            assert ig.engine.alpha == 1.0
-        finally:
-            iglobal_mod.warning = original
-
     @pytest.mark.parametrize(
         'bad_cfg, fragment',
         [
+            ({'balanced': {'alpha': 2.5}}, 'alpha'),
+            ({'balanced': {'alpha': -0.1}}, 'alpha'),
             ({'top_k': 0}, 'top_k'),
             ({'top_k': -1}, 'top_k'),
             ({'rrf_k': -1}, 'rrf_k'),
         ],
     )
-    def test_invalid_bounds_raise_value_error(self, bad_cfg, fragment):
-        """Out-of-range top_k / rrf_k should fail fast in beginGlobal."""
+    def test_out_of_range_values_are_config_errors(self, bad_cfg, fragment):
+        """The schema bounds alpha to [0, 1], top_k to >= 1 and rrf_k to >= 0: resolving names the key."""
         import types
 
-        from rocketlib import OPEN_MODE
+        from rocketlib.config import ConfigError
 
         ig = IGlobal.__new__(IGlobal)
-
-        class _Endpoint:
-            class endpoint:
-                openMode = OPEN_MODE.RUN if hasattr(OPEN_MODE, 'RUN') else 'run'
-
-        ig.IEndpoint = _Endpoint
         ig.glb = types.SimpleNamespace(logicalType='search_hybrid', connConfig=bad_cfg)
 
-        with pytest.raises(ValueError) as exc:
+        with pytest.raises(ConfigError) as exc:
             ig.beginGlobal()
         assert fragment in str(exc.value)
+
+    def test_the_mode_sets_alpha_and_an_override_wins(self):
+        """Each search mode carries its own alpha; a value stored under the mode replaces it."""
+        import types
+
+        ig = IGlobal.__new__(IGlobal)
+        ig.glb = types.SimpleNamespace(logicalType='search_hybrid', connConfig={'profile': 'semantic'})
+        ig.beginGlobal()
+        assert (ig.engine.alpha, ig.top_k, ig.rrf_k) == (0.8, 10, 60)
+
+        ig = IGlobal.__new__(IGlobal)
+        ig.glb = types.SimpleNamespace(
+            logicalType='search_hybrid', connConfig={'profile': 'semantic', 'semantic': {'alpha': 0.6}, 'top_k': 3}
+        )
+        ig.beginGlobal()
+        assert (ig.engine.alpha, ig.top_k) == (0.6, 3)
 
 
 # ===========================================================================

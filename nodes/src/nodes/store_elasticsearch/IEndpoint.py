@@ -28,8 +28,8 @@ Defines the pipeline endpoint; configuration and lifecycle are handled by
 IGlobal and IInstance.
 """
 
-from ai.common.transform import IEndpointTransform
+from rocketlib import IEndpointBase
 
 
-class IEndpoint(IEndpointTransform):
+class IEndpoint(IEndpointBase):
     """Endpoint for index_search (Elasticsearch and OpenSearch). No extra config."""
