@@ -52,11 +52,14 @@ from .types import TaskError
 # GRAMMAR
 # =============================================================================
 
-# One address segment: developer id, pipe id, source (component id).
-SEGMENT_PATTERN = re.compile(r'^[A-Za-z0-9_-]+$')
+# One address segment: developer id, pipe id, source (component id). Matched
+# with fullmatch: a `$` anchor would accept a trailing newline ("acme\n"),
+# which would then reach registry keys, display ids and run-log paths.
+SEGMENT_PATTERN = re.compile(r'[A-Za-z0-9_-]+')
 
-# Characters an ingested identity (userId / teamId) may never carry: path
-# separators, the personal-audience marker and any whitespace.
+# Characters an ingested identity (userId / teamId) may never carry besides
+# whitespace: the path separator and the personal-audience marker.
+# Whitespace is rejected separately (str.isspace in validate_identity).
 IDENTITY_FORBIDDEN = frozenset('/~')
 
 # The one wildcard an endpoints scope accepts: every source of one pipe.
@@ -91,7 +94,7 @@ def validate_segment(value: Any, field: str) -> str:
     Raises:
         TaskError: ``TASK_INVALID_ARGUMENT`` with ``field`` set.
     """
-    if not isinstance(value, str) or not SEGMENT_PATTERN.match(value):
+    if not isinstance(value, str) or not SEGMENT_PATTERN.fullmatch(value):
         raise TaskError(
             TaskError.INVALID_ARGUMENT,
             f'{field} {value!r} is not a valid address segment: use only letters, digits, "_" and "-"',

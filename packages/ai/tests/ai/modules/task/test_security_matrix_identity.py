@@ -345,6 +345,18 @@ def test_s6_address_parses_on_exact_segments():
         assert err.value.code == TaskError.INVALID_ARGUMENT
 
 
+@pytest.mark.parametrize('bad', ['acme.docBrain.parsePDF\n', 'acme\n.docBrain', 'acme.docBrain\n'])
+def test_s6_a_trailing_newline_is_not_a_segment(bad):
+    """Segments match in full: a `$` anchor would let a trailing newline
+    through to registry keys and run-log paths.
+    """
+    with pytest.raises(TaskError) as err:
+        parse_address(bad)
+    assert err.value.code == TaskError.INVALID_ARGUMENT
+    with pytest.raises(TaskError):
+        build_address('acme', 'docBrain', 'parsePDF\n')
+
+
 @pytest.mark.parametrize('bad', ['a/b', 'a b', 'user~1', ' lead', 'tab\tid', ''])
 def test_s6_identity_boundary_rejects_path_and_scope_characters(bad):
     """userId/teamId ingestion rejects '/', whitespace and '~'."""
