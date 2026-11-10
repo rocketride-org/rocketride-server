@@ -232,6 +232,9 @@ class MiscCommands(DAPConn):
             request (Dict[str, Any]): DAP request containing:
                 - arguments (Dict[str, Any], optional):
                     - service (str, optional): Name of specific service to retrieve
+                    - definitions (bool, optional): Return every service's FULL
+                      entry (configuration schema included) instead of the
+                      summary view; no icon table
 
         Returns:
             Dict[str, Any]: DAP response containing:
@@ -258,6 +261,9 @@ class MiscCommands(DAPConn):
                 # Validate the service exists
                 if not schema:
                     raise ValueError(f"Service '{service}' not found. Please check the service name and try again.")
+            elif args.get('definitions'):
+                # Every full entry at once (credential discovery)
+                schema = await services_catalog.get_definitions()
             else:
                 # The cached summary view: display fields + inline icons
                 schema = await services_catalog.get_summary()

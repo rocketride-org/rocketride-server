@@ -48,6 +48,7 @@
 // Includes all the header files to support the engine::store namespace
 //-----------------------------------------------------------------------------
 #include "./headers/types.hpp"
+#include "./headers/nestedJson.hpp"
 #include "./headers/tags.hpp"
 #include "./headers/ioctrl.hpp"
 #include "./headers/services.hpp"

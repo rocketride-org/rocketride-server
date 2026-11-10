@@ -35,7 +35,7 @@ _PIPELINE_SCHEMA = {
 
 
 async def _list_components(client, tasks, args: Dict[str, Any]) -> dict:
-    services, err = await engine_call(client.get_services(), 'list_components')
+    services, err = await engine_call(client.get_services(definitions=True), 'list_components')
     if err:
         return err
     definitions = (services or {}).get('services') or {}

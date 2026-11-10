@@ -62,7 +62,7 @@ class ServicesMixin(DAPClient):
         """Initialize services functionality."""
         super().__init__(**kwargs)
 
-    async def get_services(self) -> SERVICES_RESPONSE:
+    async def get_services(self, *, definitions: bool = False) -> SERVICES_RESPONSE:
         """
         Retrieve all service summaries from the server.
 
@@ -72,6 +72,12 @@ class ServicesMixin(DAPClient):
         'version'. The configuration schema is served by get_service()
         on demand.
 
+        Args:
+            definitions: When True, every entry is the FULL definition
+                (configuration schema included) and there is no 'icons'
+                table — the bulk form of get_service(), for callers that
+                need every service's properties at once.
+
         Returns:
             Dict containing 'services', 'icons', and 'version'. Returns
             {} if the response has no body.
@@ -79,6 +85,8 @@ class ServicesMixin(DAPClient):
         Raises:
             RuntimeError: If the server returns an error.
         """
+        if definitions:
+            return await self.call('rrext_services', definitions=True)
         return await self.call('rrext_services')
 
     async def get_service(self, service: str) -> SERVICE_DEFINITION:

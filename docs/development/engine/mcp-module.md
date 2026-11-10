@@ -68,7 +68,7 @@ file to keep in sync and no generator to run.
 A node declares a credential on the property itself: `env` names the account
 variable that supplies it, and `secret` marks it as a credential rather than a
 plain setting (see
-[services.json](../nodes/services-schema.md#credentials-and-account-variables)).
+[services.json](../nodes/services-schema.md#property-notations)).
 `credentials.catalog_from_definitions` walks each definition — including enum
 branches, groups and array items — and collects every `env`-carrying property.
 A node with no such property is not an integration and is never listed as

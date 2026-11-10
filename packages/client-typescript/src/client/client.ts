@@ -3339,8 +3339,11 @@ export class RocketRideClient extends DAPClient {
 	 * }
 	 * ```
 	 */
-	async getServices(): Promise<ServicesResponse> {
-		return this.call<ServicesResponse>('rrext_services', {});
+	async getServices(options?: { definitions?: boolean }): Promise<ServicesResponse> {
+		// definitions: every entry is the FULL definition (configuration
+		// schema included) and there is no icons table — the bulk form of
+		// getService(), for callers that need every service's properties
+		return this.call<ServicesResponse>('rrext_services', options?.definitions ? { definitions: true } : {});
 	}
 
 	/**

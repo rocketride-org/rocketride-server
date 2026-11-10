@@ -25,6 +25,76 @@
 
 using namespace engine::store::pipeline;
 
+//-----------------------------------------------------------------------------
+// Publish-time encryption is keyed by the leaf PATH the service definition
+// registers: a root secret (deepl's "apikey") and a branch secret (qdrant's
+// "cloud.apikey", flagged on vector.apikey and referenced only in the cloud
+// branch) are both lifted into the token and restored on decrypt
+//-----------------------------------------------------------------------------
+TEST_CASE("PipelineConfig::secureParameters") {
+    PipelineConfig config(R"({
+        "pipeline": {
+            "source": "qdrant_1",
+            "version": 1,
+            "components": [
+                {
+                    "id": "qdrant_1",
+                    "provider": "qdrant",
+                    "config": {
+                        "parameters": {
+                            "profile": "cloud",
+                            "cloud": { "host": "h.qdrant.io", "apikey": "k-cloud" }
+                        }
+                    }
+                },
+                {
+                    "id": "deepl_1",
+                    "provider": "tool_deepl",
+                    "config": {
+                        "parameters": { "apikey": "k-root" }
+                    }
+                }
+            ]
+        }
+    })"_json);
+
+    // Both nodes must be loaded for the registrations to exist
+    REQUIRE_NO_ERROR(IServices::getServiceDefinition("qdrant"));
+    REQUIRE_NO_ERROR(IServices::getServiceDefinition("tool_deepl"));
+
+    REQUIRE_NO_ERROR(config.encrypt());
+
+    auto &qdrant = config.components()[0]["config"]["parameters"];
+    auto &deepl = config.components()[1]["config"]["parameters"];
+
+    SECTION("a branch secret is lifted from its nested position") {
+        REQUIRE_FALSE(qdrant["cloud"].isMember("apikey"));
+        REQUIRE(qdrant["cloud"]["host"] == "h.qdrant.io");
+        REQUIRE(qdrant["secureParameters"]["secure"].size() == 1u);
+        REQUIRE(qdrant["secureParameters"]["secure"][0] == "cloud.apikey");
+        REQUIRE(qdrant["secureParameters"]["token"].isString());
+    }
+
+    SECTION("a root secret keeps working") {
+        REQUIRE_FALSE(deepl.isMember("apikey"));
+        REQUIRE(deepl["secureParameters"]["secure"][0] == "apikey");
+    }
+
+    SECTION("decrypt restores both at their positions") {
+        REQUIRE_NO_ERROR(config.decrypt());
+        REQUIRE(qdrant["cloud"]["apikey"] == "k-cloud");
+        REQUIRE(deepl["apikey"] == "k-root");
+    }
+
+    SECTION("decrypt does not overwrite an updated value unless asked") {
+        qdrant["cloud"]["apikey"] = "rotated";
+        REQUIRE_NO_ERROR(config.decrypt());
+        REQUIRE(qdrant["cloud"]["apikey"] == "rotated");
+        REQUIRE_NO_ERROR(config.decrypt(true));
+        REQUIRE(qdrant["cloud"]["apikey"] == "k-cloud");
+    }
+}
+
 TEST_CASE("PipelineConfig") {
     PipelineConfig config(R"({
         "pipeline": {

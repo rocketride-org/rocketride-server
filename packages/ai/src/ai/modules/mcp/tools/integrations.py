@@ -18,7 +18,7 @@ from ._common import engine_call
 
 
 async def _list_integrations(client, tasks, args: Dict[str, Any]) -> dict:
-    services, err = await engine_call(client.get_services(), 'list_integrations')
+    services, err = await engine_call(client.get_services(definitions=True), 'list_integrations')
     if err:
         return err
     definitions = (services or {}).get('services') or {}

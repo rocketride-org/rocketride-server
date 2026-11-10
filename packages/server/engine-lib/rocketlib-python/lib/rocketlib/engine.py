@@ -301,6 +301,18 @@ def getServiceDefinition(logicalType: str) -> Dict:
 getServiceDefinition = engLib.getServiceDefinition  # noqa
 
 
+def getServiceSchema(logicalType: str) -> Dict:
+    """
+    Return the RESOLVED service schema for a logical name: ``properties``
+    with a ``path`` on every leaf, the ``params`` descriptors and the
+    ``capabilities`` bitmask. This is what ``resolveConfig`` consumes.
+    """
+    ...
+
+
+getServiceSchema = engLib.getServiceSchema  # noqa
+
+
 def getServiceDefinitions() -> Dict:
     """
     Return a service definition given a logical name.

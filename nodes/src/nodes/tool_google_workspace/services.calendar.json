@@ -61,5 +61,5 @@
 			"default": false
 		}
 	},
-	"properties": ["type", "google.authType", "access"]
+	"properties": ["type", "google.authType", "access", "allowDelete", "allowPublicSharing"]
 }

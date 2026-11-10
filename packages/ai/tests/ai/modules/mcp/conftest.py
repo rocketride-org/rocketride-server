@@ -195,7 +195,7 @@ class FakeEngineClient:
         self.sent.append({'token': token, 'data': data, 'objinfo': objinfo, 'mimetype': mimetype})
         return self._result
 
-    async def get_services(self):
+    async def get_services(self, *, definitions=False):
         self.get_services_calls += 1
         return self._services
 

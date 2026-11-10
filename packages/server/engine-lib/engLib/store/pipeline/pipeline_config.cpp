@@ -490,9 +490,10 @@ Error PipelineConfig::decryptSection(json::Value &section,
                          "secure value of",
                          _ts("'", name, "'"));
 
-        // Update the parameter with decrypted secure value if necessary
-        if (overwrite || !section.isMember(name))
-            section[name] = (*secureValues)[name];
+        // Update the parameter with the decrypted secure value if
+        // necessary - at its nested position, the name being its path
+        if (overwrite || !findNested(section, name))
+            setNested(section, name, (*secureValues)[name]);
     }
 
     return {};
@@ -608,14 +609,17 @@ Error PipelineConfig::encryptSection(IServices::ServiceDefinitionPtr def,
     json::Value secureNames(json::arrayValue), secureValues(json::objectValue);
 
     for (const auto &[name, type] : def->secureParameters) {
-        // Skip if the parameter not in the config or not secure
-        if (!section.isMember(name) || type != PARAM_TYPE::SECURE) continue;
+        // Skip if not secure or not in the config. The name is the leaf's
+        // dotted path - a branch secret lives nested in the section
+        if (type != PARAM_TYPE::SECURE) continue;
+        const auto *value = findNested(section, name);
+        if (!value) continue;
 
-        // Store the secure parameter name and value
+        // Store the secure parameter name and value (flat, by path)
         secureNames.append(name);
-        secureValues[name] = section[name];
-        // Remove the secure parameter from the parameters
-        section.removeMember(name);
+        secureValues[name] = *value;
+        // Remove the secure parameter from its nested position
+        removeNested(section, name);
     }
 
     // If we have secure parameters, encrypt them and add to the config

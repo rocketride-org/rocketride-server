@@ -497,10 +497,10 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
 
     //-------------------------------------------------------------
     /// @details
-    ///		Declares a debug output function which can accept
-    ///		multiple arguments. All arguments MUST be convertable
-    ///		to python strings. This is for nodes to output
-    ///		under the DebugOut level
+    ///		Returns the RAW service definition for a logical type - the
+    ///		services.json as authored. Existing callers (Config.getNodeConfig
+    ///		on the nodes not yet converted) read "preconfig" from it.
+    ///		Returns None for an unknown type.
     ///------------------------------------------------------------
     engLib.PYBIND_FUNCTION(
         getServiceDefinition, [](py::str &logicalType) -> py::object {
@@ -516,8 +516,34 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
             // Get a ptr to it
             const auto defPtr = *result;
 
-            // Return it
+            // Return the raw definition
             return pyjson::jsonToDict(defPtr->serviceDefinition);
+        });
+
+    //-------------------------------------------------------------
+    /// @details
+    ///		Returns the RESOLVED service schema for a logical type -
+    ///		the expanded "properties" (a "path" on every leaf), the
+    ///		"params" descriptors and the "capabilities" bitmask - which
+    ///		is what rocketlib.resolveConfig consumes. Returns None for
+    ///		an unknown type.
+    ///------------------------------------------------------------
+    engLib.PYBIND_FUNCTION(
+        getServiceSchema, [](py::str &logicalType) -> py::object {
+            // Get the type as a std::string
+            const auto type = logicalType.cast<std::string>();
+
+            // Get the service type
+            const auto result = IServices::getServiceDefinition(type);
+
+            // Return none or an object
+            if (!result) return py::none();
+
+            // Get a ptr to it
+            const auto defPtr = *result;
+
+            // Return the resolved schema
+            return pyjson::jsonToDict(defPtr->serviceSchema);
         });
 
     //-------------------------------------------------------------
@@ -1417,6 +1443,7 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
         .PYBIND_PROP_READONLY_STATIC(GPU, url::UrlConfig::PROTOCOL_CAPS::GPU)
         .PYBIND_PROP_READONLY_STATIC(DEPRECATED, url::UrlConfig::PROTOCOL_CAPS::DEPRECATED)
         .PYBIND_PROP_READONLY_STATIC(EXPERIMENTAL, url::UrlConfig::PROTOCOL_CAPS::EXPERIMENTAL)
+        .PYBIND_PROP_READONLY_STATIC(MULTITENANT, url::UrlConfig::PROTOCOL_CAPS::MULTITENANT)
 
         .PYBIND_FUNCTION_STATIC(
             getProtocolCaps, [](const std::string &protocol) -> uint32_t {

@@ -40,7 +40,7 @@
 	// Optional:
 	//		Description of this node shown in the pipeline builder.
 	//
-	"description": ["Exposes DeepL translation and AI rephrasing as agent tools.", "Translates text into a target language or rewrites it in a chosen style or tone via the DeepL API, returning the result plus the detected source language."],
+	"description": "Exposes DeepL translation and AI rephrasing as agent tools. Translates text into a target language or rewrites it in a chosen style or tone via the DeepL API, returning the result plus the detected source language.",
 	"lanes": {},
 	//
 	//	Test configuration for automated node testing.

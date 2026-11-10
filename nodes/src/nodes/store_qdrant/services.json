@@ -161,7 +161,7 @@
 					"properties": [
 						"qdrant.cloud.host",
 						"qdrant.port",
-						"vector.apikey",
+						{ "base": "vector.apikey", "env": "ROCKETRIDE_QDRANT_APIKEY", "required": true },
 						"vector.score",
 						"vector.collection",
 						"qdrant.serverName"
