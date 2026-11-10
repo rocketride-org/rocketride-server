@@ -1,0 +1,250 @@
+{
+	"format": 3,
+	"scenario": "build-04-extract-invoice",
+	"set": "claude-72e670db",
+	"trial": 1,
+	"source": {
+		"head": "72e670db734a273d547cb5a3f44d7356452af704",
+		"model": "anthropic:claude-sonnet-5",
+		"recordedAt": "2026-10-28T04:32:11.782Z"
+	},
+	"turns": [
+		{
+			"request": "Create a pipeline invoice-fields. I send an invoice file (PDF or plain text) to a webhook and get back four fields: invoice_number, vendor, total as a number and due_date as a date. Use OpenAI to do the extraction.",
+			"events": [
+				{
+					"wave": 0,
+					"reply": "```json\n{\"thought\": \"Get oriented on the workspace and read the pipeline + component reference guides before building.\", \"scratch\": \"Starting task: create invoice-fields pipeline using webhook in, OpenAI extraction, webhook out (or similar).\", \"tool_calls\": [{\"tool\": \"list_workspace\", \"args\": {}}, {\"tool\": \"read_file\", \"args\": {\"path\": \".rocketride/docs/ROCKETRIDE_CONCEPTS.md\"}}, {\"tool\": \"read_file\", \"args\": {\"path\": \".rocketride/docs/ROCKETRIDE_PIPELINES.md\"}}, {\"tool\": \"read_file\", \"args\": {\"path\": \".rocketride/docs/ROCKETRIDE_COMPONENT_REFERENCE.md\"}}]}\n```"
+				},
+				{
+					"wave": 1,
+					"reply": "```json\n{\"thought\": \"Inspect the services catalog and relevant schemas (webhook, document/PDF handling, LLM extraction) before building the pipeline.\", \"scratch\": \"Starting task: create invoice-fields pipeline using webhook in, OpenAI extraction, webhook out. Need to check services-catalog.json for webhook, document parsing, llm_openai, structured extraction components, and response component for webhook replies.\", \"tool_calls\": [\n  {\"tool\": \"read_file\", \"args\": {\"path\": \".rocketride/services-catalog.json\"}},\n  {\"tool\": \"list_directory\", \"args\": {\"path\": \".rocketride/schema\"}}\n]}\n```"
+				},
+				{
+					"wave": 2,
+					"reply": "```json\n{\"thought\": \"Local catalog files don't exist, so fetch the live services catalog via rocketride_client to find webhook, document parsing, and llm_openai/structured extraction providers.\", \"scratch\": \"Starting task: create invoice-fields pipeline using webhook in, OpenAI extraction, webhook out. Local .rocketride/services-catalog.json and schema dir are empty, so must use rocketride_client getServices/getService instead.\", \"tool_calls\": [{\"tool\": \"rocketride_client\", \"args\": {\"method\": \"getServices\"}}]}\n```"
+				},
+				{
+					"wave": 3,
+					"reply": "```json\n{\"thought\": \"Peek the rest of the services catalog to find webhook, llm_openai, response, and document/PDF parsing providers needed for this pipeline.\", \"scratch\": \"Need: webhook source, PDF->text parser, llm_openai (extraction w/ structured output), response_* target. Catalog showed 68/187; must see rest.\", \"tool_calls\": [{\"tool\": \"memory.peek\", \"args\": {\"key\": \"wave-2.r0\", \"path\": \"services\"}}]}\n```"
+				},
+				{
+					"wave": 4,
+					"reply": "```json\n{\"thought\": \"Fetch detailed schemas for the components I plan to use: webhook, parse, extract_data, llm_openai, response_json.\", \"scratch\": \"Catalog seen: webhook[source], parse[data] parses documents, extract_data[text] extracts structured data to table, llm_openai[llm], response_json[infrastructure] returns JSON. Plan pipeline: webhook -> parse -> extract_data (invoke llm_openai) -> response_json. Need lanes/config details.\", \"tool_calls\": [\n  {\"tool\": \"rocketride_client\", \"method\": \"getService\", \"args\": {\"method\": \"getService\", \"params\": [\"webhook\"]}},\n  {\"tool\": \"rocketride_client\", \"args\": {\"method\": \"getService\", \"params\": [\"parse\"]}},\n  {\"tool\": \"rocketride_client\", \"args\": {\"method\": \"getService\", \"params\": [\"extract_data\"]}},\n  {\"tool\": \"rocketride_client\", \"args\": {\"method\": \"getService\", \"params\": [\"llm_openai\"]}},\n  {\"tool\": \"rocketride_client\", \"args\": {\"method\": \"getService\", \"params\": [\"response_json\"]}}\n]}\n```"
+				},
+				{
+					"wave": 5,
+					"reply": "```json\n{\"thought\": \"Need exact lane names for parse (and confirm extract_data config fields/invoke) before wiring the pipeline, so peek the full lanes objects.\", \"scratch\": \"Catalog confirmed: webhook[source]->_source outputs incl tags/text/json/documents?; parse[data] lanes obj key seen as 'tags'->[text,table,image,...]; extract_data[text] lanes: table/text/documents -> [answers,documents], invoke llm min1; llm_openai[llm] lanes questions->answers, preconfig default 'openai-5-2'; response_json[infrastructure] lanes json->[], field laneName default 'json'. Need full parse lanes & extract_data field structure (extract.fields entries) to build config properly.\", \"tool_calls\": [\n  {\"tool\": \"memory.peek\", \"args\": {\"key\": \"wave-4.r1\", \"path\": \"lanes\"}},\n  {\"tool\": \"memory.peek\", \"args\": {\"key\": \"wave-4.r0\", \"path\": \"lanes\"}}\n]}\n```"
+				},
+				{
+					"wave": 6,
+					"reply": "```json\n{\"thought\": \"Need exact control-wiring syntax for invoke requirements and the extract_data.type enum (for 'date'), then response_answers lanes.\", \"scratch\": \"Catalog findings: webhook._source->[tags,text,json,audio,video,image,questions]; parse.tags->[text,table,image,video,audio]; extract_data{table,text,documents}->[answers,documents], invoke llm min1; llm_openai.questions->answers, default profile openai-5-2; response_json.json->[] laneName default 'json'. Plan: webhook(tags)->parse(tags)->text->extract_data(text, invoke llm_openai via control)->answers->response_answers. Need: extract.type full enum (for date/decimal names), control array syntax example, response_answers lanes schema.\", \"tool_calls\": [\n  {\"tool\": \"memory.peek\", \"args\": {\"key\": \"wave-4.r2\", \"path\": \"fields.extract.type.enum\"}},\n  {\"tool\": \"search_files\", \"args\": {\"pattern\": \"\\\"control\\\"\", \"path\": \".rocketride/docs/ROCKETRIDE_PIPELINES.md\"}},\n  {\"tool\": \"rocketride_client\", \"args\": {\"method\": \"getService\", \"params\": [\"response_answers\"]}}\n]}\n```"
+				},
+				{
+					"wave": 7,
+					"reply": "```json\n{\"thought\": \"Read the pipelines guide around the extract_data example (line ~1000-1020) to confirm exact field config shape before writing the .pipe file.\", \"scratch\": \"Catalog findings: webhook._source->[tags,text,json,audio,video,image,questions]; parse.tags->[text,table,image,video,audio]; extract_data{table,text,documents}->[answers,documents], invoke llm min1, control wiring: \\\"control\\\":[{\\\"classType\\\":\\\"llm\\\",\\\"from\\\":\\\"extract_data_1\\\"}] on the llm node. extract.type enum includes text/decimal/int/... (need date too, assume 'date' enum value exists). response_answers.answers->[] laneName default 'answers'. Plan pipeline: webhook(tags)->parse(tags)->text lane->extract_data(text,fields=[invoice_number:text,vendor:text,total:decimal,due_date:date])->answers->response_answers. llm_openai controls extract_data via control array on llm node pointing from extract_data_1.\", \"tool_calls\": [{\"tool\": \"read_file\", \"path\": \".rocketride/docs/ROCKETRIDE_PIPELINES.md\", \"offset\": 960, \"limit\": 90}]}\n```"
+				},
+				{
+					"wave": 8,
+					"reply": "```json\n{\"thought\":\"Look at a concrete llm_openai wiring example in the pipelines guide to get the exact config shape before writing the pipeline file.\",\"scratch\":\"Catalog findings confirmed: webhook._source->[tags,text,json,...]; parse.tags->[text,table,image,video,audio]; extract_data{text,table,documents}->[answers,documents] needs llm control; response_answers.answers->[]. Pattern 27 example:\\nwebhook->parse->extract_data[controlled:llm]->response_answers (skip schema_validate).\\nextract_data config: {profile:default, default:{fields:[{column,type,defval}]}, parameters:{}}\\nfields needed: invoice_number(text), vendor(text), total(decimal), due_date(date).\\ncontrol wiring: on llm_openai_1 config add control:[{classType:llm, from:extract_data_1}], no input lane.\\nNeed exact llm_openai config shape (profile field name/value) - search doc for example usage.\",\"tool_calls\":[{\"tool\":\"search_files\",\"args\":{\"pattern\":\"llm_openai_1\",\"path\":\".rocketride/docs/ROCKETRIDE_PIPELINES.md\"}}]}\n```"
+				},
+				{
+					"wave": 9,
+					"reply": "```json\n{\"thought\": \"Fetch the exact llm_openai config example near line 390 and 1130 to get the correct config shape before writing the pipeline.\", \"scratch\": \"Catalog findings confirmed: webhook._source->[tags,text,json,...]; parse.tags->[text,table,image,video,audio]; extract_data{text,table,documents}->[answers,documents] needs llm control; response_answers.answers->[]. Pattern 27: webhook->parse->extract_data[controlled:llm]->response_answers (skip schema_validate per our simpler goal). extract_data config: {profile:default, default:{fields:[{column,type,defval}]}, parameters:{}}. fields needed: invoice_number(text), vendor(text), total(decimal), due_date(date - check enum). control wiring: on llm_openai_1 config add control:[{classType:llm, from:extract_data_1}], no input lane. Still need exact llm_openai minimal config example from doc lines ~385-400 and ~1125-1140.\", \"tool_calls\": [{\"tool\": \"read_file\", \"args\": {\"path\": \".rocketride/docs/ROCKETRIDE_PIPELINES.md\", \"offset\": 375, \"limit\": 30}}, {\"tool\": \"read_file\", \"args\": {\"path\": \".rocketride/docs/ROCKETRIDE_PIPELINES.md\", \"offset\": 1120, \"limit\": 20}}]}\n```"
+				},
+				{
+					"wave": 10,
+					"reply": "```json\n{\"thought\": \"Need the full extract.type enum list to pick the correct date type value before writing the pipeline.\", \"scratch\": \"Plan: webhook_1(_source->tags) -> parse_1(tags->text) -> extract_data_1(text->[answers,documents], control llm_openai_1) -> response_answers_1(answers). Need extract.type enum for date field.\", \"tool_calls\": [{\"tool\": \"memory.peek\", \"args\": {\"key\": \"wave-4.r2\", \"path\": \"fields.extract.type.enum[0:17]\"}}]}\n```"
+				},
+				{
+					"wave": 11,
+					"reply": "```json\n{\"thought\": \"Peek the extract_data schema as raw text to find the extract.type enum values (dotted key breaks path parsing), to confirm 'date' is available.\", \"scratch\": \"Plan pipeline: webhook_1(_source->tags) -> parse_1(tags->text) -> extract_data_1(text->[answers,documents], control llm_openai_1, fields: invoice_number/text, vendor/text, total/decimal, due_date/date) -> response_answers_1(answers). Need to confirm 'date' type exists in extract.type enum.\", \"tool_calls\": [{\"tool\": \"memory.peek\", \"args\": {\"key\": \"wave-4.r2\", \"offset\": 0, \"length\": 4000}}]}\n```"
+				},
+				{
+					"wave": 12,
+					"reply": "```json\n{\"thought\": \"Write the invoice-fields pipeline file using webhook->parse->extract_data (LLM-controlled)->response_answers, then validate it.\", \"scratch\": \"Plan confirmed: webhook_1(_source->tags) -> parse_1(tags->text) -> extract_data_1(text->answers, control llm_openai_1, fields: invoice_number/text, vendor/text, total/decimal, due_date/date) -> response_answers_1(answers). extract.type enum confirmed includes 'date'. Ready to write file.\", \"tool_calls\": [{\"tool\": \"write_file\", \"path\": \"pipelines/invoice-fields.pipe\", \"content\": \"{\\n\\t\\\"components\\\": [\\n\\t\\t{ \\\"id\\\": \\\"webhook_1\\\", \\\"provider\\\": \\\"webhook\\\",\\n\\t\\t  \\\"config\\\": { \\\"hideForm\\\": true, \\\"mode\\\": \\\"Source\\\", \\\"parameters\\\": {}, \\\"type\\\": \\\"webhook\\\" } },\\n\\t\\t{ \\\"id\\\": \\\"parse_1\\\", \\\"provider\\\": \\\"parse\\\", \\\"config\\\": {},\\n\\t\\t  \\\"input\\\": [{ \\\"lane\\\": \\\"tags\\\", \\\"from\\\": \\\"webhook_1\\\" }] },\\n\\t\\t{ \\\"id\\\": \\\"extract_data_1\\\", \\\"provider\\\": \\\"extract_data\\\",\\n\\t\\t  \\\"config\\\": { \\\"profile\\\": \\\"default\\\", \\\"default\\\": { \\\"fields\\\": [\\n\\t\\t\\t  { \\\"column\\\": \\\"invoice_number\\\", \\\"type\\\": \\\"text\\\", \\\"defval\\\": \\\"\\\" },\\n\\t\\t\\t  { \\\"column\\\": \\\"vendor\\\", \\\"type\\\": \\\"text\\\", \\\"defval\\\": \\\"\\\" },\\n\\t\\t\\t  { \\\"column\\\": \\\"total\\\", \\\"type\\\": \\\"decimal\\\", \\\"defval\\\": \\\"\\\" },\\n\\t\\t\\t  { \\\"column\\\": \\\"due_date\\\", \\\"type\\\": \\\"date\\\", \\\"defval\\\": \\\"\\\" }\\n\\t\\t  ] }, \\\"parameters\\\": {} },\\n\\t\\t  \\\"input\\\": [{ \\\"lane\\\": \\\"text\\\", \\\"from\\\": \\\"parse_1\\\" }] },\\n\\t\\t{ \\\"id\\\": \\\"llm_openai_1\\\", \\\"provider\\\": \\\"llm_openai\\\",\\n\\t\\t  \\\"config\\\": { \\\"profile\\\": \\\"openai-5\\\", \\\"openai-5\\\": { \\\"apikey\\\": \\\"${ROCKETRIDE_OPENAI_KEY}\\\" }, \\\"parameters\\\": {} },\\n\\t\\t  \\\"control\\\": [{ \\\"classType\\\": \\\"llm\\\", \\\"from\\\": \\\"extract_data_1\\\" }] },\\n\\t\\t{ \\\"id\\\": \\\"response_answers_1\\\", \\\"provider\\\": \\\"response_answers\\\", \\\"config\\\": { \\\"laneName\\\": \\\"answers\\\" },\\n\\t\\t  \\\"input\\\": [{ \\\"lane\\\": \\\"answers\\\", \\\"from\\\": \\\"extract_data_1\\\" }] }\\n\\t],\\n\\t\\\"project_id\\\": \\\"c3f1a9d2-6b7e-4a58-9c0d-2f5e8b1a4d6c\\\",\\n\\t\\\"viewport\\\": { \\\"x\\\": 0, \\\"y\\\": 0, \\\"zoom\\\": 1 },\\n\\t\\\"version\\\": 1\\n}\\n\"}]}\n```"
+				},
+				{
+					"wave": 13,
+					"reply": "```json\n{\"thought\": \"Read back the written pipeline file to confirm the llm_openai control wiring and field config are correct since validate already passed.\", \"scratch\": \"File pipelines/invoice-fields.pipe written and validate: OK per wave-12.r0. Need to double check full content for correctness before declaring done.\", \"remove\": [], \"tool_calls\": [{\"tool\": \"read_file\", \"path\": \"pipelines/invoice-fields.pipe\"}]}\n```"
+				},
+				{
+					"wave": 14,
+					"reply": "```json\n{\"thought\": \"Verify the extract_data field definitions (column names/types) are correct since the summary truncated values to '...'\", \"scratch\": \"File written, validate OK, structure looks right (webhook->parse->extract_data[llm:openai]->response_answers). Need to confirm field list content: invoice_number(text), vendor(text), total(decimal), due_date(date).\", \"tool_calls\": [{\"tool\": \"memory.peek\", \"args\": {\"key\": \"wave-13.r0\", \"path\": \"components[2].config.default.fields\"}}]}\n```"
+				},
+				{
+					"wave": 15,
+					"reply": "```json\n{\"thought\": \"The pipeline file is written, validated OK by the save, and confirmed to have the correct structure and field list (invoice_number/text, vendor/text, total/decimal, due_date/date) feeding into llm_openai-controlled extract_data and response_answers — goal met.\", \"scratch\": \"pipelines/invoice-fields.pipe: webhook_1 -> parse_1 -> extract_data_1(llm_openai_1 control) -> response_answers_1. validate: OK. fields confirmed via peek.\", \"remove\": [\"wave-0.r0\",\"wave-0.r1\",\"wave-0.r2\",\"wave-0.r3\",\"wave-1.r0\",\"wave-1.r1\",\"wave-2.r0\",\"wave-3.r0\",\"wave-4.r0\",\"wave-4.r1\",\"wave-4.r2\",\"wave-4.r3\",\"wave-4.r4\",\"wave-5.r0\",\"wave-5.r1\",\"wave-6.r0\",\"wave-6.r1\",\"wave-6.r2\",\"wave-7.r0\",\"wave-8.r0\",\"wave-9.r0\",\"wave-9.r1\",\"wave-10.r0\",\"wave-11.r0\",\"wave-13.r0\",\"wave-14.r0\"], \"done\": true, \"answer\": \"Created `pipelines/invoice-fields.pipe`: a webhook receives the invoice (PDF or plain text), `parse` extracts its text, `extract_data` (using an OpenAI LLM, GPT-5, via a control connection) pulls out the four fields — `invoice_number` (text), `vendor` (text), `total` (decimal/number), and `due_date` (date) — and `response_answers` returns the extracted JSON to the caller. The pipeline file was saved and validated successfully (validate: OK). You'll need to set your OpenAI API key in the `ROCKETRIDE_OPENAI_KEY` variable if it isn't already configured, since the pipeline references it as a placeholder. Nothing else is outstanding.\"}\n```"
+				}
+			],
+			"ended": {
+				"outcome": "done",
+				"reason": "done"
+			},
+			"calls": [
+				{
+					"wave": 0,
+					"tool": "list_workspace",
+					"ok": true,
+					"args": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+					"result": "e3ed6351ceb4c2a2a68f65b4ca45df32ea27b2c8995517c5f9ff2c23c3f23865"
+				},
+				{
+					"wave": 0,
+					"tool": "read_file",
+					"ok": true,
+					"args": "6d9609e0dbd8369ea38c0ec07f407191f0a7531cf9f5d349b37f5c1c052e4632",
+					"result": ""
+				},
+				{
+					"wave": 0,
+					"tool": "read_file",
+					"ok": true,
+					"args": "320b62804840e10b9547220b78d88fca46122c34cde682d96b9a828383097e33",
+					"result": ""
+				},
+				{
+					"wave": 0,
+					"tool": "read_file",
+					"ok": true,
+					"args": "d7eb3c2084841f49aff0ab42f05222f28a742df003dc0004f342b329fe6d24a3",
+					"result": ""
+				},
+				{
+					"wave": 1,
+					"tool": "read_file",
+					"ok": false,
+					"args": "2f751eef7f5fe78a43ef7140ad12e851e2179042487965301a5d1e8646469277",
+					"result": ""
+				},
+				{
+					"wave": 1,
+					"tool": "list_directory",
+					"ok": true,
+					"args": "2d047caf87e089ed5356152745d52f7d099a5bea6d90ca6408535eab75ac7282",
+					"result": ""
+				},
+				{
+					"wave": 2,
+					"tool": "rocketride_client",
+					"ok": true,
+					"args": "65db211fc84fa4e2bab0c00b5674d83199e33b40f7078b5e6074fcd1dab7d816",
+					"result": ""
+				},
+				{
+					"wave": 4,
+					"tool": "rocketride_client",
+					"ok": true,
+					"args": "5840a01cb65fdb8e72e07e006180f811f36a6e8b7a0a87b4afeffbcaa76d590c",
+					"result": ""
+				},
+				{
+					"wave": 4,
+					"tool": "rocketride_client",
+					"ok": true,
+					"args": "89e421702178b9718154242950b5747ad4df27447ffdc31eafc1afc131234b89",
+					"result": ""
+				},
+				{
+					"wave": 4,
+					"tool": "rocketride_client",
+					"ok": true,
+					"args": "9d660143554e862bd0e9334ad6c55b3fa451e81593de2c45118764d08fab020e",
+					"result": ""
+				},
+				{
+					"wave": 4,
+					"tool": "rocketride_client",
+					"ok": true,
+					"args": "8907f1380e6885926396990bed03b50434013762d37fb86fb94e5d626aefaedb",
+					"result": ""
+				},
+				{
+					"wave": 4,
+					"tool": "rocketride_client",
+					"ok": true,
+					"args": "3d53a67cd3ec9fbc61ffb2a012102e5fddaad4994774463f3f199ebad4e77af7",
+					"result": ""
+				},
+				{
+					"wave": 6,
+					"tool": "search_files",
+					"ok": true,
+					"args": "edbee70647c17f30ab57531cc212254e7718ef233845ecd0c418ff985a3b5c66",
+					"result": ""
+				},
+				{
+					"wave": 6,
+					"tool": "rocketride_client",
+					"ok": true,
+					"args": "14021bf389846fafcd9fb0dcc69aab55c80b0c8d17d5f5be7e78121e51cadbf6",
+					"result": ""
+				},
+				{
+					"wave": 7,
+					"tool": "read_file",
+					"ok": true,
+					"args": "bbf97fa7eb2c484ee143cc8a3ba7604a1a3f1c1a2b0444d0726a1ef1d74eb14f",
+					"result": ""
+				},
+				{
+					"wave": 8,
+					"tool": "search_files",
+					"ok": true,
+					"args": "ae28bfef41e8fd0605452b91670ab31393e3de4183626b5cbbf9777706589a05",
+					"result": ""
+				},
+				{
+					"wave": 9,
+					"tool": "read_file",
+					"ok": true,
+					"args": "d61efb7425bfc8a221c23ad21ce066e1b3a9b62f8072fd87f587d5f1c214a3f4",
+					"result": ""
+				},
+				{
+					"wave": 9,
+					"tool": "read_file",
+					"ok": true,
+					"args": "f7ebbd398d24065b0008af12e2dedabc97332c09c3d95cb98a0a18ab8aa042af",
+					"result": ""
+				},
+				{
+					"wave": 12,
+					"tool": "write_file",
+					"ok": true,
+					"args": "3ef10baf66adeb49b806953d2c6eed2df0878956a1d67d899b0c3228c1877c1f",
+					"result": "4e150bce08521eee5a31790cfaf483431606b86a2713ee964fd72d6fb6102832"
+				},
+				{
+					"wave": 13,
+					"tool": "read_file",
+					"ok": true,
+					"args": "74f5bf0a0f3d132143b39fadba2ae3079361249aa7aedf0073baad64288e5b10",
+					"result": "2a372b9b1a70ab8bdf1006a5d9f76de44379e800ec009c5adcc0ec5fa98f5cb0"
+				}
+			]
+		}
+	],
+	"limits": {
+		"steps": 60,
+		"costUsd": 2
+	},
+	"expected": {
+		"status": "pass",
+		"checks": {
+			"outcome": "pass",
+			"scope": "pass",
+			"no-leak": "pass",
+			"static-valid": "pass",
+			"engine-valid": "not_in_layer",
+			"placeholders": "pass",
+			"providers": "pass",
+			"llm-control": "pass",
+			"fields": "pass",
+			"runs": "not_in_layer"
+		}
+	},
+	"finalFiles": {
+		"pipelines/invoice-fields.pipe": "24de42d223e21304cb2676857e0b84a4bd2e422ee2861e9f2ebfd4226bc9e585"
+	}
+}
