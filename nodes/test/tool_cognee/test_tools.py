@@ -1141,6 +1141,20 @@ def test_global_rejects_an_out_of_range_top_k():
         _configured_global({'top_k': 500}).beginGlobal()
 
 
+@pytest.mark.parametrize(
+    ('conn_config', 'field'),
+    [
+        ({'base_url': '   '}, 'base_url'),
+        ({'base_url': '/'}, 'base_url'),
+        ({'dataset': '   '}, 'dataset'),
+    ],
+)
+def test_global_rejects_a_value_that_strips_to_empty(conn_config, field):
+    """The schema minLength counts whitespace: a blank value passes it, so the node refuses it after stripping."""
+    with pytest.raises(Exception, match=f'tool_cognee: {field} is required'):
+        _configured_global(conn_config).beginGlobal()
+
+
 def test_global_end_clears_api_key():
     """Pipe teardown removes the credential from process memory."""
     glb = _configured_global()

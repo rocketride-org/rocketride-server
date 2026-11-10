@@ -50,14 +50,21 @@ class IGlobal(IGlobalBase):
         # The resolved config: defaults applied, bounds and enum validated
         cfg = self.config
 
+        # The schema's minLength counts whitespace, so a blank or bare '/'
+        # value passes it and would only fail on the first tool call
         self.base_url = cfg.base_url.strip().rstrip('/')
+        if not self.base_url:
+            raise Exception('tool_cognee: base_url is required')
 
         # Optional: cognee self-hosted with access control off needs no key.
         # The key reaches the node through its config (a ${ROCKETRIDE_COGNEE_APIKEY}
         # reference resolved per call); there is no process-env fallback
         self.api_key = str(cfg.api_key or '').strip()
 
+        # A blank dataset would silently widen the scope to the server default
         self.dataset = cfg.dataset.strip()
+        if not self.dataset:
+            raise Exception('tool_cognee: dataset is required')
         self.allow_dataset_override = cfg.allow_dataset_override
         self.search_type = cfg.search_type
         self.top_k = cfg.top_k
