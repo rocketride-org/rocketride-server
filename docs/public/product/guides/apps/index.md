@@ -251,7 +251,8 @@ both sections in `app-manifest.json` at the root of its output, next to the
 page snapshots; the server reads that file in preference to the registered
 manifest. Both sections are optional and append-only: fields are never
 repurposed or removed, and the server ignores keys it does not know, so an
-older server accepts a newer manifest.
+older server accepts a newer manifest. This release checks the sections at
+publish and builds the map; it does not serve the map's pages yet.
 
 ```typescript
 interface PublicPage {
@@ -292,7 +293,8 @@ publish fails with a message naming the field):
 
 Until a published platform app contributes a valid page, the page map holds
 the server's built-in page list instead. A published app whose storage cannot
-be read keeps the pages of its last readable build.
+be read keeps the pages of its last readable build while the server runs;
+after a restart it has none until its storage can be read again.
 
 ### Settings
 
