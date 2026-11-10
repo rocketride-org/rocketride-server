@@ -1,10 +1,14 @@
-"""Tests for the thread-start stuck marker of rr_test_stack_dumps."""
+"""Tests for the thread-start stuck marker and the WMI query line of rr_test_stack_dumps."""
 
 import importlib.util
 import os
+import re
 import sys
 import threading
 import time
+import types
+
+import pytest
 
 _PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'rr_test_stack_dumps.py')
 _spec = importlib.util.spec_from_file_location('rr_test_stack_dumps_under_test', _PATH)
@@ -211,3 +215,113 @@ def test_new_start_call_between_samples_gives_no_marker(tmp_path):
         _release(first, release, helper, dumper)
         second.finished.wait(5)
         second.join(5)
+
+
+_WMI_OK = re.compile(r'=== wmi query seconds=\d+\.\d{3} ok chars=(\d+) query=(.*)\n\n')
+_WMI_ERR = re.compile(r'=== wmi query seconds=\d+\.\d{3} error=(\w+) winerror=(\S+) query=(.*)\n\n')
+
+
+def _fake_wmi(monkeypatch, exec_query):
+    """
+    Put a fake ``_wmi`` module into ``sys.modules``.
+
+    Args:
+        monkeypatch (pytest.MonkeyPatch): The fixture that restores ``sys.modules``.
+        exec_query (Callable): The fake ``exec_query``.
+
+    Returns:
+        types.ModuleType: The fake module.
+    """
+    module = types.ModuleType('_wmi')
+    module.exec_query = exec_query
+    monkeypatch.setitem(sys.modules, '_wmi', module)
+    return module
+
+
+def test_wmi_wrapper_logs_ok_line(tmp_path, monkeypatch):
+    def fake(query):
+        """Fake doc."""
+        return 'x' * 7
+
+    module = _fake_wmi(monkeypatch, fake)
+    dumper, path = _dumper(tmp_path)
+    assert dumps._wrap_wmi(dumper) is True
+    assert module.exec_query.__name__ == 'fake' and module.exec_query.__doc__ == 'Fake doc.'
+    assert module.exec_query('SELECT a\nFROM b ' + 'q' * 300) == 'x' * 7
+    dumper.close()
+    match = _WMI_OK.fullmatch(path.read_text(encoding='utf-8'))
+    assert match and match.group(1) == '7'
+    assert match.group(2) == ('SELECT a FROM b ' + 'q' * 300)[:200]
+
+
+def test_wmi_wrapper_logs_error_and_reraises_same_exception(tmp_path, monkeypatch):
+    error = OSError(0, 'timed out', None, 258)
+
+    def fake(query):
+        raise error
+
+    module = _fake_wmi(monkeypatch, fake)
+    dumper, path = _dumper(tmp_path)
+    dumps._wrap_wmi(dumper)
+    try:
+        module.exec_query('SELECT 1')
+    except OSError as caught:
+        assert caught is error
+    else:
+        raise AssertionError('exception was swallowed')
+    dumper.close()
+    match = _WMI_ERR.fullmatch(path.read_text(encoding='utf-8'))
+    assert match and match.groups() == ('OSError', '258', 'SELECT 1')
+
+
+def test_wmi_error_without_winerror_logs_dash(tmp_path, monkeypatch):
+    def fake(query):
+        raise ValueError('boom')
+
+    module = _fake_wmi(monkeypatch, fake)
+    dumper, path = _dumper(tmp_path)
+    dumps._wrap_wmi(dumper)
+    try:
+        module.exec_query('Q')
+    except ValueError:
+        pass
+    dumper.close()
+    assert _WMI_ERR.fullmatch(path.read_text(encoding='utf-8')).groups() == ('ValueError', '-', 'Q')
+
+
+def test_wmi_wrapper_does_not_write_after_close_or_raise(tmp_path, monkeypatch):
+    module = _fake_wmi(monkeypatch, lambda query: 'abc')
+    dumper, path = _dumper(tmp_path)
+    dumps._wrap_wmi(dumper)
+    dumper.close()
+    assert module.exec_query('Q') == 'abc'
+    assert path.read_text(encoding='utf-8') == ''
+
+
+def test_wmi_wrapper_installs_once_and_skips_missing_module(tmp_path, monkeypatch):
+    module = _fake_wmi(monkeypatch, lambda query: 'abc')
+    dumper, _ = _dumper(tmp_path)
+    assert dumps._wrap_wmi(dumper) is True
+    wrapper = module.exec_query
+    assert dumps._wrap_wmi(dumper) is False and module.exec_query is wrapper
+    monkeypatch.setitem(sys.modules, '_wmi', None)
+    assert dumps._wrap_wmi(dumper) is False
+    dumper.close()
+
+
+def test_wmi_wrapper_real_query(tmp_path, monkeypatch):
+    if os.name != 'nt':
+        pytest.skip('_wmi exists on Windows only')
+    import _wmi
+
+    monkeypatch.setattr(_wmi, 'exec_query', _wmi.exec_query)
+    dumper, path = _dumper(tmp_path)
+    assert dumps._wrap_wmi(dumper) is True
+    try:
+        _wmi.exec_query('SELECT Version FROM OS')
+    except OSError:
+        pass
+    dumper.close()
+    text = path.read_text(encoding='utf-8')
+    assert _WMI_OK.fullmatch(text) or _WMI_ERR.fullmatch(text), text
+    assert text.endswith('query=SELECT Version FROM OS\n\n')
