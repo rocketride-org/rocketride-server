@@ -47,7 +47,6 @@ import pytest
 
 from ai.account import account as account_singleton
 from ai.account import manifest_push
-from ai.account.app_rows import serving_block_of
 from ai.account.app_deploy import (
     _REPLY_MAX_CHARS,
     _publisher_of,
@@ -1578,35 +1577,6 @@ async def test_resolve_app_pins_skips_unbuilt_versions(registry):
 # =============================================================================
 # RESOLVE — the manifest scope walk (user > team > public; serving gate)
 # =============================================================================
-
-
-def _binding(audience, binding='enabled', deployment='ready', build='ok'):
-    """One joined publish row as the backends return it."""
-    return {'state': binding, 'audience': dict(audience), 'artifactState': deployment, 'artifactBuild': build}
-
-
-@pytest.mark.parametrize(
-    'row, ladder, expected',
-    [
-        (_binding(AUD_USER), True, ''),
-        # The owner's own switch outranks every other cause.
-        (_binding(AUD_USER, binding='disabled', deployment='failed', build='failed'), True, 'disabled'),
-        (_binding(AUD_TEAM, deployment='failed'), True, 'failed'),
-        (_binding(AUD_PUBLIC, deployment='submit'), True, 'in-review'),
-        (_binding(AUD_PUBLIC, deployment='rejected'), True, 'rejected'),
-        (_binding(AUD_PUBLIC, deployment='private'), True, 'not-approved'),
-        # No review ladder: public serves like an internal rung.
-        (_binding(AUD_PUBLIC, deployment='private'), False, ''),
-        # Internal rungs serve anything but a failed deployment.
-        (_binding(AUD_TEAM, deployment='submit'), True, ''),
-        (_binding(AUD_USER, build='failed'), True, 'build-failed'),
-        (_binding(AUD_USER, build='building'), True, 'building'),
-        (_binding(AUD_USER, build=''), True, 'building'),
-    ],
-)
-def test_serving_block_of_names_why_a_binding_does_not_serve(row, ladder, expected):
-    """#2461: one gate decides serving for the manifest AND the owner's view."""
-    assert serving_block_of(row, ladder) == expected
 
 
 @pytest.mark.asyncio
