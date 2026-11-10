@@ -68,6 +68,7 @@ from fastapi import HTTPException
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
 
 from ai.web import Request
+from ai.web.middleware import route_path
 
 # Engine binary directory — all static paths are relative to this.
 _root_dir = os.path.dirname(sys.executable)
@@ -118,9 +119,10 @@ def _capture_for(request: Request) -> Optional[Path]:
     ?code/?state/?error, and invite or verification links carry a token the
     app must read. Crawlers fetch the canonical URL, which has none.
     """
-    if request.url.path.startswith('/shell/') or request.url.query:
+    path = route_path(request.scope)
+    if path.startswith('/shell/') or request.url.query:
         return None
-    route = request.url.path.strip('/')
+    route = path.strip('/')
     prerender_root = (Path(_shell_root) / '_prerender').resolve()
     capture = _resolve_safe(_shell_root, f'_prerender/{route}/index.html' if route else '_prerender/index.html')
     if capture.is_relative_to(prerender_root) and capture.is_file():
@@ -167,11 +169,12 @@ async def shell_static(request: Request):
     if not (Path(_shell_root) / 'index.html').is_file():
         raise HTTPException(status_code=503, detail='Shell UI not built. Run: ./builder shell:build')
 
-    # Map the URL path into the shell directory.
+    # Map the path the router matched (root_path stripped, as auth decided on)
+    # into the shell directory.
     # "/" → index.html
     # "/shell/static/js/main.js" → static/js/main.js
     # "/shell/themes/dark.json" → themes/dark.json
-    raw_path = request.url.path.lstrip('/')
+    raw_path = route_path(request.scope).lstrip('/')
 
     # Strip the "shell/" prefix for shell-specific routes
     if raw_path.startswith('shell/'):
@@ -597,7 +600,7 @@ async def apps_static(request: Request):
         HTTPException: 404 if file not found, 503 if apps dir missing.
     """
     # "/apps/rocketride.pipeBuilder/remoteEntry.js" → rocketride.pipeBuilder/remoteEntry.js
-    raw_path = request.url.path.lstrip('/')
+    raw_path = route_path(request.scope).lstrip('/')
     if raw_path.startswith('apps/'):
         raw_path = raw_path[len('apps/') :]
 
