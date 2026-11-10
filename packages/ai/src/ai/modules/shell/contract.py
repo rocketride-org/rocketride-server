@@ -342,6 +342,22 @@ def with_slash_twin(path: str) -> Tuple[str, ...]:
     return path, (path[:-1] if path.endswith('/') else path + '/')
 
 
+def slash_twin_label(source: str, candidate: str) -> str:
+    """How an error about ``source`` names ``candidate``, one of ``with_slash_twin(source)``.
+
+    Args:
+        source: The path the error is about (its message already names it).
+        candidate: ``source`` itself or its trailing-slash twin.
+
+    Returns:
+        '' for ``source`` itself, else ``"its slash twin '<twin>' "``, ready
+        to prefix the reason.
+    """
+    if candidate == source:
+        return ''
+    return f'its slash twin {candidate!r} '
+
+
 def _redirect_source_error(
     source: Any, pages: List[Page], live_conflict: Optional[Callable[[str], Optional[str]]]
 ) -> Optional[str]:
@@ -366,12 +382,13 @@ def _redirect_source_error(
         return err
     paths = {p.path for p in pages}
     for candidate in with_slash_twin(source):
-        which = '' if candidate == source else f'its slash twin {candidate!r} '
+        which = slash_twin_label(source, candidate)
         if candidate in paths:
             return f'{which}is a publicPages path (a URL is a page or a redirect, not both)'
-        conflict = live_conflict(candidate) if live_conflict else None
-        if conflict:
-            return f'{which}collides with the live server route {conflict}'
+        if live_conflict is not None:
+            conflict = live_conflict(candidate)
+            if conflict:
+                return f'{which}collides with the live server route {conflict}'
     return None
 
 

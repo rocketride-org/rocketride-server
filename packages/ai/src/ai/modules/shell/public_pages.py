@@ -54,7 +54,15 @@ from ai.account.app_rows import (
     serving_block_of,
 )
 
-from .contract import Page, check_manifest, check_redirects, is_privileged, may_claim_root, with_slash_twin
+from .contract import (
+    Page,
+    check_manifest,
+    check_redirects,
+    is_privileged,
+    may_claim_root,
+    slash_twin_label,
+    with_slash_twin,
+)
 
 
 @dataclass(frozen=True)
@@ -421,7 +429,7 @@ async def gate_errors(app_id: str, manifest: Mapping[str, Any], dist_dir: str, a
         for candidate in with_slash_twin(source):
             owner = exact.get(candidate)
             if owner is not None:
-                which = '' if candidate == source else f'its slash twin {candidate!r} '
+                which = slash_twin_label(source, candidate)
                 errors.append(
                     f'site.redirects from {source!r}: {which}is a page of the published app {owner.app_id}; '
                     'a URL is a page or a redirect, not both: drop the entry'
