@@ -64,6 +64,8 @@ CRAWLERS: Tuple[str, ...] = (
     'DuckAssistBot',
     'Meta-ExternalAgent',
     'meta-externalfetcher',
+    # Meta AI's search crawler: it reads pages to cite them in Meta AI answers.
+    'meta-webindexer',
     'MistralAI-User',
     # Robots-only token (Apple's AI-training opt-out); never in a UA.
     'Applebot-Extended',
