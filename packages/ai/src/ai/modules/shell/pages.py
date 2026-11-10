@@ -32,9 +32,12 @@ HEAD (405 otherwise); a feed is Atom with absolute URLs on ``RR_APP_URL``,
 source (``site.redirects``) and a page's trailing-slash twin answer GET and
 HEAD with a 301 to the page; any other path the aggregate does not claim
 answers what the router answered before the catch-all existed: 405, 307 or
-404. A GET or HEAD 404 that accepts HTML (a browser's or a crawler's) is the
-engine's not-found page (``not_found_page.py``), except under the reserved
-prefixes; ``/`` serves the shell if its page fails to render.
+404. With ``site.notFound`` declared, that 404 is the site's own page on GET
+and HEAD (``_not_found_page``), except under the reserved prefixes
+(``/.well-known`` among them); without it, a GET or HEAD that accepts HTML
+(a browser's or a crawler's) gets the engine's not-found page
+(``not_found_page.py``), with the same exception. ``/`` serves the shell if
+its page fails to render.
 
 Auth: the catch-all is not a public route, which would open every path,
 private API routes included, to anonymous callers. The web server consults
@@ -98,7 +101,6 @@ from ai.web.middleware import route_path
 from rocketlib import error, warning
 
 from . import articles, data_sources, public_pages
-from .contract import MAX_SNAPSHOT_BYTES, Page, reserved_error, snapshot_error, with_slash_twin
 from .articles import blogposting
 from .contract import MAX_SNAPSHOT_BYTES, Page, reserved_error, snapshot_error, with_slash_twin
 from .crawlers import CRAWLER, classify
@@ -529,7 +531,7 @@ def image_url(value: str, owner: Optional[Page]) -> str:
     return f'{base}{assets_base(owner)}/{value}'
 
 
-async def _snapshot_bytes(page: Page, path: str) -> bytes:
+async def _snapshot_bytes(page: Page, path: str, where: str = '') -> bytes:
     """The snapshot at store ``path``, from the snapshot cache or the one read of it in flight.
 
     On a miss, the path's read in flight (``_snapshot_reads``) is awaited, or
@@ -541,6 +543,7 @@ async def _snapshot_bytes(page: Page, path: str) -> bytes:
     Args:
         page: The page the snapshot serves (named in warnings).
         path: The snapshot's store path.
+        where: What the warnings name instead of the page's path.
 
     Returns:
         The snapshot's bytes.
@@ -558,14 +561,14 @@ async def _snapshot_bytes(page: Page, path: str) -> bytes:
         read = asyncio.create_task(_stored_snapshot(path))
         _snapshot_reads[path] = read
         # Added before any request's shield, so it runs before any of them resumes.
-        read.add_done_callback(partial(_read_finished, page, path))
+        read.add_done_callback(partial(_read_finished, page, path, where))
     try:
         return await asyncio.wait_for(asyncio.shield(read), _SNAPSHOT_READ_SECONDS)
     except asyncio.TimeoutError as exc:
         failure = StorageError(f'the store did not answer within {_SNAPSHOT_READ_SECONDS:g} s')
         _storage_failures.put(path, monotonic(), 1)
         if _storage_warning_due(path, 'deadline'):
-            _warn_fallback(page, failure)
+            _warn_fallback(page, failure, where)
         raise failure from exc
 
 
@@ -616,7 +619,7 @@ async def _from_store(call: Callable[[str], Awaitable[_T]], path: str) -> _T:
         raise StorageError(f'the store failed reading {path}: {type(exc).__name__}: {exc}') from exc
 
 
-def _read_finished(page: Page, path: str, read: 'asyncio.Task[bytes]') -> None:
+def _read_finished(page: Page, path: str, where: str, read: 'asyncio.Task[bytes]') -> None:
     """Done-callback of the shared read of ``path``: drop it from ``_snapshot_reads`` and handle its failure.
 
     It runs whether or not any request still waits on the read, so its
@@ -629,6 +632,7 @@ def _read_finished(page: Page, path: str, read: 'asyncio.Task[bytes]') -> None:
     Args:
         page: The page whose request started the read (named in warnings).
         path: The snapshot's store path.
+        where: What the warnings name instead of the page's path.
         read: The finished read.
     """
     _snapshot_reads.pop(path, None)
@@ -639,12 +643,12 @@ def _read_finished(page: Page, path: str, read: 'asyncio.Task[bytes]') -> None:
         return
     if isinstance(failure, _SnapshotTooLarge):
         _unusable_snapshots.put(path, True, 1)
-        _warn_fallback(page, failure)
+        _warn_fallback(page, failure, where)
         return
     if isinstance(failure, StorageError):
         _storage_failures.put(path, monotonic(), 1)
         if _storage_warning_due(path, 'read'):
-            _warn_fallback(page, failure)
+            _warn_fallback(page, failure, where)
         return
     error(f'[public_pages] reading snapshot {path} failed: {failure!r}')
 
@@ -666,15 +670,19 @@ async def _page_data(page: Page) -> Tuple[Dict[str, Any], bool]:
     return {}, False
 
 
-def _warn_fallback(page: Page, reason: Any) -> None:
-    """Log that crawlers get the shell document in place of the page's snapshot."""
-    warning(f'[public_pages] {page.path}: snapshot {page.snapshot!r} unavailable, serving the shell document: {reason}')
+def _warn_fallback(page: Page, reason: Any, where: str = '') -> None:
+    """Log that crawlers get the shell document in place of the page's snapshot, naming ``where`` (default the page's path)."""
+    warning(
+        f'[public_pages] {where or page.path}: snapshot {page.snapshot!r} unavailable, '
+        f'serving the shell document: {reason}'
+    )
 
 
-async def _crawler_snapshot(page: Page, context: Dict[str, Any]) -> Tuple[Optional[str], bool]:
+async def _crawler_snapshot(page: Page, context: Dict[str, Any], *, where: str = '') -> Tuple[Optional[str], bool]:
     """The page's snapshot rendered with ``context``, or None for the shell document: ``(html, cacheable)``.
 
-    A fallback is cacheable when it is final for the page's version: no
+    Every fallback warning names ``where`` (default the page's path) and the
+    snapshot. A fallback is cacheable when it is final for the page's version: no
     snapshot, a malformed snapshot path or no production version, a snapshot
     over ``MAX_SNAPSHOT_BYTES``, or a template the engine refuses (the last
     two are remembered by store path and warned about once). A storage
@@ -688,6 +696,7 @@ async def _crawler_snapshot(page: Page, context: Dict[str, Any]) -> Tuple[Option
     Args:
         page: A page of the aggregate.
         context: The page's bound data sources (``_page_data``).
+        where: What the warnings name instead of the page's path.
 
     Returns:
         ``(html, cacheable)``: the rendered snapshot, or None when crawlers
@@ -698,14 +707,14 @@ async def _crawler_snapshot(page: Page, context: Dict[str, Any]) -> Tuple[Option
     try:
         path = snapshot_path(page)
     except ValueError as exc:
-        _warn_fallback(page, exc)
+        _warn_fallback(page, exc, where)
         return None, True
     if path in _unusable_snapshots:
         return None, True
     if path not in _snapshot_cache and _storage_backing_off(path):
         return None, False
     try:
-        raw = await _snapshot_bytes(page, path)
+        raw = await _snapshot_bytes(page, path, where)
         # A 2 MiB snapshot takes tens of milliseconds to render: off the event loop.
         html = await asyncio.to_thread(
             render, raw.decode('utf-8', errors='replace'), {**context, 'assets': assets_base(page)}
@@ -716,7 +725,7 @@ async def _crawler_snapshot(page: Page, context: Dict[str, Any]) -> Tuple[Option
         return None, True
     except TemplateError as exc:
         _unusable_snapshots.put(path, True, 1)
-        _warn_fallback(page, exc)
+        _warn_fallback(page, exc, where)
         return None, True
     except StorageError:
         # The read, or this request's deadline, started the backoff and warned.
@@ -757,6 +766,38 @@ def _storage_warning_due(path: str, kind: str) -> bool:
         return False
     _storage_warned.put(key, now, 1)
     return True
+
+
+async def _not_found_page(request: Request, aggregate: Any) -> Optional[Response]:
+    """The 404 page of ``site.notFound`` for a path nothing serves, or None.
+
+    None when the site declares no ``notFound``, or the path is under a
+    reserved prefix (``/.well-known`` among them), where API callers and
+    discovery probes (OAuth, MCP) expect the plain 404. Crawlers get the
+    snapshot from the root owner's production version, rendered like a
+    page's (``assets`` resolves; no data), or the shell's ``index.html`` when
+    it cannot be read; people get ``index.html``, never a capture, so the app
+    renders its own 404. Either way under a head titled ``Page not found |
+    <site.title>``, with noindex and no canonical URL. Built per request:
+    never cached as a page.
+    """
+    path = route_path(request.scope) or '/'
+    snapshot = aggregate.site.get('notFound')
+    root = aggregate.exact.get('/')
+    if not snapshot or root is None or reserved_error(path):
+        return None
+    index = shell_document_path(request, capture=False)
+    rendered = None
+    if classify(request.headers.get('user-agent', '')) == CRAWLER:
+        owner = Page('/', root.app_id, '', snapshot=snapshot, dist_dir=root.dist_dir, version=root.version)
+        rendered, _ = await _crawler_snapshot(owner, {}, where=f'404 for {path!r}')
+    body = rendered
+    if body is None:
+        body = await asyncio.to_thread(index.read_text, encoding='utf-8')
+    site_title = aggregate.site.get('title', '')
+    body = inject_head(body, title=f'Page not found | {site_title}' if site_title else 'Page not found', noindex=True)
+    headers = {'Vary': 'User-Agent', 'Cache-Control': 'private, no-cache', 'X-Robots-Tag': 'noindex'}
+    return HTMLResponse(body, status_code=404, headers=headers)
 
 
 def _feed(aggregate: public_pages.Aggregate, feed: Mapping[str, str]) -> Response:
@@ -815,12 +856,14 @@ async def public_page(request: Request) -> Response:
 
     Returns:
         The page, a feed, a 301 to a page, the shell on an unclaimed ``/``,
-        or the router's 307 to a served trailing-slash twin.
+        the router's 307 to a served trailing-slash twin, or the
+        ``site.notFound`` page (status 404) for a path nothing serves.
 
     Raises:
-        HTTPException: 404 for a path nothing serves; 405, with ``Allow``, for
-            a method the page, feed, redirect or real route does not take; 503
-            (from ``shell_document_path``) when the shell is not built.
+        HTTPException: 404 for a path nothing serves (without
+            ``site.notFound``); 405, with ``Allow``, for a method the page,
+            feed, redirect or real route does not take; 503 (from
+            ``shell_document_path``) when the shell is not built.
     """
     path = route_path(request.scope) or '/'
     aggregate = public_pages.current()
@@ -837,7 +880,7 @@ async def public_page(request: Request) -> Response:
         return _feed(aggregate, feed)
     page = aggregate.exact.get(path)
     if page is None:
-        return await _unclaimed(request, path)
+        return await _unclaimed(request, path, aggregate)
     if path == '/':
         return await _home_page(request, page, aggregate)
     return await _render_page(request, path, page, aggregate)
@@ -893,12 +936,16 @@ def _redirect(request: Request, path: str, aggregate: public_pages.Aggregate) ->
     return None
 
 
-async def _unclaimed(request: Request, path: str) -> Response:
+async def _unclaimed(request: Request, path: str, aggregate: public_pages.Aggregate) -> Response:
     """A GET or HEAD on a path no page claims: the shell on ``/``, else what the router answered before the catch-all.
+
+    A path nothing serves gets the site's own 404 page when it declares one
+    (``_not_found_page``).
 
     Returns:
         The shell on ``/``, the router's 307 to a served trailing-slash twin,
-        or the not-found page with status 404 (``_not_found``).
+        or with status 404 the ``site.notFound`` page, else the engine's
+        not-found page (``_not_found``).
 
     Raises:
         HTTPException: the router's 405 on a real route's path; 404 for a
@@ -906,7 +953,7 @@ async def _unclaimed(request: Request, path: str) -> Response:
     """
     if path == '/':
         return await shell_static(request)
-    miss = _router_miss(request)
+    miss = _router_miss(request) or await _not_found_page(request, aggregate)
     if miss is None:
         return _not_found(request, path)
     return miss

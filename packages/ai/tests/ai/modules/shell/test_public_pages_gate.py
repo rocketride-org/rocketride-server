@@ -160,6 +160,32 @@ async def test_a_snapshot_over_the_size_cap_is_refused_by_its_stat():
     assert f"snapshot 'pages/fresh.html' is {size} bytes, over the {MAX_SNAPSHOT_BYTES}-byte limit" in errors[0]
 
 
+async def test_a_not_found_snapshot_missing_from_the_build_is_rejected():
+    manifest = copy.deepcopy(HOME_MANIFEST)
+    manifest['site']['notFound'] = 'pages/404.html'
+    errors = await gate_errors('rocketride.home', manifest, DIST, hostile_account())
+    assert errors == [
+        "site.notFound 'pages/404.html' is not in the built version; emit it into the build output or drop the field"
+    ]
+    FILES[f'{DIST}/pages/404.html'] = b'<html></html>'
+    assert await gate_errors('rocketride.home', manifest, DIST, hostile_account()) == []
+
+
+async def test_a_not_found_read_failure_other_than_not_found_fails_closed(monkeypatch):
+    from .hostile_fixtures import read_file
+
+    async def flaky(path):
+        if path.endswith('/pages/404.html'):
+            raise OSError('store down')
+        return await read_file(path)
+
+    monkeypatch.setattr(pp, 'read_artifact_file', flaky)
+    manifest = copy.deepcopy(HOME_MANIFEST)
+    manifest['site']['notFound'] = 'pages/404.html'
+    with pytest.raises(OSError):
+        await gate_errors('rocketride.home', manifest, DIST, hostile_account())
+
+
 async def test_every_problem_is_reported_at_once():
     manifest = {
         'publicPages': [

@@ -32,6 +32,7 @@ from the app owning ``/``, the site facts the SEO files carry:
                      "published": "2026-11-09", "modified": "2026-11-10T09:00:00Z",
                      "authors": [{"name": "...", "url": "https://..."}]}],
     "site": {"title": "...", "blurb": "...", "docsUrl": "https://.../llms.txt",
+             "notFound": "pages/404.html",
              "redirects": [{"from": "/terms", "to": "/legal/terms"}],
              "image": "og/site.png",
              "feeds": [{"path": "/blog/feed.xml", "prefix": "/blog/", "title": "..."}],
@@ -522,6 +523,11 @@ def _check_site(raw: Any) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
         if err:
             return None, f'site.docsUrl: {err}'
         out['docsUrl'] = raw['docsUrl']
+    if 'notFound' in raw:
+        err = snapshot_error(raw['notFound'])
+        if err:
+            return None, f'site.notFound {raw["notFound"]!r}: {err}'
+        out['notFound'] = raw['notFound']
     if 'image' in raw:
         err = _image_error(raw['image'])
         if err:

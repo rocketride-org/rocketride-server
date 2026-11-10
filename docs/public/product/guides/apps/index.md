@@ -243,6 +243,8 @@ interface AppManifest {
     title?: string;
     blurb?: string;
     docsUrl?: string;
+    /** The snapshot, in the build output, served with a 404 on paths nothing serves: 'pages/404.html'. */
+    notFound?: string;
     /** Old URLs answered with a 301 to one of your pages, query string kept. */
     redirects?: { from: string; to: string }[];
     /** The link-preview image of pages that declare none (same forms as a page's image). */
@@ -310,8 +312,8 @@ publish fails with a message naming the field):
   releases it).
 - Each `data` entry is `plans`, `plans:<appId>` or `app:<appId>`, and a page
   names each source (`plans`, `app`) at most once.
-- `snapshot` must be a relative `.html` path that exists in the built version,
-  at most 2 MiB.
+- `snapshot` and `site.notFound` must be a relative `.html` path that exists
+  in the built version, and a `snapshot` at most 2 MiB.
 - `image` and `site.image` are an `https://` URL, a root path (`/apps/...`,
   never `//`) or a relative path inside the build output, with no empty or dot
   segment, at most 2048 characters.
@@ -477,7 +479,12 @@ page (query kept). Any path that is neither a page, a redirect nor a server
 route answers `404`. A browser or crawler (a `GET` or `HEAD` that accepts
 HTML) gets the server's not-found page with it, which links home and to
 sign-in; paths under `/api`, `/task`, `/mcp` and `/.well-known`, and API
-clients, get the plain `404`.
+clients, get the plain `404`. With `site.notFound` declared, a `GET` or `HEAD`
+on such a path (outside those prefixes) answers `404` with a page titled
+`Page not found | <site.title>`, `noindex` and no canonical URL, never cached
+as a page: crawlers get the `site.notFound` snapshot, rendered like a page's
+(`{{assets}}` included), and people get the shell's `index.html`, so your app
+renders its own not-found view.
 
 ### Settings
 
