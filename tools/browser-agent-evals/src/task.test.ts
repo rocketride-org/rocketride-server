@@ -55,12 +55,17 @@ test('a hand-broken copy of a task is refused, with each problem named', () => {
 		checks.push({ id: 'no-path', type: 'validates' });
 		checks.push({ id: 'bad-reason', type: 'outcome', expect: 'failed', reason: 3 });
 		checks.push({ id: 'bad-use', type: 'check_app_passes', app: 'apps/a-ui', use: { fill: '', click: 'Ask', pipeline: 'pipelines/*.pipe', answer: '(', timeoutSec: 0, wait: 1 } });
+		// app may be left out, but a use needs it, and a named app must be an app folder
+		checks.push({ id: 'new-app', type: 'check_app_passes' });
+		checks.push({ id: 'use-no-app', type: 'check_app_passes', use: { fill: 'hi', click: 'Ask', pipeline: 'apps/x-ui/*.pipe' } });
+		checks.push({ id: 'bad-app', type: 'check_app_passes', app: 'a-ui' });
 		// the starting file's text is not copied into the broken set
 		fs.writeFileSync(path.join(dir, `${id}.json`), JSON.stringify(task));
 
 		const { problems } = validateTask(id, dir);
-		const expected = ['unknown field timelimit', 'prompt is empty', 'timeLimitSec must be a whole number of seconds above 0', 'file pipelines/support-chat.pipe comes from "fixtures/support-chat-openai/pipelines/support-chat.pipe", which is not a file in the task set folder', "check tools has type tool_called, which reads the agent's tool calls, so a browser trial cannot grade it", 'check typo has unknown type "file_exist"', 'check bad-regex regex is not a valid regex', 'check no-path (validates) needs path', 'check bad-reason reason must be text: the reason the saved turn must end with, such as refused', 'check bad-use use has unknown field wait', 'check bad-use use needs fill, the text to type into the app', "check bad-use use needs pipeline, a glob of the app's own pipeline file under apps/a-ui/", 'check bad-use use answer must be a valid regex', 'check bad-use use timeoutSec must be a whole number of seconds above 0'];
+		const expected = ['unknown field timelimit', 'prompt is empty', 'timeLimitSec must be a whole number of seconds above 0', 'file pipelines/support-chat.pipe comes from "fixtures/support-chat-openai/pipelines/support-chat.pipe", which is not a file in the task set folder', "check tools has type tool_called, which reads the agent's tool calls, so a browser trial cannot grade it", 'check typo has unknown type "file_exist"', 'check bad-regex regex is not a valid regex', 'check no-path (validates) needs path', 'check bad-reason reason must be text: the reason the saved turn must end with, such as refused', 'check bad-use use has unknown field wait', 'check bad-use use needs fill, the text to type into the app', "check bad-use use needs pipeline, a glob of the app's own pipeline file under apps/a-ui/", 'check bad-use use answer must be a valid regex', 'check bad-use use timeoutSec must be a whole number of seconds above 0', 'check use-no-app use needs app, the folder of the app it uses', 'check bad-app app must be an app folder, apps/<name>, or left out to grade the one app the turn added'];
 		for (const p of expected) assert.ok(problems.includes(p), `missing problem: ${p}\ngot:\n${problems.join('\n')}`);
+		assert.ok(!problems.some((p) => p.startsWith('check new-app')), 'a check_app_passes check with no app is valid');
 		assert.ok(problems.some((p) => p.startsWith('cards must be')));
 		assert.deepEqual(
 			loadTasks(dir).invalid.map((v) => v.id),

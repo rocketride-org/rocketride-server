@@ -52,7 +52,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { changedApps, checkApps, withLoads, withSteps, type AppCheckResult } from './checks/app';
+import { appsToCheck, checkApps, withLoads, withSteps, type AppCheckResult } from './checks/app';
 import { appPipelines, pipelineRuns, runVerdict, withRuns, type AppRun, type RunSeen } from './checks/appRun';
 import { TrialScans, type KeyScan } from './checks/common';
 import { runOutputs, validatePipes } from './checks/pipeline';
@@ -329,10 +329,10 @@ export async function runTrial(opts: TrialOptions): Promise<{ record: BrowserTri
 	record.finalFiles = Object.fromEntries(Object.entries(final).map(([p, text]) => [p, scrubber.scrub(text)]));
 	record.canary = scans.canaryScans();
 	browser.keyScan = scans.keyScan();
-	// the apps the grade reads: every app folder the turn changed, and every one a check names
-	const apps = new Set([...changedApps(start, final), ...task.checks.filter((c) => c.type === 'check_app_passes').map((c) => String(c.app))]);
-	if (apps.size) {
-		browser.appChecks = await checkApps([...apps].sort(), final, path.join(dir, 'app-check'));
+	// the apps the grade reads: every app folder the turn changed, and every one a check grades (the one it names, or the one the turn added)
+	const apps = appsToCheck(task.checks, start, final);
+	if (apps.length) {
+		browser.appChecks = await checkApps(apps, final, path.join(dir, 'app-check'));
 		withLoads(browser.appChecks, browser.appLoads);
 		withSteps(browser.appChecks, record.turns.at(-1)?.result?.checks ?? null, final);
 		withRuns(browser.appChecks, browser.appRuns);

@@ -189,6 +189,40 @@ export function changedApps(start: Record<string, string>, final: Record<string,
 	return appFolders(Object.fromEntries(changed.map((p) => [p, '']))).filter((a) => existing.has(a));
 }
 
+/** The app folders the turn added: in the final workspace and not in the starting one. */
+export function addedApps(start: Record<string, string>, final: Record<string, string>): string[] {
+	const before = new Set(appFolders(start));
+	return appFolders(final).filter((a) => !before.has(a));
+}
+
+/**
+ * The app a check_app_passes check grades: the folder it names, or, when it
+ * names none, the one app folder the turn added under apps/. With no added
+ * folder, or several, it grades none and says what it found.
+ */
+export function appOf(ck: { type: string; app?: unknown }, start: Record<string, string>, final: Record<string, string>): { app: string } | { why: string } {
+	if (typeof ck.app === 'string') return { app: ck.app };
+	const added = addedApps(start, final);
+	if (added.length === 1) return { app: added[0] as string };
+	return { why: added.length ? `the check names no app and the turn added ${added.length} app folders (${added.join(', ')}), so it cannot tell which one to grade` : 'the check names no app and the turn added no app folder under apps/' };
+}
+
+/**
+ * Every app a trial's grade reads: each app folder the turn changed, and
+ * each app a check_app_passes check grades.
+ *
+ * @param checks - The task's checks.
+ * @param start - The workspace the task started with.
+ * @param final - The workspace at the end.
+ */
+export function appsToCheck(checks: Array<{ type: string; app?: unknown }>, start: Record<string, string>, final: Record<string, string>): string[] {
+	const graded = checks.filter((c) => c.type === 'check_app_passes').flatMap((c) => {
+		const which = appOf(c, start, final);
+		return 'app' in which ? [which.app] : [];
+	});
+	return [...new Set([...changedApps(start, final), ...graded])].sort();
+}
+
 /**
  * Lays an app folder out on disk with its dependencies linked.
  *

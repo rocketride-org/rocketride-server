@@ -43,7 +43,7 @@
 
 import { fnmatch, pointerGet, pyRegex, secretViolations, staticErrors, type Component, type Verdict } from './score';
 import type { Cause } from './cause';
-import { changedApps } from './checks/app';
+import { appOf, changedApps } from './checks/app';
 import { resolvePath, type Substitution } from './resolve';
 import type { Task, TaskCheck } from './task';
 import type { BrowserTrialRecord } from './trial';
@@ -297,9 +297,11 @@ function runCheck(ck: TaskCheck, task: Task, record: BrowserTrialRecord, ctx: Gr
 			return res(true, `${scan.values} values, ${scan.scanned.join(', ')}`);
 		}
 		case 'check_app_passes': {
-			const a = ctx.appChecks?.[String(ck.app)];
-			if (!a) return { status: 'pending', detail: 'no app check ran' };
-			return res(a.ok, a.detail);
+			const which = appOf(ck, ctx.start, record.finalFiles);
+			if (!('app' in which)) return res(false, which.why);
+			const a = ctx.appChecks?.[which.app];
+			if (!a) return { status: 'pending', detail: `no app check ran on ${which.app}` };
+			return res(a.ok, ck.app === undefined ? `${which.app}: ${a.detail}` : a.detail);
 		}
 		default:
 			return { status: 'pending', detail: `unknown check type ${ck.type} (task ${task.id})` };

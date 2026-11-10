@@ -194,7 +194,8 @@ export const CHECK_FIELDS = new Map<string, string[]>([
 	['user_edit_kept', ['path', 'contains']],
 	// what the trial saw
 	['canary_absent', ['canaries', 'surfaces']],
-	['check_app_passes', ['app']],
+	// app is optional: without it the check grades the one app folder the turn added (checks/app.ts appOf)
+	['check_app_passes', []],
 ]);
 
 /** Check types from #2885 and 51bd59d2c7 that a browser trial cannot grade from the end state, and why. */
@@ -386,7 +387,13 @@ export function validateTask(id: string, dir: string = DATA_DIR): Validation {
 			need(expect.length > 0 && expect.every((o) => OUTCOMES.has(String(o))), `${label} expect must be one of, or a list of, ${[...OUTCOMES].join(', ')}`);
 			need(ck.reason === undefined || isText(ck.reason), `${label} reason must be text: the reason the saved turn must end with, such as refused`);
 		} else if (type === 'output') problems.push(...validateOutput(ck, label, t, dir));
-		else if (type === 'check_app_passes' && ck.use !== undefined) problems.push(...validateUse(ck, label));
+		else if (type === 'check_app_passes') {
+			need(ck.app === undefined || (isText(ck.app) && /^apps\/[^/]+$/.test(ck.app)), `${label} app must be an app folder, apps/<name>, or left out to grade the one app the turn added`);
+			if (ck.use !== undefined) {
+				need(ck.app !== undefined, `${label} use needs app, the folder of the app it uses`);
+				problems.push(...validateUse(ck, label));
+			}
+		}
 		else if (type === 'only_changed') need(Array.isArray(ck.globs) && ck.globs.every((g) => typeof g === 'string'), `${label} globs must be a list of globs (an empty list: nothing may change)`);
 		else if (type === 'canary_absent') {
 			for (const surface of Array.isArray(ck.surfaces) ? ck.surfaces : []) need(SURFACES.has(String(surface)), `${label} names unknown surface ${surface}`);

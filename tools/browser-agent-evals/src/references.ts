@@ -41,7 +41,7 @@ import path from 'node:path';
 
 import type { RocketRideClient } from 'rocketride';
 
-import { changedApps, checkApps } from './checks/app';
+import { appsToCheck, checkApps } from './checks/app';
 import { TrialScans } from './checks/common';
 import { runOutputs, validatePipes } from './checks/pipeline';
 import type { HeldKey } from './evidence';
@@ -148,7 +148,7 @@ export async function checkWorkspace(client: RocketRideClient, task: Task, tasks
 	for (const text of Object.values(final)) scans.feed('workspace_files', text);
 	record.canary = scans.canaryScans();
 	record.browser.keyScan = scans.keyScan();
-	const apps = new Set([...changedApps(start, final), ...task.checks.filter((c) => c.type === 'check_app_passes').map((c) => String(c.app))]);
-	if (apps.size) record.browser.appChecks = await checkApps([...apps].sort(), final, workDir);
+	const apps = appsToCheck(task.checks, start, final);
+	if (apps.length) record.browser.appChecks = await checkApps(apps, final, workDir);
 	return gradeTrial(task, record, { start, appChecks: record.browser.appChecks }, null);
 }

@@ -31,6 +31,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 
 import { DATA_DIR } from './catalog';
+import { appsToCheck } from './checks/app';
 import { isModelQuestion, TrialScans } from './checks/common';
 import { fileCheck, gradeTrial } from './grade';
 import { readTree, referenceWorkspace, startFiles } from './references';
@@ -102,6 +103,26 @@ test('an ANSWER task loads, passes when the agent said done and changed nothing,
 	// the same task typed ASK waits for the judge
 	assert.equal(gradeTrial({ ...task, type: 'ASK' }, doneRecord(task, start), { start }, null).status, 'pending');
 	fs.rmSync(dir, { recursive: true });
+});
+
+test('check_app_passes with no app grades the one app folder the turn added, and fails naming what it found with none or two', () => {
+	const task = { id: 'level4-app', type: 'BUILD', target: 'app', checks: [{ id: 'app-passes', type: 'check_app_passes' }], judge: [] } as unknown as Task;
+	const start = { 'apps/old-ui/package.json': '{}' };
+	const appCheck = (final: Record<string, string>, appChecks: Record<string, { ok: boolean; detail: string }>) => gradeTrial(task, doneRecord(task, final), { start, appChecks }, null).checks.find((c) => c.id === 'app-passes');
+
+	// one new app: the after-turn app check covers it beside the changed one, and the check grades it alone
+	const one = { 'apps/old-ui/package.json': '{"v":2}', 'apps/notes-ui/package.json': '{}', 'apps/notes-ui/src/App.tsx': 'x' };
+	assert.deepEqual(appsToCheck(task.checks, start, one), ['apps/notes-ui', 'apps/old-ui']);
+	const passing = appCheck(one, { 'apps/notes-ui': { ok: true, detail: 'types and build pass' }, 'apps/old-ui': { ok: false, detail: 'types: 1 error' } });
+	assert.deepEqual([passing?.status, passing?.detail], ['pass', 'apps/notes-ui: types and build pass']);
+	assert.equal(appCheck(one, { 'apps/notes-ui': { ok: false, detail: 'build: failed' } })?.status, 'fail');
+
+	const none = appCheck(start, {});
+	assert.deepEqual([none?.status, none?.detail], ['fail', 'the check names no app and the turn added no app folder under apps/']);
+	const two = { ...start, 'apps/a-ui/package.json': '{}', 'apps/b-ui/package.json': '{}' };
+	const ok = { ok: true, detail: 'types and build pass' };
+	const both = appCheck(two, { 'apps/a-ui': ok, 'apps/b-ui': ok });
+	assert.deepEqual([both?.status, both?.detail], ['fail', 'the check names no app and the turn added 2 app folders (apps/a-ui, apps/b-ui), so it cannot tell which one to grade']);
 });
 
 test('every reference solution passes the file checks of its task', () => {
