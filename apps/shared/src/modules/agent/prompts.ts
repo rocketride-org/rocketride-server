@@ -232,8 +232,8 @@ const ROUTER_ENTRIES: Array<{ when: string; paths: string[] }> = [
 
 const OPENING = 'Before acting, you must read the guide that matches the task.';
 
-/** Closing note: the guides were written for local agents, so say what replaces their commands and scripts (wrapped to keep each line short). */
-const CLOSING = ['These guides were written for local agents. Where one says to run a `rocketride` command, read `.rocketride/schema/` or `services-catalog.json`,', 'or run a Python script, call the matching TypeScript client method with rocketride_client instead.'].join('\n');
+/** Closing note: the guides were written for local agents, so say what this workspace lacks and which client calls replace it. */
+const CLOSING = ['These guides were written for local agents. This workspace has no `.rocketride/schema/` folder, no `services-catalog.json`, no `rocketride` CLI and no Python runtime.', 'Get component details from rocketride_client instead. `getServices()` lists every component by provider name, and `getService("<provider>")` gives one component\'s config schema.', 'Where a guide says to run a `rocketride` command or a Python script, call the matching TypeScript client method with rocketride_client.'].join('\n');
 
 const ROUTER = [OPENING, '', ...ROUTER_ENTRIES.map((e) => `- ${e.when}: ${e.paths.join(' + ')}`), '', CLOSING].join('\n');
 
