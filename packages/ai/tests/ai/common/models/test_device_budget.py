@@ -1,5 +1,6 @@
 """Unit tests for the per-device admission guard (fake memory probe and NVML, no torch needed)."""
 
+import contextlib
 import os
 import sys
 import threading
@@ -217,6 +218,7 @@ class _Cond(threading.Condition):
         self.waited = set()
         self._notifies = 0
         self._waits_since = {}
+        self._held = {}
 
     def wait(self, timeout=None):
         """Note the calling thread, then wait as ``threading.Condition`` does.
@@ -235,6 +237,28 @@ class _Cond(threading.Condition):
             return super().wait(timeout)
         finally:
             del self._waits_since[me]
+            held = self._held.get(me)
+            if held is not None:
+                # woken while held: give the lock back and stay out until let go
+                state = self._release_save()
+                held.wait(_HOLD)
+                self._acquire_restore(state)
+
+    def hold(self, thread):
+        """Keep a waiting thread from acting, without the lock, from its next wake until ``let_go``.
+
+        Args:
+            thread: The thread to hold.
+        """
+        self._held[thread] = threading.Event()
+
+    def let_go(self, thread):
+        """Let a held thread act again.
+
+        Args:
+            thread: The thread held by ``hold``.
+        """
+        self._held.pop(thread).set()
 
     def notify_all(self):
         """Count the notify, then wake every waiter."""
@@ -350,6 +374,16 @@ def test_memory_a_call_already_holds_is_not_counted_twice():
     assert second.enters()
     first.leave()
     second.leave()
+
+
+def test_memory_held_while_the_device_was_idle_is_not_a_calls_progress():
+    """What the process held when the device was last idle (loaded models) does not count against a call's cost."""
+    budget = _gpu(_Probe(free=3000, allocated=3000))
+    first = _Call(budget, 2000)
+    assert first.enters()
+    second = _Call(budget, 1000)  # the first may still claim its 2000 MB
+    assert second.stays_out()
+    _leave_all([first, second])
 
 
 def test_memory_freed_elsewhere_is_seen_without_a_release():
@@ -515,6 +549,31 @@ def test_a_call_inside_when_the_idle_spell_ends_keeps_the_cache(monkeypatch):
     assert release.inside_at == [0]
 
 
+def test_a_call_in_the_idle_spell_keeps_the_cache_for_the_call_queued_behind_it(monkeypatch):
+    """A call that enters during an idle spell ends it, so the cache stays when it hands over to a queued call."""
+    clock = _Clock(monkeypatch)
+    budget = None
+    release = _Release(lambda: budget)
+    budget = _gpu(_Probe(free=1e6), release=release)
+    with budget.reserve(100):
+        pass  # the device drains: an idle spell starts
+    clock.advance(budget, budgetmod.IDLE_RELEASE_S / 2)
+    first = _Call(budget, None)  # runs alone, so the next call queues
+    assert first.enters()
+    second = _Call(budget, 100)
+    assert second.stays_out()
+    clock.advance(budget, budgetmod.IDLE_RELEASE_S)  # the old spell's time is up
+    budget._cond.hold(second._thread)  # the releasing thread acts before the queued call can enter
+    first.leave()
+    assert _settled(budget)
+    assert release.count == 0
+    budget._cond.let_go(second._thread)
+    assert second.enters()
+    second.leave()
+    clock.advance(budget, budgetmod.IDLE_RELEASE_S)
+    assert release.inside_at == [0]
+
+
 def test_each_idle_spell_releases_once(monkeypatch):
     """A release follows every idle spell, and only one per spell."""
     clock = _Clock(monkeypatch)
@@ -531,6 +590,19 @@ def test_each_idle_spell_releases_once(monkeypatch):
         pass
     clock.advance(budget, budgetmod.IDLE_RELEASE_S)
     assert release.count == 2
+
+
+def test_the_releasing_thread_wakes_for_every_drain_on_the_real_clock(monkeypatch):
+    """With nothing due the releasing thread waits without a timeout, so each later drain must wake it."""
+    monkeypatch.setattr(budgetmod, 'IDLE_RELEASE_S', 0.05)
+    release = _Release()
+    budget = _gpu(_Probe(free=1e6), release=release)
+    for n in (1, 2, 3):
+        call = _Call(budget, 100)
+        assert call.enters()
+        assert _settled(budget)  # it has seen the call enter and waits again: only the leave can wake it
+        call.leave()
+        assert _wait_for(lambda: release.count == n)
 
 
 def test_drains_do_not_start_a_thread_each(monkeypatch):
@@ -570,7 +642,7 @@ def test_a_thread_given_a_finished_threads_id_sets_up_again(monkeypatch):
 
 
 def test_a_failed_workspace_set_up_does_not_fail_the_call(monkeypatch):
-    """A set-up that raises is logged once, not tried again, and leaves the calls and the guard as they were."""
+    """A torch without memory pools is logged once, not tried again, and leaves the calls and the guard as they were."""
     warnings = []
     monkeypatch.setattr(budgetmod, 'logger', types.SimpleNamespace(warning=lambda *args: warnings.append(args)))
     tries = []
@@ -588,6 +660,193 @@ def test_a_failed_workspace_set_up_does_not_fail_the_call(monkeypatch):
     other.leave()
     assert len(tries) == 1 and len(warnings) == 1 and 'cuBLAS' in warnings[0][0]
     assert budget._inside == []
+
+
+def test_a_set_up_that_fails_in_one_thread_is_tried_by_the_next(monkeypatch):
+    """A failure other than a missing API (out of memory) stays with its thread; it is logged once."""
+    warnings = []
+    monkeypatch.setattr(budgetmod, 'logger', types.SimpleNamespace(warning=lambda *args: warnings.append(args)))
+    tries = []
+
+    def warm():
+        """Fail in the first two threads, as a set-up out of memory would."""
+        tries.append(threading.current_thread())
+        if len(tries) <= 2:
+            raise RuntimeError('CUDA out of memory')
+
+    budget = _gpu(_Probe(free=1e6), warm=warm)
+    for _ in range(3):
+        call = _Call(budget, 100)
+        assert call.enters()
+        call.leave()
+    assert len(set(tries)) == 3 and len(warnings) == 1
+
+
+class _FakeCuda:
+    """``torch.cuda`` as the workspace set-up uses it, with torch 2.10's rules for memory pools."""
+
+    def __init__(self):
+        """Start on device 0 in every thread, with no pool."""
+        self._current = threading.local()
+        self._lock = threading.Lock()
+        self._uses = {}  # (device, pool id) -> the pool's use count on that device
+        self._recorders = {}  # (device, pool id) -> the thread recording to it
+        self._next_id = 0
+        self.workspaces = []  # (thread, device, pool id or None for the default pool)
+        self.on_handle = lambda: None
+
+    def current_device(self):
+        """Return the calling thread's current device."""
+        return getattr(self._current, 'index', 0)
+
+    @contextlib.contextmanager
+    def device(self, index):
+        """Make a device current in the calling thread.
+
+        Args:
+            index: The device.
+
+        Yields:
+            None, while the device is current.
+        """
+        before = self.current_device()
+        self._current.index = index
+        try:
+            yield
+        finally:
+            self._current.index = before
+
+    def MemPool(self):
+        """Make a pool on the current device, as ``torch.cuda.MemPool`` does."""
+        with self._lock:
+            self._next_id += 1
+            pool = types.SimpleNamespace(id=(0, self._next_id), device=self.current_device())
+            self._uses[(pool.device, pool.id)] = 1
+        return pool
+
+    @contextlib.contextmanager
+    def use_mem_pool(self, pool):
+        """Route the calling thread's allocations on the current device to a pool.
+
+        Args:
+            pool: The pool.
+
+        Yields:
+            None, while the thread records to the pool.
+
+        Raises:
+            RuntimeError: As torch's allocator, when the pool has no use left on this device
+                or another thread already records to it.
+        """
+        key = (self.current_device(), pool.id)
+        with self._lock:
+            # create_or_incref_pool: a pool first met on a device starts there at 1 and must stay live
+            if key in self._uses and self._uses[key] <= 0:
+                raise RuntimeError('INTERNAL ASSERT FAILED: it->second->use_count > 0')
+            self._uses[key] = self._uses.get(key, 0) + 1
+            if key in self._recorders:
+                raise RuntimeError('beginAllocateToPool: already recording to mempool_id')
+            self._recorders[key] = threading.current_thread()
+        try:
+            yield
+        finally:
+            with self._lock:
+                del self._recorders[key]
+                self._uses[key] -= 1
+
+    def current_blas_handle(self):
+        """Allocate the calling thread's workspace where its allocations go now."""
+        self.on_handle()
+        key = (self.current_device(), None)
+        with self._lock:
+            pools = [k[1] for k, t in self._recorders.items() if t is threading.current_thread() and k[0] == key[0]]
+        self.workspaces.append((threading.current_thread(), key[0], pools[0] if pools else None))
+
+
+class _WatchedLock:
+    """A lock that notes when a thread has to wait for it."""
+
+    def __init__(self):
+        """Start unlocked, with no wait noted."""
+        self._lock = threading.Lock()
+        self.waited = threading.Event()
+
+    def __enter__(self):
+        """Take the lock, noting a wait if another thread holds it."""
+        if not self._lock.acquire(blocking=False):
+            self.waited.set()
+            self._lock.acquire()
+        return self
+
+    def __exit__(self, *exc):
+        """Give the lock back."""
+        self._lock.release()
+
+
+def _fake_warm(monkeypatch, device):
+    """Build the real workspace set-up of a device on a fake ``torch.cuda``.
+
+    Args:
+        monkeypatch: The test's monkeypatch fixture.
+        device: The device, ``'cuda:N'``.
+
+    Returns:
+        (the set-up, the fake ``torch.cuda``, the set-up's lock).
+    """
+    cuda, lock = _FakeCuda(), _WatchedLock()
+    monkeypatch.setitem(sys.modules, 'ai.common.torch', types.SimpleNamespace(torch=types.SimpleNamespace(cuda=cuda)))
+    with monkeypatch.context() as m:
+        m.setattr(budgetmod, 'threading', types.SimpleNamespace(**{**vars(threading), 'Lock': lambda: lock}))
+        warm = budgetmod._cuda_warm(device)
+    return warm, cuda, lock
+
+
+def test_a_thread_setting_up_beside_another_waits_and_gets_its_workspace_in_the_pool(monkeypatch):
+    """A second thread waits while the first records to the pool, which takes one recorder, and both land in it."""
+    warm, cuda, lock = _fake_warm(monkeypatch, 'cuda:0')
+    errors = []
+
+    def second():
+        """Set up a second thread, keeping what it raises."""
+        try:
+            warm()
+        except Exception as e:
+            errors.append(e)
+
+    other = threading.Thread(target=second)
+
+    def first_handle():
+        """While the first thread records, start the second and see it refused or waiting."""
+        cuda.on_handle = lambda: None
+        other.start()
+        assert _wait_for(lambda: errors or lock.waited.is_set())
+
+    cuda.on_handle = first_handle
+    warm()
+    other.join(_ENTERS)
+    assert errors == []
+    assert [(device, pool) for _, device, pool in cuda.workspaces] == [(0, (0, 1))] * 2
+    assert len({thread for thread, _, _ in cuda.workspaces}) == 2
+
+
+def test_the_workspace_pool_is_made_on_the_guards_device(monkeypatch):
+    """On ``cuda:1`` the pool is made there, though threads enter on device 0, so every thread's workspace lands in it."""
+    warm, cuda, _ = _fake_warm(monkeypatch, 'cuda:1')
+    errors = []
+
+    def one():
+        """Set up one thread, keeping what it raises."""
+        try:
+            warm()
+        except Exception as e:
+            errors.append(e)
+
+    for _ in range(3):
+        thread = threading.Thread(target=one)
+        thread.start()
+        thread.join(_ENTERS)
+    assert errors == []
+    assert [(device, pool) for _, device, pool in cuda.workspaces] == [(1, (0, 1))] * 3
 
 
 def test_no_workspace_set_up_on_cpu():
@@ -1046,7 +1305,7 @@ def test_the_cuda_workspace_set_up_keeps_large_blocks_releasable():
     big = 256 << 20
 
     def kept_mb(warm):
-        """On a new stream, which gets a workspace of its own, free a large block, run a product, release.
+        """With no cuBLAS workspace left, so the product needs a new one, free a large block, run a product, release.
 
         Args:
             warm: Sets up the workspace once the large block is free, as a thread entering late finds it, or None.
@@ -1054,6 +1313,7 @@ def test_the_cuda_workspace_set_up_keeps_large_blocks_releasable():
         Returns:
             The MB still reserved above the start.
         """
+        torch._C._cuda_clearCublasWorkspaces()  # a workspace kept from earlier would make the product allocate none
         torch.cuda.empty_cache()
         start = torch.cuda.memory_reserved(0)
         with torch.cuda.stream(torch.cuda.Stream(0)):

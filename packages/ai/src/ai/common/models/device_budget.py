@@ -23,7 +23,10 @@ process that only holds a CUDA context (the idle process of a finished task, ali
 idle TTL) does not count, since it takes no compute; its memory is still used, which the
 free-memory reads see. A process that has just started may show start-up samples and count
 for about the same window. A neighbour that pauses for longer than the window stops
-counting and counts again when it resumes, as a new neighbour does. Where NVML cannot
+counting and counts again when it resumes, as a new neighbour does. The guard reads NVML
+only when a call arrives, so after an idle gap of its own a neighbour it saw before is not
+new to it: the next call enters without that wait, beside what the neighbour, which did
+not count this idle process, may have admitted meanwhile. Where NVML cannot
 report per-process utilisation, every listed process counts, and so it does until the
 samples have once shown this process busy: a driver that samples no engine process would
 make every neighbour look idle. In another PID namespace NVML lists host pids, so this
@@ -37,11 +40,21 @@ idle process nor one that ran several calls alone holds memory the other one nee
 ``torch.cuda.empty_cache()`` takes no device: a release hands back the process's unused
 cache on every device, which other models of the process then allocate again. A cached
 block goes back only when nothing in it is in use, and the cuBLAS workspace a thread gets
-with its first matrix product lives as long as the thread's handle; allocated inside a
-large cached block, it would keep the whole block. So the guard creates that workspace,
-when a thread first enters on a GPU, in a memory pool of its own, and an idle process
-keeps its models and one workspace per thread (8 MiB, 32 MiB on Hopper). A thread that
-ran a matrix product before it first entered keeps its workspace where it was.
+with its first matrix product lives as long as the process (a finished thread's handle
+and workspace go to a later thread); allocated inside a large cached block, it would keep
+the whole block. So the guard creates that workspace, when a thread first enters on a GPU,
+in a memory pool of its own, one thread at a time, and an idle process keeps its models
+and one workspace per thread: 8 MiB + 128 KiB, two to a 20 MiB segment (32 MiB on sm_90).
+cuBLAS keys a workspace by handle and stream, so the set-up covers the stream current
+when the thread first enters (the default one for the OCR models); a thread that ran a
+matrix product before it first entered, or later computes on another stream, gets that
+workspace where it was, and the 1 MiB cuBLASLt workspace still comes with a thread's
+first product, in a 2 MiB segment of small blocks. While a thread sets up, other
+allocations on that device skip torch's last retry on out-of-memory (free the whole
+cache), ``empty_cache()`` leaves that device's cache, and a block another thread marks
+with ``record_stream`` and frees meanwhile loses that stream's use (torch takes it for a
+graph capture), so it could be reused early. This lasts one handle creation per thread;
+the OCR models record no streams.
 
 With ``--modelserver`` inference runs in the server, which has its own dispatcher, and
 the guard is a no-op.
@@ -157,12 +170,14 @@ def _cuda_warm(device: str) -> Warm:
         """Allocate the calling thread's cuBLAS workspace on the device from the pool."""
         from ai.common.torch import torch
 
-        with lock:
+        # one thread at a time: the allocator refuses a second recorder on a pool, from any thread
+        with lock, torch.cuda.device(index):
             if 'pool' not in pool:
+                # a pool belongs to the device current when it is made
                 pool['pool'] = torch.cuda.MemPool()
-        with torch.cuda.device(index), torch.cuda.use_mem_pool(pool['pool']):
-            # the first handle request of a thread allocates its workspace; a later one reuses it
-            torch.cuda.current_blas_handle()
+            with torch.cuda.use_mem_pool(pool['pool']):
+                # the first handle request of a thread allocates its workspace; a later one reuses it
+                torch.cuda.current_blas_handle()
 
     return warm
 
@@ -343,6 +358,7 @@ class DeviceBudget:
         self._release_warned = False
         self._warmed = threading.local()
         self._warm_failed = False
+        self._warm_warned = False
 
     @contextlib.contextmanager
     def reserve(self, cost_mb: Optional[float]) -> Iterator[None]:
@@ -364,6 +380,8 @@ class DeviceBudget:
                 self._queue.remove(ticket)
                 self._cond.notify_all()
             self._inside.append(cost_mb)
+            # a call ends the idle spell; only the next drain starts another
+            self._release_due = False
         try:
             if self._gpu:
                 self._warm_thread()
@@ -385,8 +403,12 @@ class DeviceBudget:
             self._warm()
         except Exception as e:
             # the workspace then comes with the first matrix product, as without the guard
-            self._warm_failed = True
-            logger.warning('%s: cannot set up the cuBLAS workspace in its own pool (%s)', self.device, e)
+            if isinstance(e, AttributeError):
+                # a torch without memory pools; another failure (out of memory) stays with its thread
+                self._warm_failed = True
+            if not self._warm_warned:
+                self._warm_warned = True
+                logger.warning('%s: cannot set up the cuBLAS workspace in its own pool (%s)', self.device, e)
 
     def _release_when_idle(self) -> None:
         """Release the cache once the device has stayed idle for ``IDLE_RELEASE_S``; the caller holds the lock."""
