@@ -11,6 +11,7 @@ set_env refuses update_env as unknown instead of wiping what it was not sent.
 import asyncio
 from unittest.mock import AsyncMock
 
+from rocketride import CONST_ENV_MASK
 from rocketride.account import AccountApi
 
 
@@ -23,12 +24,12 @@ def _api():
 def test_set_env_splits_none_into_the_delete_list():
     api, client = _api()
 
-    asyncio.run(api.set_env('user', {'ROCKETRIDE_A': 'a', 'ROCKETRIDE_B': None, 'ROCKETRIDE_C': '••••••••'}))
+    asyncio.run(api.set_env('user', {'ROCKETRIDE_A': 'a', 'ROCKETRIDE_B': None, 'ROCKETRIDE_C': CONST_ENV_MASK}))
 
     client.call.assert_awaited_once_with(
         'rrext_account_me',
         subcommand='update_env',
-        env={'ROCKETRIDE_A': 'a', 'ROCKETRIDE_C': '••••••••'},
+        env={'ROCKETRIDE_A': 'a', 'ROCKETRIDE_C': CONST_ENV_MASK},
         delete=['ROCKETRIDE_B'],
     )
 

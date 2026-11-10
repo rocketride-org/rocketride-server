@@ -19,7 +19,8 @@ import os
 import pytest
 from dotenv import dotenv_values
 
-from ai.account.oss import ENV_MASK, Account
+from ai.account.base import ENV_MASK
+from ai.account.oss import Account, _merged_env
 
 
 class _Conn:
@@ -313,3 +314,57 @@ def test_a_saved_value_reads_back_the_same_at_start_up(env_file, monkeypatch):
     assert _call('update_env', env=values)['ok'] is True
 
     assert _env_file_dict(env_file) == values
+
+
+def test_the_sdks_send_the_mask_the_server_keeps():
+    from rocketride import CONST_ENV_MASK
+
+    assert CONST_ENV_MASK == ENV_MASK
+
+
+@pytest.mark.parametrize('value', [ENV_MASK + 'sk-new', ENV_MASK + ENV_MASK])
+def test_a_key_typed_after_the_mask_writes_nothing(env_file, monkeypatch, value):
+    monkeypatch.setenv('ROCKETRIDE_A', 'sk-old')
+
+    resp = _call('update_env', env={'ROCKETRIDE_A': value})
+
+    assert resp['ok'] is False and 'begins with the mask' in resp['message']
+    assert value not in resp['message']
+    assert os.environ['ROCKETRIDE_A'] == 'sk-old'
+    assert not env_file.exists()
+
+
+def test_a_name_sent_in_another_case_addresses_the_upper_cased_stored_one(monkeypatch):
+    # What Windows lists after 'ROCKETRIDE_my-key' and 'ROCKETRIDE_b' were saved
+    for key in [k for k in os.environ if k.startswith('ROCKETRIDE_')]:
+        monkeypatch.delenv(key)
+    monkeypatch.setenv('ROCKETRIDE_MY-KEY', 'sk-one')
+    monkeypatch.setenv('ROCKETRIDE_B', 'sk-two')
+
+    env, error = _merged_env({'ROCKETRIDE_my-key': None, 'ROCKETRIDE_b': ENV_MASK}, fold_case=True)
+
+    assert error is None
+    assert env == {'ROCKETRIDE_B': 'sk-two'}
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Windows upper-cases environment names')
+def test_on_windows_a_name_saved_in_lower_case_is_deleted_by_that_name(env_file):
+    assert _call('update_env', env={'ROCKETRIDE_my-key': 'sk-one'})['ok'] is True
+
+    resp = _call('update_env', delete=['ROCKETRIDE_my-key'])
+
+    assert resp == {'ok': True, 'body': {'updated': True}}
+    assert not any(k.upper() == 'ROCKETRIDE_MY-KEY' for k in os.environ)
+    assert not any(k.upper() == 'ROCKETRIDE_MY-KEY' for k in _env_file_dict(env_file))
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='a symlink needs a privilege on Windows')
+def test_a_symlinked_env_file_is_written_through_the_link(env_file, tmp_path):
+    target = tmp_path / 'root.env'
+    target.write_text('OTHER=1\n', encoding='utf-8')
+    env_file.symlink_to(target)
+
+    assert _call('update_env', env={'ROCKETRIDE_A': 'sk-one'})['ok'] is True
+
+    assert env_file.is_symlink()
+    assert _env_file_dict(target) == {'OTHER': '1', 'ROCKETRIDE_A': 'sk-one'}

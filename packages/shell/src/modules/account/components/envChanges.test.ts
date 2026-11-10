@@ -5,7 +5,8 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ENV_MASK as MASK, envChanges, savedEnv } from './envChanges';
+import { CONST_ENV_MASK as MASK } from 'rocketride';
+import { envChanges, savedEnv } from './envChanges';
 
 test('a stored name the draft no longer has is sent as null', () => {
 	const stored = { ROCKETRIDE_A: MASK, ROCKETRIDE_B: MASK };

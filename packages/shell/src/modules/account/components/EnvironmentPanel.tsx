@@ -18,6 +18,7 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import type { CSSProperties } from 'react';
 import { commonStyles } from '../../../themes/styles';
+import { CONST_ENV_MASK } from 'rocketride';
 import { envChanges } from './envChanges';
 
 // =============================================================================
@@ -232,10 +233,17 @@ export const EnvScopeCard: React.FC<{
 						{draft.map(([key, value], idx) => (
 							<div key={idx} style={styles.row}>
 								<input value={key} onChange={(e) => updateEntry(idx, 'key', e.target.value)} placeholder="ROCKETRIDE_KEY_NAME" style={styles.keyInput as CSSProperties} />
-								<input type={revealedKeys.has(key) ? 'text' : 'password'} value={value} onChange={(e) => updateEntry(idx, 'value', e.target.value)} placeholder="••••••••" style={styles.valueInput as CSSProperties} />
-								<button onClick={() => toggleReveal(key)} style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardBodyButton } as CSSProperties}>
-									{revealedKeys.has(key) ? 'Hide' : 'Show'}
-								</button>
+								{/* A stored value is write-only: its field holds the mask, read-only, until Replace empties it */}
+								<input type={revealedKeys.has(key) && value !== CONST_ENV_MASK ? 'text' : 'password'} value={value} readOnly={value === CONST_ENV_MASK} onChange={(e) => updateEntry(idx, 'value', e.target.value)} placeholder="••••••••" style={styles.valueInput as CSSProperties} />
+								{value === CONST_ENV_MASK ? (
+									<button onClick={() => updateEntry(idx, 'value', '')} style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardBodyButton } as CSSProperties}>
+										Replace
+									</button>
+								) : (
+									<button onClick={() => toggleReveal(key)} style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardBodyButton } as CSSProperties}>
+										{revealedKeys.has(key) ? 'Hide' : 'Show'}
+									</button>
+								)}
 								<button onClick={() => removeEntry(idx)} style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardBodyButton } as CSSProperties}>
 									Delete
 								</button>

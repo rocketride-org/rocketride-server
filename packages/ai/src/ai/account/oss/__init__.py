@@ -48,22 +48,12 @@ from depends import depends as _depends
 # requirements.txt before importing anything else from this module.
 _depends(os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt')
 
-import re
 import tempfile
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from rocketlib import debug
 
-from ..base import AccountBase
-
-# What clients see in place of a stored environment value. A secret is
-# written once and never read back; sending the mask back keeps the value.
-# The SaaS service (extension/saas/account_service.py) uses the same string.
-ENV_MASK = '••••••••'
-
-# The names accepted: a .env key ends at whitespace, '=' or '#', a quote is
-# stripped from it, and the process environment ends at a NUL
-ENV_NAME = re.compile(r'ROCKETRIDE_[^\s=#\'"\0]+')
+from ..base import ENV_MASK, ENV_NAME, AccountBase
 
 
 def _env_line(name: str, value: str) -> str:
@@ -75,6 +65,86 @@ def _env_line(name: str, value: str) -> str:
     """
     escaped = value.replace('\\', '\\\\').replace("'", "\\'")
     return f"{name}='{escaped}'\n"
+
+
+def _env_changes(args: Dict[str, Any]) -> Tuple[Dict[str, Optional[str]], Optional[str]]:
+    """
+    The changes an ``update_env`` / ``set_env`` request asks for.
+
+    Args:
+        args: The request arguments: ``env`` (name to value) and ``delete`` (names).
+
+    Returns:
+        The changes (a name to its value, None to delete) and None, or an
+        empty dict and the error text when a name or value is refused.
+    """
+    raw, deleted = args.get('env', {}), args.get('delete', [])
+    if not isinstance(raw, dict) or not isinstance(deleted, list):
+        return {}, '`env` must be an object and `delete` a list; nothing was saved.'
+    if not all(isinstance(name, str) for name in deleted):
+        return {}, 'Environment names and values must be strings; nothing was saved.'
+    changes = dict(raw)
+    changes.update({name: None for name in deleted})
+    if not all(isinstance(k, str) and (v is None or isinstance(v, str)) for k, v in changes.items()):
+        return {}, 'Environment names and values must be strings; nothing was saved.'
+    rejected = sorted(k for k in changes if not ENV_NAME.fullmatch(k))
+    if rejected:
+        # Names only: the values are secrets and must not reach the client.
+        return {}, (
+            'Unsupported environment variable name(s): '
+            + ', '.join(rejected)
+            + ". Names begin with 'ROCKETRIDE_' and hold no whitespace, '=', '#', quote or NUL; nothing was saved."
+        )
+    # A .env line ends at a line break, the environment at a NUL, and
+    # load_dotenv expands '${', quoted or not
+    if any(v is not None and (any(c in v for c in '\0\r\n') or '${' in v) for v in changes.values()):
+        return {}, (
+            "Environment values cannot contain a line break, NUL or '${' (the .env loader expands it); nothing was saved."
+        )
+    # A key typed after the mask in an editor's field: storing it would hide it for good
+    typed_on_mask = sorted(k for k, v in changes.items() if v is not None and v != ENV_MASK and v.startswith(ENV_MASK))
+    if typed_on_mask:
+        return {}, (
+            'The value of ' + ', '.join(typed_on_mask) + ' begins with the mask; replace it whole. Nothing was saved.'
+        )
+    return changes, None
+
+
+def _merged_env(changes: Dict[str, Optional[str]], fold_case: bool) -> Tuple[Dict[str, str], Optional[str]]:
+    """
+    The ROCKETRIDE_* environment once ``changes`` are merged into the stored one.
+
+    Args:
+        changes:   From ``_env_changes``: a value sets, None deletes, the mask keeps.
+        fold_case: True on Windows, where the environment lists every name
+                   upper-cased: a sent name then addresses the stored one.
+
+    Returns:
+        The merged names and values and None, or an empty dict and the error
+        text when the mask names nothing stored or the locale cannot hold a
+        name or value.
+    """
+    env = {k: v for k, v in os.environ.items() if k.startswith('ROCKETRIDE_')}
+    if fold_case:
+        changes = {(k.upper() if k.upper() in env else k): v for k, v in changes.items()}
+    unmasked = sorted(k for k, v in changes.items() if v == ENV_MASK and k not in env)
+    if unmasked:
+        return {}, 'No stored value to keep for: ' + ', '.join(unmasked) + '. Send a value; nothing was saved.'
+    for name, value in changes.items():
+        if value is None:
+            env.pop(name, None)
+        elif value != ENV_MASK:
+            env[name] = value
+
+    # A name or value the process environment cannot hold (a non-ASCII
+    # one under an ASCII locale) is refused before anything is written
+    try:
+        for name, value in env.items():
+            os.environ.encodekey(name)
+            os.environ.encodevalue(value)
+    except UnicodeError:
+        return {}, "A name or value cannot be held in this engine's environment (its locale); nothing was saved."
+    return env, None
 
 
 class Account(AccountBase):
@@ -462,57 +532,12 @@ class Account(AccountBase):
             # The SDKs send update_env, which a server with the old full-replacement
             # set_env refuses as unknown instead of wiping what it was not sent
             if sub in ('set_env', 'update_env'):
-                raw, deleted = args.get('env', {}), args.get('delete', [])
-                if not isinstance(raw, dict) or not isinstance(deleted, list):
-                    return conn.build_error(request, '`env` must be an object and `delete` a list; nothing was saved.')
-                changes = dict(raw)
-                if not all(isinstance(name, str) for name in deleted):
-                    return conn.build_error(request, 'Environment names and values must be strings; nothing was saved.')
-                changes.update({name: None for name in deleted})
-                if not all(isinstance(k, str) and (v is None or isinstance(v, str)) for k, v in changes.items()):
-                    return conn.build_error(request, 'Environment names and values must be strings; nothing was saved.')
-                rejected = sorted(k for k in changes if not ENV_NAME.fullmatch(k))
-                if rejected:
-                    # Names only: the values are secrets and must not reach the client.
-                    return conn.build_error(
-                        request,
-                        'Unsupported environment variable name(s): '
-                        + ', '.join(rejected)
-                        + ". Names begin with 'ROCKETRIDE_' and hold no whitespace, '=', '#', quote or NUL;"
-                        ' nothing was saved.',
-                    )
-                # A .env line ends at a line break, the environment at a NUL, and
-                # load_dotenv expands '${', quoted or not
-                if any(v is not None and (any(c in v for c in '\0\r\n') or '${' in v) for v in changes.values()):
-                    return conn.build_error(
-                        request,
-                        "Environment values cannot contain a line break, NUL or '${' (the .env loader expands it);"
-                        ' nothing was saved.',
-                    )
-                env = {k: v for k, v in os.environ.items() if k.startswith('ROCKETRIDE_')}
-                unmasked = sorted(k for k, v in changes.items() if v == ENV_MASK and k not in env)
-                if unmasked:
-                    return conn.build_error(
-                        request,
-                        'No stored value to keep for: ' + ', '.join(unmasked) + '. Send a value; nothing was saved.',
-                    )
-                for name, value in changes.items():
-                    if value is None:
-                        env.pop(name, None)
-                    elif value != ENV_MASK:
-                        env[name] = value
-
-                # A name or value the process environment cannot hold (a non-ASCII
-                # one under an ASCII locale) is refused before anything is written
-                try:
-                    for name, value in env.items():
-                        os.environ.encodekey(name)
-                        os.environ.encodevalue(value)
-                except UnicodeError:
-                    return conn.build_error(
-                        request,
-                        "A name or value cannot be held in this engine's environment (its locale); nothing was saved.",
-                    )
+                changes, error = _env_changes(args)
+                if error:
+                    return conn.build_error(request, error)
+                env, error = _merged_env(changes, os.name == 'nt')
+                if error:
+                    return conn.build_error(request, error)
 
                 # Step 1: Persist to the .env file first, so a file that cannot be
                 # read or written leaves memory as it was. Use sys.executable
@@ -570,6 +595,9 @@ class Account(AccountBase):
         for k, v in sorted(env.items()):
             if k not in written_keys:
                 lines.append(_env_line(k, v))
+
+        # A symlinked .env is swapped at its target, so the link survives
+        path = os.path.realpath(path)
 
         # Written whole to a temporary file, then swapped in: a failed write
         # leaves the old .env as it was

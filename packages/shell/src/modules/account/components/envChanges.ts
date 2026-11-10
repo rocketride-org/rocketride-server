@@ -3,8 +3,7 @@
 // Copyright (c) 2026 Aparavi Software AG
 // =============================================================================
 
-/** What the server answers in place of each stored value. */
-export const ENV_MASK = '••••••••';
+import { CONST_ENV_MASK } from 'rocketride';
 
 /**
  * The changes a saved draft makes to a scope's environment.
@@ -39,7 +38,7 @@ export function envChanges(draft: [string, string][], stored: Record<string, str
 export function savedEnv(changes: Record<string, string | null>): Record<string, string> {
 	const saved: Record<string, string> = {};
 	for (const [key, value] of Object.entries(changes)) {
-		if (value !== null) saved[key] = ENV_MASK;
+		if (value !== null) saved[key] = CONST_ENV_MASK;
 	}
 	return saved;
 }
