@@ -91,6 +91,7 @@
 			"type": "string",
 			"title": "Graph name",
 			"default": "rocketride",
+			"minLength": 1,
 			"description": "Name of the AGE graph to query in your RocketRide cloud database"
 		},
 		"rocketridegraph.max_attempts": {
