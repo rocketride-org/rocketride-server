@@ -58,6 +58,7 @@ import type { StoredApp } from './session/appStore';
 import { createWebAppBuilderHost } from './session/webHost';
 import { createDevPreviewPage } from './session/devPreviewPage';
 import { WebDevSession } from './session/devSession';
+import { answerPreviewMessage } from './session/previewHandshake';
 
 // =============================================================================
 // STYLES
@@ -275,7 +276,7 @@ const AppBuilderProvider: React.FC<{
 	// ── Preview handshake + feed routing ─────────────────────────────────
 	// The embedded (or debug-tab) dev shell posts shell:devReady, waits for
 	// rrdev:auth (its token store is frame-local in-memory), then the
-	// session adopts it as the injection target.
+	// session adopts it as the injection target (previewHandshake.ts).
 	useEffect(() => {
 		if (!session) return;
 		const handler = (e: MessageEvent): void => {
@@ -283,23 +284,18 @@ const AppBuilderProvider: React.FC<{
 			const fromDebug = debugWindowRef.current && e.source === debugWindowRef.current;
 			if (!fromIframe && !fromDebug) return;
 			const data = e.data as { type?: string } | undefined;
-			if (data?.type === 'shell:devReady') {
-				// step: ALWAYS answer with the definitive session state ('' =
-				// signed out) so any embedded dev shell boots authenticated.
-				// The answer applies the preview-session precedence (explicit
-				// preview sign-in > Inherit Auth > none — see above).
-				(e.source as Window).postMessage({ type: 'rrdev:auth', token: previewSessionToken() }, window.location.origin);
-				// step: the embedded preview and the debug tab both become
-				// the linked-injection target
-				void session.attachPreview(e.source as Window);
-			} else if (data?.type === 'rrdev:signedOut') {
+			if (data?.type === 'rrdev:signedOut') {
 				// The preview user signed out: drop the preview session, or
 				// the next devReady answer would resurrect it and make
 				// sign-out impossible to test.
 				setPreviewToken('');
-			} else {
-				session.handlePreviewMessage(e.data as Record<string, unknown>);
+				return;
 			}
+			// step: the embedded preview and the debug tab both become the
+			// linked-injection target. The devReady answer applies the
+			// preview-session precedence (explicit preview sign-in > Inherit
+			// Auth > none — see above).
+			void answerPreviewMessage(session, e.source as Window, e.data, previewSessionToken);
 		};
 		window.addEventListener('message', handler);
 		return () => window.removeEventListener('message', handler);
