@@ -115,6 +115,17 @@ async def test_pre_release_rungs_never_affect_the_aggregate():
     assert '/preview-only' not in _paths(agg) and '/pricing' in _paths(agg)
 
 
+@pytest.mark.parametrize('blocked', [{'state': 'disabled'}, {'artifact_state': 'rejected'}, {'build': 'failed'}])
+async def test_a_blocked_row_that_wins_precedence_does_not_hide_a_serving_one(blocked):
+    # The store walk drops rows that do not serve, then picks each app's winner
+    # among the rest. A lower org id wins precedence, so a blocked row there
+    # must not drop an app the store still serves from the platform org.
+    acct = hostile_account()
+    acct.add('00000000-aaaa', 'rocketride.home', HOME_MANIFEST, **blocked)
+    published = {p.app_id: p for p in await load_published(acct)}
+    assert published['rocketride.home'].dist_dir.startswith('orgs/00000000-platform/')
+
+
 # ---------------------------------------------------------------------------
 # Legacy fallback
 # ---------------------------------------------------------------------------
