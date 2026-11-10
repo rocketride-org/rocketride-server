@@ -605,7 +605,7 @@ class WebServer:
         authenticators first, then falls back to the built-in account authenticator.
 
         Authentication Flow:
-        1. Extract authorization from header or query parameter
+        1. Extract authorization from the Authorization header
         2. Try each registered authenticator in order
         3. If all fail, try built-in account authentication
         4. On success: Store account info in request.state and return None
@@ -741,13 +741,13 @@ class WebServer:
         # Step 1: Extract Authorization Credentials
         # ============================================================================
 
-        # Try to get authorization from the Authorization header (standard approach)
+        # The credential rides the Authorization header and NOTHING else: a
+        # query-string credential lands in access logs, browser history and
+        # Referer headers, so ``?auth=`` is not honored on any HTTP door.
+        # (WebSocket clients authenticate with a DAP auth message after
+        # connecting; the shell's one-shot app-page hand-off is consumed
+        # client-side and never reaches a request.)
         authorization = request.headers.get('authorization', '')
-
-        # Fallback: Check query parameters for 'auth' (used by browsers/WebSocket clients
-        # that can't easily set custom headers)
-        if not authorization:
-            authorization = request.query_params.get('auth', None)
 
         # If no authorization credentials provided at all, reject immediately
         if not authorization:

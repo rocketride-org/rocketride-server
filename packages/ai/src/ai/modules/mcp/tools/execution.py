@@ -28,7 +28,6 @@ normalizer's hard-failure set.
 
 import asyncio
 from typing import Any, Dict
-from urllib.parse import urlencode
 
 from ..apps import DROPPER_URI
 from ..errors import _bad, _timeout
@@ -178,47 +177,35 @@ async def _run_pipeline(client, tasks, args: Dict[str, Any]) -> dict:
 
 
 async def _run_dropper_pipe(client, tasks, args: Dict[str, Any]) -> dict:
-    """Start a pipeline and return a self-contained upload URL.
+    """Start a pipeline and return its address and a credential-free upload URL.
 
     Bytes cannot ride the MCP tool call (transport payload limits), so this
-    tool returns an HTTP endpoint an out-of-band uploader POSTs files to. The
-    URL embeds only the task's public auth key (``pk_``) — ``/task/data``
-    resolves the task from it, so it needs no ``Authorization`` header and no
-    routing token. The ``tk_`` control token deliberately never appears in a
-    URL: query strings land in access logs, browser history, and ``Referer``
-    headers. Unlike ``run_pipeline`` there is no inline-send path.
+    tool returns the HTTP endpoint an out-of-band uploader POSTs files to:
+    ``/task/data/{address}``, authenticated with an ``rr_`` key in the
+    ``Authorization`` header. No credential ever rides a URL (query strings
+    land in access logs, browser history and ``Referer`` headers). The
+    caller-minted scoped upload key for the sandboxed widget is the widget
+    work package; until it lands the widget cannot upload. Unlike
+    ``run_pipeline`` there is no inline-send path.
     """
     started, err = await _start_task(client, args, 'run_dropper_pipe')
     if err:
         return err
 
-    token = started.get('token')
-    public_token = started.get('publicToken')
-    if not token:
+    address = started.get('token')
+    if not address:
         return _bad(
-            'engine did not return a task token for the dropper URL',
+            'engine did not return a task address for the dropper URL',
             'the pipeline may have failed to start, or the engine response was malformed',
         )
-    if not public_token:
-        # The task is already running engine-side and the caller gets no
-        # token back to terminate with -- tear it down rather than orphan it
-        # until its ttl expires (or forever, when ttl is 0).
-        try:
-            await asyncio.wait_for(client.terminate(token), timeout=DEFAULT_TIMEOUT_SECONDS)
-        except Exception:  # noqa: BLE001 - best-effort cleanup on an already-failed call
-            pass
-        return _bad(
-            'engine did not return public auth for the dropper URL',
-            'the pipeline may lack a data-ingress source, or the engine response was malformed',
-        )
-    tasks.add(token, pipeline_ref='<inline>')
+    tasks.add(address, pipeline_ref='<inline>')
 
     base_url = str(client.base_url).rstrip('/')
     result_payload: Dict[str, Any] = {
         'ok': True,
-        'task_token': token,
-        'upload_url': f'{base_url}/task/data?{urlencode({"auth": public_token})}',
-        'dropper_url': f'{base_url}/dropper?{urlencode({"auth": public_token})}',
+        'task_token': address,
+        'address': address,
+        'upload_url': f'{base_url}/task/data/{address}',
         'projectId': started.get('projectId'),
         'source': started.get('source'),
     }

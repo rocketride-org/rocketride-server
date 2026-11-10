@@ -79,7 +79,6 @@ from .commands.cmd_store import StoreCommands
 from ai.account.models import (
     AccountInfo,
     RequestContext,
-    resolve_run_permissions,
     resolve_task_permissions,
     resolve_team_permissions,
 )
@@ -88,7 +87,7 @@ from ai.common.account import AccountPipelineValidation
 # Only import for type checking to avoid circular import errors
 if TYPE_CHECKING:
     from .task_engine import Task
-    from .task_server import TaskServer
+    from .task_server import TaskServer, TASK_CONTROL
 
 """
 Permissions Management
@@ -391,8 +390,8 @@ class TaskConn(
         environment layering only. Commands that target a SPECIFIC object
         use verify_team_permission against the addressed team instead.
 
-        Task-scoped synthetic identities are unchanged by the union: their
-        organization carries exactly the run's one team.
+        The deploy dispatch's synthetic identities are unchanged by the union:
+        their organization carries exactly the run's one team.
         """
         if not self._account_info:
             return False
@@ -534,84 +533,71 @@ class TaskConn(
 
         return True
 
-    def get_task_token(self, request: Dict[str, Any], permissions: str = '') -> str:
+    def get_task_address(self, request: Dict[str, Any]) -> str:
         """
-        Retrieve the task token associated with a command request and verify permissions if needed.
+        Read the task address from a command request's token slot.
+
+        Clients send the address (``developerId.pipelineId[.source]``) in
+        ``arguments.token`` — the slot that once carried a task token. No
+        credential type locks a connection to a task: every request names
+        its task and is authorized against it.
 
         Args:
-            request (Dict[str, Any]): The command request containing task token
-            token (str): The task token to look up.
+            request (Dict[str, Any]): The command request.
 
         Returns:
-            TASK: The task instance corresponding to the token.
+            str: The address as sent (validated by the resolver).
 
         Raises:
-            KeyError: If the task with the specified token does not exist.
+            PermissionError: The connection is not authenticated.
         """
         if not self._account_info:
             raise PermissionError('Not authenticated')
-        # If we authenticated with a public key, we are locked to that task
-        if self._account_info.auth.startswith('pk_'):
-            control = self._server.get_task_control_by_public_key(self._account_info.auth)
-            return control.token
-
-        # If we authenticated with a task token, we are locked to that task
-        if self._account_info.auth.startswith('tk_'):
-            return self._account_info.auth
-
-        # Extract token from arguments, falling back to request root
-        # for backward compatibility with older clients.
         args = request.get('arguments') or {}
-        token = args.get('token') or request.get('token')
+        return args.get('token') or ''
 
-        # Permission checks are deferred to get_task() / callers where the
-        # task's team is known, so we can resolve against the correct team.
-        return token
+    def get_control(self, request: Dict[str, Any], permissions: str = '') -> 'TASK_CONTROL':
+        """
+        Resolve the control a command request addresses, under this connection's account.
+
+        ONE path for every task-addressed command: the address from the
+        token slot, the request's account, and the required permission go
+        through ``TaskServer.resolve_control`` — which walks the caller's
+        rungs, checks the run-scoped permission on EVERY call (sys.admin
+        passes inside the resolver) and enforces a scoped key's endpoints.
+
+        Args:
+            request (Dict[str, Any]): The command request.
+            permissions (str): The permission the command needs.
+
+        Returns:
+            TASK_CONTROL: The resolved control.
+
+        Raises:
+            TaskError: Bad address grammar, or no rung answered.
+            PermissionError: Unauthenticated, no permission, or outside the
+                key's endpoints scope.
+        """
+        address = self.get_task_address(request)
+        return self._server.resolve_control(address, self._account_info, permissions or None)
 
     def get_task(self, request: Dict[str, Any], permissions: str = '') -> 'Task':
         """
-        Retrieve the task instance associated with the given request.
-
-        If a task token is specified in request.arguments:
-            - If the initial auth token is an apikey, no problem
-            - If the initial auth token is a task or public key token,
-            the token pass here must match (no cross task access)
-        If a task token is not specfied, we use the initial auth token
+        Retrieve the task instance a command request addresses.
 
         Args:
-            apikey (str): API key for authentication.
-            token (str): The task token to look up.
+            request (Dict[str, Any]): The command request (address in ``arguments.token``).
+            permissions (str): The permission the command needs.
 
         Returns:
-            TASK: The task instance corresponding to the token.
+            Task: The task behind the resolved control.
 
         Raises:
-            KeyError: If the task with the specified token does not exist.
+            TaskError: Bad address grammar, or no rung answered.
+            PermissionError: Unauthenticated, no permission, or outside the
+                key's endpoints scope.
         """
-        # Get the token
-        token = self.get_task_token(request, permissions)
-
-        # Get the task control and verify access for API key auth
-        control = self._server.get_task_control(token)
-
-        # pk_ and tk_ auth are already scoped to their task by get_task_token.
-        # For all other auth types, resolve permissions against the task's team.
-        # sys.admin bypasses all team permission checks.
-        if self._account_info and not self._account_info.auth.startswith(('pk_', 'tk_')):
-            if 'sys.admin' not in (self._account_info.sysPermissions or []):
-                # Run-scoped resolution: a USER-owned run (dev or @me deploy)
-                # is private — full access for its owner (surviving an org
-                # switch: the owner is unchanged even when the run's team is
-                # now foreign), none for anyone else, and the billing teamId
-                # never grants a teammate access. Team-owned runs resolve
-                # through team membership.
-                perms = resolve_run_permissions(self._account_info, control)
-                if not perms:
-                    raise PermissionError('Access denied: no permissions for this task')
-                if permissions and permissions not in perms:
-                    raise PermissionError(f'Permission {permissions!r} denied for this task')
-
-        return control.task
+        return self.get_control(request, permissions).task
 
     def get_connection_id(self) -> int:
         """

@@ -192,7 +192,7 @@ class MonitorCommands(DAPConn):
     async def send_task_event(
         self,
         event_type: EVENT_TYPE,
-        token: str,
+        key: str,
         event: Dict[str, Any] = None,
     ) -> None:
         """
@@ -205,13 +205,13 @@ class MonitorCommands(DAPConn):
         Args:
             type (EVENT_TYPE): The type/category of the event being forwarded
             id (str): Unique identifier for the specific task instance
-            token (str): Unique task identifier associated with the event
+            key (str): The originating control's registry key
             event (Dict[str, Any]): The event payload containing:
                 - event: String identifier for the event type
                 - body: Event-specific data payload
 
         Event Routing Logic:
-        - Events are only sent to monitors with matching apikey:token subscriptions
+        - Events are only sent to monitors subscribed to the run's owner-scoped key
         - No forwarding occurs if no monitors are subscribed to the task
         """
 
@@ -242,8 +242,8 @@ class MonitorCommands(DAPConn):
             # protocol (each connection mints its own header seq).
             await self.send_event(evt_name, id=control.id, body=body)
 
-        # Get the task by token
-        control = self._server.get_task_control(token)
+        # Get the task by its registry key
+        control = self._server.control_by_key(key)
 
         # Verify we are allowed to receive events for this task - for SSE events, it requires data
         # access, for all others, it's monitor access
@@ -476,14 +476,10 @@ class MonitorCommands(DAPConn):
             if project_id or source:
                 raise ValueError('You must specifiy either token or project_id/source, not both')
 
-            # Resolve the token to a project key
-            control = self._server.get_task_control(token)
-
-            # Verify the caller may reach this run (run-scoped: a user-owned
-            # run is subscribable only by its owner; a team-owned run by
-            # anyone with permissions on the run's team)
-            if not resolve_run_permissions(self._account_info, control):
-                raise PermissionError('Access denied: no permissions for this task')
+            # Resolve the address under the caller's account (run-scoped: a
+            # user-owned run is subscribable only by its owner; a team-owned
+            # run by anyone with task.monitor on the run's team)
+            control = self._server.resolve_control(token, self._account_info, 'task.monitor')
 
             # Build the key from the resolved run's OWNER so subscribe and
             # delivery agree regardless of how the subscription was addressed
@@ -665,8 +661,8 @@ class MonitorCommands(DAPConn):
                     print(f"Warning: Unknown event type '{event_str}' ignored")
             return bitmask
 
-        # Verify permission
-        token = self.get_task_token(request, 'task.monitor')
+        # The address (token slot), if the subscription is task-addressed
+        token = self.get_task_address(request)
 
         # Parse monitoring configuration from request arguments
         args = request.get('arguments', {})

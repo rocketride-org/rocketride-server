@@ -17,7 +17,13 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from ai.account.models import AccountInfo
 from ai.modules.task.task_server import TaskServer, TASK_CONTROL
+
+ADDRESS = 'acme.project-1.src'
+KEY = f'dev.user-1.{ADDRESS}'
+# The identity every launch in this module runs as.
+IDENTITY = dict(client_id='user-1', user_id='user-1', team_id='team-1', org_id='org-1', developer_id='acme')
 
 
 def _make_server():
@@ -32,7 +38,6 @@ def _make_server():
     ts._store_instance = None
     ts._config = {}
     ts._server = MagicMock()
-    ts._server.account.generate_token.return_value = 'pk_public'
     ts.debug_message = MagicMock()
     return ts
 
@@ -49,44 +54,58 @@ def _pipeline(model='gpt-4.1-mini'):
 
 
 def _running(pipeline):
-    """A TASK_CONTROL whose task reports itself as still running."""
+    """A TASK_CONTROL whose task reports itself as still running, owned by user-1."""
     control = TASK_CONTROL()
-    control.token = 'tk_test'
-    control.id = 'abcd1234.src'
+    control.key = KEY
+    control.address = ADDRESS
+    control.id = ADDRESS
+    control.developer_id = 'acme'
+    control.userId = 'user-1'
+    control.teamId = 'team-1'
+    control.run_kind = 'dev'
+    control.owner_kind = 'user'
     control.project_id = 'project-1'
     control.source = 'src'
     control.provider = 'webhook'
-    control.public_auth = 'pk_public'
     control.pipeline = pipeline
     control.task = MagicMock()
     control.task.is_task_complete.return_value = False
     return control
 
 
+def _owner():
+    """The owner's session: a restart resolves the address under it."""
+    return AccountInfo(
+        auth='rr_key',
+        userId='user-1',
+        organization={'id': 'org-1', 'name': '', 'permissions': [], 'teams': [], 'developerId': 'acme'},
+    )
+
+
 def _request(pipeline):
     return {
         'command': 'launch',
-        'arguments': {'token': 'tk_test', 'pipeline': pipeline, 'useExisting': True},
+        'arguments': {'pipeline': pipeline, 'useExisting': True},
     }
 
 
 @pytest.mark.asyncio
 async def test_reused_flag_marks_an_instance_that_was_already_running():
     ts = _make_server()
-    ts._task_control['tk_test'] = _running(_pipeline())
+    ts._task_control[KEY] = _running(_pipeline())
 
-    result = await ts.start_task(_request(_pipeline()), conn=MagicMock())
+    result = await ts.start_task(_request(_pipeline()), conn=MagicMock(), **IDENTITY)
 
     assert result['reused'] is True
-    assert result['token'] == 'tk_test'
+    assert result['token'] == ADDRESS
 
 
 @pytest.mark.asyncio
 async def test_a_differing_pipeline_is_reported_as_ignored():
     ts = _make_server()
-    ts._task_control['tk_test'] = _running(_pipeline(model='gpt-4.1-mini'))
+    ts._task_control[KEY] = _running(_pipeline(model='gpt-4.1-mini'))
 
-    await ts.start_task(_request(_pipeline(model='claude-opus-5')), conn=MagicMock())
+    await ts.start_task(_request(_pipeline(model='claude-opus-5')), conn=MagicMock(), **IDENTITY)
 
     said = ' '.join(str(call) for call in ts.debug_message.call_args_list)
     assert 'ignoring the submitted pipeline' in said
@@ -95,9 +114,9 @@ async def test_a_differing_pipeline_is_reported_as_ignored():
 @pytest.mark.asyncio
 async def test_an_identical_pipeline_is_reused_without_the_notice():
     ts = _make_server()
-    ts._task_control['tk_test'] = _running(_pipeline())
+    ts._task_control[KEY] = _running(_pipeline())
 
-    result = await ts.start_task(_request(_pipeline()), conn=MagicMock())
+    result = await ts.start_task(_request(_pipeline()), conn=MagicMock(), **IDENTITY)
 
     said = ' '.join(str(call) for call in ts.debug_message.call_args_list)
     assert 'ignoring the submitted pipeline' not in said
@@ -117,20 +136,19 @@ async def test_the_restarted_pipeline_is_what_a_later_reuse_compares_against():
     ts = _make_server()
     control = _running(_pipeline(model='gpt-4.1-mini'))
     control.teamId = ''
-    ts._task_control['tk_test'] = control
-    ts.get_task_control = lambda token: control
+    ts._task_control[KEY] = control
     control.task.restart_task = AsyncMock()
     control.task.has_attached_debugger.return_value = False
 
     restarted = _pipeline(model='claude-opus-5')
     conn = MagicMock()
-    conn._account_info = None
-    await ts.restart_task({'arguments': {'token': 'tk_test', 'pipeline': restarted}}, conn=conn)
+    conn._account_info = _owner()
+    await ts.restart_task({'arguments': {'token': ADDRESS, 'pipeline': restarted}}, conn=conn)
 
     assert control.pipeline == restarted
 
     ts.debug_message.reset_mock()
-    await ts.start_task(_request(restarted), conn=MagicMock())
+    await ts.start_task(_request(restarted), conn=MagicMock(), **IDENTITY)
     said = ' '.join(str(call) for call in ts.debug_message.call_args_list)
     assert 'ignoring the submitted pipeline' not in said
 
@@ -146,8 +164,7 @@ async def test_a_restart_stores_the_pipeline_in_the_shape_a_launch_would():
     ts = _make_server()
     control = _running(_pipeline())
     control.teamId = ''
-    ts._task_control['tk_test'] = control
-    ts.get_task_control = lambda token: control
+    ts._task_control[KEY] = control
     control.task.restart_task = AsyncMock()
     control.task.has_attached_debugger.return_value = False
 
@@ -158,8 +175,8 @@ async def test_a_restart_stores_the_pipeline_in_the_shape_a_launch_would():
         'components': [{'id': 'src', 'provider': 'webhook'}, {'id': 'llm', 'provider': 'llm_openai'}],
     }
     conn = MagicMock()
-    conn._account_info = None
-    await ts.restart_task({'arguments': {'token': 'tk_test', 'pipeline': raw}}, conn=conn)
+    conn._account_info = _owner()
+    await ts.restart_task({'arguments': {'token': ADDRESS, 'pipeline': raw}}, conn=conn)
 
     assert control.pipeline['source'] == 'src'
     assert control.pipeline['components'][0]['config'] == {}
@@ -172,8 +189,9 @@ async def test_a_restart_stores_the_pipeline_in_the_shape_a_launch_would():
         'components': [{'id': 'src', 'provider': 'webhook'}, {'id': 'llm', 'provider': 'llm_openai'}],
     }
     await ts.start_task(
-        {'command': 'launch', 'arguments': {'token': 'tk_test', 'pipeline': resubmitted, 'useExisting': True}},
+        {'command': 'launch', 'arguments': {'pipeline': resubmitted, 'useExisting': True}},
         conn=MagicMock(),
+        **IDENTITY,
     )
     said = ' '.join(str(call) for call in ts.debug_message.call_args_list)
     assert 'ignoring the submitted pipeline' not in said
@@ -192,17 +210,16 @@ async def test_an_invalid_pipeline_is_refused_before_the_task_is_stopped():
     original = _pipeline()
     control = _running(original)
     control.teamId = ''
-    ts._task_control['tk_test'] = control
-    ts.get_task_control = lambda token: control
+    ts._task_control[KEY] = control
     control.task.restart_task = AsyncMock()
     control.task.has_attached_debugger.return_value = False
 
     # The source component the control names is not in this pipeline.
     broken = {'project_id': 'project-1', 'components': [{'id': 'other', 'provider': 'webhook'}]}
     conn = MagicMock()
-    conn._account_info = None
+    conn._account_info = _owner()
     with pytest.raises(ValueError):
-        await ts.restart_task({'arguments': {'token': 'tk_test', 'pipeline': broken}}, conn=conn)
+        await ts.restart_task({'arguments': {'token': ADDRESS, 'pipeline': broken}}, conn=conn)
 
     control.task.restart_task.assert_not_awaited()
     assert control.pipeline is original, 'the record still describes what is running'
@@ -220,8 +237,7 @@ async def test_a_restart_cannot_change_the_source():
     ts = _make_server()
     control = _running(_pipeline())
     control.teamId = ''
-    ts._task_control['tk_test'] = control
-    ts.get_task_control = lambda token: control
+    ts._task_control[KEY] = control
     control.task.restart_task = AsyncMock()
     control.task.has_attached_debugger.return_value = False
 
@@ -231,8 +247,8 @@ async def test_a_restart_cannot_change_the_source():
         'components': [{'id': 'src', 'provider': 'webhook'}, {'id': 'llm', 'provider': 'llm_openai'}],
     }
     conn = MagicMock()
-    conn._account_info = None
+    conn._account_info = _owner()
     with pytest.raises(ValueError, match='source'):
-        await ts.restart_task({'arguments': {'token': 'tk_test', 'pipeline': other_source}}, conn=conn)
+        await ts.restart_task({'arguments': {'token': ADDRESS, 'pipeline': other_source}}, conn=conn)
 
     control.task.restart_task.assert_not_awaited()

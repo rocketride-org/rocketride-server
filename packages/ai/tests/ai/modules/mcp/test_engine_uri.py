@@ -226,8 +226,10 @@ async def test_dropper_links_use_resolved_origin(monkeypatch, fake_web_server, f
     )
 
     assert result['ok'] is True, result
-    assert result['upload_url'].startswith(f'{origin}/task/data?auth=')
-    assert result['dropper_url'].startswith(f'{origin}/dropper?auth=')
+    # The address rides the path; no credential ever rides a URL.
+    assert result['upload_url'] == f'{origin}/task/data/{result["address"]}'
+    assert '?' not in result['upload_url']
+    assert 'dropper_url' not in result
 
 
 # ---------------------------------------------------------------------------

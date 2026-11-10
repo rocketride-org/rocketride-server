@@ -5,7 +5,9 @@ from typing import Dict, List, Union, Optional, Coroutine
 from pydantic import BaseModel
 from rocketlib import Entry, getObject
 from ai.constants import CONST_HTTP_CHUNK_SIZE
-from ai.web import WebServer, exception, response, Request, Query, Header, formatException
+from ai.web import WebServer, exception, response, Request, Header, formatException
+from ai.modules.task.address import check_endpoint_scope, parse_address
+from ai.modules.task.types import TaskError
 from fastapi.responses import Response
 from starlette.datastructures import UploadFile
 from rocketride import RocketRideClient
@@ -30,16 +32,22 @@ class RequestProcessing:
     through standalone pipes without temporary files or memory buffering.
     """
 
-    def __init__(self, client: RocketRideClient, token: str):
+    def __init__(self, client: RocketRideClient, address: str, params: Optional[Dict[str, str]] = None):
         """
         Initialize the RequestProcessing instance.
 
         Args:
             client: Connected RocketRideClient instance for processing data
-            token: Token for data pipe operations
+            address: The task address (``developerId.pipelineId.source``) the
+                data goes to — what the SDK sends in the token slot
+            params: The caller's per-call parameters from the query string,
+                already filtered of reserved names. Held on the processor;
+                delivery into the pipe open rides the per-call allow-list in
+                ``cmd_data`` (the params work package), not the object metadata.
         """
         self._client = client
-        self._token = token
+        self._token = address
+        self.params: Dict[str, str] = dict(params or {})
 
     async def _send_stream(
         self, request: Request, unique_key: str = 'body'
@@ -412,7 +420,7 @@ class RequestProcessing:
             # Get the MIME type from the request to determine processing method
             mimeType = self._getMimeRequestType(request)
 
-            self._client.debug_message(f'Processing request with MIME type: {mimeType} using token: "{self._token}"')
+            self._client.debug_message(f'Processing request with MIME type: {mimeType} for "{self._token}"')
 
             # Simple routing logic: multipart form or raw stream
             if mimeType == 'multipart/form-data':
@@ -429,108 +437,137 @@ class RequestProcessing:
             return exception(e)
 
 
+# Query-string names that are NOT parameters: addressing and credentials
+# never ride the query string on this door. ``teamId``/``runKind`` (rung
+# selectors) are unreachable by design — the resolver walks the caller's rungs
+# — ``auth`` is retired (log-exposed) and ``token`` is the path segment.
+RESERVED_QUERY_NAMES = frozenset({'teamId', 'runKind', 'auth', 'token'})
+
+
+def _address_of(request: Request) -> str:
+    """
+    The task address this request names: the path segment, else the ONE
+    endpoint a scoped key carries.
+
+    ``/webhook/{address}`` and ``/task/data/{address}`` carry the dotted
+    address in a single path segment. The bare ``/webhook`` is allowed ONLY
+    when the key carries exactly one exact ``endpoints`` entry: the key
+    already names the pipe, so the path need not repeat it; a full key (or
+    an any-source scope) must give the address.
+
+    Args:
+        request: The authenticated request (``request.state.account`` set).
+
+    Returns:
+        The address as a string (validated by the resolver downstream).
+
+    Raises:
+        TaskError: ``TASK_INVALID_ARGUMENT`` when neither names an address.
+    """
+    address = request.path_params.get('address')
+    if address:
+        parse_address(address)
+        return str(address)
+    endpoints = getattr(request.state.account, 'endpoints', None)
+    if endpoints and len(endpoints) == 1 and not str(endpoints[0]).endswith('.*'):
+        return str(endpoints[0])
+    raise TaskError(
+        TaskError.INVALID_ARGUMENT,
+        'A task address is required: POST /webhook/{developerId.pipelineId.source} '
+        '(the bare /webhook serves only a key scoped to exactly one endpoint)',
+        field='address',
+    )
+
+
+def _params_of(request: Request) -> Dict[str, str]:
+    """
+    The caller's per-call parameters from the query string.
+
+    Reserved names are refused outright (never silently dropped): a request
+    that tries to steer the rung or carry a credential in the URL is an
+    error, not a different call.
+
+    Args:
+        request: The incoming request.
+
+    Returns:
+        The remaining ``name -> value`` pairs (last value wins per name).
+
+    Raises:
+        TaskError: ``TASK_INVALID_ARGUMENT`` naming the reserved parameter.
+    """
+    params: Dict[str, str] = {}
+    for name, value in request.query_params.items():
+        if name in RESERVED_QUERY_NAMES:
+            raise TaskError(
+                TaskError.INVALID_ARGUMENT,
+                f'{name!r} is not a parameter on this door: the address rides the path and the '
+                'credential the Authorization header',
+                field=name,
+            )
+        params[str(name)] = str(value)
+    return params
+
+
 async def task_Data(
     request: Request,
-    token: Optional[str] = Query(None, description='Token returned from task execute'),
-    teamId: Optional[str] = Query(None, description="Address the team's DEPLOY run of the path's project/source"),
-    runKind: Optional[str] = Query(
-        None,
-        description="Teamless continuum selector: absent/'dev' = the caller's dev run, 'deploy' = the caller's personal @me deploy run",
-    ),
     authorization: Optional[str] = Header(
         None,
-        description='Credential via Authorization header. Optional: may instead be supplied as the '
-        '?auth= query param, which AuthMiddleware also accepts.',
+        description='The account API key (rr_) as a Bearer credential. Header ONLY: there is no '
+        'query-string credential on this door.',
     ),
 ) -> Response:
     r"""
     Process data uploads through RocketRide pipelines.
 
+    ONE path form: the dotted task address in a single segment
+    (``/task/data/{address}``, alias ``/webhook/{address}``). The door runs
+    the same account -> resolver -> permission path as the DAP ``send``: the
+    caller's account resolves the address across its rungs, a scoped key is
+    held to its ``endpoints``, and the caller is who pays.
+
     This endpoint handles two types of uploads:
     1. Multipart form data with files and text fields
     2. Raw request body streams (PUT/POST with direct content)
 
+    Query-string parameters are per-call parameters (filtered of the
+    reserved names ``teamId``/``runKind``/``auth``/``token``).
+
     Args:
         request (Request): The FastAPI request object
-        token (str): Task token from pipeline execution
-        authorization (str): Bearer token in the Authorization header. May
-            instead be supplied as the ``?auth=`` query param (accepted by
-            AuthMiddleware) — used by out-of-band uploaders like the dropper
-            widget's self-contained upload URL, where no header can be set.
-            Prefer the header where possible: query strings can end up in
-            access logs and browser history.
+        authorization (str): ``Bearer <rr_ key>``; the ONLY place a credential
+            is accepted. Machine webhooks use the owner's SCOPED key
+            (``permissions=['task.data'], endpoints=[address]``).
 
     Example Usage:
         # Multipart form upload
-        curl -X POST "http://localhost:8000/task/data?token=task-123" \
-             -H "Authorization: Bearer your-api-key" \
-             -F "file=@document.pdf" \
-             -F "question=What is this about?"
-
-        # Query-param auth (no header available, e.g. dropper upload URL)
-        curl -X POST "http://localhost:8000/task/data?token=task-123&auth=your-public-key" \
-             -F "file=@document.pdf"
+        curl -X POST "http://localhost:8000/webhook/acme.docBrain.parsePDF"              -H "Authorization: Bearer $ROCKETRIDE_APIKEY"              -F "file=@document.pdf"              -F "question=What is this about?"
 
         # Raw stream upload (PUT or POST)
-        curl -X PUT "http://localhost:8000/task/data?token=task-123" \
-             -H "Authorization: Bearer your-api-key" \
-             -H "Content-Type: application/pdf" \
-             -H "Content-Disposition: attachment; filename=document.pdf" \
-             --data-binary @document.pdf
+        curl -X PUT "http://localhost:8000/task/data/acme.docBrain.parsePDF"              -H "Authorization: Bearer $ROCKETRIDE_APIKEY"              -H "Content-Type: application/pdf"              -H "Content-Disposition: attachment; filename=document.pdf"              --data-binary @document.pdf
 
-        # Text stream upload
-        curl -X POST "http://localhost:8000/task/data?token=task-123" \
-             -H "Authorization: Bearer your-api-key" \
-             -H "Content-Type: text/plain" \
-             -d "Some text content"
+        # A key scoped to exactly one endpoint may omit the address
+        curl -X POST "http://localhost:8000/webhook"              -H "Authorization: Bearer $ROCKETRIDE_APIKEY"              -H "Content-Type: text/plain"              -d "Some text content"
     """
     client = None
 
     try:
-        if token is None:
-            # Task-scoped credentials ARE the task — no project lookup needed
-            # (and none permitted: a pk_/tk_ key is locked to its run).
-            account = request.state.account
-            auth = getattr(account, 'auth', '') or ''
-            if auth.startswith('tk_'):
-                token = auth
-            elif auth.startswith('pk_'):
-                try:
-                    control = request.app.state.task.get_task_control_by_public_key(auth)
-                    token = control.token
-                except RuntimeError:
-                    # Missing-task case — fall through to the normal auth/404 path
-                    pass
-            else:
-                project_id = request.path_params.get('project_id')
-                source = request.path_params.get('source')
-                if project_id is not None and source is not None:
-                    try:
-                        # Owner-scoped resolution: teamId query ⇒ the team's
-                        # deploy run; absent ⇒ the caller's own run (dev by
-                        # default; the caller's @me deploy when runKind says
-                        # so). PermissionError propagates — an authenticated
-                        # caller must never resolve someone else's task token.
-                        control = request.app.state.task.get_task_control_by_project(
-                            project_id,
-                            source,
-                            account,
-                            require='task.data',
-                            team_id=teamId or '',
-                            run_kind=runKind or '',
-                        )
-                        token = control.token
-                    except RuntimeError:
-                        # Documented missing-task case ('Your pipeline is not
-                        # running') — fall back to token=None so the request takes
-                        # the normal auth/404 path. Anything else propagates.
-                        pass
+        # Step 1: the address (path, or the scoped key's one endpoint) and
+        # the per-call parameters — both refused before any connection opens
+        address = _address_of(request)
+        params = _params_of(request)
+
+        # Step 2: a scoped key is bound to its endpoints here, before the
+        # request ever reaches the engine
+        check_endpoint_scope(getattr(request.state.account, 'endpoints', None), address)
 
         # Get the WebServer instance from application state
         server: WebServer = request.app.state.server
         port = server.get_port()
 
-        # Create RocketRideClient instance for data streaming operations
+        # Create RocketRideClient instance for data streaming operations,
+        # authenticated as the caller: the DAP side resolves the address
+        # under this account and checks task.data on every call
         client = RocketRideClient(
             uri=f'http://localhost:{port}',
             auth=request.state.account.auth,
@@ -540,7 +577,7 @@ async def task_Data(
         await client.connect()
 
         # Create request processor
-        process = RequestProcessing(client, token)
+        process = RequestProcessing(client, address, params)
 
         # Process it
         result = await process.process(request)
@@ -558,23 +595,14 @@ async def task_Data(
 
 async def task_Process(
     request: Request,
-    token: Optional[str] = Query(None, description='Token returned from task execute'),
-    teamId: Optional[str] = Query(None, description="Address the team's DEPLOY run of the path's project/source"),
-    runKind: Optional[str] = Query(
-        None,
-        description="Teamless continuum selector: absent/'dev' = the caller's dev run, 'deploy' = the caller's personal @me deploy run",
-    ),
     authorization: Optional[str] = Header(
         None,
-        description='Credential via Authorization header. Optional: may instead be supplied as the '
-        '?auth= query param, which AuthMiddleware also accepts.',
+        description='The account API key (rr_) as a Bearer credential. Header ONLY.',
     ),
 ) -> DataResult:
     r"""
     Process data uploads through RocketRide pipelines.
 
-    DEPRECATED - Use /task/data.
+    DEPRECATED - Use /task/data/{address}.
     """
-    # Forward runKind too: without it a caller on this deprecated endpoint who
-    # means their @me deploy run resolves the dev run instead (or 404s).
-    return await task_Data(request=request, token=token, teamId=teamId, runKind=runKind, authorization=authorization)
+    return await task_Data(request=request, authorization=authorization)

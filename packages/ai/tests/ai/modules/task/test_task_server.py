@@ -12,7 +12,7 @@ Focus areas:
 - ``release_unauthed_slot`` — IP rate-limit slot accounting
 - ``_next_connection_id`` — monotonic id generator
 - ``assign_port`` / ``release_port`` — managed port pool
-- ``get_task_control`` / ``get_task_control_by_public_key`` / ``get_task``
+- ``control_by_key`` / ``_verify_control`` — registry lookup and the run-scoped check
 - ``_dapbase_on_connected`` / ``_dapbase_on_disconnected``
 - ``broadcast_server_event`` / ``broadcast_task_event`` — error tolerance
 - ``store`` property — lazy initialization
@@ -31,6 +31,9 @@ import pytest
 from ai.modules.task import task_server as task_server_module
 from ai.modules.task.task_server import TaskServer
 from ai.modules.task.types import TaskError
+
+# A registry key in the ``runKind.ownerId.address`` layout start_task builds.
+KEY = 'dev.user-1.acme.proj-1.src-1'
 
 
 def _make_server(*, config=None, web_server=None):
@@ -62,28 +65,32 @@ def _make_server(*, config=None, web_server=None):
     return ts
 
 
-def _make_control(*, token='tk_1', user_id='user-1', team_id='team-1', public_auth=None, task=None):
+def _make_control(*, key=KEY, user_id='user-1', team_id='team-1', task=None):
     """
-    Build a TASK_CONTROL-shaped stand-in carrying the attributes
-    TaskServer.get_task_control / get_task / get_task_control_by_public_key
-    read.
+    Build a TASK_CONTROL-shaped stand-in carrying the attributes the registry
+    lookups, the broadcast path and the cleanup loops read.
 
     Args:
-        token: task token (lookup key in ``_task_control``).
-        user_id: owner user id (used by cross-tenant checks).
+        key: registry key (``runKind.ownerId.address``; lookup key in ``_task_control``).
+        user_id: owner user id (used by run-scoped checks).
         team_id: owning team id (used by permission resolution).
-        public_auth: pk_-style public auth key, if any.
         task: the underlying Task stand-in (defaults to a MagicMock).
 
     Returns:
         SimpleNamespace: control structure stand-in.
     """
     return SimpleNamespace(
-        id='task-name',
-        token=token,
+        id='acme.proj-1.src-1',
+        key=key,
+        address='acme.proj-1.src-1',
+        developer_id='acme',
         userId=user_id,
         teamId=team_id,
-        public_auth=public_auth,
+        run_kind='dev',
+        owner_kind='user',
+        owner_id=user_id,
+        project_id='proj-1',
+        source='src-1',
         task=task or MagicMock(),
     )
 
@@ -463,128 +470,84 @@ def test_probe_port_never_reports_a_failed_bind_as_free(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# get_task_control / get_task_control_by_public_key / get_task
+# control_by_key / _verify_control
 # ---------------------------------------------------------------------------
 
 
-def test_get_task_control_returns_registered_control():
-    """A valid token returns the matching TASK_CONTROL structure."""
+def test_control_by_key_returns_registered_control():
+    """A registered key returns the matching TASK_CONTROL structure."""
     ts = _make_server()
-    control = _make_control(token='tk_1')
-    ts._task_control['tk_1'] = control
-    assert ts.get_task_control('tk_1') is control
+    control = _make_control()
+    ts._task_control[KEY] = control
+    assert ts.control_by_key(KEY) is control
 
 
-def test_get_task_control_missing_token_raises():
-    """An empty token raises ValueError before lookup."""
+def test_control_by_key_empty_key_carries_a_code():
+    """An empty key is simply not registered: TASK_NOT_REGISTERED, no ValueError."""
     ts = _make_server()
-    with pytest.raises(ValueError, match='Task token is required'):
-        ts.get_task_control('')
+    with pytest.raises(TaskError) as excinfo:
+        ts.control_by_key('')
+    assert excinfo.value.code == TaskError.NOT_REGISTERED
 
 
-def test_get_task_control_unknown_token_raises_runtime():
-    """An unknown but non-empty token raises RuntimeError."""
+def test_control_by_key_unknown_key_raises_runtime():
+    """An unknown key raises RuntimeError (existing handlers still catch it)."""
     ts = _make_server()
     with pytest.raises(RuntimeError, match='not running'):
-        ts.get_task_control('tk_unknown')
+        ts.control_by_key('dev.user-1.acme.proj-1.unknown')
 
 
-def test_get_task_control_unknown_token_carries_a_code():
+def test_control_by_key_unknown_key_carries_a_code():
     """The failure is classifiable without matching the English message (#2097)."""
     ts = _make_server()
     with pytest.raises(TaskError) as excinfo:
-        ts.get_task_control('tk_unknown')
+        ts.control_by_key('dev.user-1.acme.proj-1.unknown')
     assert excinfo.value.code == TaskError.NOT_REGISTERED
-    assert isinstance(excinfo.value, RuntimeError)  # existing handlers still catch it
+    assert isinstance(excinfo.value, RuntimeError)
 
 
-def test_get_task_control_by_public_key_unknown_carries_a_code():
-    """A public key naming no live task reports TASK_NOT_REGISTERED."""
-    ts = _make_server()
-    with pytest.raises(TaskError) as excinfo:
-        ts.get_task_control_by_public_key('pk_unknown')
-    assert excinfo.value.code == TaskError.NOT_REGISTERED
-
-
-def test_get_task_control_with_require_denies_without_membership(monkeypatch):
-    """No permissions on the task's team -> uniform access-denied error."""
+def test_verify_control_denies_without_membership(monkeypatch):
+    """No permissions on the run -> uniform access-denied error."""
     from ai.modules.task import task_server as ts_mod
 
     monkeypatch.setattr(ts_mod, 'resolve_run_permissions', lambda info, control: [])
-
-    ts = _make_server()
-    ts._task_control['tk_1'] = _make_control()
     account = SimpleNamespace(userId='u', devTeam='t', sysPermissions=[])
 
     with pytest.raises(PermissionError, match='no permissions for this task'):
-        ts.get_task_control('tk_1', account_info=account, require='task.debug')
+        TaskServer._verify_control(_make_control(), account, 'task.debug')
 
 
-def test_get_task_control_with_require_enforces_permission(monkeypatch):
+def test_verify_control_enforces_permission(monkeypatch):
     """Membership without the required permission raises PermissionError."""
     from ai.modules.task import task_server as ts_mod
 
     monkeypatch.setattr(ts_mod, 'resolve_run_permissions', lambda info, control: ['task.monitor'])
-
-    ts = _make_server()
-    ts._task_control['tk_1'] = _make_control()
     account = SimpleNamespace(userId='u', devTeam='t', sysPermissions=[])
 
     with pytest.raises(PermissionError, match="'task.debug' denied"):
-        ts.get_task_control('tk_1', account_info=account, require='task.debug')
+        TaskServer._verify_control(_make_control(), account, 'task.debug')
 
 
-def test_get_task_control_with_require_passes_when_granted(monkeypatch):
-    """A granted permission lets get_task_control return the control unmodified."""
+def test_verify_control_passes_when_granted(monkeypatch):
+    """A granted permission returns the control unmodified."""
     from ai.modules.task import task_server as ts_mod
 
     monkeypatch.setattr(ts_mod, 'resolve_run_permissions', lambda info, control: ['task.debug'])
-
-    ts = _make_server()
     control = _make_control()
-    ts._task_control['tk_1'] = control
     account = SimpleNamespace(userId='u', devTeam='t', sysPermissions=[])
 
-    assert ts.get_task_control('tk_1', account_info=account, require='task.debug') is control
+    assert TaskServer._verify_control(control, account, 'task.debug') is control
 
 
-def test_get_task_control_with_require_sys_admin_bypasses():
-    """sys.admin is granted INSIDE resolve_task_permissions (it returns the
-    full permission set) — deliberately no outer short-circuit to keep in
-    sync (parity with get_task).
+def test_verify_control_sys_admin_bypasses():
+    """sys.admin is granted INSIDE resolve_run_permissions (it returns the
+    full permission set) — deliberately no outer short-circuit.
     """
-    ts = _make_server()
     control = _make_control()
-    ts._task_control['tk_1'] = control
     # No organization at all: only the resolver's sys.admin expansion grants.
     account = SimpleNamespace(userId='u', devTeam='t', sysPermissions=['sys.admin'], organization=None)
 
-    assert ts.get_task_control('tk_1', account_info=account, require='task.debug') is control
-
-
-def test_get_task_returns_underlying_task():
-    """get_task is a thin wrapper over get_task_control.task."""
-    ts = _make_server()
-    inner_task = SimpleNamespace(name='my-task')
-    ts._task_control['tk_1'] = _make_control(token='tk_1', task=inner_task)
-    assert ts.get_task('tk_1') is inner_task
-
-
-def test_get_task_control_by_public_key_finds_match():
-    """The first control whose public_auth equals the argument is returned."""
-    ts = _make_server()
-    ctrl_a = _make_control(token='tk_a', public_auth='pk_zzz')
-    ctrl_b = _make_control(token='tk_b', public_auth='pk_xyz')
-    ts._task_control = {'tk_a': ctrl_a, 'tk_b': ctrl_b}
-    assert ts.get_task_control_by_public_key('pk_xyz') is ctrl_b
-
-
-def test_get_task_control_by_public_key_missing_raises():
-    """No matching public key raises RuntimeError with a clear message."""
-    ts = _make_server()
-    ts._task_control['tk_a'] = _make_control(token='tk_a', public_auth='pk_other')
-    with pytest.raises(RuntimeError, match='not running'):
-        ts.get_task_control_by_public_key('pk_does-not-exist')
+    assert TaskServer._verify_control(control, account, 'task.debug') is control
 
 
 # ---------------------------------------------------------------------------
@@ -644,23 +607,23 @@ async def test_broadcast_server_event_isolates_failures():
 
 
 @pytest.mark.asyncio
-async def test_broadcast_task_event_skips_when_token_unknown():
-    """If the token is not in the task registry, the broadcast short-circuits."""
+async def test_broadcast_task_event_skips_when_key_unknown():
+    """If the key is not in the task registry, the broadcast short-circuits."""
     ts = _make_server()
     conn = MagicMock()
     conn.send_task_event = AsyncMock()
     ts._connections = {1: conn}
 
-    await TaskServer.broadcast_task_event(ts, event_type='etype', token='tk_x', event={'event': 'x'})
+    await TaskServer.broadcast_task_event(ts, event_type='etype', key=KEY, event={'event': 'x'})
 
     conn.send_task_event.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_broadcast_task_event_calls_each_subscriber():
-    """All connections receive the event when the task token is registered."""
+    """All connections receive the event when the task key is registered."""
     ts = _make_server()
-    ts._task_control['tk_x'] = _make_control(token='tk_x')
+    ts._task_control[KEY] = _make_control()
 
     a, b = MagicMock(), MagicMock()
     a.send_task_event = AsyncMock()
@@ -668,25 +631,25 @@ async def test_broadcast_task_event_calls_each_subscriber():
     ts._connections = {1: a, 2: b}
 
     payload = {'event': 'summary', 'body': {}}
-    await TaskServer.broadcast_task_event(ts, event_type='etype', token='tk_x', event=payload)
+    await TaskServer.broadcast_task_event(ts, event_type='etype', key=KEY, event=payload)
 
-    a.send_task_event.assert_awaited_once_with('etype', token='tk_x', event=payload)
-    b.send_task_event.assert_awaited_once_with('etype', token='tk_x', event=payload)
+    a.send_task_event.assert_awaited_once_with('etype', key=KEY, event=payload)
+    b.send_task_event.assert_awaited_once_with('etype', key=KEY, event=payload)
 
 
 @pytest.mark.asyncio
 async def test_broadcast_task_event_silently_skips_permission_errors():
     """PermissionError from a connection is treated as normal (not logged)."""
     ts = _make_server()
-    ts._task_control['tk_x'] = _make_control(token='tk_x')
+    ts._task_control[KEY] = _make_control()
 
-    pk_conn = MagicMock()
-    pk_conn.send_task_event = AsyncMock(side_effect=PermissionError('no monitor'))
+    denied = MagicMock()
+    denied.send_task_event = AsyncMock(side_effect=PermissionError('no monitor'))
     other = MagicMock()
     other.send_task_event = AsyncMock()
-    ts._connections = {1: pk_conn, 2: other}
+    ts._connections = {1: denied, 2: other}
 
-    await TaskServer.broadcast_task_event(ts, event_type='etype', token='tk_x', event={'event': 'x'})
+    await TaskServer.broadcast_task_event(ts, event_type='etype', key=KEY, event={'event': 'x'})
 
     other.send_task_event.assert_awaited_once()
     ts.debug_message.assert_not_called()  # permission errors are normal
@@ -696,7 +659,7 @@ async def test_broadcast_task_event_silently_skips_permission_errors():
 async def test_broadcast_task_event_logs_other_exceptions():
     """Non-permission errors are logged but the broadcast continues."""
     ts = _make_server()
-    ts._task_control['tk_x'] = _make_control(token='tk_x')
+    ts._task_control[KEY] = _make_control()
 
     bad = MagicMock()
     bad.send_task_event = AsyncMock(side_effect=RuntimeError('boom'))
@@ -704,7 +667,7 @@ async def test_broadcast_task_event_logs_other_exceptions():
     good.send_task_event = AsyncMock()
     ts._connections = {1: bad, 2: good}
 
-    await TaskServer.broadcast_task_event(ts, event_type='etype', token='tk_x', event={'event': 'x'})
+    await TaskServer.broadcast_task_event(ts, event_type='etype', key=KEY, event={'event': 'x'})
 
     good.send_task_event.assert_awaited_once()
     ts.debug_message.assert_called_once()
@@ -770,12 +733,12 @@ async def test_cleanup_tasks_removes_completed_expired_task(monkeypatch):
     task.is_task_complete = MagicMock(return_value=True)
     # endTime well in the past: 10000 - 200 -> grace window expired
     task.get_status = MagicMock(return_value=SimpleNamespace(endTime=9_000.0))
-    ts._task_control['tk_old'] = _make_control(token='tk_old', task=task)
+    ts._task_control['dev.user-1.acme.proj-1.old'] = _make_control(key='dev.user-1.acme.proj-1.old', task=task)
 
     with pytest.raises(_LoopBreak):
         await TaskServer._cleanup_tasks(ts)
 
-    ts.remove_task.assert_awaited_once_with('tk_old')
+    ts.remove_task.assert_awaited_once_with('dev.user-1.acme.proj-1.old')
 
 
 @pytest.mark.asyncio
@@ -794,7 +757,7 @@ async def test_cleanup_tasks_skips_running_task(monkeypatch):
 
     task = MagicMock()
     task.is_task_complete = MagicMock(return_value=False)
-    ts._task_control['tk_run'] = _make_control(token='tk_run', task=task)
+    ts._task_control['dev.user-1.acme.proj-1.run'] = _make_control(key='dev.user-1.acme.proj-1.run', task=task)
 
     with pytest.raises(_LoopBreak):
         await TaskServer._cleanup_tasks(ts)
@@ -830,14 +793,14 @@ async def test_monitor_ttl_terminates_idle_task(monkeypatch):
     task.is_task_complete = MagicMock(return_value=False)
     task._ttl = 100
     task._idle_time = 50  # 50 + 60 (check interval) > 100 -> terminate
-    ts._task_control['tk_idle'] = _make_control(token='tk_idle', task=task)
+    ts._task_control['dev.user-1.acme.proj-1.idle'] = _make_control(key='dev.user-1.acme.proj-1.idle', task=task)
 
     with pytest.raises(_LoopBreak):
         await TaskServer._monitor_ttl(ts)
 
     # The reason MUST be 'ttl': it is what makes the run record as a
     # completed window instead of a cancelled run.
-    ts.stop_task.assert_awaited_once_with('tk_idle', reason='ttl')
+    ts.stop_task.assert_awaited_once_with('dev.user-1.acme.proj-1.idle', reason='ttl')
 
 
 @pytest.mark.asyncio
@@ -862,7 +825,9 @@ async def test_monitor_ttl_skips_task_with_zero_ttl(monkeypatch):
     task.is_task_complete = MagicMock(return_value=False)
     task._ttl = 0
     task._idle_time = 999_999
-    ts._task_control['tk_immortal'] = _make_control(token='tk_immortal', task=task)
+    ts._task_control['dev.user-1.acme.proj-1.immortal'] = _make_control(
+        key='dev.user-1.acme.proj-1.immortal', task=task
+    )
 
     with pytest.raises(_LoopBreak):
         await TaskServer._monitor_ttl(ts)
@@ -876,15 +841,15 @@ async def test_monitor_ttl_skips_task_with_zero_ttl(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_remove_task_unknown_token_carries_a_code():
-    """An unknown token reaches the TaskError guard, not a bare KeyError.
+async def test_remove_task_unknown_key_carries_a_code():
+    """An unknown key reaches the TaskError guard, not a bare KeyError.
 
     The registry pop had no default, so the guard below it was unreachable
     for the one case it was written for.
     """
     ts = _make_server()
     with pytest.raises(TaskError) as excinfo:
-        await ts.remove_task('tk_unknown')
+        await ts.remove_task('dev.user-1.acme.proj-1.unknown')
     assert excinfo.value.code == TaskError.NOT_REGISTERED
 
 
@@ -897,8 +862,8 @@ async def test_remove_task_calls_stop_and_broadcasts():
     task = MagicMock()
     task.stop_task = AsyncMock()
     control = SimpleNamespace(
-        id='task-name',
-        token='tk_rm',
+        id='acme.proj-1.src-1',
+        key='dev.user-1.acme.proj-1.rm',
         userId='u1',
         teamId='t1',
         run_kind='dev',
@@ -909,12 +874,12 @@ async def test_remove_task_calls_stop_and_broadcasts():
         source='src-1',
         apikey='ak_x',
     )
-    ts._task_control['tk_rm'] = control
+    ts._task_control['dev.user-1.acme.proj-1.rm'] = control
 
-    result = await TaskServer.remove_task(ts, 'tk_rm')
+    result = await TaskServer.remove_task(ts, 'dev.user-1.acme.proj-1.rm')
 
     assert result is control
-    assert 'tk_rm' not in ts._task_control
+    assert 'dev.user-1.acme.proj-1.rm' not in ts._task_control
     task.stop_task.assert_awaited_once()
     ts.broadcast_server_event.assert_awaited_once()
 
@@ -972,11 +937,10 @@ async def test_push_account_update_swallows_send_errors(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_push_account_update_skips_task_scoped_connections(monkeypatch):
-    """pk_/tk_ connections carry the LAUNCHING user's id (so they match the
-    userId filter) but must NOT be rebuilt or notified: rebuilding escalates a
-    minimal task identity into the full user and leaks the user's rr_ session
-    key. Only the full-user connection is notified, with the token-stripped body.
+async def test_push_account_update_notifies_every_connection_of_the_user(monkeypatch):
+    """Every connection of the user is rebuilt and notified with the
+    userToken-stripped push body — there is no second credential type that
+    would need skipping: a connection is a user's connection or not.
     """
     # push_account_update resolves `from ai.account import account` and reads
     # account._service.get_authentication_result -- patch the real facade's
@@ -1000,25 +964,19 @@ async def test_push_account_update_skips_task_scoped_connections(monkeypatch):
         c.get_connection_id = MagicMock(return_value=cid)
         return c
 
-    pk = _conn(1, 'pk_abc')
-    tk = _conn(2, 'tk_abc')
-    full = _conn(3, 'rr_abc')
-    ts._connections = {1: pk, 2: tk, 3: full}
+    session = _conn(1, 'rr_session')
+    pat = _conn(2, 'rr_pat')
+    ts._connections = {1: session, 2: pat}
 
     await TaskServer.push_account_update(ts, 'u1')
 
-    # Task-scoped sockets are neither rebuilt nor notified.
-    pk.send_event.assert_not_awaited()
-    tk.send_event.assert_not_awaited()
-    assert pk._account_info.auth == 'pk_abc'  # identity untouched
-    assert tk._account_info.auth == 'tk_abc'
-
-    # The full-user connection is notified with the token-stripped push body.
-    full.send_event.assert_awaited_once()
-    args, kwargs = full.send_event.call_args
-    assert args[0] == 'apaext_account'
-    assert kwargs['body'] == {'userId': 'u1', 'userToken': ''}
-    fresh.to_push_result.assert_called_once()
+    for conn in (session, pat):
+        conn.send_event.assert_awaited_once()
+        args, kwargs = conn.send_event.call_args
+        assert args[0] == 'apaext_account'
+        assert kwargs['body'] == {'userId': 'u1', 'userToken': ''}
+        assert conn._account_info is fresh
+    assert fresh.to_push_result.call_count == 2
 
 
 # ---------------------------------------------------------------------------
@@ -1070,11 +1028,10 @@ async def test_push_org_update_swallows_send_errors(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_push_org_update_notifies_org_and_skips_task_scoped(monkeypatch):
-    """Every full-user connection on the org is rebuilt and notified with the
-    token-stripped body; pk_/tk_ sockets on the same org are skipped for the
-    same reason as push_account_update (no escalation, no rr_ key leak).
-    Organization may be a dict or an object — both shapes must match.
+async def test_push_org_update_notifies_every_connection_on_the_org(monkeypatch):
+    """Every connection on the org is rebuilt and notified with the
+    userToken-stripped body. Organization may be a dict or an object — both
+    shapes must match.
     """
     from ai.account import account as real_account
 
@@ -1095,49 +1052,19 @@ async def test_push_org_update_notifies_org_and_skips_task_scoped(monkeypatch):
         c.get_connection_id = MagicMock(return_value=cid)
         return c
 
-    pk = _conn(1, 'pk_abc', {'id': 'org-1'})
     full_dict = _conn(2, 'rr_abc', {'id': 'org-1'})
     full_obj = _conn(3, 'rr_def', SimpleNamespace(id='org-1'))
-    ts._connections = {1: pk, 2: full_dict, 3: full_obj}
+    ts._connections = {2: full_dict, 3: full_obj}
 
     await TaskServer.push_org_update(ts, 'org-1')
 
-    # Task-scoped sockets are neither rebuilt nor notified.
-    pk.send_event.assert_not_awaited()
-    assert pk._account_info.auth == 'pk_abc'  # identity untouched
-
-    # Both full-user connections (dict- and object-shaped org) are notified.
+    # Both connections (dict- and object-shaped org) are notified.
     for full in (full_dict, full_obj):
         full.send_event.assert_awaited_once()
         args, kwargs = full.send_event.call_args
         assert args[0] == 'apaext_account'
         assert kwargs['body'] == {'userId': 'u1', 'userToken': ''}
         assert full._account_info is fresh
-
-
-# ---------------------------------------------------------------------------
-# _build_task_account_info — pk_/tk_ permission resolution
-# ---------------------------------------------------------------------------
-
-
-def test_build_task_account_info_populates_organization():
-    """The synthesized account for pk_/tk_ auth must carry a populated
-    ``organization`` so team permissions resolve. Regression: a plural
-    ``organizations=`` value was silently dropped by pydantic, leaving
-    ``organization`` None and breaking the chat SSE subscribe with
-    'Access denied: no permissions for this task'.
-    """
-    from ai.account.models import resolve_task_permissions
-
-    ts = _make_server()
-    control = SimpleNamespace(userId='user-1', teamId='team-1', orgId='org-1')
-
-    info = ts._build_task_account_info('pk_abc', control, ['task.data'])
-
-    assert info.organization is not None
-    # The task's own team is present with the granted permissions, so a pk_
-    # subscriber resolves to a non-empty permission list for its own task.
-    assert resolve_task_permissions(info, 'team-1') == ['task.data']
 
 
 # ---------------------------------------------------------------------------
@@ -1178,7 +1105,7 @@ async def test_monitor_ttl_ages_a_silent_task(monkeypatch):
     ts = _make_server()
     ts.stop_task = AsyncMock()
     task = _ttl_task(ttl=900, idle=0)
-    ts._task_control['tk_quiet'] = _make_control(token='tk_quiet', task=task)
+    ts._task_control['dev.user-1.acme.proj-1.quiet'] = _make_control(key='dev.user-1.acme.proj-1.quiet', task=task)
 
     await _one_ttl_cycle(monkeypatch, ts)
 
@@ -1192,11 +1119,13 @@ async def test_monitor_ttl_reaps_a_task_that_stayed_silent(monkeypatch):
     ts = _make_server()
     ts.stop_task = AsyncMock()
     task = _ttl_task(ttl=900, idle=860)
-    ts._task_control['tk_abandoned'] = _make_control(token='tk_abandoned', task=task)
+    ts._task_control['dev.user-1.acme.proj-1.abandoned'] = _make_control(
+        key='dev.user-1.acme.proj-1.abandoned', task=task
+    )
 
     await _one_ttl_cycle(monkeypatch, ts)
 
-    ts.stop_task.assert_awaited_once_with('tk_abandoned', reason='ttl')
+    ts.stop_task.assert_awaited_once_with('dev.user-1.acme.proj-1.abandoned', reason='ttl')
 
 
 @pytest.mark.asyncio
@@ -1206,7 +1135,7 @@ async def test_monitor_ttl_spares_a_task_whose_timer_was_reset(monkeypatch):
     ts.stop_task = AsyncMock()
     task = _ttl_task(ttl=900, idle=860)
     task._idle_time = 0  # what on_event does when the pipeline reports work
-    ts._task_control['tk_busy'] = _make_control(token='tk_busy', task=task)
+    ts._task_control['dev.user-1.acme.proj-1.busy'] = _make_control(key='dev.user-1.acme.proj-1.busy', task=task)
 
     await _one_ttl_cycle(monkeypatch, ts)
 
@@ -1220,7 +1149,9 @@ async def test_monitor_ttl_leaves_a_zero_ttl_counter_alone(monkeypatch):
     ts = _make_server()
     ts.stop_task = AsyncMock()
     task = _ttl_task(ttl=0, idle=0)
-    ts._task_control['tk_immortal'] = _make_control(token='tk_immortal', task=task)
+    ts._task_control['dev.user-1.acme.proj-1.immortal'] = _make_control(
+        key='dev.user-1.acme.proj-1.immortal', task=task
+    )
 
     await _one_ttl_cycle(monkeypatch, ts)
 

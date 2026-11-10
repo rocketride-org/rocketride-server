@@ -92,14 +92,14 @@ async def test_proxy_requires_task_control_on_the_targets_team():
     """
     account = _account_info()
     server = MagicMock()
-    server.get_task_control = MagicMock(return_value=_running_control())
+    server.resolve_control = MagicMock(return_value=_running_control())
     conn = _make_conn(account_info=account, server=server)
 
     response = await CProfileCommands.on_rrext_cprofile_start(
-        conn, {'arguments': {'target': 'tk_target', 'session': 's'}}
+        conn, {'arguments': {'target': 'acme.pipe.target', 'session': 's'}}
     )
 
-    server.get_task_control.assert_called_once_with('tk_target', account, require='task.control')
+    server.resolve_control.assert_called_once_with('acme.pipe.target', account, 'task.control')
     assert response['body'] == {'status': 'started'}
 
 
@@ -109,11 +109,11 @@ async def test_proxy_cross_team_target_denied_before_forwarding():
     subprocess — the cross-team profiling hole this closes.
     """
     server = MagicMock()
-    server.get_task_control = MagicMock(side_effect=PermissionError('denied for this task'))
+    server.resolve_control = MagicMock(side_effect=PermissionError('denied for this task'))
     conn = _make_conn(account_info=_account_info(), server=server)
 
     with pytest.raises(PermissionError, match='denied for this task'):
-        await CProfileCommands.on_rrext_cprofile_stop(conn, {'arguments': {'target': 'tk_other_team'}})
+        await CProfileCommands.on_rrext_cprofile_stop(conn, {'arguments': {'target': 'acme.pipe.other_team'}})
 
 
 @pytest.mark.asyncio
@@ -130,16 +130,16 @@ async def test_proxy_cross_team_target_denied_before_forwarding():
 )
 async def test_every_proxy_handler_authorizes_the_target(handler):
     """All six cprofile handlers route proxy targets through the authorized
-    lookup — none may keep the old unchecked get_task_control(target) form.
+    lookup — none may keep an unchecked lookup of the target.
     """
     account = _account_info()
     server = MagicMock()
-    server.get_task_control = MagicMock(return_value=_running_control())
+    server.resolve_control = MagicMock(return_value=_running_control())
     conn = _make_conn(account_info=account, server=server)
 
-    await handler(conn, {'arguments': {'target': 'tk_target'}})
+    await handler(conn, {'arguments': {'target': 'acme.pipe.target'}})
 
-    server.get_task_control.assert_called_once_with('tk_target', account, require='task.control')
+    server.resolve_control.assert_called_once_with('acme.pipe.target', account, 'task.control')
 
 
 # ---------------------------------------------------------------------------
@@ -155,7 +155,7 @@ async def test_direct_mode_does_not_touch_task_lookup():
 
     response = await CProfileCommands.on_rrext_cprofile_status(conn, {'arguments': {}})
 
-    server.get_task_control.assert_not_called()
+    server.resolve_control.assert_not_called()
     assert 'active' in (response['body'] or {})
 
 

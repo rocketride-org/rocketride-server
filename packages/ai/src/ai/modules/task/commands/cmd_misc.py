@@ -47,9 +47,9 @@ Architecture:
 import time
 from typing import TYPE_CHECKING, Dict, Any, List, Tuple
 from rocketride import EVENT_TYPE
-from rocketlib import getServiceDefinition, validatePipeline
-from ai.common.config import Config
+from rocketlib import ConfigError, resolveConfig, validatePipeline
 from ai.common.dap import DAPConn, TransportBase
+from ai.common.node_config import node_schema, resolve_node_config
 from ai.common.list_rows import paginate_rows
 from ai.account.models import resolve_run_permissions
 from ..pipeline import MultipleSourcesError, resolve_implied_source, resolve_pipeline_env, substituted_env
@@ -151,30 +151,43 @@ def _can_validate_echo(pipeline: Dict[str, Any]) -> bool:
     return True
 
 
-# Component-level keys that are not node configuration. The engine validates and
-# consumes these itself, so a profile does not discard them and an author must not be
-# told to move them inside one.
-_STRUCTURAL_CONFIG_KEYS = frozenset({'profile', 'parameters', 'secureParameters', 'name'})
+def _config_errors(components: List[Any]) -> List[Dict[str, Any]]:
+    """Resolve every component's config; one error entry per component that does not fit.
 
-
-def _service_profile_names(provider: str) -> frozenset:
-    """Return every profile name the service declares, or an empty set.
-
-    A config saved by an editor carries one sub-object per profile, so an unselected
-    profile's own block would otherwise read as a key the resolver threw away.
+    The entries follow the engine's own ``errors`` shape (``id`` + ``message``) so
+    a client reads them off the same list. A component without a provider, or
+    with one the engine does not know, is the engine's structural error and is
+    not repeated here.
 
     Args:
-        provider: Component provider, e.g. 'llm_openai'.
+        components: The pipeline's ``components`` list, or ``[component]``.
 
     Returns:
-        The declared profile names. Empty when the service or its preconfig is
-        unavailable, which leaves the caller reporting the key rather than hiding it.
+        The hard config errors: unknown keys, type/min/max/enum/required
+        violations, stale selector values. Keys under an unreachable branch and
+        the editor-owned ``name`` are tolerated by the resolver.
     """
-    try:
-        service = getServiceDefinition(provider)
-        return frozenset((service or {}).get('preconfig', {}).get('profiles', {}) or {})
-    except Exception:
-        return frozenset()
+    errors: List[Dict[str, Any]] = []
+    for component in components:
+        if not isinstance(component, dict):
+            continue
+        provider = component.get('provider')
+        schema = node_schema(provider) if provider else None
+        if schema is None:
+            continue
+        config = component.get('config')
+        if config is None:
+            config = {}
+        if not isinstance(config, dict):
+            # The same rule on_rrext_resolve_config applies: a config that is
+            # not an object is malformed, not empty
+            errors.append({'id': component.get('id') or provider, 'message': f'{provider}: config must be an object'})
+            continue
+        try:
+            resolveConfig(schema, config)
+        except ConfigError as e:
+            errors.append({'id': component.get('id') or provider, 'message': f'{provider}: {e}'})
+    return errors
 
 
 class MiscCommands(DAPConn):
@@ -232,6 +245,9 @@ class MiscCommands(DAPConn):
             request (Dict[str, Any]): DAP request containing:
                 - arguments (Dict[str, Any], optional):
                     - service (str, optional): Name of specific service to retrieve
+                    - definitions (bool, optional): Return every service's FULL
+                      entry (configuration schema included) instead of the
+                      summary view; no icon table
 
         Returns:
             Dict[str, Any]: DAP response containing:
@@ -258,6 +274,9 @@ class MiscCommands(DAPConn):
                 # Validate the service exists
                 if not schema:
                     raise ValueError(f"Service '{service}' not found. Please check the service name and try again.")
+            elif args.get('definitions'):
+                # Every full entry at once (credential discovery)
+                schema = await services_catalog.get_definitions()
             else:
                 # The cached summary view: display fields + inline icons
                 schema = await services_catalog.get_summary()
@@ -375,6 +394,8 @@ class MiscCommands(DAPConn):
                 # This payload is the validator's root, where it writes its own
                 # errors and warnings, so ones the caller sent are not passed in.
                 data = validatePipeline({k: v for k, v in pipeline.items() if k not in _DIAGNOSTICS})
+                components = [pipeline['component']]
+                submitted_components = [submitted['component']]
                 # When anything was substituted, the reply is rebuilt from the
                 # caller's own input so it returns the config as submitted: the
                 # echoed component comes from a second pass over it (the
@@ -387,7 +408,7 @@ class MiscCommands(DAPConn):
                     echoed = original
                     if _can_validate_echo(echo):
                         echoed = validatePipeline({'pipeline': echo})['pipeline']['components'][0]
-                    ids = _submitted_ids([pipeline['component']], [original])
+                    ids = _submitted_ids(components, submitted_components)
                     root = {k: v for k, v in submitted.items() if k not in _DIAGNOSTICS}
                     data = {**root, 'component': echoed, **_restored_diagnostics(data, substituted, ids)}
             else:
@@ -409,6 +430,8 @@ class MiscCommands(DAPConn):
                 # Same envelope pipe_Validate (modules/pipe) builds — the version
                 # rides INSIDE the wrapped config (see the FILE-form note above).
                 data = validatePipeline({'pipeline': inner})
+                components = pipeline.get('components') or []
+                submitted_components = submitted.get('components')
                 # Rebuilt from the caller's own input, as above
                 if substituted:
                     echo = {**submitted, 'version': submitted.get('version', 1)}
@@ -418,8 +441,28 @@ class MiscCommands(DAPConn):
                     if echo_source:
                         echo['source'] = echo_source
                     echoed = validatePipeline({'pipeline': echo})['pipeline'] if _can_validate_echo(echo) else echo
-                    ids = _submitted_ids(pipeline.get('components'), submitted.get('components'))
+                    ids = _submitted_ids(components, submitted_components)
                     data = {'pipeline': echoed, **_restored_diagnostics(data, substituted, ids)}
+
+            # Config values are validated by the resolver the node itself runs at
+            # start, so what fails here is exactly what would fail the run: hard
+            # errors, on the engine's own errors list.
+            config_errors = _config_errors(components)
+            if config_errors:
+                if substituted:
+                    # A resolver message may quote the resolved value, so under
+                    # substitution it follows the same template-reference
+                    # contract as the engine's own diagnostics above.
+                    ids = _submitted_ids(components, submitted_components)
+                    config_errors = [
+                        {
+                            'message': _template_message(substituted, 'error'),
+                            **({'id': ids[entry['id']]} if entry.get('id') in ids else {}),
+                        }
+                        for entry in config_errors
+                    ]
+                data = dict(data)
+                data['errors'] = list(data.get('errors') or []) + config_errors
 
             # Return the results
             return self.build_response(request, body=data)
@@ -437,11 +480,11 @@ class MiscCommands(DAPConn):
         """
         Handle DAP 'rrext_resolve_config' to resolve a component config as a node sees it.
 
-        Runs the config through the same ``Config.getNodeConfig`` a node calls at
-        load, so an author can see what the node actually receives rather than
-        what the .pipe appears to say. This has to happen engine-side: the
-        service catalog does not carry ``preconfig``, so profile resolution
-        cannot be reproduced from ``rrext_services``.
+        Runs the config through ``rocketlib.resolveConfig`` on the engine-resolved
+        schema, the same pass ``IGlobalBase.config`` runs at start, so an author
+        sees what the node actually receives rather than what the .pipe appears
+        to say: defaults applied, the active selector branch flattened, keys
+        under an unselected branch left out.
 
         Args:
             request (Dict[str, Any]): DAP request containing:
@@ -452,13 +495,18 @@ class MiscCommands(DAPConn):
         Returns:
             Dict[str, Any]: DAP response whose body carries:
                 - provider (str): The provider that was resolved.
-                - profile (str): The profile that applied, named or default.
-                - resolved (Dict[str, Any]): What the node receives.
-                - dropped (List[str]): Top-level config keys the resolver discarded.
+                - resolved (Dict[str, Any]): What the node receives, by short key.
+                - paths (Dict[str, str]): Each resolved key's dotted schema path,
+                  which is where the value is stored in the config tree.
+                - params (List[Dict[str, Any]]): The node's ``params`` descriptors.
+                - paramKeys (List[str]): Resolved keys that are per-call parameters.
+                - envKeys (List[str]): Resolved keys still holding a ``${ROCKETRIDE_*}``
+                  placeholder, filled from the caller's environment at run time.
 
         Raises:
             ValueError: If provider is missing or config is not an object.
-            Exception: If the service is unknown or has no preconfig section.
+            ConfigError: If the service is unknown or the config does not fit its
+                schema (unknown key, stale selector value, type/range violation).
         """
         try:
             args = request.get('arguments', {})
@@ -474,33 +522,18 @@ class MiscCommands(DAPConn):
             if not isinstance(config, dict):
                 raise ValueError('config must be an object')
 
-            resolved = Config.getNodeConfig(provider, config)
-            profile = config.get('profile')
+            view = resolve_node_config(provider, config)
 
-            # Report the keys the resolver discarded rather than leaving the author
-            # to infer it from an absence. With a profile set, getNodeConfig reads
-            # the user layer only from the sub-object named after that profile, so
-            # sibling top-level keys never reach the node (#1839).
-            dropped = []
-            if profile:
-                # Every sibling of the selected profile is discarded, so the value is
-                # not worth comparing: one that happens to match the profile's own is
-                # still a line the resolver never read.
-                #
-                # Two kinds of sibling are not user config and must not be reported.
-                # The structural keys below belong to the component, not the node, and
-                # the engine consumes them on its own path (pipeline_config.cpp Rule 5
-                # and Rule 6); telling an author to move them inside the profile would
-                # break the component. An unselected profile's own sub-object is the
-                # other: an editor-saved config keeps one per profile.
-                profiles = _service_profile_names(provider)
-                dropped = [k for k in config if k != profile and k not in _STRUCTURAL_CONFIG_KEYS and k not in profiles]
-
+            # The view plus the schema facts an author cannot read off the values:
+            # where each key lives in the stored tree, and which keys a caller can
+            # set per call or that the caller's environment fills at run time.
             body = {
                 'provider': provider,
-                'profile': profile or 'default',
-                'resolved': resolved,
-                'dropped': dropped,
+                'resolved': view.to_dict(),
+                'paths': {key: view.path_of(key) for key in view},
+                'params': view.params,
+                'paramKeys': sorted(view.param_keys),
+                'envKeys': sorted(view.env_keys),
             }
             return self.build_response(request, body=body)
 
@@ -531,7 +564,7 @@ class MiscCommands(DAPConn):
 
             current_time = time.time()
 
-            # Snapshot the caller-visible server state (permission + tk_ scoping)
+            # Snapshot the caller-visible server state (permission scoping)
             task_controls, conn_items = self._scoped_state()
 
             # Materialize the connection and task row lists via the shared builders
@@ -566,8 +599,7 @@ class MiscCommands(DAPConn):
         Handle DAP 'rrext_list_connections' command: a paginated view of the
         caller's active connections following the platform list-API
         convention. Same permission gate and caller scoping as
-        on_rrext_dashboard — connections are filtered to the caller's userId
-        (and to the single owning connection under tk_ task-token auth).
+        on_rrext_dashboard — connections are filtered to the caller's userId.
 
         Args:
             request (Dict[str, Any]): DAP request containing:
@@ -594,7 +626,7 @@ class MiscCommands(DAPConn):
             args = request.get('arguments', {}) or {}
             current_time = time.time()
 
-            # Snapshot the caller-visible server state (permission + tk_ scoping)
+            # Snapshot the caller-visible server state (permission scoping)
             task_controls, conn_items = self._scoped_state()
 
             # Materialize the full row set, then apply search / filters /
@@ -625,7 +657,7 @@ class MiscCommands(DAPConn):
         caller's tasks following the platform list-API convention. Same
         permission gate and caller scoping as on_rrext_dashboard — tasks are
         limited to those resolve_task_permissions grants the caller (own,
-        teammate, org admin; only the owning task under tk_ token auth).
+        teammate, org admin).
 
         Args:
             request (Dict[str, Any]): DAP request containing:
@@ -652,7 +684,7 @@ class MiscCommands(DAPConn):
             args = request.get('arguments', {}) or {}
             current_time = time.time()
 
-            # Snapshot the caller-visible server state (permission + tk_ scoping)
+            # Snapshot the caller-visible server state (permission scoping)
             task_controls, _conn_items = self._scoped_state()
 
             # Materialize the full row set, then apply search / filters /
@@ -687,8 +719,7 @@ class MiscCommands(DAPConn):
         Applies the shared caller scoping used by on_rrext_dashboard and the
         rrext_list_* commands: tasks the caller may monitor (own, teammate,
         org admin — via resolve_task_permissions) and connections owned by
-        the caller's userId. Task-scoped tokens (tk_) narrow both lists to
-        the single owning task/connection.
+        the caller's userId.
 
         Returns:
             Tuple[List[Any], List[Tuple[int, Any]]]:
@@ -700,18 +731,12 @@ class MiscCommands(DAPConn):
         # Snapshot tasks the caller may see (run-scoped: user-owned runs are
         # owner-only; team-owned runs need permissions on the run's team)
         task_controls = [c for c in server._task_control.values() if resolve_run_permissions(self._account_info, c)]
-        # Connections are user-scoped (not task-scoped), so filter by userId
+        # Connections are user-scoped, so filter by userId
         conn_items = [
             (cid, conn)
             for cid, conn in server._connections.items()
             if hasattr(conn, '_account_info') and conn._account_info and conn._account_info.userId == caller_user_id
         ]
-
-        # Task-scoped tokens (tk_) can only see their own task
-        caller_auth = self._account_info.auth if hasattr(self._account_info, 'auth') else ''
-        if caller_auth.startswith('tk_'):
-            task_controls = [c for c in task_controls if c.token == caller_auth]
-            conn_items = [(cid, conn) for cid, conn in conn_items if cid == self._connection_id]
 
         return task_controls, conn_items
 
@@ -759,15 +784,16 @@ class MiscCommands(DAPConn):
             # (once per control; they do not vary per connection).
             project_key = owner_key(control.run_kind, control.owner_id, control.project_id, control.source)
             project_wildcard_key = owner_wildcard_key(control.run_kind, control.owner_id, control.project_id)
-            pipe_prefix = f'{project_key}.'
             for cid, conn in conn_items:
                 if not hasattr(conn, '_monitors'):
                     continue
+                # A pipe-scoped key matches by ADDRESS EQUALITY of its prefix
+                # (everything before the last dot), never by startswith.
                 if (
                     project_key in conn._monitors
                     or project_wildcard_key in conn._monitors
                     or '*' in conn._monitors
-                    or any(k.startswith(pipe_prefix) for k in conn._monitors)
+                    or any(k.rsplit('.', 1)[0] == project_key for k in conn._monitors)
                 ):
                     conn_tasks.setdefault(cid, []).append(task_name)
 

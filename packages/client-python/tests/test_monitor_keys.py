@@ -90,7 +90,7 @@ def test_round_trips_team_scoped_pipe_key():
 
 def test_round_trips_token_key():
     """Token keys are untouched by the scope suffix."""
-    assert _round_trip({'token': 'tk_abc'}) == {'token': 'tk_abc'}
+    assert _round_trip({'token': 'acme.docBrain.parsePDF'}) == {'token': 'acme.docBrain.parsePDF'}
 
 
 def test_round_trips_ids_containing_former_delimiters():

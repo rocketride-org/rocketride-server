@@ -704,7 +704,7 @@ class Store:
 
         Instances are cheap per-consumer wrappers and identity must NEVER be
         cached — a user's concurrent sessions can carry different permission
-        envelopes (PAT-scoped sessions, synthetic tk_/pk_ sessions). The
+        envelopes (PAT-scoped sessions, the deploy dispatch's synthetic sessions). The
         shared write-lock/handle registries live on this Store, so
         non-caching loses no coordination.
 
@@ -733,8 +733,8 @@ class Store:
         if is_session:
             # Sessions anchor to their own namespace, always — derived from
             # the authenticated identity, never from an explicit client_id.
-            # A session-shaped ctx with no userId (e.g. a task-scoped
-            # AccountInfo built from an empty control.userId) is rejected
+            # A session-shaped ctx with no userId (e.g. a team-owned deploy
+            # run's synthetic AccountInfo, which carries no user) is rejected
             # outright: accepting a client_id for it would unlock an
             # arbitrary user's store.
             session_user = getattr(ctx.account_info, 'userId', '') or ''

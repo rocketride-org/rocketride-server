@@ -312,7 +312,7 @@ async def test_run_dropper_pipe_requires_pipeline(fake_engine):
 
 
 @pytest.mark.asyncio
-async def test_run_dropper_pipe_returns_self_contained_upload_url(fake_engine):
+async def test_run_dropper_pipe_returns_the_address_and_a_credential_free_upload_url(fake_engine):
     registry = ToolRegistry()
     execution.register(registry)
     tasks = TaskRegistry()
@@ -321,14 +321,16 @@ async def test_run_dropper_pipe_returns_self_contained_upload_url(fake_engine):
 
     assert result['ok'] is True
     assert result['task_token'] == fake_engine._token
-    # pk_ only: /task/data resolves the task from the public key, and the tk_
-    # control token must never ride in a URL (access logs, Referer, history).
-    assert result['upload_url'] == (f'{fake_engine.base_url}/task/data?auth={fake_engine._public_token}')
-    assert fake_engine._token not in result['upload_url']
-    assert result['dropper_url'] == (f'{fake_engine.base_url}/dropper?auth={fake_engine._public_token}')
+    assert result['address'] == fake_engine._token
+    # The address is public information and rides the path; no credential
+    # ever rides a URL (access logs, Referer, history) — the uploader sends
+    # its rr_ key in the Authorization header.
+    assert result['upload_url'] == f'{fake_engine.base_url}/task/data/{fake_engine._token}'
+    assert '?' not in result['upload_url']
+    assert 'dropper_url' not in result
     assert result['projectId'] == 'proj-fake'
     assert result['source'] == 'src-fake'
-    # token tracked so monitor/terminate work against it
+    # address tracked so monitor/terminate work against it
     assert tasks.get(fake_engine._token) is not None
 
 
@@ -356,23 +358,6 @@ async def test_run_dropper_pipe_forwards_kwargs_and_never_inline_sends(fake_engi
         }
     ]
     assert fake_engine.sent == []
-
-
-@pytest.mark.asyncio
-async def test_run_dropper_pipe_bad_request_when_engine_omits_public_token(fake_engine):
-    registry = ToolRegistry()
-    execution.register(registry)
-    tasks = TaskRegistry()
-    fake_engine._public_token = None  # simulate an engine response missing publicToken
-
-    result = await registry.handler('run_dropper_pipe')(fake_engine, tasks, {'pipeline': PIPE})
-
-    assert result['ok'] is False
-    assert result['error_type'] == 'BadRequest'
-    # no null-keyed task leaked into the registry
-    assert tasks.get(None) is None
-    # the already-started task is torn down, not orphaned until its ttl
-    assert fake_engine.terminated == ['tok-1']
 
 
 # --- pipelineTraceLevel passthrough --------------------------------------

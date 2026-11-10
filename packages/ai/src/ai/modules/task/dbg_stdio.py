@@ -128,7 +128,7 @@ class DbgStdio(DAPClient):
     Attributes:
         _transport (TransportStdio): The stdio transport for subprocess communication
         _process (asyncio.subprocess.Process): The monitored subprocess
-        _token (str): Unique identifier for this debugging session
+        _key (str): The control's registry key for this debugging session
     """
 
     def __init__(self, **kwargs) -> None:
@@ -181,7 +181,7 @@ class DbgStdio(DAPClient):
         """
         # Get the token for identification
         self._id = kwargs.get('id', 'UNKNOWN')
-        self._token = kwargs.get('token', 'UNKNOWN')
+        self._key = kwargs.get('key', 'UNKNOWN')
 
         # Get and validate the subprocess
         self._process = kwargs.get('process', None)

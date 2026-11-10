@@ -29,10 +29,12 @@ would silently apply the server's default idle timeout, a dev-task policy
 that must never govern deploy runs.
 """
 
-from unittest.mock import AsyncMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+import ai.account
 import ai.modules.task.task_server_facade as facade_mod
 from ai.modules.task.task_server_facade import start_server_task_as_team
 
@@ -56,23 +58,32 @@ async def _dispatch(ttl):
         captured['command'] = command
         captured['arguments'] = arguments
         captured['account_info'] = self._account_info
-        # Step 2: answer like a successful execute.
-        return {'success': True, 'body': {'token': 'tk_test'}}
+        # Step 2: answer like a successful execute (the address in the token slot).
+        return {'success': True, 'body': {'token': 'acme.proj-1.src-1'}}
+
+    # The server resolves the returned address back to the control whose
+    # KEY the facade hands its in-process callers.
+    server = MagicMock()
+    server.resolve_control = MagicMock(return_value=SimpleNamespace(key='deploy.team-1.acme.proj-1.src-1'))
 
     # The connection constructor needs a real server; stub it out entirely —
-    # this is a wire-shape test, not a TaskConn test.
+    # this is a wire-shape test, not a TaskConn test. The org's developer id
+    # comes from the account layer, not from any session.
     with (
         patch.object(facade_mod._InProcessConn, '__init__', return_value=None),
         patch.object(facade_mod._InProcessConn, 'request', fake_request),
+        patch.object(ai.account.account, 'get_developer_id', AsyncMock(return_value='acme'), create=True),
     ):
-        await start_server_task_as_team(
-            AsyncMock(),
+        key = await start_server_task_as_team(
+            server,
             {'components': []},
             org_id='org-1',
             team_id='team-1',
             trigger='schedule',
             ttl=ttl,
         )
+    captured['key'] = key
+    captured['resolve'] = server.resolve_control.call_args
     return captured['arguments'], captured['account_info']
 
 
@@ -116,3 +127,5 @@ async def test_deploy_dispatch_carries_no_human_identity():
     assert account_info.displayName == ''
     assert account_info.email == ''
     assert account_info.devTeam == 'team-1'
+    # The address namespace rides the synthetic org: it is the org's, not a human's.
+    assert account_info.organization['developerId'] == 'acme'

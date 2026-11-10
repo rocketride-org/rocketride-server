@@ -127,7 +127,7 @@ class TaskCommands(DAPConn):
                 - arguments: Task configuration including apikey for authentication
 
         Returns:
-            Dict[str, Any]: Execute response with task token and initialization event
+            Dict[str, Any]: Execute response with the task address and initialization event
 
         Raises:
             Exception: If task creation or execution startup fails
@@ -306,7 +306,7 @@ class TaskCommands(DAPConn):
         disconnect.
 
         Args:
-            request (Dict[str, Any]): Terminate request carrying the task token
+            request (Dict[str, Any]): Terminate request carrying the task address
 
         Returns:
             Dict[str, Any]: Acknowledgment of successful termination
@@ -315,28 +315,28 @@ class TaskCommands(DAPConn):
             Exception: If task termination or cleanup fails
         """
         # Bound before the try so the failure log below can reference it even
-        # when get_task_token itself raises — otherwise the UnboundLocalError
+        # when get_task_address itself raises — otherwise the UnboundLocalError
         # would replace the real error.
-        token = '<unresolved>'
+        address = '<unresolved>'
 
         try:
-            token = self.get_task_token(request)
+            address = self.get_task_address(request)
 
-            # Validate ownership and permissions via get_task
-            self.get_task(request, 'task.control')
+            # Resolve under the caller's account with task.control
+            control = self.get_control(request, 'task.control')
 
             # Log the termination request
             self.debug_message('Terminating task and cleaning up resources')
 
             # Stop the task and perform resource cleanup
-            await self._server.stop_task(token)
+            await self._server.stop_task(control.key)
 
             # Acknowledge successful termination
             return self.build_response(request)
 
         except Exception as e:
             # Log termination failure with task context
-            self.debug_message(f'Failed to terminate task "{token}": {str(e)}')
+            self.debug_message(f'Failed to terminate task "{address}": {str(e)}')
             raise
 
     async def on_restart(self, request: Dict[str, Any]) -> Dict[str, Any]:
@@ -351,26 +351,24 @@ class TaskCommands(DAPConn):
                 - arguments: Task configuration including apikey for authentication
 
         Returns:
-            Dict[str, Any]: Execute response with task token and initialization event
+            Dict[str, Any]: Execute response with the task address and initialization event
 
         Raises:
             Exception: If task creation or execution startup fails
         """
         try:
             # Authorize against the TASK'S team, not the dev team: get_task
-            # resolves the token to its control entry and requires
-            # task.control on that team (sys.admin bypasses). A dev-team
+            # resolves the address to its control entry and requires
+            # task.control on that run (sys.admin bypasses). A dev-team
             # check alone let any task.control holder restart other teams'
-            # token-addressed tasks.
+            # tasks.
             task = self.get_task(request, 'task.control')
 
             # A restart decrypts the team's CURRENT secrets again (the task loads
             # its ${...} values at every start), so re-check access to the team as
             # on_execute does: get_task gives a run's owner access without asking
-            # whether they are still on the team. pk_/tk_ connections are scoped
-            # to their task already.
-            if self._account_info and not self._account_info.auth.startswith(('pk_', 'tk_')):
-                self.verify_team_permission(task.team_id, 'task.control')
+            # whether they are still on the team.
+            self.verify_team_permission(task.team_id, 'task.control')
 
             # Start the task without debugger attachment
             response = await self._server.restart_task(
@@ -513,10 +511,10 @@ class TaskCommands(DAPConn):
                 project_id, source, self._account_info, require='task.monitor', team_id=team_id, run_kind=run_kind
             )
 
-            # Return successful response with status data
+            # Return the address in the token slot
             return self.build_response(
                 request,
-                body={'token': control.token},
+                body={'token': control.address},
             )
 
         except Exception as e:
@@ -582,7 +580,7 @@ class TaskCommands(DAPConn):
                             'name': name,
                             'description': description,
                             'source': control.source,
-                            'token': control.token,
+                            'token': control.address,
                             'status': status.status,
                             # Owning team — lets clients attribute a task to a
                             # TEAM deployment vs a dev run of the same project.

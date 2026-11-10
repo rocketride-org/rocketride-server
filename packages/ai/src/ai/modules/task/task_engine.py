@@ -67,6 +67,7 @@ from ai.constants import (
 from ai.account.base import OutOfCreditsError
 from ai import CONST_AI_NODE_SCRIPT
 from ai.common.dap import DAPBase, DAPClient, TransportWebSocket
+from ai.common.node_config import resolve_node_config
 from ai.common.rocketride_db import DB_PROVIDERS, db_target, dsn_key, exposes_public_endpoint
 from ai.modules.task.pipeflow import apply_pipeflow_event
 from ai.modules.task.run_log import RunLogWriter
@@ -387,17 +388,18 @@ def _service_capabilities(service: Any) -> List[str]:
 def saas_pipeline_violation(
     pipeline: Dict[str, Any],
     get_service: Callable[[str], Any],
-    get_node_config: Callable[[str, Dict[str, Any]], Dict[str, Any]],
+    resolve_node_config: Callable[[str, Dict[str, Any]], Mapping],
     shared_host: bool = True,
 ) -> Optional[str]:
     """Return why a hosted engine must refuse ``pipeline``, or None if it may run.
 
-    ``get_service`` and ``get_node_config`` are ``rocketlib.getServiceDefinition``
-    and ``Config.getNodeConfig`` in production. The MCP transport is resolved the
-    way the node resolves it (profile defaults merged under the component config),
-    because the default profile is itself stdio. Anything that cannot be resolved
-    is refused. ``shared_host`` says the task will share the engine's host (the
-    task's ``--shared-host``); only then is stdio MCP refused.
+    ``get_service`` and ``resolve_node_config`` are ``rocketlib.getServiceDefinition``
+    and ``resolve_node_config`` (the resolver on the engine-resolved schema) in
+    production. The MCP transport is resolved the way the node resolves it (schema
+    defaults under the component config), because the schema default is itself
+    stdio. Anything that cannot be resolved is refused. ``shared_host`` says the
+    task will share the engine's host (the task's ``--shared-host``); only then is
+    stdio MCP refused.
     """
     for component in pipeline.get('components', []) or []:
         provider = str(component.get('provider') or '')
@@ -409,7 +411,9 @@ def saas_pipeline_violation(
 
         if shared_host and str((service or {}).get('path') or '').lower() == CONST_MCP_CLIENT_NODE_PATH:
             try:
-                transport = str(get_node_config(provider, component.get('config') or {}).get('transport') or 'stdio')
+                transport = str(
+                    resolve_node_config(provider, component.get('config') or {}).get('transport') or 'stdio'
+                )
             except Exception:
                 transport = 'unresolved'
             if transport.strip().lower() not in ('streamable-http', 'sse'):
@@ -598,8 +602,8 @@ class Task(DAPBase):
         id: str,
         project_id: str,
         source: str,
-        token: str,
-        public_auth: str,
+        key: str,
+        address: str,
         pipeline: Dict[str, Any],
         launch_args: Dict[str, Any] = None,
         launch_type: LAUNCH_TYPE = LAUNCH_TYPE.LAUNCH,
@@ -620,7 +624,8 @@ class Task(DAPBase):
 
         Args:
             server: Central orchestration server
-            token: Token for task authentication
+            key: The control's registry key (``runKind.ownerId.address``)
+            address: The task's public name ``developerId.pipelineId.source``
             pipeline: Complete pipeline configuration
             launch_args: Launch configuration parameters
             launch_type: Task creation mode (launch/attach)
@@ -643,8 +648,8 @@ class Task(DAPBase):
         self.id = id
         self.project_id = project_id
         self.source = source
-        self.token = token
-        self.public_auth = public_auth
+        self.key = key
+        self.address = address
         self.client_id = client_id
         self.team_id = team_id
         self.org_id = org_id
@@ -720,7 +725,7 @@ class Task(DAPBase):
         self._data_lock: asyncio.Lock = asyncio.Lock()
         self._data_port: Optional[int] = None
         self._data_client: Optional[Task.TaskData] = None
-        # Per-run credential for the child's /task/data, separate from self.token
+        # Per-run credential for the child's /task/data (engine<->EaaS only)
         self._data_token: Optional[str] = None
         self._reset_channel_state()
 
@@ -859,19 +864,19 @@ class Task(DAPBase):
         expansion rewrites every string, a node's provider included, so the
         raw pipeline can name other nodes than the ones that start.
 
-        Targets are read through ``Config.getNodeConfig``, the resolver the
+        Targets are read through ``resolve_node_config``, the resolver the
         node itself uses, so the engine authorizes exactly the key the node
-        will look up. A malformed scope or target fails the task start.
+        will look up. A malformed scope or target fails the task start, and
+        so does a config that does not fit the node's schema (``ConfigError``
+        is a ``ValueError``).
         """
-        from ai.common.config import Config
-
         components = pipeline.get('components') or []
         targets: List[Tuple[str, str]] = []
         for component in components:
             if not isinstance(component, dict) or component.get('provider') not in DB_PROVIDERS:
                 continue
             try:
-                pair = db_target(Config.getNodeConfig(component['provider'], component.get('config') or {}))
+                pair = db_target(resolve_node_config(component['provider'], component.get('config') or {}))
             except ValueError as e:
                 raise ValueError(f'{component.get("id") or component["provider"]}: {e}') from e
             if pair not in targets:
@@ -1078,10 +1083,9 @@ class Task(DAPBase):
 
         if _is_saas_engine():
             from rocketlib import getServiceDefinition
-            from ai.common.config import Config
 
             problem = saas_pipeline_violation(
-                pipeline, getServiceDefinition, Config.getNodeConfig, shared_host=self._shares_host()
+                pipeline, getServiceDefinition, resolve_node_config, shared_host=self._shares_host()
             )
             if problem:
                 raise ValueError(problem)
@@ -1135,7 +1139,7 @@ class Task(DAPBase):
             'config': config,
             'paths': {'base': data_path},
             'nodeId': '9a0b9f66-f693-4b3b-a85b-bb810261c26e',
-            'taskId': self.token,
+            'taskId': self.key,
             'type': 'pipeline',
             # Trusted identity for in-process tools (surfaced to nodes as
             # IEndpoint.endpoint.jobConfig['identity']). Rides the 0600 task
@@ -1837,7 +1841,7 @@ class Task(DAPBase):
                 # Notify dashboard of task errors (non-zero exit)
                 if self._status.exitCode and self._status.exitCode != 0:
                     try:
-                        task_user_id = self._server.get_task_control(self.token).userId if self.token else None
+                        task_user_id = self._server.control_by_key(self.key).userId if self.key else None
                     except Exception:
                         task_user_id = None
                     await self._server.broadcast_server_event(
@@ -2109,7 +2113,7 @@ class Task(DAPBase):
             # Route through server broadcast system
             await self._server.broadcast_task_event(
                 event_type=type,
-                token=self.token,
+                key=self.key,
                 event=message,
             )
 
@@ -2182,9 +2186,9 @@ class Task(DAPBase):
             else:
                 for note in notes:
                     if isinstance(note, str):
-                        # Handle string notes - simple replacement
-                        note = note.replace('{token}', self.token)
-                        note = note.replace('{public_auth}', self.public_auth)
+                        # Handle string notes - simple replacement; {token} is
+                        # the token SLOT, which carries the address
+                        note = note.replace('{token}', self.address)
                         # getattr: partially-initialized tasks (and test stubs)
                         # may not carry the identity attributes at all.
                         project_id = getattr(self, 'project_id', None)
@@ -2199,9 +2203,8 @@ class Task(DAPBase):
                         processed_note = {}
                         for key, value in note.items():
                             if isinstance(value, str):
-                                # Replace tokens in string values
-                                value = value.replace('{token}', self.token)
-                                value = value.replace('{public_auth}', self.public_auth)
+                                # Replace placeholders in string values
+                                value = value.replace('{token}', self.address)
                                 project_id = getattr(self, 'project_id', None)
                                 source = getattr(self, 'source', None)
                                 if project_id is not None:
@@ -2298,12 +2301,12 @@ class Task(DAPBase):
         # Handle pipeline trace events to build summary and flow events
         elif event_type == 'apaevt_trace':
             operation = body.get('op', '')
-            total_pipes = body.get('total_pipes', 0)
-            pipe_index = body.get('id', '')
-            component_name = body.get('pipe_id', '')
+            total_pipes = body.get('totalPipes', 0)
+            pipe_index = body.get('pipeId', '')
+            component_name = body.get('componentId', '')
             raw_trace = body.get('trace', {})
 
-            # total_pipes=0 marks a synthetic trace (tool-call events emit it
+            # totalPipes=0 marks a synthetic trace (tool-call events emit it
             # as "unknown") — keep the data lane's real pipe count.
             if total_pipes:
                 self._status.pipeflow.totalPipes = total_pipes
@@ -2954,7 +2957,7 @@ class Task(DAPBase):
                 self._debug_stdio = Task.TaskDbgStdio(
                     parent_task=self,
                     id=self.id,
-                    token=self.token,
+                    key=self.key,
                     process=self._engine_process,
                 )
                 await self._debug_stdio.connect()
@@ -3024,7 +3027,7 @@ class Task(DAPBase):
             # Initialize metrics tracking (uses default sample_interval from constants)
             try:
                 # Resolve billing identity from task control
-                _control = self._server.get_task_control(self.token) if self.token else None
+                _control = self._server.control_by_key(self.key) if self.key else None
                 self._task_metrics = TaskMetrics(
                     pid=self._engine_process.pid,
                     task_status=self._status,
