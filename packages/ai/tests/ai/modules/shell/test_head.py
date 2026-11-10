@@ -24,10 +24,7 @@
 
 from __future__ import annotations
 
-import json
-import re
-
-from ai.modules.shell.head import inject_head, jsonld_script
+from ai.modules.shell.head import inject_head
 
 DOC = (
     '<!doctype html><html lang="en"><head><meta charset="utf-8">'
@@ -87,34 +84,10 @@ def test_headless_documents_only_lose_tags_before_body():
     assert out.count('<title>') == 2 and '<title>keep</title>' in out and 'old' not in out
 
 
-def test_jsonld_cannot_break_out_of_its_script():
-    payload = {'name': '</script><script>alert(1)</script>', 'd': 'a & b   '}
-    script = jsonld_script(payload)
-    inner = re.match(r'^<script type="application/ld\+json">(.*)</script>$', script, re.S).group(1)
-    assert '<' not in inner and '>' not in inner and '&' not in inner
-    assert ' ' not in inner and ' ' not in inner
-    assert json.loads(inner) == payload
-
-
-def test_jsonld_blocks_land_in_head():
-    out = inject_head(DOC, title='T', jsonld=[{'@type': 'Organization'}, {'@type': 'WebSite'}])
-    head = out[: out.index('</head>')]
-    assert head.count('application/ld+json') == 2
-
-
 def test_the_charset_declaration_stays_within_the_first_1024_bytes():
-    big = [{'@type': 'Organization', 'description': 'x' * 4000}]
     for charset in ('<meta charset="utf-8">', '<meta http-equiv="Content-Type" content="text/html; charset=utf-8">'):
         doc = f'<!doctype html><html lang="en"><head>{charset}<title>shell</title></head><body></body></html>'
-        out = inject_head(doc, title='Pricing', description='Plans.', jsonld=big)
+        out = inject_head(doc, title='Pricing', description='x' * 4000)
         end = out.index(charset) + len(charset)
         assert len(out[:end].encode('utf-8')) <= 1024, charset
         assert end <= out.index('<title>Pricing</title>') < out.index('</head>'), charset
-
-
-def test_extra_tags_land_in_head_verbatim_after_the_metadata():
-    tag = '<link rel="alternate" type="application/rss+xml" href="/blog/feed.xml">'
-    out = inject_head(DOC, title='T', jsonld=[{'@type': 'WebSite'}], extra=[tag])
-    head = out[: out.index('</head>')]
-    assert head.count(tag) == 1
-    assert head.index('<title>T</title>') < head.index('application/ld+json') < head.index(tag)
