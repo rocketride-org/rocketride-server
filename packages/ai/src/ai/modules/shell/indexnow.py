@@ -52,9 +52,10 @@ reads run at most ``MAX_CONCURRENT_READS`` at a time, and a build's reads are
 bounded by ``READ_SECONDS``. A build whose reads time out is retried by the
 task itself, after ``RETRY_SECONDS`` doubling up to ``MAX_RETRY_SECONDS``,
 until it succeeds or a later build supersedes it; a baseline is never
-superseded, so the changes of the build after it are not lost. The POST is
-bounded by ``TIMEOUT_SECONDS``. Failures and refusals are logged as warnings
-and never affect the rebuild.
+superseded, so the changes of the build after it are not lost. A build's
+URLs go in POSTs of at most 10,000 each (the protocol's cap), one after
+another, each bounded by ``TIMEOUT_SECONDS``. Failures and refusals are
+logged as warnings and never affect the rebuild.
 """
 
 import asyncio
@@ -184,8 +185,8 @@ async def _process(aggregate: Aggregate) -> bool:
         _last = now
         return True
     paths, _last = diff(_last, now, (p.app_id for p in aggregate.exact.values()))
-    if paths:
-        await submit(base, k, [base + path for path in paths[:_MAX_URLS]])
+    for start in range(0, len(paths), _MAX_URLS):
+        await submit(base, k, [base + path for path in paths[start : start + _MAX_URLS]])
     return True
 
 
