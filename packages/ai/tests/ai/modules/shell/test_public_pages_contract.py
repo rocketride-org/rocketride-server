@@ -360,6 +360,15 @@ def test_bad_article_fields_fail_with_the_field_named(field, value, needle):
     assert len(errors) == 1 and errors[0].startswith(needle), errors
 
 
+def test_a_bad_https_image_names_what_is_wrong_with_the_url():
+    for image, why in (
+        ('https://cdn.example/a b.png', 'must be an absolute https:// URL'),
+        ('https://cdn.example/\ud83d.png', 'contains a lone surrogate'),
+    ):
+        _, _, errors = check_manifest(ROOT_APP, {'publicPages': [_page('/x', image=image)]})
+        assert len(errors) == 1 and errors[0].startswith(f'publicPages[0].image {image!r}: {why}'), errors
+
+
 def test_modified_before_published_rejected():
     pages, _, errors = check_manifest(
         ROOT_APP, {'publicPages': [_page('/x', published='2026-11-10', modified='2026-11-09')]}
@@ -663,9 +672,9 @@ def test_a_feed_path_collides_with_no_page_redirect_live_route_or_their_twins():
     pages = BLOG_PAGES + [_page('/news.xml')]
     _, _, errors = check_manifest(ROOT_APP, {'publicPages': pages, 'site': {'feeds': [{**FEED, 'path': '/news.xml'}]}})
     assert errors == ["site.feeds[0].path '/news.xml': is a publicPages path; choose another path"]
-    for source in ('/old.xml', '/old.xml/'):
+    for source, which in (('/old.xml', ''), ('/old.xml/', "its slash twin '/old.xml/' ")):
         _, _, errors = _feeds({**FEED, 'path': '/old.xml'}, redirects=[source])
-        assert len(errors) == 1 and 'site.redirects source' in errors[0], source
+        assert errors == [f"site.feeds[0].path '/old.xml': {which}is a site.redirects source; choose another path"]
     for route in ('/live.xml', '/live.xml/'):
         _, _, errors = _feeds(
             {**FEED, 'path': '/live.xml'}, live_conflict=lambda p, r=route: 'GET /x' if p == r else None

@@ -301,20 +301,24 @@ def _page_data_error(data: Any) -> Optional[str]:
     return None
 
 
+_IMAGE_FORMS = (
+    f'must be an https:// URL, a root path ("/apps/<appId>/og.png") or a path inside the build output '
+    f'("og/page.png"), at most {_MAX_URL} characters, without empty or dot segments'
+)
+
+
 def _image_error(value: Any) -> Optional[str]:
     """Why ``value`` cannot be an ``image``: an https URL, a root path, or a path in the build output."""
-    if isinstance(value, str) and len(value) <= _MAX_URL:
-        if value.startswith('https://'):
-            if not _https_url_error(value):
-                return None
-        else:
-            relative = value[1:] if value.startswith('/') else value
-            if _BUILD_PATH.fullmatch(relative) and not any(seg in ('.', '..') for seg in relative.split('/')):
-                return None
-    return (
-        f'must be an https:// URL, a root path ("/apps/<appId>/og.png") or a path inside the build output '
-        f'("og/page.png"), at most {_MAX_URL} characters, without empty or dot segments'
-    )
+    if not isinstance(value, str) or len(value) > _MAX_URL:
+        return _IMAGE_FORMS
+    if value.startswith('https://'):
+        return _https_url_error(value)
+    relative = value[1:] if value.startswith('/') else value
+    if not _BUILD_PATH.fullmatch(relative):
+        return _IMAGE_FORMS
+    if any(seg in ('.', '..') for seg in relative.split('/')):
+        return _IMAGE_FORMS
+    return None
 
 
 def page_instant(value: str) -> datetime:
@@ -331,15 +335,22 @@ def page_instant(value: str) -> datetime:
     raise ValueError(f'not a page date: {value!r}')
 
 
+_DATE_FORMS = 'must be a real date, YYYY-MM-DD or an RFC 3339 date-time with an offset (2026-11-09T10:00:00Z)'
+
+
 def _date_error(value: Any) -> Optional[str]:
     """Why ``value`` is not a real ``YYYY-MM-DD`` date or RFC 3339 date-time with an offset, or None."""
+    if not isinstance(value, str):
+        return _DATE_FORMS
+    if not _DATE.fullmatch(value) and not _DATETIME.fullmatch(value):
+        return _DATE_FORMS
+    # The shape is right; the calendar (2026-02-30) and an offset that moves
+    # the instant out of years 1 to 9999 are only caught by building it.
     try:
-        if isinstance(value, str):
-            page_instant(value)
-            return None
+        page_instant(value)
     except (ValueError, OverflowError):
-        pass
-    return 'must be a real date, YYYY-MM-DD or an RFC 3339 date-time with an offset (2026-11-09T10:00:00Z)'
+        return _DATE_FORMS
+    return None
 
 
 def _check_article(where: str, raw: Mapping[str, Any]) -> Tuple[Dict[str, Any], Optional[str]]:
@@ -579,7 +590,7 @@ def _feed_path_error(
         return 'must end in .xml'
     paths = {p.path for p in pages}
     for candidate in with_slash_twin(path):
-        which = '' if candidate == path else f'its slash twin {candidate!r} '
+        which = slash_twin_label(path, candidate)
         if candidate in paths:
             return f'{which}is a publicPages path'
         if candidate in redirects:
