@@ -280,7 +280,9 @@ publish fails with a message naming the field):
   platform app that declares `site` without declaring `/` is refused, and a
   third-party app's `site` is ignored, since it can never take effect.
 - `path` is absolute and lowercase, with no query, fragment, trailing slash,
-  empty or dot segment. Wildcard pages are not supported.
+  empty or dot segment. Each segment uses only `a-z`, `0-9`, `-`, `.`, `_` and
+  `~`, so `/café` and `/caf%C3%A9` are refused. Wildcard pages are not
+  supported.
 - Paths under a root route the engine serves itself (`/api`, `/apps`, `/auth`,
   `/mcp`, `/shell`, `/status`, `/task`, `/.well-known` and the rest of the
   engine's routes) or the three crawler files (`/sitemap.xml`, `/robots.txt`,
@@ -294,7 +296,8 @@ publish fails with a message naming the field):
 Until a published platform app contributes a valid page, the page map holds
 the server's built-in page list instead. A published app whose storage cannot
 be read keeps the pages of its last readable build while the server runs;
-after a restart it has none until its storage can be read again.
+after a restart it has none until its storage can be read again. Kept pages
+still compete with other apps' claims under the same first-claim rule.
 
 ### Settings
 
