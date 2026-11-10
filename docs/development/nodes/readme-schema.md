@@ -181,9 +181,17 @@ name and one row per exposed function.
 - This section is the agent-facing contract — it has the highest accuracy
   bar in the file.
 
-## 6. `## Profiles` — CONDITIONAL
+## 6. `## Profiles` — CONDITIONAL (allowed, never required)
 
-**Trigger:** `preconfig.profiles` contains ≥ 2 entries other than `custom`.
+**Trigger:** the service's first root-level selector (a `properties` entry
+whose `enum` is a dict of branches) has ≥ 2 branches other than `custom`. The
+section is then **allowed**, not required: a README may instead describe the
+selector under `## Configuration` (for example as a `### Models` table). It is
+forbidden when there is no such selector. When present, the branches are the
+profiles: the branch key is the profile key, the selector's `default` is the
+default profile, and a profile's metadata is its branch `title`, the branch
+key under the selector's name (a `model` selector's key is the model id), and
+the `constant` values the branch declares.
 
 Every declared profile appears exactly once.
 
@@ -271,7 +279,7 @@ once for the directory.
 is a separate node to the engine — a branded preset (`llm_openai_api`'s Nebius
 service), a second provider (`cloud_tts`'s OpenAI and ElevenLabs), or a second
 backend (`store_elasticsearch`'s Elasticsearch and OpenSearch) — so its
-`preconfig.default` is a fact about that service, not a competing claim about
+selector `default` is a fact about that service, not a competing claim about
 the primary one. In a combined table, mark **every** service's default row and
 name each one in the introduction:
 
