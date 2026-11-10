@@ -280,8 +280,13 @@ class Store(DocumentStoreBase):
             include_values=False,
         )['matches']
 
-        # Have to get similarity score threshold post query
-        points_satisfy_threshold = [point for point in points if point['score'] >= self.threshold_search]
+        # Apply the score threshold post query. A cosine match score can be
+        # negative, so 0.0 ("All results" in vector.score) skips the filter
+        # rather than dropping the negative matches
+        if self.threshold_search > 0.0:
+            points_satisfy_threshold = [point for point in points if point['score'] >= self.threshold_search]
+        else:
+            points_satisfy_threshold = points
         # Convert the points into groups
         docs = self._convertToDocs(points_satisfy_threshold)
 
