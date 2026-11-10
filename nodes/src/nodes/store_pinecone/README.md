@@ -72,9 +72,9 @@ The collection is the Pinecone index name and defaults to `rocketride`. Validati
 
 ### Similarity and retrieval score
 
-The metric is not configurable: the driver creates every index with the `cosine` metric, and the score handling assumes it. An index created earlier with `euclidean` or `dotproduct` keeps its metric, so its scores are not on the cosine scale; recreate such an index under a new collection name to get comparable scores.
+The metric is not configurable: the driver creates every index with the `cosine` metric. An index created earlier with `euclidean` or `dotproduct` keeps its metric, and the node reads it back from the index (once, on the first semantic search) to convert the scores so that higher always means closer: a `cosine` score is Pinecone's cosine similarity as returned; a `euclidean` index's squared distance `d` becomes `1 / (1 + d)`, so an identical vector scores `1.0`; a `dotproduct` score is the raw dot product, which equals the cosine similarity only for unit-length embeddings. Recreate a legacy index under a new collection name to get cosine scores.
 
-Retrieval Score (`score`, default `0.7`) is the minimum Pinecone match score a semantic-search result must reach; matches below it are dropped before they are returned. `0.0` returns every match.
+Retrieval Score (`score`, default `0.7`) is the minimum converted score a semantic-search result must reach; matches below it are dropped before they are returned, and the returned score is the converted one. `0.0` returns every match.
 
 ### API key
 

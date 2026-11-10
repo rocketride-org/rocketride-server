@@ -21,7 +21,7 @@
 # SOFTWARE.
 # =============================================================================
 
-"""The Pinecone store pins its metric: the index is created with cosine, a value Pinecone accepts."""
+"""The Pinecone store pins its metric: new indexes use cosine, and scores follow the metric of the open index."""
 
 from unittest.mock import MagicMock, patch
 
@@ -55,12 +55,13 @@ def test_the_index_is_created_with_the_cosine_metric():
     assert client.create_index.call_args.kwargs['dimension'] == 5
 
 
-def _search(store, client, scores):
-    """Run a semantic search whose Pinecone query returns one match per score; return the kept scores."""
+def _search(store, client, scores, metric='cosine'):
+    """Run a semantic search on an index of the given metric whose query returns one match per score; return the kept scores."""
     store.doesCollectionExist = lambda *args: True
     store._convertFilter = lambda docFilter: {}
     store._convertToDocs = lambda points: points
-    client.Index.return_value.query.return_value = {'matches': [{'score': score} for score in scores]}
+    client.describe_index.return_value = MagicMock(metric=metric)
+    client.Index.return_value.query.return_value = {'matches': [{'score': score, 'metadata': {}} for score in scores]}
 
     kept = store.searchSemantic(MagicMock(embedding=[0.1]), MagicMock(offset=0, limit=None))
     return [point['score'] for point in kept]
@@ -79,3 +80,35 @@ def test_a_positive_score_drops_matches_below_it():
     store.threshold_search = 0.5
 
     assert _search(store, client, [0.9, 0.5, 0.1, -0.3]) == [0.9, 0.5]
+
+
+def test_a_euclidean_index_keeps_the_closest_match_under_the_default_score():
+    """Pinecone scores a euclidean index by squared distance; 1 / (1 + d) keeps the closest match and drops the distant one."""
+    store, client = _store()
+    assert store.threshold_search == 0.7
+
+    kept = _search(store, client, [0.1, 0.9], metric='euclidean')
+
+    assert len(kept) == 1
+    assert abs(kept[0] - 1.0 / 1.1) < 1e-9
+
+
+def test_a_euclidean_index_with_a_zero_score_keeps_every_match_closest_first():
+    store, client = _store()
+    store.threshold_search = 0.0
+
+    kept = _search(store, client, [0.0, 0.5, 4.0], metric='euclidean')
+
+    assert kept == sorted(kept, reverse=True)
+    assert abs(kept[0] - 1.0) < 1e-9
+
+
+def test_the_index_metric_is_read_once():
+    store, client = _store()
+    store.threshold_search = 0.0
+
+    _search(store, client, [0.9], metric='euclidean')
+    _search(store, client, [0.9], metric='euclidean')
+
+    assert client.describe_index.call_count == 1
+    assert store.metric == 'euclidean'
