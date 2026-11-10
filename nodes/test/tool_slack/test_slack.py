@@ -46,9 +46,15 @@ def _require_str(args, key, *, tool_name=''):
 
 
 def _build_import_stubs():
+    # The real base: its ``config`` property resolves self.glb.connConfig against the engine's
+    # schema for tool_slack (rocketlib.filters is never stubbed); the stub stands in for the rest.
+    from rocketlib.filters import IGlobalBase
+
     rocketlib = MagicMock()
     rocketlib.IInstanceBase = object
-    rocketlib.IGlobalBase = object
+    rocketlib.IGlobalBase = IGlobalBase
+    rocketlib.engine = importlib.import_module('rocketlib.engine')
+    rocketlib.config = importlib.import_module('rocketlib.config')
     rocketlib.tool_function = lambda **kwargs: lambda f: f
     rocketlib.OPEN_MODE = MagicMock()
     rocketlib.warning = lambda *a, **kw: None
@@ -66,7 +72,6 @@ def _build_import_stubs():
         'ai': MagicMock(),
         'ai.common': MagicMock(),
         'ai.common.utils': ai_common_utils,
-        'ai.common.config': MagicMock(),
     }
 
 
@@ -751,12 +756,12 @@ class TestExceptionHierarchy:
 # ===========================================================================
 
 
-def _make_iglobal(open_mode='SOURCE', conn_config=None):
+def _make_iglobal(conn_config=None):
+    """An IGlobal on the stored config; ``self.config`` resolves it through the engine's schema."""
     iglobal = iglobal_mod.IGlobal()
 
     mock_endpoint = Mock()
     mock_endpoint.endpoint = Mock()
-    mock_endpoint.endpoint.openMode = getattr(iglobal_mod.OPEN_MODE, open_mode)
     mock_endpoint.endpoint.bag = {}
     iglobal.IEndpoint = mock_endpoint
 
@@ -767,62 +772,48 @@ def _make_iglobal(open_mode='SOURCE', conn_config=None):
     return iglobal
 
 
-_NO_SLACK_ENV = {
+_MOCK_ENV = {
     'ROCKETRIDE_MOCK': 'nodes/test/mocks',
-    iglobal_mod.SLACK_TOKEN_ENV: '',
-    iglobal_mod.SLACK_WEBHOOK_URL_ENV: '',
+    'ROCKETRIDE_SLACK_TOKEN': '',
+    'ROCKETRIDE_SLACK_WEBHOOK_URL': '',
 }
 
 
 class TestIGlobal:
-    def _begin(self, iglobal, config, env=None):
-        with patch.dict(os.environ, {**_NO_SLACK_ENV, **(env or {})}, clear=False):
-            with patch.object(iglobal_mod, 'Config') as mock_config_cls:
-                mock_config_cls.getNodeConfig.return_value = config
-                iglobal.beginGlobal()
-
-    def test_begin_global_config_mode_skips_client(self):
-        iglobal = _make_iglobal(open_mode='CONFIG')
-        iglobal.beginGlobal()
-        assert iglobal._slack is None
+    def _begin(self, config, env=None):
+        iglobal = _make_iglobal(config)
+        with patch.dict(os.environ, {**_MOCK_ENV, **(env or {})}, clear=False):
+            iglobal.beginGlobal()
+        return iglobal
 
     def test_begin_global_token_mode(self):
-        iglobal = _make_iglobal()
-        self._begin(iglobal, {'token': TEST_TOKEN, 'webhookUrl': ''})
+        iglobal = self._begin({'token': TEST_TOKEN})
         assert iglobal._slack is not None
         assert iglobal._slack._web is not None
 
     def test_begin_global_webhook_mode(self):
-        iglobal = _make_iglobal()
-        self._begin(iglobal, {'token': '', 'webhookUrl': TEST_WEBHOOK})
+        iglobal = self._begin({'webhookUrl': TEST_WEBHOOK})
         assert iglobal._slack is not None
         assert iglobal._slack._webhook is not None
 
     def test_begin_global_both_raises_prefixed_error(self):
-        iglobal = _make_iglobal()
         with pytest.raises(ValueError, match='tool_slack: .*not both'):
-            self._begin(iglobal, {'token': TEST_TOKEN, 'webhookUrl': TEST_WEBHOOK})
+            self._begin({'token': TEST_TOKEN, 'webhookUrl': TEST_WEBHOOK})
 
     def test_begin_global_neither_raises_prefixed_error(self):
-        iglobal = _make_iglobal()
         with pytest.raises(ValueError, match='tool_slack: .*required'):
-            self._begin(iglobal, {'token': '', 'webhookUrl': ''})
+            self._begin({'token': '', 'webhookUrl': ''})
 
-    def test_env_fallback_when_config_empty(self):
-        iglobal = _make_iglobal()
-        self._begin(iglobal, {'token': '', 'webhookUrl': ''}, env={iglobal_mod.SLACK_TOKEN_ENV: TEST_TOKEN})
-        assert iglobal._slack._web is not None
+    def test_begin_global_has_no_process_env_fallback(self):
+        """The credentials arrive through the node config only (${ROCKETRIDE_SLACK_*} references per call)."""
+        with pytest.raises(ValueError, match='tool_slack: .*required'):
+            self._begin({}, env={'ROCKETRIDE_SLACK_TOKEN': TEST_TOKEN})
 
-    def test_explicit_config_wins_over_env(self):
-        """A stray env var must not conflict with an explicitly configured mode."""
-        iglobal = _make_iglobal()
-        self._begin(
-            iglobal,
-            {'token': '', 'webhookUrl': TEST_WEBHOOK},
-            env={iglobal_mod.SLACK_TOKEN_ENV: TEST_TOKEN},
-        )
-        assert iglobal._slack._webhook is not None
-        assert iglobal._slack._web is None
+    def test_auth_config_error_names_the_problem(self):
+        assert iglobal_mod._auth_config_error(TEST_TOKEN, '') is None
+        assert iglobal_mod._auth_config_error('', TEST_WEBHOOK) is None
+        assert 'not both' in iglobal_mod._auth_config_error(TEST_TOKEN, TEST_WEBHOOK)
+        assert 'required' in iglobal_mod._auth_config_error('', '')
 
     def test_mock_mode_skips_dependency_install(self):
         iglobal = _make_iglobal()
@@ -839,37 +830,6 @@ class TestIGlobal:
         iglobal._slack = Mock()
         iglobal.endGlobal()
         assert iglobal._slack is None
-
-    def _validate(self, config, env=None):
-        with patch.dict(os.environ, {**_NO_SLACK_ENV, **(env or {})}, clear=False):
-            with patch.object(iglobal_mod, 'Config') as mock_config_cls:
-                mock_config_cls.getNodeConfig.return_value = config
-                with patch.object(iglobal_mod, 'warning') as mock_warning:
-                    _make_iglobal().validateConfig()
-        return mock_warning
-
-    def test_validate_config_neither_warns(self):
-        assert self._validate({'token': '', 'webhookUrl': ''}).call_count == 1
-
-    def test_validate_config_both_warns(self):
-        assert self._validate({'token': TEST_TOKEN, 'webhookUrl': TEST_WEBHOOK}).call_count == 1
-
-    def test_validate_config_token_only_is_clean(self):
-        self._validate({'token': TEST_TOKEN, 'webhookUrl': ''}).assert_not_called()
-
-    def test_validate_config_webhook_only_is_clean(self):
-        self._validate({'token': '', 'webhookUrl': TEST_WEBHOOK}).assert_not_called()
-
-    def test_validate_config_env_fallback_is_clean(self):
-        warning = self._validate({'token': '', 'webhookUrl': ''}, env={iglobal_mod.SLACK_TOKEN_ENV: TEST_TOKEN})
-        warning.assert_not_called()
-
-    def test_validate_config_lookup_failure_warns(self):
-        with patch.object(iglobal_mod, 'Config') as mock_config_cls:
-            mock_config_cls.getNodeConfig.side_effect = Exception('boom')
-            with patch.object(iglobal_mod, 'warning') as mock_warning:
-                _make_iglobal().validateConfig()
-        mock_warning.assert_called_once()
 
 
 # ===========================================================================

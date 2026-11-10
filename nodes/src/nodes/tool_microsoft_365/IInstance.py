@@ -38,7 +38,6 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from ai.common.config import Config
 from rocketlib import IInstanceBase
 
 from .graph_client import GraphService, token_scope_report
@@ -100,11 +99,12 @@ class MicrosoftToolInstanceBase(IInstanceBase):
                 out['connection_ok'] = False
                 out['error'] = str(exc)[:200]
         try:
-            cfg = Config.getNodeConfig(self.IGlobal.glb.logicalType, self.IGlobal.glb.connConfig)
-            auth_type = (cfg.get('authType') or 'service').strip()
+            # The resolved config for this call: the active authType branch flattened in
+            cfg = self.settings
+            auth_type = cfg['authType']
             out['authType'] = auth_type
             if auth_type == 'user':
-                token_str = str(cfg.get('userToken') or '').strip()
+                token_str = str(cfg.get('userAuth') or '').strip()
                 if token_str:
                     try:
                         _granted, covered, missing = token_scope_report(self.SERVICE, cfg, out['requiredScopes'])

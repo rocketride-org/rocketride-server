@@ -23,7 +23,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 import types
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import Mock
@@ -43,7 +43,86 @@ _TOOL_ARG_HELPERS = (
     'require_str_list',
 )
 
-STUB_MODULE_NAMES = ('rocketlib', 'ai', 'ai.common', 'ai.common.config', 'ai.common.utils')
+STUB_MODULE_NAMES = ('rocketlib', 'ai', 'ai.common', 'ai.common.utils')
+
+# The branch each auth leaf is stored under (plan section 5.6.2): a flat test
+# config names the leaves, ``to_conn_config`` nests them where the resolver reads.
+_BRANCH_OF = {'token': 'pat', 'appId': 'app', 'privateKey': 'app', 'installationId': 'app'}
+
+#: The stored config the current ``install_stubs`` call bound; ``conn_config()`` reads it.
+_CURRENT_CONN_CONFIG: dict = {}
+
+
+def to_conn_config(flat: dict | None) -> dict:
+    """Nest a flat test config into the path-addressed shape the resolver expects.
+
+    A ``credentialMap`` written as a dict (repository to credential, the terse form
+    the routing tests use) is stored as the form's rows, which is the array leaf
+    the schema declares; a list or a string is stored as given.
+    """
+    nested: dict = {}
+    for key, value in (flat or {}).items():
+        branch = _BRANCH_OF.get(key)
+        if branch:
+            nested.setdefault(branch, {})[key] = value
+        elif key == 'credentialMap' and isinstance(value, dict):
+            nested[key] = [
+                {'credentialRepository': repository, 'credentialValue': credential}
+                for repository, credential in value.items()
+            ]
+        else:
+            nested[key] = value
+    return nested
+
+
+def conn_config() -> dict:
+    """The stored config bound by the enclosing ``scoped_stubs``, for ``glb.connConfig``."""
+    return dict(_CURRENT_CONN_CONFIG)
+
+
+# What the schema's defaults give every option the node's readers touch.
+_OPTION_DEFAULTS = {
+    'authType': 'pat',
+    'readOnly': False,
+    'tools': [],
+    'graphqlAllowMutations': False,
+    'graphqlMaxResponseBytes': 4194304,
+    'rateLimitBudgetSeconds': 60,
+    'rateLimitMaxRetries': 3,
+}
+
+
+class FlatConfig(Mapping):
+    """A flat test config read the way the node reads its ``ConfigView``: by item and attribute.
+
+    For the parser-level tests: the schema stores a ``credentialMap`` as the form's rows,
+    so a map written as an object or as JSON text, a bad row key or a bad value never
+    reaches the node through the resolver. These tests check the node's own readers
+    (``node_config``), so they hand them the config directly, defaults applied.
+    """
+
+    def __init__(self, flat: dict | None) -> None:
+        self._values = {**_OPTION_DEFAULTS, **(flat or {})}
+
+    def __getitem__(self, key):
+        return self._values[key]
+
+    def __getattr__(self, name):
+        if name.startswith('_') or name not in self._values:
+            raise AttributeError(name)
+        return self._values[name]
+
+    def __iter__(self):
+        return iter(self._values)
+
+    def __len__(self):
+        return len(self._values)
+
+
+def flat_config(flat: dict | None) -> FlatConfig:
+    """``flat`` as the node's readers see a config, defaults applied."""
+    return FlatConfig(flat)
+
 
 if str(_NODES_SRC) not in sys.path:
     sys.path.insert(0, str(_NODES_SRC))
@@ -77,7 +156,18 @@ def _load_real_tool_args():
 
 
 def install_stubs(node_config: dict | None = None) -> None:
+    """Bind ``node_config`` (flat leaves) as the stored config and stub the node's engine-only deps.
+
+    The stub ``rocketlib`` keeps the REAL ``IGlobalBase`` so ``self.config`` resolves
+    through the engine's schema for tool_github; ``warning`` is a Mock the tests inspect.
+    """
+    global _CURRENT_CONN_CONFIG
+    _CURRENT_CONN_CONFIG = to_conn_config(node_config)
+
     mod_rl = types.ModuleType('rocketlib')
+    # The real submodules by their sys.modules entries, so a leaked stub parent cannot hide them.
+    mod_rl.engine = importlib.import_module('rocketlib.engine')
+    mod_rl.config = importlib.import_module('rocketlib.config')
 
     def mock_tool_function(*, input_schema=None, description=None, output_schema=None):
         # Stamp the metadata like rocketlib does, so the node's tool list is the real one.
@@ -102,27 +192,18 @@ def install_stubs(node_config: dict | None = None) -> None:
                 if hasattr(getattr(type(self), name, None), '__tool_meta__')
             }
 
-    class IGlobalBase:
-        pass
+    # The real base: its ``config`` property resolves self.glb.connConfig against
+    # the engine's schema for tool_github (rocketlib.filters is never stubbed).
+    from rocketlib.filters import IGlobalBase, IValidatorBase
 
     mod_rl.IInstanceBase = IInstanceBase
     mod_rl.IGlobalBase = IGlobalBase
-    mod_rl.OPEN_MODE = types.SimpleNamespace(CONFIG='config')
+    mod_rl.IValidatorBase = IValidatorBase
     mod_rl.warning = Mock()
     sys.modules['rocketlib'] = mod_rl
 
     sys.modules['ai'] = types.ModuleType('ai')
     sys.modules['ai.common'] = types.ModuleType('ai.common')
-
-    mod_ai_common_config = types.ModuleType('ai.common.config')
-
-    class Config:
-        @staticmethod
-        def getNodeConfig(logical_type, conn_config):
-            return node_config if node_config is not None else {}
-
-    mod_ai_common_config.Config = Config
-    sys.modules['ai.common.config'] = mod_ai_common_config
 
     mod_ai_common_utils = types.ModuleType('ai.common.utils')
     tool_args = _load_real_tool_args()

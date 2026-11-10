@@ -71,20 +71,6 @@
 		"_source": ["tags", "text", "json", "audio", "video", "image", "questions"]
 	},
 	//
-	//	Optional:
-	//		Profile section are configuration options used by the driver
-	//		itself
-	//
-	"preconfig": {
-		// Define the values that will be merged into any profile configuration
-		// specified, unless the profile is 'absolute'
-		"default": "default",
-		// Defines profiles used with the "profile": key
-		"profiles": {
-			"default": {}
-		}
-	},
-	//
 	// Required:
 	//		Defines the fields shown in the node's config panel, in order
 	//

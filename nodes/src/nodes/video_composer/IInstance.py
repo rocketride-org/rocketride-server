@@ -101,8 +101,13 @@ class IInstance(IInstanceBase):
         self._cleanup()
 
     def open(self, obj: Entry):
-        """Reset the frame buffer and capture the output filename from the entry."""
+        """Reset the frame buffers and capture the output filename from the entry.
+
+        The partial-frame buffer is reset here too (stream-reset convention): a
+        stream that ended without its END action must not leak into the next object.
+        """
         self._frames = []
+        self._image_buf = bytearray()
         self._filename = (obj.name if obj.hasName else None) or 'output.mp4'
         _log('open: in-memory frame buffer initialised')
         _plog(f'open: filename={self._filename!r} obj.hasName={obj.hasName}')

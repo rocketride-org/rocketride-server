@@ -39,7 +39,7 @@ def response(data, status=200, headers=None, content=None):
 @pytest.fixture
 def node(monkeypatch):
     with scoped_stubs():
-        from tool_github import IInstance
+        from tool_github.IInstance import IInstance
         from tool_github import github_client
 
         inst = IInstance()

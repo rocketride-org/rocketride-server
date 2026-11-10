@@ -22,14 +22,13 @@ Neither is the caller's input that two legacy messages repeat (``file_get`` and
 
 import ast
 import json
-import types
 from pathlib import Path
 
 import pytest
 import requests
 
 from ._fake_github import FakeGitHub, app, app_config, dispatch, real_node
-from ._stubs import scoped_stubs
+from ._stubs import flat_config, scoped_stubs
 
 NODE = Path(__file__).resolve().parents[2] / 'src' / 'nodes' / 'tool_github'
 MESSAGE_CALLS = {
@@ -98,21 +97,24 @@ def test_no_message_literal_in_the_node_contains_an_asterisk():
 
 
 def _start_error(cfg):
+    """The start error and the validator's warnings for ``cfg``, on the flat config (see _stubs.FlatConfig)."""
     with scoped_stubs(cfg):
-        from tool_github.IGlobal import IGlobal, warning
+        from rocketlib import warning
+        from tool_github import node_config
+        from tool_github.IValidator import IValidator
 
-        glb = IGlobal()
-        glb.IEndpoint = types.SimpleNamespace(endpoint=types.SimpleNamespace(openMode='open'))
-        glb.glb = types.SimpleNamespace(logicalType='tool_github', connConfig={})
+        view = flat_config(cfg)
         with pytest.raises(ValueError) as error:
-            glb.beginGlobal()
-        glb.validateConfig()
+            node_config.read_options(view)
+            node_config.read_auth(view)
+        validator = IValidator()
+        validator._config_restricted = view
+        validator.validateConfig()
         return [str(error.value), *(str(call.args[0]) for call in warning.call_args_list)]
 
 
 START_CONFIGS = [
     {'authType': '*', 'token': 'x'},
-    {'token': 'x', 'tools': ['*', 'repo_tree*', 'no_such_tool']},
     {'credentialMap': ['*']},
     {'credentialMap': '["*"]'},
     {'credentialMap': {'*/x': 'tok'}},

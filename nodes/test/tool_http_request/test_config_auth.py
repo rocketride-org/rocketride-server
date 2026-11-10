@@ -20,12 +20,33 @@ import pytest
 GITHUB = r'^https://api\.github\.com(?:/|$)'
 
 
+# The branch each auth leaf is stored under (plan section 5.6.2): a flat test
+# config names the leaves, ``_conn_config`` nests them where the resolver reads.
+_BRANCH_OF = {
+    'authToken': 'bearer',
+    'authUsername': 'basic',
+    'authPassword': 'basic',
+    'authHeaderName': 'api_key',
+    'authHeaderValue': 'api_key',
+}
+
+
+def _conn_config(flat: dict) -> dict:
+    """Nest a flat test config into the path-addressed shape the resolver expects."""
+    nested: dict = {}
+    for key, value in flat.items():
+        branch = _BRANCH_OF.get(key)
+        if branch:
+            nested.setdefault(branch, {})[key] = value
+        else:
+            nested[key] = value
+    return nested
+
+
 def _started_global(iglobal, cfg: dict):
-    """Run ``beginGlobal`` against ``cfg`` and return the IGlobal instance."""
-    iglobal.Config.getNodeConfig.return_value = cfg
+    """Run ``beginGlobal`` on the stored config ``cfg`` and return the IGlobal instance."""
     instance = object.__new__(iglobal.IGlobal)
-    instance.IEndpoint = types.SimpleNamespace(endpoint=types.SimpleNamespace(openMode='run'))
-    instance.glb = types.SimpleNamespace(logicalType='tool_http_request', connConfig={})
+    instance.glb = types.SimpleNamespace(logicalType='tool_http_request', connConfig=_conn_config(cfg))
     instance.beginGlobal()
     return instance
 
@@ -93,7 +114,6 @@ def test_api_key_config_auth_is_header_only(node_modules):
 @pytest.mark.parametrize(
     'cfg,error',
     [
-        ({'authType': 'oauth'}, 'authType must be one of'),
         ({'authType': 'bearer'}, 'authToken is empty'),
         ({'authType': 'bearer', 'authToken': '   '}, 'authToken is empty'),
         ({'authType': 'basic', 'authPassword': 'pw'}, 'authUsername is empty'),
@@ -106,8 +126,6 @@ def test_api_key_config_auth_is_header_only(node_modules):
         ({'authType': 'api_key', 'authHeaderName': 'X-Key:', 'authHeaderValue': 'k'}, 'not a valid HTTP header name'),
         ({'authType': 'api_key', 'authHeaderName': 'host', 'authHeaderValue': 'k'}, 'cannot be Host'),
         ({'authType': 'bearer', 'authToken': 'abc\r\nX-Injected: 1'}, 'must not contain line breaks'),
-        ({'authType': ['bearer']}, 'authType must be a string'),
-        ({'authType': True}, 'authType must be a string'),
         ({'authType': 'basic', 'authUsername': 'u\nx', 'authPassword': 'p'}, 'must not contain line breaks'),
     ],
 )
@@ -162,7 +180,7 @@ def test_redacted_placeholder_is_rejected(node_modules):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize('cfg', [{}, {'defaultHeaders': None}, {'defaultHeaders': ''}, {'defaultHeaders': []}])
+@pytest.mark.parametrize('cfg', [{}, {'defaultHeaders': None}, {'defaultHeaders': []}])
 def test_missing_default_headers_is_empty(node_modules, cfg):
     _http_client, iglobal, _iinstance = node_modules
 
@@ -191,14 +209,12 @@ def test_default_headers_keep_case_and_skip_blank_rows(node_modules):
     }
 
 
-def test_default_headers_accept_json_string_form(node_modules):
+def test_default_headers_reject_the_json_string_form(node_modules):
+    """The schema types defaultHeaders as an array; a string is never reconciled into rows."""
     _http_client, iglobal, _iinstance = node_modules
 
-    headers = iglobal.IGlobal._build_default_headers(
-        {'defaultHeaders': '[{"headerName": "Accept", "headerValue": "*/*"}]'}
-    )
-
-    assert headers == {'Accept': '*/*'}
+    with pytest.raises(ValueError, match='defaultHeaders must be a list of rows'):
+        iglobal.IGlobal._build_default_headers({'defaultHeaders': '[{"headerName": "Accept", "headerValue": "*/*"}]'})
 
 
 @pytest.mark.parametrize(
@@ -223,8 +239,8 @@ def test_default_headers_accept_json_string_form(node_modules):
         ([{'headerName': 123, 'headerValue': 'x'}], 'headerName must be a string'),
         ([{'headerName': 'X', 'headerValue': ['x']}], 'headerValue must be a string'),
         (['Accept: */*'], 'must be an object'),
-        ({'Accept': '*/*'}, 'malformed and cannot be parsed'),
-        ('not json', 'malformed and cannot be parsed'),
+        ({'Accept': '*/*'}, 'must be a list of rows'),
+        ('not json', 'must be a list of rows'),
     ],
 )
 def test_invalid_default_headers_fail_closed(node_modules, rows, error):
@@ -353,60 +369,33 @@ def test_whitelist_is_optional_without_config_auth(node_modules):
     assert glb.url_patterns == []
 
 
-def test_begin_global_warns_about_credentials_the_auth_type_ignores(node_modules):
-    """The silent-ignore the issue reported now at least says so."""
+def test_begin_global_ignores_credentials_stored_under_another_auth_type(node_modules):
+    """A stored bearer token under authType none is kept in the file, not read, never sent."""
     _http_client, iglobal, _iinstance = node_modules
 
     glb = _started_global(iglobal, {'authType': 'none', 'authToken': 'ghp_live', 'authHeaderValue': 'k'})
 
     assert glb.config_auth is None
-    messages = [call.args[0] for call in iglobal.warning.call_args_list]
-    assert any("authType is 'none'; authHeaderValue, authToken will not be sent" == m for m in messages)
+    assert iglobal.warning.call_args_list == []
 
 
-def test_begin_global_warns_about_fields_outside_selected_auth_type(node_modules):
+def test_begin_global_requires_the_selected_branch_credential(node_modules):
+    """The schema requires the bearer token once bearer is selected: the resolver names the leaf."""
+    from rocketlib.config import ConfigError
+
     _http_client, iglobal, _iinstance = node_modules
 
-    _started_global(
-        iglobal,
-        {
-            'authType': 'bearer',
-            'authToken': 'ghp_live',
-            'authUsername': 'svc',
-            'urlWhitelist': [{'whitelistPattern': GITHUB}],
-        },
-    )
-
-    messages = [call.args[0] for call in iglobal.warning.call_args_list]
-    assert any("authType is 'bearer'; authUsername will not be sent" == m for m in messages)
+    with pytest.raises(ConfigError, match='"bearer.authToken" is required'):
+        _started_global(iglobal, {'authType': 'bearer', 'urlWhitelist': [{'whitelistPattern': GITHUB}]})
 
 
-def test_validate_config_reports_auth_problems_as_warnings(node_modules):
+def test_begin_global_rejects_an_unknown_auth_type(node_modules):
+    from rocketlib.config import ConfigError
+
     _http_client, iglobal, _iinstance = node_modules
-    iglobal.Config.getNodeConfig.return_value = {
-        'serverName': 'http',
-        'authType': 'bearer',
-        'authToken': '${ROCKETRIDE_GITHUB_TOKEN}',
-    }
-    glb = object.__new__(iglobal.IGlobal)
-    glb.glb = types.SimpleNamespace(logicalType='tool_http_request', connConfig={})
 
-    glb.validateConfig()
-
-    messages = [call.args[0] for call in iglobal.warning.call_args_list]
-    assert any('${ROCKETRIDE_GITHUB_TOKEN}' in m and 'unresolved placeholder' in m for m in messages)
-
-
-def test_validate_config_warns_when_config_auth_lacks_whitelist(node_modules):
-    _http_client, iglobal, _iinstance = node_modules
-    iglobal.Config.getNodeConfig.return_value = {'serverName': 'http', 'authType': 'bearer', 'authToken': 'ghp_live'}
-    glb = object.__new__(iglobal.IGlobal)
-    glb.glb = types.SimpleNamespace(logicalType='tool_http_request', connConfig={})
-
-    glb.validateConfig()
-
-    messages = [call.args[0] for call in iglobal.warning.call_args_list]
-    assert any('URL whitelist is empty; add at least one' in m for m in messages)
+    with pytest.raises(ConfigError, match="'oauth', which is not one of its options"):
+        _started_global(iglobal, {'authType': 'oauth'})
 
 
 # ---------------------------------------------------------------------------

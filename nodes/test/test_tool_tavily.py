@@ -86,7 +86,6 @@ def _build_import_stubs():
         'ai': MagicMock(),
         'ai.common': MagicMock(),
         'ai.common.utils': ai_common_utils,
-        'ai.common.config': MagicMock(),
         'requests': requests,
     }
 

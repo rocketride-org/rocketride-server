@@ -21,26 +21,23 @@
 # SOFTWARE.
 # =============================================================================
 
+"""
+Video Composer node - global (shared) state.
+
+The encoding settings are read-only: every instance reads them through the
+resolved ``self.config`` view (the selected quality preset flattened in: fps,
+codec and crf). Resolving at start fails the pipeline early on a bad value.
+"""
+
 from rocketlib import IGlobalBase
-from ai.common.config import Config
 
 
 class IGlobal(IGlobalBase):
     """Global state manager for the video composer node."""
 
-    config = None
-
     def beginGlobal(self):
-        """Load and validate node configuration.
-
-        Calls Config.getNodeConfig with glb.logicalType and glb.connConfig,
-        raises RuntimeError if None is returned, then sets config['type']
-        from the 'profile' key in glb.connConfig (defaults to 'standard').
-        """
-        self.config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-        if self.config is None:
-            raise RuntimeError(f'getNodeConfig returned None for logicalType={self.glb.logicalType!r}')
-        self.config['type'] = self.glb.connConfig.get('profile', 'standard')
+        """Resolve the node configuration once, so a schema error surfaces at start, not on the first frame."""
+        self.config
 
     def endGlobal(self):
         """Release global resources."""

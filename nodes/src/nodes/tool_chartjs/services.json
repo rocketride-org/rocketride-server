@@ -18,29 +18,18 @@
 		}
 	},
 	"lanes": {},
-	"preconfig": {
-		"default": "default",
-		"profiles": {
-			"default": {
-				"title": "Default",
-				"serverName": "chartjs"
-			}
-		}
-	},
-	"fields": {
+	//
+	// Optional:
+	//		Local property definitions. The server name is a pinned constant (the tool
+	//		namespace); the node has no user-editable configuration.
+	//
+	"propertyDefinitions": {
 		"tool_chartjs.serverName": {
-			"hidden": true,
-			"type": "string",
+			"type": "constant",
 			"title": "Server name",
 			"description": "Namespace prefix for the tool: <serverName>.generate_chart",
 			"default": "chartjs"
 		}
 	},
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "Chart (Chart.js)",
-			"properties": ["type"]
-		}
-	]
+	"properties": ["type", "tool_chartjs.serverName"]
 }

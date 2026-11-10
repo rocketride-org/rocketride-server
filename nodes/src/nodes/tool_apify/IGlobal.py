@@ -1,6 +1,4 @@
 # =============================================================================
-# RocketRide Engine
-# =============================================================================
 # MIT License
 # Copyright (c) 2026 Aparavi Software AG
 #
@@ -26,17 +24,16 @@
 """
 Apify tool node - global (shared) state.
 
-Reads the Apify API token from config and creates an ApifyClient.
-Tool logic lives on IInstance via @tool_function.
+Reads the Apify API token from the resolved node config and creates an
+ApifyClient. Tool logic lives on IInstance via @tool_function.
 """
 
 from __future__ import annotations
 
 import os
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 
-from ai.common.config import Config
-from rocketlib import IGlobalBase, OPEN_MODE, warning
+from rocketlib import IGlobalBase, warning
 
 from depends import depends
 
@@ -49,57 +46,34 @@ depends(os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt')
 from apify_client import ApifyClient
 
 
-def _int_or(value, default: int) -> int:
-    try:
-        return max(1, int(value))
-    except (TypeError, ValueError):
-        return default
-
-
-def _decimal_or(value, default: Decimal) -> Decimal:
-    try:
-        return Decimal(str(value))
-    except (TypeError, ValueError, InvalidOperation):
-        return default
-
-
 class IGlobal(IGlobalBase):
     """Global state for tool_apify."""
 
     client: ApifyClient | None = None
-    # Safety bounds for agent-driven runs; overridable from config.
+    # Safety bounds for agent-driven runs; the schema supplies the defaults
+    # and the minimums, so the values arrive validated.
     max_items: int = 100
     run_timeout_secs: int = 120
     max_cost_usd: Decimal = Decimal('1')
 
     def beginGlobal(self) -> None:
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
+        cfg = self.config
 
-        cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-        apikey = str((cfg.get('apikey') or '')).strip()
-
+        # The token reaches the node through its config (a ${ROCKETRIDE_APIFY_APIKEY}
+        # reference resolved per call); the schema marks it required
+        apikey = str(cfg.apikey or '').strip()
         if not apikey:
             raise Exception('tool_apify: apikey is required')
 
-        self.max_items = _int_or(cfg.get('max_items'), 100)
-        self.run_timeout_secs = _int_or(cfg.get('run_timeout_secs'), 120)
-        self.max_cost_usd = _decimal_or(cfg.get('max_cost_usd'), Decimal('1'))
+        self.max_items = cfg.max_items
+        self.run_timeout_secs = cfg.run_timeout_secs
+        self.max_cost_usd = Decimal(str(cfg.max_cost_usd))
 
         try:
             self.client = ApifyClient(apikey)
         except Exception as e:
             warning(str(e))
             raise
-
-    def validateConfig(self) -> None:
-        try:
-            cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-            apikey = str((cfg.get('apikey') or '')).strip()
-            if not apikey:
-                warning('apikey is required')
-        except Exception as e:
-            warning(str(e))
 
     def endGlobal(self) -> None:
         self.client = None

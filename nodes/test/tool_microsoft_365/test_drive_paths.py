@@ -50,7 +50,7 @@ if str(_NODES_SRC) not in sys.path:
 from unittest.mock import MagicMock
 
 _added = []
-for _name in ('depends', 'rocketlib', 'ai', 'ai.common', 'ai.common.utils', 'ai.common.config'):
+for _name in ('depends', 'rocketlib', 'ai', 'ai.common', 'ai.common.utils'):
     if _name not in sys.modules:
         _stub = MagicMock()
         if _name == 'depends':

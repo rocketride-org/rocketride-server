@@ -1,6 +1,4 @@
 # =============================================================================
-# RocketRide Engine
-# =============================================================================
 # MIT License
 # Copyright (c) 2026 Aparavi Software AG
 #
@@ -26,16 +24,13 @@
 """
 Notion tool node - global (shared) state.
 
-Reads the Notion internal integration secret from the node config.
+Reads the Notion internal integration secret from the resolved node config.
 Tool logic lives on IInstance via @tool_function.
 """
 
 from __future__ import annotations
 
-import os
-
-from ai.common.config import Config
-from rocketlib import IGlobalBase, OPEN_MODE, error, warning
+from rocketlib import IGlobalBase, error
 
 
 class IGlobal(IGlobalBase):
@@ -44,27 +39,15 @@ class IGlobal(IGlobalBase):
     apikey: str = ''
 
     def beginGlobal(self) -> None:
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
-
-        cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-
-        apikey = str(cfg.get('apikey') or os.environ.get('NOTION_API_KEY', '')).strip()
-
+        # The key reaches the node through its config (a ${ROCKETRIDE_NOTION_APIKEY}
+        # reference resolved per call); there is no process-env fallback
+        apikey = str(self.config.apikey or '').strip()
         if not apikey:
-            error('tool_notion: apikey is required — set it in node config or NOTION_API_KEY env var')
+            error(
+                'tool_notion: apikey is required - set it in the node config (a ${ROCKETRIDE_NOTION_APIKEY} reference)'
+            )
             raise ValueError('tool_notion: apikey is required')
-
         self.apikey = apikey
-
-    def validateConfig(self) -> None:
-        try:
-            cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-            apikey = str(cfg.get('apikey') or os.environ.get('NOTION_API_KEY', '')).strip()
-            if not apikey:
-                warning('apikey is required')
-        except Exception as e:
-            warning(str(e))
 
     def endGlobal(self) -> None:
         self.apikey = ''

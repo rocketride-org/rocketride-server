@@ -95,8 +95,6 @@ def _build_import_stubs() -> dict:
     ai_utils = types.ModuleType('ai.common.utils')
     ai_utils.normalize_tool_input = lambda args, **_kw: args if isinstance(args, dict) else {}
     ai_utils.post_with_retry = _stub_post_with_retry
-    ai_config = types.ModuleType('ai.common.config')
-    ai_config.Config = MagicMock()
 
     return {
         'rocketlib': rocketlib,
@@ -104,7 +102,6 @@ def _build_import_stubs() -> dict:
         'ai': ai_pkg,
         'ai.common': ai_common,
         'ai.common.utils': ai_utils,
-        'ai.common.config': ai_config,
     }
 
 

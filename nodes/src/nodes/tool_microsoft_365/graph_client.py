@@ -200,7 +200,7 @@ def resolve_token_uri(svc: GraphService, token_uri: object) -> str:
 
 
 def _decode_blob(value: str) -> str:
-    """Return text from a raw string or a base64 ``data:`` URL (serviceKey/userToken fields)."""
+    """Return text from a raw string or a base64 ``data:`` URL (serviceKey/userAuth fields)."""
     if not value:
         raise ValueError('missing credential value')
     if value.startswith('data:'):
@@ -377,17 +377,17 @@ class BrokerUserAuth(GraphAuth):
 
 
 def token_scope_report(svc: GraphService, cfg: dict, required: list[str]) -> tuple[set[str], bool, list[str]]:
-    """Decode the config's userToken and report (granted, covered, missing) for ``required``.
+    """Decode the config's userAuth and report (granted, covered, missing) for ``required``.
 
     The single source of truth for scope diagnostics: ``IGlobal.validateConfig``,
     ``IInstance.check_connection``, and ``build_auth`` all judge scopes through
     this function so the three checks cannot drift. App-only auth carries no
-    ``userToken`` (its permissions are app roles, verified by a probe call in
+    ``userAuth`` (its permissions are app roles, verified by a probe call in
     check_connection), so it always reports (set(), True, []). An absent/empty
     granted set is fail-open: older tokens may lack a scope field, and the
     absence of evidence must not block validation.
     """
-    token_str = str(cfg.get('userToken') or '').strip()
+    token_str = str(cfg.get('userAuth') or '').strip()
     if not token_str:
         return set(), True, []
     info = json.loads(_decode_blob(token_str))
@@ -404,10 +404,10 @@ def build_auth(svc: GraphService, auth_type: str, cfg: dict, scopes: list[str]) 
     """Build a :class:`GraphAuth` for ``svc`` from node config, scoped to ``scopes``.
 
     ``auth_type`` selects app-only (tenantId/clientId/clientSecret, client
-    credentials) or delegated user OAuth (userToken JSON, broker-refreshed).
+    credentials) or delegated user OAuth (userAuth JSON, broker-refreshed).
     """
     if auth_type == 'user':
-        info = json.loads(_decode_blob(str(cfg.get('userToken') or '')))
+        info = json.loads(_decode_blob(str(cfg.get('userAuth') or '')))
         access_token = info.get('access_token') or info.get('token') or ''
         resolve_token_uri(svc, info.get('token_uri') or 'https://login.microsoftonline.com/common/oauth2/v2.0/token')
         # Untrusted input: reject any refresh URL not pointing at a known broker.

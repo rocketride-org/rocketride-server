@@ -1,6 +1,4 @@
 # =============================================================================
-# RocketRide Engine
-# =============================================================================
 # MIT License
 # Copyright (c) 2026 Aparavi Software AG
 #
@@ -27,15 +25,15 @@
 GoHighLevel tool node - global (shared) state.
 
 Reads the sub-account Private Integration Token, the location id it is scoped to,
-the read-only flag, the published tool groups, and the raw-request switch from config.
+the read-only flag, the published tool groups, and the raw-request switch from the
+resolved node config.
 """
 
 from __future__ import annotations
 
-from ai.common.config import Config
-from rocketlib import IGlobalBase, OPEN_MODE, warning
+from rocketlib import IGlobalBase, warning
 
-from .tool_groups import DEFAULT_GROUPS, normalize_groups, unknown_groups
+from .tool_groups import DEFAULT_GROUPS, normalize_groups
 
 #: Every Private Integration Token observed so far carries this prefix. It is not a
 #: documented guarantee, so a token without it is warned about and still used.
@@ -52,70 +50,38 @@ class IGlobal(IGlobalBase):
     allow_raw_request: bool = True
 
     def beginGlobal(self) -> None:
-        """Read the node config and fail early when the node cannot reach an account.
+        """Read the resolved node config and fail early when the node cannot reach an account.
+
+        The schema requires the token and the location id (the token is opaque, so the
+        location cannot be derived from it, and without a location id GoHighLevel
+        answers 403 with a message that blames the token) and pins ``toolGroups`` to
+        the groups this node implements, so a misspelt group never reaches here.
 
         Raises:
-            Exception: If the token or the location id is missing. Both are required:
-                the token is opaque, so the location cannot be derived from it, and
-                without a location id GoHighLevel answers 403 with a message that
-                blames the token rather than the missing parameter.
-            ValueError: If ``toolGroups`` is configured but names no group this node
-                implements. Falling back to the defaults there would publish more
-                tools than the operator asked for; see ``normalize_groups``.
+            Exception: If the token or the location id is blank after stripping.
         """
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
-
         from depends import load_depends
 
         load_depends(__file__)
 
-        cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-        self.token = str((cfg.get('privateIntegrationToken') or '')).strip()
-        self.location_id = str((cfg.get('locationId') or '')).strip()
-        self.read_only = bool(cfg.get('readOnly', False))
-        self.tool_groups = normalize_groups(cfg.get('toolGroups'))
-        self.allow_raw_request = bool(cfg.get('allowRawRequest', True))
-
-        # A wholly unknown toolGroups value raised in normalize_groups above. A partially
-        # unknown one narrows to the names that matched, which is what the operator asked
-        # for minus the typo, so it runs, but the dropped names go to the job log: the
-        # editor warning in validateConfig is invisible to a deployed pipeline.
-        dropped = unknown_groups(cfg.get('toolGroups'))
-        if dropped:
-            warning(
-                f'tool_gohighlevel: ignoring unknown tool group(s): {", ".join(dropped)}. '
-                f'Publishing: {", ".join(sorted(self.tool_groups))}'
-            )
+        cfg = self.config
+        # The token reaches the node through its config (a ${ROCKETRIDE_GOHIGHLEVEL_TOKEN}
+        # reference resolved per call)
+        self.token = str(cfg.privateIntegrationToken or '').strip()
+        self.location_id = str(cfg.locationId or '').strip()
+        self.read_only = cfg.readOnly
+        self.tool_groups = normalize_groups(cfg.toolGroups)
+        self.allow_raw_request = cfg.allowRawRequest
 
         if not self.token:
             raise Exception('tool_gohighlevel: privateIntegrationToken is required')
+        if not self.token.startswith(TOKEN_PREFIX):
+            warning(
+                'tool_gohighlevel: privateIntegrationToken does not start with "pit-": agency tokens, OAuth access '
+                'tokens and v1 API keys are not accepted by this node'
+            )
         if not self.location_id:
             raise Exception('tool_gohighlevel: locationId is required (the sub-account this token is scoped to)')
-
-    def validateConfig(self) -> None:
-        """Surface config problems in the editor without starting the backend."""
-        try:
-            cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-            token = str((cfg.get('privateIntegrationToken') or '')).strip()
-            if not token:
-                warning('privateIntegrationToken is required')
-            elif not token.startswith(TOKEN_PREFIX):
-                warning(
-                    'privateIntegrationToken does not start with "pit-": agency tokens, OAuth access tokens '
-                    'and v1 API keys are not accepted by this node'
-                )
-            if not str((cfg.get('locationId') or '')).strip():
-                warning('locationId is required (the sub-account this Private Integration Token is scoped to)')
-            unknown = unknown_groups(cfg.get('toolGroups'))
-            if unknown:
-                warning(f'unknown tool group(s): {", ".join(unknown)}')
-            try:
-                normalize_groups(cfg.get('toolGroups'))
-            except ValueError:
-                warning('toolGroups matches no known group, so the pipeline will fail to start')
-        except Exception as e:
-            warning(str(e))
 
     def endGlobal(self) -> None:
         """Release shared state, wiping the credential."""

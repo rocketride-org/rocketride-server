@@ -1,6 +1,4 @@
 # =============================================================================
-# RocketRide Engine
-# =============================================================================
 # MIT License
 # Copyright (c) 2026 Aparavi Software AG
 #
@@ -27,17 +25,15 @@
 Pipedrive tool node - global (shared) state.
 
 Reads the API token, company domain, read-only flag, published tool groups,
-and the raw-request switch from config.
+and the raw-request switch from the resolved node config.
 """
 
 from __future__ import annotations
 
-from ai.common.config import Config
-from rocketlib import IGlobalBase, OPEN_MODE, warning
+from rocketlib import IGlobalBase, warning
 
 from .pipedrive_client import BASE_URL, BASE_URL_V2, base_url_for, base_url_v2_for
 from .tool_groups import (
-    ALL_GROUPS,
     DEFAULT_GROUPS,
     RECOMMENDED_TOOL_LIMIT,
     normalize_groups,
@@ -52,45 +48,31 @@ class IGlobal(IGlobalBase):
     token: str = ''
     company_domain: str = ''
     base_url: str = BASE_URL
-    #: Search tools only — Pipedrive retired the v1 search routes.
+    #: Search tools only - Pipedrive retired the v1 search routes.
     base_url_v2: str = BASE_URL_V2
     read_only: bool = False
     tool_groups: frozenset = DEFAULT_GROUPS
     allow_raw_request: bool = True
 
     def beginGlobal(self) -> None:
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
-
-        cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-        self.token = str((cfg.get('apiToken') or '')).strip()
-        self.company_domain = str((cfg.get('companyDomain') or '')).strip()
+        # The resolved config: the token a required secret (a ${ROCKETRIDE_PIPEDRIVE_TOKEN}
+        # reference resolved per call), toolGroups pinned to the groups this node
+        # implements, so an unknown group never reaches here
+        cfg = self.config
+        self.token = str(cfg.apiToken or '').strip()
+        self.company_domain = str(cfg.companyDomain or '').strip()
         self.base_url = base_url_for(self.company_domain)
         self.base_url_v2 = base_url_v2_for(self.company_domain)
-        self.read_only = bool(cfg.get('readOnly', False))
-        self.tool_groups = normalize_groups(cfg.get('toolGroups'))
-        self.allow_raw_request = bool(cfg.get('allowRawRequest', True))
+        self.read_only = cfg.readOnly
+        self.tool_groups = normalize_groups(cfg.toolGroups)
+        self.allow_raw_request = cfg.allowRawRequest
 
         if not self.token:
             raise Exception('tool_pipedrive: apiToken is required')
 
-        oversized = _oversized_warning(cfg.get('toolGroups'), self.tool_groups)
+        oversized = _oversized_warning(cfg.toolGroups, self.tool_groups)
         if oversized:
             warning(oversized)
-
-    def validateConfig(self) -> None:
-        try:
-            cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-            if not str((cfg.get('apiToken') or '')).strip():
-                warning('apiToken is required')
-            unknown = _unknown_groups(cfg.get('toolGroups'))
-            if unknown:
-                warning(f'unknown tool group(s): {", ".join(unknown)}')
-            oversized = _oversized_warning(cfg.get('toolGroups'), normalize_groups(cfg.get('toolGroups')))
-            if oversized:
-                warning(oversized)
-        except Exception as e:
-            warning(str(e))
 
     def endGlobal(self) -> None:
         self.token = ''
@@ -105,7 +87,7 @@ class IGlobal(IGlobalBase):
 def _oversized_warning(raw, groups) -> str:
     """Warn when the selected groups publish more tools than an LLM handles well.
 
-    Advisory only — the tools are still published. ``all`` is an explicit opt-in
+    Advisory only - the tools are still published. ``all`` is an explicit opt-in
     to the whole surface and is exempt.
     """
     if wants_all_groups(raw):
@@ -121,11 +103,3 @@ def _oversized_warning(raw, groups) -> str:
         'Agents pick the wrong tool more often at this size, and some providers reject more '
         'than 128 tools in one request. Drop a group, or use "all" if this is deliberate.'
     )
-
-
-def _unknown_groups(raw) -> list[str]:
-    """Group names in the config that this node does not implement."""
-    if not isinstance(raw, (list, tuple)):
-        return []
-    known = ALL_GROUPS | {'all'}
-    return sorted({str(g).strip() for g in raw if str(g).strip() and str(g).strip() not in known})

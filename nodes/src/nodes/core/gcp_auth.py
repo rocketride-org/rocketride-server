@@ -24,8 +24,9 @@
 # =============================================================================
 
 import base64
+import importlib.util
 import json
-from typing import Optional, Tuple, Any
+from typing import Any, Callable, Optional, Tuple
 
 # Default scope when callers omit one. Service-account credentials require an
 # explicit scope set; without it google-auth leaves requires_scopes=True and
@@ -105,3 +106,44 @@ def get_gcp_credentials(config: dict, scopes: Optional[list[str]] = None) -> Tup
 
     else:
         raise GCPAuthError(f'Unknown authType: {auth_type}')
+
+
+def google_auth_available() -> bool:
+    """
+    True when google-auth can be imported.
+
+    A missing ``google`` parent package makes ``find_spec`` raise rather than
+    return None, so both are "absent".
+    """
+    try:
+        return importlib.util.find_spec('google.auth') is not None
+    except (ModuleNotFoundError, ValueError):
+        return False
+
+
+def check_credentials_at_save_time(config: Any, scopes: list, report: Callable[[str], None]) -> None:
+    """
+    The save-time credential check shared by the GCP validators.
+
+    Builds the configured credentials once and reports problems through
+    ``report`` (a node's ``warning``); never raises, the user is still editing.
+    CONFIG mode installs no node requirements, so an absent google-auth is a
+    skipped check, said as such, rather than a credential error.
+
+    Args:
+        config: The resolved node config (authType, serviceAccountKey, projectId).
+        scopes: The OAuth scopes the node needs.
+        report: Where a problem is written, one message per call.
+    """
+    if not google_auth_available():
+        report(
+            'Credential check skipped: google-auth is not installed yet. '
+            'It runs once the node has started and installed its requirements.'
+        )
+        return
+    try:
+        get_gcp_credentials(config, scopes=scopes)
+    except GCPAuthError as e:
+        report(f'Auth configuration error: {e}')
+    except Exception as e:
+        report(str(e))

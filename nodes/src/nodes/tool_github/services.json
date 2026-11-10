@@ -12,76 +12,40 @@
 	"description": ["Exposes GitHub repository operations as agent tools.", "Covers files, issues, pull requests, reviews, releases, workflows, orgs, users,", "code search, and commit history."],
 	"tile": ["GitHub${parameters.github.defaultRepo ? ': ' + parameters.github.defaultRepo : ''}"],
 	"lanes": {},
-	"preconfig": {
-		"default": "default",
-		"profiles": {
-			"default": {
-				"title": "GitHub",
-				"authType": "pat",
-				"token": "",
-				"appId": "",
-				"privateKey": "",
-				"installationId": "",
-				"credentialMap": [],
-				"defaultRepo": "",
-				"readOnly": false,
-				"tools": [],
-				"graphqlAllowMutations": false,
-				"graphqlMaxResponseBytes": 4194304,
-				"rateLimitBudgetSeconds": 60,
-				"rateLimitMaxRetries": 3
-			}
-		}
-	},
-	"fields": {
-		"github.authType": {
-			"type": "string",
-			"title": "Authentication method",
-			"default": "pat",
-			"enum": [
-				["pat", "Personal Access Token"],
-				["app", "GitHub App (installation token)"]
-			],
-			"conditional": [
-				{ "value": "pat", "properties": ["github.token"] },
-				{ "value": "app", "properties": ["github.appId", "github.privateKey", "github.installationId"] }
-			],
-			"description": "Personal Access Token is simplest for individual/dev use. GitHub App auth mints short-lived, auto-rotating installation tokens — recommended for unattended pipelines against an org's repos."
-		},
+	//
+	// Optional:
+	//		Local property definitions. The authentication method is the selector: the
+	//		PAT branch carries the token, the App branch the app id, private key and
+	//		installation id. A credentialMap adds per-repository credentials as rows;
+	//		with one, the node's own credential is optional (the node checks that).
+	//
+	"propertyDefinitions": {
 		"github.token": {
 			"type": "string",
 			"title": "Personal Access Token",
 			"description": "GitHub PAT with repo, issues, pull_requests, and workflows scopes. Use a fine-grained token scoped to only the repos you need.",
-			"default": "",
-			"optional": true,
-			"secure": true,
-			"ui": {
-				"ui:widget": "ApiKeyWidget"
-			}
+			"secret": true,
+			"env": "ROCKETRIDE_GITHUB_TOKEN"
 		},
 		"github.appId": {
 			"type": "string",
 			"title": "App ID",
-			"description": "The numeric App ID from your GitHub App's settings page.",
-			"default": "",
-			"optional": true
+			"description": "The numeric App ID from your GitHub App's settings page."
 		},
 		"github.privateKey": {
-			"type": "string",
-			"format": "data-url",
+			"type": "upload",
 			"title": "App Private Key (.pem)",
 			"description": "Upload the PEM private key generated for your GitHub App. Used to sign short-lived JWTs; never sent to GitHub directly.",
-			"default": "",
-			"optional": true,
-			"secure": true,
-			"ui:options:accept": ".pem"
+			"secret": true,
+			"options": {
+				"accept": ".pem"
+			}
 		},
 		"github.installationId": {
 			"type": "string",
 			"title": "Installation ID",
 			"description": "The installation ID for the org/account where the App is installed (found in the installation's settings URL). Leave empty to find the installation per repository (GET /repos/{owner}/{repo}/installation), so one pipeline can reach repositories in every organization where the App is installed.",
-			"default": "",
-			"optional": true
+			"default": ""
 		},
 		"github.credentialRepository": {
 			"type": "string",
@@ -94,17 +58,14 @@
 			"title": "Credential",
 			"description": "A personal access token, a ${ROCKETRIDE_...} placeholder for one, or the JSON text of a GitHub App credential: {\"appId\": ..., \"privateKey\": ..., \"installationId\": optional}.",
 			"default": "",
-			"secure": true,
-			"ui": {
-				"ui:widget": "ApiKeyWidget"
-			}
+			"secret": true
 		},
 		"github.credentialMap": {
 			"title": "Credential map",
 			"description": "Optional. One row per repository or organization that needs its own credential. Repository or owner: owner/repo, owner/* for all of an owner's repositories, or * for the default. Credential: a personal access token, a ${ROCKETRIDE_...} placeholder, or a GitHub App credential as JSON. A call uses the most specific row for its repository; repositories no row matches use the node's own token, and a * row replaces that token (the node may not have both). Rows are checked when the pipeline starts.",
 			"type": "array",
 			"optional": true,
-			"secure": true,
+			"secret": true,
 			"minItems": 0,
 			"default": [],
 			"items": {
@@ -228,11 +189,32 @@
 			"optional": true
 		}
 	},
-	"shape": [
+	"properties": [
+		"type",
 		{
-			"section": "Pipe",
-			"title": "GitHub",
-			"properties": ["type", "github.authType", "github.credentialMap", "github.defaultRepo", "github.readOnly", "github.tools", "github.graphqlAllowMutations", "github.graphqlMaxResponseBytes", "github.rateLimitBudgetSeconds", "github.rateLimitMaxRetries"]
-		}
+			"name": "authType",
+			"type": "string",
+			"title": "Authentication method",
+			"description": "Personal Access Token is simplest for individual/dev use. GitHub App auth mints short-lived, auto-rotating installation tokens, recommended for unattended pipelines against an org's repos.",
+			"default": "pat",
+			"enum": {
+				"pat": {
+					"title": "Personal Access Token",
+					"properties": ["github.token"]
+				},
+				"app": {
+					"title": "GitHub App (installation token)",
+					"properties": ["github.appId", "github.privateKey", "github.installationId"]
+				}
+			}
+		},
+		"github.credentialMap",
+		"github.defaultRepo",
+		"github.readOnly",
+		"github.tools",
+		"github.graphqlAllowMutations",
+		"github.graphqlMaxResponseBytes",
+		"github.rateLimitBudgetSeconds",
+		"github.rateLimitMaxRetries"
 	]
 }

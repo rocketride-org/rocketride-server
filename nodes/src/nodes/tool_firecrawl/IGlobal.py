@@ -1,6 +1,4 @@
 # =============================================================================
-# RocketRide Engine
-# =============================================================================
 # MIT License
 # Copyright (c) 2026 Aparavi Software AG
 #
@@ -26,15 +24,14 @@
 """
 Firecrawl tool node - global (shared) state.
 
-Reads the Firecrawl API key from config and creates a FirecrawlApp client.
-Tool logic lives on IInstance via @tool_function.
+Reads the Firecrawl API key from the resolved node config and creates a
+FirecrawlApp client. Tool logic lives on IInstance via @tool_function.
 """
 
 from __future__ import annotations
 
 import os
-from ai.common.config import Config
-from rocketlib import IGlobalBase, OPEN_MODE, warning
+from rocketlib import IGlobalBase, warning
 
 from depends import depends
 
@@ -53,12 +50,9 @@ class IGlobal(IGlobalBase):
     app: FirecrawlApp | None = None
 
     def beginGlobal(self) -> None:
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
-
-        cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-        apikey = str((cfg.get('apikey') or '')).strip()
-
+        # The key reaches the node through its config (a ${ROCKETRIDE_FIRECRAWL_APIKEY}
+        # reference resolved per call); the schema marks it required
+        apikey = str(self.config.apikey or '').strip()
         if not apikey:
             raise Exception('tool_firecrawl: apikey is required')
 
@@ -67,15 +61,6 @@ class IGlobal(IGlobalBase):
         except Exception as e:
             warning(str(e))
             raise
-
-    def validateConfig(self) -> None:
-        try:
-            cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-            apikey = str((cfg.get('apikey') or '')).strip()
-            if not apikey:
-                warning('apikey is required')
-        except Exception as e:
-            warning(str(e))
 
     def endGlobal(self) -> None:
         self.app = None

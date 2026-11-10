@@ -1,6 +1,4 @@
 # =============================================================================
-# RocketRide Engine
-# =============================================================================
 # MIT License
 # Copyright (c) 2026 Aparavi Software AG
 #
@@ -26,13 +24,13 @@
 """
 v0 by Vercel tool node - global (shared) state.
 
-Reads the v0 API key from config and stores it for IInstance tool methods.
+Reads the v0 API key from the resolved node config and stores it for IInstance
+tool methods.
 """
 
 from __future__ import annotations
 
-from ai.common.config import Config
-from rocketlib import IGlobalBase, OPEN_MODE, warning
+from rocketlib import IGlobalBase
 
 
 class IGlobal(IGlobalBase):
@@ -41,24 +39,11 @@ class IGlobal(IGlobalBase):
     apikey: str = ''
 
     def beginGlobal(self) -> None:
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
-
-        cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-
-        self.apikey = str(cfg.get('apikey') or '').strip()
-
+        # The key reaches the node through its config (a ${ROCKETRIDE_V0_APIKEY}
+        # reference resolved per call); the schema marks it required
+        self.apikey = str(self.config.apikey or '').strip()
         if not self.apikey:
             raise Exception('tool_v0: apikey is required')
-
-    def validateConfig(self) -> None:
-        try:
-            cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-            apikey = str(cfg.get('apikey') or '').strip()
-            if not apikey:
-                warning('apikey is required')
-        except Exception as e:
-            warning(str(e))
 
     def endGlobal(self) -> None:
         self.apikey = ''

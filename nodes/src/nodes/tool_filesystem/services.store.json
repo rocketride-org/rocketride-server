@@ -18,15 +18,7 @@
 		"audio": ["json"],
 		"video": ["json"]
 	},
-	"preconfig": {
-		"default": "default",
-		"profiles": {
-			"default": {
-				"title": "Default"
-			}
-		}
-	},
-	"fields": {
+	"propertyDefinitions": {
 		"filesystem.targetDir": {
 			"type": "string",
 			"title": "Target directory",
@@ -79,11 +71,5 @@
 			}
 		}
 	},
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "File Store",
-			"properties": ["type", "filesystem.targetDir", "filesystem.onConflict", "filesystem.emitUrl", "filesystem.urlExpiresIn", "filesystem.pathWhitelist"]
-		}
-	]
+	"properties": ["type", "filesystem.targetDir", "filesystem.onConflict", "filesystem.emitUrl", "filesystem.urlExpiresIn", "filesystem.pathWhitelist"]
 }
