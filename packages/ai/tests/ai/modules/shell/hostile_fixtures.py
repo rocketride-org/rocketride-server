@@ -26,7 +26,7 @@ The hostile fixture set for the public-pages aggregate and leak tests.
 One in-memory platform state holding the apps that may contribute to the public
 surface NEXT TO every kind of app that must never contribute. The publish rows
 run through the REAL serving gate and visibility filters
-(``app_deploy._serving_block_of``); only the storage layer (``publish_list`` /
+(``app_rows.serving_block_of``); only the storage layer (``publish_list`` /
 ``deployments_artifact``) is faked.
 
 Visible:
