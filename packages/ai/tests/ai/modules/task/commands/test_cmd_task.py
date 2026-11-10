@@ -115,7 +115,7 @@ def _account_info(*, user_id='user-1', auth='ak_x', dev_team='team-1', organizat
 @pytest.mark.asyncio
 async def test_on_execute_starts_task_with_resolved_org_id():
     """on_execute resolves org_id from the user's default team and calls start_task."""
-    organization = {'id': 'org-B', 'teams': [{'id': 'team-1'}, {'id': 'team-other'}]}
+    organization = {'id': 'org-B', 'teams': [{'id': 'team-1'}, {'id': 'team-other'}], 'developerId': 'acme'}
     account = _account_info(user_id='user-1', dev_team='team-1', organization=organization)
 
     server = MagicMock()
@@ -129,6 +129,8 @@ async def test_on_execute_starts_task_with_resolved_org_id():
     assert call_kwargs['org_id'] == 'org-B'
     assert call_kwargs['team_id'] == 'team-1'
     assert call_kwargs['user_id'] == 'user-1'
+    # The session org's developer id is the address namespace start_task requires
+    assert call_kwargs['developer_id'] == 'acme'
     assert call_kwargs['wait_for_running'] is True
     assert response == {'type': 'response', 'body': {'token': 'acme.pipe.new'}}
 
@@ -374,12 +376,14 @@ async def test_on_launch_starts_task_with_resolved_org():
     """on_launch resolves org_id from devTeam and delegates to start_task."""
     server = MagicMock()
     server.start_task = AsyncMock(return_value={'id': 'task-99', 'token': 'acme.pipe.99'})
-    conn = _make_conn(account_info=_account_info(), server=server)
+    organization = {'id': 'org-1', 'teams': [{'id': 'team-1'}], 'developerId': 'acme'}
+    conn = _make_conn(account_info=_account_info(organization=organization), server=server)
 
     await TaskCommands.on_launch(conn, {'arguments': {}})
 
     server.start_task.assert_awaited_once()
     assert server.start_task.call_args.kwargs['org_id'] == 'org-1'
+    assert server.start_task.call_args.kwargs['developer_id'] == 'acme'
     conn.send_response.assert_awaited_once()
 
 

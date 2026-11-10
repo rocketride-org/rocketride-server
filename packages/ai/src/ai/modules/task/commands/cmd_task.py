@@ -54,6 +54,7 @@ The actual task execution and management is delegated to the TaskServer.
 from typing import TYPE_CHECKING, Dict, Any
 from ai.common.dap import DAPConn, TransportBase
 from ai.account import account
+from ai.account.app_deploy import _developer_id_of
 from ai.account.models import resolve_run_permissions
 from rocketride import TASK_STATE
 from ..address import in_endpoint_scope
@@ -207,7 +208,10 @@ class TaskCommands(DAPConn):
                 merged_env.update(caller_env)
                 return merged_env
 
-            # Start the task without debugger attachment
+            # Start the task without debugger attachment. The address namespace
+            # is the session org's developer id (the in-process deploy dispatch
+            # stamps it on its synthetic organization); start_task refuses a run
+            # without one.
             response = await self._server.start_task(
                 request,
                 self,
@@ -216,6 +220,7 @@ class TaskCommands(DAPConn):
                 user_id=self._account_info.userId,
                 team_id=team_id,
                 org_id=org_id,
+                developer_id=_developer_id_of(self) or '',
                 env_source=env_source,
                 run_kind=run_kind,
                 owner_kind=owner_kind,
@@ -279,7 +284,8 @@ class TaskCommands(DAPConn):
             # identity (rejected if the team's org cannot be determined).
             org_id = await self.resolve_org_for_team(team_id)
 
-            # Create and start the new task, obtaining a unique token
+            # Create and start the new task; the session org's developer id is
+            # the address namespace (start_task refuses a run without one)
             response = await self._server.start_task(
                 request,
                 self,
@@ -287,9 +293,10 @@ class TaskCommands(DAPConn):
                 user_id=self._account_info.userId,
                 team_id=team_id,
                 org_id=org_id,
+                developer_id=_developer_id_of(self) or '',
             )
 
-            # Send successful launch response with task token
+            # Send successful launch response with the run's address
             await self.send_response(request, body=response)
 
         except Exception as e:
