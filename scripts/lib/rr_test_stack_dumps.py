@@ -40,6 +40,19 @@ error, plus the state of the lock file and its ``.progress`` sidecar. It tells a
 lock held by another process (the lock step fails) from a lock nobody holds
 (the open step fails, or the lock is free).
 
+After each dump the dumper looks for a thread whose innermost frames are one or more
+``threading.py`` ``wait`` frames called directly from a ``threading.py`` ``start``
+frame, which is how a thread looks while ``Thread.start()`` waits for the new OS thread
+to run its first Python line. A dump can catch a healthy ``start`` for an instant, so
+the dumper waits ``_START_RECHECK_S`` seconds without the GIL (and without delaying
+close), samples again, and appends a block for every thread whose very same ``start``
+frame object is still on its stack::
+
+    === thread start stuck thread=0x<16 hex digits> seconds=2
+
+followed by a blank line. A given stuck ``start`` frame is reported once; a later
+``start`` call that gets stuck is reported again.
+
 A child that exits normally removes a file that holds no dump, so what is left
 belongs to children that ran long or were killed.
 """
@@ -59,6 +72,9 @@ _JOIN_TIMEOUT = 0.5
 
 # Seconds the main thread must have been inside FileLock.__enter__ before the lock probe runs.
 _PROBE_AFTER = 180
+
+# Seconds the dumper waits before it checks that a thread is still inside the same Thread.start() call.
+_START_RECHECK_S = 2
 
 # Longest sidecar text kept in the probe block, in characters.
 _SIDECAR_MAX = 300
@@ -261,6 +277,62 @@ def _run_lock_probe(lock_path: str, sidecar_path: str) -> str:
     return '\n'.join(lines) + '\n\n'
 
 
+def _frame_is(frame, name: str, filename: str = 'threading.py') -> bool:
+    """
+    Tell whether a frame runs the function ``name`` of the file ``filename``.
+
+    Args:
+        frame (frame): The frame to test.
+        name (str): The expected function name.
+        filename (str): The expected file basename.
+
+    Returns:
+        bool: True when both match.
+    """
+    code = frame.f_code
+    return code.co_name == name and os.path.basename(code.co_filename) == filename
+
+
+def _find_start_wait(frame):
+    """
+    Find the ``Thread.start`` frame a thread is waiting in.
+
+    The thread's innermost frames must be one or more ``wait`` frames of ``threading.py``,
+    followed directly by a ``start`` frame of ``threading.py``.
+
+    Args:
+        frame (frame | None): The innermost frame of the thread.
+
+    Returns:
+        frame | None: The ``start`` frame, or None when the thread is not waiting in it.
+    """
+    waits = 0
+    while frame is not None and _frame_is(frame, 'wait'):
+        waits += 1
+        frame = frame.f_back
+    if waits and frame is not None and _frame_is(frame, 'start'):
+        return frame
+    return None
+
+
+def _on_stack(frame, target) -> bool:
+    """
+    Tell whether a frame object is on a stack.
+
+    Args:
+        frame (frame | None): The innermost frame of the stack.
+        target (frame): The frame object to look for, compared by identity.
+
+    Returns:
+        bool: True when ``target`` is ``frame`` or one of its callers.
+    """
+    while frame is not None:
+        if frame is target:
+            return True
+        frame = frame.f_back
+    return False
+
+
 class _Dumper:
     """Daemon thread that appends a stack dump to the file every interval."""
 
@@ -283,6 +355,8 @@ class _Dumper:
         self._closed = False
         self._wait_since = None
         self._probed = False
+        self._recheck = _START_RECHECK_S
+        self._reported = {}
         self._thread = threading.Thread(target=self._run, name='rr-stack-dumper', daemon=True)
 
     def start(self) -> None:
@@ -367,19 +441,90 @@ class _Dumper:
             None
         """
         frames = sys._current_frames()
+        starts = {}
         try:
+            starts = self._start_waits(frames)
             main_ident = threading.main_thread().ident
             text = _format_stacks(frames, threading.get_ident(), time.monotonic() - self._started, main_ident)
             text += self._info_line()
             text += self._probe_block(frames.get(threading.main_thread().ident))
         finally:
             del frames
+        self._append(text)
+        if starts:
+            self._report_stuck_starts(starts)
+
+    def _append(self, text: str) -> None:
+        """
+        Append text to the dump file under the file lock, then flush and fsync it.
+
+        Args:
+            text (str): The text to write.
+
+        Returns:
+            None
+        """
         with self._lock:
             if self._closed:
                 return
             self._file.write(text)
             self._file.flush()
             os.fsync(self._file.fileno())
+
+    def _start_waits(self, frames: dict) -> dict:
+        """
+        Pick the threads that wait in ``Thread.start()`` and are not reported yet.
+
+        Reported entries whose thread has left that ``start`` frame are forgotten.
+
+        Args:
+            frames (dict): Thread ident to its current frame, as ``sys._current_frames()`` returns.
+
+        Returns:
+            dict[int, frame]: Thread ident to its ``start`` frame.
+        """
+        own = threading.get_ident()
+        found = {}
+        for ident, frame in frames.items():
+            if ident != own:
+                start = _find_start_wait(frame)
+                if start is not None:
+                    found[ident] = start
+        self._reported = {ident: start for ident, start in self._reported.items() if found.get(ident) is start}
+        return {ident: start for ident, start in found.items() if self._reported.get(ident) is not start}
+
+    def _report_stuck_starts(self, starts: dict) -> None:
+        """
+        Append a marker for every thread still inside the same ``Thread.start()`` call.
+
+        Waits ``self._recheck`` seconds without the GIL, samples the threads again and
+        compares the ``start`` frame objects by identity. Nothing is written when the
+        dumper is stopped during the wait.
+
+        Args:
+            starts (dict[int, frame]): Thread ident to its ``start`` frame from the first sample.
+
+        Returns:
+            None
+        """
+        try:
+            if self._stop.wait(self._recheck):
+                return
+            frames = sys._current_frames()
+            try:
+                stuck = {ident: start for ident, start in starts.items() if _on_stack(frames.get(ident), start)}
+            finally:
+                del frames
+            if not stuck:
+                return
+            self._reported.update(stuck)
+            self._append(
+                ''.join(
+                    f'=== thread start stuck thread=0x{ident:016x} seconds={self._recheck:g}\n\n' for ident in stuck
+                )
+            )
+        finally:
+            starts.clear()
 
     def close(self) -> None:
         """
