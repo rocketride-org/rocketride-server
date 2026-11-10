@@ -46,6 +46,7 @@ Rendered responses are cached per (path, UA class) under a byte budget and
 dropped on every aggregate swap.
 """
 
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from fastapi import HTTPException
@@ -56,7 +57,7 @@ from ai.web import Request
 from ai.web.middleware import route_path
 
 from . import public_pages
-from .contract import with_slash_twin
+from .contract import Page, with_slash_twin
 from .crawlers import CRAWLER, classify
 from .head import inject_head
 from .shell import CACHE_CONTROL, app_url, shell_document_path, shell_static
@@ -273,62 +274,131 @@ def _moved(request: Request, path: str) -> Response:
     )
 
 
-async def public_page(request: Request):
-    """Serve one public page (or the router's own answer for a miss); also mounted on ``/``.
+async def public_page(request: Request) -> Response:
+    """Serve one public page, or the router's own answer for a path no page claims; also mounted on ``/``.
 
-    ``/`` keeps its dedicated route: when the aggregate does not claim it,
-    it serves the shell exactly as ``shell_static`` does.
+    One helper per outcome, in order: a method other than GET and HEAD, a
+    redirect, a path no page claims, then the page itself. ``/`` keeps its
+    dedicated route: when the aggregate does not claim it, it serves the
+    shell exactly as ``shell_static`` does.
+
+    Args:
+        request: The request. Its path as the router matched it (``root_path``
+            stripped) is the one the auth middleware decided on.
+
+    Returns:
+        The page, a 301 to a page, the shell on an unclaimed ``/``, or the
+        router's 307 to a served trailing-slash twin.
+
+    Raises:
+        HTTPException: 404 for a path nothing serves; 405, with ``Allow``, for
+            a method the page, redirect or real route does not take; 503
+            (from ``shell_document_path``) when the shell is not built.
     """
-    # The path the router matched (root_path stripped): the one the auth middleware decided on.
     path = route_path(request.scope) or '/'
     aggregate = public_pages.current()
     # HEAD is GET without the body (the server drops it; status and headers
     # stay identical): link checkers and unfurl prefetches send it.
     if request.method not in ('GET', 'HEAD'):
-        # Any other method: pages and redirects answer 405; any other path
-        # answers what the router would have without the catch-all.
-        if path == '/' or path in aggregate.exact or path in aggregate.redirects:
-            raise HTTPException(status_code=405, detail='Method Not Allowed', headers={'Allow': 'GET, HEAD'})
-        miss = _router_miss(request)
-        if miss is None:
-            raise HTTPException(status_code=404, detail='Not Found')
-        return miss
+        return _other_method(request, path, aggregate)
     public_pages.maybe_refresh()  # schedules only: the swap lands on a later request
+    moved = _redirect(request, path, aggregate)
+    if moved is not None:
+        return moved
+    page = aggregate.exact.get(path)
+    if page is None:
+        return await _unclaimed(request, path)
+    return _render_page(request, path, page)
+
+
+def _other_method(request: Request, path: str, aggregate: public_pages.Aggregate) -> Response:
+    """A method other than GET and HEAD: pages and redirects refuse it; any other path gets the router's answer.
+
+    Returns:
+        The router's 307 to a served trailing-slash twin.
+
+    Raises:
+        HTTPException: 405 with ``Allow: GET, HEAD`` on ``/``, a page or a
+            redirect source; the router's 405 on a real route's path; else 404.
+    """
+    if path == '/' or path in aggregate.exact or path in aggregate.redirects:
+        raise HTTPException(status_code=405, detail='Method Not Allowed', headers={'Allow': 'GET, HEAD'})
+    miss = _router_miss(request)
+    if miss is None:
+        raise HTTPException(status_code=404, detail='Not Found')
+    return miss
+
+
+def _redirect(request: Request, path: str, aggregate: public_pages.Aggregate) -> Optional[Response]:
+    """The 301 for a redirect source (``site.redirects``) or a page's trailing-slash twin, else None."""
     target = aggregate.redirects.get(path)
     if target is not None:
         return _moved(request, target)
-    page = aggregate.exact.get(path)
-    if page is None:
-        if path == '/':
-            return await shell_static(request)
-        # A page's trailing-slash twin: one permanent URL per page.
-        if path.endswith('/') and path[:-1] in aggregate.exact:
-            return _moved(request, path[:-1])
-        miss = _router_miss(request)
-        if miss is None:
-            raise HTTPException(status_code=404, detail='Not Found')
-        return miss
+    # A page's trailing-slash twin: one permanent URL per page. No page path
+    # ends with a slash, so a twin is never a page itself.
+    if path.endswith('/') and path[:-1] in aggregate.exact:
+        return _moved(request, path[:-1])
+    return None
+
+
+async def _unclaimed(request: Request, path: str) -> Response:
+    """A GET or HEAD on a path no page claims: the shell on ``/``, else what the router answered before the catch-all.
+
+    Returns:
+        The shell on ``/``, or the router's 307 to a served trailing-slash twin.
+
+    Raises:
+        HTTPException: the router's 405 on a real route's path, else 404.
+    """
+    if path == '/':
+        return await shell_static(request)
+    miss = _router_miss(request)
+    if miss is None:
+        raise HTTPException(status_code=404, detail='Not Found')
+    return miss
+
+
+def _render_page(request: Request, path: str, page: Page) -> Response:
+    """The page from the render cache, rendered on a miss.
+
+    Keyed by (path, UA class, shell document, its mtime and size,
+    ``RR_APP_URL``), so a new shell build or origin renders afresh.
+
+    Returns:
+        The page's response.
+
+    Raises:
+        HTTPException: 503 (from ``shell_document_path``) when the shell is not built.
+    """
     crawler = classify(request.headers.get('user-agent', '')) == CRAWLER
     document = shell_document_path(request)
     stat = document.stat()
     key = (path, crawler, document, stat.st_mtime_ns, stat.st_size, app_url())
     cached = _render_cache.get(key)
     if cached is None:
-        body = inject_head(
-            document.read_text(encoding='utf-8'),
-            title=page.head_title or page.title,
-            description=page.description,
-            canonical=canonical_url(path),
-            noindex=not page.listed,
-        )
-        # Crawler responses may sit in shared caches; people's never do (the
-        # document names the current build's bundles), so caches key on the UA.
-        headers = {'Vary': 'User-Agent', 'Cache-Control': CACHE_CONTROL if crawler else 'private, no-cache'}
-        if not page.listed:
-            headers['X-Robots-Tag'] = 'noindex'
-        cached = (body.encode('utf-8'), headers)
+        cached = _render(path, page, crawler, document)
         _render_cache.put(key, cached, len(cached[0]))
     return HTMLResponse(cached[0], headers=dict(cached[1]))
+
+
+def _render(path: str, page: Page, crawler: bool, document: Path) -> Tuple[bytes, Dict[str, str]]:
+    """Render one page as the render cache holds it: ``(body, headers)``.
+
+    The body is the shell document with the page's head metadata injected.
+    """
+    body = inject_head(
+        document.read_text(encoding='utf-8'),
+        title=page.head_title or page.title,
+        description=page.description,
+        canonical=canonical_url(path),
+        noindex=not page.listed,
+    )
+    # Crawler responses may sit in shared caches; people's never do (the
+    # document names the current build's bundles), so caches key on the UA.
+    headers = {'Vary': 'User-Agent', 'Cache-Control': CACHE_CONTROL if crawler else 'private, no-cache'}
+    if not page.listed:
+        headers['X-Robots-Tag'] = 'noindex'
+    return body.encode('utf-8'), headers
 
 
 async def register_public_pages(server: Any) -> None:
