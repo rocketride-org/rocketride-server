@@ -35,7 +35,8 @@ from typing import Mapping
 
 from rocketlib import IValidatorBase, warning
 
-MONGODB_SRV_RE = re.compile(r'^mongodb\+srv://[^:]+:[^@]+@[a-zA-Z0-9\-]+\.[a-zA-Z0-9]+\.mongodb\.net/\?.*')
+# The path and the query after the cluster host are optional in an SRV URI
+MONGODB_SRV_RE = re.compile(r'^mongodb\+srv://[^:]+:[^@]+@[a-zA-Z0-9\-]+\.[a-zA-Z0-9]+\.mongodb\.net(?:/.*)?$')
 INVALID_DATABASE_CHARS = ('/', '\\', ' ', '"', '$', '*', '<', '>', ':', '|', '?')
 
 
