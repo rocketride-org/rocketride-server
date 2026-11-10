@@ -700,7 +700,12 @@ async def _render(path: str, page: Page, crawler: bool, document: Path, now: flo
     # Only crawlers bind data: people get the shell document, which the
     # app renders itself.
     sources = page.data if crawler else ()
-    context, cacheable = await _page_data(page, canonical) if sources else ({}, True)
+    context, cacheable = {}, True
+    # A render bound to nothing never expires.
+    expires = math.inf
+    if sources:
+        context, cacheable = await _page_data(page, canonical)
+        expires = now + data_sources.TTL_SECONDS
     snapshot = None
     if crawler:
         snapshot, rendered = await _crawler_snapshot(page, context)
@@ -725,7 +730,6 @@ async def _render(path: str, page: Page, crawler: bool, document: Path, now: flo
     headers = {'Vary': 'User-Agent', 'Cache-Control': cache_control}
     if not page.listed:
         headers['X-Robots-Tag'] = 'noindex'
-    expires = now + data_sources.TTL_SECONDS if sources else math.inf
     return _Rendered(sources, expires, body.encode('utf-8'), headers), cacheable
 
 
