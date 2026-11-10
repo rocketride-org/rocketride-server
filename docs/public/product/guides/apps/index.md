@@ -327,6 +327,9 @@ A snapshot is a template with exactly three kinds of tag, each on one line:
 `{{name}}` and `{{a.b}}` insert a value, HTML-escaped; `{{#name}}...{{/name}}`
 repeats its content for each item of a list, enters an object, and renders
 nothing for an absent, empty or false value. Sections nest at most 16 deep.
+There is no `{{.}}`: a list item that is not an object adds no names, so a tag
+inside its section reads the enclosing values (`{{b}}` inside `{{#a}}` over
+`["x"]` renders the outer `b`).
 Any other tag renders nothing, as does a tag naming a value the server does
 not provide; a `{{` that does not form a tag stays as text. Escaping makes a
 value safe in HTML text and in quoted attributes that are not URLs; it does not
