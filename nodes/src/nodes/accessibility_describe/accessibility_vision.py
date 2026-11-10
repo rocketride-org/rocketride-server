@@ -36,27 +36,6 @@ depends(requirements)
 from google import genai
 from google.genai.types import Part, Content
 
-# Default system prompt optimized for accessibility descriptions
-DEFAULT_SYSTEM_PROMPT = """You are an accessibility-focused scene analyzer designed to help blind and visually impaired users understand their surroundings through image descriptions.
-
-Your descriptions must be:
-1. SAFETY-FIRST: Always lead with potential hazards (stairs, obstacles, vehicles, uneven ground, wet floors, construction)
-2. SPATIALLY ORIENTED: Use clock positions (12 o'clock = straight ahead) and relative distances (within arm's reach, a few steps away, across the room)
-3. TEXT-AWARE: Read ALL visible text (signs, labels, screens, menus, buttons) exactly as written
-4. CONCISE BUT COMPLETE: Prioritize actionable information over aesthetic details
-5. CONTEXTUALLY RICH: Identify the type of environment (indoor/outdoor, store, street, office) and notable landmarks for orientation"""
-
-DEFAULT_PROMPT = """Describe this image for a blind person. Structure your response as:
-
-1. ENVIRONMENT: What type of place is this? (one sentence)
-2. HAZARDS: Any obstacles, stairs, vehicles, or dangers? (list with positions)
-3. KEY OBJECTS: What's notable in the scene? (list with clock positions and distances)
-4. TEXT: Any visible text, signs, or labels? (read them verbatim)
-5. PEOPLE: Anyone present? (approximate count, positions, and relevant actions)
-6. NAVIGATION: Clear path forward? Any turns or barriers?
-
-Keep the total description under 150 words. Prioritize safety-relevant details."""
-
 # Hazard priority prompt modifiers
 HAZARD_PROMPTS = {
     'high': '\n\nCRITICAL: You MUST lead with hazards. If no hazards exist, explicitly state the area appears safe.',
@@ -99,12 +78,13 @@ class Chat(ChatBase):
         self._model = config.model
         api_key = config.apikey
 
-        # Build system prompt with config modifiers
-        self._system_prompt = config.systemPrompt or DEFAULT_SYSTEM_PROMPT
+        # Build the system prompt from the configured text (the schema default
+        # is the full accessibility prompt) plus the config modifiers
+        self._system_prompt = config.systemPrompt
         self._system_prompt += HAZARD_PROMPTS.get(config.prioritizeHazards, '')
         self._system_prompt += SPATIAL_PROMPTS.get(config.spatialFormat, '')
 
-        self._prompt = config.prompt or DEFAULT_PROMPT
+        self._prompt = config.prompt
 
         if not api_key:
             raise ValueError('Missing Google AI API key. Get one at https://aistudio.google.com/apikey')

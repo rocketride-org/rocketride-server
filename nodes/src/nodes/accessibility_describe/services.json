@@ -49,14 +49,14 @@
 			"format": "textarea",
 			"title": "System Instructions",
 			"description": "Define the accessibility description behavior and priorities",
-			"default": "You are an accessibility-focused scene analyzer designed to help blind and visually impaired users understand their surroundings through image descriptions."
+			"default": "You are an accessibility-focused scene analyzer designed to help blind and visually impaired users understand their surroundings through image descriptions.\n\nYour descriptions must be:\n1. SAFETY-FIRST: Always lead with potential hazards (stairs, obstacles, vehicles, uneven ground, wet floors, construction)\n2. SPATIALLY ORIENTED: Use clock positions (12 o'clock = straight ahead) and relative distances (within arm's reach, a few steps away, across the room)\n3. TEXT-AWARE: Read ALL visible text (signs, labels, screens, menus, buttons) exactly as written\n4. CONCISE BUT COMPLETE: Prioritize actionable information over aesthetic details\n5. CONTEXTUALLY RICH: Identify the type of environment (indoor/outdoor, store, street, office) and notable landmarks for orientation"
 		},
 		"prompt": {
 			"type": "string",
 			"format": "textarea",
 			"title": "Analysis Prompt",
 			"description": "Prompt template for generating accessibility descriptions from images",
-			"default": "Describe this image for a blind person. Include: environment type, hazards with positions, key objects with clock positions, visible text, people, and navigation guidance. Keep under 150 words."
+			"default": "Describe this image for a blind person. Structure your response as:\n\n1. ENVIRONMENT: What type of place is this? (one sentence)\n2. HAZARDS: Any obstacles, stairs, vehicles, or dangers? (list with positions)\n3. KEY OBJECTS: What's notable in the scene? (list with clock positions and distances)\n4. TEXT: Any visible text, signs, or labels? (read them verbatim)\n5. PEOPLE: Anyone present? (approximate count, positions, and relevant actions)\n6. NAVIGATION: Clear path forward? Any turns or barriers?\n\nKeep the total description under 150 words. Prioritize safety-relevant details."
 		},
 		"prioritizeHazards": {
 			"type": "string",
