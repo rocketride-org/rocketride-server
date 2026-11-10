@@ -3,7 +3,7 @@
 	"type": "ANSWER",
 	"target": "app",
 	"title": "Answers which stock UI components exist and that the gallery is where to browse them.",
-	"prompt": "What stock components exist, and where do I browse them?",
+	"prompt": "What stock UI components exist, and where do I browse them?",
 	"files": [],
 	"cards": "deny",
 	"timeLimitSec": 3600,

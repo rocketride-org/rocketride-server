@@ -53,7 +53,7 @@ Not graded by code: the old keyword checks, the agent's tool calls, and the leve
 | question-04-schema-check | extra | ANSWER | pipeline | deny | time limit 3600 (was 180); no-change (no_change_tools) folded into the empty only_changed |
 | question-05-model-choice | extra | ANSWER | pipeline | deny | time limit 3600 (was 180); no-change (no_change_tools) folded into the empty only_changed |
 | question-06-deploy-schedule | extra | ANSWER | pipeline | deny | time limit 3600 (was 180); no-change (no_change_tools) folded into the empty only_changed; dropped names-deploy-add (answer_matches), names-pause (answer_matches), names-resume (answer_matches) |
-| question-07-stock-components | extra | ANSWER | app | deny | time limit 3600 (was 180); no-change (no_change_tools) folded into the empty only_changed; dropped names-components (answer_names), names-gallery (answer_matches) |
+| question-07-stock-components | extra | ANSWER | app | deny | time limit 3600 (was 180); after batch 1, the prompt says "UI components", since "components" also fits pipeline nodes; no-change (no_change_tools) folded into the empty only_changed; dropped names-components (answer_names), names-gallery (answer_matches) |
 | question-08-publish-version | extra | ANSWER | app | deny | time limit 3600 (was 180); no-change (no_change_tools) folded into the empty only_changed; dropped names-where-app (answer_matches) |
 | question-09-org-key | extra | ANSWER | pipeline | deny | time limit 3600 (was 180); no-change (no_change_tools) folded into the empty only_changed |
 | question-10-plan-usage | extra | ANSWER | pipeline | deny | time limit 3600 (was 180); no-change (no_change_tools) folded into the empty only_changed |
