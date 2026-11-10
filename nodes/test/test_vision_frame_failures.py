@@ -14,8 +14,8 @@ The engine builds the object's error from str() of the raised exception only and
 never reads __cause__ (engLib/python/call.hpp), so the message must carry the cause.
 
 Each node's real IInstance.py runs with rocketlib, ai.common.* and the node's own
-IGlobal stubbed. Failures are injected at the decoder or at the model call, so the
-real _emit, the device_lock handling and the buffer reset all run.
+IGlobal stubbed. Failures are injected at the decoder, at the model call or at the
+image-lane write, so the real _emit, the device_lock handling and the buffer reset all run.
 """
 
 import importlib.util
@@ -101,6 +101,11 @@ def _fail(*args, **kwargs):
     raise ValueError('injected frame failure')
 
 
+def _fail_write(*args, **kwargs):
+    """Fail like an image-lane write would, for example when the output stream cannot be written."""
+    raise OSError('injected write failure')
+
+
 def _model_result(node, image):
     """Return what the node's model returns for a frame with nothing found in it."""
     if node == 'depth_estimate':
@@ -143,13 +148,14 @@ def _stubs(package):
 def handler(monkeypatch):
     """Return a loader that builds a node's real IInstance with a frame buffered."""
 
-    def load(node, decode, model):
+    def load(node, decode, model, forward=_forward_enriched_image):
         """Load the node's IInstance, wire its decoder and model, and buffer one frame.
 
         Args:
             node: Node package name, e.g. 'detect'.
             decode: Replaces ImageProcessor.load_image_from_bytes.
             model: Replaces the node's model call; it receives the decoded image.
+            forward: Replaces forward_enriched_image, the node's image-lane write.
 
         Returns:
             The instance after BEGIN and WRITE, ready for END.
@@ -160,6 +166,7 @@ def handler(monkeypatch):
         for name, value in stubs.items():
             monkeypatch.setitem(sys.modules, name, value)
         stubs['ai.common.image'].ImageProcessor.load_image_from_bytes = decode
+        stubs['ai.common.avi.descriptor'].forward_enriched_image = forward
 
         spec = importlib.util.spec_from_file_location(
             package.__name__ + '.IInstance', _NODES_DIR / node / 'IInstance.py'
@@ -222,6 +229,28 @@ def test_frame_failure_without_a_message_names_the_exception_type(handler, node)
 
     with pytest.raises(RuntimeError, match=f'^{node} failed to process the input frame: AssertionError$'):
         _end(instance, [])
+
+
+@pytest.mark.parametrize('node', NODES)
+def test_image_write_failure_after_the_text_write_fails_the_object(handler, node):
+    """An image-lane write that fails after the text write raises with the cause and keeps the text."""
+    # Every node's _emit writes the text lane before the image lane, so the text is
+    # already delivered when the image write fails, and it cannot be retracted.
+    instance = handler(node, decode=_decode, model=lambda image: _model_result(node, image), forward=_fail_write)
+    forwarded = []
+
+    with pytest.raises(
+        RuntimeError, match=f'^{node} failed to process the input frame: injected write failure$'
+    ) as caught:
+        _end(instance, forwarded)
+
+    assert isinstance(caught.value.__cause__, OSError)
+    assert forwarded == [], 'the raw END was forwarded after the failure'
+    assert list(instance.instance.delivered) == ['text'], 'the image lane recorded a write that failed'
+    assert len(instance.instance.delivered['text']) == 1, 'the text written before the failure was not kept'
+    assert instance._image_data is None
+    assert instance.IGlobal.device_lock.acquire(blocking=False), 'device_lock is still held after the failure'
+    instance.IGlobal.device_lock.release()
 
 
 @pytest.mark.parametrize('node', NODES)
