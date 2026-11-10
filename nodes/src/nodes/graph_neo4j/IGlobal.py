@@ -32,8 +32,17 @@ and LLM query loop from the base class.
 
 from __future__ import annotations
 
+import os
 import re
 from typing import Any, Dict, List, Optional, Tuple
+
+from depends import depends
+
+# neo4j is imported at module scope, so the requirements are installed before
+# that happens. This module is only imported on the run path (config mode
+# imports the validator alone), so the install never runs while a user is merely
+# opening the node's settings panel.
+depends(os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt')
 
 import neo4j
 from neo4j.exceptions import Neo4jError, ServiceUnavailable

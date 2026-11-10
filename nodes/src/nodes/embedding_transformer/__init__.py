@@ -20,23 +20,3 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-
-from .IGlobal import IGlobal
-from .IInstance import IInstance
-
-
-# Allow direct access to the underlying embedding
-def getEmbedding():
-    """
-    Return the embedding class.
-    """
-    from .sentenceTransformer import Embedding
-
-    return Embedding
-
-
-__all__ = [
-    'IInstance',
-    'IGlobal',
-    'getEmbedding',
-]

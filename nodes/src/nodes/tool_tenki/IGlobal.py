@@ -27,6 +27,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import threading
 import time
@@ -36,6 +37,14 @@ import uuid
 from ai.common.config import Config
 from ai.common.utils import config_int
 from rocketlib import IGlobalBase, OPEN_MODE, debug, warning
+
+from depends import depends
+
+# tenki is imported at module scope, so the requirements are installed before
+# that happens. This module is only imported on the run path (config mode
+# imports the validator alone), so the install never runs while a user is merely
+# opening the node's settings panel.
+depends(os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt')
 
 from tenki import (
     Client,

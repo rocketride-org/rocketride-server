@@ -20,23 +20,3 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-
-from .IGlobal import IGlobal
-from .IInstance import IInstance
-
-
-# Allow direct access to the underlying reader
-def getReader():
-    """
-    Get the reader class for the OCR.
-    """
-    from .ocr import Reader
-
-    return Reader
-
-
-__all__ = [
-    'IGlobal',
-    'IInstance',
-    'getReader',
-]

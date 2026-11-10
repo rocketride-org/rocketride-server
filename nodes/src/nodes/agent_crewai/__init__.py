@@ -20,21 +20,3 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-
-"""
-CrewAI agent framework node package for RocketRide Engine.
-
-This package no longer directly exports `IInstance` / `IGlobal` — each of the
-three CrewAI logical types lives in its own sub-package and the engine loads
-them via the `path` field in their respective services.json files:
-
-- `nodes.agent_crewai.crewai_agent`     — `agent_crewai` (standalone CrewAI Agent)
-- `nodes.agent_crewai.crewai_subagent`  — `agent_crewai_subagent` (managed sub-agent)
-- `nodes.agent_crewai.crewai_manager`   — `agent_crewai_manager` (hierarchical delegator)
-
-The shared CrewAI framework code that all three sub-packages import lives at
-this package level: `crewai_base.py`, `crewai_runner.py`, `crewai_listener.py`,
-and the shared `requirements.txt`.
-"""
-
-__all__: list[str] = []

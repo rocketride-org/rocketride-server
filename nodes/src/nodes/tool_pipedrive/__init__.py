@@ -22,17 +22,3 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-
-"""
-Pipedrive CRM node for RocketRide Engine.
-
-Exposes the Pipedrive REST API v1 as agent tools: deals, persons,
-organizations, activities, pipelines, notes, leads, products, files, users,
-projects and the rest of the v1 surface, surfaced as @tool_function
-decorators on IInstance.
-"""
-
-from .IGlobal import IGlobal as IGlobal
-from .IInstance import IInstance as IInstance
-
-__all__ = ['IGlobal', 'IInstance']
