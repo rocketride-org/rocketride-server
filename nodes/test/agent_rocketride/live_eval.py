@@ -105,7 +105,8 @@ def score(task: Task, log: List[Dict[str, Any]], stop_reason: Any, answer: str) 
     reasons: List[str] = []
     if stop_reason != 'done':
         reasons.append(f'stop_reason {stop_reason!r}')
-    text = (answer or '').lower()
+    # Models write typographic apostrophes ("can’t"); the markers use plain ones.
+    text = (answer or '').replace('\u2019', "'").lower()
     for group in task.markers:
         if not any(m.lower() in text for m in group):
             reasons.append(f'answer lacks {" or ".join(repr(m) for m in group)}')

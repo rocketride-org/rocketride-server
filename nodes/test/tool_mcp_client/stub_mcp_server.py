@@ -40,7 +40,8 @@ Three more options, for agent tests that launch the server from a command line
   ``tools/call`` of a known tool, so a test can read exactly which tools ran.
 - A tool entry may carry ``"_stub_result": <any JSON>``. ``tools/list`` strips
   every key that starts with ``_``, and ``tools/call`` returns that value as
-  ``structuredContent`` next to ``content`` and ``received_arguments``.
+  ``structuredContent``, and as JSON text in ``content``, as the MCP spec asks
+  of a tool that returns structured content.
 """
 
 import argparse
@@ -176,7 +177,9 @@ def _handle(msg):
             'received_arguments': arguments,
         }
         if '_stub_result' in known[name]:
-            result['structuredContent'] = known[name]['_stub_result']
+            canned = known[name]['_stub_result']
+            result['content'] = [{'type': 'text', 'text': json.dumps(canned, ensure_ascii=False)}]
+            result['structuredContent'] = canned
         return {'jsonrpc': '2.0', 'id': msg_id, 'result': result}
 
     return {
