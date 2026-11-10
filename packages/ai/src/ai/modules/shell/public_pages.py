@@ -83,9 +83,16 @@ class Aggregate:
         return sorted(self.exact.values(), key=lambda p: p.path)
 
 
+def _claim_key(pub: Published) -> Tuple[float, str]:
+    """Sort key of one claim: its production binding time, then its app id. An unknown time sorts last."""
+    if pub.published_at is None:
+        return float('inf'), pub.app_id
+    return pub.published_at, pub.app_id
+
+
 def _claim_order(published: List[Published]) -> List[Published]:
     """First claim wins: the earlier production binding, then app id (deterministic)."""
-    return sorted(published, key=lambda p: (p.published_at if p.published_at is not None else float('inf'), p.app_id))
+    return sorted(published, key=_claim_key)
 
 
 def _claims(
@@ -123,11 +130,14 @@ def build_aggregate(
     exact, sites = _claims(published, live_conflict)
     if not exact:
         return legacy_aggregate(live_conflict)
+    site: Dict[str, Any] = {}
     root = exact.get('/')
+    if root is not None:
+        site = dict(sites.get(root.app_id, {}))
     owners = {page.app_id for page in exact.values()}
     return Aggregate(
         exact=exact,
-        site=dict(sites.get(root.app_id, {})) if root is not None else {},
+        site=site,
         published={pub.app_id: pub for pub in published if pub.app_id in owners},
     )
 
@@ -142,10 +152,13 @@ def legacy_aggregate(live_conflict: Optional[Callable[[str], Optional[str]]] = N
     manifest = legacy_page_manifest()
     exact: Dict[str, Page] = {}
     for raw in manifest['publicPages']:
-        conflict = live_conflict(raw['path']) if live_conflict else None
-        if conflict:
-            debug(f'[public_pages] legacy page {raw["path"]} collides with the live route {conflict} (page skipped)')
-            continue
+        if live_conflict is not None:
+            conflict = live_conflict(raw['path'])
+            if conflict:
+                debug(
+                    f'[public_pages] legacy page {raw["path"]} collides with the live route {conflict} (page skipped)'
+                )
+                continue
         exact[raw['path']] = Page(
             path=raw['path'],
             app_id='',
@@ -204,7 +217,9 @@ async def load_published(
     if acct is None:
         from ai.account import account as acct
 
-    org = '' if 'saas' in getattr(acct, 'capabilities', ()) else 'local'
+    org = 'local'
+    if 'saas' in getattr(acct, 'capabilities', ()):
+        org = ''
     review_ladder = getattr(acct, 'review_ladder', True)
     winners: Dict[str, Dict[str, Any]] = {}
     for row in precedence_sorted(await acct.publish_list(org, 'app', [{'type': 'public', 'id': ''}])):

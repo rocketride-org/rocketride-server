@@ -232,9 +232,10 @@ def _page_path_error(path: Any, root: bool, live_conflict: Optional[Callable[[st
     err = _reserved_error(path)
     if err:
         return f'{err}; choose another path'
-    conflict = live_conflict(path) if live_conflict else None
-    if conflict:
-        return f'collides with the live server route {conflict}; choose another path'
+    if live_conflict is not None:
+        conflict = live_conflict(path)
+        if conflict:
+            return f'collides with the live server route {conflict}; choose another path'
     return None
 
 
@@ -289,9 +290,10 @@ def _check_page(
     if err:
         return None, f'{where}.data: {err}'
     snapshot = raw.get('snapshot', '')
-    err = _snapshot_error(snapshot) if snapshot != '' else None
-    if err:
-        return None, f'{where}.snapshot {snapshot!r}: {err}'
+    if snapshot != '':
+        err = _snapshot_error(snapshot)
+        if err:
+            return None, f'{where}.snapshot {snapshot!r}: {err}'
     page = Page(
         path=path,
         app_id='',
