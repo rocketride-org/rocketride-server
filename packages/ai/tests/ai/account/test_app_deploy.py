@@ -1901,6 +1901,17 @@ async def test_third_party_public_pages_rejected_at_publish(registry, quiet_push
 
 
 @pytest.mark.asyncio
+async def test_third_party_site_alone_publishes(registry, quiet_push, no_published_pages):
+    # A store app's generic 'site' key can never take effect, so it never blocks a publish.
+    manifest = {'name': 'Brandy', 'site': {'title': 'Brandy', 'docsUrl': 'not a url'}}
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready', manifest=manifest)
+    dev = _FakeConn(teams=_TEAMS, developer_id='acme')
+    result = await handle_deploy_app(dev, _request('publish', version=1, target='@public'))
+    assert result['success'] is True
+    assert len(registry.set_calls) == 1
+
+
+@pytest.mark.asyncio
 async def test_public_pages_gate_fails_closed_on_storage_errors(registry, quiet_push, no_published_pages, monkeypatch):
     import ai.modules.shell.public_pages as pp
 
