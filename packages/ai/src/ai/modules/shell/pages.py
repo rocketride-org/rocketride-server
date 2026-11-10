@@ -46,7 +46,7 @@ Rendered responses are cached per (path, UA class) under a byte budget and
 dropped on every aggregate swap.
 """
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from fastapi import HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -56,6 +56,7 @@ from ai.web import Request
 from ai.web.middleware import route_path
 
 from . import public_pages
+from .contract import with_slash_twin
 from .crawlers import CRAWLER, classify
 from .head import inject_head
 from .shell import CACHE_CONTROL, app_url, shell_document_path, shell_static
@@ -84,6 +85,27 @@ def _real_routes(server: Any) -> list:
     return [r for r in server.app.router.routes if not isinstance(r, WebSocketRoute)]
 
 
+def _first_route_matching(path: str, routes: Iterable[Any]) -> Optional[Any]:
+    """The first of ``routes`` whose path pattern matches ``path``, in order.
+
+    A route without a path pattern (a ``Host``) cannot be checked against a
+    path, so it counts as a match: a caller that must fail closed gets it
+    back, and one that must not leaves such routes out of ``routes``.
+
+    Args:
+        path: The path the router matches (``root_path`` stripped).
+        routes: Routes in match order.
+
+    Returns:
+        The matching route, or None when no route matches.
+    """
+    for route in routes:
+        regex = getattr(route, 'path_regex', None)
+        if regex is None or regex.match(path):
+            return route
+    return None
+
+
 def is_public_path(path: str) -> bool:
     """Auth-middleware predicate: will a page handler answer this path?
 
@@ -94,13 +116,8 @@ def is_public_path(path: str) -> bool:
     the aggregate claims. A route the check cannot reason about (no path
     pattern) fails closed.
     """
-    for route in _real_routes(_web_server):
-        regex = getattr(route, 'path_regex', None)
-        if regex is None:
-            return False
-        if regex.match(path):
-            return getattr(route, 'endpoint', None) is public_page
-    return False
+    route = _first_route_matching(path, _real_routes(_web_server))
+    return route is not None and getattr(route, 'endpoint', None) is public_page
 
 
 def live_route_conflict(path: str) -> Optional[str]:
@@ -113,15 +130,16 @@ def live_route_conflict(path: str) -> Optional[str]:
     server = _web_server
     if server is None:
         return None
-    for route in server.app.router.routes:
-        template = getattr(route, 'path', None)
-        if not template or getattr(route, 'endpoint', None) is public_page:
-            continue
-        regex = getattr(route, 'path_regex', None)
-        if regex is not None and regex.match(path):
-            methods = ','.join(sorted(getattr(route, 'methods', None) or [])) or 'ANY'
-            return f'{methods} {template}'
-    return None
+    routes = [
+        r
+        for r in server.app.router.routes
+        if getattr(r, 'path', None) and getattr(r, 'endpoint', None) is not public_page
+    ]
+    route = _first_route_matching(path, routes)
+    if route is None:
+        return None
+    methods = ','.join(sorted(getattr(route, 'methods', None) or [])) or 'ANY'
+    return f'{methods} {route.path}'
 
 
 def canonical_url(path: str) -> str:
@@ -159,21 +177,25 @@ def _router_miss(request: Request) -> Optional[Response]:
     if server is None:
         return None
     path = route_path(request.scope)
-    routes = [r for r in _real_routes(server) if getattr(r, 'endpoint', None) is not public_page]
-    for route in routes:
-        regex = getattr(route, 'path_regex', None)
-        if regex is not None and regex.match(path):
-            methods = sorted(getattr(route, 'methods', None) or [])
-            raise HTTPException(
-                status_code=405, detail='Method Not Allowed', headers={'Allow': ', '.join(methods)} if methods else None
-            )
+    # The router skips a route it cannot match on the path (a Host), and so does this.
+    routes = [
+        r
+        for r in _real_routes(server)
+        if getattr(r, 'path_regex', None) is not None and getattr(r, 'endpoint', None) is not public_page
+    ]
+    route = _first_route_matching(path, routes)
+    if route is not None:
+        methods = sorted(getattr(route, 'methods', None) or [])
+        headers = None
+        if methods:
+            headers = {'Allow': ', '.join(methods)}
+        raise HTTPException(status_code=405, detail='Method Not Allowed', headers=headers)
     # A relative Location starting with '//' is protocol-relative: off-site.
-    if path != '/' and not path.startswith('//'):
-        twin = path[:-1] if path.endswith('/') else path + '/'
-        served = twin in public_pages.current().exact
-        served = served or any(getattr(r, 'path_regex', None) and r.path_regex.match(twin) for r in routes)
-        if served:
-            return RedirectResponse(_relative_location(request, twin), status_code=307)
+    if path == '/' or path.startswith('//'):
+        return None
+    twin = with_slash_twin(path)[1]
+    if twin in public_pages.current().exact or _first_route_matching(twin, routes) is not None:
+        return RedirectResponse(_relative_location(request, twin), status_code=307)
     return None
 
 
