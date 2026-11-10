@@ -458,7 +458,11 @@ class MiscCommands(DAPConn):
                     config_errors = [
                         {
                             'message': _template_message(substituted, 'error'),
-                            **({'id': ids[entry['id']]} if entry.get('id') in ids else {}),
+                            **(
+                                {'id': ids[entry['id']]}
+                                if isinstance(entry.get('id'), str) and entry['id'] in ids
+                                else {}
+                            ),
                         }
                         for entry in config_errors
                     ]

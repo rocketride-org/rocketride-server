@@ -1633,6 +1633,27 @@ async def test_on_rrext_validate_config_errors_follow_the_template_contract(monk
 
 
 @pytest.mark.asyncio
+async def test_on_rrext_validate_config_error_with_a_non_string_id_carries_no_id(monkeypatch):
+    """A component id that is not a string (here a list, which the engine reports on
+    its own) cannot key the submitted-id map: under substitution its config error
+    keeps the template message and simply omits the id instead of failing the reply.
+    """
+    _schemas(monkeypatch)
+    monkeypatch.setattr(cmd_misc, 'validatePipeline', lambda payload: copy.deepcopy(payload))
+    env = {'ROCKETRIDE_PORT': '70000'}
+    conn = _validate_conn(monkeypatch, env=env, schemas=True)
+    component = {
+        'id': ['q1'],
+        'provider': 'store_qdrant',
+        'config': {'mode': 'local', 'local': {'port': '${ROCKETRIDE_PORT}'}},
+    }
+
+    reply = await _reply(conn, {'source': 'q1', 'components': [component]})
+
+    assert reply['errors'] == [{'message': _template_message(env, 'error')}]
+
+
+@pytest.mark.asyncio
 async def test_on_rrext_validate_rejects_a_config_that_is_not_an_object(monkeypatch):
     """A falsy non-dict config ([]) is malformed, not empty: reported, never validated as {}."""
     _schemas(monkeypatch)
