@@ -31,6 +31,8 @@
  * a record.
  */
 
+import type { PipelineOutput } from './expect';
+
 // =============================================================================
 // THE TURN RESULT: the parts of the agent's TurnResult the scorer reads
 // =============================================================================
@@ -174,11 +176,16 @@ export interface CanaryScan {
 	values: number;
 }
 
-/** What run_output saw. Never a value from the run beyond a short excerpt. */
+/**
+ * What run_output saw. The excerpt goes in the check's detail; the whole
+ * output goes in record.json, which is scrubbed of the held keys like the
+ * final files beside it, so a reader can judge what the excerpt cuts.
+ */
 export interface RunOutputResult {
 	status: 'pass' | 'fail' | 'pending';
 	detail: string;
 	excerpt?: string;
+	output?: PipelineOutput;
 }
 
 /** The validate a save or the end of the trial ran on one pipeline. */

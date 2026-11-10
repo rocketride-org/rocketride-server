@@ -149,3 +149,19 @@ test('an upload send uses a webhook when the pipeline has no dropper, and fails 
 	assert.deepEqual(used, ['webhook_1']);
 	assert.equal((await runOutputCheck(client, ck as never, BATCH_1, pipe('chat'), [], [])).detail, 'the pipeline has no dropper or webhook source');
 });
+
+test('an output check keeps every answer whole, so a reader can judge what the excerpt cuts', async () => {
+	// edit-02 round 2 failed on two answers, and its excerpt kept 100 characters of each
+	const long = `# What is a Webhook?\n\n${'A webhook sends data from one app to another when something happens. '.repeat(4)}`;
+	const files = { 'pipelines/support.pipe': JSON.stringify({ project_id: 'support', components: [{ id: 'webhook_1', provider: 'webhook' }] }) };
+	const ck = { id: 'runs', kind: 'run_output', path: 'pipelines/support.pipe', send: { webhook: { text: 'What is a webhook?' } }, expect: { nonempty: true } };
+	const client = {
+		use: async () => ({ token: 'task-1', reused: false }),
+		getTaskStatus: async () => ({}),
+		terminate: async () => {},
+		send: async () => ({ result_types: { answers: 'answers' }, answers: [long, 'A webhook is a friendly ping.'] }),
+	} as unknown as RocketRideClient;
+
+	const result = await runOutputCheck(client, ck as never, BATCH_1, files, [], []);
+	assert.deepEqual(result.output, { answers: [long, 'A webhook is a friendly ping.'], text: [] });
+});

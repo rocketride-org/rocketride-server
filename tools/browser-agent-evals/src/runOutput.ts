@@ -200,5 +200,5 @@ export async function runOutputCheck(client: RocketRideClient, ck: ScenarioCheck
 	}
 	const fails = expectationFailures((ck.expect ?? {}) as Record<string, unknown>, out, inputChars);
 	const excerpt = [...out.answers.map((a, i) => `answer ${i + 1}: ${a.slice(0, 100)}`), ...out.text.map((x, i) => `text ${i + 1}: ${x.slice(0, 100)}`)].join(' | ').slice(0, 600);
-	return { status: fails.length ? 'fail' : 'pass', detail: fails.length ? fails.join('; ') : `${out.answers.length} answers, ${out.text.length} text items`, excerpt };
+	return { status: fails.length ? 'fail' : 'pass', detail: fails.length ? fails.join('; ') : `${out.answers.length} answers, ${out.text.length} text items`, excerpt, output: out };
 }
