@@ -14,6 +14,7 @@ const {
 	parseDump,
 	parseStackFile,
 	checkFrozen,
+	checkThreadStart,
 	checkSilent,
 	parseTime,
 	findCdb,
@@ -563,14 +564,15 @@ const clock = (s) => {
  * @param {string} main - The main thread text
  * @param {number[]} seconds - The elapsed time of each dump
  * @param {string} worker - The xdist worker id of the info line
+ * @param {(s: number) => string} testOf - The current test of the dump at s seconds
  * @returns {string} The dump blocks
  */
-const pytestDumps = (main, seconds, worker = 'gw2') =>
+const pytestDumps = (main, seconds, worker = 'gw2', testOf = () => 'test_x.py::t (call)') =>
 	seconds
 		.map(
 			(s) =>
 				`Timeout (${clock(s)})!\n${LOOP_THREAD}${main}\n` +
-				`info: worker=${worker} current_test=test_x.py::t (call)\n\n`
+				`info: worker=${worker} current_test=${testOf(s)}\n\n`
 		)
 		.join('');
 // n dumps, one minute apart, from 0:01:00.
@@ -615,6 +617,20 @@ test('an identical pytest stack for less than 300 s is not frozen', () => {
 	const other = workerMain(frame('x.py', 1, 'other') + CV2_TOP);
 	const changed = header + pytestDumps(other, [60, 120, 180]) + pytestDumps(stuck, [240, 300, 360]);
 	assert.strictEqual(checkFrozen(parseStackFile(changed)).frozen, false);
+});
+
+test('the same stack under a new test in each dump is not frozen: async tests share the event-loop stack', () => {
+	const loop = workerMain(frame(`${WIN}\\dist\\server\\Lib\\asyncio\\windows_events.py`, 774, '_poll'));
+	const header = pytestHeader('pytest-worker');
+	const moving = header + pytestDumps(loop, everyMinute(6), 'gw2', (s) => `test_x.py::t${s} (call)`);
+	assert.strictEqual(checkFrozen(parseStackFile(moving)).frozen, false);
+	// One test that awaits for 240 s is not frozen; for 300 s it is.
+	const stuck = header + pytestDumps(loop, everyMinute(6), 'gw2', (s) => (s < 120 ? 'a (call)' : 'b (call)'));
+	assert.strictEqual(checkFrozen(parseStackFile(stuck)).frozen, false);
+	const same = header + pytestDumps(loop, everyMinute(7), 'gw2', (s) => (s < 120 ? 'a (call)' : 'b (call)'));
+	const verdict = checkFrozen(parseStackFile(same));
+	assert.strictEqual(verdict.frozen, true);
+	assert.strictEqual(verdict.seconds, 300);
 });
 
 test('idle pytest processes are not frozen: an xdist worker at get, the controller at loop_once', () => {
@@ -672,4 +688,108 @@ test('pytest captures have their own cap of two and do not use up the three task
 	const natives = fs.readdirSync(dir).filter((n) => n.startsWith('native_'));
 	assert.strictEqual(natives.filter((n) => /native_20\d/.test(n)).length, 2);
 	assert.strictEqual(natives.filter((n) => /native_10\d/.test(n)).length, 3);
+});
+
+// The stall seen in a task child: a non-main thread in Thread.start waits for the new OS thread.
+const LIB = `${WIN}\\dist\\server\\Lib`;
+const START_CHAIN =
+	frame(THREADING, 355, 'wait') +
+	frame(THREADING, 655, 'wait') +
+	frame(THREADING, 999, 'start') +
+	frame(`${LIB}\\concurrent\\futures\\thread.py`, 203, '_adjust_thread_count') +
+	frame(`${LIB}\\concurrent\\futures\\thread.py`, 180, 'submit') +
+	frame(`${LIB}\\asyncio\\base_events.py`, 867, 'run_in_executor') +
+	frame(NODE_PY, 65, 'run_loop') +
+	frame(THREADING, 1012, 'run');
+// The shape of pytest-timeout starting its timer thread: the same wait and start frames.
+const TIMER_CHAIN =
+	frame(THREADING, 355, 'wait') +
+	frame(THREADING, 655, 'wait') +
+	frame(THREADING, 999, 'start') +
+	frame(`${WIN}\\dist\\server\\Lib\\site-packages\\pytest_timeout.py`, 410, 'pytest_timeout_set_timer');
+const startThread = (chain, id = '0x0000000000001bac') => `Thread ${id} (most recent call first):\n${chain}\n`;
+const LABELLED_IDLE_MAIN = IDLE_MAIN.replace('0x00002464', '0x0000000000000db8 [main]');
+const STUCK = '=== thread start stuck thread=0x0000000000001bac seconds=2\n\n';
+const threadsDump = (others, secs = '0:01:00') => `Timeout (${secs})!\n${others}${LABELLED_IDLE_MAIN}\n`;
+
+test('a thread-start marker triggers and carries the thread frames of the dump before it', () => {
+	const text = HEADER + threadsDump(startThread(START_CHAIN)) + STUCK;
+	const found = checkThreadStart(text);
+	assert.strictEqual(found.id, '0x0000000000001bac');
+	assert.strictEqual(found.seconds, 2);
+	assert.strictEqual(found.kind, 'task');
+	assert.deepStrictEqual(
+		found.frames.slice(0, 3).map((f) => `${f.line} ${f.func}`),
+		['355 wait', '655 wait', '999 start']
+	);
+	// The kind comes from the header; a thread that is not in the dump gives a marker without frames.
+	const other = pytestHeader('pytest-worker') + threadsDump('') + STUCK;
+	assert.deepStrictEqual(checkThreadStart(other), {
+		id: '0x0000000000001bac',
+		seconds: 2,
+		kind: 'pytest-worker',
+		frames: [],
+	});
+});
+
+test('the marker after a cut dump still triggers', () => {
+	const mainHead = 'Thread 0x0000000000000db8 [main] (most recent call first):\n';
+	const cut = `Timeout (0:01:00)!
+${startThread(START_CHAIN)}${mainHead}`;
+	const found = checkThreadStart(HEADER + cut + '\n' + STUCK);
+	assert.strictEqual(found?.id, '0x0000000000001bac');
+	assert.strictEqual(found.frames.length, 8);
+});
+
+test('raw wait and start frames without a marker do not trigger', () => {
+	for (const chain of [TIMER_CHAIN, START_CHAIN]) {
+		assert.strictEqual(checkThreadStart(HEADER + threadsDump(startThread(chain))), null);
+	}
+	const idleDumps = pytestDumps(workerMain(WORKER_IDLE_TOP, ' [main]'), everyMinute(3));
+	assert.strictEqual(checkThreadStart(pytestHeader('pytest-worker') + idleDumps), null);
+	assert.strictEqual(checkThreadStart(HEADER), null);
+	// A marker before the first dump heading is not part of a dump.
+	assert.strictEqual(checkThreadStart(HEADER + STUCK), null);
+});
+
+test('scan captures a marked pid once, names thread, kind and seconds, and ignores unmarked files', async () => {
+	const marked = HEADER.replace('9280', '9281') + threadsDump(startThread(START_CHAIN)) + STUCK;
+	const timer = HEADER.replace('9280', '9300') + threadsDump(startThread(TIMER_CHAIN));
+	const { dir, calls, watch } = makeWatch({ 'stacks_9281.txt': marked, 'stacks_9300.txt': timer });
+	await watch.scan();
+	await watch.scan();
+	watch.stop();
+	assert.strictEqual(calls.filter((c) => c.file === __filename).length, 1);
+	const native = fs.readFileSync(path.join(dir, 'native_9281.txt'), 'utf8');
+	assert.match(native, /trigger: thread-start thread=0x0000000000001bac kind=task seconds=2\n/);
+	assert.match(native, /threading\.py:999 start/);
+	assert.ok(!fs.existsSync(path.join(dir, 'native_9300.txt')));
+});
+
+test('thread-start captures have their own cap of four and do not use up the other caps', async () => {
+	const files = {};
+	for (const pid of [301, 302, 303, 304, 305]) {
+		const head = HEADER.replace('9280', String(pid));
+		files[`stacks_${pid}.txt`] = head + threadsDump(startThread(START_CHAIN)) + STUCK;
+	}
+	for (const pid of [101, 102, 103]) {
+		files[`stacks_${pid}.txt`] = HEADER.replace('9280', String(pid)) + dump(FROZEN_MAIN) + dump(FROZEN_MAIN);
+	}
+	const { dir, watch } = makeWatch(files);
+	await watch.scan();
+	await watch.scan();
+	watch.stop();
+	const natives = fs.readdirSync(dir).filter((n) => n.startsWith('native_'));
+	assert.strictEqual(natives.filter((n) => /native_30\d/.test(n)).length, 4);
+	assert.strictEqual(natives.filter((n) => /native_10\d/.test(n)).length, 3);
+});
+
+test('a frozen task child that is also marked keeps its frozen trigger', async () => {
+	const main = FROZEN_MAIN.replace('0x0000243c', '0x0000243c [main]');
+	const both = `${HEADER}Timeout (0:01:00)!\n${main}\nTimeout (0:02:00)!\n${main}\n${STUCK}`;
+	const { dir, watch } = makeWatch({ 'stacks_9280.txt': both });
+	await watch.scan();
+	watch.stop();
+	const native = fs.readFileSync(path.join(dir, 'native_9280.txt'), 'utf8');
+	assert.match(native, /trigger: main thread unchanged in the last two dumps/);
 });
