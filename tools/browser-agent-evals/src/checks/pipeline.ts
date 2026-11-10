@@ -88,12 +88,13 @@ export async function validatePipes(client: RocketRideClient, task: Task, start:
  *
  * @param client - A connected client.
  * @param task - The task.
+ * @param tasksDir - The task set folder, which a `send` file is relative to.
  * @param start - The starting workspace.
  * @param final - The final workspace.
  * @param engineVariables - The Variable names the engine has.
  * @returns record.runOutput: each check's result, by id.
  */
-export async function runOutputs(client: RocketRideClient, task: Task, start: Record<string, string>, final: Record<string, string>, engineVariables: string[]): Promise<Record<string, RunOutputResult>> {
+export async function runOutputs(client: RocketRideClient, task: Task, tasksDir: string, start: Record<string, string>, final: Record<string, string>, engineVariables: string[]): Promise<Record<string, RunOutputResult>> {
 	const out: Record<string, RunOutputResult> = {};
 	const owned: OwnedRun[] = [];
 	try {
@@ -102,7 +103,7 @@ export async function runOutputs(client: RocketRideClient, task: Task, start: Re
 			else if (typeof ck.needs === 'string') out[ck.id] = { status: 'pending', detail: `needs ${ck.needs}` };
 			else {
 				const path = typeof ck.path === 'string' ? resolvePath(ck.path, start, final).path : ck.path;
-				out[ck.id] = await runOutputCheck(client, { ...ck, kind: 'run_output', path } as unknown as ScenarioCheck, final, engineVariables, owned);
+				out[ck.id] = await runOutputCheck(client, { ...ck, kind: 'run_output', path } as unknown as ScenarioCheck, tasksDir, final, engineVariables, owned);
 			}
 		}
 	} finally {

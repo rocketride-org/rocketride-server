@@ -38,7 +38,6 @@ import path from 'node:path';
 import type { RocketRideClient } from 'rocketride';
 
 import { expectationFailures, type PipelineOutput } from './expect';
-import { inputPath } from './task';
 import type { RunOutputResult, ScenarioCheck } from './types';
 
 const load = createRequire(__filename);
@@ -123,12 +122,13 @@ function withLimit<T>(work: Promise<T>, what: string): Promise<T> {
  *
  * @param client - The connected client.
  * @param ck - The check.
+ * @param tasksDir - The task set folder, which a `send` file is relative to.
  * @param finalFiles - The workspace after the run.
  * @param engineVariables - The Variable names the engine has.
  * @param owned - The runs the trial started. One of this pipeline and source is ended first, since the engine refuses a second start.
  * @returns The result.
  */
-export async function runOutputCheck(client: RocketRideClient, ck: ScenarioCheck, finalFiles: Record<string, string>, engineVariables: string[], owned: OwnedRun[]): Promise<RunOutputResult> {
+export async function runOutputCheck(client: RocketRideClient, ck: ScenarioCheck, tasksDir: string, finalFiles: Record<string, string>, engineVariables: string[], owned: OwnedRun[]): Promise<RunOutputResult> {
 	const file = finalFiles[String(ck.path)];
 	if (file === undefined) return { status: 'fail', detail: `${ck.path} was not saved` };
 	let pipeline: Record<string, unknown>;
@@ -164,7 +164,7 @@ export async function runOutputCheck(client: RocketRideClient, ck: ScenarioCheck
 					result = (await withLimit(client.chat({ token: started.token, question: q as never }), 'chat')) as unknown as Record<string, unknown>;
 				} else {
 					const s = what as Send;
-					const data = s.file ? fs.readFileSync(inputPath(s.file)) : Buffer.from(String(s.text ?? ''), 'utf8');
+					const data = s.file ? fs.readFileSync(path.join(tasksDir, s.file)) : Buffer.from(String(s.text ?? ''), 'utf8');
 					inputChars += data.length;
 					const mimetype = s.mimetype ?? MIMETYPES[path.extname(s.file ?? '.txt')] ?? 'application/octet-stream';
 					result = (await withLimit(client.send(started.token, new Uint8Array(data), { name: s.file ? path.basename(s.file) : 'input.txt' }, mimetype), 'send')) as unknown as Record<string, unknown>;

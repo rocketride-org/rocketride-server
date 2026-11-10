@@ -47,8 +47,8 @@ export const EVAL_DIR = __dirname;
 /** The checkout's root, three folders up. */
 export const REPO_ROOT = path.resolve(EVAL_DIR, '../../..');
 
-/** The task set read by default: task files, fixtures and inputs. EVAL_DATA_DIR points elsewhere. */
-export const DATA_DIR = process.env.EVAL_DATA_DIR ?? path.join(EVAL_DIR, '..', 'tasks', 'breadth');
+/** The task set read when --tasks names none: task files, fixtures and inputs. */
+export const DATA_DIR = path.join(EVAL_DIR, '..', 'tasks', 'breadth');
 
 /** The node folders the catalog is read from. */
 const NODES_DIR = path.join(REPO_ROOT, 'nodes/src/nodes');

@@ -27,6 +27,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
+import fs from 'node:fs';
 import path from 'node:path';
 
 import type { RocketRideClient } from 'rocketride';
@@ -44,10 +45,16 @@ test('the summary length counts each output once', () => {
 	assert.deepEqual(expectationFailures(expect, { answers: [], text: [] }, 10), ['the output is empty', 'the output (0 characters) is not shorter than the input (10)']);
 });
 
-/** An output check's expect in tasks/batch-1, as the task file has it. */
+const BATCH_1 = path.join(EVAL_DIR, '..', 'tasks', 'batch-1');
+
+/** An output check in tasks/batch-1, as the task file has it. */
+function batchCheck(id: string): Record<string, unknown> {
+	return loadTask(id, BATCH_1).checks.find((c) => c.type === 'output') as Record<string, unknown>;
+}
+
+/** An output check's expect in tasks/batch-1. */
 function batchExpect(id: string): Record<string, unknown> {
-	const ck = loadTask(id, path.join(EVAL_DIR, '..', 'tasks', 'batch-1')).checks.find((c) => c.type === 'output');
-	return ck?.expect as Record<string, unknown>;
+	return batchCheck(id).expect as Record<string, unknown>;
 }
 
 test("text_match passes only when the pipeline's text matches", () => {
@@ -98,8 +105,30 @@ test("run_output ends the trial's own run of the pipeline before it starts one, 
 	};
 	// the agent's own test run is still running when the trial ends
 	const ours = await start();
-	assert.doesNotMatch((await runOutputCheck(client, ck, files, ['ROCKETRIDE_OPENAI_KEY'], [ours])).detail, /already running/);
+	assert.doesNotMatch((await runOutputCheck(client, ck, 'tasks', files, ['ROCKETRIDE_OPENAI_KEY'], [ours])).detail, /already running/);
 	const theirs = await start();
-	assert.match((await runOutputCheck(client, ck, files, ['ROCKETRIDE_OPENAI_KEY'], [ours])).detail, /already running/);
+	assert.match((await runOutputCheck(client, ck, 'tasks', files, ['ROCKETRIDE_OPENAI_KEY'], [ours])).detail, /already running/);
 	assert.equal((await client.getTaskStatus(theirs.token)).completed, false);
+});
+
+test("an output check sends its input file from the task's own folder", async () => {
+	const ck: Record<string, unknown> = { ...batchCheck('build-09-ocr-receipt'), kind: 'run_output' };
+	const files = { [String(ck.path)]: JSON.stringify({ project_id: 'receipt-text', components: [{ id: 'dropper_1', provider: 'dropper' }] }) };
+	const sent: Array<{ data: Uint8Array; name: string; mimetype: string }> = [];
+	const client = {
+		use: async () => ({ token: 'task-1', reused: false }),
+		getTaskStatus: async () => ({}),
+		terminate: async () => {},
+		send: async (_token: string, data: Uint8Array, meta: { name: string }, mimetype: string) => {
+			sent.push({ data, name: meta.name, mimetype });
+			return { result_types: { text: 'text' }, text: ['TOTAL 27.14'] };
+		},
+	} as unknown as RocketRideClient;
+
+	const result = await runOutputCheck(client, ck as never, BATCH_1, files, [], []);
+	assert.equal(result.status, 'pass', result.detail);
+	assert.deepEqual(
+		sent.map((s) => ({ name: s.name, mimetype: s.mimetype, same: Buffer.from(s.data).equals(fs.readFileSync(path.join(BATCH_1, 'inputs', 'receipt.png'))) })),
+		[{ name: 'receipt.png', mimetype: 'image/png', same: true }]
+	);
 });

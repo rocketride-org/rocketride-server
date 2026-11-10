@@ -142,7 +142,7 @@ export async function checkWorkspace(client: RocketRideClient, task: Task, tasks
 	const record = handMadeRecord(task, final, 'none (hand-made workspace)');
 	record.engineVariables = engineVariables;
 	record.pipes = await validatePipes(client, task, start, final);
-	record.runOutput = await runOutputs(client, task, start, final, engineVariables);
+	record.runOutput = await runOutputs(client, task, tasksDir, start, final, engineVariables);
 	const scans = new TrialScans(task, keys);
 	for (const s of ['model_questions', 'thinking', 'final_text', 'session_json', 'catalog']) scans.empty(s);
 	for (const text of Object.values(final)) scans.feed('workspace_files', text);

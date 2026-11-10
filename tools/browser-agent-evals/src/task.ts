@@ -31,8 +31,8 @@
  * the format. Every task is validated before a trial starts; an invalid task
  * is named with each of its problems, and nothing runs.
  *
- * This file began as #2885's scenarios.ts. SURFACES and inputPath are as they
- * were; the loader reads the task format instead of #2885's scenarios.
+ * This file began as #2885's scenarios.ts. SURFACES is as it
+ * was; the loader reads the task format instead of #2885's scenarios.
  */
 
 import fs from 'node:fs';
@@ -216,11 +216,6 @@ export const SURFACES = new Set(['model_questions', 'thinking', 'final_text', 's
 // =============================================================================
 // LOADING
 // =============================================================================
-
-/** An input file the runner sends to a saved pipeline. */
-export function inputPath(file: string): string {
-	return path.join(DATA_DIR, file);
-}
 
 /**
  * Every task file's id in a task set folder, sorted. Subfolders (fixtures,

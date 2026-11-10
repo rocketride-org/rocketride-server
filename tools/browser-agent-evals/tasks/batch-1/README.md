@@ -2,7 +2,7 @@
 
 The first browser-agent eval batch: 59 tasks. Krish's 30 from `tasks/breadth/`, the 8 level-4 prompts, and 21 of the 22 extras from the old actions set (`terminate-foreign-run` waits for runner work). Every task has a 3600 s time limit. Cards: 39 approve, 20 deny.
 
-Run it with `EVAL_DATA_DIR` set to this folder's absolute path. An `output` check reads its `send` file from `EVAL_DATA_DIR` (`src/task.ts` `inputPath`), not from `--tasks`, so with `--tasks` alone the sends read `tasks/breadth/inputs/`, which has no `receipt.png` or `meeting-30s.wav`.
+Run it with `--tasks tasks/batch-1` (from `tools/browser-agent-evals`). An `output` check reads its `send` file from the task set folder, so build-08, build-09 and build-16 send this folder's `inputs/meeting-30s.wav` and `inputs/receipt.png`.
 
 Two runner changes this set relies on: the `ANSWER` type (answer-only tasks: end `done`, change nothing), and `check_app_passes` with no `app`, meaning the one app folder the turn added. The level-4 pipeline checks name a placeholder path and rely on `src/resolve.ts`, which uses the one `.pipe` the turn added under `pipelines/`. `secrets_are_placeholders` is not path-resolved, so those tasks leave its path out and it scans every `.pipe`.
 

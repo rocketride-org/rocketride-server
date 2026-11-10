@@ -293,7 +293,7 @@ export async function runTrial(opts: TrialOptions): Promise<{ record: BrowserTri
 				browser.agentSettingsAfter = await store.agentSettings();
 				rawFinal = await store.readWorkspace();
 				record.pipes = await validatePipes(store.client, task, start, rawFinal);
-				record.runOutput = await runOutputs(store.client, task, start, rawFinal, record.engineVariables);
+				record.runOutput = await runOutputs(store.client, task, opts.tasksDir, start, rawFinal, record.engineVariables);
 				steps('engine checks', `validated ${record.pipes.length} pipeline(s), ran ${Object.keys(record.runOutput).length} output check(s)`);
 			}
 		}
