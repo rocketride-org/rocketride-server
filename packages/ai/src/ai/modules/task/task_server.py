@@ -545,17 +545,9 @@ class TaskServer(DAPBase):
 
         conn_user_id = getattr(getattr(conn, '_account_info', None), 'userId', None)
 
-        # Expire this connection's dev-overlay entries (a closed dev session
-        # must not leave a stale bundle override in the user's manifest) and
-        # refresh the user's REMAINING connections so their shells drop it.
-        if conn_user_id:
-            try:
-                from ai.account.dev_overlay import drop_connection, push_refresh
-
-                if drop_connection(conn_user_id, connection_id):
-                    await push_refresh(self, conn_user_id, source='expiry')
-            except Exception as e:
-                self.debug_message(f'dev overlay disconnect cleanup failed: {e}')
+        # No dev-overlay cleanup: dev previews are LOCAL-FIRST — the
+        # registration lives in preview pages and dies with them; the
+        # server holds no per-connection dev state.
 
         await self.broadcast_server_event(
             EVENT_TYPE.DASHBOARD,
@@ -1259,13 +1251,13 @@ class TaskServer(DAPBase):
 
         Raises:
             ValueError: If launch type is invalid or task already exists
-            RuntimeError: If required pipeline configuration is missing
+            RuntimeError: If the pipeline is missing, empty or not an object
             Exception: If task creation or startup fails
 
         Task Creation Process:
         1. Parse and validate request parameters
-        2. Generate unique task token if not provided
-        3. Validate pipeline configuration
+        2. Validate pipeline configuration (before anything reads it)
+        3. Generate unique task token if not provided
         4. Check for task uniqueness and handle conflicts
         5. Create Task instance with full configuration
         6. Register task in central registry with security metadata
@@ -1313,8 +1305,9 @@ class TaskServer(DAPBase):
         # Initialize task control structure for new task
         control = TASK_CONTROL()
 
-        # For launch/exec token is in args
-        args = request.get('arguments', {})
+        # For launch/exec token is in args. An explicit "arguments": null is a
+        # request with no pipeline, refused by the guard below.
+        args = request.get('arguments') or {}
         use_existing_task = args.get('useExisting', False)
 
         # Extract TTL from args (use server-configured default if not provided)
@@ -1343,6 +1336,17 @@ class TaskServer(DAPBase):
         control.pipeline = args.get('pipeline', None)
         control.source = args.get('source', None)
 
+        # Validate required pipeline configuration. Checked before the first
+        # read of the pipeline below, which would otherwise fail first with an
+        # AttributeError or TypeError that does not say what is missing. An
+        # empty pipeline or one that is not an object (such as a .pipe path
+        # sent as `pipeline`) is refused the same way.
+        if not isinstance(control.pipeline, dict) or not control.pipeline:
+            raise RuntimeError(
+                'Pipeline configuration is missing or invalid. Pass the pipeline object itself; '
+                'to run a .pipe file, pass its path as filepath.'
+            )
+
         # If a source was not specified, in the args, get it from the pipeline
         if not control.source:
             control.source = control.pipeline.get('source', None)
@@ -1351,7 +1355,9 @@ class TaskServer(DAPBase):
         if not control.source:
             control.source = resolve_implied_source(control.pipeline)
             if control.source is None:
-                raise ValueError('Pipeline does not have a source component defined')
+                raise ValueError(
+                    'Pipeline has no source. Select a source component or add a node configured as a source.'
+                )
 
         # Find the actual source component
         # Stamp the resolved source and give the source component a config if it has
@@ -1442,10 +1448,6 @@ class TaskServer(DAPBase):
         except (ValueError, TypeError):
             raise ValueError(f'Invalid launch type: "{command}"')
 
-        # Validate required pipeline configuration
-        if not control.pipeline:
-            raise RuntimeError('Missing pipeline configuration in launch request')
-
         # Save the owner so we know when to stop the task
         if control.launch_type == LAUNCH_TYPE.LAUNCH:
             control.launch_owner = conn
@@ -1475,8 +1477,13 @@ class TaskServer(DAPBase):
                     return _return_results(existing_control, reused=True)
 
                 # We are absolutely supposed to create a task or the user did
-                # not specify the token (which means a random collision)
-                raise ValueError('Pipeline is already running.')
+                # not specify the token (which means a random collision). Name
+                # the running task, not this request's id: a caller's token is
+                # not scoped by source, so the two can differ.
+                raise ValueError(
+                    f'Pipeline is already running (task {existing_control.id}). '
+                    'Reuse it (useExisting / use_existing), or stop it and run again.'
+                )
 
             # Clean up completed task with same token
             self._task_control.pop(control.token, None)

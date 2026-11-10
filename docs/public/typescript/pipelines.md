@@ -29,8 +29,9 @@ wrap it in `{ pipeline: ... }`; the client sends it to the server, which resolve
 
 **Running the same pipeline more than once at a time.** Without a custom `token`,
 the server names the task after its owner, `project_id` and source, so a second
-`use()` of the same pipe fails with `Pipeline is already running.` Give each
-instance its own `token` and they run side by side:
+`use()` of the same pipe fails with an error that starts
+`Pipeline is already running`. Give each instance its own `token` and they run
+side by side:
 
 ```typescript
 const { token } = await client.use({ filepath: './pipeline.pipe', token: `tk_${crypto.randomUUID()}` });

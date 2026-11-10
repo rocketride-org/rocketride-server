@@ -87,11 +87,6 @@ export class EngineRegistry extends EventEmitter {
 		return this.engines.get(mode);
 	}
 
-	/** Returns all currently active engines. */
-	getActiveEngines(): Map<ConnectionMode, EngineManager> {
-		return new Map(this.engines);
-	}
-
 	// =========================================================================
 	// RECONCILER
 	// =========================================================================

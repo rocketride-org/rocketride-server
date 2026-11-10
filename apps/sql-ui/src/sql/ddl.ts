@@ -37,7 +37,7 @@ import { quoteIdent } from './paging';
 // =============================================================================
 
 /** A column definition used by add-column and create-table operations. */
-export interface IColumnSpec {
+export interface ColumnSpec {
 	/** Column name. */
 	name: string;
 	/** SQL datatype (verbatim, e.g. 'VARCHAR(255)'). */
@@ -52,7 +52,7 @@ export interface IColumnSpec {
 
 /** One staged designer operation. */
 export type AlterOp =
-	| { kind: 'addColumn'; spec: IColumnSpec }
+	| { kind: 'addColumn'; spec: ColumnSpec }
 	| { kind: 'dropColumn'; name: string }
 	| { kind: 'renameColumn'; name: string; newName: string }
 	| { kind: 'changeType'; name: string; type: string }
@@ -73,7 +73,7 @@ export const FK_ACTIONS = ['RESTRICT', 'CASCADE', 'SET NULL', 'NO ACTION'] as co
  * @param spec - The column spec.
  * @returns The column definition SQL fragment.
  */
-function columnFragment(dialect: SqlDialect, spec: IColumnSpec): string {
+function columnFragment(dialect: SqlDialect, spec: ColumnSpec): string {
 	const parts = [quoteIdent(dialect, spec.name), spec.type];
 	if (!spec.nullable) parts.push('NOT NULL');
 	if (spec.defaultExpr) parts.push(`DEFAULT ${spec.defaultExpr}`);
@@ -92,7 +92,7 @@ function columnFragment(dialect: SqlDialect, spec: IColumnSpec): string {
  * @param columns - The column specs (at least one).
  * @returns The CREATE TABLE statement.
  */
-export function generateCreateTable(dialect: SqlDialect, tableName: string, columns: IColumnSpec[]): string {
+export function generateCreateTable(dialect: SqlDialect, tableName: string, columns: ColumnSpec[]): string {
 	const lines = columns.map((c) => '  ' + columnFragment(dialect, c));
 	const pk = columns.filter((c) => c.primaryKey).map((c) => quoteIdent(dialect, c.name));
 	if (pk.length > 0) lines.push(`  PRIMARY KEY (${pk.join(', ')})`);

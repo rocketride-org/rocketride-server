@@ -43,7 +43,7 @@ Test Coverage:
 
 Test Configuration:
     Tests use environment variables for configuration:
-    - ROCKETRIDE_URI: Server URI (defaults to http://localhost:5565)
+    - ROCKETRIDE_URI: Server URI (defaults to http://127.0.0.1:5565)
     - ROCKETRIDE_APIKEY: Authentication key (defaults to 'MYAPIKEY')
     - Various LLM API keys for chat tests (ROCKETRIDE_OPENAI_KEY, etc.)
 
@@ -104,7 +104,7 @@ DAPMessage = Dict[str, Any]
 
 # Test configuration
 TEST_CONFIG = {
-    'uri': os.getenv('ROCKETRIDE_URI', 'http://localhost:5565'),
+    'uri': os.getenv('ROCKETRIDE_URI', 'http://127.0.0.1:5565'),
     'auth': os.getenv('ROCKETRIDE_APIKEY', 'MYAPIKEY'),
     'timeout': 30.0,  # 30 second timeout for integration tests
 }
@@ -480,7 +480,37 @@ class TestDataOperations:
                 await client.disconnect()
 
     @pytest.mark.asyncio
-    async def test_should_handle_file_uploads(self):
+    async def test_should_join_a_character_split_across_pipe_writes(self):
+        """A text written in chunks cut inside a character reaches the pipeline whole."""
+        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+        pipeline_token = None
+        try:
+            await client.connect()
+            await ensure_clean_pipeline(client, self.DATA_TOKEN)
+
+            result = await client.use(pipeline=get_echo_pipeline(), token=self.DATA_TOKEN)
+            pipeline_token = result['token']
+
+            pipe = await client.pipe(pipeline_token, {'name': 'test-split.txt'}, 'text/plain')
+
+            await pipe.open()
+
+            # 'П' is two bytes; the first write ends after its first byte
+            data = 'Привет, мир'.encode('utf-8')
+            await pipe.write(data[:1])
+            await pipe.write(data[1:])
+
+            result = await pipe.close()
+
+            assert result['text'][0] == 'Привет, мир\n\n'
+        finally:
+            if pipeline_token:
+                await ensure_clean_pipeline(client, pipeline_token)
+            if client.is_connected():
+                await client.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_should_handle_file_uploads(self, tmp_path):
         client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
         pipeline_token = None
         try:
@@ -493,17 +523,13 @@ class TestDataOperations:
             name = 'test.txt'
             test_content = 'Test file content for upload'
 
-            # Create file file
-            with open(name, 'w') as f:
-                # Create the file
-                f.write(test_content)
-                f.close()
+            # The file sits in this test's own directory: the working directory
+            # is dist/server, shared by every suite running in parallel
+            path = tmp_path / name
+            path.write_text(test_content)
 
-                # Upload and process file
-                try:
-                    upload_results = await client.send_files([(name, {'name': name}, 'text/plain')], pipeline_token)
-                finally:
-                    os.unlink(name)  # Ensure temp file is deleted
+            # Upload and process file
+            upload_results = await client.send_files([(str(path), {'name': name}, 'text/plain')], pipeline_token)
 
             assert upload_results is not None
             assert isinstance(upload_results, list)
@@ -513,7 +539,7 @@ class TestDataOperations:
 
             # Validate UPLOAD_RESULT structure
             assert upload_result['action'] == 'complete'
-            assert upload_result['filepath'] == name
+            assert upload_result['filepath'] == str(path)
             assert upload_result['bytes_sent'] == len(test_content)
             assert upload_result['file_size'] == len(test_content)
             assert isinstance(upload_result['upload_time'], (int, float))
@@ -1569,7 +1595,7 @@ class TestEndToEndWorkflow:
                 await client.disconnect()
 
     @pytest.mark.asyncio
-    async def test_should_handle_complete_file_upload_and_processing_workflow(self):
+    async def test_should_handle_complete_file_upload_and_processing_workflow(self, tmp_path):
         client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
         token = None
         try:
@@ -1588,17 +1614,12 @@ class TestEndToEndWorkflow:
 Line 2: timestamp {int(time.time())}
 Line 3: random data {random.random()}"""
 
-            # Create file file
-            with open(name, 'w') as f:
-                # Create the file
-                f.write(test_content)
-                f.close()
+            # In this test's own directory, not the shared working directory
+            path = tmp_path / name
+            path.write_text(test_content)
 
-                # Upload and process file
-                try:
-                    upload_results = await client.send_files([(name, {'name': name}, 'text/plain')], token)
-                finally:
-                    os.unlink(name)  # Ensure temp file is deleted
+            # Upload and process file
+            upload_results = await client.send_files([(str(path), {'name': name}, 'text/plain')], token)
 
             # Get final task status
             final_status = await client.get_task_status(token)
@@ -1743,7 +1764,7 @@ Line 3: random data {random.random()}"""
                 await client.disconnect()
 
     @pytest.mark.asyncio
-    async def test_should_handle_mixed_operation_workflow_with_events(self):
+    async def test_should_handle_mixed_operation_workflow_with_events(self, tmp_path):
         received_events = []
 
         async def event_handler(event):
@@ -1775,17 +1796,12 @@ Line 3: random data {random.random()}"""
             name = 'mixed-test.txt '
             file_content = 'Mixed file content'
 
-            # Create file file
-            with open(name, 'w') as f:
-                # Create the file
-                f.write(file_content)
-                f.close()
+            # In this test's own directory, not the shared working directory
+            path = tmp_path / name
+            path.write_text(file_content)
 
-                # Upload and process file
-                try:
-                    upload_result = await client.send_files([(name, {'name': name}, 'text/plain')], token)
-                finally:
-                    os.unlink(name)  # Ensure temp file is deleted
+            # Upload and process file
+            upload_result = await client.send_files([(str(path), {'name': name}, 'text/plain')], token)
 
             # Streaming
             pipe = await client.pipe(token, {'name': 'mixed-stream.txt'}, 'text/plain')
@@ -1793,8 +1809,12 @@ Line 3: random data {random.random()}"""
             await pipe.write('Mixed streaming content'.encode())
             stream_result = await pipe.close()
 
-            # Small delay to ensure events are processed
-            await asyncio.sleep(0.5)
+            # Wait for the status events to arrive
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline and not any(
+                e.get('event') in ('apaevt_status_update', 'apaevt_task') for e in received_events
+            ):
+                await asyncio.sleep(0.05)
 
             # Validate results
             results = [send_result, upload_result, stream_result]

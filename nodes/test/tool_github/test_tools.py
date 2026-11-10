@@ -12,14 +12,16 @@ Requires a GitHub PAT with repo + issues + pull_requests + workflows scopes.
 from __future__ import annotations
 
 import os
-import sys
 import uuid
-from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'src' / 'nodes' / 'tool_github'))
-from github_client import call  # noqa: E402
+from ._stubs import scoped_stubs
+
+# Imported through the package, inside scoped_stubs like every test file here, so the
+# tool_github.* modules another file keeps in sys.modules are left as they were.
+with scoped_stubs():
+    from tool_github.github_client import call
 
 TOKEN = os.getenv('GITHUB_TOKEN', '')
 REPO = os.getenv('GITHUB_TEST_REPO', '')

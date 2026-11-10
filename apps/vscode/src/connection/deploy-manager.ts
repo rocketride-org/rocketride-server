@@ -245,15 +245,6 @@ export class DeployManager extends ConnectionManager {
 		return !this.isSharedMode();
 	}
 
-	/**
-	 * Always register the engine status listener, even in shared mode.
-	 * When the user switches from shared → independent, the listener
-	 * must already be in place to receive the 'ready' event from the
-	 * newly started engine.
-	 */
-	public override setEngineRegistry(registry: import('../engine').EngineRegistry): void {
-		super.setEngineRegistry(registry);
-	}
 
 	// =========================================================================
 	// CONNECT / DISCONNECT — no-ops in shared mode

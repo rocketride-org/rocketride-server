@@ -96,6 +96,7 @@ The STDIO transport has no authentication fields: the subprocess runs locally wi
 - Protocol versions advertised during `initialize`: `2024-11-05` for STDIO, `2025-11-25` for Streamable HTTP and SSE.
 - Tool calls must use the fully namespaced `server.tool` form; a call addressed to a different `serverName` than this node's is rejected.
 - The MCP server process/connection is started in `beginGlobal` and shut down in `endGlobal`; a failed handshake or tool discovery fails pipeline startup with a warning.
+- Tool discovery follows `tools/list` pagination: the client requests pages until the server stops returning `nextCursor`, forwarding each cursor unchanged. A catalog of more than 100 pages or 5000 entries, a listing still unfinished after 60 seconds, a repeated cursor, a tool name already listed on an earlier page, or a malformed page is refused with an error that names the page; a transport failure on any page (an HTTP timeout or error status, a JSON-RPC error, the stdio server exiting) is reported with the transport's own message. Either way, at startup the pipeline fails with a warning, and on a refresh the previous catalog is kept and a warning is raised. The 60-second check runs before each page request and doesn't cut short a request already in flight, which runs under the transport's own timeout.
 
 ---
 

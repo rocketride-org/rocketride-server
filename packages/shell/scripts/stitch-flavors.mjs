@@ -28,9 +28,10 @@
  * assets are CDN-served — neither tolerates a second path or server-side
  * query logic. The picker chooses the asset set client-side:
  *
- *   - `?rrdev=1` on the URL selects the dev flavor AND persists the choice in
- *     sessionStorage ('rr:dev') so the OAuth round trip — whose redirect URI
- *     is the bare origin — comes back to the same flavor.
+ *   - `?rrdev=1` on the URL selects the dev flavor AND persists the tab
+ *     session ('rr:tab' — the same one-key boot identity devGate owns) so
+ *     the OAuth round trip — whose redirect URI is the bare origin — comes
+ *     back to the same flavor and the same locked app.
  *   - Everyone else gets the production assets; dev assets are dormant
  *     objects in the bucket that production visitors never fetch.
  *
@@ -127,21 +128,49 @@ if (manifest.prod.css.length === 0)
 
 // The picker runs inline at the END of body (#root exists by then). Dynamic
 // scripts are async by default — async=false preserves execution order.
-// Beside the flavor choice it persists the dev-locked app id ('rr:devAppId'):
-// the OAuth redirect strips the query string, and previewLockedAppId falls
-// back to this session copy.
+// Beside the flavor choice it persists the TAB SESSION ('rr:tab', the same
+// one-key boot identity the bundle's devGate owns: dev flag, locked app id,
+// auth relay origin): the OAuth redirect strips the query string, and every
+// consumer falls back to this session copy. Merge-over-existing — a boot
+// with only `?code=` must never erase the identity a previous boot wrote.
+// TOP-LEVEL ONLY: same-origin iframes share the tab's session storage area
+// (per WHATWG), so a persisting EMBEDDED preview would dev-gate and app-lock
+// the host shell's next load. An embedded preview never runs the OAuth
+// redirect (its session arrives via rrdev:auth), so its query string — which
+// the embedder owns — survives for the frame's whole lifetime and no
+// persistence is needed.
 const picker = `<script>(function(){
 var RR_FLAVORS=${JSON.stringify(manifest)};
 var dev=false;
 try{
 	var p=new URLSearchParams(location.search);
-	if(p.get('rrdev')==='1'){
-		try{sessionStorage.setItem('rr:dev','1');}catch(e){}
-		var a=p.get('appId')||p.get('appid');
-		if(a){try{sessionStorage.setItem('rr:devAppId',a);}catch(e){}}
+	// DEV RELAY BOUNCE, pre-bundle: a dev tab's sign-in redirects HERE (the
+	// registered origin) with the dev origin in state. Bouncing before any
+	// flavor loads means this hop never paints a shell (no brand flash) and
+	// never costs a boot. LOOPBACK targets only — never an open redirector;
+	// the in-bundle bootstrap keeps the same check as backstop.
+	var code=p.get('code'),st=p.get('state')||'';
+	if(code&&st.indexOf('rrdev:')===0){
+		var tgt=st.slice(6).replace(/\\/+$/,'');
+		if(/^http:\\/\\/(localhost|127\\.0\\.0\\.1)(:\\d{1,5})?$/.test(tgt)&&tgt!==location.origin){
+			location.replace(tgt+'/?code='+encodeURIComponent(code));
+			return;
+		}
 	}
-	dev=p.get('rrdev')==='1';
-	if(!dev){try{dev=sessionStorage.getItem('rr:dev')==='1';}catch(e){}}
+	var tab={dev:false,appId:'',authOrigin:''};
+	try{var prev=JSON.parse(sessionStorage.getItem('rr:tab')||'{}');
+		tab.dev=prev.dev===true;
+		tab.appId=typeof prev.appId==='string'?prev.appId:'';
+		tab.authOrigin=typeof prev.authOrigin==='string'?prev.authOrigin:'';}catch(e){}
+	if(p.get('rrdev')==='1')tab.dev=true;
+	var a=p.get('appId')||p.get('appid');if(a)tab.appId=a;
+	var o=p.get('rrauthorigin');
+	if(o){try{var u=new URL(o);if(u.protocol==='http:'||u.protocol==='https:')tab.authOrigin=u.origin;}catch(e){}}
+	if(window.self===window.top&&(tab.dev||tab.appId||tab.authOrigin)){
+		try{sessionStorage.setItem('rr:tab',JSON.stringify(tab));}catch(e){}
+	}
+	dev=tab.dev;
+	if(!dev){dev=!!window.__rrDevBoot;}
 }catch(e){}
 var f=RR_FLAVORS[dev?'dev':'prod'];
 f.css.forEach(function(href){

@@ -653,8 +653,11 @@ def _zip_guard(archive: Any) -> str:
 _REPLY_MAX_CHARS = 4000
 
 # Response cap for the build_log verb — long logs serve their TAIL (the
-# failure always lands at the end; the full file stays in the store).
-_BUILD_LOG_MAX_CHARS = 256 * 1024
+# failure always lands at the end; the full file stays in the store). BYTES,
+# because the tail is fetched as a RANGED store read: a rocket-ui-class build
+# writes a multi-megabyte log, and reading the whole object just to keep its
+# last quarter-megabyte made the log modal crawl on S3-backed stores.
+_BUILD_LOG_MAX_BYTES = 256 * 1024
 
 
 async def handle_deploy_app(conn: Any, request: Dict[str, Any]) -> Dict[str, Any]:
@@ -815,7 +818,7 @@ async def handle_deploy_app(conn: Any, request: Dict[str, Any]) -> Dict[str, Any
         # Refresh the acting user's manifest (data + signal); other audience
         # members pick the row up on their next account rebuild/login.
         try:
-            from ai.account.dev_overlay import push_refresh
+            from ai.account.manifest_push import push_refresh
 
             await push_refresh(conn._server, conn._account_info.userId, source='app-publish')
         except Exception as exc:
@@ -982,15 +985,33 @@ async def handle_deploy_app(conn: Any, request: Dict[str, Any]) -> Dict[str, Any
             return conn.build_error(request, f'v{version} of {app_id} has no content home on the server')
         from ai.account.store import Store
 
+        # Ranged tail read: open_read reports the size, read_chunk fetches
+        # only the final cap's worth of bytes (S3/Azure range GET; seek on
+        # filesystem) — never the whole log.
+        log_path = f'{content_root}/build.log'
+        store = Store.instance()._store
         try:
-            data = await Store.instance()._store.read_bytes(f'{content_root}/build.log')
+            opened = await store.open_read(log_path)
         except Exception:
             # No log (legacy build, or the worker never ran) — an empty log
             # is a normal answer, not an error.
             return conn.build_response(request, body={'appId': app_id, 'version': version, 'log': ''})
+        context = opened.get('context')
+        size = int(opened.get('size') or 0)
+        try:
+            offset = max(0, size - _BUILD_LOG_MAX_BYTES)
+            data = await store.read_chunk(log_path, context, offset, _BUILD_LOG_MAX_BYTES) if size > 0 else b''
+        except Exception:
+            return conn.build_response(request, body={'appId': app_id, 'version': version, 'log': ''})
+        finally:
+            try:
+                await store.close_read(log_path, context)
+            except Exception:
+                pass
+        # errors='replace': a byte-offset tail can start mid-UTF-8 sequence.
         text = data.decode('utf-8', errors='replace')
-        if len(text) > _BUILD_LOG_MAX_CHARS:
-            text = f'... (showing the last {_BUILD_LOG_MAX_CHARS} characters)\n{text[-_BUILD_LOG_MAX_CHARS:]}'
+        if size > _BUILD_LOG_MAX_BYTES:
+            text = f'... (showing the last {_BUILD_LOG_MAX_BYTES} bytes of {size})\n{text}'
         return conn.build_response(request, body={'appId': app_id, 'version': version, 'log': text})
 
     # ── where — the reverse index (audience → served version) ─────────────
@@ -1094,6 +1115,7 @@ def manifest_snapshot(entry: Dict[str, Any], artifact: Dict[str, Any]) -> Dict[s
     manifest = metadata.get('manifest') if isinstance(metadata.get('manifest'), dict) else {}
     return {
         'name': str(manifest.get('name') or artifact.get('name') or artifact.get('appId') or ''),
+        'publisher': str(manifest.get('publisher') or ''),
         'description': str(manifest.get('description') or ''),
         'iconPath': str(manifest.get('icon') or ''),
         'readmePath': str(manifest.get('readme') or ''),
@@ -1309,6 +1331,38 @@ def _holds_required_permissions(row: Dict[str, Any], sys_perms: Any) -> bool:
     return not required or 'sys.admin' in sys_perms or all(p in sys_perms for p in required)
 
 
+# The scaffold's publisher when no developer id is known; a reserved slug no
+# org can register, so a listing treats it as no publisher at all.
+_PLACEHOLDER_PUBLISHER = 'local'
+
+
+def _publisher_of(app_id: str, manifest: Dict[str, Any], snapshot: Dict[str, Any]) -> str:
+    """
+    The DEVELOPER a listing entry names, never empty (#2977).
+
+    First declared name wins: the version's own ``appManifest.publisher``
+    (metadata.manifest, the listing truth on both editions, and present on
+    versions deployed before the snapshot kept a publisher), then the binding
+    snapshot's copy, then the app id's namespace. Every deployed app id is
+    ``<developerId>`` or ``<developerId>.<name>`` inside the publishing org's
+    registered developer namespace (``_assert_owns_namespace``), so its first
+    segment IS that org's developer id, the same slug the app scaffold writes
+    as ``appManifest.publisher``. Seeded platform apps are ``rocketride.*``,
+    and on OSS the org's developer id is ``rocketride``, so an OSS app that
+    declares no publisher lists ``rocketride``.
+
+    Blank and non-string values count as missing, and so does ``local``: the
+    placeholder the scaffold writes (with the id ``local.<slug>``) when no
+    developer id is known. Deploying renames the id into a real namespace but
+    often leaves that publisher behind, and ``local`` is a reserved slug no
+    org can register, so it never names a real developer.
+    """
+    for value in (manifest.get('publisher'), snapshot.get('publisher')):
+        if isinstance(value, str) and value.strip() and value.strip().lower() != _PLACEHOLDER_PUBLISHER:
+            return value.strip()
+    return app_id.split('.', 1)[0]
+
+
 async def resolve_app_pins(org_id: str, user_id: Optional[str], team_ids: List[str]) -> List[Dict[str, Any]]:
     """
     Resolves the caller's published apps via the scope walk over the binding
@@ -1361,6 +1415,11 @@ async def resolve_app_pins(org_id: str, user_id: Optional[str], team_ids: List[s
         if not isinstance(artifact, dict) or artifact.get('kind') != 'app':
             continue
         snapshot = row.get('snapshot') or {}
+        # The version's stored appManifest (metadata.manifest): the listing
+        # truth, and the only publisher source on the DB edition (its fixed
+        # snapshot columns drop `publisher`).
+        artifact_meta = artifact.get('metadata') if isinstance(artifact.get('metadata'), dict) else {}
+        artifact_manifest = artifact_meta.get('manifest') if isinstance(artifact_meta.get('manifest'), dict) else {}
         rung = 'personal' if audience_type == 'user' else audience_type
         mode = snapshot.get('mode') or 'free'
         # Internal-pin serving status. A public (store) entry gets its real
@@ -1381,6 +1440,7 @@ async def resolve_app_pins(org_id: str, user_id: Optional[str], team_ids: List[s
             'id': app_id,
             'moduleId': artifact.get('moduleId') or app_id.replace('.', '_'),
             'name': snapshot.get('name') or artifact.get('name') or app_id,
+            'publisher': _publisher_of(app_id, artifact_manifest, snapshot),
             'description': snapshot.get('description') or '',
             'icon': _icon_url_of(app_id, version, snapshot.get('iconPath')),
             'readme': snapshot.get('readmePath') or '',
