@@ -47,7 +47,7 @@
 	"description": ["An opt-in currency converter for the audit-grade financial extraction suite. ", "Converts fact values from a source currency to a target currency at a stated rate ", "and date supplied in the configuration — conversion is never implicit or fetched ", "from a live rate. Reads and writes the <code>answers</code> lane.</br>", "</br>", "The conversion is <b>non-destructive</b>: the original amount and currency are kept, ", "a <code>converted</code> block is added, and a <code>provenance</code> entry records ", "the rate, date and source/target currencies. Records that are not fact objects, or whose ", "currency does not match the configured source, pass through unchanged."],
 	//
 	// Optional:
-	//		The icon is the icon to display in the UI for this node
+	//		The icon to display in the UI for this node
 	//
 	"icon": "util-text.svg",
 	"documentation": "https://docs.rocketride.org/nodes/currency_convert_explicit",
@@ -68,31 +68,10 @@
 	//	a populated fact. Conversion logic is covered by the unit tests in
 	//	nodes/test/test_currency_convert_explicit.py and the contract suite.
 	//
-	//	Optional:
-	//		Profile section - configuration defaults used by the driver.
-	//		A single "default" profile supplies the base values; individual
-	//		fields below override them from the UI.
-	//
-	"preconfig": {
-		"default": "default",
-		"profiles": {
-			"default": {
-				"title": "Explicit conversion at a stated rate",
-				"source_currency": "EUR",
-				"target_currency": "USD",
-				"rate": 1.0,
-				"rate_date": "",
-				"amount_field": "amount",
-				"currency_field": "currency",
-				"decimals": 2
-			}
-		}
-	},
-	//
 	// Optional:
-	//		Local field definitions
+	//		Local property definitions. Every field is stored flat.
 	//
-	"fields": {
+	"propertyDefinitions": {
 		"currency_convert_explicit.source_currency": {
 			"type": "string",
 			"title": "Source currency",
@@ -146,34 +125,19 @@
 			"default": 2,
 			"minimum": 0,
 			"maximum": 10
-		},
-		"currency_convert_explicit.default": {
-			"object": "default",
-			"properties": ["currency_convert_explicit.source_currency", "currency_convert_explicit.target_currency", "currency_convert_explicit.rate", "currency_convert_explicit.rate_date", "currency_convert_explicit.amount_field", "currency_convert_explicit.currency_field", "currency_convert_explicit.decimals"]
-		},
-		"currency_convert_explicit.profile": {
-			"title": "Conversion",
-			"description": "Explicit currency conversion configuration",
-			"type": "string",
-			"default": "default",
-			"enum": ["*>preconfig.profiles.*.title"],
-			"conditional": [
-				{
-					"value": "default",
-					"properties": ["currency_convert_explicit.default"]
-				}
-			]
 		}
 	},
 	//
 	// Required:
-	//		Defines the fields (shape) of the service
+	//		Defines the properties shown in the pipeline builder side panel, in order
 	//
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "Currency Convert (Explicit)",
-			"properties": ["currency_convert_explicit.profile"]
-		}
+	"properties": [
+		"currency_convert_explicit.source_currency",
+		"currency_convert_explicit.target_currency",
+		"currency_convert_explicit.rate",
+		"currency_convert_explicit.rate_date",
+		"currency_convert_explicit.amount_field",
+		"currency_convert_explicit.currency_field",
+		"currency_convert_explicit.decimals"
 	]
 }

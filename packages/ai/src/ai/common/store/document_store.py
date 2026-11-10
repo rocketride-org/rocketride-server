@@ -1011,10 +1011,11 @@ class VectorStoreToolMixin:
             },
         },
         description=(
-            'Search for documents in the vector database. Requires an embedding provider bound to this '
-            'node (via IGlobal.embed_query) for semantic similarity search. Returns matching documents '
-            'with their content, metadata, and scores. Returns {"success": false, "error": "..."} on '
-            'failure (missing embedder, empty query, store error).'
+            'Search for documents in the vector database by semantic similarity. Requires a query-embedding '
+            'provider bound to this node (IGlobal.embed_query); the stock store nodes bind none today, so on '
+            'them this call returns {"success": false, "error": "..."} stating that semantic search is not '
+            'available. Returns matching documents with their content, metadata, and scores; the same error '
+            'shape on an empty query or a store error.'
         ),
     )
     def search(self, args):
@@ -1059,7 +1060,7 @@ class VectorStoreToolMixin:
             return {
                 'success': False,
                 'error': (
-                    f'no embedding provider bound to IGlobal.embed_query; configure an embedding sub-block for the {self._vectordb_server_name()} node to enable semantic search'
+                    f'semantic search is not available on the {self._vectordb_server_name()} node: no embedding provider is bound to IGlobal.embed_query (the store node embeds in the data lane only; a query-embedding provider on the store is a planned addition)'
                 ),
             }
 
@@ -1181,9 +1182,9 @@ class VectorStoreToolMixin:
             'and a call without chunk 0 adds to them. Documents without metadata.chunkId are numbered 0, 1, '
             '2 ... per object ID, so such a call replaces. A call without chunk 0 that repeats a stored chunk '
             'number can store a second copy of it: to change one chunk, send the whole object from chunk 0. '
-            'Embeddings are computed automatically when an '
-            'embedding provider is bound to this node (via IGlobal.embed_query). Alternatively, supply pre-computed '
-            '"embedding" (float array) and "embedding_model" (string) per document to skip auto-computation. '
+            'Supply pre-computed "embedding" (float array) and "embedding_model" (string) per document: the stock '
+            'store nodes bind no embedding provider for this path (IGlobal.embed_query), so a document without them '
+            'is refused. A node that does bind one computes the missing embeddings itself. '
             "Several documents with one object ID are stored as that document's chunks. "
             'Returns {"success": false, "error": "..."} when embeddings cannot be obtained.'
         ),
@@ -1276,7 +1277,7 @@ class VectorStoreToolMixin:
                     return {
                         'success': False,
                         'error': (
-                            f'no embedding provider bound to IGlobal.embed_query; configure an embedding sub-block for the {self._vectordb_server_name()} node or supply pre-computed "embedding" and "embedding_model" per document'
+                            f'the {self._vectordb_server_name()} node has no embedding provider bound to IGlobal.embed_query: supply pre-computed "embedding" and "embedding_model" per document'
                         ),
                     }
                 doc.embedding = computed

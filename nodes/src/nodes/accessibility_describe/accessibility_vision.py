@@ -28,7 +28,6 @@ from depends import depends  # type: ignore
 from typing import Any
 from ai.common.schema import Answer, Question
 from ai.common.chat import ChatBase
-from ai.common.config import Config
 
 # Load requirements
 requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
@@ -85,26 +84,27 @@ class Chat(ChatBase):
     _system_prompt: str = ''
     _prompt: str = ''
 
-    def __init__(self, provider: str, connConfig: dict[str, Any], bag: dict[str, Any]):
-        """Initialize the Gemini Vision accessibility chat instance."""
+    def __init__(self, provider: str, connConfig: Any, bag: dict[str, Any]):
+        """Initialize the Gemini Vision accessibility chat instance.
+
+        Args:
+            provider: The node's logical type.
+            connConfig: The node's resolved config (defaults applied, flat): model,
+                apikey, systemPrompt, prompt, prioritizeHazards, spatialFormat, modelTotalTokens.
+            bag: The endpoint's shared runtime state.
+        """
         super().__init__(provider, connConfig, bag)
-        config = Config.getNodeConfig(provider, connConfig)
+        config = connConfig
 
-        self._model = config.get('model', 'gemini-2.5-flash')
-        api_key = config.get('apikey')
-
-        # Get accessibility-specific config
-        hazard_priority = config.get('accessibility.prioritizeHazards', 'high')
-        spatial_format = config.get('accessibility.spatialFormat', 'clock')
+        self._model = config.model
+        api_key = config.apikey
 
         # Build system prompt with config modifiers
-        self._system_prompt = (
-            config.get('accessibility.systemPrompt') or config.get('systemPrompt') or DEFAULT_SYSTEM_PROMPT
-        )
-        self._system_prompt += HAZARD_PROMPTS.get(hazard_priority, '')
-        self._system_prompt += SPATIAL_PROMPTS.get(spatial_format, '')
+        self._system_prompt = config.systemPrompt or DEFAULT_SYSTEM_PROMPT
+        self._system_prompt += HAZARD_PROMPTS.get(config.prioritizeHazards, '')
+        self._system_prompt += SPATIAL_PROMPTS.get(config.spatialFormat, '')
 
-        self._prompt = config.get('accessibility.prompt') or config.get('prompt') or DEFAULT_PROMPT
+        self._prompt = config.prompt or DEFAULT_PROMPT
 
         if not api_key:
             raise ValueError('Missing Google AI API key. Get one at https://aistudio.google.com/apikey')
@@ -120,7 +120,7 @@ class Chat(ChatBase):
         except Exception as e:
             raise ValueError(f'Failed to initialize Google AI client: {e!s}') from e
 
-        self._modelTotalTokens = config.get('modelTotalTokens', 1048576)
+        self._modelTotalTokens = config.modelTotalTokens
         bag['chat'] = self
 
     @property

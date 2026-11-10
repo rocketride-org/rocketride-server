@@ -14,7 +14,7 @@ import time
 import json
 import contextvars
 from typing import Dict, Any, Callable, Optional
-from rocketlib import debug, warning
+from rocketlib import debug, getServiceDefinition, warning
 from ai.common.schema import Answer, Question
 from ai.common.config import Config, check_credential_resolved
 from ai.common.util import EmptyResponseError, ThinkTruncatedError, parseJson
@@ -111,13 +111,17 @@ class ChatBase:
         Raises:
             ConfigurationError: If the provider configuration is invalid or missing
         """
-        # Load the provider-specific configuration using the Config utility
-        # This will merge default settings with provider-specific overrides
-        config = Config.getNodeConfig(provider, connConfig)
+        # A converted node (its definition has no "preconfig") passes the
+        # resolver's view as connConfig: defaults applied, the active branch
+        # flattened, keys read by path. An unconverted node keeps the preconfig
+        # merge until common/config.py is deleted (plan Step 2 item 5).
+        definition = getServiceDefinition(provider)
+        converted = definition is not None and 'preconfig' not in definition
+        config = connConfig if converted else Config.getNodeConfig(provider, connConfig)
 
         # A key still written as ${ROCKETRIDE_...} would go to the provider as the key,
         # and the user would see an "invalid API key" reply instead of the missing name.
-        check_credential_resolved(provider, 'apikey', config.get('apikey'), connConfig)
+        check_credential_resolved(provider, 'apikey', config.get('apikey'), None if converted else connConfig)
 
         # Extract model configuration - these are the core settings that control
         # how the chat driver behaves with respect to token limits
@@ -130,7 +134,7 @@ class ChatBase:
         # there is nothing left to report. Only when a token field was hand-supplied:
         # catalogue profiles are checked by the model sync, and warning about those on
         # every run would be noise. Hand-written config is what the sync never sees.
-        if hand_supplied_token_fields(connConfig):
+        if not converted and hand_supplied_token_fields(connConfig):
             problem = check_output_token_config(
                 self._model,
                 self._modelOutputTokens,

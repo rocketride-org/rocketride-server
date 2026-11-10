@@ -20,91 +20,62 @@
 			"min": 0
 		}
 	},
-	"preconfig": {
-		"default": "default",
-		"profiles": {
-			"default": {
-				"instructions": [],
-				"advanced_mode": false,
-				"role": "Specialist",
-				"task_description": "",
-				"goal": "",
-				"backstory": "",
-				"expected_output": ""
-			}
-		}
-	},
-	"fields": {
+	//
+	// Optional:
+	//		Local property definitions. Every field is stored flat; the CrewAI
+	//		Agent/Task fields are always declared (advanced_mode is a plain flag).
+	//
+	"propertyDefinitions": {
 		"instructions": {
 			"type": "array",
 			"title": "Instructions",
 			"description": "Additional instructions to guide this sub-agent when the Manager delegates to it.",
-			"items": {
-				"type": "string",
-				"format": "textarea"
-			}
+			"item": { "name": "instruction", "type": "string", "format": "textarea" }
 		},
 		"advanced_mode": {
 			"type": "boolean",
 			"title": "Advanced Mode",
 			"description": "Expose CrewAI Agent and Task configuration directly.",
-			"default": false,
-			"enum": [
-				[false, "Off"],
-				[true, "On"]
-			],
-			"conditional": [
-				{
-					"value": true,
-					"properties": ["agent_crewai_subagent.agent_config_header", "role", "goal", "backstory", "agent_crewai_subagent.task_config_header", "task_description", "expected_output"]
-				}
-			]
-		},
-		"agent_crewai_subagent.agent_config_header": {
-			"type": "null",
-			"title": "Agent Config",
-			"default": null
+			"default": false
 		},
 		"role": {
 			"type": "string",
 			"title": "Role",
-			"description": "Sub-agent role name (e.g. 'Financial Analyst'). The Manager uses this name when routing delegation. Maps to CrewAI Agent(role=...)."
+			"description": "Sub-agent role name (e.g. 'Financial Analyst'). The Manager uses this name when routing delegation. Maps to CrewAI Agent(role=...).",
+			"default": "Specialist"
 		},
 		"goal": {
 			"type": "string",
 			"format": "textarea",
 			"title": "Goal",
-			"description": "What this sub-agent aims to achieve when delegated to. Maps to CrewAI Agent(goal=...)."
+			"description": "What this sub-agent aims to achieve when delegated to. Maps to CrewAI Agent(goal=...).",
+			"default": ""
 		},
 		"backstory": {
 			"type": "string",
 			"format": "textarea",
 			"title": "Backstory",
-			"description": "Background context for this sub-agent's expertise. Helps the Manager and the sub-agent's own LLM reason about when it's the right choice. Maps to CrewAI Agent(backstory=...)."
-		},
-		"agent_crewai_subagent.task_config_header": {
-			"type": "null",
-			"title": "Task Config",
-			"default": null
+			"description": "Background context for this sub-agent's expertise. Helps the Manager and the sub-agent's own LLM reason about when it's the right choice. Maps to CrewAI Agent(backstory=...).",
+			"default": ""
 		},
 		"task_description": {
 			"type": "string",
 			"format": "textarea",
 			"title": "Task",
-			"description": "What this sub-agent does when delegated to by the Manager. The user's request is passed as additional context at run time. Maps to CrewAI Task(description=...)."
+			"description": "What this sub-agent does when delegated to by the Manager. The user's request is passed as additional context at run time. Maps to CrewAI Task(description=...).",
+			"default": ""
 		},
 		"expected_output": {
 			"type": "string",
 			"format": "textarea",
 			"title": "Expected Output",
-			"description": "Description of the expected output format. Maps to CrewAI Task(expected_output=...)."
+			"description": "Description of the expected output format. Maps to CrewAI Task(expected_output=...).",
+			"default": ""
 		}
 	},
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "CrewAI Subagent",
-			"properties": ["instructions", "advanced_mode"]
-		}
-	]
+	//
+	// Required:
+	//		Defines the properties shown in the pipeline builder side panel, in order
+	//
+	"properties": ["type", "instructions", "advanced_mode", "role", "goal", "backstory", "task_description", "expected_output"]
 }

@@ -22,22 +22,18 @@
 # =============================================================================
 
 from rocketlib import IGlobalBase
-from ai.common.config import Config
+
+from .glinerRecognizer import GliNERRecognizer
 
 
 class IGlobal(IGlobalBase):
     def beginGlobal(self):
-        # Import what we need
-        from .glinerRecognizer import GliNERRecognizer
-
         # Get our bag
         bag = self.IEndpoint.endpoint.bag
 
-        # Get this nodes config
-        config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-
-        # Get the recognizer
-        self.recognizer = GliNERRecognizer(self.glb.logicalType, config, bag)
+        # Build the recognizer on the resolved config (defaults applied, the
+        # selected profile's model flat)
+        self.recognizer = GliNERRecognizer(self.config, bag)
 
     def endGlobal(self):
         # Destroy the recognizer module

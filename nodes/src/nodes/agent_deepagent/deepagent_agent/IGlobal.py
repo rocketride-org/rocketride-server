@@ -28,7 +28,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from rocketlib import IGlobalBase, OPEN_MODE
+from rocketlib import IGlobalBase
 
 
 class IGlobal(IGlobalBase):
@@ -40,8 +40,8 @@ class IGlobal(IGlobalBase):
     ``DeepAgentDriver`` singleton used by every pipeline invocation.
 
     Attributes:
-        agent: The active ``DeepAgentDriver`` instance, or ``None`` when the node is
-            opened in ``CONFIG`` mode or after ``endGlobal`` has been called.
+        agent: The active ``DeepAgentDriver`` instance, or ``None`` after
+            ``endGlobal`` has been called.
     """
 
     agent: Any = None
@@ -50,16 +50,12 @@ class IGlobal(IGlobalBase):
         """
         Initialise the node: install dependencies and create the driver.
 
-        Skipped entirely when the endpoint is opened in ``CONFIG`` mode (no runtime
-        execution is expected).  Otherwise, resolves ``requirements.txt`` via
-        ``depends`` and instantiates ``DeepAgentDriver``.
+        Resolves ``requirements.txt`` via ``depends`` and instantiates
+        ``DeepAgentDriver``.
 
         Returns:
             None
         """
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
-
         from depends import depends
 
         # Shared requirements.txt lives at the parent agent_deepagent/ level.

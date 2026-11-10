@@ -26,40 +26,51 @@
 			]
 		}
 	],
-	"preconfig": {
-		"default": "florence-base",
-		"profiles": {
-			"florence-base": {
-				"title": "Florence-2 Base",
-				"model": "microsoft/Florence-2-base",
-				"revision": "5ca5edf5bd017b9919c05d08aebef5e4c7ac3bac",
-				"task": "caption"
-			}
-		}
-	},
-	"fields": {
+	//
+	// Optional:
+	//		Local property definitions. The model profile is the selector; the
+	//		one shipped profile pins its model and revision as constants. The
+	//		caption granularity is shared and stored flat.
+	//
+	"propertyDefinitions": {
 		"caption.task": {
+			"type": "string",
 			"title": "Granularity",
 			"description": "How detailed the caption should be.",
-			"type": "string",
 			"default": "caption",
-			"enum": ["caption", "detailed_caption", "more_detailed_caption"],
-			"enumNames": ["Short", "Detailed", "More detailed"]
-		},
-		"caption.profile": {
-			"title": "Model",
-			"type": "string",
-			"default": "florence-base",
-			"enum": ["*>preconfig.profiles.*.title"]
+			"enum": [
+				["caption", "Short"],
+				["detailed_caption", "Detailed"],
+				["more_detailed_caption", "More detailed"]
+			]
 		}
 	},
-	"shape": [
+	//
+	// Required:
+	//		Defines the properties shown in the pipeline builder side panel, in order
+	//
+	"properties": [
 		{
-			"section": "Pipe",
-			"title": "Caption",
-			"properties": ["caption.profile", "caption.task"]
-		}
+			"name": "profile",
+			"type": "string",
+			"title": "Model",
+			"default": "florence-base",
+			"enum": {
+				"florence-base": {
+					"title": "Florence-2 Base",
+					"properties": [
+						{ "name": "model", "type": "constant", "default": "microsoft/Florence-2-base" },
+						{ "name": "revision", "type": "constant", "default": "5ca5edf5bd017b9919c05d08aebef5e4c7ac3bac" }
+					]
+				}
+			}
+		},
+		"caption.task"
 	],
+	//
+	//	Test configuration for automated node testing. "profiles" lists
+	//	values of the "profile" selector.
+	//
 	"test": {
 		"profiles": ["florence-base"],
 		"requiresHardware": { "cuda": { "vramGb": 3 }, "mps": { "ramGb": 6 }, "cpu": { "ramGb": 6 } },

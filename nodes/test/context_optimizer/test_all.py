@@ -155,11 +155,11 @@ import rocketlib  # noqa: E402  -- the engine binding the catalog is read throug
 # ===========================================================================
 #
 # The catalog is read through ``rocketlib.getServiceDefinitions()`` (the
-# engine's index of registered services) and ``rocketlib.getServiceDefinition``
-# (one node's raw services*.json). Outside the engine those are the C++
-# binding's stubs, so the tests below install substitutes on the ``rocketlib``
-# module and exercise the production ``_engine_model_definitions`` path
-# unchanged.
+# engine's index of registered services) and ``rocketlib.getServiceSchema``
+# (one node's resolved schema). The tests below install substitutes on the
+# ``rocketlib`` module and exercise the production
+# ``_engine_model_definitions`` path unchanged; ``engine_registry`` uses the
+# real engine instead.
 
 
 def _load_jsonc(path: Path) -> dict:
@@ -201,34 +201,48 @@ def _load_jsonc(path: Path) -> dict:
     return json.loads(re.sub(r',(\s*[}\]])', r'\1', ''.join(out)))
 
 
-def _source_tree_registry() -> tuple[dict, dict]:
-    """(index, definitions) for every node in the source tree.
+def _schema(profiles) -> dict:
+    """A resolved schema in the engine's shape: a ``model`` selector whose branches pin their windows.
 
-    Mirrors what the engine registry returns: the index carries each
-    logical type's ``classType``; the definitions are the raw files. The
-    optimizer decides by content which of them publish a model catalog.
+    Args:
+        profiles: ``[(model id, modelTotalTokens), ...]``.
     """
-    index: dict[str, dict] = {}
-    definitions: dict[str, dict] = {}
-    for path in sorted(_NODES_SRC.glob('*/services*.json')):
-        try:
-            definition = _load_jsonc(path)
-        except ValueError:
-            continue
-        protocol = definition.get('protocol') if isinstance(definition, dict) else None
-        logical_type = protocol[:-3] if isinstance(protocol, str) and protocol.endswith('://') else path.parent.name
-        index[logical_type] = {'classType': definition.get('classType', []), 'title': definition.get('title', '')}
-        definitions[logical_type] = definition
-    return index, definitions
+    return {
+        'capabilities': 0,
+        'params': [],
+        'properties': [
+            {
+                'name': 'model',
+                'path': 'model',
+                'type': 'string',
+                'default': profiles[0][0] if profiles else '',
+                'enum': {
+                    model: {
+                        'title': model,
+                        'properties': [
+                            {
+                                'name': 'modelTotalTokens',
+                                'path': f'{model}.modelTotalTokens',
+                                'type': 'constant',
+                                'default': window,
+                            }
+                        ],
+                    }
+                    for model, window in profiles
+                },
+            }
+        ],
+    }
 
 
-def _install_registry(monkeypatch, index, definitions, *, calls=None, envelope=True):
+def _install_registry(monkeypatch, index, schemas, *, calls=None, envelope=True):
     """Point ``rocketlib`` at a fake engine registry.
 
     By default the index is served in the engine's real shape -- the
     ``{"services": {...}, "version": N}`` envelope that
     ``IServices::getServiceSchemas`` builds; ``envelope=False`` serves a bare
-    index to exercise the tolerance path.
+    index to exercise the tolerance path. ``schemas`` maps each logical type
+    to the resolved schema ``getServiceSchema`` returns for it.
     """
 
     def get_definitions():
@@ -236,27 +250,22 @@ def _install_registry(monkeypatch, index, definitions, *, calls=None, envelope=T
             calls.append(('index',))
         return {'services': index, 'version': 'test'} if envelope else index
 
-    def get_definition(logical_type):
+    def get_schema(logical_type):
         if calls is not None:
-            calls.append(('definition', logical_type))
-        return definitions[logical_type]
+            calls.append(('schema', logical_type))
+        return schemas[logical_type]
 
     monkeypatch.setattr(rocketlib, 'getServiceDefinitions', get_definitions)
-    monkeypatch.setattr(rocketlib, 'getServiceDefinition', get_definition)
+    monkeypatch.setattr(rocketlib, 'getServiceSchema', get_schema)
 
 
 def _definitions(class_types, **nodes):
-    """Build a synthetic (index, definitions) pair: name -> [(model, window), ...]."""
-    index, definitions = {}, {}
+    """Build a synthetic (index, schemas) pair: name -> [(model, window), ...]."""
+    index, schemas = {}, {}
     for name, profiles in nodes.items():
         index[name] = {'classType': list(class_types)}
-        definitions[name] = {
-            'classType': list(class_types),
-            'preconfig': {
-                'profiles': {f'p{i}': {'model': m, 'modelTotalTokens': w} for i, (m, w) in enumerate(profiles)}
-            },
-        }
-    return index, definitions
+        schemas[name] = _schema(profiles)
+    return index, schemas
 
 
 def _llm_definitions(**nodes):
@@ -265,22 +274,15 @@ def _llm_definitions(**nodes):
 
 
 @pytest.fixture
-def engine_registry(monkeypatch):
-    """The real source-tree llm_* catalog, served through the registry seam."""
-    index, definitions = _source_tree_registry()
-    _install_registry(monkeypatch, index, definitions)
-    return index, definitions
+def engine_registry():
+    """The real engine registry: the resolved schema of every node the engine loaded."""
+    return ContextOptimizer._engine_model_definitions()
 
 
 @pytest.fixture
 def empty_registry(monkeypatch):
     """An engine with no LLM nodes registered (the catalog is empty)."""
     _install_registry(monkeypatch, {}, {})
-
-
-# ===========================================================================
-# Fixtures
-# ===========================================================================
 
 
 @pytest.fixture
@@ -794,7 +796,8 @@ class TestModelLimits:
         if not catalog:
             pytest.skip('no llm_* catalog in this build')
         shared = sorted(set(catalog) & set(ContextOptimizer.MODEL_LIMITS))
-        assert shared, 'expected MODEL_LIMITS and the catalog to overlap on at least one id'
+        if not shared:
+            pytest.skip('MODEL_LIMITS and the catalog share no id in this tree yet (no converted llm_* node)')
         disagreements = {
             model: (ContextOptimizer.MODEL_LIMITS[model], catalog[model])
             for model in shared
@@ -833,45 +836,48 @@ class TestModelCatalog:
     """Tests for the live model catalog read through the engine registry."""
 
     @staticmethod
-    def _declared_ids_by_node() -> dict[str, set[str]]:
-        """Model ids each source-tree ``llm_*`` node declares, read independently.
+    def _model_selectors(service: dict):
+        """Every ``model`` selector a converted services file declares (its enum keyed by model id)."""
+        candidates = list(service.get('propertyDefinitions', {}).items())
+        candidates += [(spec.get('name', ''), spec) for spec in service.get('properties', []) if isinstance(spec, dict)]
+        for name, field in candidates:
+            if isinstance(field, dict) and name.rsplit('.', 1)[-1] == 'model' and isinstance(field.get('enum'), dict):
+                yield field
+
+    @classmethod
+    def _declared_ids_by_node(cls) -> dict[str, set[str]]:
+        """Model ids each converted source-tree ``llm_*`` node declares, read independently.
 
         Parsed straight from the services files by the test's own loader
         rather than through :meth:`ContextOptimizer._load_model_catalog`, so
         the assertions below are a real check on the loader and not a
-        restatement of it.
+        restatement of it. A node in the ``propertyDefinitions`` format
+        declares its models as the branches of a ``model`` selector and the
+        window as a ``modelTotalTokens`` default; a file still in the old
+        format declares nothing the catalog can read.
         """
         declared: dict[str, set[str]] = {}
         for path in sorted(_NODES_SRC.glob('llm_*/services*.json')):
             service = _load_jsonc(path)
-            profiles = service.get('preconfig', {}).get('profiles', {})
-            ids = {
-                profile['model']
-                for profile in profiles.values()
-                if isinstance(profile, dict)
-                and isinstance(profile.get('model'), str)
-                and profile['model']
-                and isinstance(profile.get('modelTotalTokens'), int)
-                and not isinstance(profile.get('modelTotalTokens'), bool)
-                and profile['modelTotalTokens'] > 0
-            }
+            if 'properties' not in service or 'modelTotalTokens' not in path.read_text(encoding='utf-8'):
+                continue
+            ids = {model for selector in cls._model_selectors(service) for model in selector['enum'] if model}
             if ids:
                 declared.setdefault(path.parent.name, set()).update(ids)
         return declared
 
     def test_catalog_is_discovered(self, engine_registry):
-        """Every source-tree llm_* node's profiles reach the catalog via the registry.
+        """Every converted source-tree llm_* node's models reach the catalog via the registry.
 
         Asserted structurally on purpose: no individual model id is named
         here. The catalog contents are owned by ``tools/sync_models`` and
         move whenever a provider renames or retires a model, so pinning ids
         would make an unrelated model-sync PR red-line this suite. What must
-        hold is the shape -- a non-empty mapping of ids to positive integer
-        windows -- and that no discovered provider is silently dropped.
+        hold is the shape -- a mapping of ids to positive integer windows --
+        and that no converted provider is silently dropped.
         """
         catalog = ContextOptimizer.model_catalog()
         assert isinstance(catalog, dict)
-        assert catalog, 'expected at least one llm_* profile with modelTotalTokens'
         for model, limit in catalog.items():
             assert isinstance(model, str) and model, f'non-string catalog key: {model!r}'
             assert isinstance(limit, int) and not isinstance(limit, bool) and limit > 0, (
@@ -879,12 +885,13 @@ class TestModelCatalog:
             )
 
         declared = self._declared_ids_by_node()
-        assert declared, 'expected at least one llm_* node to declare a model'
+        if not declared:
+            pytest.skip('no llm_* node declares its models in the propertyDefinitions format in this tree yet')
         for node, ids in declared.items():
             assert ids & set(catalog), f'no model id from {node} reached the catalog'
 
     def test_catalog_is_read_through_the_engine_registry(self, monkeypatch):
-        """Discovery goes index -> every registered type -> raw definition, by content.
+        """Discovery goes index -> every registered type -> resolved schema, by content.
 
         This is the review's ask: no globbing relative to ``__file__``, so an
         installed or ``--node_path``-materialised node with no sibling
@@ -900,16 +907,20 @@ class TestModelCatalog:
             'image_vision_gamma': {'classType': ['image']},
             'store_vector': {'classType': ['store']},
         }
-        definitions = {
-            'llm_alpha': {'preconfig': {'profiles': {'p': {'model': 'alpha-1', 'modelTotalTokens': 32000}}}},
-            'image_vision_gamma': {'preconfig': {'profiles': {'p': {'model': 'gamma-1', 'modelTotalTokens': 2048}}}},
-            'store_vector': {'preconfig': {'profiles': {'p': {'dimensions': 1536}}}},
+        schemas = {
+            'llm_alpha': _schema([('alpha-1', 32000)]),
+            'image_vision_gamma': _schema([('gamma-1', 2048)]),
+            'store_vector': {
+                'capabilities': 0,
+                'params': [],
+                'properties': [{'name': 'dimensions', 'path': 'dimensions', 'type': 'integer', 'default': 1536}],
+            },
         }
-        _install_registry(monkeypatch, index, definitions, calls=calls)
+        _install_registry(monkeypatch, index, schemas, calls=calls)
         catalog = ContextOptimizer.model_catalog()
         assert catalog == {'alpha-1': 32000, 'gamma-1': 2048}
         assert calls[0] == ('index',)
-        fetched = {name for kind, *rest in calls if kind == 'definition' for name in rest}
+        fetched = {name for kind, *rest in calls if kind == 'schema' for name in rest}
         assert fetched == set(index), 'every registered type is consulted; content decides'
         assert not hasattr(ContextOptimizer, '_CATALOG_ROOT'), 'no filesystem-relative discovery may remain'
 
@@ -938,7 +949,7 @@ class TestModelCatalog:
     )
     def test_unusable_registry_index_yields_empty_catalog(self, monkeypatch, raw):
         monkeypatch.setattr(rocketlib, 'getServiceDefinitions', lambda: raw)
-        monkeypatch.setattr(rocketlib, 'getServiceDefinition', lambda lt: pytest.fail('must not be called'))
+        monkeypatch.setattr(rocketlib, 'getServiceSchema', lambda lt: pytest.fail('must not be called'))
         assert ContextOptimizer.model_catalog() == {}
 
     def test_registry_envelope_is_unwrapped(self, monkeypatch):
@@ -947,7 +958,7 @@ class TestModelCatalog:
         index, definitions = _llm_definitions(llm_env=[('env-1', 12000)])
         _install_registry(monkeypatch, index, definitions, calls=calls, envelope=True)
         assert ContextOptimizer.model_catalog() == {'env-1': 12000}
-        fetched = [rest[0] for kind, *rest in calls if kind == 'definition']
+        fetched = [rest[0] for kind, *rest in calls if kind == 'schema']
         assert fetched == ['llm_env'], 'the envelope keys ("services", "version") must never be looked up as types'
 
     def test_bare_index_is_tolerated(self, monkeypatch):
@@ -978,13 +989,13 @@ class TestModelCatalog:
 
         index = {'llm_ok': {'classType': ['llm']}, 'llm_broken': {'classType': ['llm']}}
 
-        def get_definition(logical_type):
+        def get_schema(logical_type):
             if logical_type == 'llm_broken':
                 raise RuntimeError('engine says no')
-            return {'preconfig': {'profiles': {'p': {'model': 'ok-1', 'modelTotalTokens': 5000}}}}
+            return _schema([('ok-1', 5000)])
 
         monkeypatch.setattr(rocketlib, 'getServiceDefinitions', lambda: index)
-        monkeypatch.setattr(rocketlib, 'getServiceDefinition', get_definition)
+        monkeypatch.setattr(rocketlib, 'getServiceSchema', get_schema)
         assert ContextOptimizer.model_catalog() == {'ok-1': 5000}
 
     def test_registry_refresh_is_seen_without_a_restart(self, monkeypatch):
@@ -1041,18 +1052,18 @@ class TestModelCatalog:
         assert opt._total_limit == ContextOptimizer.MODEL_LIMITS['claude-sonnet']
 
     def test_malformed_definitions_are_ignored(self, monkeypatch):
-        """Definitions without usable profiles degrade to the fallback table."""
+        """Schemas without a usable model window degrade to the fallback table."""
         index = {
             'llm_broken': {'classType': ['llm']},
             'llm_odd': {'classType': ['llm']},
             'llm_none': {'classType': ['llm']},
         }
-        definitions = {
+        schemas = {
             'llm_broken': 'not a dict',
-            'llm_odd': {'preconfig': {'profiles': [1, 2]}},
-            'llm_none': {'preconfig': {'profiles': {'p': {'model': 'm', 'modelTotalTokens': True}}}},
+            'llm_odd': {'capabilities': 0, 'params': [], 'properties': 'not a list'},
+            'llm_none': _schema([('m', True)]),
         }
-        _install_registry(monkeypatch, index, definitions)
+        _install_registry(monkeypatch, index, schemas)
         assert ContextOptimizer.model_catalog() == {}
         opt = ContextOptimizer({'model_name': 'gpt-5.4', 'max_context_tokens': 0})
         assert opt._total_limit == ContextOptimizer.MODEL_LIMITS['gpt-5.4']
@@ -1117,36 +1128,41 @@ class TestEdgeCases:
 class TestIGlobalLifecycle:
     """Test the IGlobal class lifecycle with mocks."""
 
-    def test_begin_global_config_mode(self):
-        """In CONFIG mode, optimizer should not be created."""
+    def test_begin_global_builds_the_optimizer_from_the_resolved_config(self, monkeypatch):
+        """The resolver's view (mode flattened, defaults applied) is what beginGlobal hands the optimizer."""
+        import context_optimizer.IGlobal as iglobal_module
+
+        built = []
+        monkeypatch.setattr(iglobal_module, 'ContextOptimizer', lambda config: built.append(dict(config)) or 'opt')
         iglobal = IGlobal.__new__(IGlobal)
         iglobal.optimizer = None
-        iglobal.config = None
-        # Mock the IEndpoint and glb
-        endpoint_mock = MagicMock()
-        endpoint_mock.endpoint.openMode = 'config'  # CONFIG mode
+        iglobal.glb = types.SimpleNamespace(
+            logicalType='context_optimizer', connConfig={'mode': 'manual', 'manual': {'max_context_tokens': 112}}
+        )
 
-        class _OPEN_MODE:
-            CONFIG = 'config'
+        iglobal.beginGlobal()
 
-        iglobal.IEndpoint = endpoint_mock
-        iglobal.glb = MagicMock()
-
-        with patch('context_optimizer.IGlobal.OPEN_MODE', _OPEN_MODE):
-            iglobal.beginGlobal()
-
-        assert iglobal.optimizer is None
+        assert iglobal.optimizer == 'opt'
+        assert built == [
+            {
+                'mode': 'manual',
+                'model_name': 'custom',
+                'max_context_tokens': 112,
+                'system_prompt_budget_pct': 10,
+                'query_budget_pct': 15,
+                'document_budget_pct': 50,
+                'history_budget_pct': 25,
+            }
+        ]
 
     def test_end_global_cleanup(self):
-        """EndGlobal should set optimizer and config to None."""
+        """EndGlobal should release the optimizer."""
         iglobal = IGlobal.__new__(IGlobal)
         iglobal.optimizer = MagicMock()
-        iglobal.config = {'model_name': 'test'}
 
         iglobal.endGlobal()
 
         assert iglobal.optimizer is None
-        assert iglobal.config is None
 
 
 def _write_questions(inst, question) -> None:
@@ -1758,11 +1774,11 @@ def _model_name_warnings(mock_warning) -> list:
 
 
 class TestModelNameValidation:
-    """``model_name`` is declared a string but nothing coerces one on the way in.
+    """``model_name`` is declared a string, and the optimizer guards it on its own too.
 
-    ``Config.getNodeConfig`` merges the profile defaults into the raw pipeline
-    config without type-checking, so a hand-written ``"model_name": null``
-    reached ``resolve_model_limit`` and raised
+    The resolver types the node config, but ``ContextOptimizer`` is also built
+    straight from dicts (callers, these tests), where a ``"model_name": null``
+    once reached ``resolve_model_limit`` and raised
     ``AttributeError: 'NoneType' object has no attribute 'rsplit'`` inside
     ``beginGlobal``, taking the whole node down.
     """

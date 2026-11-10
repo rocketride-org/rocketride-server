@@ -21,7 +21,6 @@ import json
 import sys
 import types
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -44,6 +43,7 @@ def _build_import_stubs():
     rocketlib = MagicMock()
     rocketlib.IInstanceBase = object
     rocketlib.IGlobalBase = object
+    rocketlib.IValidatorBase = object
     rocketlib.tool_function = lambda **kwargs: lambda f: f
     rocketlib.OPEN_MODE = MagicMock()
     rocketlib.warning = lambda *a, **kw: None
@@ -107,8 +107,10 @@ for _name, _stub in _build_import_stubs().items():
 docs_iinstance = importlib.import_module('nodes.tool_google_workspace.docs.IInstance')
 docs_client = importlib.import_module('nodes.tool_google_workspace.docs.client')
 docs_iglobal = importlib.import_module('nodes.tool_google_workspace.docs.IGlobal')
+docs_ivalidator = importlib.import_module('nodes.tool_google_workspace.docs.IValidator')
 workspace_client = importlib.import_module('nodes.tool_google_workspace.google_client')
 workspace_iglobal = importlib.import_module('nodes.tool_google_workspace.IGlobal')
+workspace_ivalidator = importlib.import_module('nodes.tool_google_workspace.IValidator')
 workspace_iinstance = importlib.import_module('nodes.tool_google_workspace.IInstance')
 ga = importlib.import_module('nodes.core.google_access')
 
@@ -303,15 +305,12 @@ def test_check_connection_reports_probe_failure():
 
 
 def test_check_connection_reports_missing_user_auth_scopes(monkeypatch):
+    settings = {
+        'authType': 'user',
+        'userAuth': json.dumps({'scope': 'https://www.googleapis.com/auth/drive.file'}),
+    }
+    monkeypatch.setattr(docs_iinstance.IInstance, 'settings', property(lambda self: settings))
     inst = _make()
-    inst.IGlobal.glb = SimpleNamespace(logicalType='tool_docs', connConfig='conn1')
-    config = SimpleNamespace(
-        getNodeConfig=lambda logical_type, conn_config: {
-            'authType': 'user',
-            'userToken': json.dumps({'scope': 'https://www.googleapis.com/auth/drive.file'}),
-        }
-    )
-    monkeypatch.setattr(workspace_iinstance, 'Config', config)
 
     out = inst.check_connection({})
 
@@ -326,13 +325,11 @@ def test_services_json_shape():
     assert data['classType'] == ['tool']
     assert data['capabilities'] == ['invoke']
     assert data['lanes'] == {}  # tool node: no data lanes
-    assert data['prefix'] == 'docs'
     assert data['path'] == 'nodes.tool_google_workspace.docs'
     assert data['icon'] == 'docs.svg'
-    assert 'docs.access' in data['fields']
-    assert data['fields']['docs.access']['default'] == 'write'
-    assert [row[0] for row in data['fields']['docs.access']['enum']] == ['readonly', 'write']
-    assert data['shape'][0]['properties'] == ['type', 'google.authType', 'docs.access']
+    assert data['propertyDefinitions']['access']['default'] == 'write'
+    assert [row[0] for row in data['propertyDefinitions']['access']['enum']] == ['readonly', 'write']
+    assert data['properties'] == ['type', 'google.authType', 'access']
     # OAuth node: the framework can't drive it without live creds, so no dynamic test block.
     assert 'test' not in data
 
@@ -340,9 +337,10 @@ def test_services_json_shape():
 def test_services_json_no_secret_defaults():
     """Secrets must never carry a real default (gitleaks scans services*.json)."""
     data = json.loads(_SERVICES_JSON.read_text(encoding='utf-8'))
-    for prof in data['preconfig']['profiles'].values():
-        assert prof.get('serviceKey', '') == ''
-        assert prof.get('userToken', '') == ''
+    # Credentials come from the shared google.* definitions; the node declares none of its own.
+    assert 'preconfig' not in data
+    for name, prop in data['propertyDefinitions'].items():
+        assert not prop.get('secret') and prop.get('type') not in ('oauth2', 'upload'), name
 
 
 # ---------------------------------------------------------------------------
@@ -646,14 +644,14 @@ def test_all_eight_tools_present():
 def test_token_scope_report_covered_missing_absent_and_malformed():
     required = ['https://www.googleapis.com/auth/documents']
     assert workspace_client.token_scope_report(docs_client.SERVICE, {}, required) == (set(), True, [])
-    covered_cfg = {'userToken': '{"scope": "https://www.googleapis.com/auth/documents"}'}
+    covered_cfg = {'userAuth': '{"scope": "https://www.googleapis.com/auth/documents"}'}
     granted, covered, missing = workspace_client.token_scope_report(docs_client.SERVICE, covered_cfg, required)
     assert covered is True and missing == []
-    other_cfg = {'userToken': '{"scope": "https://www.googleapis.com/auth/unrelated"}'}
+    other_cfg = {'userAuth': '{"scope": "https://www.googleapis.com/auth/unrelated"}'}
     granted, covered, missing = workspace_client.token_scope_report(docs_client.SERVICE, other_cfg, required)
     assert covered is False and missing == required
     with pytest.raises(ValueError):
-        workspace_client.token_scope_report(docs_client.SERVICE, {'userToken': '{bad'}, required)
+        workspace_client.token_scope_report(docs_client.SERVICE, {'userAuth': '{bad'}, required)
 
 
 def test_document_create_seed_failure_returns_id_with_warning():
@@ -711,14 +709,9 @@ def test_text_replace_preserves_replacement_whitespace():
 
 
 def test_check_connection_reports_malformed_token(monkeypatch):
-    class _Cfg:
-        @staticmethod
-        def getNodeConfig(*_a, **_k):
-            return {'authType': 'user', 'userToken': '{bad json'}
-
-    monkeypatch.setattr(workspace_iinstance, 'Config', _Cfg)
+    settings = {'authType': 'user', 'userAuth': '{bad json'}
+    monkeypatch.setattr(docs_iinstance.IInstance, 'settings', property(lambda self: settings))
     inst = _make()
-    inst.IGlobal.glb = types.SimpleNamespace(logicalType='tool_docs', connConfig={})
     out = inst.check_connection({})
     assert out['connection_ok'] is False
     assert 'invalid user token' in out['scopeError']
@@ -726,11 +719,8 @@ def test_check_connection_reports_malformed_token(monkeypatch):
 
 def test_validate_config_warns_for_malformed_user_token(monkeypatch):
     warnings = []
-    monkeypatch.setattr(
-        workspace_iglobal.Config, 'getNodeConfig', lambda *a, **k: {'authType': 'user', 'userToken': '{bad json'}
-    )
-    monkeypatch.setattr(workspace_iglobal, 'warning', warnings.append)
-    glb = docs_iglobal.IGlobal()
-    glb.glb = types.SimpleNamespace(logicalType='docs', connConfig={})
-    glb.validateConfig()
+    config = {'authType': 'user', 'userAuth': '{bad json'}
+    monkeypatch.setattr(workspace_ivalidator, 'warning', warnings.append)
+    monkeypatch.setattr(docs_ivalidator.IValidator, 'config', property(lambda self: config))
+    docs_ivalidator.IValidator().validateConfig()
     assert any('invalid' in message.lower() for message in warnings)

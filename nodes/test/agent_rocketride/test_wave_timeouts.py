@@ -235,9 +235,12 @@ CHECK = 'workspace.compile'
 
 
 def _driver(wave, **config):
-    """Build the driver from node config, through the real Config merge."""
-    glb = SimpleNamespace(logicalType='agent_rocketride', connConfig=config)
-    return wave.rocketride_agent.RocketRideDriver(SimpleNamespace(glb=glb))
+    """Build the driver from node config, through the real resolver (``IGlobalBase.config``)."""
+    from rocketlib import IGlobalBase
+
+    iglobal = IGlobalBase()
+    iglobal.glb = SimpleNamespace(logicalType='agent_rocketride', connConfig=config)
+    return wave.rocketride_agent.RocketRideDriver(iglobal)
 
 
 def _context(wave, memory):

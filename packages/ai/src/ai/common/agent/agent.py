@@ -81,11 +81,17 @@ class AgentBase(ABC):
         # Get the logical type (nodeId) of our invoker
         self._node_id = self._iGlobal.glb.logicalType
 
-        # Retrieve node-specific configuration by using the logical type and
-        # the connection configuration from the global context.
-        # Config.getNodeConfig likely returns structured config data tailored
-        # for this node instance.
-        config = Config.getNodeConfig(self._iGlobal.glb.logicalType, self._iGlobal.glb.connConfig)
+        # A converted node (its definition has no "preconfig") reads the
+        # resolver's view: defaults applied, the active branch flattened, keys
+        # read by path. An unconverted node keeps the preconfig merge until
+        # common/config.py is deleted (plan Step 2 item 5).
+        from rocketlib import getServiceDefinition
+
+        definition = getServiceDefinition(self._node_id)
+        if definition is not None and 'preconfig' not in definition:
+            config = self._iGlobal.config
+        else:
+            config = Config.getNodeConfig(self._iGlobal.glb.logicalType, self._iGlobal.glb.connConfig)
 
         # Keep the resolved config so subclasses can read their own extra fields
         # without re-resolving (and without re-implementing shape handling).

@@ -21,37 +21,27 @@
 # SOFTWARE.
 # =============================================================================
 
-from rocketlib import IGlobalBase, OPEN_MODE
-from ai.common.config import Config
+import os
+
+from rocketlib import IGlobalBase
+
+from .optimizer import ContextOptimizer
 
 
 class IGlobal(IGlobalBase):
-    config = None
     optimizer = None
 
     def beginGlobal(self):
-        # Are we in config mode or some other mode?
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            # We are going to get a call to configureService but
-            # we don't actually need to load the driver for that
-            pass
-        else:
-            import os
-            from depends import depends  # type: ignore
+        # Load the requirements (tiktoken)
+        from depends import depends  # type: ignore
 
-            # Load the requirements (tiktoken)
-            requirements = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'requirements.txt')
-            depends(requirements)
+        requirements = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'requirements.txt')
+        depends(requirements)
 
-            # Get the configuration
-            self.config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-
-            # Create the optimizer
-            from .optimizer import ContextOptimizer
-
-            self.optimizer = ContextOptimizer(self.config)
+        # Create the optimizer on the resolved config (defaults applied, the
+        # selected mode's values flat)
+        self.optimizer = ContextOptimizer(self.config)
 
     def endGlobal(self):
         # Clean up resources
         self.optimizer = None
-        self.config = None

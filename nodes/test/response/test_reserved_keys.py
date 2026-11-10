@@ -8,8 +8,9 @@
 With ``laneName: result_types`` the node wrote its ``result_types`` dict under the
 lane's key and then called ``.append`` on it, which raised ``AttributeError``;
 ``name``, ``path``, ``metadata``, ``objectId``, ``error`` and ``status`` were
-overwritten instead. The node now refuses such a key when it starts, and warns
-when the config is validated. Drives the real ``IGlobal`` and ``IInstance``.
+overwritten instead. The node now refuses such a key when it starts, and the
+validator warns when the config is checked. Drives the real ``IGlobal``,
+``IValidator`` and ``IInstance`` through the engine-resolved schema.
 """
 
 import importlib.util
@@ -18,7 +19,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from rocketlib import OPEN_MODE
 
 NODES_SRC = Path(__file__).parent.parent.parent / 'src' / 'nodes'
 DISCOVERY_PY = Path(__file__).parent.parent / 'framework' / 'discovery.py'
@@ -28,10 +28,11 @@ sys.path.insert(0, str(NODES_SRC))
 
 from response.IGlobal import IGlobal  # noqa: E402
 from response.IInstance import IInstance  # noqa: E402
+from response.IValidator import IValidator  # noqa: E402
 from ai.common.schema import Answer  # noqa: E402
 
-# The package exports the IGlobal class under the module's name, so reach the module itself
-response_global = sys.modules[IGlobal.__module__]
+# The reserved-key check and its warning live beside the validator
+response_validator = sys.modules[IValidator.__module__]
 
 
 class _Obj:
@@ -46,19 +47,19 @@ class _Obj:
         self.hasPath = False
 
 
-def _global(config, open_mode=None):
-    """Build the node's IGlobal for ``config`` without starting it.
+def _global(config, logical_type='response_text', cls=IGlobal):
+    """Build the node's IGlobal (or IValidator) for ``config`` without starting it.
 
     Args:
-        config: The connConfig.
-        open_mode: The endpoint's open mode; a run mode when not given.
+        config: The connConfig, in the service's path-addressed shape.
+        logical_type: The service: ``response_text`` declares ``laneName``, ``response`` declares ``lanes``.
+        cls: The class to build.
 
     Returns:
-        The IGlobal.
+        The IGlobal or IValidator.
     """
-    glb = IGlobal()
-    glb.glb = SimpleNamespace(connConfig=config, logicalType='response')
-    glb.IEndpoint = SimpleNamespace(endpoint=SimpleNamespace(openMode=open_mode or OPEN_MODE.SOURCE))
+    glb = cls()
+    glb.glb = SimpleNamespace(connConfig=config, logicalType=logical_type)
     return glb
 
 
@@ -99,17 +100,15 @@ def test_a_reserved_key_in_the_lanes_mapping_is_refused_too():
         ]
     }
     with pytest.raises(ValueError, match="Result key 'result_types', 'status' is reserved"):
-        _global(config).beginGlobal()
+        _global(config, 'response').beginGlobal()
 
 
 def test_the_config_dialog_warns_instead_of_failing(monkeypatch):
-    """Opened for configuration the node starts, and validateConfig reports the key."""
+    """Opened for configuration the validator reports the key instead of failing."""
     warnings = []
-    monkeypatch.setattr(response_global, 'warning', warnings.append)
-    glb = _global({'laneName': 'result_types'}, OPEN_MODE.CONFIG)
+    monkeypatch.setattr(response_validator, 'warning', warnings.append)
 
-    glb.beginGlobal()
-    glb.validateConfig()
+    _global({'laneName': 'result_types'}, cls=IValidator).validateConfig()
 
     assert len(warnings) == 1
     assert "'result_types' is reserved" in warnings[0]
@@ -118,9 +117,9 @@ def test_the_config_dialog_warns_instead_of_failing(monkeypatch):
 def test_valid_keys_raise_no_warning(monkeypatch):
     """An ordinary custom key validates silently."""
     warnings = []
-    monkeypatch.setattr(response_global, 'warning', warnings.append)
+    monkeypatch.setattr(response_validator, 'warning', warnings.append)
 
-    _global({'laneName': 'my_answers'}).validateConfig()
+    _global({'laneName': 'my_answers'}, cls=IValidator).validateConfig()
 
     assert warnings == []
 
@@ -146,7 +145,7 @@ def test_a_custom_key_still_collects_every_lane():
 
 def test_unmapped_lanes_use_their_lane_type():
     """With no key configured, each lane keeps its own name, as before."""
-    glb = _global({'lanes': [{'laneId': 'table', 'laneName': 'grid'}]})
+    glb = _global({'lanes': [{'laneId': 'table', 'laneName': 'grid'}]}, 'response')
     glb.beginGlobal()
     inst = _instance(glb)
 
@@ -165,7 +164,7 @@ def _default_lane_names():
     Read with the repo's JSONC reader: the services files have comments and trailing commas.
 
     Returns:
-        The pairs, sorted by file name.
+        ``(services file, logical type, default laneName)`` triples, sorted by file name.
     """
     spec = importlib.util.spec_from_file_location('_response_discovery', DISCOVERY_PY)
     discovery = importlib.util.module_from_spec(spec)
@@ -174,9 +173,9 @@ def _default_lane_names():
     for path in sorted((NODES_SRC / 'response').glob('services*.json')):
         service = discovery._parse_service_json(str(path))
         assert service is not None, f'{path.name} did not parse'
-        default = service.get('fields', {}).get('laneName', {}).get('default')
+        default = service.get('propertyDefinitions', {}).get('laneName', {}).get('default')
         if default:
-            found.append((path.name, default))
+            found.append((path.name, service['protocol'].replace('://', ''), default))
     return found
 
 
@@ -189,10 +188,12 @@ def test_the_services_still_set_defaults_to_check():
 
 
 @pytest.mark.parametrize(
-    ('services_file', 'lane_name'), _DEFAULT_LANE_NAMES, ids=[name for name, _ in _DEFAULT_LANE_NAMES]
+    ('services_file', 'logical_type', 'lane_name'),
+    _DEFAULT_LANE_NAMES,
+    ids=[name for name, _, _ in _DEFAULT_LANE_NAMES],
 )
-def test_no_service_default_result_key_is_reserved(services_file, lane_name):
+def test_no_service_default_result_key_is_reserved(services_file, logical_type, lane_name):
     """A service's default key must stay usable: reserving it would stop every pipeline that keeps the default."""
-    glb = _global({'laneName': lane_name})
+    glb = _global({}, logical_type)
     glb.beginGlobal()
     assert glb.laneName == lane_name

@@ -22,7 +22,6 @@
 # =============================================================================
 
 from rocketlib import IGlobalBase, debug
-from ai.common.config import Config
 
 
 class IGlobal(IGlobalBase):
@@ -34,9 +33,10 @@ class IGlobal(IGlobalBase):
 
     def beginGlobal(self):
         """Initialize the global authoritative overlay configuration."""
-        raw = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig) or {}
-        self.regulator_type = str(raw.get('regulator_type', 'sec')).strip()
-        cik_raw = str(raw.get('cik', '')).strip()
+        # The resolved config: defaults applied, every value validated
+        config = self.config
+        self.regulator_type = config.regulator_type.strip()
+        cik_raw = config.cik.strip()
         # Zero-pad only after the emptiness check so a blank CIK stays falsy
         # (zfill(10) on '' would become '0000000000' and skip query_sec's guard).
         self.cik = cik_raw.zfill(10) if cik_raw else ''

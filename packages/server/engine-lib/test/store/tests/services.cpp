@@ -501,6 +501,28 @@ TEST_CASE("store::Services::secureParameters") {
             "is not allowed inside an array item"));
     }
 
+    SECTION("a secret in a selector branch inside an array item is a load error") {
+        // The item rule outranks the branch rule: the walk cannot reach a
+        // value under "[]" whichever branch is active
+        const auto itemDefs = R"({
+            "fx.kind": {
+                "type": "string",
+                "default": "cloud",
+                "enum": {
+                    "cloud": { "title": "Cloud", "properties": ["fx.key"] },
+                    "local": { "title": "Local", "properties": [] }
+                }
+            },
+            "fx.key": { "type": "string", "title": "Key", "secret": true }
+        })"_json;
+        auto schema = resolveFixture(fixture(
+            itemDefs,
+            R"([{ "name": "targets", "type": "array", "item": "fx.kind" }])"_json));
+        REQUIRE_ERROR(schema, Ec::InvalidParam, "\"secret\" on property key in");
+        REQUIRE(schema.ccode().message().contains(
+            "is not allowed inside an array item"));
+    }
+
     SECTION("a hoisted readonly leaf is registered once, at the hoisted path") {
         REQUIRE(secure.count("region") == 1u);
         REQUIRE(secure.at("region") == PARAM_TYPE::READONLY);

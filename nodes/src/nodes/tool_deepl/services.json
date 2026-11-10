@@ -26,6 +26,11 @@
 	//
 	"register": "filter",
 	//
+	// Required:
+	//		The node type. A python node is loaded from the package "path" names.
+	//
+	"node": "python",
+	//
 	// Optional:
 	//		The path is the executable/script code.
 	//

@@ -200,6 +200,16 @@ class TestHardErrors:
         with pytest.raises(ConfigError, match=r'"tuning.tags\[1\]" expects string'):
             resolveConfig(DEPTH_ESTIMATE, {'tuning': {'tags': ['ok', 2]}})
 
+    def test_array_of_scalars_resolves_as_the_list(self):
+        # A stored array is a LEAF value, not a nested level: it is kept whole,
+        # its elements are checked against the item descriptor, and the default
+        # applies when nothing is stored
+        view = resolveConfig(DEPTH_ESTIMATE, {'tuning': {'tags': ['fast', 'gpu']}})
+        assert view.tags == ['fast', 'gpu']
+        assert view['tags'] == ['fast', 'gpu']
+        assert resolveConfig(DEPTH_ESTIMATE, {}).tags == []
+        assert resolveConfig(DEPTH_ESTIMATE, {'tuning': {'tags': []}}).tags == []
+
 
 # ==== ConfigView =============================================================
 

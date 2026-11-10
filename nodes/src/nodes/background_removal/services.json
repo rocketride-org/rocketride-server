@@ -10,7 +10,7 @@
 	"description": ["Foreground / background separation using BiRefNet (MIT). Returns an RGBA cutout with a straight (non-premultiplied) alpha channel, so downstream nodes can re-composite over any background without dark fringes. ", "Two profiles are shipped: the default 1K BiRefNet and a higher-resolution 2K variant for fine hair / detailed edges. Runs on CPU, Apple Silicon (MPS), and CUDA."],
 	"icon": "background-removal.svg",
 	"documentation": "https://docs.rocketride.org/nodes/background_removal",
-	"tile": ["Model: ${parameters.background_removal.profile}", "Max edge: ${parameters.background_removal.maxEdge}"],
+	"tile": ["Model: ${parameters.background_removal.profile}", "Max edge: ${parameters.background_removal.${profile}.maxEdge}"],
 	"lanes": {
 		"image": ["text", "image"]
 	},
@@ -30,58 +30,61 @@
 			]
 		}
 	],
-	"preconfig": {
-		"default": "birefnet-default",
-		"profiles": {
-			"birefnet-default": {
-				"title": "BiRefNet — default, 1K (MIT)",
-				"model": "ZhengPeng7/BiRefNet",
-				"revision": "e2bf8e4460fc8fa32bba5ea4d94b3233d367b0e4",
-				"maxEdge": 1024
-			},
-			"birefnet-hr": {
-				"title": "BiRefNet HR — 2K, finer hair / edge detail (MIT)",
-				"model": "ZhengPeng7/BiRefNet_HR",
-				"revision": "a7a562f6fd16021180f2f4348f4de003a2d3d1e1",
-				"maxEdge": 2048
-			}
-		}
-	},
-	"fields": {
-		"background_removal.model": {
-			"type": "string",
-			"title": "Model",
-			"description": "HuggingFace model identifier for background removal (overrides the profile default)",
-			"minLength": 2,
-			"maxLength": 256
-		},
+	//
+	// Optional:
+	//		Local property definitions. The model profile is the selector; each
+	//		profile pins its model and revision as constants and carries its
+	//		own default for the inference edge cap.
+	//
+	"propertyDefinitions": {
 		"background_removal.maxEdge": {
-			"type": "number",
+			"type": "integer",
 			"title": "Max input edge (px)",
 			"description": "Downscale source so long edge <= this value before inference; alpha is upsampled back to the original source size for compositing. Lower = faster + less VRAM; higher = sharper edges.",
 			"default": 1024,
 			"minimum": 256,
 			"maximum": 4096
 		},
-		"background_removal.profile": {
-			"title": "Model",
-			"description": "BiRefNet variant — default is 1K, HR is 2K for finer edges.",
-			"type": "string",
-			"default": "birefnet-default",
-			"enum": ["*>preconfig.profiles.*.title"],
-			"conditional": [
-				{ "value": "birefnet-default", "properties": [] },
-				{ "value": "birefnet-hr", "properties": [] }
-			]
+		"background_removal.hr.maxEdge": {
+			"base": "background_removal.maxEdge",
+			"default": 2048
 		}
 	},
-	"shape": [
+	//
+	// Required:
+	//		Defines the properties shown in the pipeline builder side panel, in order
+	//
+	"properties": [
 		{
-			"section": "Pipe",
-			"title": "Background Removal",
-			"properties": ["background_removal.profile", "background_removal.maxEdge"]
+			"name": "profile",
+			"type": "string",
+			"title": "Model",
+			"description": "BiRefNet variant — default is 1K, HR is 2K for finer edges.",
+			"default": "birefnet-default",
+			"enum": {
+				"birefnet-default": {
+					"title": "BiRefNet — default, 1K (MIT)",
+					"properties": [
+						{ "name": "model", "type": "constant", "default": "ZhengPeng7/BiRefNet" },
+						{ "name": "revision", "type": "constant", "default": "e2bf8e4460fc8fa32bba5ea4d94b3233d367b0e4" },
+						"background_removal.maxEdge"
+					]
+				},
+				"birefnet-hr": {
+					"title": "BiRefNet HR — 2K, finer hair / edge detail (MIT)",
+					"properties": [
+						{ "name": "model", "type": "constant", "default": "ZhengPeng7/BiRefNet_HR" },
+						{ "name": "revision", "type": "constant", "default": "a7a562f6fd16021180f2f4348f4de003a2d3d1e1" },
+						"background_removal.hr.maxEdge"
+					]
+				}
+			}
 		}
 	],
+	//
+	//	Test configuration for automated node testing. "profiles" lists
+	//	values of the "profile" selector.
+	//
 	"test": {
 		"profiles": ["birefnet-default"],
 		"requiresHardware": { "cuda": { "vramGb": 6 }, "mps": { "ramGb": 12 }, "cpu": { "ramGb": 12 } },

@@ -39,7 +39,7 @@ worked example.
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Tuple
 
-from rocketlib import IGlobalBase, OPEN_MODE, warning
+from rocketlib import IGlobalBase, OPEN_MODE, getServiceDefinition, warning
 
 from ai.common.config import Config, check_credential_resolved
 
@@ -70,8 +70,10 @@ class StoreGlobalBase(IGlobalBase, ABC):
     # The live store, opened in beginGlobal and read by StoreInstanceBase.
     store: Optional[DocumentStoreBase] = None
 
-    # Embedder wiring for the control-plane tool path (search/upsert). Bound in
-    # beginGlobal only when an embedding sub-block is configured.
+    # Embedder hook for the control-plane tool path (search/upsert). Nothing
+    # binds it today: the store embeds in the data lane only, and the tool
+    # path reports semantic search as unavailable. A query-embedding provider
+    # on the store node is a planned addition (plan section 15, item 13).
     embed_query = None
     embed_model_name: Optional[str] = None
 
@@ -85,6 +87,9 @@ class StoreGlobalBase(IGlobalBase, ABC):
 
         Called once per pipeline start (outside CONFIG mode). Must raise if the
         store cannot be constructed so the failure surfaces at pipeline start.
+        ``conn_config`` is the resolved ``ConfigView`` for a converted node
+        (no ``preconfig`` in its definition) and the stored config, to
+        re-resolve through ``Config.getNodeConfig``, for an unconverted one.
         """
 
     # The config fields holding what the driver sends its server to sign in.
@@ -116,6 +121,26 @@ class StoreGlobalBase(IGlobalBase, ABC):
     # Lifecycle — identical across vector stores
     # ------------------------------------------------------------------
 
+    def _effective_config(self) -> Tuple[Any, bool, Any]:
+        """The node's effective config as ``(cfg, converted, written)``.
+
+        A converted node (its definition has no "preconfig") reads the
+        resolver's view: defaults applied, the active branch flattened, keys
+        read by path. An unconverted node keeps the preconfig merge until
+        this base is converted for real: ONE ``getNodeConfig`` pass over the
+        stored config (a second pass over the merged result would have lost
+        ``profile`` and read the default profile's block over the active one).
+        ``written`` is what the pipeline stored, for the unfilled-placeholder
+        message and for the driver's own merge; the resolver already read that
+        tree by path, so a converted node passes None.
+        """
+        definition = getServiceDefinition(self.glb.logicalType)
+        converted = definition is not None and 'preconfig' not in definition
+        if converted:
+            return self.config, True, None
+        written = self.glb.connConfig
+        return Config.getNodeConfig(self.glb.logicalType, written), False, written
+
     def beginGlobal(self) -> None:
         """Open the store, unless in CONFIG mode."""
         # CONFIG mode only needs configureService; the driver is not loaded.
@@ -124,11 +149,11 @@ class StoreGlobalBase(IGlobalBase, ABC):
 
         self.store = None
         bag = self.IEndpoint.endpoint.bag
-        connConfig = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
+
+        cfg, converted, written = self._effective_config()
 
         # Resolve the namespace used for agent-facing tool names from the merged
         # config so it honors both profile defaults and user overrides.
-        cfg = Config.getNodeConfig(self.glb.logicalType, connConfig)
         resolved_name = cfg.get('serverName') if hasattr(cfg, 'get') else None
         if isinstance(resolved_name, str) and resolved_name.strip():
             self.serverName = resolved_name.strip()
@@ -146,23 +171,28 @@ class StoreGlobalBase(IGlobalBase, ABC):
         self.allow_write = parse_bool(raw_allow_write, default=type(self).allow_write)
 
         # A key left as an unfilled ${ROCKETRIDE_...} fails here, before the driver sends it.
-        self._check_credentials(cfg, connConfig)
+        self._check_credentials(cfg, written)
 
-        # Open the driver's store. Pass the raw connConfig, not the merged cfg above:
-        # each driver's Store re-resolves it via Config.getNodeConfig, so the profile
-        # merge stays in one place.
-        self.store = self._open_store(self.glb.logicalType, connConfig, bag)
+        # Open the driver's store. A converted driver reads the resolved view
+        # directly; an unconverted one receives the stored config and
+        # re-resolves it via Config.getNodeConfig, so the profile merge stays
+        # in one place.
+        self.store = self._open_store(self.glb.logicalType, cfg if converted else written, bag)
 
     def endGlobal(self) -> None:
         """Drop the store."""
         self.store = None
 
     def validateConfig(self) -> None:
-        """Save-time validation: probe the server so the user sees errors immediately."""
+        """Save-time validation: probe the server so the user sees errors immediately.
+
+        Reads the config the same way ``beginGlobal`` does, so a converted node
+        (resolver view, no preconfig) and an unconverted one both validate.
+        """
         try:
-            config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
+            config, _converted, written = self._effective_config()
             # An unfilled credential is reported as such, and the probe does not send it.
-            self._check_credentials(config, self.glb.connConfig)
+            self._check_credentials(config, written)
             self._probe_connection(config)
         except Exception as e:
             warning(str(e))

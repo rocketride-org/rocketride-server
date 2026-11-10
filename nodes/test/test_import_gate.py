@@ -12,6 +12,13 @@ module top. This gate pins that contract for every python node package: importin
 the validator under the GPU import guard (the hosted-engine backstop) must leave
 ``<path>.IGlobal`` and ``<path>.IInstance`` out of ``sys.modules``.
 
+The imports run in ONE fresh child interpreter (``framework/import_gate_probe.py``
+on the engine's Python), not in the pytest process: a node test collected earlier
+may already hold a package's ``IGlobal`` in ``sys.modules``, and a GPU library a
+fixture imported before the guard would pass the blocker unchallenged. The child
+evicts each package before importing its validator, so every probe is a first
+import, and the report is checked per package here so a red node is named.
+
 A red node has one of: a package ``__init__`` that re-exports the classes, an
 ``IValidator.py`` that imports ``IGlobal``/``IInstance``, or a validator that
 imports a GPU library directly.
@@ -22,19 +29,21 @@ Usage:
 
 from __future__ import annotations
 
-import importlib
-import importlib.util
+import json
+import subprocess
 import sys
 from pathlib import Path
-from typing import List
+from typing import Dict, List
 
 import pytest
-
-from ai.common.models.gpu_guard import _BLOCKED_MODULES, _GPUImportBlocker
 
 from .framework.discovery import _parse_service_json
 
 NODES_SRC = Path(__file__).resolve().parent.parent / 'src' / 'nodes'
+PROBE = Path(__file__).resolve().parent / 'framework' / 'import_gate_probe.py'
+
+# Tests run on the engine's Python, so the engine directory is the interpreter's.
+_ENGINE_DIR = Path(sys.executable).resolve().parent
 
 
 # =============================================================================
@@ -81,34 +90,46 @@ PACKAGES = _python_node_packages()
 # =============================================================================
 
 
+@pytest.fixture(scope='module')
+def probe_report() -> Dict[str, Dict[str, object]]:
+    """Run the probe once for every package in a fresh engine interpreter; return its report."""
+    run = subprocess.run(
+        [sys.executable, str(PROBE)],
+        input=json.dumps(PACKAGES),
+        capture_output=True,
+        text=True,
+        timeout=900,
+        cwd=str(_ENGINE_DIR),
+        check=False,
+    )
+    if run.returncode != 0:
+        tail = run.stdout[-1500:] + '\n' + run.stderr[-1500:]
+        pytest.fail(f'import gate probe failed (exit {run.returncode}):\n{tail}')
+    try:
+        report = json.loads(run.stdout)
+    except ValueError:
+        tail = run.stdout[-1500:] + '\n' + run.stderr[-1500:]
+        pytest.fail(f'import gate probe printed no report:\n{tail}')
+    missing = sorted(set(PACKAGES) - set(report))
+    assert not missing, f'import gate probe reported nothing for {missing}'
+    return report
+
+
 @pytest.mark.parametrize('package', PACKAGES)
-def test_validator_imports_without_the_global(package: str) -> None:
+def test_validator_imports_without_the_global(package: str, probe_report: Dict[str, Dict[str, object]]) -> None:
     """Importing the node's validator leaves IGlobal/IInstance out of sys.modules.
 
     Args:
         package: The node package, e.g. ``nodes.store_qdrant``.
+        probe_report: The fresh-interpreter report, one entry per package.
     """
-    before = set(sys.modules)
-    blocker = _GPUImportBlocker(_BLOCKED_MODULES)
-    sys.meta_path.insert(0, blocker)
-    try:
-        validator = f'{package}.IValidator'
-        # Step 1: the package's own validator when the file exists ...
-        if importlib.util.find_spec(validator) is not None:
-            module = importlib.import_module(validator)
-            assert hasattr(module, 'IValidator'), f'{validator} has no IValidator class'
-        else:
-            # Step 2: ... otherwise the framework default, which validates the schema
-            from rocketlib import IValidatorBase  # noqa: F401
-
-        # Step 3: the run-path modules must not have ridden along
-        heavy = [name for name in (f'{package}.IGlobal', f'{package}.IInstance') if name in sys.modules]
-        assert not heavy, (
-            f'{package}: importing the validator loaded {", ".join(heavy)}. '
-            'Config mode imports <path>.IValidator only: keep __init__.py empty and the validator import-light.'
-        )
-    finally:
-        sys.meta_path.remove(blocker)
-        # Step 4: leave sys.modules as found so one node cannot colour the next
-        for name in set(sys.modules) - before:
-            sys.modules.pop(name, None)
+    result = probe_report[package]
+    assert result['error'] is None, (
+        f'{package}: importing the validator failed: {result["error"]}. '
+        'Config mode imports <path>.IValidator only: keep it import-light (rocketlib, stdlib, light clients).'
+    )
+    heavy = result['heavy']
+    assert not heavy, (
+        f'{package}: importing the validator loaded {", ".join(heavy)}. '
+        'Config mode imports <path>.IValidator only: keep __init__.py empty and the validator import-light.'
+    )
