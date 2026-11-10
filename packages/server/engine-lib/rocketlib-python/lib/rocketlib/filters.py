@@ -989,19 +989,19 @@ class BindingLogger:
         self.rootBindingId = root_binding_id  #: The binding tree at capture.
 
     def debug(self, *args) -> None:
-        """Output a debug message under this binding."""
+        """Output a debug message to the engine log (not binding-tagged; the module-level ``debug``)."""
         from .engine import debug
 
         debug(*args)
 
     def warning(self, *args) -> None:
-        """Output a warning under this binding."""
+        """Output a warning to the engine log (not binding-tagged; the module-level ``warning``)."""
         from .engine import warning
 
         warning(*args)
 
     def error(self, *args) -> None:
-        """Output an error under this binding."""
+        """Output an error to the engine log (not binding-tagged; the module-level ``error``)."""
         from .engine import error
 
         error(*args)
@@ -1137,12 +1137,16 @@ class IInstanceBase:
         """
         Capture this binding for a worker thread or asyncio task.
 
-        The engine tags a node's messages with the binding that is CURRENT on the
-        pipe; a thread the node spawns outlives that and would tag the next holder.
-        Take the logger inside the call and use it from the worker instead.
+        The ids read off ``self.instance`` follow the binding that is CURRENT on
+        the pipe; a thread the node spawns outlives that and would read the next
+        holder's. Take the logger inside the call and use it from the worker
+        instead: ``sendSSE`` carries the captured ids. ``debug`` / ``warning`` /
+        ``error`` write to the engine log, which carries no binding, exactly like
+        the module-level functions; they are on the logger so a worker holds one
+        object for all its output.
 
         Returns:
-            BindingLogger: debug / warning / error / sendSSE bound to this binding.
+            BindingLogger: sendSSE tagged with this binding, plus the engine log calls.
         """
         return BindingLogger(self.instance.pipeId, self.bindingId, self.rootBindingId)
 

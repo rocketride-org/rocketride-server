@@ -228,11 +228,11 @@ Error IServiceEndpoint::bindFilters(size_t pipeId,
 ///		Builds the global pipe
 //-------------------------------------------------------------------------
 Error IServiceEndpoint::buildGlobalPipe() noexcept {
-    // Create all the global filters - call the begin as we go along
-    // to allow them to add new drivers along the way
-    for (size_t i = 0; i < pipeStack.size(); ++i) {
+    // Creates the global filter of one pipe stack entry and puts it at the
+    // same position of the global stack, so the two stacks stay aligned
+    const auto makeGlobal = [this](size_t index) -> Error {
         // Get the filter we are initalizing
-        auto &filter = pipeStack[i];
+        auto &filter = pipeStack[index];
 
         // Get a shared ptr from it
         auto thisEndpoint = this->endpoint.lock();
@@ -251,9 +251,14 @@ Error IServiceEndpoint::buildGlobalPipe() noexcept {
         // Set the self referential weak ptr
         global->global = global;
 
-        // Save it in the pipe stack
-        m_globalStack.push_back(global);
-    }
+        // Save it at the filter's position of the global stack
+        m_globalStack.insert(m_globalStack.begin() + index, global);
+        return {};
+    };
+
+    // Create all the global filters
+    for (size_t i = 0; i < pipeStack.size(); ++i)
+        if (auto ccode = makeGlobal(i)) return ccode;
 
     // In pipeline mode, validate all the global filters first, in order
     if (config.openMode == OPEN_MODE::PIPELINE) {
@@ -270,13 +275,31 @@ Error IServiceEndpoint::buildGlobalPipe() noexcept {
         util::Guard pipeStackIndexGuard{[this] { pipeStackIndex = 0; },
                                         [this] { pipeStackIndex = -1; }};
 
-        // And then begin the global filters, in order
+        // And then begin the global filters, in order. A filter may add
+        // new ones behind itself while it begins (insertFilter): those get
+        // their globals created and validated here, aligned with the pipe
+        // stack, and are begun next in turn
         for (; _cast<size_t>(pipeStackIndex) < m_globalStack.size();
              ++pipeStackIndex) {
-            auto global = m_globalStack[pipeStackIndex];
+            const auto begun = pipeStackIndex;
+            auto global = m_globalStack[begun];
 
             // If the beginFilterGlobal has an error, stop
             if (auto ccode = global->beginFilterGlobal()) return ccode;
+
+            // insertFilter moved pipeStackIndex past each filter it added
+            for (auto inserted = begun + 1; inserted <= pipeStackIndex;
+                 ++inserted) {
+                if (auto ccode = makeGlobal(_cast<size_t>(inserted)))
+                    return ccode;
+
+                if (config.openMode == OPEN_MODE::PIPELINE)
+                    if (auto ccode = m_globalStack[inserted]->validateConfig())
+                        return ccode;
+            }
+
+            // Resume at the first added filter, so it is begun in turn
+            pipeStackIndex = begun;
         }
     }
 

@@ -59,7 +59,9 @@ static ErrorOr<py::object> loadOptionalSubmodule(const Text &path,
 /// @details
 ///		Constructor - creates underlying python objects and binds them
 ///		to the handles. The node package contract is file-per-class:
-///		<path>.IGlobal is imported when the pipe runs, and in CONFIG /
+///		<path>.IGlobal is imported when the pipe runs (falling back to
+///		rocketlib.IGlobalBase, so an instance's settings resolve for a
+///		node that ships only IInstance.py), and in CONFIG /
 ///		PIPELINE_CONFIG mode only <path>.IValidator (falling back to
 ///		rocketlib.IValidatorBase) - IGlobal.py is never imported there.
 //-------------------------------------------------------------------------
@@ -130,18 +132,22 @@ IPythonGlobalBase::IPythonGlobalBase(const FactoryArgs &args) noexcept
 
             // Create an instance of the IGlobal / IValidator class
             m_pyGlobal = m_pyModule.attr(className)();
-        } else if (configMode) {
-            // No IValidator.py: the framework default validates the
-            // configuration against the schema
+        } else {
+            // No IValidator.py / IGlobal.py: the framework default. The
+            // validator checks the configuration against the schema; the
+            // global resolves it, so an instance's settings work for a
+            // node that ships only IInstance.py
+            const char *baseName =
+                configMode ? "IValidatorBase" : "IGlobalBase";
             Text utilName = "rocketlib";
             auto pyUtil = engine::python::loadModule(utilName);
             if (!pyUtil) return pyUtil.ccode();
 
-            if (!py::hasattr(*pyUtil, "IValidatorBase"))
-                return APERR(Ec::InvalidModule,
-                             "The IValidatorBase template is missing");
+            if (!py::hasattr(*pyUtil, baseName))
+                return APERR(Ec::InvalidModule, "The", baseName,
+                             "template is missing");
 
-            m_pyGlobal = pyUtil->attr("IValidatorBase")();
+            m_pyGlobal = pyUtil->attr(baseName)();
         }
 
         // If we have a global data instance, bind it to this host service
