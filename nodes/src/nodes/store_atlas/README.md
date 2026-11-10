@@ -44,7 +44,7 @@ Pipeline agents address the functions below as `<node id>.<function>`. The confi
 
 ## Configuration
 
-Provide the Atlas connection URI, database, collection, similarity, and retrieval score. The node creates the collection and its indexes when it first receives documents. Keep those index choices stable for an existing collection; this implementation checks for an index name but does not rebuild a differently shaped vector index for you.
+Provide the Atlas connection URI, database, collection, and retrieval score. The node creates the collection and its indexes when it first receives documents. Keep those index choices stable for an existing collection; this implementation checks for an index name but does not rebuild a differently shaped vector index for you.
 
 ### Connection URI, database, and collection
 
@@ -54,7 +54,7 @@ Database names cannot contain `/`, `\\`, spaces, quotes, `$`, `*`, `<`, `>`, `:`
 
 ### Vector indexes and similarity
 
-On first ingestion the node creates ordinary metadata indexes, a text index on `content`, and a vector search index named `vector_index`. That vector index takes its dimension from the incoming embeddings. Similarity defaults to `cosine`; `euclidean` and `dotproduct` are the other accepted values. Keep the selected metric and embedding dimension aligned with the vectors you will query; changing either after collection creation calls for a new compatible index or collection.
+On first ingestion the node creates ordinary metadata indexes, a text index on `content`, and a vector search index named `vector_index`. That vector index takes its dimension from the incoming embeddings. The similarity metric is pinned to `cosine` by the driver and is not configurable. Keep the embedding dimension aligned with the vectors you will query; changing either after collection creation calls for a new compatible index or collection.
 
 The implementation logs and continues if Atlas rejects vector-index creation, with a message that it may need to be created in Atlas. If semantic retrieval then fails while keyword retrieval works, inspect the Atlas vector index rather than changing the question text. The node also builds metadata indexes and a text index, so first ingest is doing setup work as well as writing data.
 
