@@ -187,11 +187,12 @@ name and one row per exposed function.
 whose `enum` is a dict of branches) has ≥ 2 branches other than `custom`. The
 section is then **allowed**, not required: a README may instead describe the
 selector under `## Configuration` (for example as a `### Models` table). It is
-forbidden when there is no such selector. When present, the branches are the
-profiles: the branch key is the profile key, the selector's `default` is the
-default profile, and a profile's metadata is its branch `title`, the branch
-key under the selector's name (a `model` selector's key is the model id), and
-the `constant` values the branch declares.
+forbidden otherwise: when the service has no root-level selector, or when its
+first selector has fewer than 2 branches other than `custom`. When present, the
+branches are the profiles: the branch key is the profile key, the selector's
+`default` is the default profile, and a profile's metadata is its branch
+`title`, the branch key under the selector's name (a `model` selector's key is
+the model id), and the `constant` values the branch declares.
 
 Every declared profile appears exactly once.
 
