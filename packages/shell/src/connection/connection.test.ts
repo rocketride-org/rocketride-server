@@ -2433,14 +2433,17 @@ test('an EMPTY #rrtoken fragment (--no-auth) clears the remembered session, rese
  * Boots a manager on a stubbed top-level (or framed) page whose URL carries a
  * `#rrtoken=` fragment and reports what the seeding step did.
  */
-async function bootWithFragment(opts: { origin: string; hash: string; nodeEnv?: string; framed?: boolean }): Promise<{ saved: string[]; cleared: number; stripped: string[]; warned: string[] }> {
+async function bootWithFragment(opts: { origin: string; hash: string; nodeEnv?: string; framed?: boolean; replaceStateThrows?: boolean }): Promise<{ saved: string[]; cleared: number; stripped: string[]; warned: string[] }> {
 	const stripped: string[] = [];
 	const warned: string[] = [];
 	const warn = console.warn;
 	console.warn = (...args: unknown[]) => { warned.push(args.map(String).join(' ')); };
 	const win: Record<string, unknown> = {
 		location: { search: '?appid=local.alarm&rrdev=1', pathname: '/', origin: opts.origin, hash: opts.hash },
-		history: { state: null, replaceState: (_s: unknown, _t: string, url: string) => { stripped.push(url); } },
+		history: { state: null, replaceState: (_s: unknown, _t: string, url: string) => {
+			if (opts.replaceStateThrows) throw new Error('SecurityError (stub)');
+			stripped.push(url);
+		} },
 	};
 	win.self = win;
 	win.top = opts.framed ? {} : win;
@@ -2498,6 +2501,13 @@ test('#rrtoken is ignored by a PRODUCTION build (nothing saved or cleared) but i
 			assert.deepEqual(res.warned, [], `${label}: a production build does not log`);
 		}
 	}
+});
+
+test('a refused #rrtoken strip is best-effort: a replaceState that throws does not reject bootstrap', async () => {
+	const res = await bootWithFragment({ origin: 'https://cloud.rocketride.example', hash: '#rrtoken=attacker_credential', nodeEnv: 'production', replaceStateThrows: true });
+	assert.deepEqual(res.saved, [], 'no token was saved');
+	assert.equal(res.cleared, 0, 'nothing was cleared');
+	assert.deepEqual(res.warned, [], 'nothing was warned');
 });
 
 test('#rrtoken is ignored by a FRAMED shell (previews inherit their embedder\'s session via rrdev:auth) and the embedder-owned URL is left alone', async () => {

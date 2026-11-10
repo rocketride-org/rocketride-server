@@ -873,8 +873,8 @@ export class ConnectionManager implements IConnectionManager {
 
 		// ── Dev token seeding ─────────────────────────────────────────────
 		// The terminal dev host (`rocketride app dev`) hands the workspace
-		// credential in the URL FRAGMENT — never sent on the wire, stripped
-		// before anything else reads the URL. Seeding is honoured ONLY in a
+		// credential in the URL FRAGMENT — never sent on the wire; a top-level
+		// shell strips it in this block. Seeding is honoured ONLY in a
 		// top-level dev shell served from a LOOPBACK origin (framed previews
 		// inherit their embedder's session via rrdev:auth; production builds
 		// have no dev gate; and a dev flavor served from a real origin — the
@@ -885,10 +885,10 @@ export class ConnectionManager implements IConnectionManager {
 		// other sign-in; the normal stored-token path below then connects.
 		// A REFUSED directive (production build, non-loopback origin) is
 		// never acted on, but a TOP-LEVEL shell still strips the fragment in
-		// every build so a credential in a link does not linger in the
-		// address bar or history. A FRAMED shell leaves the URL alone: the
-		// embedder owns it, and replaceState would edit shared session
-		// history. Only the exact `#rrtoken=` prefix is a directive.
+		// every build. This block leaves a FRAMED shell's URL alone (previews
+		// inherit their embedder's session via rrdev:auth and no launcher puts
+		// the directive in a frame URL). Only the exact `#rrtoken=` prefix is
+		// a directive.
 		// The fragment is the LAUNCHER's definitive session directive (the
 		// same vocabulary as the embedded flow's rrdev:auth answer): a
 		// value signs the tab in as that credential; EMPTY (`#rrtoken=`,
@@ -907,10 +907,12 @@ export class ConnectionManager implements IConnectionManager {
 			if (tokenSeedDirective) {
 				console.warn('[shell] ignoring #rrtoken: dev token seeding is honoured only by a shell served from a loopback dev server');
 			}
-			// Ignored is not the same as harmless to leave: strip the fragment
-			// so a credential handed to a refused tab does not linger in the
-			// URL bar and history.
-			window.history.replaceState({ ...(window.history.state ?? {}) }, '', window.location.pathname + window.location.search);
+			// Best-effort: rewrites the CURRENT history entry so the fragment
+			// leaves the address bar and Back/Forward history. It cannot remove
+			// a visit the browser already recorded when the page loaded.
+			try {
+				window.history.replaceState({ ...(window.history.state ?? {}) }, '', window.location.pathname + window.location.search);
+			} catch { /* ignore */ }
 		}
 		if (tokenSeedDirective && isLoopbackShell()) {
 			const seeded = decodeURIComponent(bootHash.slice('#rrtoken='.length));
