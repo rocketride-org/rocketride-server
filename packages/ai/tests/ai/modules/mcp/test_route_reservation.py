@@ -224,10 +224,10 @@ async def test_page_paths_on_the_mcp_api_are_rejected_as_reserved_and_live(monke
 async def test_a_page_path_is_rejected_only_while_it_is_a_live_route(monkeypatch, tmp_path):
     import ai.modules.shell.public_pages as public_pages
     from ai.modules.shell.contract import check_manifest
-    from ai.modules.shell.legacy_manifest import _legacy_manifest
+    from ai.modules.shell.legacy_manifest import legacy_page_manifest
     from ai.modules.shell.shell import shell_static
 
-    manifest = _legacy_manifest()
+    manifest = legacy_page_manifest()
     paths = [page['path'] for page in manifest['publicPages']]
 
     # The shell registers no page routes: every home-ui page path is free.

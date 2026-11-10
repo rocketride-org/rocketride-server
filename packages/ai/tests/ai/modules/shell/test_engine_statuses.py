@@ -34,62 +34,23 @@ as in production until home-ui publishes its manifest.
 
 from __future__ import annotations
 
-import asyncio
-
 import pytest
 from fastapi.testclient import TestClient
 
 import ai.modules.shell.public_pages as pp
-import ai.modules.shell.shell as shell_mod
 
-SHELL_BODY = '<div id="root">shell</div>'
+from .engine_boot import SHELL_BODY, boot_engine
+
 GOOGLEBOT = 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)'
 BROWSER = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/131.0 Safari/537.36'
-
-
-def _close_bounded(loop: asyncio.AbstractEventLoop) -> None:
-    """Close the loop ``eaas.run`` ran on without waiting on its service loops for ever.
-
-    ``eaas.run`` starts the task module's service loops (scheduler, TTL monitor,
-    cleanup, app builds), which only a process exit stops. ``asyncio.run`` would
-    cancel them and wait with no limit, and on Windows CI that wait once never
-    returned. These tests need only the built app.
-    """
-    pending = asyncio.all_tasks(loop)
-    for task in pending:
-        task.cancel()
-    if pending:
-        loop.run_until_complete(asyncio.wait(pending, timeout=5))
-    loop.close()
 
 
 @pytest.fixture
 def engine(monkeypatch, tmp_path):
     """The app ``eaas.run`` serves, with no published manifests (the legacy aggregate)."""
-    from ai import eaas
-    from ai.web import WebServer
-
-    (tmp_path / 'index.html').write_text(f'<html><head><title>shell</title></head><body>{SHELL_BODY}</body></html>')
-    monkeypatch.setattr(shell_mod, '_shell_root', str(tmp_path))
-    monkeypatch.setattr(eaas, '_require_writable_task_data', lambda *a, **k: None)
-
-    async def no_manifests(acct=None, strict=False, exclude='', unreadable=None):
-        return []
-
-    monkeypatch.setattr(pp, 'load_published', no_manifests)
-    built = {}
-
-    async def capture(self):
-        built['server'] = self
-
-    monkeypatch.setattr(WebServer, 'serve', capture)
-    loop = asyncio.new_event_loop()
-    try:
-        loop.run_until_complete(eaas.run({'port': 0, 'host': '127.0.0.1'}))
-    finally:
-        _close_bounded(loop)
+    server = boot_engine(monkeypatch, tmp_path)
     assert pp.current().legacy
-    return TestClient(built['server'].app, follow_redirects=False)
+    return TestClient(server.app, follow_redirects=False)
 
 
 @pytest.fixture
