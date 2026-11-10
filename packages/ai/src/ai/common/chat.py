@@ -624,6 +624,7 @@ class ChatBase:
         fails before any text reached the caller. Reasoning goes to on_reasoning_chunk.
         """
         question.checkTurn()
+        names = ToolNames.build(question.tools, question.messages)
         llm = self._turn_llm()
         origin = model_origin(llm)
         cache = bool(self.SUPPORTS_PROMPT_CACHE_PREFIX and question.cachePrefix)
@@ -663,7 +664,7 @@ class ChatBase:
             if adapter.reasoning and on_reasoning_chunk is not None:
                 on_reasoning_chunk(adapter.reasoning)
 
-        turn, stop = from_langchain(message, ToolNames.build(question.tools, question.messages), origin)
+        turn, stop = from_langchain(message, names, origin)
         if on_finish is not None:
             on_finish(stop)
         return Answer(message=turn, stopReason=stop)

@@ -338,6 +338,18 @@ def _turn(**fields) -> Question:
     )
 
 
+def test_tool_names_that_collide_for_the_provider_are_refused_before_any_request(monkeypatch):
+    transport = _Transport()
+    chat = _anthropic_driver(monkeypatch, transport)
+    q = Question(tools=[{'name': provider_tool_name('a/b')}], messages=[UserMessage(content='hi')])
+    q.addMessage(AssistantMessage(content=[ToolCallBlock(id='call_1', name='a/b', args={})]))
+    q.addToolResult('call_1', 'done')
+
+    with pytest.raises(ValueError, match='a/b'):
+        chat.chat(q)
+    assert transport.bodies == []
+
+
 def test_a_streamed_anthropic_tool_loop_with_thinking(monkeypatch):
     transport = _Transport(
         _anthropic_stream('Filing it.', tool='tool_github_1__create_issue'), _anthropic_stream('Filed #42.')

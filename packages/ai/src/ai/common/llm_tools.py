@@ -51,11 +51,12 @@ _HASH_LEN = 8
 
 
 def provider_tool_name(name: str) -> str:
-    """Map a caller tool name to one every provider accepts. Pure and injective.
+    """Map a caller tool name to one every provider accepts. Pure.
 
     A legal name without '__' is kept. Otherwise each '.' becomes '__', which stays reversible
     while the name has no '__' and no '_' beside a dot. Any other name, or one over 64
     characters, is sanitized, truncated and given '_' plus 8 hex characters of its sha256.
+    That hashed form can equal another caller name, which ToolNames.build rejects.
     """
     if _LEGAL.match(name) and '__' not in name:
         return name
@@ -77,12 +78,21 @@ class ToolNames:
         """Rebuilt per request from the tools and every call in the history, so it keeps no state.
 
         Calls are included so a call to a tool the caller has since removed still maps back.
+        Raises ValueError when two caller names become the same provider name.
         """
         names = {tool.name for tool in tools}
         for message in messages:
             if message.role == 'assistant' and not isinstance(message.content, str):
                 names.update(block.name for block in message.content if isinstance(block, ToolCallBlock))
-        return cls({provider_tool_name(name): name for name in names})
+        to_caller: Dict[str, str] = {}
+        for name in sorted(names):
+            provider = provider_tool_name(name)
+            if provider in to_caller:
+                raise ValueError(
+                    f'tool names {to_caller[provider]!r} and {name!r} both become {provider!r}; rename one'
+                )
+            to_caller[provider] = name
+        return cls(to_caller)
 
     def caller(self, provider_name: str) -> str:
         """Map a name the model used back to the caller's.
