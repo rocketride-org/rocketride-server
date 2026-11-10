@@ -23,8 +23,10 @@
 
 import os
 import uuid
+from functools import lru_cache
+from pathlib import Path
 from typing import List, Dict, Any, Optional
-from .discovery import NodeTestConfig, get_node_test_config
+from .discovery import NodeTestConfig, get_node_test_config, _parse_service_json
 
 # Maps ROCKETRIDE_<PROVIDER>_<ATTR> attribute names to config field names.
 # Used by _parse_credential_env_var() to derive credentials from env var names.
@@ -145,6 +147,151 @@ _LLM_MOCK_CREDENTIALS = {
 }
 
 
+# =============================================================================
+# Node config shape (plan section 5.6.2)
+#
+# A node stores its config as a tree addressed by the engine's leaf
+# paths: a selector's own value at its path, a branch's values under the branch
+# VALUE, a leaf referenced by the identical specifier in every branch hoisted to
+# the parent, everything else flat. SchemaPaths derives those paths from the raw
+# definition the same way the engine does, so the builder can place a profile
+# and the mock credentials where the resolver expects them.
+# =============================================================================
+
+_CORE_DIR = Path(__file__).resolve().parents[2] / 'src' / 'nodes' / 'core'
+
+
+@lru_cache(maxsize=None)
+def _global_definitions() -> Dict[str, Any]:
+    """The shared ``propertyDefinitions`` every node may reference (``core/services.common*.json``)."""
+    definitions: Dict[str, Any] = {}
+    for path in sorted(_CORE_DIR.glob('services.common*.json')):
+        data = _parse_service_json(str(path)) or {}
+        definitions.update(data.get('propertyDefinitions') or {})
+    return definitions
+
+
+def _set_path(config: Dict[str, Any], path: str, value: Any) -> None:
+    """Store ``value`` at dotted ``path`` inside ``config``, creating the groups on the way."""
+    target = config
+    *groups, leaf = path.split('.')
+    for group in groups:
+        target = target.setdefault(group, {})
+    target[leaf] = value
+
+
+class SchemaPaths:
+    """Where a node stores each config leaf (the engine's ``path`` rule, plan section 5.6.1).
+
+    Attributes:
+        leaves: short name -> the paths it resolves at: one per branch when the
+            definition is branch-specific, a single hoisted path when it is shared.
+        selectors: selector path -> its branch values, in declaration order.
+        defaults: path -> the leaf's declared default (constants included).
+    """
+
+    def __init__(self, property_definitions: Dict[str, Any], properties: List[Any]):
+        """Walk ``properties`` against the local and shared definitions.
+
+        Args:
+            property_definitions: The node's own ``propertyDefinitions``.
+            properties: The node's ordered ``properties`` list.
+        """
+        self.leaves: Dict[str, List[str]] = {}
+        self.selectors: Dict[str, List[str]] = {}
+        self.defaults: Dict[str, Any] = {}
+        self._local = property_definitions or {}
+        self._walk(properties or [], '')
+
+    def _lookup(self, name: str) -> Dict[str, Any]:
+        """A definition by name; the node's own wins over a shared one, unknown is empty."""
+        return self._local.get(name) or _global_definitions().get(name) or {}
+
+    def _expand(self, specifier: Any) -> Dict[str, Any]:
+        """Resolve one property specifier, following ``base`` aliases; the name shortens to its last dotted segment."""
+        if isinstance(specifier, str):
+            name, field = specifier, dict(self._lookup(specifier))
+        elif isinstance(specifier, dict) and 'base' in specifier:
+            name = specifier['base']
+            field = {**self._lookup(name), **{key: value for key, value in specifier.items() if key != 'base'}}
+        elif isinstance(specifier, dict):
+            name, field = specifier.get('name', ''), dict(specifier)
+        else:
+            return {}
+        followed = set()
+        while 'base' in field and field['base'] not in followed:
+            alias = field.pop('base')
+            followed.add(alias)
+            field = {**self._lookup(alias), **field}
+        field.setdefault('name', name)
+        field['name'] = str(field['name']).rsplit('.', 1)[-1]
+        return field
+
+    def _walk(self, specifiers: List[Any], prefix: str) -> None:
+        """Record the leaves and selectors of one level; branches recurse at ``prefix + value``."""
+        for specifier in specifiers:
+            field = self._expand(specifier)
+            name = field.get('name')
+            if not name:
+                continue
+            enum = field.get('enum')
+            path = f'{prefix}{name}'
+            if isinstance(field.get('properties'), list) and not isinstance(enum, dict):
+                self._walk(field['properties'], f'{path}.')
+                continue
+            if path not in self.leaves.setdefault(name, []):
+                self.leaves[name].append(path)
+            if 'default' in field:
+                self.defaults[path] = field['default']
+            if isinstance(enum, dict):
+                self.selectors[path] = list(enum)
+                bodies = [body.get('properties') or [] for body in enum.values() if isinstance(body, dict)]
+                hoisted = [spec for spec in bodies[0] if all(spec in other for other in bodies[1:])] if bodies else []
+                self._walk(hoisted, prefix)
+                for value, body in enum.items():
+                    if isinstance(body, dict):
+                        branch = [spec for spec in (body.get('properties') or []) if spec not in hoisted]
+                        self._walk(branch, f'{prefix}{value}.')
+
+    def selector_for(self, value: Optional[str]) -> Optional[str]:
+        """The root-level selector that has ``value`` as a branch, or None."""
+        for path, branches in self.selectors.items():
+            if '.' not in path and value in branches:
+                return path
+        return None
+
+    def path_for(self, name: str, branch: Optional[str]) -> Optional[str]:
+        """The path short name ``name`` resolves at with ``branch`` selected, or None when undeclared."""
+        candidates = self.leaves.get(name) or []
+        for path in candidates:
+            if '.' not in path or (branch and path.startswith(f'{branch}.')):
+                return path
+        return candidates[0] if candidates else None
+
+    def profile_values(self, profile: Optional[str]) -> Dict[str, Any]:
+        """Short name -> declared default for every leaf reachable with ``profile`` selected.
+
+        Root leaves, the selected branch's leaves (constants included) and the
+        selector itself; a leaf declared only under another branch is left out.
+
+        Args:
+            profile: The branch value, or None for the selector's default.
+        """
+        selector = self.selector_for(profile) if profile else None
+        if selector is None:
+            selector = next((path for path in self.selectors if '.' not in path), None)
+            profile = self.defaults.get(selector) if selector else None
+        values: Dict[str, Any] = {}
+        for name, paths in self.leaves.items():
+            for path in paths:
+                reachable = '.' not in path or (profile is not None and path.startswith(f'{profile}.'))
+                if reachable and path in self.defaults:
+                    values[name] = self.defaults[path]
+        if selector and profile is not None:
+            values[selector] = profile
+        return values
+
+
 class PipelineBuilder:
     """
     Builds test pipelines for node testing.
@@ -161,7 +308,7 @@ class PipelineBuilder:
 
         Args:
             config: The node test configuration
-            profile: Optional profile name to use (from preconfig.profiles)
+            profile: Optional profile: a value of the node's root selector
         """
         self.config = config
         self.profile = profile
@@ -183,10 +330,9 @@ class PipelineBuilder:
         Returns:
             Configuration dict for the node
         """
-        config = {}
-        if profile:
-            config['profile'] = profile
+        node = self.config if provider == self.config.provider else get_node_test_config(provider)
 
+        config = {}
         if provider == self.config.provider and self.config.config:
             config.update(self.config.config)
         # Inject credentials into the pipeline config.
@@ -213,10 +359,17 @@ class PipelineBuilder:
                     field = _parse_credential_env_var(env_var, provider)
                     if val and field:
                         creds[field] = val
-        if creds:
-            overrides = config.get(profile, {})
-            if isinstance(overrides, dict):
-                config[profile] = {**overrides, **creds}
+        # Path-addressed shape (plan section 5.6.2): the selector value only when
+        # the schema declares a selector with that branch; a credential under
+        # the branch VALUE when its definition is branch-specific, flat when
+        # it is hoisted. An undeclared credential goes flat so the resolver
+        # names it instead of the builder hiding it.
+        paths = SchemaPaths(node.property_definitions, node.properties) if node else SchemaPaths({}, [])
+        selector = paths.selector_for(profile)
+        if selector:
+            config[selector] = profile
+        for field, value in creds.items():
+            _set_path(config, paths.path_for(field, profile) or field, value)
         return config
 
     def _build_chain_component(

@@ -5,10 +5,10 @@
 
 """The vector store drivers' refusals say what is wrong and what to do (#2476).
 
-Each driver's ``Store`` is loaded from the ``nodes`` package with its vendor
-client stubbed: every message checked here is raised before a client is built
-or a connection is opened. ``Config.getNodeConfig`` is patched to hand the test
-config straight through, so no profile merge is involved.
+A node module is loaded from the ``nodes`` package with its vendor client
+stubbed: every message checked here is raised before a client is built or a
+connection is opened. The similarity metric is an enum of the schema, so its
+refusal comes from the resolver every store runs at start, before the driver.
 """
 
 from __future__ import annotations
@@ -30,8 +30,6 @@ import ai.common.rocketride_db  # noqa: F401
 import ai.common.schema  # noqa: F401
 import ai.common.store  # noqa: F401
 from ai.common.store.store_instance_base import NO_STORE_MESSAGE
-import ai.common.transform  # noqa: F401
-from ai.common.config import Config
 
 # Every third-party module a driver imports, stubbed whether or not it is
 # installed (several sibling suites leave a fake numpy behind), plus
@@ -112,41 +110,34 @@ def _load(module_name: str):
         return importlib.import_module(module_name)
 
 
-@pytest.fixture(autouse=True)
-def _config_passthrough(monkeypatch):
-    monkeypatch.setattr(Config, 'getNodeConfig', lambda provider, connConfig: dict(connConfig))
-
-
 # ---------------------------------------------------------------------------
 # Unsupported similarity metric
 # ---------------------------------------------------------------------------
 
+# The stores whose schema offers the metric. The other vector stores pin it in
+# the driver (cosine), so no configuration can carry an unsupported value there.
 _SIMILARITY_CASES = [
-    ('nodes.store_weaviate.weaviate', 'Weaviate', 'cosine, dot, l2-squared, hamming, manhattan'),
-    ('nodes.store_pinecone.pinecone', 'Pinecone', 'cosine, euclidean, dotproduct'),
-    ('nodes.store_postgres.postgres', 'PostgreSQL (pgvector)', 'cosine, l2, inner_product'),
-    ('nodes.rocketride_vector.rocketride_vector', 'RocketRide Vector', 'cosine, l2, inner_product'),
-    ('nodes.store_astra.astra_db', 'Astra DB', 'cosine, euclidean, dot_product'),
-    ('nodes.store_chroma.chroma', 'Chroma', 'cosine, l2, ip'),
-    ('nodes.store_qdrant.qdrant', 'Qdrant', 'Cosine, Euclid, Dot, Manhattan'),
+    ('postgres', ['cosine', 'l2', 'inner_product']),
+    ('rocketride_vector', ['cosine', 'l2', 'inner_product']),
 ]
 
 
-@pytest.mark.parametrize(
-    ('module_name', 'store_name', 'allowed'),
-    _SIMILARITY_CASES,
-    ids=[case[0].rsplit('.', 1)[1] for case in _SIMILARITY_CASES],
-)
-def test_an_unsupported_similarity_metric_names_the_value_and_the_choices(module_name, store_name, allowed):
-    store_class = _load(module_name).Store
-    config = {'collection': 'docs', 'host': 'localhost', 'port': 1234, 'similarity': 'no-such-metric'}
+@pytest.mark.parametrize(('logical_type', 'allowed'), _SIMILARITY_CASES, ids=[case[0] for case in _SIMILARITY_CASES])
+def test_an_unsupported_similarity_metric_names_the_value_and_the_choices(logical_type, allowed):
+    """The metric is an enum of the schema: the resolver every store runs at start
+    refuses an unknown value before the driver is built, naming the value and the
+    accepted ones, which is also the list the driver's operator table is keyed by.
+    """
+    import rocketlib
+    from rocketlib.config import ConfigError, resolveConfig
 
-    with pytest.raises(Exception) as excinfo:
-        store_class('provider', config, {})
+    schema = rocketlib.getServiceSchema(logical_type)
+    assert schema is not None, f'{logical_type} is not registered with the engine'
 
-    assert str(excinfo.value) == (
-        f'{store_name}: unsupported similarity \'no-such-metric\'. Set "similarity" to: {allowed}.'
-    )
+    with pytest.raises(ConfigError) as excinfo:
+        resolveConfig(schema, {'similarity': 'no-such-metric'})
+
+    assert f'"similarity" must be one of {allowed}, got \'no-such-metric\'' in str(excinfo.value)
 
 
 # ---------------------------------------------------------------------------

@@ -30,9 +30,6 @@ def store_base_stubs(document_store_base=None) -> types.ModuleType:
         def _open_store(self, logical_type, conn_config, bag):
             raise NotImplementedError
 
-        def _sub_key(self):
-            raise NotImplementedError
-
         def _probe_connection(self, config):
             raise NotImplementedError
 

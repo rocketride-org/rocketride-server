@@ -1,32 +1,36 @@
+//
+// Common property definitions for Google Cloud Platform - these will be merged
+// into the service definition as required by the service
+//
 {
-	"fields": {
+	"propertyDefinitions": {
 		"gcp.authType": {
 			"type": "string",
 			"title": "Authentication Type",
-			"default": "adc",
-			"enum": ["adc", "service_account"],
-			"enumNames": ["Application Default Credentials", "Service Account JSON"],
 			"description": "Choose how to authenticate to Google Cloud Platform.",
-			"conditional": [
-				{
-					"value": "service_account",
+			"default": "adc",
+			"enum": {
+				"adc": {
+					"title": "Application Default Credentials"
+				},
+				"service_account": {
+					"title": "Service Account JSON",
 					"properties": ["gcp.serviceAccountKey"]
 				}
-			]
+			}
 		},
 		"gcp.serviceAccountKey": {
-			"type": "string",
-			"format": "data-url",
+			"type": "upload",
 			"title": "Service Account Key JSON",
 			"description": "Upload the JSON key file for your Google Cloud service account.",
-			"ui:options:accept": ".json",
-			"secure": true
+			"options": {
+				"accept": ".json"
+			}
 		},
 		"gcp.projectId": {
 			"type": "string",
 			"title": "Project ID",
-			"description": "Optional: Specify the Google Cloud Project ID explicitly. Leave blank to infer from credentials.",
-			"optional": true
+			"description": "Optional: Specify the Google Cloud Project ID explicitly. Leave blank to infer from credentials."
 		}
 	}
 }

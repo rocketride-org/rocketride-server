@@ -21,8 +21,9 @@
 # SOFTWARE.
 # =============================================================================
 
-from rocketlib import IGlobalBase, debug, OPEN_MODE
-from ai.common.config import Config
+from rocketlib import IGlobalBase, debug
+
+from .detector import AnomalyDetector
 
 
 class IGlobal(IGlobalBase):
@@ -37,17 +38,12 @@ class IGlobal(IGlobalBase):
 
     def beginGlobal(self):
         """Initialize the anomaly detector when the pipeline starts."""
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            pass
-        else:
-            from .detector import AnomalyDetector
+        # The resolved config: defaults applied, the active method's values flat
+        config = self.config
 
-            config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-
-            method = config.get('method', 'z_score')
-            debug(f'    Loading anomaly detector: method={method}')
-            self.detector = AnomalyDetector(config)
-            debug('    Anomaly detector initialized')
+        debug(f'    Loading anomaly detector: method={config.method}')
+        self.detector = AnomalyDetector(config)
+        debug('    Anomaly detector initialized')
 
     def endGlobal(self):
         """Clean up the anomaly detector when the pipeline ends."""

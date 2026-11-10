@@ -8,8 +8,7 @@
 import os
 from typing import Any, Tuple
 
-from rocketlib import IGlobalBase, OPEN_MODE
-from ai.common.config import Config
+from rocketlib import IGlobalBase
 
 from . import elevenlabs_tts, openai_tts, rime_tts
 
@@ -17,29 +16,21 @@ _MP3_MIME = 'audio/mpeg'
 
 # One entry per cloud TTS vendor. The key is matched (substring) against the node
 # logicalType to pick the vendor. Add a vendor by adding an entry here plus its
-# <vendor>_tts.synthesize(text, model, voice, api_key) -> bytes module.
+# <vendor>_tts.synthesize(text, model, voice, api_key) -> bytes module. The
+# model, voice and key defaults are the vendor's services.*.json schema.
 _ENGINES = {
     'openai': {
         'synthesize': openai_tts.synthesize,
-        'default_model': 'gpt-4o-mini-tts',
-        'default_voice': 'alloy',
-        'env_key': 'OPENAI_API_KEY',
         'label': 'OpenAI TTS',
     },
     'elevenlabs': {
         'synthesize': elevenlabs_tts.synthesize,
-        'default_model': 'eleven_multilingual_v2',
-        'default_voice': 'EXAVITQu4vr4xnSDxMaL',
-        'env_key': 'ELEVENLABS_API_KEY',
         'label': 'ElevenLabs',
     },
-    # Rime speakers are model-specific; the services.tts_rime.json profile
-    # conditional renders one speaker enum per model, all merged under `voice`.
+    # Rime speakers are model-specific; services.tts_rime.json carries one
+    # speaker enum per model branch, every one resolving to the `voice` key.
     'rime': {
         'synthesize': rime_tts.synthesize,
-        'default_model': 'coda',
-        'default_voice': 'astra',
-        'env_key': 'RIME_API_KEY',
         'label': 'Rime',
     },
 }
@@ -91,23 +82,19 @@ class IGlobal(IGlobalBase):
     _api_key: str
 
     def beginGlobal(self):
-        """Resolve the vendor/model/voice/key from the node configuration.
+        """Resolve the vendor from the logicalType and the model/voice/key from the resolved config.
 
-        No-op in ``CONFIG`` mode (the UI only needs the schema). Otherwise
-        installs the lightweight HTTP dependency and validates the API key.
+        The schema supplies the defaults and marks the key required, so an
+        empty key never reaches here; the key arrives through the node config
+        (a ${ROCKETRIDE_TTS_*_APIKEY} reference resolved per call). Then installs
+        the lightweight HTTP dependency.
         """
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
-
         self._engine = _resolve_engine(self.glb.logicalType)
-        spec = _ENGINES[self._engine]
 
-        cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-        self._model = str(cfg.get('model') or spec['default_model']).strip()
-        self._voice = str(cfg.get('voice') or spec['default_voice']).strip()
-        self._api_key = (cfg.get('apikey') or os.environ.get(spec['env_key']) or '').strip()
-        if not self._api_key:
-            raise Exception(f'{spec["label"]} requires an API key (node config or {spec["env_key"]})')
+        cfg = self.config
+        self._model = cfg.model
+        self._voice = cfg.voice
+        self._api_key = cfg.apikey.strip()
 
         from depends import depends  # type: ignore
 

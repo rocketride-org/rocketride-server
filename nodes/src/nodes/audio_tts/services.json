@@ -66,30 +66,11 @@
 		"answers": ["audio"]
 	},
 	//
-	//	Optional:
-	//		Profile section are configuration options used by the driver
-	//		itself
-	//
-	"preconfig": {
-		// Define the values that will be merged into any profile configuration
-		// specified, unless the profile is 'absolute'
-		"default": "kokoro",
-		// Defines profiles used with the "profile": key
-		"profiles": {
-			"kokoro": {
-				"engine": "kokoro",
-				"kokoro_voice": "af_heart"
-			}
-		}
-	},
-	//
 	// Optional:
-	//		Local field definitions - these define fields only for the
-	//		current service. You may specify them here, or directly
-	//		in the shape
+	//		Local property definitions. Kokoro is the only engine, so the
+	//		voice is the whole configuration and is stored flat.
 	//
-	"fields": {
-		// ── Kokoro ────────────────────────────────────────────────────────────
+	"propertyDefinitions": {
 		"audio_tts.kokoro_voice": {
 			"type": "string",
 			"title": "Voice",
@@ -151,41 +132,17 @@
 				["pm_alex", "Portuguese: pm_alex"],
 				["pm_santa", "Portuguese: pm_santa"]
 			]
-		},
-		// ── Form objects (one per profile) ────────────────────────────────────
-		"audio_tts.form.kokoro": {
-			"object": "kokoro",
-			"properties": ["audio_tts.kokoro_voice"]
-		},
-		// ── Profile selector (drives conditional form rendering) ───────────────
-		"audio_tts.profile": {
-			"title": "TTS profile",
-			"type": "string",
-			"default": "kokoro",
-			"enum": [["kokoro", "Kokoro"]],
-			"conditional": [
-				{
-					"value": "kokoro",
-					"properties": ["audio_tts.form.kokoro"]
-				}
-			]
 		}
 	},
 	//
 	// Required:
-	//		Defines the fields (shape) of the service. Either source or target
-	//		may be specified, or both, but at least one is required
+	//		Defines the properties shown in the pipeline builder side panel, in order
 	//
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "Text To Speech",
-			"properties": ["audio_tts.profile"]
-		}
-	],
+	"properties": ["audio_tts.kokoro_voice"],
 	//
 	// Optional:
-	//		Test configuration for automated node testing
+	//		Test configuration for automated node testing. The node has no
+	//		selector; "kokoro" labels the one configuration.
 	//
 	"test": {
 		"profiles": ["kokoro"],

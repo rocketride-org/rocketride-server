@@ -24,10 +24,9 @@
 import os
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Dict
+from typing import Any, Dict, Mapping
 
 from rocketlib import debug, expand
-from ai.common.config import Config
 from ai.common.models import GLiNER
 from ai.common.models.base import make_device_lock
 from .Ruleparser import RuleParser
@@ -40,29 +39,30 @@ from .anonymize import (
 
 
 class GliNERRecognizer:
-    def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
+    def __init__(self, config: Mapping[str, Any], bag: Dict[str, Any]):
         """
         Initialize the GLiNER Recognizer.
 
         Uses ai.common.models.GLiNER which automatically routes to model server
         if --modelserver flag is present, otherwise runs locally.
-        """
-        # Get the nodes configuration
-        config = Config.getNodeConfig(provider, connConfig)
 
-        self.model_name = config.get('model', 'xomad/gliner-model-merge-large-v1.0')
-        self.anonymize = config.get('anonymize', True)
-        self.anonymize_char = config.get('anonymizeChar', '\u2588')
+        Args:
+            config: The node's resolved config (defaults applied, the selected
+                profile's model flat): model, anonymizeChar, redactionStyle, entityTypes.
+            bag: The endpoint's shared runtime state.
+        """
+        self.model_name = config['model']
+        self.anonymize_char = config['anonymizeChar']
 
         # Redaction style: 'mask' overwrites entities with anonymize_char (\u2588\u2588\u2588\u2588),
         # 'token' replaces each entity with a labelled placeholder like [PERSON].
-        self.redaction_style = config.get('redactionStyle', 'mask')
+        self.redaction_style = config['redactionStyle']
 
         # Entity types to detect. Configurable per pipeline via the `entityTypes`
-        # field; clean_entity_types rejects non-list values, drops blank entries,
-        # and falls back to the common defaults when the result is empty so
-        # detection is never silently disabled.
-        self.labels = clean_entity_types(config.get('entityTypes'))
+        # field; clean_entity_types drops blank entries and falls back to the
+        # common defaults when the result is empty so detection is never
+        # silently disabled.
+        self.labels = clean_entity_types(config['entityTypes'])
 
         enginePath = expand('%execPath%')
         rule_file_path = os.path.join(enginePath, 'nucleuz', 'rulePack.dat')

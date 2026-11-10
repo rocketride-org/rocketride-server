@@ -17,9 +17,11 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from rocketlib.config import ConfigError
 
 _NODES_SRC = str(Path(__file__).resolve().parent.parent.parent / 'src' / 'nodes')
 # Force the node source to the FRONT of sys.path: this test directory is itself
@@ -384,96 +386,68 @@ def _import_schema():
 
 
 class TestIGlobalLifecycle:
-    """IGlobal strategy selection and validation."""
+    """IGlobal strategy selection through the real resolver (the engine's schema for services.json)."""
 
-    def test_iglobal_creates_sentence_strategy(self):
+    @staticmethod
+    def _begin(conn_config):
+        """Start the node's IGlobal on a stored config and return it."""
         IGlobal, _ = _import_node_classes()
         iglobal = IGlobal.__new__(IGlobal)
         iglobal.strategy = None
-
-        endpoint = MagicMock()
-        endpoint.openMode = 'run'
-        iglobal.IEndpoint = MagicMock()
-        iglobal.IEndpoint.endpoint = endpoint
-
-        glb = MagicMock()
-        glb.logicalType = 'chunker'
-        glb.connConfig = {'strategy': 'sentence', 'chunk_size': '500', 'chunk_overlap': '50'}
-        iglobal.glb = glb
-
+        iglobal.glb = SimpleNamespace(logicalType='chunker', connConfig=conn_config)
         iglobal.beginGlobal()
+        return iglobal
+
+    def test_iglobal_creates_sentence_strategy(self):
+        iglobal = self._begin({'strategy': 'sentence', 'sentence': {'chunk_size': 500, 'chunk_overlap': 50}})
         assert isinstance(iglobal.strategy, SentenceChunker)
         assert iglobal.strategy.chunk_size == 500
         assert iglobal.strategy.chunk_overlap == 50
 
     def test_iglobal_creates_token_strategy(self):
-        IGlobal, _ = _import_node_classes()
-        iglobal = IGlobal.__new__(IGlobal)
-        iglobal.strategy = None
-
-        endpoint = MagicMock()
-        endpoint.openMode = 'run'
-        iglobal.IEndpoint = MagicMock()
-        iglobal.IEndpoint.endpoint = endpoint
-
-        glb = MagicMock()
-        glb.logicalType = 'chunker'
-        glb.connConfig = {
-            'strategy': 'token',
-            'chunk_size': '512',
-            'chunk_overlap': '50',
-            'encoding_name': 'o200k_base',
-        }
-        iglobal.glb = glb
-
-        iglobal.beginGlobal()
+        iglobal = self._begin(
+            {'strategy': 'token', 'token': {'chunk_size': 512, 'chunk_overlap': 50, 'encoding_name': 'o200k_base'}}
+        )
         assert isinstance(iglobal.strategy, TokenChunker)
         assert iglobal.strategy.chunk_size == 512
         assert iglobal.strategy.chunk_overlap == 50
         assert iglobal.strategy.encoding_name == 'o200k_base'
 
-    def test_iglobal_rejects_unknown_strategy(self):
-        IGlobal, _ = _import_node_classes()
-        iglobal = IGlobal.__new__(IGlobal)
-        iglobal.strategy = None
+    def test_each_strategy_keeps_its_own_defaults(self):
+        """The token strategy counts tokens, so its sizes default lower than the sentence strategy's."""
+        sentence = self._begin({})
+        assert isinstance(sentence.strategy, SentenceChunker)
+        assert (sentence.strategy.chunk_size, sentence.strategy.chunk_overlap) == (1000, 200)
 
-        endpoint = MagicMock()
-        endpoint.openMode = 'run'
-        iglobal.IEndpoint = MagicMock()
-        iglobal.IEndpoint.endpoint = endpoint
+        token = self._begin({'strategy': 'token'})
+        assert isinstance(token.strategy, TokenChunker)
+        assert (token.strategy.chunk_size, token.strategy.chunk_overlap) == (512, 50)
+        assert token.strategy.encoding_name == 'cl100k_base'
 
-        glb = MagicMock()
-        glb.logicalType = 'chunker'
-        glb.connConfig = {'strategy': 'recurisve', 'chunk_size': '100', 'chunk_overlap': '0'}
-        iglobal.glb = glb
+    def test_switching_strategies_keeps_the_other_ones_values(self):
+        """A stored value under the strategy that is not selected is kept, not validated, not read."""
+        iglobal = self._begin({'strategy': 'sentence', 'token': {'chunk_size': 64}})
+        assert isinstance(iglobal.strategy, SentenceChunker)
+        assert iglobal.strategy.chunk_size == 1000
 
-        with pytest.raises(ValueError, match='Unknown chunker strategy'):
-            iglobal.beginGlobal()
-
-    def test_iglobal_points_removed_recursive_strategy_at_preprocessor(self):
-        """A stale 'recursive' config names the node that owns that algorithm.
+    @pytest.mark.parametrize('value', ['recurisve', 'recursive'])
+    def test_iglobal_rejects_unknown_strategy(self, value):
+        """A strategy the schema does not list fails loudly and names the two it offers.
 
         Recursive character splitting lives in preprocessor_langchain; this node
-        no longer reimplements it, so the error has to route the author there
-        rather than read as a plain typo.
+        never reimplements it, so 'recursive' is an unknown option like any typo.
         """
-        IGlobal, _ = _import_node_classes()
-        iglobal = IGlobal.__new__(IGlobal)
-        iglobal.strategy = None
+        with pytest.raises(ConfigError, match="not one of its options \\['sentence', 'token'\\]"):
+            self._begin({'strategy': value})
 
-        endpoint = MagicMock()
-        endpoint.openMode = 'run'
-        iglobal.IEndpoint = MagicMock()
-        iglobal.IEndpoint.endpoint = endpoint
+    def test_iglobal_rejects_an_overlap_that_is_not_below_the_size(self):
+        with pytest.raises(ValueError, match='must be less than chunk_size'):
+            self._begin({'sentence': {'chunk_size': 100, 'chunk_overlap': 100}})
 
-        glb = MagicMock()
-        glb.logicalType = 'chunker'
-        glb.connConfig = {'strategy': 'recursive', 'chunk_size': '100', 'chunk_overlap': '0'}
-        iglobal.glb = glb
-
-        with pytest.raises(ValueError, match='preprocessor_langchain'):
-            iglobal.beginGlobal()
-        assert iglobal.strategy is None
+    def test_a_stringified_size_is_a_schema_error(self):
+        """The sizes are integers: a quoted number is refused, never silently coerced."""
+        with pytest.raises(ConfigError, match='"sentence.chunk_size" expects integer'):
+            self._begin({'sentence': {'chunk_size': '500'}})
 
 
 class TestIInstanceWriteDocuments:

@@ -1,6 +1,5 @@
 # =============================================================================
 # MIT License
-#
 # Copyright (c) 2026 Aparavi Software AG
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -22,8 +21,9 @@
 # SOFTWARE.
 # =============================================================================
 
-from rocketlib import IGlobalBase, OPEN_MODE, warning
-from ai.common.config import Config
+from rocketlib import IGlobalBase
+from ai.common.models.base import make_device_lock
+from ai.common.models.vision.caption import Captioner
 
 
 class IGlobal(IGlobalBase):
@@ -31,27 +31,13 @@ class IGlobal(IGlobalBase):
     device_lock = None
 
     def beginGlobal(self):
-        """Build the shared Captioner facade from node config (model/task)."""
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
-
-        from ai.common.models.vision.caption import Captioner, DEFAULT_MODEL, DEFAULT_TASK
-
-        config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-
-        model_name = (config.get('model') or '').strip()
-        if not model_name:
-            warning(f'caption: no model configured, using default {DEFAULT_MODEL}')
-            model_name = DEFAULT_MODEL
-        task = str(config.get('task', DEFAULT_TASK)).strip() or DEFAULT_TASK
-        revision = (config.get('revision') or '').strip() or None
+        """Build the shared Captioner facade from the resolved config (model/revision/task)."""
+        config = self.config
 
         # device=None -> model server when --modelserver is set, else local.
-        self.captioner = Captioner(model_name=model_name, device=None, task=task, revision=revision)
+        self.captioner = Captioner(model_name=config.model, device=None, task=config.task, revision=config.revision)
 
         # Local inference must serialize GPU access
-        from ai.common.models.base import make_device_lock
-
         self.device_lock = make_device_lock()
 
     def endGlobal(self):

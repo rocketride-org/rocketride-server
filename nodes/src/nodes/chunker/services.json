@@ -10,7 +10,7 @@
 	"description": ["A text chunking component that splits documents into smaller, semantically coherent ", "chunks for downstream processing such as embedding, retrieval, and LLM-based generation. ", "Provides two strategies the engine does not otherwise have: sentence-boundary splitting ", "with no third-party dependencies, and token-based splitting using the real tiktoken BPE ", "tokenizer (not a byte-length estimate). Both support configurable chunk size and overlap, ", "and emit start/end character offsets per chunk. For recursive character splitting use the ", "General Text (preprocessor_langchain) node, which already provides it."],
 	"icon": "chunker.svg",
 	"documentation": "https://docs.rocketride.org/nodes/chunker",
-	"tile": ["Strategy: ${parameters.chunker.${profile}.strategy}", "Size: ${parameters.chunker.${profile}.chunk_size}"],
+	"tile": ["Strategy: ${parameters.chunker.strategy}", "Size: ${parameters.chunker.${strategy}.chunk_size}"],
 	"lanes": {
 		"documents": ["documents"]
 	},
@@ -27,25 +27,14 @@
 			]
 		}
 	],
-	"preconfig": {
-		"default": "sentence",
-		"profiles": {
-			"sentence": {
-				"title": "Sentence Boundary - Splits at sentence endings for coherent chunks",
-				"strategy": "sentence",
-				"chunk_size": 1000,
-				"chunk_overlap": 200
-			},
-			"token": {
-				"title": "Token-based - Splits by token count, ideal for LLM context windows",
-				"strategy": "token",
-				"chunk_size": 512,
-				"chunk_overlap": 50,
-				"encoding_name": "cl100k_base"
-			}
-		}
-	},
-	"fields": {
+	//
+	// Optional:
+	//		Local property definitions. The strategy is the selector; the token
+	//		strategy aliases the size fields with its own (token-count) defaults
+	//		and adds the tokenizer encoding, so each strategy keeps its own
+	//		stored values.
+	//
+	"propertyDefinitions": {
 		"chunker.chunk_size": {
 			"type": "integer",
 			"title": "Chunk size",
@@ -60,6 +49,14 @@
 			"default": 200,
 			"minimum": 0
 		},
+		"chunker.token.chunk_size": {
+			"base": "chunker.chunk_size",
+			"default": 512
+		},
+		"chunker.token.chunk_overlap": {
+			"base": "chunker.chunk_overlap",
+			"default": 50
+		},
 		"chunker.encoding_name": {
 			"type": "string",
 			"title": "Token encoding",
@@ -71,40 +68,35 @@
 				["p50k_base", "p50k_base - Codex models"],
 				["r50k_base", "r50k_base - GPT-3 models"]
 			]
-		},
-		"chunker.sentence": {
-			"object": "sentence",
-			"properties": ["chunker.chunk_size", "chunker.chunk_overlap"]
-		},
-		"chunker.token": {
-			"object": "token",
-			"properties": ["chunker.chunk_size", "chunker.chunk_overlap", "chunker.encoding_name"]
-		},
-		"chunker.profile": {
-			"title": "Chunking strategy",
-			"description": "Select the text chunking strategy",
-			"type": "string",
-			"default": "sentence",
-			"enum": ["*>preconfig.profiles.*.title"],
-			"conditional": [
-				{
-					"value": "sentence",
-					"properties": ["chunker.sentence"]
-				},
-				{
-					"value": "token",
-					"properties": ["chunker.token"]
-				}
-			]
 		}
 	},
-	"shape": [
+	//
+	// Required:
+	//		Defines the properties shown in the pipeline builder side panel, in order
+	//
+	"properties": [
 		{
-			"section": "Pipe",
-			"title": "Text Chunker",
-			"properties": ["chunker.profile"]
+			"name": "strategy",
+			"type": "string",
+			"title": "Chunking strategy",
+			"description": "Select the text chunking strategy",
+			"default": "sentence",
+			"enum": {
+				"sentence": {
+					"title": "Sentence Boundary - Splits at sentence endings for coherent chunks",
+					"properties": ["chunker.chunk_size", "chunker.chunk_overlap"]
+				},
+				"token": {
+					"title": "Token-based - Splits by token count, ideal for LLM context windows",
+					"properties": ["chunker.token.chunk_size", "chunker.token.chunk_overlap", "chunker.encoding_name"]
+				}
+			}
 		}
 	],
+	//
+	//	Test configuration for automated node testing. "profiles" lists
+	//	values of the "strategy" selector.
+	//
 	"test": {
 		"profiles": ["sentence", "token"],
 		"outputs": ["documents"],

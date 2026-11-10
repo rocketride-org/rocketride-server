@@ -37,7 +37,6 @@ from rocketlib import debug, error, warning
 
 from ai.common.agent import AgentBase, AgentContext
 from ai.common.agent.types import AgentRunResult
-from ai.common.config import Config
 from ai.common.schema import Question
 
 from ai.common.utils import safe_str
@@ -113,7 +112,8 @@ class RocketRideDriver(AgentBase):
     def __init__(self, iGlobal) -> None:
         """Initialize the Wave driver and load host services."""
         super().__init__(iGlobal)
-        config = Config.getNodeConfig(iGlobal.glb.logicalType, iGlobal.glb.connConfig)
+        # The resolved config AgentBase already read (defaults applied, flat)
+        config = self._config
         self._max_waves = config.get('max_waves', _DEFAULT_MAX_WAVES)
         # Optional tool that checks the work (e.g. "workspace.compile"). When set,
         # the planner must run it after its last change before it may finish.

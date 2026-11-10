@@ -20,9 +20,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from rocketlib import IGlobalBase, OPEN_MODE
-
-from ai.common.config import Config
+from rocketlib import IGlobalBase
 
 
 class IGlobal(IGlobalBase):
@@ -33,9 +31,6 @@ class IGlobal(IGlobalBase):
     _kickoff_runner: Any = None
 
     def beginGlobal(self) -> None:
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
-
         from depends import depends
 
         # Shared requirements.txt at the parent agent_crewai/ level.
@@ -46,13 +41,12 @@ class IGlobal(IGlobalBase):
         )
         depends(requirements)
 
-        # Resolve through Config.getNodeConfig so profile defaults are applied and both
-        # the flat and nested-under-default pipe shapes work.
-        conn_config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
+        # The resolved config: defaults applied, every field flat and typed
+        config = self.config
 
-        self.goal = str(conn_config.get('goal') or '').strip()
-        self.backstory = str(conn_config.get('backstory') or '').strip()
-        self.planning = bool(conn_config.get('planning', False))
+        self.goal = config.goal.strip()
+        self.backstory = config.backstory.strip()
+        self.planning = config.planning
 
         from ..crewai_runner import get_shared_runner
 

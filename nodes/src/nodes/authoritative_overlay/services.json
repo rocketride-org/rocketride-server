@@ -26,41 +26,7 @@
 			"answers"
 		]
 	},
-	"preconfig": {
-		"default": "basic",
-		"profiles": {
-			"basic": {
-				"title": "Basic: US SEC (EDGAR)",
-				"regulator_type": "sec",
-				"cik": "320193"
-			}
-		}
-	},
-	"fields": {
-		"authoritative_overlay.basic": {
-			"object": "basic",
-			"properties": [
-				"authoritative_overlay.regulator_type",
-				"authoritative_overlay.cik"
-			]
-		},
-		"authoritative_overlay.profile": {
-			"title": "Profile",
-			"description": "Overlay profile",
-			"type": "string",
-			"default": "basic",
-			"enum": [
-				"*>preconfig.profiles.*.title"
-			],
-			"conditional": [
-				{
-					"value": "basic",
-					"properties": [
-						"authoritative_overlay.basic"
-					]
-				}
-			]
-		},
+	"propertyDefinitions": {
 		"authoritative_overlay.regulator_type": {
 			"type": "string",
 			"title": "Regulator Source",
@@ -80,14 +46,9 @@
 			"default": "320193"
 		}
 	},
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "Authoritative Overlay",
-			"properties": [
-				"authoritative_overlay.profile"
-			]
-		}
+	"properties": [
+		"authoritative_overlay.regulator_type",
+		"authoritative_overlay.cik"
 	],
 	"test": [
 		{

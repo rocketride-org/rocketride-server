@@ -75,66 +75,32 @@
 	},
 	//
 	// Optional:
-	//		Configuration profiles used by the driver
+	//		Local property definitions. Every field is stored flat.
 	//
-	"preconfig": {
-		"default": "default",
-		"profiles": {
-			"default": {
-				"agent_description": "",
-				"instructions": [],
-				"require_tool_call": false
-			}
-		}
-	},
-	//
-	// Optional:
-	//		Local field definitions for this service
-	//
-	"fields": {
+	"propertyDefinitions": {
 		"agent_description": {
 			"type": "string",
+			"format": "textarea",
 			"title": "Agent description",
 			"default": "",
-			"optional": true,
-			"description": "What does this agent do? Describe its purpose and capabilities, this helps parent agents select and invoke it correctly.",
-			"ui": {
-				"ui:widget": "textarea"
-			}
+			"description": "What does this agent do? Describe its purpose and capabilities, this helps parent agents select and invoke it correctly."
 		},
 		"instructions": {
 			"type": "array",
 			"title": "Instructions",
 			"description": "Additional instructions to guide the agent.",
-			"items": {
-				"type": "string",
-				"format": "textarea"
-			}
+			"item": { "name": "instruction", "type": "string", "format": "textarea" }
 		},
 		"require_tool_call": {
 			"type": "boolean",
 			"title": "Require tool call",
 			"default": false,
 			"description": "Require the agent to invoke at least one tool before answering. When on, a run that answers without calling any tool fails with a guard error. Use for determinism-critical pipelines where an ungrounded or narrated answer must never be delivered. Off by default."
-		},
-		"agent_llamaindex.default": { "object": "default", "properties": ["agent_description", "instructions", "require_tool_call"] },
-		"agent_llamaindex.profile": {
-			"title": "Profile",
-			"type": "string",
-			"default": "default",
-			"enum": [["default", "Default"]],
-			"conditional": [{ "value": "default", "properties": ["agent_llamaindex.default"] }]
 		}
 	},
 	//
 	// Required:
-	//		Defines the configuration shape (sections + fields) shown in the UI
+	//		Defines the properties shown in the pipeline builder side panel, in order
 	//
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "LlamaIndex",
-			"properties": ["agent_description", "instructions", "require_tool_call"]
-		}
-	]
+	"properties": ["type", "agent_description", "instructions", "require_tool_call"]
 }
