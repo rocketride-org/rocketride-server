@@ -43,7 +43,8 @@ import { LOCAL_APIKEY, MAX_SLOTS, openStack, slotPlan, type Stack, type StackOpt
 import { agentSettingsFile, Store, type AgentLimits } from './store';
 import { loadTasks, type Task } from './task';
 import { writeRunReport } from './report';
-import { buildResults, spentUsd, writeResults, type Schedule } from './results';
+import { findResults, mergeResults } from './merge';
+import { buildResults, spentUsd, writeResults, type ResultsFile, type Schedule } from './results';
 import { checkWorkspace, readTree, referenceWorkspace } from './references';
 import { causeOf } from './cause';
 import { roundOrder, runSchedule, runTrials, type Job } from './schedule';
@@ -83,6 +84,12 @@ Commands:
   smoke           Ask each model one question the way the Agent tab does
                   (task 0.2), on the engine alone. Prints a table: model,
                   answered, seconds, whether the engine lists the key name.
+  merge           Write one results.json and report.md for a batch that ran
+                  as many small runs (one task per fresh stack): every
+                  results.json under --out, each task's trials renumbered in
+                  the order they started and scored as one --trials run.
+                  Needs --out <batch folder> and --trials <n>. Lists the
+                  trial folders no results.json names.
 
 Options:
   --env-file <file>
@@ -253,6 +260,44 @@ function validate(args: Args): number {
 	console.log(`${valid.length} valid, ${bad.length} invalid, in ${args.tasks}`);
 	if (args.table) console.log(`\n${table(valid)}`);
 	return bad.length ? 1 : 0;
+}
+
+/** The trial folders under a batch folder that hold a result.json. */
+function trialFolders(dir: string): string[] {
+	const found: string[] = [];
+	const walk = (d: string) => {
+		for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+			if (!e.isDirectory() || /^(final|stack.*|pages|node_modules)$/.test(e.name)) continue;
+			const p = path.join(d, e.name);
+			if (/^trial-\d+/.test(e.name)) {
+				if (fs.existsSync(path.join(p, 'result.json'))) found.push(p);
+			} else walk(p);
+		}
+	};
+	walk(dir);
+	return found;
+}
+
+function merge(args: Args): number {
+	if (!args.out || args.trials === null) {
+		console.error(`merge needs --out <batch folder> and --trials <n>\n\n${USAGE}`);
+		return 2;
+	}
+	const out = path.resolve(args.out);
+	try {
+		const runs = findResults(out).map((f) => ({ dir: path.dirname(f), results: JSON.parse(fs.readFileSync(f, 'utf8')) as ResultsFile }));
+		const results = mergeResults(runs, out, args.trials);
+		console.log(`${runs.length} runs, ${results.tasks.length} tasks: ${writeResults(out, results)} and ${writeRunReport(out, results)}`);
+		for (const r of runs.filter((x) => x.results.stopped)) console.log(`${path.relative(out, r.dir)} stopped early, ${r.results.stopped}`);
+		// step: a run stopped before it wrote results.json leaves trials no results.json names; list them, never count them
+		const named = new Set(results.tasks.flatMap((t) => t.trials.map((x) => path.dirname(path.resolve(out, x.result)))));
+		const unnamed = trialFolders(out).filter((d) => !named.has(d));
+		if (unnamed.length) console.log(`${unnamed.length} trial folder(s) no results.json names, left out:\n${unnamed.map((d) => `  ${path.relative(out, d)}`).join('\n')}`);
+		return 0;
+	} catch (err) {
+		console.error(err instanceof Error ? err.message : String(err));
+		return 1;
+	}
 }
 
 async function run(args: Args, modelKeys: HeldKey[]): Promise<number> {
@@ -623,6 +668,7 @@ async function main(): Promise<number> {
 		return 0;
 	}
 	if (args.command === 'validate') return validate(args);
+	if (args.command === 'merge') return merge(args);
 	const command = args.command === null ? undefined : KEYED[args.command];
 	if (!command) {
 		console.error(`${args.command === null ? 'no command' : `unknown command ${args.command}`}\n\n${USAGE}`);

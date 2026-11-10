@@ -9,6 +9,7 @@ What exists so far:
 - Grading (`grade.ts`): the task's checks on the trial, with 51bd59d2c7's check kinds, a check every task gets (`keys-not-leaked`), and path resolution for renamed files. Reruns of failures and the flake rate (`schedule.ts`), written to `results.json` and `report.md`.
 - `check`: grades a hand-made workspace, such as a task's reference solution, against the engine with no agent.
 - `smoke`: asks each eval model one question the way the Agent tab does.
+- `merge`: writes one `results.json` and `report.md` for a batch that ran as many small runs, such as one task per fresh stack. It reads every `results.json` under `--out`, renumbers each task's trials in the order they started, scores them as one `--trials` run, and lists any trial folder no `results.json` names. It needs no model keys.
 - From #2885 (`origin/feat/rocket-agent-eval`): the scorer (`score.ts`), the secret scan (`canary.ts`), the report writer (`report.ts`), the trial record types (`types.ts`), the sample-input pipeline run (`runOutput.ts`) and the node catalog (`catalog.ts`).
 
 The tool drives the Agent tab from #2718 (`feat/rocket-agent-browser`), so it needs that branch.
