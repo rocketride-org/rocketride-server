@@ -21,7 +21,7 @@
 # SOFTWARE.
 # =============================================================================
 
-"""The Chroma store pins its metric: the collection uses the cosine space and the scores take the cosine rescaling."""
+"""The Chroma store pins its metric: new collections use the cosine space, and scores follow the space of the open collection."""
 
 from unittest.mock import patch
 
@@ -52,17 +52,45 @@ def test_the_collection_is_created_in_the_cosine_space():
     assert client.get_or_create_collection.call_args.kwargs['metadata'] == {'hnsw:space': 'cosine'}
 
 
-def test_scores_take_the_cosine_rescaling():
-    """A cosine distance of 0.8 rescales to 0.9; a result below 0.20 is dropped."""
-    store, _ = _store()
-    results = {
-        'ids': [['a', 'b']],
-        'metadatas': [[{'objectId': 'a', 'chunkId': 0}, {'objectId': 'b', 'chunkId': 0}]],
-        'distances': [[0.8, -0.9]],
-        'documents': [['kept', 'dropped']],
+def _results(distances):
+    """A Chroma query() result with one record per distance."""
+    ids = [f'r{i}' for i in range(len(distances))]
+    return {
+        'ids': [ids],
+        'metadatas': [[{'objectId': record, 'chunkId': 0} for record in ids]],
+        'distances': [list(distances)],
+        'documents': [ids],
     }
 
-    docs = store._convertToDocs(results)
 
-    assert [doc.page_content for doc in docs] == ['kept']
-    assert abs(docs[0].score - 0.9) < 1e-9
+def test_scores_take_the_cosine_rescaling():
+    """Chroma's cosine distance is 1 - similarity: 0 scores 1.0, 0.2 scores 0.9, and 1.8 (0.1) is dropped by the 0.20 floor."""
+    store, _ = _store()
+
+    docs = store._convertToDocs(_results([0.0, 0.2, 1.8]))
+
+    assert [doc.page_content for doc in docs] == ['r0', 'r1']
+    assert abs(docs[0].score - 1.0) < 1e-9
+    assert abs(docs[1].score - 0.9) < 1e-9
+
+
+def test_a_closer_match_scores_higher():
+    """The score falls as the distance grows, so ranking by score ranks by closeness."""
+    store, _ = _store()
+
+    docs = store._convertToDocs(_results([0.1, 0.5, 1.0]))
+
+    scores = [doc.score for doc in docs]
+    assert scores == sorted(scores, reverse=True)
+
+
+def test_a_collection_created_in_another_space_keeps_its_rescaling():
+    """A collection built before the pin reports its own hnsw:space; its distances are not rescaled as cosine."""
+    store, client = _store()
+    store.collectionObj = client.get_collection.return_value
+    store.collectionObj.metadata = {'hnsw:space': 'l2'}
+
+    docs = store._convertToDocs(_results([0.0]))
+
+    assert store._distanceSpace() == 'l2'
+    assert abs(docs[0].score - 1.0) > 1e-9

@@ -135,8 +135,9 @@ class Store(DocumentStoreBase):
         # HTTPS-only; a self-hosted server behind plain HTTP turns it off.
         self.ssl = self._coerceBool(config.get('ssl', True))
 
-        # The metric is pinned: Chroma accepts l2, ip or cosine (hnsw:space),
-        # and the score rescaling in the search assumes cosine
+        # The metric is pinned for new collections: Chroma accepts l2, ip or
+        # cosine (hnsw:space); a collection created before the pin keeps its
+        # own space, which _distanceSpace reads back for the score rescaling
         self.similarity = 'cosine'
 
         # Read the same way as the key check (IGlobal._credentials), so the key is
@@ -421,6 +422,20 @@ class Store(DocumentStoreBase):
         else:
             return None
 
+    def _distanceSpace(self) -> str:
+        """
+        Return the distance space the open collection was created in.
+
+        New collections take the pinned cosine space. A collection created
+        while the metric was still a setting keeps the l2 or ip space it was
+        built in, and Chroma returns its distances in that space, so the
+        rescaling must follow the collection, not the pin.
+        """
+        metadata = getattr(self.collectionObj, 'metadata', None)
+        if isinstance(metadata, dict) and isinstance(metadata.get('hnsw:space'), str):
+            return metadata['hnsw:space']
+        return self.similarity
+
     def _convertToDocs(self, results: Dict) -> List[Doc]:
         """
         Convert ChromaDB results to a list of Docs.
@@ -433,6 +448,9 @@ class Store(DocumentStoreBase):
             results['distances'] = results['distances'][0]
             results['documents'] = results['documents'][0]
 
+        # The space the distances were computed in decides their rescaling
+        space = self._distanceSpace()
+
         # Now, add the documents to the results
         for i in range(len(results['ids'])):
             # Get the payload content and meadata
@@ -440,8 +458,11 @@ class Store(DocumentStoreBase):
             content = results['documents'][i]
 
             if results.get('distances', None) is not None:
-                if self.similarity == 'cosine':
-                    score = (results['distances'][i] + 1) / 2
+                if space == 'cosine':
+                    # Chroma's cosine distance is 1 - cosine similarity, in
+                    # [0, 2] with 0 for identical vectors; map it to a [0, 1]
+                    # score where 1 is the closest match
+                    score = 1.0 - results['distances'][i] / 2
                 else:
                     score = float(1.0 / (1.0 + np.exp(results['distances'][i] / -100)))
 
