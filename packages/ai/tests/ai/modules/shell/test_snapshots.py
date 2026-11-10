@@ -47,6 +47,7 @@ from fastapi.testclient import TestClient
 import ai.modules.shell.pages as pages
 import ai.modules.shell.public_pages as pp
 import ai.modules.shell.shell as shell_mod
+from ai.modules.shell.contract import MAX_SNAPSHOT_BYTES
 from ai.modules.shell.pages import FALLBACK_PATH, public_page, snapshot_path
 from ai.modules.shell.public_pages import Aggregate, Page
 from ai.modules.shell.template import MAX_SECTION_DEPTH, render
@@ -59,6 +60,7 @@ from .hostile_fixtures import (
     HOSTILE_DESCRIPTION,
     HOSTILE_NAME,
     dist_of,
+    file_info,
     hostile_account,
     install,
     read_file,
@@ -98,6 +100,19 @@ def reads(monkeypatch):
         return await read_file(path)
 
     monkeypatch.setattr(pp, 'read_artifact_file', counting)
+    return log
+
+
+@pytest.fixture
+def stats(monkeypatch):
+    """Every store path the serving path stats, in order."""
+    log = []
+
+    async def counting(path):
+        log.append(path)
+        return await file_info(path)
+
+    monkeypatch.setattr(pp, 'artifact_file_info', counting)
     return log
 
 
@@ -213,12 +228,12 @@ def test_a_page_without_a_snapshot_serves_crawlers_the_shell_document(shell_root
 
 @pytest.mark.parametrize(
     'failure',
-    [StorageNotFoundError('File not found'), RuntimeError('store down')],
-    ids=['not-in-the-store', 'store-down'],
+    [StorageNotFoundError('File not found'), RuntimeError('store down'), ValueError('garbled store answer')],
+    ids=['not-in-the-store', 'store-down', 'store-value-error'],
 )
 def test_a_failed_snapshot_read_is_served_uncached_and_warned(shell_root, monkeypatch, warned, failure):
-    # Neither outcome is final: a gated version's files may not be readable yet,
-    # and a store recovers. Nothing downstream may keep the fallback.
+    # No outcome is final: a gated version's files may not be readable yet,
+    # and a store recovers, whatever it raised. Nothing downstream may keep the fallback.
     _seed()
     _serve(_page())
 
@@ -239,13 +254,44 @@ def test_a_failed_snapshot_read_is_served_uncached_and_warned(shell_root, monkey
     assert 'Pricing plans' in resp.text and resp.headers['cache-control'] == 'public, max-age=3600'
 
 
-def test_a_snapshot_the_engine_refuses_is_served_uncached_and_warned(shell_root, warned):
+def test_a_snapshot_the_engine_refuses_falls_back_cacheably_and_warns_once(shell_root, reads, warned):
+    # A version's snapshot never changes, so neither does the template error.
     _seed('{{#plans}}' * (MAX_SECTION_DEPTH + 1) + 'deep')
     _serve(_page())
-    resp = _crawl(_client())
-    assert resp.status_code == 200 and SHELL_BODY in resp.text
-    assert resp.headers['cache-control'] == 'private, no-cache'
-    assert len(pages._render_cache) == 0 and any('nest deeper' in line for line in warned)
+    client = _client()
+    for _ in range(2):
+        resp = _crawl(client)
+        assert resp.status_code == 200 and SHELL_BODY in resp.text
+        assert resp.headers['cache-control'] == 'public, max-age=3600'
+    assert len(pages._render_cache) == 1 and len(reads) == 1
+    assert len(warned) == 1 and 'nest deeper' in warned[0]
+    # A swap drops the cached response, not the memory of the bad version.
+    _serve(_page(title='Renamed'))
+    assert '<title>Renamed</title>' in _crawl(client).text
+    assert len(reads) == 1 and len(warned) == 1
+
+
+def test_a_snapshot_over_the_size_cap_is_never_read_and_falls_back_cacheably(shell_root, reads, stats, warned):
+    _seed('x' * (MAX_SNAPSHOT_BYTES + 1))
+    _serve(_page())
+    client = _client()
+    for _ in range(2):
+        resp = _crawl(client)
+        assert resp.status_code == 200 and SHELL_BODY in resp.text
+        assert resp.headers['cache-control'] == 'public, max-age=3600'
+    assert reads == [] and stats == [f'{DIST}/pages/pricing.html']
+    assert len(pages._render_cache) == 1 and len(pages._snapshot_cache) == 0
+    assert len(warned) == 1 and f'over the {MAX_SNAPSHOT_BYTES}-byte limit' in warned[0]
+    _serve(_page(title='Renamed'))
+    assert '<title>Renamed</title>' in _crawl(client).text
+    assert reads == [] and len(stats) == 1 and len(warned) == 1
+
+
+def test_a_snapshot_at_the_size_cap_renders(shell_root):
+    filler = 'x' * (MAX_SNAPSHOT_BYTES - len(SNAPSHOT))
+    _seed(SNAPSHOT.replace('</body>', f'{filler}</body>'))
+    _serve(_page())
+    assert 'Pricing plans' in _crawl(_client()).text
 
 
 @pytest.mark.parametrize('snapshot', ['../escape.html', '/abs.html', 'pages/../../x.html', 'a\\b.html', ''])
@@ -370,25 +416,25 @@ def _bulk(count, size):
 
 
 def test_oversize_body_is_served_but_not_cached(shell_root):
+    # Snapshots are capped well under the render budget; a shell document is not.
     size = pages._RENDER_CACHE_MAX_BYTES + 1
-    _seed(f'<html><head></head><body>{"x" * size}</body></html>')
+    (shell_root / 'index.html').write_text(f'<html><head></head><body>{"x" * size}</body></html>')
     _serve(_page())
-    resp = _crawl(_client())
+    resp = _client().get('/pricing', headers={'User-Agent': BROWSER})
     assert resp.status_code == 200 and len(resp.content) > size
     assert len(pages._render_cache) == 0 and pages._render_cache.total == 0
-    assert len(pages._snapshot_cache) == 0  # over its own budget as well
 
 
 def test_snapshot_cache_evicts_fifo_under_budget(shell_root):
-    _bulk(4, 6 * MIB)
+    _bulk(10, MAX_SNAPSHOT_BYTES - 1024)
     client = _client()
-    for i in range(3):
+    for i in range(9):
         _crawl(client, f'/p{i}')
-    # Three 6 MiB snapshots overflow 16 MiB: the first one read goes first.
-    assert list(pages._snapshot_cache.keys()) == [f'{DIST}/pages/p1.html', f'{DIST}/pages/p2.html']
+    # Eight snapshots near the cap fill 16 MiB; the ninth evicts the first one read.
+    assert list(pages._snapshot_cache.keys()) == [f'{DIST}/pages/p{i}.html' for i in range(1, 9)]
     assert pages._snapshot_cache.total <= pages._SNAPSHOT_CACHE_MAX_BYTES == 16 * MIB
-    _crawl(client, '/p3')
-    assert list(pages._snapshot_cache.keys()) == [f'{DIST}/pages/p2.html', f'{DIST}/pages/p3.html']
+    _crawl(client, '/p9')
+    assert list(pages._snapshot_cache.keys()) == [f'{DIST}/pages/p{i}.html' for i in range(2, 10)]
 
 
 def test_a_crawler_sweep_keeps_both_caches_under_their_byte_budgets(shell_root):

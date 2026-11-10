@@ -296,7 +296,8 @@ publish fails with a message naming the field):
   releases it).
 - Each `data` entry is `plans`, `plans:<appId>` or `app:<appId>`, and a page
   names each source (`plans`, `app`) at most once.
-- `snapshot` must be a relative `.html` path that exists in the built version.
+- `snapshot` must be a relative `.html` path that exists in the built version,
+  at most 2 MiB.
 - `site.docsUrl` must be an `https://` URL, with `<`, `>`, `"`, `'` and
   `` ` `` percent-encoded.
 - `site.redirects` (at most 100): each `from` is one exact path in the `path`
@@ -319,7 +320,8 @@ canonical URL on `RR_APP_URL`, and `noindex` for an unlisted page.
 Crawlers (search, AI and link-preview bots, by user agent) get the page's
 `snapshot` instead, read from the production version's build output, with the
 same head. A page without a snapshot, or whose snapshot cannot be read or
-rendered, serves crawlers the shell's document.
+rendered, serves crawlers the shell's document; so does a stored snapshot over
+2 MiB, which the server never reads.
 
 A snapshot is a template with exactly three kinds of tag, each on one line:
 `{{name}}` and `{{a.b}}` insert a value, HTML-escaped; `{{#name}}...{{/name}}`

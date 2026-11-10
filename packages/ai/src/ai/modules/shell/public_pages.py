@@ -55,6 +55,7 @@ from ai.account.app_rows import (
 )
 
 from .contract import (
+    MAX_SNAPSHOT_BYTES,
     Page,
     check_manifest,
     check_redirects,
@@ -386,7 +387,8 @@ async def gate_errors(app_id: str, manifest: Mapping[str, Any], dist_dir: str, a
     paths and redirect sources) against every OTHER published platform
     manifest (first claim wins; ownership is derived from published
     manifests, so unpublishing releases it, with no table), and snapshot
-    files missing from the built version.
+    files missing from the built version or over ``MAX_SNAPSHOT_BYTES``
+    (sized by a stat, never read).
 
     The collision check sees only what is already published: two platform
     apps publishing the same path at the same moment can both pass. The
@@ -452,11 +454,18 @@ async def gate_errors(app_id: str, manifest: Mapping[str, Any], dist_dir: str, a
         if not page.snapshot:
             continue
         try:
-            await artifact_file_info(f'{dist_dir}/{page.snapshot}')
+            info = await artifact_file_info(f'{dist_dir}/{page.snapshot}')
         except StorageNotFoundError:
             errors.append(
                 f'publicPages path {page.path!r}: snapshot {page.snapshot!r} is not in the built version; '
                 'emit it into the build output or drop the field'
+            )
+            continue
+        if info['size'] > MAX_SNAPSHOT_BYTES:
+            errors.append(
+                f'publicPages path {page.path!r}: snapshot {page.snapshot!r} is {info["size"]} bytes, over the '
+                f'{MAX_SNAPSHOT_BYTES}-byte limit; move images, styles and scripts into the build output and '
+                'reference them through {{assets}}'
             )
     return errors
 

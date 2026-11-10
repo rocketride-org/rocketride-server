@@ -49,7 +49,8 @@ robots) is injected.
 
 Rendered responses are cached per (path, UA class) under a byte budget and
 dropped on every aggregate swap; snapshot bytes, immutable per version, are
-cached by store path under its own byte budget.
+cached by store path under its own byte budget. A snapshot over
+``MAX_SNAPSHOT_BYTES`` (sized by a stat) is never read.
 """
 
 import asyncio
@@ -67,12 +68,12 @@ from ai.web.middleware import route_path
 from rocketlib import warning
 
 from . import public_pages
-from .contract import Page, snapshot_error, with_slash_twin
+from .contract import MAX_SNAPSHOT_BYTES, Page, snapshot_error, with_slash_twin
 from .crawlers import CRAWLER, classify
 from .head import inject_head
 from .settings import app_url
 from .shell import CACHE_CONTROL, shell_document_path, shell_static
-from .template import render
+from .template import TemplateError, render
 
 # The web server whose route table the auth predicate and the live-route
 # collision check read (set by initModule).
@@ -315,6 +316,16 @@ def _clear_rendered(old: Any, new: Any) -> None:
 _SNAPSHOT_CACHE_MAX_BYTES = 16 * 1024 * 1024
 _snapshot_cache = _FifoCache(_SNAPSHOT_CACHE_MAX_BYTES)
 
+# Store paths of snapshots that can never render: over MAX_SNAPSHOT_BYTES, or a
+# template the engine refuses. A version's build output never changes, so each
+# is warned about once and never read again, across swaps too.
+_UNUSABLE_SNAPSHOTS_MAX = 1024
+_unusable_snapshots = _FifoCache(_UNUSABLE_SNAPSHOTS_MAX, _UNUSABLE_SNAPSHOTS_MAX)
+
+
+class _SnapshotTooLarge(Exception):
+    """A stored snapshot over ``MAX_SNAPSHOT_BYTES`` (never read)."""
+
 
 def snapshot_path(page: Page) -> str:
     """The store path of a page's snapshot inside its production version's build output.
@@ -338,35 +349,58 @@ def assets_base(page: Page) -> str:
     return f'/apps/{page.app_id}/v{page.version}'
 
 
-async def _snapshot_bytes(page: Page) -> bytes:
-    path = snapshot_path(page)
+async def _snapshot_bytes(path: str) -> bytes:
+    """The snapshot at store ``path``, from the snapshot cache or the store.
+
+    On a miss the file is sized by a stat first, so a snapshot over the cap
+    is never downloaded.
+
+    Raises:
+        _SnapshotTooLarge: the stored file is over ``MAX_SNAPSHOT_BYTES``.
+        Exception: a storage failure (``StorageNotFoundError`` included).
+    """
     raw = _snapshot_cache.get(path)
     if raw is None:
+        size = (await public_pages.artifact_file_info(path))['size']
+        if size > MAX_SNAPSHOT_BYTES:
+            raise _SnapshotTooLarge(f'{size} bytes, over the {MAX_SNAPSHOT_BYTES}-byte limit')
         raw = await public_pages.read_artifact_file(path)
         _snapshot_cache.put(path, raw, len(raw))
     return raw
 
 
+def _fallback(page: Page, document: Path, reason: Any) -> str:
+    """The shell document, served to crawlers in place of a snapshot that cannot be used (logged)."""
+    warning(f'[public_pages] {page.path}: snapshot {page.snapshot!r} unavailable, serving the shell document: {reason}')
+    return document.read_text(encoding='utf-8')
+
+
 async def _crawler_document(page: Page, document: Path) -> Tuple[str, bool]:
     """The page's rendered snapshot for crawlers, else the shell document: ``(html, cacheable)``.
 
-    Every fallback is logged as a warning. Only a malformed snapshot path (or
-    a page without a production version, ``ValueError``) falls back
-    cacheably: that never changes for the page. Any other failure falls back
-    uncached, so the next request tries again: a storage error, a snapshot
-    the store does not have (yet), or a template the engine refuses.
+    A fallback is cacheable when it is final for the page's version: a
+    malformed snapshot path or no production version, a snapshot over
+    ``MAX_SNAPSHOT_BYTES``, or a template the engine refuses (the last two
+    are remembered by store path and warned about once). Any other failure
+    falls back uncached and warned, so the next request tries again: a
+    storage error, or a snapshot the store does not have (yet).
     """
     if not page.snapshot:
         return document.read_text(encoding='utf-8'), True
     try:
-        raw = await _snapshot_bytes(page)
+        path = snapshot_path(page)
+    except ValueError as exc:
+        return _fallback(page, document, exc), True
+    if path in _unusable_snapshots:
+        return document.read_text(encoding='utf-8'), True
+    try:
+        raw = await _snapshot_bytes(path)
         return render(raw.decode('utf-8', errors='replace'), {'assets': assets_base(page)}), True
+    except (_SnapshotTooLarge, TemplateError) as exc:
+        _unusable_snapshots.put(path, True, 1)
+        return _fallback(page, document, exc), True
     except Exception as exc:
-        cacheable = isinstance(exc, ValueError)
-        warning(
-            f'[public_pages] {page.path}: snapshot {page.snapshot!r} unavailable, serving the shell document: {exc}'
-        )
-    return document.read_text(encoding='utf-8'), cacheable
+        return _fallback(page, document, exc), False
 
 
 def _moved(request: Request, path: str) -> Response:
