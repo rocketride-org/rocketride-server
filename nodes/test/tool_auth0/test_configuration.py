@@ -71,6 +71,7 @@ def test_service_configuration():
     assert service['classType'] == ['tool'] and service['lanes'] == {}
     assert 'nosaas' not in service['capabilities']
     assert service['preconfig']['profiles']['default']['allowWrite'] is False
+    assert 'unavailable' in service['fields']['auth0.allowWrite']['description']
     for name in ('clientSecret', 'writeClientSecret'):
         field = service['fields'][f'auth0.{name}']
         assert field['secure'] is True and field['ui']['ui:widget'] == 'ApiKeyWidget'
@@ -183,3 +184,84 @@ def test_credentials_are_not_taken_from_process_environment(node, monkeypatch):
     with pytest.raises(ValueError):
         instance.beginGlobal()
     depends.assert_not_called()
+
+
+@pytest.mark.parametrize('secret', ['${ROCKETRIDE_AUTH0_WRITE_SECRET}', 'literal-write-secret'])
+def test_encrypted_write_credential_is_decoded_before_env_substitution(node, monkeypatch, secret):
+    package, _, _, _ = node
+    path = NODE.parents[3] / 'packages' / 'ai' / 'src' / 'ai' / 'modules' / 'task' / 'pipeline.py'
+    spec = importlib.util.spec_from_file_location('auth0_test_pipeline_config', path)
+    pipeline = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(pipeline)
+    encrypted = {
+        'components': [
+            {'config': {'parameters': {'secureParameters': {'secure': ['writeClientSecret'], 'token': 'opaque'}}}}
+        ]
+    }
+    decoded = {'components': [{'config': {'parameters': {'writeClientSecret': secret}}}]}
+    monkeypatch.setattr(sys.modules['rocketlib'], 'resolveSecureParameters', lambda value: decoded, raising=False)
+    resolved = pipeline.resolve_pipeline_env(
+        pipeline.resolve_parameter_tokens(encrypted), {'ROCKETRIDE_AUTH0_WRITE_SECRET': 'resolved-write-secret'}
+    )
+    cfg = {
+        'domain': 'tenant.auth0.com',
+        'clientId': 'read',
+        'clientSecret': 'read-secret',
+        'allowWrite': True,
+        'writeClientId': 'write',
+        **resolved['components'][0]['config']['parameters'],
+    }
+    package.auth0_client.validate_config(cfg)
+    assert cfg['writeClientSecret'] == ('resolved-write-secret' if secret.startswith('${') else secret)
+    unresolved = pipeline.resolve_pipeline_env(pipeline.resolve_parameter_tokens(encrypted), {})
+    if secret.startswith('${'):
+        cfg.update(unresolved['components'][0]['config']['parameters'])
+        with pytest.raises(ValueError, match='unresolved credential reference'):
+            package.auth0_client.validate_config(cfg)
+
+
+def test_parameter_decode_failure_does_not_expose_values(node, monkeypatch):
+    path = NODE.parents[3] / 'packages' / 'ai' / 'src' / 'ai' / 'modules' / 'task' / 'pipeline.py'
+    spec = importlib.util.spec_from_file_location('auth0_test_pipeline_config', path)
+    pipeline = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(pipeline)
+
+    def fail(_):
+        raise ValueError('credential-value')
+
+    monkeypatch.setattr(sys.modules['rocketlib'], 'resolveSecureParameters', fail, raising=False)
+    data = {'components': [{'config': {'parameters': {'secureParameters': {}}}}]}
+    with pytest.raises(ValueError) as error:
+        pipeline.resolve_parameter_tokens(data)
+    assert 'credential-value' not in str(error.value)
+    assert error.value.__suppress_context__
+
+
+def test_active_tokens_are_decoded_once_and_inactive_profiles_are_preserved(node, monkeypatch):
+    path = NODE.parents[3] / 'packages' / 'ai' / 'src' / 'ai' / 'modules' / 'task' / 'pipeline.py'
+    spec = importlib.util.spec_from_file_location('auth0_test_pipeline_config', path)
+    pipeline = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(pipeline)
+    inactive = {'secureParameters': {'secure': ['key'], 'token': 'inactive'}}
+    original = {
+        'components': [
+            {
+                'config': {
+                    'profile': 'current',
+                    'current': {'secureParameters': {'secure': ['key'], 'token': 'active'}},
+                    'other': inactive,
+                }
+            }
+        ]
+    }
+    decoded = {'components': [{'config': {'profile': 'current', 'current': {'key': 'value'}, 'other': inactive}}]}
+    calls = []
+
+    def resolve(value):
+        calls.append(value)
+        return decoded
+
+    monkeypatch.setattr(sys.modules['rocketlib'], 'resolveSecureParameters', resolve, raising=False)
+    assert pipeline.resolve_parameter_tokens(pipeline.resolve_parameter_tokens(original)) is decoded
+    assert calls == [original]
+    assert decoded['components'][0]['config']['other'] == inactive

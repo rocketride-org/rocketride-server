@@ -40,24 +40,12 @@ with this node installed and the test tenant configuration is required.
    Other read operations require their own scopes; do not infer the minimum
    user-log scope from a token that has both permissions.
 
-## Live write: explicit approval required
+## Live write: unavailable
 
-Do not enable writes or make a DELETE during the read-only checks. Before any
-write, identify the exact dedicated tenant and test user, the observed pre-write
-administrative and brute-force states, and the write application. Request the
-user's explicit approval for each planned action:
-
-* Calling `unblock_user` on the designated account when a brute-force block is
-  present can clear its brute-force protection records. Check the administrative
-  block before and after and record only whether it changed.
-* Calling `unblock_user` with no blocks exercises the node's no-op path; the
-  current implementation does **not** send a DELETE in that case. Verifying
-  Auth0's response to a DELETE when no block exists is a separate live write and
-  requires explicit approval for that direct request as well.
-
-Do not create a block, change the administrative block, or retry an ambiguous
-write without separate authorization. A precheck and DELETE are not atomic, so
-record the observed state and outcome without asserting which record changed.
+The node does not expose `unblock_user` and denies unblock requests even when
+write credentials are configured. It cannot perform a live write until an
+independent human authorization mechanism is supported. Do not make a DELETE
+as part of these read-only checks.
 
 ## Sanitized evidence
 
@@ -70,10 +58,7 @@ record the observed state and outcome without asserting which record changed.
 | Recent user logs and individual event | Pass | Both tools succeeded; a direct client read also confirmed page limit and order. |
 | Brute-force block state and no-block response | Pass | No blocks returned for the three designated users. |
 | Minimum user-log scope | Not run | A separately scoped read-only application is needed. |
-| Approved unblock with existing block | Not run | Requires explicit approval |
-| Node no-op with no blocks | Not run | Requires explicit approval |
-| Auth0 DELETE with no blocks | Not run | Separate explicit approval required |
-| Administrative state unchanged after approved write | Not run | |
+| Unblock | Not run | Node writes are disabled pending independent human authorization. |
 
 The OpenRouter chat pipeline returned an answer consistent with the direct
 read-only result. The agent's individual tool calls were not independently

@@ -6,12 +6,14 @@
 
 import importlib.util
 import json
+import shutil
 import subprocess
 import sys
 import uuid
 import xml.etree.ElementTree as etree
 from pathlib import Path
 
+import pytest
 import test_configuration
 
 node = test_configuration.node
@@ -54,6 +56,22 @@ def test_example_pipeline_wires_auth0_to_agent_without_writes():
 
 
 def test_example_edges_match_actual_service_definitions():
+    if not shutil.which('node'):
+        pytest.skip('Node.js is not installed')
+    dependency_check = subprocess.run(
+        [
+            'node',
+            '-e',
+            "try { require.resolve('jsonc-parser', {paths: ['./scripts/lib']}); } "
+            "catch (err) { if (err.code === 'MODULE_NOT_FOUND') process.exit(3); throw err; }",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    if dependency_check.returncode == 3:
+        pytest.skip('jsonc-parser is not installed')
+    assert dependency_check.returncode == 0, dependency_check.stderr
     paths = [
         'nodes/src/nodes/webhook/services.chat.json',
         'nodes/src/nodes/agent_rocketride/services.json',

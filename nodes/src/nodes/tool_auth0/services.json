@@ -61,7 +61,7 @@
 		"auth0.allowWrite": {
 			"type": "boolean",
 			"title": "Enable writes",
-			"description": "Allow brute-force unblock using separate write credentials.",
+			"description": "Reserve separate write credentials; unblocking remains unavailable pending independent human authorization.",
 			"default": false
 		},
 		"auth0.writeClientId": {

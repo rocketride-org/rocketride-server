@@ -55,7 +55,6 @@ def client(node, monkeypatch):
         'auth0.com.evil.net',
         'localhost',
         '127.0.0.1',
-        'https://tenant.auth0.com',
         'tenant.auth0.com:443',
         'tenant.auth0.com/path',
         'tenant.auth0.com?x=1',
@@ -273,6 +272,10 @@ def test_all_tools_map_remote_errors_through_flat_contract(client, node, operati
         }
     )
     result = getattr(instance, operation)(args)
+    if operation == 'unblock_user':
+        assert result['error_code'] == 'WRITE_AUTHORIZATION_REQUIRED'
+        requests.request.assert_not_called()
+        return
     expected = code or ('RESOURCE_NOT_FOUND' if operation in ('search_users', 'get_log_event') else 'USER_NOT_FOUND')
     assert result == {
         'success': False,
@@ -309,13 +312,11 @@ def test_read_tools_use_approved_http_routes_and_read_token(client, node, operat
     assert requests.post.call_args.kwargs['json']['client_id'] == 'read'
 
 
-def test_unblock_uses_read_token_for_check_and_separate_write_token_for_delete(client, node):
+def test_client_uses_separate_read_and_write_tokens(client):
     _, auth, requests, _ = client
-    instance = node[0].IInstance()
-    instance.IGlobal = types.SimpleNamespace(client=auth)
     requests.request.side_effect = [response(200, {'blocked_for': [{'identifier': 'x'}]}), response(204)]
-    result = instance.unblock_user({'user_id': 'auth0|1'})
-    assert set(result) == {'success', 'user_id', 'unblocked', 'had_blocks', 'message'}
+    auth.request('get_user_blocks', identifier='auth0|1', params={'consider_brute_force_enablement': 'true'})
+    auth.request('unblock_user', identifier='auth0|1')
     read_call, write_call = requests.request.call_args_list
     assert read_call.args == ('GET', 'https://tenant.us.auth0.com/api/v2/user-blocks/auth0%7C1')
     assert read_call.kwargs['params'] == {'consider_brute_force_enablement': 'true'}
@@ -356,3 +357,44 @@ def test_unauthorized_write_invalidates_only_its_token(client):
     auth.request('get_user', identifier='1')
     assert [call.kwargs['json']['client_id'] for call in requests.post.call_args_list] == ['read', 'write']
     assert requests.request.call_args.kwargs['headers']['Authorization'] == 'Bearer read-token'
+
+
+def test_close_during_token_refresh_waits_and_clears_credentials(client):
+    import threading
+
+    module, auth, requests, _ = client
+    entered, release = threading.Event(), threading.Event()
+
+    def post(*args, **kwargs):
+        entered.set()
+        assert release.wait(5)
+        return response(body={'access_token': 'token', 'expires_in': 3600})
+
+    requests.post.side_effect = post
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        pending = pool.submit(auth.request, 'get_user', identifier='u')
+        assert entered.wait(5)
+        closed = pool.submit(auth.close)
+        release.set()
+        pending.result(timeout=5)
+        closed.result(timeout=5)
+    assert auth._config == {} and auth._tokens == {'read': None, 'write': None}
+    with pytest.raises(module.Auth0Error) as error:
+        auth.request('get_user', identifier='u')
+    assert error.value.code == 'CLIENT_CLOSED'
+
+
+@pytest.mark.parametrize('domain', ['Tenant.US.Auth0.com', ' tenant.us.auth0.com ', 'https://tenant.us.auth0.com/'])
+def test_normalizes_valid_tenant_domain(client, domain):
+    module, _, _, cfg = client
+    cfg['domain'] = domain
+    assert module.Auth0Client(cfg)._base == 'https://tenant.us.auth0.com'
+
+
+def test_rate_limit_reset_header_and_invalid_values(client, monkeypatch):
+    module, _, _, _ = client
+    monkeypatch.setattr(module.time, 'time', lambda: 1000)
+    assert module._retry_after({'x-ratelimit-reset': '1007'}) == 7
+    assert module._retry_after({'Retry-After': '2', 'x-ratelimit-reset': '1007'}) == 2
+    for value in ('nan', 'inf', 'bad', '999'):
+        assert module._retry_after({'x-ratelimit-reset': value}) == 0

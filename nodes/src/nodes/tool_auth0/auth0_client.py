@@ -48,7 +48,14 @@ def _retry_after(headers):
     """Parse a retry delay from response headers."""
     value = headers.get('Retry-After')
     if not value:
-        return 0.0
+        value = headers.get('x-ratelimit-reset')
+        if not value:
+            return 0.0
+        try:
+            delay = float(value) - time.time()
+        except (TypeError, ValueError, OverflowError):
+            return 0.0
+        return max(0.0, delay) if math.isfinite(delay) else 0.0
     try:
         delay = float(value)
     except (TypeError, ValueError):
@@ -64,7 +71,10 @@ def _retry_after(headers):
 
 def validate_domain(domain):
     """Accept only ASCII DNS hostnames below auth0.com."""
-    if not isinstance(domain, str) or len(domain) > 253 or not domain.endswith('.auth0.com'):
+    if not isinstance(domain, str):
+        raise Auth0Error('INVALID_DOMAIN', 'A valid Auth0 tenant hostname is required.')
+    domain = re.sub(r'^https://', '', domain.strip(), flags=re.IGNORECASE).removesuffix('/').lower()
+    if len(domain) > 253 or not domain.endswith('.auth0.com'):
         raise Auth0Error('INVALID_DOMAIN', 'A valid Auth0 tenant hostname is required.')
     labels = domain.split('.')
     if len(labels) < 3 or any(
@@ -109,11 +119,14 @@ class Auth0Client:
         self._base = 'https://' + validate_domain(cfg['domain'])
         self._tokens = {'read': None, 'write': None}
         self._locks = {'read': threading.Lock(), 'write': threading.Lock()}
+        self._closed = False
 
     def close(self) -> None:
         """Release credential references."""
-        self._config.clear()
-        self._tokens = {'read': None, 'write': None}
+        with self._locks['read'], self._locks['write']:
+            self._closed = True
+            self._config.clear()
+            self._tokens = {'read': None, 'write': None}
 
     @property
     def writes_enabled(self):
@@ -125,6 +138,8 @@ class Auth0Client:
         import requests
 
         with self._locks[kind]:
+            if self._closed:
+                raise Auth0Error('CLIENT_CLOSED', 'Auth0 client is closed.')
             cached = self._tokens[kind]
             if cached and time.monotonic() < cached[1]:
                 return cached[0]
@@ -192,6 +207,8 @@ class Auth0Client:
                 raise Auth0Error('INVALID_INPUT', 'A valid identifier is required.')
             path = path.replace('{id}', quote(identifier, safe=''))
         kind = 'write' if method == 'DELETE' else 'read'
+        if self._closed:
+            raise Auth0Error('CLIENT_CLOSED', 'Auth0 client is closed.')
         if kind == 'write' and not self._config.get('allowWrite'):
             raise Auth0Error('WRITE_DISABLED', 'Auth0 writes are disabled.')
         auth_retry = False
