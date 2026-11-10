@@ -166,8 +166,8 @@ async def load_published(
     reaches here), through the SAME serving gate the store walk uses (binding
     enabled, deployment approved on a review-ladder server, build ok),
     anonymous permission reach (no requiredPermissions), platform namespace
-    only. One winner per app id (lowest publisher org, as the store walk
-    resolves ties).
+    only. One winner per app id, chosen among its serving rows (lowest
+    publisher org, as the store walk resolves ties).
 
     ``public: false`` apps never contribute. One app whose row or artifact
     cannot be read is skipped (logged) so it cannot freeze the map, and its
@@ -190,14 +190,17 @@ async def load_published(
         from ai.account import account as acct
 
     org = '' if 'saas' in getattr(acct, 'capabilities', ()) else 'local'
+    review_ladder = getattr(acct, 'review_ladder', True)
     winners: Dict[str, Dict[str, Any]] = {}
     for row in precedence_sorted(await acct.publish_list(org, 'app', [{'type': 'public', 'id': ''}])):
+        # The store walk's order: a row that does not serve never competes,
+        # and the precedence winner among the rest lands last.
+        if serving_block_of(row, review_ladder) or not holds_required_permissions(row, set()):
+            continue
         winners[str(row.get('appId') or '')] = row
     out: List[Published] = []
     for app_id, row in sorted(winners.items()):
         if app_id == exclude or (row.get('audience') or {}).get('type') != 'public' or not is_privileged(app_id):
-            continue
-        if serving_block_of(row, getattr(acct, 'review_ladder', True)) or not holds_required_permissions(row, set()):
             continue
         if (row.get('snapshot') or {}).get('public', True) is False:
             continue
