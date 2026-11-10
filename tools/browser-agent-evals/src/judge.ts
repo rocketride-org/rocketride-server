@@ -32,7 +32,8 @@
  * published to the signed-in user (@me), and opened at <shell>/?appid=<id>.
  * The Design preview is no use here: its frame is a blob: URL that no other
  * browser can open. After one signed-in look at the page, judgeApp uses the
- * app against the checklist, and the stack stops.
+ * app against the checklist, each session starting from the user's files as
+ * they were when the app was published, and the stack stops.
  */
 
 import fs from 'node:fs';
@@ -46,7 +47,7 @@ import { Driver } from './driver';
 import { findLeaks, heldKeys, MODEL_KEYS, Scrubber, type HeldKey } from './evidence';
 import { readTree } from './references';
 import { LOCAL_APIKEY, openStack, type Stack } from './stack';
-import { Store } from './store';
+import { Store, type Snapshot } from './store';
 
 /** The key the shell keeps its sign-in token under, which the judge's browser starts with. */
 const LS_TOKEN = 'rr:user_token';
@@ -209,6 +210,23 @@ async function lookAtApp(url: string, stack: Stack, dir: string, scrubber: Scrub
 }
 
 /**
+ * Puts the user's files back as they were when the app was published, so a
+ * judge session starts where a new user would, not with what an earlier
+ * session saved. Pipelines an earlier session started keep running, as they
+ * would for a user who comes back. Each restore signs in afresh rather than
+ * holding one client open across the sessions.
+ */
+async function restoreUserFiles(stack: Stack, published: Snapshot, run: number, log: (line: string) => void): Promise<void> {
+	const store = await Store.connect(stack.engineUri, stack.apiKey);
+	try {
+		const { deleted, rewritten } = await store.restore(published);
+		log(`before run ${run}: the user's files are back as published (deleted: ${deleted.join(', ') || 'none'}; written back: ${rewritten.join(', ') || 'none'})`);
+	} finally {
+		await store.close();
+	}
+}
+
+/**
  * Runs the judge command: starts the stack, serves the app, judges it, and
  * writes result.json and summary.md to plan.out. The stack always stops.
  *
@@ -233,6 +251,7 @@ export async function judgeCommand(plan: JudgePlan, modelKeys: HeldKey[]): Promi
 		// step: the trial's workspace into the store, as a trial leaves it
 		const store = await Store.connect(stack.engineUri, stack.apiKey);
 		let served: Served;
+		let published: Snapshot;
 		try {
 			await store.reset();
 			await store.seed(Object.entries(readTree(plan.workspace)).map(([p, text]) => ({ path: p, text })));
@@ -252,6 +271,9 @@ export async function judgeCommand(plan: JudgePlan, modelKeys: HeldKey[]): Promi
 			await store.client.publishApp(plan.appId, version, '@me');
 			served = { workspace: plan.workspace, app: plan.app, appId: plan.appId, version, url: `${stack.shellUrl}/?appid=${encodeURIComponent(plan.appId)}` };
 			log(`built and published to @me: ${served.url}`);
+			// step: the user's files as a new user of the app meets them; each judge session starts from these
+			published = await store.snapshot();
+			log(`kept the user's ${published.files.size} files as published; each judge session starts from them`);
 		} finally {
 			await store.close();
 		}
@@ -259,7 +281,8 @@ export async function judgeCommand(plan: JudgePlan, modelKeys: HeldKey[]): Promi
 		const loadError = await lookAtApp(served.url, stack, path.join(plan.out, 'served'), scrubber);
 		if (loadError) throw new Error(`the shell shows "${loadError}" at ${served.url}, so the judge did not start (screenshot in ${path.join(plan.out, 'served')})`);
 
-		const result = await judgeApp({ url: served.url, checklist: plan.checklist, ...(plan.runs === null ? {} : { runs: plan.runs }), outDir: plan.out, localStorage: { [LS_TOKEN]: stack.apiKey }, apiKey, ...(plan.inputs ? { uploadDir: plan.inputs } : {}) });
+		const beforeRun = (run: number) => restoreUserFiles(stack, published, run, log);
+		const result = await judgeApp({ url: served.url, checklist: plan.checklist, ...(plan.runs === null ? {} : { runs: plan.runs }), outDir: plan.out, localStorage: { [LS_TOKEN]: stack.apiKey }, apiKey, ...(plan.inputs ? { uploadDir: plan.inputs } : {}), beforeRun });
 		fs.writeFileSync(path.join(plan.out, 'result.json'), `${scrubber.scrub(JSON.stringify({ served, checklistFile: plan.checklistFile, ...result }, null, '\t'))}\n`);
 		fs.writeFileSync(path.join(plan.out, 'summary.md'), scrubber.scrub(judgeSummary(result, served)));
 		for (const r of result.runs) log(`run ${r.run}: ${r.verdict}, $${r.costUsd?.toFixed(3) ?? '?'}, ${Math.round(r.durationMs / 1000)}s${r.invalidReason ? `, invalid: ${r.invalidReason}` : ''}`);

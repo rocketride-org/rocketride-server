@@ -97,6 +97,86 @@ export function storePath(prefix: string, vpath: string): string {
 	return [`${prefix}${PROJECTS}`, MOUNTS[mount], ...rest].filter(Boolean).join('/');
 }
 
+/**
+ * The engine's system trees (packages/ai file_store.py SYSTEM_TREES): written
+ * by the engine, left out of the user's listings and denied to the user, so
+ * not the user's files.
+ */
+const SYSTEM_TREES = new Set(['.logs', '.deployments']);
+
+/** fsReadMany's limit on paths per call. */
+const READ_MANY = 256;
+
+/** The part of the client's file API that a snapshot and its restore use. */
+export type FileApi = Pick<RocketRideClient, 'fsListDir' | 'fsReadMany' | 'fsOpen' | 'fsWrite' | 'fsClose' | 'fsDelete'>;
+
+/** The user's files at one moment: each file's store path and bytes, and the scope roots they were read under. */
+export interface Snapshot {
+	roots: string[];
+	files: ReadonlyMap<string, Uint8Array>;
+}
+
+/**
+ * Every file under each root, by store path, less the system trees at a
+ * root. A listing that fails throws, so nothing is built on a partial list.
+ */
+async function userFiles(api: FileApi, roots: string[]): Promise<string[]> {
+	const walk = async (dir: string, root: boolean): Promise<string[]> => {
+		const out: string[] = [];
+		for (const e of (await api.fsListDir(dir)).entries ?? []) {
+			if (root && SYSTEM_TREES.has(e.name)) continue;
+			const p = dir ? `${dir}/${e.name}` : e.name;
+			if (e.type === 'dir') out.push(...(await walk(p, false)));
+			else out.push(p);
+		}
+		return out;
+	};
+	const out: string[] = [];
+	for (const root of roots) out.push(...(await walk(root, true)));
+	return out;
+}
+
+/**
+ * Reads every file under the roots, as bytes, leaving out the system trees.
+ *
+ * @param roots - Scope roots: '' is the user's own files.
+ */
+export async function snapshotFiles(api: FileApi, roots: string[]): Promise<Snapshot> {
+	const paths = await userFiles(api, roots);
+	const files = new Map<string, Uint8Array>();
+	for (let i = 0; i < paths.length; i += READ_MANY) {
+		for (const r of await api.fsReadMany(paths.slice(i, i + READ_MANY))) {
+			if (!r.ok || !r.data) throw new Error(`could not read ${r.path}: ${r.error}`);
+			files.set(r.path, r.data);
+		}
+	}
+	return { roots, files };
+}
+
+/**
+ * Puts the files under the snapshot's roots back as the snapshot has them:
+ * deletes each file it does not have, and writes back each file whose bytes
+ * differ or that is gone. The system trees are left alone.
+ *
+ * @returns The store paths deleted and written back.
+ */
+export async function restoreFiles(api: FileApi, snapshot: Snapshot): Promise<{ deleted: string[]; rewritten: string[] }> {
+	const now = (await snapshotFiles(api, snapshot.roots)).files;
+	const deleted = [...now.keys()].filter((p) => !snapshot.files.has(p));
+	const rewritten = [...snapshot.files].filter(([p, data]) => !now.has(p) || Buffer.compare(now.get(p) as Uint8Array, data) !== 0).map(([p]) => p);
+	for (const p of deleted) await api.fsDelete(p);
+	for (const p of rewritten) {
+		const data = snapshot.files.get(p) as Uint8Array;
+		const { handle } = await api.fsOpen(p, 'w');
+		try {
+			if (data.length) await api.fsWrite(handle, data);
+		} finally {
+			await api.fsClose(handle, 'w');
+		}
+	}
+	return { deleted, rewritten };
+}
+
 /** One turn as the session file keeps it (agent turn.ts TurnRecord), read as data. */
 export interface SavedTurn {
 	turnId: string;
@@ -249,6 +329,20 @@ export class Store {
 		const out: Record<string, string> = {};
 		for (const p of await this.workspaceFiles()) out[p] = await this.rr.fsReadString(storePath(this.prefix, p));
 		return out;
+	}
+
+	/**
+	 * The user's files as they stand: every file in the user's own store, and
+	 * in the team scope's when the page writes under one, less the system
+	 * trees (.logs, .deployments).
+	 */
+	async snapshot(): Promise<Snapshot> {
+		return await snapshotFiles(this.rr, ['', ...(this.prefix ? [this.prefix.replace(/\/$/, '')] : [])]);
+	}
+
+	/** Puts the user's files back as the snapshot has them (restoreFiles). */
+	async restore(snapshot: Snapshot): Promise<{ deleted: string[]; rewritten: string[] }> {
+		return await restoreFiles(this.rr, snapshot);
 	}
 
 	/**

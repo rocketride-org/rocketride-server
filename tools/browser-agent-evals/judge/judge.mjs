@@ -149,9 +149,10 @@ export function parseChecklist(text) {
  * @param {Record<string, string>} [options.localStorage] Seeded for the URL's origin. Values of 8 characters or more are replaced in the saved transcripts.
  * @param {string} options.apiKey The Anthropic API key the sessions run on, as `ANTHROPIC_API_KEY`. No other Anthropic credential reaches them, and the key is replaced in the saved transcripts.
  * @param {string} [options.uploadDir] A folder of files the sessions may upload into the app. Each session gets a fresh copy outside any repo as its working folder, and checklist lines that name a file in this folder are rewritten to the copy. Without it, uploading is blocked.
+ * @param {(run: number) => Promise<void> | void} [options.beforeRun] Called with the run's number before each run starts, once the run before it has finished, to put the app back the way the first run found it. If it throws, judgeApp throws.
  * @returns {Promise<JudgeResult>} `costUsd` adds up what the runs reported, and a run killed at its time limit reports nothing.
  */
-export async function judgeApp({ url, checklist, runs = 3, model = 'claude-sonnet-5-5', budgetUsd = 0.6, timeoutMs = 600_000, outDir, localStorage = {}, apiKey, uploadDir }) {
+export async function judgeApp({ url, checklist, runs = 3, model = 'claude-sonnet-5-5', budgetUsd = 0.6, timeoutMs = 600_000, outDir, localStorage = {}, apiKey, uploadDir, beforeRun }) {
 	if (checklist.length === 0) throw new Error('checklist has no lines');
 	checkApiKey(apiKey);
 	if (!Number.isInteger(runs) || runs < 1) throw new Error(`runs must be a positive integer, got ${runs}`);
@@ -160,6 +161,7 @@ export async function judgeApp({ url, checklist, runs = 3, model = 'claude-sonne
 
 	const completed = [];
 	for (let run = 1; run <= runs; run++) {
+		await beforeRun?.(run);
 		completed.push(await judgeOnce(run, { url, checklist, model, budgetUsd, timeoutMs, outDir: absoluteOutDir, localStorage, apiKey, uploadDir: uploadDir && path.resolve(uploadDir) }));
 	}
 

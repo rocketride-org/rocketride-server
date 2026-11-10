@@ -186,6 +186,17 @@ describe('judgeApp', () => {
 		assert.equal(result.lines[0].text, checklist[0]);
 	});
 
+	it('calls beforeRun before each session, once the session before it has finished', async () => {
+		const sessionsDone = () => (fs.existsSync(path.join(root, 'count')) ? Number(fs.readFileSync(path.join(root, 'count'), 'utf8')) : 0);
+		const calls = [];
+		await judge([ALL_PASS, ALL_PASS, ALL_PASS], { beforeRun: async (run) => calls.push([run, sessionsDone()]) });
+		assert.deepEqual(calls, [
+			[1, 0],
+			[2, 1],
+			[3, 2],
+		]);
+	});
+
 	it('refuses to start a session without a key', async () => {
 		await assert.rejects(judge([ALL_PASS], { apiKey: undefined }), /EVAL_ANTHROPIC_KEY/);
 	});
