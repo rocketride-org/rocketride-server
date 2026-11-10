@@ -35,6 +35,7 @@ import pytest
 
 from ai.modules.shell.contract import (
     PLATFORM_DEVELOPER_ID,
+    RESERVED_PREFIXES,
     check_manifest,
     is_privileged,
     may_claim_root,
@@ -275,20 +276,8 @@ def test_duplicate_paths_in_one_manifest_rejected():
 
 @pytest.mark.parametrize(
     'path',
-    [
-        '/api',
-        '/api/v1',
-        '/shell',
-        '/shell/x',
-        '/apps',
-        '/apps/x',
-        '/task',
-        '/mcp',
-        '/mcp/x',
-        '/sitemap.xml',
-        '/robots.txt',
-        '/llms.txt',
-    ],
+    [p for prefix in RESERVED_PREFIXES for p in (prefix, f'{prefix}/x')]
+    + ['/status', '/.well-known/openai-apps-challenge', '/auth/callback', '/webhook/abc'],
 )
 def test_reserved_prefixes_rejected(path):
     pages, _, errors = check_manifest(ROOT_APP, {'publicPages': [_page(path)]})
@@ -304,11 +293,11 @@ def test_reserved_prefix_is_segment_aware():
 
 
 def test_live_route_conflicts_rejected():
-    live = {'/status': 'GET /status', '/health': 'GET /health'}.get
+    live = {'/metrics': 'GET /metrics', '/health': 'GET /health'}.get
 
     pages, _, errors = check_manifest(
         ROOT_APP,
-        {'publicPages': [_page('/status'), _page('/health'), _page('/fine')]},
+        {'publicPages': [_page('/metrics'), _page('/health'), _page('/fine')]},
         live_conflict=live,
     )
     assert [p.path for p in pages] == ['/fine']

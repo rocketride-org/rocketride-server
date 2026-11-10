@@ -279,10 +279,11 @@ publish fails with a message naming the field):
   that declares the `/` page.
 - `path` is absolute and lowercase, with no query, fragment, trailing slash,
   empty or dot segment. Wildcard pages are not supported.
-- Paths under `/api`, `/shell`, `/apps`, `/task`, `/mcp` or the three crawler
-  files (`/sitemap.xml`, `/robots.txt`, `/llms.txt`) are rejected, as is a
-  path another published platform app already claims (first claim wins;
-  unpublishing releases it).
+- Paths under a root route the engine serves itself (`/api`, `/apps`, `/auth`,
+  `/mcp`, `/shell`, `/status`, `/task`, `/.well-known` and the rest of the
+  engine's routes) or the three crawler files (`/sitemap.xml`, `/robots.txt`,
+  `/llms.txt`) are rejected, as is a path another published platform app
+  already claims (first claim wins; unpublishing releases it).
 - Each `data` entry is `plans`, `plans:<appId>` or `app:<appId>`, and a page
   names each source (`plans`, `app`) at most once.
 - `snapshot` must be a relative `.html` path that exists in the built version.

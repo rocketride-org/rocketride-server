@@ -77,6 +77,18 @@ async def test_republishing_your_own_paths_is_not_a_collision():
     assert await gate_errors('rocketride.home', HOME_MANIFEST, DIST, hostile_account()) == []
 
 
+async def test_the_installed_live_route_check_reaches_the_gate_and_the_rebuild():
+    pp.set_live_conflict({'/health': 'GET /health'}.get)
+    manifest = {'publicPages': [{'path': '/health', 'title': 'Health'}, {'path': '/fine', 'title': 'Fine'}]}
+    errors = await gate_errors('rocketride.other', manifest, DIST, hostile_account())
+    assert len(errors) == 1 and 'live server route GET /health' in errors[0]
+    # A manifest that reached the store anyway (a seeded row) loses the page at build time.
+    acct = hostile_account()
+    acct.add('00000000-platform', 'rocketride.other', manifest)
+    assert await pp.rebuild(acct)
+    assert '/health' not in pp.current().exact and '/fine' in pp.current().exact
+
+
 async def test_an_unpublished_apps_claims_are_released():
     # rocketride.secret claims /leaksecret, but its public row is disabled.
     manifest = {'publicPages': [{'path': '/leaksecret', 'title': 'Now mine'}]}
