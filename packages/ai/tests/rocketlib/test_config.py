@@ -71,6 +71,15 @@ class TestDefaults:
         view = resolveConfig(QDRANT, {'name': 'My store'})
         assert 'name' not in view
 
+    def test_engine_owned_secure_parameters_section_is_tolerated(self):
+        # A saved pipeline carries the engine's encrypted-secret section at the
+        # config root; re-validating it must not report it as an unknown key
+        stored = {'mode': 'cloud', 'secureParameters': {'secure': ['cloud.apikey.key'], 'token': 'blob'}}
+        view = resolveConfig(QDRANT, stored)
+        assert 'secureParameters' not in view
+        with pytest.raises(ConfigError, match='unknown config key "cloud.secureParameters"'):
+            resolveConfig(QDRANT, {'mode': 'cloud', 'cloud': {'secureParameters': {}}})
+
 
 class TestSelectors:
     """Branch selection, hoisting and nesting."""

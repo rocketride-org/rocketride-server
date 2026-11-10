@@ -149,13 +149,14 @@ def nest_wiring(flat: Dict[str, str]) -> Dict[str, Any]:
     """Materialise ``{path: placeholder}`` into the nested config tree the path addresses.
 
     A credential's ``path`` is where the resolver reads it AND where the
-    engine's encrypt walk (``findNested`` over ``secureParameters``, by
-    resolved path) looks for it. The resolver also accepts the dotted path
-    as one flat key, but the encrypt walk does not: a flat ``cloud.apikey``
-    under ``config.parameters`` validates clean and then rides back out of
+    engine's encrypt walk (``findNested`` from the component ``config``
+    root, by resolved path, into ``secureParameters``) looks for it.
+    Neither walk accepts the dotted path as one flat key: the resolver
+    rejects it, and the encrypt walk descends object by object, so a flat
+    ``cloud.apikey`` would never be lifted and would ride back out of
     ``rrext_validate`` - and into the stored pipeline - with its expanded
     secret in plaintext. So the wiring handed to a caller is already the
-    nested tree; copying it into ``config.parameters`` puts every value
+    nested tree; copying it into the component ``config`` puts every value
     where both walks find it. A top-level path is unchanged by this.
 
     Raises:

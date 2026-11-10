@@ -414,6 +414,61 @@ async def test_on_rrext_validate_propagates_validate_pipeline_errors(monkeypatch
 
 
 # ---------------------------------------------------------------------------
+# on_rrext_validate — secret encryption through the real engine
+#
+# Runs inside the engine (engine.exe -m pytest): validatePipeline is the real
+# rocketlib binding on the loaded node catalog, so the encrypt walk runs on a
+# converted node's stored shape (plan section 5.6.2 / 12 F).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_validate_moves_a_stored_secret_into_secure_parameters():
+    """A secret in a converted node's config comes back encrypted under secureParameters, never in plaintext."""
+    pytest.importorskip('engLib')
+    import json
+
+    branch_secret = 'kb-1'
+    unselected_secret = 'ku-1'
+    root_secret = 'kr-1'
+    pipeline = {
+        'source': 'q1',
+        'components': [
+            {
+                'id': 'q1',
+                'provider': 'qdrant',
+                'config': {'profile': 'cloud', 'cloud': {'host': 'https://x.cloud.qdrant.io', 'apikey': branch_secret}},
+            },
+            {
+                'id': 'q2',
+                'provider': 'qdrant',
+                'config': {'profile': 'local', 'local': {'host': 'localhost'}, 'cloud': {'apikey': unselected_secret}},
+            },
+            {'id': 'd1', 'provider': 'tool_deepl', 'config': {'apikey': root_secret, 'targetLang': 'DE'}},
+        ],
+    }
+
+    conn = _make_conn()
+    result = await MiscCommands.on_rrext_validate(conn, {'arguments': {'pipeline': pipeline}})
+
+    body = result['body']
+    assert 'errors' not in body, body.get('errors')
+    for secret in (branch_secret, unselected_secret, root_secret):
+        assert secret not in json.dumps(body), f'{secret} is in plaintext somewhere in the response'
+
+    qdrant, unselected, deepl = (c['config'] for c in body['pipeline']['components'])
+    assert 'apikey' not in qdrant['cloud'], 'the branch secret must leave its stored position'
+    assert qdrant['secureParameters']['secure'] == ['cloud.apikey'], 'registered and reported by its stored path'
+    assert isinstance(qdrant['secureParameters']['token'], str) and qdrant['secureParameters']['token']
+    assert qdrant['cloud']['host'] == 'https://x.cloud.qdrant.io', 'plain leaves stay where they are'
+    assert 'apikey' not in unselected['cloud'], 'a secret under the unselected branch block is a stored secret too'
+    assert unselected['secureParameters']['secure'] == ['cloud.apikey']
+    assert 'apikey' not in deepl, 'the root secret must leave its stored position'
+    assert deepl['secureParameters']['secure'] == ['apikey']
+    assert deepl['targetLang'] == 'DE'
+
+
+# ---------------------------------------------------------------------------
 # on_rrext_dashboard — happy path
 # ---------------------------------------------------------------------------
 

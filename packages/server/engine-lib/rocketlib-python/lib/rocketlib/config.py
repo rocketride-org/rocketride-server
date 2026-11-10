@@ -61,6 +61,11 @@ ENV_PLACEHOLDER = re.compile(r'\$\{(ROCKETRIDE_[A-Za-z0-9_]*)\}')
 #: Root-level keys the editor owns that are not node configuration.
 EDITOR_OWNED_KEYS = frozenset({'name'})
 
+# Written by the engine, never by a node author: the encrypted-secret
+# section a stored pipeline carries at the config root. The engine decrypts
+# it before a node runs, so the resolver skips it rather than reporting it
+ENGINE_OWNED_KEYS = frozenset({'secureParameters'})
+
 #: Property types whose stored value is never validated: the resolved value of
 #: a constant is always its default, and the rest are credential- or
 #: upload-shaped placeholders the Phase 2 gateway owns.
@@ -603,7 +608,7 @@ def _flatten_conn_config(
             if value is None:
                 continue
             _flatten_conn_config(value, f'{path}.', indexed, out, problems)
-        elif not prefix and key in EDITOR_OWNED_KEYS:
+        elif not prefix and (key in EDITOR_OWNED_KEYS or key in ENGINE_OWNED_KEYS):
             continue
         else:
             problems.append(f'unknown config key "{path}"')

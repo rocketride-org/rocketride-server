@@ -234,16 +234,18 @@ Error PipelineConfig::validate(bool sourceRequired) noexcept {
  * 2. A component must have a string "provider".
  * 3. A component must have an object "config".
  * 4. If a component has a "config.profile", it must be a string, and
- *    the corresponding section under config must exist and be an object.
- * 5. If a component has a "config.parameters", it must be an object.
- * 6. If a component has a "config.parameters.secureParameters", it must be an
- * object with a "secure" array and a "token" string.
+ *    the branch block stored under that value, when present, must be an
+ *    object (the config is path-addressed: a selector's branch block
+ *    nests under the branch VALUE).
+ * 5. If a component has a "config.secureParameters", it must be an object
+ *    with a "secure" array and a "token" string. The config object itself
+ *    is the root of the stored tree, so the encrypted section lives there.
  *
  * @param component a pipeline component configuration JSON object.
  * @return Error
  */
 Error PipelineConfig::validateComponent(const json::Value &component) noexcept {
-    // [Rule 1–6] Validate basic structure of each component
+    // [Rule 1–5] Validate basic structure of each component
     if (!component.isObject())
         return APERR(Ec::InvalidParam, "Component must be an object");
 
@@ -273,32 +275,15 @@ Error PipelineConfig::validateComponent(const json::Value &component) noexcept {
             return APERR(Ec::InvalidParam, "Component", id,
                          "config 'profile' must be a non-empty string");
 
-        if (config.isMember(profileName)) {
-            if (!config[profileName].isObject())
-                return APERR(Ec::InvalidParam, "Component", id,
-                             "config missing profile object",
-                             _ts("'", profileName, "'"));
-
-            // [Rule 6] Check for "secureParameters" object
-            auto &profile = config[profileName];
-            if (auto ccode = validateSecureParameters(profile))
-                return APERR(ccode, "Component", id, "config profile",
-                             _ts("'", profileName, "':"), ccode.message());
-        }
-    }
-
-    // [Rule 5] Check for "parameters" object
-    if (config.isMember("parameters")) {
-        const auto &params = config["parameters"];
-        if (!params.isObject())
+        if (config.isMember(profileName) && !config[profileName].isObject())
             return APERR(Ec::InvalidParam, "Component", id,
-                         "config 'parameters' must be an object");
-
-        // [Rule 6] Check for "secureParameters" object
-        if (auto ccode = validateSecureParameters(params))
-            return APERR(ccode, "Component", id,
-                         "config 'parameters':", ccode.message());
+                         "config missing profile object",
+                         _ts("'", profileName, "'"));
     }
+
+    // [Rule 5] Check for the "secureParameters" object at the config root
+    if (auto ccode = validateSecureParameters(config))
+        return APERR(ccode, "Component", id, "config:", ccode.message());
 
     return {};
 }
@@ -310,10 +295,10 @@ Error PipelineConfig::validateComponent(const json::Value &component) noexcept {
  * @details This function ensures that a given JSON section has the valid secure
  * parameters. It performs the following validation rules:
  *
- * 6. If a section has a "secureParameters", it must be an object
+ * 5. If a section has a "secureParameters", it must be an object
  *    with a "secure" array and a "token" string.
  *
- * @param component a pipeline component section configuration JSON object.
+ * @param section a pipeline component config JSON object.
  * @return Error
  */
 
@@ -321,7 +306,7 @@ Error PipelineConfig::validateSecureParameters(
     const json::Value &section) noexcept {
     if (!section.isMember("secureParameters")) return {};
 
-    // [Rule 6] Check for "secureParameters" object
+    // [Rule 5] Check for "secureParameters" object
     const auto &secureParams = section["secureParameters"];
     if (!secureParams.isObject())
         return APERR(Ec::InvalidParam, "'secureParameters' must be an object");
@@ -395,7 +380,7 @@ Error PipelineConfig::upgradeComponent(json::Value &component,
  *
  * This function iterates through all components in the pipeline configuration,
  * decrypts secure parameters if they exist, and restores them into the
- * configuration parameters.
+ * component config tree at their registered paths.
  *
  * @param overwrite If true, existing parameters will be overwritten with
  *                  the decrypted secure values.
@@ -423,36 +408,22 @@ Error PipelineConfig::decryptComponent(json::Value &component,
     Text id = component["id"].asString();
     auto &config = component["config"];
 
-    Error ccode;
+    // The config object is the root of the stored tree (path-addressed:
+    // a root leaf sits directly under it, a branch leaf under its branch
+    // block), so the encrypted section lives there and every secure path
+    // resolves from there
+    if (auto ccode = decryptSection(config, overwrite))
+        return APERR(ccode, "Component", id, "config:", ccode.message());
 
-    Text profileName = config.lookup<Text>("profile");
-    if (profileName && config.isMember(profileName)) {
-        auto &profile = config[profileName];
-        if (auto _ccode = decryptSection(profile, overwrite))
-            ccode = APERR(_ccode, "Component", id, "config profile",
-                          _ts("'", profileName, "':"), _ccode.message()) ||
-                    ccode;
-    }
-
-    if (config.isMember("parameters")) {
-        auto &params = config["parameters"];
-        if (auto _ccode = decryptSection(params, overwrite))
-            ccode = APERR(_ccode, "Component", id,
-                          "config 'parameters':", _ccode.message()) ||
-                    ccode;
-    }
-
-    return ccode;
+    return {};
 }
 
 /**
  * @brief Decrypts secure parameters in a specific component of the pipeline
  * configuration.
  *
- * @param id An identificator of the component whose configuration contains the
- * specified section.
- * @param section A reference to a JSON object representing the section of the
- * component configuration.
+ * @param section A reference to the component config object, the root of
+ * the path-addressed stored tree.
  * @param overwrite If true, existing parameters will be overwritten with
  *                  the decrypted secure values.
  * @return An Error object.
@@ -504,7 +475,7 @@ Error PipelineConfig::decryptSection(json::Value &section,
  *
  * This function iterates through all components in the pipeline configuration,
  * collects secure parameters, encrypts them, and adds them to the
- * configuration parameters under a "secureParameters" section.
+ * component config under its "secureParameters" section.
  *
  * @return An Error object.
  */
@@ -540,20 +511,10 @@ Error PipelineConfig::encryptComponent(json::Value &component) noexcept {
     auto def = IServices::getServiceDefinition(type);
     if (!def) return {};
 
-    Error ccode;
-
-    Text profileName = config.lookup<Text>("profile");
-    if (profileName && config.isMember(profileName)) {
-        auto &profile = config[profileName];
-        ccode = encryptSection(*def, profile) || ccode;
-    }
-
-    if (config.isMember("parameters")) {
-        auto &params = config["parameters"];
-        ccode = encryptSection(*def, params) || ccode;
-    }
-
-    return ccode;
+    // The config object is the root of the stored tree: every registered
+    // secure path resolves from it, so a secret under an unselected
+    // branch block (kept in the file) is lifted as well
+    return encryptSection(*def, config);
 }
 
 /**
@@ -561,8 +522,8 @@ Error PipelineConfig::encryptComponent(json::Value &component) noexcept {
  * configuration.
  *
  * @param def A pointer to a service definition structure.
- * @param section A reference to a JSON object representing the section of the
- * component configuration.
+ * @param section A reference to the component config object, the root of
+ * the path-addressed stored tree.
  * @return An Error object.
  */
 Error PipelineConfig::encryptSection(IServices::ServiceDefinitionPtr def,
@@ -598,7 +559,7 @@ Error PipelineConfig::encryptSection(IServices::ServiceDefinitionPtr def,
         secureSection["secure"] = secureNames;
         secureSection["token"] = token;
 
-        // Add the secure section to the config parameters
+        // Add the secure section at the root of the config tree
         section["secureParameters"] = secureSection;
     }
 

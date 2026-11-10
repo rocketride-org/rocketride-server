@@ -27,36 +27,49 @@ using namespace engine::store::pipeline;
 
 //-----------------------------------------------------------------------------
 // Publish-time encryption is keyed by the leaf PATH the service definition
-// registers: a root secret (deepl's "apikey") and a branch secret (qdrant's
-// "cloud.apikey", flagged on vector.apikey and referenced only in the cloud
-// branch) are both lifted into the token and restored on decrypt
+// registers and walks the component config itself as the root of the stored
+// tree (plan section 5.6.2): a root secret (deepl's "apikey") sits directly
+// under config, a branch secret (qdrant's "cloud.apikey", flagged on
+// vector.apikey and referenced only in the cloud branch) under its branch
+// block. A secret under the UNSELECTED branch block is kept in the file, so
+// it is a stored secret and is lifted too
 //-----------------------------------------------------------------------------
-TEST_CASE("PipelineConfig::secureParameters") {
-    PipelineConfig config(R"({
-        "pipeline": {
-            "source": "qdrant_1",
-            "version": 1,
-            "components": [
-                {
-                    "id": "qdrant_1",
-                    "provider": "qdrant",
-                    "config": {
-                        "parameters": {
-                            "profile": "cloud",
-                            "cloud": { "host": "h.qdrant.io", "apikey": "k-cloud" }
-                        }
-                    }
-                },
-                {
-                    "id": "deepl_1",
-                    "provider": "tool_deepl",
-                    "config": {
-                        "parameters": { "apikey": "k-root" }
-                    }
+namespace {
+const auto SECURE_PIPELINE = R"({
+    "pipeline": {
+        "source": "qdrant_1",
+        "version": 1,
+        "components": [
+            {
+                "id": "qdrant_1",
+                "provider": "qdrant",
+                "config": {
+                    "profile": "cloud",
+                    "cloud": { "host": "h.qdrant.io", "apikey": "k-cloud" },
+                    "local": { "host": "localhost" }
                 }
-            ]
-        }
-    })"_json);
+            },
+            {
+                "id": "qdrant_2",
+                "provider": "qdrant",
+                "config": {
+                    "profile": "local",
+                    "local": { "host": "localhost" },
+                    "cloud": { "host": "h.qdrant.io", "apikey": "k-unsel" }
+                }
+            },
+            {
+                "id": "deepl_1",
+                "provider": "tool_deepl",
+                "config": { "apikey": "k-root", "targetLang": "DE" }
+            }
+        ]
+    }
+})"_json;
+}  // namespace
+
+TEST_CASE("PipelineConfig::secureParameters") {
+    PipelineConfig config(SECURE_PIPELINE);
 
     // Both nodes must be loaded for the registrations to exist
     REQUIRE_NO_ERROR(IServices::getServiceDefinition("qdrant"));
@@ -64,25 +77,46 @@ TEST_CASE("PipelineConfig::secureParameters") {
 
     REQUIRE_NO_ERROR(config.encrypt());
 
-    auto &qdrant = config.components()[0]["config"]["parameters"];
-    auto &deepl = config.components()[1]["config"]["parameters"];
+    auto &qdrant = config.components()[0]["config"];
+    auto &unselected = config.components()[1]["config"];
+    auto &deepl = config.components()[2]["config"];
 
     SECTION("a branch secret is lifted from its nested position") {
         REQUIRE_FALSE(qdrant["cloud"].isMember("apikey"));
         REQUIRE(qdrant["cloud"]["host"] == "h.qdrant.io");
+        REQUIRE(qdrant["local"]["host"] == "localhost");
         REQUIRE(qdrant["secureParameters"]["secure"].size() == 1u);
         REQUIRE(qdrant["secureParameters"]["secure"][0] == "cloud.apikey");
         REQUIRE(qdrant["secureParameters"]["token"].isString());
     }
 
-    SECTION("a root secret keeps working") {
+    SECTION("a secret under the unselected branch block is lifted too") {
+        REQUIRE(unselected["profile"] == "local");
+        REQUIRE_FALSE(unselected["cloud"].isMember("apikey"));
+        REQUIRE(unselected["secureParameters"]["secure"][0] == "cloud.apikey");
+    }
+
+    SECTION("a root secret is lifted from directly under config") {
         REQUIRE_FALSE(deepl.isMember("apikey"));
+        REQUIRE(deepl["targetLang"] == "DE");
         REQUIRE(deepl["secureParameters"]["secure"][0] == "apikey");
     }
 
-    SECTION("decrypt restores both at their positions") {
+    SECTION("no plaintext secret remains anywhere in the tree") {
+        Text text = config.root().stringify();
+        REQUIRE_FALSE(text.contains("k-cloud"));
+        REQUIRE_FALSE(text.contains("k-unsel"));
+        REQUIRE_FALSE(text.contains("k-root"));
+    }
+
+    SECTION("the encrypted tree passes structural validation") {
+        REQUIRE_NO_ERROR(config.validate());
+    }
+
+    SECTION("decrypt restores every secret at its position") {
         REQUIRE_NO_ERROR(config.decrypt());
         REQUIRE(qdrant["cloud"]["apikey"] == "k-cloud");
+        REQUIRE(unselected["cloud"]["apikey"] == "k-unsel");
         REQUIRE(deepl["apikey"] == "k-root");
     }
 
@@ -92,6 +126,57 @@ TEST_CASE("PipelineConfig::secureParameters") {
         REQUIRE(qdrant["cloud"]["apikey"] == "rotated");
         REQUIRE_NO_ERROR(config.decrypt(true));
         REQUIRE(qdrant["cloud"]["apikey"] == "k-cloud");
+    }
+
+    SECTION("a malformed secure section is a validation error at the root") {
+        qdrant["secureParameters"].removeMember("token");
+        REQUIRE_ERROR(config.validate(), Ec::InvalidParam,
+                      "Component qdrant_1 config: 'secureParameters' must "
+                      "have a 'token' string");
+    }
+}
+
+//-----------------------------------------------------------------------------
+// The validate round trip (validate -> decrypt -> encrypt) is what the
+// rrext_validate command returns to the editor: the response must carry no
+// plaintext secret, and the stored form it returns decrypts back
+//-----------------------------------------------------------------------------
+TEST_CASE("PipelineConfig::secureParameters::validateRoundTrip") {
+    REQUIRE_NO_ERROR(IServices::getServiceDefinition("qdrant"));
+    REQUIRE_NO_ERROR(IServices::getServiceDefinition("tool_deepl"));
+
+    auto response = validatePipelineOrComponent(SECURE_PIPELINE);
+    REQUIRE_NO_ERROR(response);
+    REQUIRE_FALSE(response->isMember("errors"));
+
+    SECTION("the response carries no plaintext secret") {
+        Text text = response->stringify();
+        REQUIRE_FALSE(text.contains("k-cloud"));
+        REQUIRE_FALSE(text.contains("k-unsel"));
+        REQUIRE_FALSE(text.contains("k-root"));
+
+        const auto &components = (*response)["pipeline"]["components"];
+        REQUIRE(components[0]["config"]["secureParameters"]["secure"][0] ==
+                "cloud.apikey");
+        REQUIRE(components[1]["config"]["secureParameters"]["secure"][0] ==
+                "cloud.apikey");
+        REQUIRE(components[2]["config"]["secureParameters"]["secure"][0] ==
+                "apikey");
+    }
+
+    SECTION("an already encrypted pipeline round-trips unchanged in shape") {
+        auto again = validatePipelineOrComponent(*response);
+        REQUIRE_NO_ERROR(again);
+        REQUIRE_FALSE(again->isMember("errors"));
+        REQUIRE_FALSE(again->stringify().contains("k-cloud"));
+
+        PipelineConfig config(*again);
+        REQUIRE_NO_ERROR(config.decrypt());
+        REQUIRE(config.components()[0]["config"]["cloud"]["apikey"] ==
+                "k-cloud");
+        REQUIRE(config.components()[1]["config"]["cloud"]["apikey"] ==
+                "k-unsel");
+        REQUIRE(config.components()[2]["config"]["apikey"] == "k-root");
     }
 }
 
