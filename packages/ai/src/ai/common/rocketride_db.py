@@ -86,7 +86,7 @@ def db_target(config: Mapping) -> tuple[str, str]:
     """Read and check a DB node's ``(scope, target)`` from its resolved config.
 
     Args:
-        config: The node config after ``Config.getNodeConfig`` (flat keys).
+        config: The node's resolved config (``rocketlib.resolveConfig`` view, flat keys).
 
     Returns:
         ``(scope, target)``. scope defaults to ``'org'``; target ``''`` means

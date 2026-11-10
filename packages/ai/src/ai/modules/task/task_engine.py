@@ -67,6 +67,7 @@ from ai.constants import (
 from ai.account.base import OutOfCreditsError
 from ai import CONST_AI_NODE_SCRIPT
 from ai.common.dap import DAPBase, DAPClient, TransportWebSocket
+from ai.common.node_config import resolve_node_config
 from ai.common.rocketride_db import DB_PROVIDERS, db_target, dsn_key, exposes_public_endpoint
 from ai.modules.task.pipeflow import apply_pipeflow_event
 from ai.modules.task.run_log import RunLogWriter
@@ -387,17 +388,18 @@ def _service_capabilities(service: Any) -> List[str]:
 def saas_pipeline_violation(
     pipeline: Dict[str, Any],
     get_service: Callable[[str], Any],
-    get_node_config: Callable[[str, Dict[str, Any]], Dict[str, Any]],
+    resolve_node_config: Callable[[str, Dict[str, Any]], Mapping],
     shared_host: bool = True,
 ) -> Optional[str]:
     """Return why a hosted engine must refuse ``pipeline``, or None if it may run.
 
-    ``get_service`` and ``get_node_config`` are ``rocketlib.getServiceDefinition``
-    and ``Config.getNodeConfig`` in production. The MCP transport is resolved the
-    way the node resolves it (profile defaults merged under the component config),
-    because the default profile is itself stdio. Anything that cannot be resolved
-    is refused. ``shared_host`` says the task will share the engine's host (the
-    task's ``--shared-host``); only then is stdio MCP refused.
+    ``get_service`` and ``resolve_node_config`` are ``rocketlib.getServiceDefinition``
+    and ``resolve_node_config`` (the resolver on the engine-resolved schema) in
+    production. The MCP transport is resolved the way the node resolves it (schema
+    defaults under the component config), because the schema default is itself
+    stdio. Anything that cannot be resolved is refused. ``shared_host`` says the
+    task will share the engine's host (the task's ``--shared-host``); only then is
+    stdio MCP refused.
     """
     for component in pipeline.get('components', []) or []:
         provider = str(component.get('provider') or '')
@@ -409,7 +411,9 @@ def saas_pipeline_violation(
 
         if shared_host and str((service or {}).get('path') or '').lower() == CONST_MCP_CLIENT_NODE_PATH:
             try:
-                transport = str(get_node_config(provider, component.get('config') or {}).get('transport') or 'stdio')
+                transport = str(
+                    resolve_node_config(provider, component.get('config') or {}).get('transport') or 'stdio'
+                )
             except Exception:
                 transport = 'unresolved'
             if transport.strip().lower() not in ('streamable-http', 'sse'):
@@ -859,19 +863,19 @@ class Task(DAPBase):
         expansion rewrites every string, a node's provider included, so the
         raw pipeline can name other nodes than the ones that start.
 
-        Targets are read through ``Config.getNodeConfig``, the resolver the
+        Targets are read through ``resolve_node_config``, the resolver the
         node itself uses, so the engine authorizes exactly the key the node
-        will look up. A malformed scope or target fails the task start.
+        will look up. A malformed scope or target fails the task start, and
+        so does a config that does not fit the node's schema (``ConfigError``
+        is a ``ValueError``).
         """
-        from ai.common.config import Config
-
         components = pipeline.get('components') or []
         targets: List[Tuple[str, str]] = []
         for component in components:
             if not isinstance(component, dict) or component.get('provider') not in DB_PROVIDERS:
                 continue
             try:
-                pair = db_target(Config.getNodeConfig(component['provider'], component.get('config') or {}))
+                pair = db_target(resolve_node_config(component['provider'], component.get('config') or {}))
             except ValueError as e:
                 raise ValueError(f'{component.get("id") or component["provider"]}: {e}') from e
             if pair not in targets:
@@ -1078,10 +1082,9 @@ class Task(DAPBase):
 
         if _is_saas_engine():
             from rocketlib import getServiceDefinition
-            from ai.common.config import Config
 
             problem = saas_pipeline_violation(
-                pipeline, getServiceDefinition, Config.getNodeConfig, shared_host=self._shares_host()
+                pipeline, getServiceDefinition, resolve_node_config, shared_host=self._shares_host()
             )
             if problem:
                 raise ValueError(problem)

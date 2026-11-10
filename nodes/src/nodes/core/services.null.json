@@ -44,36 +44,10 @@
 		"source": ["tags"]
 	},
 	//
-	// Optional:
-	//		Local fields definitions - these define fields only for the
-	//		current service. You may specify them here, or directly
-	//		in the shape
-	"fields": {
-		"null.source.parameters": {
-			"section": "parameters",
-			"title": "Parameters",
-			"properties": []
-		},
-		"null.target.parameters": {
-			"object": "parameters",
-			"title": "Parameters",
-			"properties": []
-		}
-	},
-	//
 	// Required:
-	//		Defines the fields (shape) of the service. Either source or target
-	//		map be specified, or both, but at least one is required
-	"shape": [
-		{
-			"section": "Source",
-			"title": "Null Source",
-			"properties": ["type", "actions", "source.mode", "null.source.parameters"]
-		},
-		{
-			"section": "Target",
-			"title": "Null Target",
-			"properties": ["type", "target.mode", "null.target.parameters"]
-		}
-	]
+	//		Defines the properties shown in the pipeline builder side panel, in
+	//		order. The engine generates this endpoint's config itself (source
+	//		or target mode, no parameters), so there is nothing a user edits.
+	//
+	"properties": ["type"]
 }

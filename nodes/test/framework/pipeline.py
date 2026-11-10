@@ -148,9 +148,9 @@ _LLM_MOCK_CREDENTIALS = {
 
 
 # =============================================================================
-# Converted-node config shape (plan section 5.6.2)
+# Node config shape (plan section 5.6.2)
 #
-# A converted node stores its config as a tree addressed by the engine's leaf
+# A node stores its config as a tree addressed by the engine's leaf
 # paths: a selector's own value at its path, a branch's values under the branch
 # VALUE, a leaf referenced by the identical specifier in every branch hoisted to
 # the parent, everything else flat. SchemaPaths derives those paths from the raw
@@ -181,7 +181,7 @@ def _set_path(config: Dict[str, Any], path: str, value: Any) -> None:
 
 
 class SchemaPaths:
-    """Where a converted node stores each config leaf (the engine's ``path`` rule, plan section 5.6.1).
+    """Where a node stores each config leaf (the engine's ``path`` rule, plan section 5.6.1).
 
     Attributes:
         leaves: short name -> the paths it resolves at: one per branch when the
@@ -271,8 +271,8 @@ class SchemaPaths:
     def profile_values(self, profile: Optional[str]) -> Dict[str, Any]:
         """Short name -> declared default for every leaf reachable with ``profile`` selected.
 
-        The stand-in for the old ``preconfig.profiles[<name>]`` object: root leaves,
-        the selected branch's leaves (constants included) and the selector itself.
+        Root leaves, the selected branch's leaves (constants included) and the
+        selector itself; a leaf declared only under another branch is left out.
 
         Args:
             profile: The branch value, or None for the selector's default.
@@ -282,10 +282,11 @@ class SchemaPaths:
             selector = next((path for path in self.selectors if '.' not in path), None)
             profile = self.defaults.get(selector) if selector else None
         values: Dict[str, Any] = {}
-        for name in self.leaves:
-            path = self.path_for(name, profile)
-            if path is not None and path in self.defaults:
-                values[name] = self.defaults[path]
+        for name, paths in self.leaves.items():
+            for path in paths:
+                reachable = '.' not in path or (profile is not None and path.startswith(f'{profile}.'))
+                if reachable and path in self.defaults:
+                    values[name] = self.defaults[path]
         if selector and profile is not None:
             values[selector] = profile
         return values
@@ -307,7 +308,7 @@ class PipelineBuilder:
 
         Args:
             config: The node test configuration
-            profile: Optional profile name to use (from preconfig.profiles)
+            profile: Optional profile: a value of the node's root selector
         """
         self.config = config
         self.profile = profile
@@ -330,14 +331,8 @@ class PipelineBuilder:
             Configuration dict for the node
         """
         node = self.config if provider == self.config.provider else get_node_test_config(provider)
-        converted = node is not None and node.converted
 
         config = {}
-        # An old-format node selects its profile by name; a converted node has no
-        # "profile" key, its selector is written below at the selector's own path.
-        if profile and not converted:
-            config['profile'] = profile
-
         if provider == self.config.provider and self.config.config:
             config.update(self.config.config)
         # Inject credentials into the pipeline config.
@@ -364,22 +359,17 @@ class PipelineBuilder:
                     field = _parse_credential_env_var(env_var, provider)
                     if val and field:
                         creds[field] = val
-        if converted:
-            # Path-addressed shape (plan section 5.6.2): the selector value only when
-            # the schema declares a selector with that branch; a credential under
-            # the branch VALUE when its definition is branch-specific, flat when
-            # it is hoisted. An undeclared credential goes flat so the resolver
-            # names it instead of the builder hiding it.
-            paths = SchemaPaths(node.property_definitions, node.properties)
-            selector = paths.selector_for(profile)
-            if selector:
-                config[selector] = profile
-            for field, value in creds.items():
-                _set_path(config, paths.path_for(field, profile) or field, value)
-        elif creds:
-            overrides = config.get(profile, {})
-            if isinstance(overrides, dict):
-                config[profile] = {**overrides, **creds}
+        # Path-addressed shape (plan section 5.6.2): the selector value only when
+        # the schema declares a selector with that branch; a credential under
+        # the branch VALUE when its definition is branch-specific, flat when
+        # it is hoisted. An undeclared credential goes flat so the resolver
+        # names it instead of the builder hiding it.
+        paths = SchemaPaths(node.property_definitions, node.properties) if node else SchemaPaths({}, [])
+        selector = paths.selector_for(profile)
+        if selector:
+            config[selector] = profile
+        for field, value in creds.items():
+            _set_path(config, paths.path_for(field, profile) or field, value)
         return config
 
     def _build_chain_component(

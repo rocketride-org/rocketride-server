@@ -46,59 +46,9 @@ def test_a_variable_outside_the_namespace_says_only_rocketride_names_resolve():
     assert '*' not in str(caught.value)
 
 
-def test_a_placeholder_the_pipeline_wrote_names_the_variable_to_add():
-    written = {'profile': 'custom', 'custom': {'apikey': '${ROCKETRIDE_OPENAI_KEY}'}}
-    with pytest.raises(ValueError, match='no variable named ROCKETRIDE_OPENAI_KEY was found'):
-        check_credential_resolved('llm_openai', 'apikey', '${ROCKETRIDE_OPENAI_KEY}', written)
-
-
-def test_a_placeholder_from_a_profile_default_says_to_set_it_in_the_node():
-    # Nebius profiles default apikey to ${ROCKETRIDE_NEBIUS_KEY}. Only the pipeline's own
-    # text is resolved, so a saved ROCKETRIDE_NEBIUS_KEY does not fill a default; telling
-    # the user to add the variable would be wrong.
-    written = {'profile': 'llama-3-3-70b', 'llama-3-3-70b': {}}
-    with pytest.raises(ValueError) as caught:
-        check_credential_resolved('llm_nebius', 'apikey', '${ROCKETRIDE_NEBIUS_KEY}', written)
-
-    message = str(caught.value)
-    assert message.startswith('llm_nebius: apikey is the profile default ${ROCKETRIDE_NEBIUS_KEY}')
-    assert 'Set apikey to ${ROCKETRIDE_NEBIUS_KEY} in the node settings' in message
-    assert 'no variable named' not in message
-    assert '*' not in message
-
-
-def test_the_same_placeholder_in_another_profile_does_not_count_as_written(monkeypatch):
-    # The active profile (qwen3) leaves apikey to its default; only an inactive block
-    # spells the placeholder, and that block is not the one in use.
-    written = {'profile': 'qwen3', 'llama': {'apikey': '${ROCKETRIDE_NEBIUS_KEY}'}, 'qwen3': {}}
-    with pytest.raises(ValueError, match='is the profile default'):
-        check_credential_resolved('llm_nebius', 'apikey', '${ROCKETRIDE_NEBIUS_KEY}', written)
-
-
-def test_a_top_level_value_counts_as_written():
-    written = {'profile': 'qwen3', 'qwen3': {}, 'apikey': '${ROCKETRIDE_NEBIUS_KEY}'}
-    with pytest.raises(ValueError, match='no variable named ROCKETRIDE_NEBIUS_KEY was found'):
-        check_credential_resolved('llm_nebius', 'apikey', '${ROCKETRIDE_NEBIUS_KEY}', written)
-
-
-def test_the_service_default_profile_is_the_active_one_when_none_is_set(monkeypatch):
-    import ai.common.config as config_module
-
-    monkeypatch.setattr(config_module, 'getServiceDefinition', lambda _: {'preconfig': {'default': 'llama'}})
-    written = {'llama': {'apikey': '${ROCKETRIDE_NEBIUS_KEY}'}}
-    with pytest.raises(ValueError, match='no variable named ROCKETRIDE_NEBIUS_KEY was found'):
-        check_credential_resolved('llm_nebius', 'apikey', '${ROCKETRIDE_NEBIUS_KEY}', written)
-
-
-@pytest.mark.parametrize(
-    'written',
-    [['not', 'a', 'config'], {'profile': 'llama', 'llama': 'not a block'}],
-    ids=['config-not-a-mapping', 'active-block-not-a-mapping'],
-)
-def test_a_config_that_cannot_be_read_gets_the_general_message(written):
-    """Do not guess "profile default" when the written config cannot be read."""
+def test_the_error_is_an_unresolved_credential_error():
     with pytest.raises(UnresolvedCredentialError, match='no variable named ROCKETRIDE_NEBIUS_KEY was found'):
-        check_credential_resolved('llm_nebius', 'apikey', '${ROCKETRIDE_NEBIUS_KEY}', written)
+        check_credential_resolved('llm_nebius', 'apikey', '${ROCKETRIDE_NEBIUS_KEY}')
 
 
 def test_the_error_is_a_value_error_so_existing_handlers_still_catch_it():

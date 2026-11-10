@@ -55,9 +55,9 @@ async def test_manifest_carries_the_keys_the_engine_actually_requires(catalog_en
     """
     The four traps that stop a node loading, none of them stated correctly in the docs.
 
-    preconfig is documented optional but Config.getNodeConfig raises without it;
-    a manifest without protocol is never registered as a service; register must
-    name a factory type; and the import path is local_nodes.<name>.
+    The engine refuses a manifest without the property model (``properties``) at
+    load; a manifest without protocol is never registered as a service; register
+    must name a factory type; and the import path is local_nodes.<name>.
     """
     result = await _scaffold(catalog_engine, name='my_node')
 
@@ -66,10 +66,24 @@ async def test_manifest_carries_the_keys_the_engine_actually_requires(catalog_en
     assert manifest['protocol'] == 'my_node://'
     assert manifest['register'] == 'filter'
     assert manifest['path'] == 'local_nodes.my_node'
-    assert 'preconfig' in manifest, 'documented optional, but getNodeConfig raises without it'
-    assert manifest['preconfig']['default'] in manifest['preconfig']['profiles'], (
-        'the default profile must name a profile that exists, or resolution raises at load'
-    )
+    assert manifest['properties'] == [], 'the engine refuses an old-format manifest (no "properties") at load'
+    assert manifest['propertyDefinitions'] == {}
+    for old_key in ('preconfig', 'fields', 'shape'):
+        assert old_key not in manifest, f'{old_key} is the old format'
+
+
+@pytest.mark.asyncio
+async def test_the_skeleton_follows_the_package_contract(catalog_engine):
+    """The engine imports IGlobal/IInstance as submodules; the config is the base class's view."""
+    result = await _scaffold(catalog_engine, name='my_node')
+
+    init = result['files']['local_nodes/my_node/__init__.py']
+    assert 'import' not in init, '__init__.py is empty by contract (comment only)'
+
+    iglobal = result['files']['local_nodes/my_node/IGlobal.py']
+    assert 'self.config' in iglobal
+    assert 'ai.common.config' not in iglobal and 'getNodeConfig' not in iglobal
+    assert 'OPEN_MODE' not in iglobal, 'config mode is the IValidator loader path, not a beginGlobal early return'
 
 
 @pytest.mark.asyncio

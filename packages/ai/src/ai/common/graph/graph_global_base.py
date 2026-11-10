@@ -40,9 +40,8 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Tuple
 
-from rocketlib import IGlobalBase, debug, getServiceDefinition, warning
+from rocketlib import IGlobalBase, debug, warning
 
-from ai.common.config import Config
 from ai.common.utils import config_int, parse_bool
 
 DEFAULT_MAX_EXECUTE_ROWS = 25000
@@ -175,25 +174,11 @@ class GraphGlobalBase(IGlobalBase, ABC):
     # Lifecycle — identical across graph engines
     # ------------------------------------------------------------------
 
-    def _effective_config(self) -> Any:
-        """The node's effective config: resolver view or preconfig merge.
-
-        A converted node (its definition has no "preconfig") reads the
-        resolver's view: defaults applied, the active branch flattened, keys
-        read by path. An unconverted node (``rocketride_graph``) keeps the
-        preconfig merge through ``Config.getNodeConfig`` until Step 2 item 5
-        converts the remaining callers.
-        """
-        definition = getServiceDefinition(self.glb.logicalType)
-        if definition is not None and 'preconfig' not in definition:
-            return self.config
-        return Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-
     def beginGlobal(self) -> None:
         """Resolve config, open the driver, and cache the graph schema."""
         self.graph_schema = {'nodes': {}, 'relationships': []}
 
-        config = self._effective_config()
+        config = self.config
 
         self.db_description = self._graph_description(config)
         self.max_validation_attempts = config_int(
@@ -237,7 +222,7 @@ class GraphGlobalBase(IGlobalBase, ABC):
     def validateConfig(self) -> None:
         """Save-time validation: probe the server so the user sees errors immediately."""
         try:
-            config = self._effective_config()
+            config = self.config
             self._probe_connection(config)
         except Exception as e:
             warning(str(e))

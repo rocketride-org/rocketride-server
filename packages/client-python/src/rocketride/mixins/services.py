@@ -117,21 +117,24 @@ class ServicesMixin(DAPClient):
         """
         Resolve a component config the way the node will receive it.
 
-        Applies the engine's own profile and default merging, so an author can
-        see the effective config instead of inferring it. Resolution is
-        engine-side because the service catalog does not carry ``preconfig``.
+        Runs the engine's own resolver on the node's schema: defaults applied,
+        the selected branch flattened, so an author can see the effective
+        config instead of inferring it.
 
         Args:
             provider: Component provider, e.g. 'llm_openai'.
             config: The component's config block. Defaults to empty.
 
         Returns:
-            ``{'provider', 'profile', 'resolved', 'dropped'}``, where ``dropped``
-            lists top-level keys the resolver discarded.
+            ``{'provider', 'resolved', 'paths', 'params', 'paramKeys', 'envKeys'}``:
+            the resolved values by key, each key's stored path, the node's
+            parameter descriptors, the keys that are per-call parameters and
+            the keys the caller's environment fills at run time.
 
         Raises:
             ValueError: If provider is empty.
-            RuntimeError: If the service is unknown or has no preconfig section.
+            RuntimeError: If the service is unknown or the config does not fit
+                its schema (the message names the key).
         """
         if not provider:
             raise ValueError('Provider name is required')

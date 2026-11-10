@@ -59,14 +59,11 @@
 	},
 	//
 	// Optional:
-	//     Local fields definitions - these define fields only for the
-	//     current service. You may specify them here, or directly
-	//     in the shape
+	//     Local property definitions. The SMB share settings live in the
+	//     "parameters" group, which is where IEndpoint reads them; the
+	//     password is a secret the account variable supplies.
 	//
-	"fields": {
-		"anonymize": {
-			"hidden": false
-		},
+	"propertyDefinitions": {
 		"text_output.server": {
 			"type": "string",
 			"title": "Server Name",
@@ -82,26 +79,31 @@
 			"type": "string",
 			"title": "Password",
 			"description": "Password for the SMB user name above.",
-			"secure": true,
+			"secret": true,
+			"env": "ROCKETRIDE_TEXT_OUTPUT_PASSWORD",
 			"optional": true,
-			"maxLength": 127,
-			"ui:widget": "password"
-		},
-		"text_output.target.parameters": {
-			"object": "parameters",
-			"properties": ["storePath", "text_output.server", "text_output.username", "text_output.password", "anonymize"]
+			"maxLength": 127
 		}
 	},
 	//
 	// Required:
-	//     Defines the fields (shape) of the service. Either source or target
-	//     map be specified, or both, but at least one is required
+	//     Defines the properties shown in the pipeline builder side panel, in order
 	//
-	"shape": [
+	"properties": [
+		"type",
 		{
-			"section": "Transform",
-			"title": "Text Output",
-			"properties": ["type", "text_output.target.parameters", "target.mode"]
-		}
+			"name": "parameters",
+			"properties": [
+				"storePath",
+				"text_output.server",
+				"text_output.username",
+				"text_output.password",
+				{
+					"base": "anonymize",
+					"hidden": false
+				}
+			]
+		},
+		"target.mode"
 	]
 }
