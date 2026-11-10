@@ -180,7 +180,11 @@ class GliNERRecognizer:
                 except Exception as e:
                     # A failed prediction is not evidence that the chunk contains
                     # no sensitive entities. Never return partially redacted text.
-                    raise RuntimeError(f'GLiNER inference failed for chunk {chunk_idx}') from e
+                    # The cause goes in the message: the engine reports only the
+                    # raised exception's text, never its __cause__.
+                    raise RuntimeError(
+                        f'GLiNER inference failed for chunk {chunk_idx}: {str(e) or type(e).__name__}'
+                    ) from e
 
             return chunk_results
 
@@ -195,7 +199,9 @@ class GliNERRecognizer:
                 except Exception as e:
                     for pending in futures:
                         pending.cancel()
-                    raise RuntimeError('Anonymization failed; no redacted result is available') from e
+                    # e is process_chunk's error, which already names the chunk and
+                    # the root cause, so its text is appended once here.
+                    raise RuntimeError(f'Anonymization failed; no redacted result is available: {e}') from e
 
                 completed += 1
                 if completed % 5 == 0 or completed == total_chunks:

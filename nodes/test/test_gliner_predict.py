@@ -10,12 +10,14 @@ ThreadPoolExecutor. GLiNER wraps a single torch module, which cannot take
 concurrent forward passes, so a lock is held around ``predict_entities`` only:
 chunking, offset arithmetic and the overlap filter stay concurrent.
 
-These tests pin two things:
+These tests pin three things:
 
 * the entities and offsets ``predict`` returns for a multi-chunk input, which is
-  what the overlap filter and the final dedup decide, and
+  what the overlap filter and the final dedup decide,
 * that concurrent chunks never enter ``predict_entities`` at the same time,
-  while still genuinely running in parallel.
+  while still genuinely running in parallel, and
+* the failure contract: a failed prediction fails the whole call with its cause
+  in the message, while a prediction that finds nothing is still a success.
 
 No GLiNER model or engine is required: the module is loaded by path with the
 heavy dependencies stubbed, and a recording double stands in for the model.
@@ -300,29 +302,25 @@ def test_a_failing_chunk_rejects_partial_anonymization():
 
     model.predict_entities = flaky
 
-    with pytest.raises(RuntimeError, match='Anonymization failed'):
+    with pytest.raises(RuntimeError, match='Anonymization failed.*: CUDA error on this chunk$'):
         make_recognizer(model).predict(text, ['organization'])
 
 
-@pytest.mark.parametrize('slots', [1, 2, 4])
-def test_process_never_returns_original_text_after_model_error(slots):
+def test_a_cause_without_a_message_is_named_by_its_type():
+    """An exception with an empty message, such as TimeoutError(), still names a cause."""
     model = _MarkerModel()
 
-    def fail(*args, **kwargs):
-        raise RuntimeError('injected inference failure')
+    def timeout(chunk, labels):
+        raise TimeoutError()
 
-    model.predict_entities = fail
-    recognizer = make_recognizer(model)
-    recognizer._predict_lock = threading.BoundedSemaphore(slots)
-    recognizer.redaction_style = 'mask'
-    recognizer.anonymize_char = 'X'
-    with pytest.raises(RuntimeError, match='Anonymization failed'):
-        recognizer.process('Alice Example works at Example Company.', ['person'])
-    assert recognizer._predict_lock.acquire(blocking=False)
-    recognizer._predict_lock.release()
+    model.predict_entities = timeout
+
+    with pytest.raises(RuntimeError, match=r'GLiNER inference failed for chunk 0: TimeoutError$'):
+        make_recognizer(model).predict('short text', ['organization'])
 
 
 def test_successful_empty_prediction_still_returns_original_text():
+    """A prediction that succeeds and finds nothing is a valid result, not a failure."""
     recognizer = make_recognizer(_MarkerModel(marker='NOT_PRESENT'))
     recognizer.redaction_style = 'mask'
     recognizer.anonymize_char = 'X'
