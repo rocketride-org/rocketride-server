@@ -15,6 +15,10 @@
  * There is no publish/host machinery: consistency is enforced the same way as
  * Card/DataGrid — views with sub-views must use this stock component and
  * never hand-roll their own tab bars.
+ *
+ * Entries may carry a one-sentence `description` of what the page is for.
+ * TabControl does not render the description visibly; it is the tooltip of
+ * the entry's tab, and of its row in the overflow menu.
  */
 
 import React, { CSSProperties, KeyboardEvent, ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
@@ -22,6 +26,7 @@ import { cardHeaderChrome } from '../card/Card';
 import { BxChevronDown } from '../BoxIcon';
 import { ViewMenu } from '../../types/viewMenu';
 import { ViewMenuBadge } from './ViewMenuBadge';
+import { entryDescription } from './entryDescription';
 
 // =============================================================================
 // TYPES
@@ -39,8 +44,9 @@ export interface ITabControlProps {
 	trailing?: ReactNode;
 	/**
 	 * Render each entry's `icon` INSTEAD of its label (the label becomes the
-	 * tab's tooltip and accessible name). Entries without an icon keep their
-	 * text label, so a mixed menu stays legible. Optional; default false.
+	 * tab's tooltip and accessible name; an entry's `description` follows the
+	 * label in the tooltip). Entries without an icon keep their text label,
+	 * so a mixed menu stays legible. Optional; default false.
 	 */
 	iconsOnly?: boolean;
 	/**
@@ -320,6 +326,9 @@ export function TabControl({ menu, activeId, onSelect, trailing, iconsOnly, onRe
 				// when the host passed onReorder.
 				const reorderable = Boolean(onReorder && entry.draggable);
 				const hint = dropHint?.id === entry.id ? dropHint.side : null;
+				// What the page is for, when the entry says (trimmed; blank
+				// counts as absent).
+				const description = entryDescription(entry);
 				return (
 					<div
 						key={entry.id}
@@ -329,7 +338,17 @@ export function TabControl({ menu, activeId, onSelect, trailing, iconsOnly, onRe
 						role="tab"
 						aria-selected={isActive}
 						aria-label={asIcon ? entry.label : undefined}
-						title={asIcon ? entry.label : undefined}
+						// The native tooltip. A text tab shows the entry's
+						// description; an icon tab shows its label, then the
+						// description after a colon. The label stays the
+						// accessible name, so browsers expose the title as the
+						// accessible description. In icon mode a screen reader
+						// therefore hears the label twice (the name, then the
+						// start of the description); that is accepted, because a
+						// label-only tooltip would hide the description on
+						// exactly the tabs that show no text. A text tab without
+						// a description renders no attribute.
+						title={asIcon ? (description ? `${entry.label}: ${description}` : entry.label) : description}
 						// Roving tabIndex: only the active tab sits in the page tab
 						// order; Arrow / Home / End move within the strip.
 						tabIndex={isActive || (activeIndex === -1 && index === 0) ? 0 : -1}
@@ -411,6 +430,9 @@ export function TabControl({ menu, activeId, onSelect, trailing, iconsOnly, onRe
 						key={entry.id}
 						type="button"
 						role="menuitem"
+						// The row shows the label, so it gets the same tooltip
+						// as a text tab: the description, or no attribute.
+						title={entryDescription(entry)}
 						style={styles.overflowRow(entry.id === activeId)}
 						onClick={() => {
 							setOverflowOpen(false);

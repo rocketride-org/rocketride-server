@@ -106,7 +106,7 @@ export const detailPanelEntry: IGalleryEntry = {
 		{ name: 'title', type: 'string', dir: 'in', required: true, note: 'Entity title - 17px/700.' },
 		{ name: 'subtitle', type: 'string', dir: 'in', note: 'Secondary line under the title.' },
 		{ name: 'avatar', type: 'ReactNode', dir: 'in', note: '42px round avatar/icon slot at the start of the EntityHeader.' },
-		{ name: 'tabs', type: 'ViewMenuEntry[]', dir: 'in', note: 'Optional tab strip (same entry shape as the ViewMenu renderers), paired with activeTab / onTabSelect.' },
+		{ name: 'tabs', type: 'ViewMenuEntry[]', dir: 'in', note: "Optional tab strip (same entry shape as the ViewMenu renderers; a description becomes the tab's tooltip), paired with activeTab / onTabSelect." },
 		{ name: 'activeTab', type: 'string', dir: 'in', note: 'Id of the active tab (drawn with the brand underline).' },
 		{ name: 'children', type: 'ReactNode', dir: 'in', required: true, note: 'Body content - composed from Section / LabelValue / Chip / StatusBadge / MiniContainer / Button.' },
 		{ name: 'footer', type: 'ReactNode', dir: 'in', note: 'Fixed action row pinned below the scrolling body (Save / Cancel / destructive verbs).' },
