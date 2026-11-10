@@ -160,6 +160,12 @@ engine:
     # Generate with: python -c "import secrets; print(secrets.token_urlsafe(32))"
     # RR_SIGNING_KEY: ""
     #
+    # Key for the secureParameters tokens the engine writes into saved
+    # pipelines. New tokens use a key derived from it; tokens saved without it
+    # still load. Use the same value on every replica and keep it: tokens
+    # written with it cannot be read without it.
+    # Generate with: python -c "import secrets; print(secrets.token_urlsafe(32))"
+    # RR_PARAM_TOKEN_SECRET: ""
     # Key for each run's private task token (tk_), at least 32 characters.
     # Unset, each pod uses its own random key and a relaunched run gets a new
     # private token after a restart. Use the same value on every replica.

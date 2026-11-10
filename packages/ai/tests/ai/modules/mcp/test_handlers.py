@@ -61,6 +61,24 @@ async def test_call_tool_unknown_name_returns_error_result_not_crash(fake_engine
 
 
 @pytest.mark.asyncio
+async def test_call_tool_validation_rejection_is_error_with_structured_parity():
+    """A rejection is {ok, errors, warnings}: isError is set, but it is not the shared error envelope."""
+    import ai.modules.mcp.handlers as handlers_mod
+
+    from .conftest import FakeEngineClient
+
+    engine = FakeEngineClient(validate_result={'errors': [{'type': 'x', 'message': 'bad', 'id': '1'}], 'warnings': []})
+    server = handlers_mod.build_mcp_server(lambda: engine)
+    async with Client(server) as client:
+        result = await client.call_tool('validate_pipeline', {'pipeline': {'components': []}})
+
+    assert result.is_error is True
+    assert json.loads(result.content[0].text) == result.structured_content
+    assert set(result.structured_content) == {'ok', 'errors', 'warnings'}
+    assert result.structured_content['ok'] is False
+
+
+@pytest.mark.asyncio
 async def test_call_tool_hard_error_surfaces_as_mcp_tool_error(monkeypatch, fake_engine):
     import ai.modules.mcp.handlers as handlers_mod
 

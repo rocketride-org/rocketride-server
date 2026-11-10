@@ -163,7 +163,8 @@ CONST_DATA_SHUTDOWN_TIMEOUT = 30.0  # seconds to wait for data connection shutdo
 CONST_SPEND_CHECK_TIMEOUT = 10.0  # seconds a task waits for EaaS's answer, once connected
 CONST_BILLING_UNAVAILABLE = 'Billing is unavailable right now; try again shortly'
 CONST_SPEND_ALLOW_SECONDS = 5.0  # seconds a task trusts an "allowed" answer before asking again
-CONST_DATA_OPEN_TARGET_WAIT = 5.0  # seconds `_open` waits for source to bind `state.target`
+# seconds a data operation waits for the source to bind `state.target`
+CONST_DATA_OPEN_TARGET_WAIT = CONST_MAX_READY_TIME
 
 # =============================================================================
 # Task Channel (requests from a task to the engine over /task/data)
