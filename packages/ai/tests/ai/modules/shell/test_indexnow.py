@@ -235,6 +235,16 @@ async def test_a_snapshot_read_failure_counts_as_changed(sent, warnings):
     assert _urls(sent) == [[f'{BASE}/pricing']] * 2
 
 
+async def test_a_snapshot_page_without_a_production_version_is_not_resubmitted(sent, warnings, reads):
+    await _build(*_version(1))
+    # Declares a snapshot, but there is no production build to read it from.
+    unversioned = Page('/draft', 'rocketride.home', 'Draft', snapshot='pages/draft.html')
+    await _build(*_version(1), unversioned)
+    await _build(*_version(1), unversioned)
+    assert _urls(sent) == [[f'{BASE}/draft']]
+    assert indexnow._last['/draft'].digest == '' and warnings == [] and len(reads) == 1
+
+
 async def test_a_snapshot_is_read_once_per_version(sent, reads):
     pages = _version(1)
     await _build(*pages)
