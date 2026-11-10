@@ -263,14 +263,17 @@ def _developer_id_of(conn: Any) -> Optional[str]:
 
 
 def namespace_of(artifact_id: str) -> str:
-    """The developer namespace an artifact id lives in: the id up to its last dot.
+    """The developer namespace an artifact id lives in: the id up to its FIRST dot.
 
-    ``acme.docBrain`` -> ``acme``; a bare slug is its own namespace. This is
-    the ONLY source of a listing's publisher: it is derived from the id,
-    which the namespace guarantee ties to the publishing org, so nothing a
+    ``acme.docBrain`` -> ``acme`` and ``acme.tools.viewer`` -> ``acme``; a
+    bare slug is its own namespace. A developer id is a dot-free slug (letters
+    and underscores only), so the first segment is always the whole namespace
+    whatever follows it. This is the ONLY source of a listing's publisher: it
+    is derived from the id, which the namespace guarantee
+    (``_assert_owns_namespace``) ties to the publishing org, so nothing a
     manifest says can claim another publisher.
     """
-    return artifact_id.rsplit('.', 1)[0] if '.' in artifact_id else artifact_id
+    return artifact_id.split('.', 1)[0]
 
 
 def _assert_owns_namespace(conn: Any, app_id: str) -> None:
