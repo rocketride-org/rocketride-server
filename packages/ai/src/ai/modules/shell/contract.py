@@ -147,6 +147,7 @@ def is_privileged(app_id: str) -> bool:
 
 
 def _root_apps() -> frozenset:
+    """The app ids allowed to claim the root origin's paths (``RR_PUBLIC_ROOT_APPS``, default the home app)."""
     raw = os.environ.get('RR_PUBLIC_ROOT_APPS', _DEFAULT_ROOT_APPS)
     return frozenset(a.strip() for a in raw.split(',') if a.strip())
 
@@ -190,6 +191,7 @@ def path_error(path: Any) -> Optional[str]:
 
 
 def _reserved_error(path: str) -> Optional[str]:
+    """Why ``path`` falls under a reserved prefix (segment-aware), or None."""
     for prefix in RESERVED_PREFIXES:
         if path == prefix or path.startswith(prefix + '/'):
             return f'is under the reserved prefix {prefix!r}'
@@ -197,6 +199,7 @@ def _reserved_error(path: str) -> Optional[str]:
 
 
 def _snapshot_error(snapshot: Any) -> Optional[str]:
+    """Why ``snapshot`` is not a relative ``.html`` path inside the artifact, or None."""
     if not isinstance(snapshot, str) or not _SNAPSHOT.fullmatch(snapshot):
         return 'must be a relative path inside the artifact ending in .html (e.g. "pages/pricing.html")'
     if any(seg in ('.', '..') for seg in snapshot.split('/')):
@@ -211,12 +214,14 @@ _SURROGATE = re.compile(r'[\ud800-\udfff]')
 
 
 def _surrogate_error(value: Any) -> Optional[str]:
+    """Why a string value cannot be served as UTF-8 (a lone surrogate), or None."""
     if isinstance(value, str) and _SURROGATE.search(value):
         return 'contains a lone surrogate (U+D800 to U+DFFF), which UTF-8 cannot carry; fix the text encoding'
     return None
 
 
 def _https_url_error(value: Any) -> Optional[str]:
+    """Why ``value`` is not an absolute ``https://`` URL that UTF-8 can carry, or None."""
     err = _surrogate_error(value)
     if err:
         return err
@@ -225,60 +230,81 @@ def _https_url_error(value: Any) -> Optional[str]:
     return None
 
 
+def _page_path_error(path: Any, root: bool, live_conflict: Optional[Callable[[str], Optional[str]]]) -> Optional[str]:
+    """Why ``path`` cannot be this app's page, or None: grammar, root privilege, reserved prefix, live route."""
+    err = path_error(path)
+    if err:
+        return err
+    if not root:
+        return 'root-mounted pages need the may-claim-root privilege (the app id listed in RR_PUBLIC_ROOT_APPS)'
+    err = _reserved_error(path)
+    if err:
+        return f'{err}; choose another path'
+    conflict = live_conflict(path) if live_conflict else None
+    if conflict:
+        return f'collides with the live server route {conflict}; choose another path'
+    return None
+
+
+def _page_text_error(raw: Dict[str, Any]) -> Optional[str]:
+    """Why the page's ``title`` or ``description`` is invalid, as ``<field>: <why>``, or None."""
+    title = raw.get('title')
+    if not isinstance(title, str) or not title.strip() or len(title) > _MAX_TITLE:
+        return f'title: required, a non-empty string of at most {_MAX_TITLE} characters'
+    description = raw.get('description', '')
+    if not isinstance(description, str) or len(description) > _MAX_DESCRIPTION:
+        return f'description: must be a string of at most {_MAX_DESCRIPTION} characters'
+    for key, value in (('title', title), ('description', description)):
+        err = _surrogate_error(value)
+        if err:
+            return f'{key}: {err}'
+    return None
+
+
+def _page_data_error(data: Any) -> Optional[str]:
+    """Why the page's ``data`` entries are invalid, or None: known forms only, each source once."""
+    if not isinstance(data, list) or not all(isinstance(d, str) for d in data):
+        return 'must be a list of data-source names'
+    for entry in data:
+        if not _DATA_ENTRY.fullmatch(entry):
+            return f'unknown data source {entry!r}; known forms: {", ".join(DATA_FORMS)}'
+    sources = [entry.split(':', 1)[0] for entry in data]
+    for name in dict.fromkeys(sources):
+        if sources.count(name) > 1:
+            return f'{name!r} appears more than once; a page binds each source once'
+    return None
+
+
 def _check_page(
     i: int, raw: Any, root: bool, live_conflict: Optional[Callable[[str], Optional[str]]]
 ) -> Tuple[Optional[Page], Optional[str]]:
+    """One ``publicPages`` entry as a ``Page``, or the first thing wrong with it, field by field."""
     where = f'publicPages[{i}]'
     if not isinstance(raw, dict):
         return None, f'{where}: must be an object'
     path = raw.get('path')
-    err = path_error(path)
+    err = _page_path_error(path, root, live_conflict)
     if err:
         return None, f'{where}.path {path!r}: {err}'
-    if not root:
-        return None, (
-            f'{where}.path {path!r}: root-mounted pages need the may-claim-root privilege '
-            '(the app id listed in RR_PUBLIC_ROOT_APPS)'
-        )
-    err = _reserved_error(path)
+    err = _page_text_error(raw)
     if err:
-        return None, f'{where}.path {path!r}: {err}; choose another path'
-    conflict = live_conflict(path) if live_conflict else None
-    if conflict:
-        return None, f'{where}.path {path!r}: collides with the live server route {conflict}; choose another path'
-    title = raw.get('title')
-    if not isinstance(title, str) or not title.strip() or len(title) > _MAX_TITLE:
-        return None, f'{where}.title: required, a non-empty string of at most {_MAX_TITLE} characters'
-    description = raw.get('description', '')
-    if not isinstance(description, str) or len(description) > _MAX_DESCRIPTION:
-        return None, f'{where}.description: must be a string of at most {_MAX_DESCRIPTION} characters'
-    for key, value in (('title', title), ('description', description)):
-        err = _surrogate_error(value)
-        if err:
-            return None, f'{where}.{key}: {err}'
+        return None, f'{where}.{err}'
     listed = raw.get('listed', True)
     if not isinstance(listed, bool):
         return None, f'{where}.listed: must be true or false'
     data = raw.get('data', [])
-    if not isinstance(data, list) or not all(isinstance(d, str) for d in data):
-        return None, f'{where}.data: must be a list of data-source names'
-    for entry in data:
-        if not _DATA_ENTRY.fullmatch(entry):
-            return None, f'{where}.data: unknown data source {entry!r}; known forms: {", ".join(DATA_FORMS)}'
-    sources = [entry.split(':', 1)[0] for entry in data]
-    for name in dict.fromkeys(sources):
-        if sources.count(name) > 1:
-            return None, f'{where}.data: {name!r} appears more than once; a page binds each source once'
+    err = _page_data_error(data)
+    if err:
+        return None, f'{where}.data: {err}'
     snapshot = raw.get('snapshot', '')
-    if snapshot != '':
-        err = _snapshot_error(snapshot)
-        if err:
-            return None, f'{where}.snapshot {snapshot!r}: {err}'
+    err = _snapshot_error(snapshot) if snapshot != '' else None
+    if err:
+        return None, f'{where}.snapshot {snapshot!r}: {err}'
     page = Page(
         path=path,
         app_id='',
-        title=title,
-        description=description,
+        title=raw['title'],
+        description=raw.get('description', ''),
         listed=listed,
         snapshot=snapshot,
         data=tuple(data),
@@ -288,6 +314,7 @@ def _check_page(
 
 
 def _check_site(raw: Any) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """The root owner's validated ``site`` block, or the first thing wrong with it."""
     if not isinstance(raw, dict):
         return None, 'site: must be an object'
     out: Dict[str, Any] = {}
