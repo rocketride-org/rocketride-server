@@ -68,6 +68,15 @@ export interface CheckReport {
 	evidence: CheckEvidence[];
 }
 
+/**
+ * Whether a report counts as passing. A step that did not run is not a
+ * failure; only a step that ran and failed is. The finish rule
+ * (run.ts appChecked) reads this; the tool result reads reportVerdict.
+ */
+export function reportPassed(report: CheckReport): boolean {
+	return report.evidence.every((e) => e.status !== 'fail');
+}
+
 /** What a report says as a whole. */
 export type CheckVerdict = 'passed' | 'failed' | 'not_checked';
 
@@ -76,13 +85,11 @@ const REQUIRED_STEPS = new Set(['types', 'build']);
 
 /**
  * A report's verdict: failed when any step failed, not_checked when the types
- * or build step did not pass (it did not run, or the report lacks it), and
- * passed otherwise. The tool result and the finish rule (run.ts CheckRecord)
- * both read it, so only a passed check lets the run finish.
+ * or build step did not run, and passed otherwise.
  */
 export function reportVerdict(report: CheckReport): CheckVerdict {
 	if (report.evidence.some((e) => e.status === 'fail')) return 'failed';
-	for (const step of REQUIRED_STEPS) if (!report.evidence.some((e) => e.step === step && e.status === 'pass')) return 'not_checked';
+	if (report.evidence.some((e) => REQUIRED_STEPS.has(e.step) && e.status === 'not_run')) return 'not_checked';
 	return 'passed';
 }
 

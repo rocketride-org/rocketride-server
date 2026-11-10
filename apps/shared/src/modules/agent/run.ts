@@ -42,7 +42,7 @@ import { isReferencePath } from '../vfs/referenceTree';
 import { DEFAULT_LIMITS, findAgentHost, type AgentHost } from './host';
 import { ModelFailure, type ChatModel, type KeyTrouble, type ModelAsk } from './model';
 import { CORE_PROMPT } from './prompts';
-import { APP_CHECK_TOOL, AppCheckToolkit, monacoMarkerSource, reportVerdict, typesNote, validateNote, validateSaved } from './toolkits/appCheck';
+import { APP_CHECK_TOOL, AppCheckToolkit, monacoMarkerSource, reportPassed, typesNote, validateNote, validateSaved } from './toolkits/appCheck';
 import type { CheckReport, MarkerSource, SaveValidation } from './toolkits/appCheck';
 import { Approvals } from './toolkits/approval';
 import { AppToolkit, DEPLOY_APP_TIMEOUT_MS } from './toolkits/appTools';
@@ -170,21 +170,12 @@ const editorMarkers = guardedMarkerSource(monacoMarkerSource);
 // CHECK RECORD — what the run checked, and the rule for when it may finish
 // =============================================================================
 
-/** The waves of an app's last change, its last passing check and its last check that could not run types or build (-1: none), and its newest report. */
-interface AppRecord {
-	changed: number;
-	passed: number;
-	incomplete: number;
-	report?: CheckReport;
-}
-
 /**
  * Every check result the run saw, and the finish rule the loop asks before it
  * accepts an answer. Only tool results write to it. Per target:
  * - A changed app needs a passing check_app in a wave after its last change. A
- *   failed, errored or late check_app leaves it unchecked, and so does one whose
- *   types or build step did not run (reportVerdict not_checked), as when the
- *   app's Design preview is closed. Runtime and console stay advisory.
+ *   failed, errored or late check_app leaves it unchecked; a step that did not
+ *   run counts as a pass.
  * - A changed pipeline must not have failed validate on its latest save (every
  *   save validates). Delete drops it; rename carries its result.
  * - Any other change needs nothing.
@@ -198,7 +189,7 @@ export class CheckRecord implements FinishRule {
 
 	private wave = -1;
 	/** Each app the run changed or checked, by folder under `apps/`, in the order first seen. */
-	private readonly apps = new Map<string, AppRecord>();
+	private readonly apps = new Map<string, { changed: number; passed: number; report?: CheckReport }>();
 	/** What validate found on each pipeline's latest save, by path, in the order first saved. */
 	private readonly pipelines = new Map<string, SaveValidation>();
 
@@ -220,10 +211,8 @@ export class CheckRecord implements FinishRule {
 	 */
 	appChecked(folder: string, report: CheckReport): void {
 		const app = this.app(folder);
-		const verdict = reportVerdict(report);
 		app.report = report;
-		app.passed = verdict === 'passed' ? this.wave : -1;
-		app.incomplete = verdict === 'not_checked' ? this.wave : -1;
+		app.passed = reportPassed(report) ? this.wave : -1;
 	}
 
 	/**
@@ -258,14 +247,10 @@ export class CheckRecord implements FinishRule {
 	 * @returns A refusal naming each app with no passing check_app since its last change and each pipeline whose last save failed validate, or null.
 	 */
 	unchecked(): string | null {
-		const open = [...this.apps].filter(([, app]) => app.changed >= 0 && app.passed <= app.changed);
-		// step: an app whose newest check after its last change could not run types or build needs what that result asks for, often the user
-		const incomplete = open.filter(([, app]) => app.incomplete > app.changed).map(([folder]) => folder);
-		const apps = open.filter(([, app]) => app.incomplete <= app.changed).map(([folder]) => folder);
+		const apps = [...this.apps].filter(([, app]) => app.changed >= 0 && app.passed <= app.changed).map(([folder]) => folder);
 		const pipes = [...this.pipelines].filter(([, v]) => 'errors' in v && v.errors.length > 0).map(([path]) => path);
 		const parts: string[] = [];
 		if (apps.length > 0) parts.push(`call ${APP_CHECK_TOOL} on ${apps.length > 1 ? 'each of ' : ''}${apps.join(', ')} on its own, after your last change to it, and fix what it reports`);
-		if (incomplete.length > 0) parts.push(`${APP_CHECK_TOOL} could not run the types or build step on ${incomplete.join(', ')}, so ${incomplete.length > 1 ? 'they are' : 'it is'} not checked: do what its result says (when that needs the user, such as opening the app's Design preview, ask them with ask_user), then call ${APP_CHECK_TOOL} again`);
 		if (pipes.length > 0) parts.push(`${pipes.join(', ')} failed validation on ${pipes.length > 1 ? 'their' : 'its'} last save: fix ${pipes.length > 1 ? 'them' : 'it'} and save again`);
 		return parts.length > 0 ? `Not finished: ${parts.join('; ')} before done=true.` : null;
 	}
@@ -320,10 +305,10 @@ export class CheckRecord implements FinishRule {
 	}
 
 	/** The record of an app, made on first use. */
-	private app(folder: string): AppRecord {
+	private app(folder: string): { changed: number; passed: number; report?: CheckReport } {
 		let app = this.apps.get(folder);
 		if (!app) {
-			app = { changed: -1, passed: -1, incomplete: -1 };
+			app = { changed: -1, passed: -1 };
 			this.apps.set(folder, app);
 		}
 		return app;

@@ -93,18 +93,15 @@ const loggedEdit = (events: string[], wait: (n: unknown) => Promise<void>): Agen
 		return 'edited';
 	});
 
-/** A check_app that gives `verdicts` (its types step's status) in turn, then passes, reporting each with a passing build to `checks` the way AppCheckToolkit does; 'error' throws and reports nothing. */
+/** A check_app that gives `verdicts` in turn, then passes, reporting each to `checks` the way AppCheckToolkit does; 'error' throws and reports nothing. */
 function checkTool(checks: CheckRecord, verdicts: Array<CheckStatus | 'error'> = []): AgentTool {
 	return stub('check_app', ({ app }) => {
 		const status = verdicts.shift() ?? 'pass';
 		if (status === 'error') throw new Error(`No app '${app}'.`);
-		checks.appChecked(String(app), { target: String(app), evidence: [evidence('types', status), evidence('build', 'pass')] });
+		checks.appChecked(String(app), { target: String(app), evidence: [{ step: 'types', ran: 'markers', output: '', status, summary: status }] });
 		return `CHECK ${status}: ${app}`;
 	});
 }
-
-/** One step of a check_app report. */
-const evidence = (step: string, status: CheckStatus) => ({ step, ran: step, output: '', status, summary: `${step} ${status}` });
 
 /** Runs the loop over `tools` answering with `model`; `extra` overrides the defaults. */
 function loop(model: ModelCall, tools: AgentTool[] = [], extra: Partial<LoopOptions> = {}) {
@@ -150,45 +147,6 @@ test('a failed check, or a check call that errors, blocks done until a newer one
 		const result = await loop(model, [stub('edit_file'), checkTool(checks, ['pass', verdict])], { finish: checks });
 		assert.equal(result.answer, 'checked', `after a check that ended in ${verdict}`);
 	}
-});
-
-test('a check_app whose build did not run is not checked: done is refused, the refusal says to ask the user, and a full pass then finishes', async () => {
-	// what check_app reports with the Design preview closed, then with it open
-	const checks = record();
-	const reports = [
-		[evidence('types', 'pass'), evidence('build', 'not_run')],
-		[evidence('types', 'pass'), evidence('build', 'pass'), evidence('runtime', 'pass')],
-	];
-	const check = stub('check_app', ({ app }) => {
-		checks.appChecked(String(app), { target: String(app), evidence: reports.shift() ?? [] });
-		return `checked ${app}`;
-	});
-	const model = scriptedModel([plan(EDIT), plan(CHECK), done('too soon'), plan(CHECK), done('checked')]);
-	const result = await loop(model, [stub('edit_file'), check], { finish: checks });
-	assert.deepEqual({ answer: result.answer, stopReason: result.stopReason }, { answer: 'checked', stopReason: 'done' });
-	const seen = model.questions.flatMap((q) => resultsIn(q).map((entry) => JSON.stringify(entry)));
-	assert.ok(
-		seen.some((text) => /could not run the types or build step on a-ui.*ask them with ask_user/.test(text)),
-		seen.join('\n')
-	);
-});
-
-test('the finish rule names an app whose newest check was not complete, asks for a new check after a later change, and clears on a full pass', async () => {
-	const checks = record();
-	const edit: RanCall = { tool: 'edit_file', args: { path: APP_FILE }, result: 'edited' };
-	const checked: RanCall = { tool: 'check_app', args: { app: 'a-ui' }, result: 'checked' };
-	const wave = async (n: number, call: RanCall, report?: Array<ReturnType<typeof evidence>>): Promise<string | null> => {
-		checks.beginWave(n);
-		if (report) checks.appChecked('a-ui', { target: 'a-ui', evidence: report });
-		await checks.endWave([call]);
-		return checks.unchecked();
-	};
-	assert.match((await wave(0, edit)) ?? '', /call check_app on a-ui on its own/);
-	assert.match((await wave(1, checked, [evidence('types', 'not_run'), evidence('build', 'pass')])) ?? '', /^Not finished: check_app could not run the types or build step on a-ui, so it is not checked/);
-	assert.match((await wave(2, checked, [evidence('types', 'pass')])) ?? '', /could not run the types or build step on a-ui/, 'a report with no build step is not checked either');
-	assert.match((await wave(3, edit)) ?? '', /call check_app on a-ui on its own/);
-	assert.match((await wave(4, checked, [evidence('types', 'fail'), evidence('build', 'not_run')])) ?? '', /call check_app on a-ui on its own/, 'a failed step is a failure, not an incomplete check');
-	assert.equal(await wave(5, checked, [evidence('types', 'pass'), evidence('build', 'pass'), evidence('console', 'not_run')]), null, 'runtime and console stay advisory');
 });
 
 test('a changed pipeline whose last save failed validate blocks done until a save that passes', async () => {

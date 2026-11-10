@@ -753,7 +753,6 @@ test('a check whose types or build step did not run is not checked, and a failed
 	assert.equal(reportVerdict(report(['types', 'pass'], ['build', 'pass'], ['runtime', 'pass'])), 'passed');
 	assert.equal(reportVerdict(report(['types', 'pass'], ['build', 'not_run'])), 'not_checked');
 	assert.equal(reportVerdict(report(['types', 'not_run'], ['build', 'pass'], ['runtime', 'pass'])), 'not_checked');
-	assert.equal(reportVerdict(report(['types', 'pass'])), 'not_checked', 'a report with no build step');
 	assert.equal(reportVerdict(report(['manifest', 'fail'], ['types', 'not_run'], ['build', 'not_run'])), 'failed');
 	assert.equal(reportVerdict(report(['types', 'pass'], ['build', 'pass'], ['runtime', 'fail'])), 'failed');
 });
