@@ -20,19 +20,3 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-
-from .IGlobal import IGlobal
-from .IInstance import IInstance
-
-
-def getChat():
-    from .gemini_vision import Chat
-
-    return Chat
-
-
-__all__ = [
-    'IGlobal',
-    'IInstance',
-    'getChat',
-]

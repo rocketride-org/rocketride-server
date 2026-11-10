@@ -23,7 +23,6 @@
 
 from typing import Any, Dict
 from ai.common.chat import ChatBase
-from ai.common.config import Config
 from ai.common.llm_adapter import debug_usage_failure, report_llm_tokens
 from google import genai
 
@@ -100,23 +99,11 @@ class Chat(ChatBase):
         super().__init__(provider, connConfig, bag)
 
         # Retrieve and validate configuration
-        config = Config.getNodeConfig(provider, connConfig)
+        config = self._config
         api_key = config.get('apikey')
-
-        # The C++ engine derives the profile sub-key as the segment after the first underscore
-        # of the profile name (e.g. "gemini-2_5-pro" → stored as "5-pro"). Try that fallback.
-        # IJson.get() requires a default argument — always pass one.
-        if not api_key and hasattr(connConfig, 'get'):
-            _profile = connConfig.get('profile', None) or ''
-            if _profile and '_' in _profile:
-                _sub = connConfig.get(_profile.split('_', 1)[1], None)
-                if _sub and hasattr(_sub, 'get'):
-                    api_key = _sub.get('apikey', None) or ''
 
         if not api_key:
             raise ValueError('Please enter your Gemini API key.')
-
-        self._modelTotalTokens = config.get('modelTotalTokens', 8192)
 
         # Initialize the Google GenAI client — key format validation is delegated to the library
         self._client = genai.Client(api_key=api_key)

@@ -42,7 +42,7 @@ class IGlobal(IGlobalBase):
         # Shared runtime state
         bag = self.IEndpoint.endpoint.bag
         # Get a chat to interface
-        self._chat = Chat(self.glb.logicalType, self.glb.connConfig, bag)
+        self._chat = Chat(self.glb.logicalType, self.config, bag)
 
     def endGlobal(self):
         self._chat = None

@@ -23,7 +23,6 @@
 
 import os
 from rocketlib import IGlobalBase
-from ai.common.config import Config
 from ai.common.chat import ChatBase
 
 
@@ -42,11 +41,8 @@ class IGlobal(IGlobalBase):
         # Get our bag
         bag = self.IEndpoint.endpoint.bag
 
-        # Get this nodes config
-        config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-
-        # Get a chat to interface
-        self._chat = Chat(self.glb.logicalType, config, bag)
+        # Get a chat to interface, on the resolved config view
+        self._chat = Chat(self.glb.logicalType, self.config, bag)
 
     def endGlobal(self):
         self._chat = None

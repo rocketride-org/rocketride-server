@@ -27,7 +27,6 @@ Zhipu AI GLM binding for the ChatLLM.
 
 from typing import Any, Dict
 from ai.common.chat import ChatBase
-from ai.common.config import Config
 from langchain_openai import ChatOpenAI
 
 
@@ -55,11 +54,10 @@ class Chat(ChatBase):
         super().__init__(provider, connConfig, bag)
 
         # Get the nodes configuration
-        config = Config.getNodeConfig(provider, connConfig)
+        config = self._config
 
-        # Get the serverbase url; fall back to the Z.ai API default so runtime
-        # accepts the same "no explicit serverbase" config that validateConfig does
-        serverbase = config.get('serverbase') or 'https://api.z.ai/api/paas/v4'
+        # The serverbase url: the schema defaults it to the Z.ai API
+        serverbase = config['serverbase']
 
         # API key is only required when calling the Z.ai / Zhipu cloud API.
         # Matches both api.z.ai (international) and open.bigmodel.cn (mainland

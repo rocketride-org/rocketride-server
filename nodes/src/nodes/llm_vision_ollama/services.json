@@ -35,7 +35,7 @@
 	//
 	// Optional:
 	//		The path is the executable/script code - it is node dependent
-	// 		and is optional for most node
+	//		and is optional for most node
 	//
 	"path": "nodes.llm_vision_ollama",
 	//
@@ -45,24 +45,28 @@
 	"prefix": "image_vision_ollama",
 	//
 	// Optional:
-	//		Description to of this driver
+	//		Description of this driver
 	//
-	"description": ["A component that connects to locally-hosted open-source vision models through Ollama ", "for image analysis, description, and visual understanding tasks. Supports Llama 3.2 Vision, ", "LLaVA, Moondream, MiniCPM-V, and other multimodal models. Runs entirely on-premise with no ", "external API keys required, ideal for privacy-sensitive applications."],
+	"description": [
+		"A component that connects to locally-hosted open-source vision models through Ollama ",
+		"for image analysis, description, and visual understanding tasks. Supports Llama 3.2 Vision, ",
+		"LLaVA, Moondream, MiniCPM-V, and other multimodal models. Runs entirely on-premise with no ",
+		"external API keys required, ideal for privacy-sensitive applications."
+	],
 	//
 	// Optional:
-	//	  The icon is the icon to display in the UI for this node
+	//		The icon is the icon to display in the UI for this node
 	//
 	"icon": "ollama.svg",
 	"documentation": "https://docs.rocketride.org/nodes/llm_vision_ollama",
 	//
+	// Optional:
+	//		Rendering hints to the UI which indicate which fields of
+	//		the configuration should be used to display information
 	//
-	//  Optional:
-	//      Rendering hints to the UI which indicate which fields of
-	//      the configuration should be used to display information
+	"tile": ["Model: ${parameters.llm_vision_ollama.model}"],
 	//
-	"tile": ["Model: ${parameters.image_vision_ollama.profile}"],
-	//
-	//	Optional:
+	// Optional:
 	//		As a pipe component, define what this pipe component takes
 	//		and what it produces
 	//
@@ -71,218 +75,131 @@
 		"documents": ["documents"]
 	},
 	//
-	//	Optional:
-	//		Profile section are configuration options used by the driver
-	//		itself
-	//
-	"preconfig": {
-		// Define the values that will be merged into any profile configuration
-		// specified, unless the profile is 'absolute'
-		"default": "llama3_2-vision-11b",
-		// Defines profiles used with the "profile": key
-		"profiles": {
-			"custom": {
-				"title": "Custom",
-				"model": "",
-				"serverbase": "http://localhost:11434/v1",
-				"modelTotalTokens": 16385
-			},
-			"llama3_2-vision-11b": {
-				"title": "Llama 3.2 Vision 11B",
-				"model": "llama3.2-vision:11b",
-				"serverbase": "http://localhost:11434/v1",
-				"modelTotalTokens": 128000
-			},
-			"llama3_2-vision-90b": {
-				"title": "Llama 3.2 Vision 90B",
-				"model": "llama3.2-vision:90b",
-				"serverbase": "http://localhost:11434/v1",
-				"modelTotalTokens": 128000
-			},
-			"llava-7b": {
-				"title": "LLaVA 7B",
-				"model": "llava:7b",
-				"serverbase": "http://localhost:11434/v1",
-				"modelTotalTokens": 32768
-			},
-			"llava-13b": {
-				"title": "LLaVA 13B",
-				"model": "llava:13b",
-				"serverbase": "http://localhost:11434/v1",
-				"modelTotalTokens": 4096
-			},
-			"llava-34b": {
-				"title": "LLaVA 34B",
-				"model": "llava:34b",
-				"serverbase": "http://localhost:11434/v1",
-				"modelTotalTokens": 4096
-			},
-			"moondream": {
-				"title": "Moondream 2",
-				"model": "moondream",
-				"serverbase": "http://localhost:11434/v1",
-				"modelTotalTokens": 2048
-			},
-			"minicpm-v": {
-				"title": "MiniCPM-V",
-				"model": "minicpm-v",
-				"serverbase": "http://localhost:11434/v1",
-				"modelTotalTokens": 8192
-			},
-			"qwen2_5vl-3b": {
-				"title": "Qwen 2.5 VL 3B",
-				"model": "qwen2.5vl:3b",
-				"serverbase": "http://localhost:11434/v1",
-				"modelTotalTokens": 128000
-			},
-			"qwen2_5vl-7b": {
-				"title": "Qwen 2.5 VL 7B",
-				"model": "qwen2.5vl:7b",
-				"serverbase": "http://localhost:11434/v1",
-				"modelTotalTokens": 128000
-			}
-		}
-	},
-	//
 	// Optional:
-	//		Local fields definitions - these define fields only for the
-	//		current service. You may specify them here, or directly
-	//		in the shape
+	//		Local property definitions. The model is the selector (one branch per
+	//		model, the branch value is the model id); each branch pins its context
+	//		window and capabilities as constants, and the leaves every model shares
+	//		(credentials, generation settings) sit at the root and are stored flat.
+	//		The "custom" branch takes a model id the catalog does not list.
 	//
-	"fields": {
-		"model": {
+	"propertyDefinitions": {
+		"llm_vision_ollama.serverbase": { "base": "llm.local.serverbase", "default": "http://localhost:11434/v1" },
+		"llm_vision_ollama.systemPrompt": {
 			"type": "string",
-			"title": "Model",
-			"description": "Ollama vision model name"
+			"format": "textarea",
+			"title": "System prompt",
+			"description": "Instructions that frame how the model describes images.",
+			"default": ""
 		},
-		"modelTotalTokens": {
-			"type": "number",
-			"title": "Tokens",
-			"description": "Total Tokens"
+		"llm_vision_ollama.prompt": {
+			"type": "string",
+			"format": "textarea",
+			"title": "Prompt",
+			"description": "The question asked about every image.",
+			"default": "Describe this image in detail."
 		},
-		"modelOutputTokens": {
+		"llm_vision_ollama.customModel": {
+			"type": "string",
+			"title": "Model id",
+			"description": "Model id exactly as the provider names it",
+			"required": true
+		},
+		"llm_vision_ollama.custom.modelTotalTokens": { "type": "number", "title": "Tokens", "description": "Total Tokens", "minimum": 1, "default": 16385 },
+		"llm_vision_ollama.custom.modelOutputTokens": {
 			"type": "integer",
 			"title": "Output Tokens",
 			"description": "Most tokens the model may write in one reply (at least 1,024). Leave it empty to keep the node's default. Reasoning models count their thinking against this limit: set it well above the reply you expect, or they can spend it all thinking and return nothing. It cannot exceed Tokens; a larger value is lowered to it.",
-			"minimum": 1024,
-			"optional": true
-		},
-		"vision.systemPrompt": {
-			"type": "string",
-			"format": "textarea",
-			"title": "System Instructions",
-			"description": "Define the model's role and behavior for image analysis"
-		},
-		"vision.prompt": {
-			"type": "string",
-			"format": "textarea",
-			"title": "Analysis Prompt",
-			"description": "Describe what you want to analyze or extract from the image"
-		},
-		"image_vision_ollama.custom": {
-			"object": "custom",
-			"properties": ["model", "modelTotalTokens", "modelOutputTokens", "llm.local.serverbase", "vision.systemPrompt", "vision.prompt"]
-		},
-		"image_vision_ollama.llama3_2-vision-11b": {
-			"object": "llama3_2-vision-11b",
-			"properties": ["llm.local.serverbase", "vision.systemPrompt", "vision.prompt"]
-		},
-		"image_vision_ollama.llama3_2-vision-90b": {
-			"object": "llama3_2-vision-90b",
-			"properties": ["llm.local.serverbase", "vision.systemPrompt", "vision.prompt"]
-		},
-		"image_vision_ollama.llava-7b": {
-			"object": "llava-7b",
-			"properties": ["llm.local.serverbase", "vision.systemPrompt", "vision.prompt"]
-		},
-		"image_vision_ollama.llava-13b": {
-			"object": "llava-13b",
-			"properties": ["llm.local.serverbase", "vision.systemPrompt", "vision.prompt"]
-		},
-		"image_vision_ollama.llava-34b": {
-			"object": "llava-34b",
-			"properties": ["llm.local.serverbase", "vision.systemPrompt", "vision.prompt"]
-		},
-		"image_vision_ollama.moondream": {
-			"object": "moondream",
-			"properties": ["llm.local.serverbase", "vision.systemPrompt", "vision.prompt"]
-		},
-		"image_vision_ollama.minicpm-v": {
-			"object": "minicpm-v",
-			"properties": ["llm.local.serverbase", "vision.systemPrompt", "vision.prompt"]
-		},
-		"image_vision_ollama.qwen2_5vl-3b": {
-			"object": "qwen2_5vl-3b",
-			"properties": ["llm.local.serverbase", "vision.systemPrompt", "vision.prompt"]
-		},
-		"image_vision_ollama.qwen2_5vl-7b": {
-			"object": "qwen2_5vl-7b",
-			"properties": ["llm.local.serverbase", "vision.systemPrompt", "vision.prompt"]
-		},
-		"image_vision_ollama.profile": {
-			"title": "Vision Model",
-			"description": "Select the Ollama vision model to use",
-			"type": "string",
-			"default": "llama3_2-vision-11b",
-			"enum": ["*>preconfig.profiles.*.title"],
-			"conditional": [
-				{
-					"value": "custom",
-					"properties": ["image_vision_ollama.custom"]
-				},
-				{
-					"value": "llama3_2-vision-11b",
-					"properties": ["image_vision_ollama.llama3_2-vision-11b"]
-				},
-				{
-					"value": "llama3_2-vision-90b",
-					"properties": ["image_vision_ollama.llama3_2-vision-90b"]
-				},
-				{
-					"value": "llava-7b",
-					"properties": ["image_vision_ollama.llava-7b"]
-				},
-				{
-					"value": "llava-13b",
-					"properties": ["image_vision_ollama.llava-13b"]
-				},
-				{
-					"value": "llava-34b",
-					"properties": ["image_vision_ollama.llava-34b"]
-				},
-				{
-					"value": "moondream",
-					"properties": ["image_vision_ollama.moondream"]
-				},
-				{
-					"value": "minicpm-v",
-					"properties": ["image_vision_ollama.minicpm-v"]
-				},
-				{
-					"value": "qwen2_5vl-3b",
-					"properties": ["image_vision_ollama.qwen2_5vl-3b"]
-				},
-				{
-					"value": "qwen2_5vl-7b",
-					"properties": ["image_vision_ollama.qwen2_5vl-7b"]
-				}
-			]
+			"minimum": 1024
 		}
 	},
 	//
 	// Required:
-	//		Defines the fields (shape) of the service. Either source or target
-	//		map be specified, or both, but at least one is required
+	//		Defines the properties shown in the pipeline builder side panel, in order
 	//
-	"shape": [
+	"properties": [
 		{
-			"section": "Pipe",
-			"title": "Ollama Vision",
-			"properties": ["image_vision_ollama.profile"]
-		}
+			"name": "model",
+			"type": "string",
+			"title": "Model",
+			"description": "Select the Ollama vision model to use",
+			"default": "llama3.2-vision:11b",
+			"enum": {
+				"llama3.2-vision:11b": {
+					"title": "Llama 3.2 Vision 11B",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 128000 }
+					]
+				},
+				"llama3.2-vision:90b": {
+					"title": "Llama 3.2 Vision 90B",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 128000 }
+					]
+				},
+				"llava:7b": {
+					"title": "LLaVA 7B",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 32768 }
+					]
+				},
+				"llava:13b": {
+					"title": "LLaVA 13B",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 4096 }
+					]
+				},
+				"llava:34b": {
+					"title": "LLaVA 34B",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 4096 }
+					]
+				},
+				"moondream": {
+					"title": "Moondream 2",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 2048 }
+					]
+				},
+				"minicpm-v": {
+					"title": "MiniCPM-V",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 8192 }
+					]
+				},
+				"qwen2.5vl:3b": {
+					"title": "Qwen 2.5 VL 3B",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 128000 }
+					]
+				},
+				"qwen2.5vl:7b": {
+					"title": "Qwen 2.5 VL 7B",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 128000 }
+					]
+				},
+				"custom": {
+					"title": "Custom model",
+					"properties": [
+						"llm_vision_ollama.customModel",
+						"llm_vision_ollama.custom.modelTotalTokens",
+						"llm_vision_ollama.custom.modelOutputTokens"
+					]
+				}
+			}
+		},
+		"llm_vision_ollama.serverbase",
+		"llm_vision_ollama.systemPrompt",
+		"llm_vision_ollama.prompt"
 	],
+	//
+	// Optional:
+	//		Test configuration for automated node testing. "profiles" lists
+	//		values of the "model" selector; the framework writes the selected one
+	//		at "model" and the mock credentials at their paths.
+	//
 	"test": {
-		"profiles": ["llama3_2-vision-11b"],
+		"profiles": ["llama3.2-vision:11b"],
 		"outputs": ["text"],
 		"timeout": 30,
 		"cases": [
@@ -290,9 +207,7 @@
 				"name": "Vision node returns mock response for image input",
 				"image": "images/ocr_test_text.png",
 				"expect": {
-					"text": {
-						"contains": "Mock LLM response"
-					}
+					"text": { "contains": "Mock LLM response" }
 				}
 			}
 		]

@@ -28,7 +28,6 @@ from depends import depends  # type: ignore
 from typing import Any, Dict, Tuple
 from ai.common.schema import Answer, Question
 from ai.common.chat import ChatBase
-from ai.common.config import Config
 
 # Load requirements
 requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
@@ -55,17 +54,15 @@ class Chat(ChatBase):
         """Initialize the Mistral Vision chat instance."""
         super().__init__(provider, connConfig, bag)
         # Get the nodes configuration
-        config = Config.getNodeConfig(provider, connConfig)
-        # Get the model
-        self._model = config.get('model')
+        config = self._config
         try:
             self._tokenizer = MistralTokenizer.from_model(self._model, strict=True)
         except Exception:
             self._tokenizer = MistralTokenizer.v3()
         api_key = config.get('apikey')
         # Get vision-specific configuration
-        self._system_prompt = config.get('vision.systemPrompt') or config.get('systemPrompt')
-        self._prompt = config.get('vision.prompt') or config.get('prompt')
+        self._system_prompt = config['systemPrompt'] or ''
+        self._prompt = config['prompt']
         # API key validation with specific error messages
         if not api_key:
             raise ValueError('Missing Mistral AI API key. Please check your configuration.')

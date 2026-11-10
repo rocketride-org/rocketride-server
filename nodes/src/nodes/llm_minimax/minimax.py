@@ -28,7 +28,6 @@ MiniMax binding for the ChatLLM.
 import re
 from typing import Any, Dict
 from ai.common.chat import ChatBase
-from ai.common.config import Config
 from ai.common.llm_adapter import report_usage_metadata
 from langchain_openai import ChatOpenAI
 
@@ -58,11 +57,11 @@ class Chat(ChatBase):
         super().__init__(provider, connConfig, bag)
 
         # Get the nodes configuration
-        config = Config.getNodeConfig(provider, connConfig)
+        config = self._config
 
         # Get the serverbase url; fall back to the MiniMax default so runtime
         # accepts the same "no explicit serverbase" config that validateConfig does
-        serverbase = config.get('serverbase') or 'https://api.minimax.io/v1'
+        serverbase = config['serverbase']
 
         # Get the api key, use a dummy key if not provided. Local profiles
         # (Ollama / vLLM / TGI) intentionally have no apikey property — local

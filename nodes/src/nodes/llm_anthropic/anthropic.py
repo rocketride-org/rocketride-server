@@ -31,7 +31,6 @@ Extended-thinking streaming is handled globally via
 from typing import Any, Dict
 
 from ai.common.chat import ChatBase
-from ai.common.config import Config, check_credential_resolved
 from ai.common.llm_native_stream import (
     PROMPT_CACHE_PREFIX_VAR,
     apply_prompt_cache_breakpoint,
@@ -74,26 +73,20 @@ class Chat(ChatBase):
         """
         Initialize the Anthropic chat bot.
         """
-        # Get the nodes configuration
-        config = Config.getNodeConfig(provider, connConfig)
-
-        # Get the model
-        model = config.get('model')
+        # Init the chat base: it resolves the model (the custom branch included),
+        # the token limits and refuses a key left as ${ROCKETRIDE_...}.
+        super().__init__(provider, connConfig, bag)
+        config = self._config
+        model = self._model
         model_gate = gate_model_name(str(model) if model is not None else '')
 
         # Get the API key, don't save it
         apikey = (config.get('apikey') or '').strip()
 
-        # A key left as ${ROCKETRIDE_...} names the missing variable, not a bad key format.
-        check_credential_resolved(provider, 'apikey', apikey, connConfig)
-
         # API key validation: must be non-empty and look like an Anthropic key
         # Formats: sk-ant-... (standard), sk-ant-api03-... (newer keys)
         if not apikey or not apikey.startswith('sk-ant'):
             raise ValueError('Invalid Anthropic API key format, please check your API key.')
-
-        # Init the chat base
-        super().__init__(provider, connConfig, bag)
 
         # Extended thinking is opt-in per node (config extendedThinking, default off) and only
         # for reasoning models. It is NOT baked into the client: the native streaming adapter adds

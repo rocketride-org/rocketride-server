@@ -1,129 +1,112 @@
+# =============================================================================
+# MIT License
+# Copyright (c) 2026 Aparavi Software AG
+# =============================================================================
+
+"""Save-time validation of the Baidu Qianfan node.
+
+Drives the real ``IValidator`` over the engine-resolved schema with the openai SDK
+stubbed: the probe sends a non-degenerate token limit, provider errors become
+the node's own messages, and a token limit that is not a number is refused by
+the resolver before any request is made.
+"""
+
 from __future__ import annotations
 
-import importlib.util
 import sys
 import types
 from pathlib import Path
 
+import pytest
+from rocketlib.config import ConfigError
 
-def _load_iglobal(monkeypatch, error_name: str | None = None, config_overrides: dict | None = None):
+NODES_SRC = Path(__file__).resolve().parents[1] / 'src' / 'nodes'
+while str(NODES_SRC) in sys.path:
+    sys.path.remove(str(NODES_SRC))
+sys.path.insert(0, str(NODES_SRC))
+
+from llm_baidu_qianfan import IValidator as qianfan_validator  # noqa: E402
+
+_LOGICAL_TYPE = 'llm_baidu_qianfan'
+
+
+def _validator(monkeypatch, error_name: str | None = None, config_overrides: dict | None = None):
+    """Build the validator over a stored config with the openai SDK stubbed.
+
+    Returns:
+        (IValidator instance, recorded probe requests, recorded warnings)
+    """
     requests: list[dict] = []
     warnings: list[str] = []
 
-    ai_module = types.ModuleType('ai')
-    common_module = types.ModuleType('ai.common')
-    chat_module = types.ModuleType('ai.common.chat')
-    config_module = types.ModuleType('ai.common.config')
-    rocketlib_module = types.ModuleType('rocketlib')
     openai_module = types.ModuleType('openai')
-
-    class ChatBase:
-        pass
-
-    class Config:
-        @staticmethod
-        def getNodeConfig(_logical_type, _conn_config):
-            config = {
-                'apikey': 'test-key',
-                'model': 'ernie-4.5-turbo-128k',
-                'serverbase': 'https://qianfan.baidubce.com/v2',
-                'modelTotalTokens': 128000,
-            }
-            if config_overrides:
-                config.update(config_overrides)
-            return config
-
-    class IGlobalBase:
-        pass
-
-    class OPEN_MODE:
-        CONFIG = 'CONFIG'
+    depends_module = types.ModuleType('depends')
 
     class OpenAIError(Exception):
-        pass
+        """Stand-in for the SDK's base error."""
 
     class APIStatusError(OpenAIError):
-        pass
+        """Stand-in for an HTTP error."""
 
     class AuthenticationError(APIStatusError):
-        pass
+        """Stand-in for a rejected key."""
 
     class RateLimitError(APIStatusError):
-        pass
+        """Stand-in for a throttled call."""
 
     class APIConnectionError(OpenAIError):
-        pass
+        """Stand-in for a transport failure."""
 
     class FakeCompletions:
+        """Records the probe request, raising the asked-for error."""
+
         def create(self, **kwargs):
+            """Record the call, then raise when the test asked for a failure."""
             requests.append(kwargs)
             if error_name is not None:
-                raised_error = getattr(openai_module, error_name)(error_name)
-                raise raised_error
-
-    class FakeChat:
-        def __init__(self):
-            self.completions = FakeCompletions()
+                raise getattr(openai_module, error_name)(error_name)
 
     class OpenAI:
-        def __init__(self, **_kwargs):
-            self.chat = FakeChat()
+        """Client stub exposing only what the node touches."""
 
-    chat_module.ChatBase = ChatBase
-    config_module.Config = Config
-    config_module.check_credential_resolved = lambda *args, **kwargs: None
-    config_module.warn_if_credential_unresolved = lambda *args, **kwargs: False
-    rocketlib_module.IGlobalBase = IGlobalBase
-    rocketlib_module.OPEN_MODE = OPEN_MODE
-    rocketlib_module.warning = warnings.append
+        def __init__(self, **_kwargs):
+            """Expose a chat.completions surface."""
+            self.chat = types.SimpleNamespace(completions=FakeCompletions())
+
     openai_module.APIConnectionError = APIConnectionError
     openai_module.APIStatusError = APIStatusError
     openai_module.AuthenticationError = AuthenticationError
     openai_module.OpenAI = OpenAI
     openai_module.OpenAIError = OpenAIError
     openai_module.RateLimitError = RateLimitError
-
-    monkeypatch.setitem(sys.modules, 'ai', ai_module)
-    monkeypatch.setitem(sys.modules, 'ai.common', common_module)
-    monkeypatch.setitem(sys.modules, 'ai.common.chat', chat_module)
-    monkeypatch.setitem(sys.modules, 'ai.common.config', config_module)
-    monkeypatch.setitem(sys.modules, 'rocketlib', rocketlib_module)
+    depends_module.depends = lambda _requirements: None
     monkeypatch.setitem(sys.modules, 'openai', openai_module)
+    monkeypatch.setitem(sys.modules, 'depends', depends_module)
+    monkeypatch.setattr(qianfan_validator, 'warning', warnings.append)
 
-    module_path = Path(__file__).resolve().parents[1] / 'src' / 'nodes' / 'llm_baidu_qianfan' / 'IGlobal.py'
-    spec = importlib.util.spec_from_file_location('baidu_qianfan_iglobal_under_test', module_path)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    monkeypatch.setattr(module.IGlobal, '_ensure_dependencies', lambda self: None)
-
-    instance = module.IGlobal()
-    instance.glb = types.SimpleNamespace(logicalType='llm_baidu_qianfan', connConfig={})
-
+    config = {'model': 'ernie-4.5-turbo-128k', 'apikey': 'test-key'}
+    if config_overrides:
+        config.update(config_overrides)
+    instance = qianfan_validator.IValidator()
+    instance.glb = types.SimpleNamespace(logicalType=_LOGICAL_TYPE, connConfig=config)
     return instance, requests, warnings
 
 
 def test_validate_config_prefers_authentication_error_message(monkeypatch):
-    instance, _requests, warnings = _load_iglobal(monkeypatch, 'AuthenticationError')
-
+    instance, _requests, warnings = _validator(monkeypatch, 'AuthenticationError')
     instance.validateConfig()
-
     assert warnings == ['Baidu Qianfan API key is invalid or unauthorized.']
 
 
 def test_validate_config_prefers_rate_limit_error_message(monkeypatch):
-    instance, _requests, warnings = _load_iglobal(monkeypatch, 'RateLimitError')
-
+    instance, _requests, warnings = _validator(monkeypatch, 'RateLimitError')
     instance.validateConfig()
-
     assert warnings == ['Baidu Qianfan rate limit exceeded while validating the configuration.']
 
 
 def test_validate_config_uses_non_degenerate_probe_token_limit(monkeypatch):
-    instance, requests, warnings = _load_iglobal(monkeypatch)
-
+    instance, requests, warnings = _validator(monkeypatch)
     instance.validateConfig()
-
     assert warnings == []
     assert requests == [
         {
@@ -134,27 +117,36 @@ def test_validate_config_uses_non_degenerate_probe_token_limit(monkeypatch):
     ]
 
 
-def test_validate_config_accepts_numeric_string_token_limit(monkeypatch):
-    instance, requests, warnings = _load_iglobal(monkeypatch, config_overrides={'modelTotalTokens': '128000'})
-
+def test_validate_config_probes_the_schema_endpoint(monkeypatch):
+    """The serverbase comes from the schema default; the probe does not need it stored."""
+    instance, requests, _warnings = _validator(monkeypatch)
     instance.validateConfig()
-
-    assert warnings == []
     assert len(requests) == 1
+    assert instance.config['serverbase'] == 'https://qianfan.baidubce.com/v2'
 
 
-def test_validate_config_rejects_non_numeric_token_limit_with_user_warning(monkeypatch):
-    instance, requests, warnings = _load_iglobal(monkeypatch, config_overrides={'modelTotalTokens': 'abc'})
-
-    instance.validateConfig()
-
+def test_a_custom_model_with_a_non_numeric_token_limit_is_refused(monkeypatch):
+    """The resolver types the custom branch's token limit; 'abc' never reaches the probe."""
+    instance, requests, _warnings = _validator(
+        monkeypatch,
+        config_overrides={'model': 'custom', 'custom': {'customModel': 'ernie-x', 'modelTotalTokens': 'abc'}},
+    )
+    with pytest.raises(ConfigError, match='modelTotalTokens'):
+        instance.validateConfig()
     assert requests == []
-    assert warnings == ['Token limit must be greater than 0']
+
+
+def test_a_custom_model_is_probed_by_its_own_id(monkeypatch):
+    instance, requests, warnings = _validator(
+        monkeypatch,
+        config_overrides={'model': 'custom', 'custom': {'customModel': 'ernie-x', 'modelTotalTokens': 128000}},
+    )
+    instance.validateConfig()
+    assert warnings == []
+    assert [r['model'] for r in requests] == ['ernie-x']
 
 
 def test_format_error_keeps_fallback_when_only_status_is_available(monkeypatch):
-    instance, _requests, _warnings = _load_iglobal(monkeypatch)
-
+    instance, _requests, _warnings = _validator(monkeypatch)
     message = instance._format_error(500, None, None, 'provider fallback message')
-
     assert message == 'Error 500: provider fallback message'

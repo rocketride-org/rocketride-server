@@ -40,7 +40,8 @@ import pytest
 
 pytest.importorskip('langchain_aws')
 
-from ai.common.config import Config  # noqa: E402
+import rocketlib  # noqa: E402
+from rocketlib.config import resolveConfig  # noqa: E402
 from ai.common.llm_adapter import turn_usage  # noqa: E402
 from ai.common.schema import Question  # noqa: E402
 
@@ -185,16 +186,17 @@ def _load_driver():
 
 
 def _chat(monkeypatch, model: str = _SONNET):
+    # The custom branch is the one place a test can set the model and limits itself.
     config = {
-        'model': model,
+        'model': 'custom',
+        'custom': {'customModel': model, 'modelTotalTokens': 200000, 'modelOutputTokens': 8192},
         'accessKey': 'AKIDEXAMPLE',
         'secretKey': 'secret-example',
         'region': 'us-east-1',
-        'modelTotalTokens': 200000,
-        'modelOutputTokens': 8192,
     }
-    monkeypatch.setattr(Config, 'getNodeConfig', staticmethod(lambda *a, **k: dict(config)))
-    chat = _load_driver().Chat('bedrock', {}, {})
+    schema = rocketlib.getServiceSchema('llm_bedrock')
+    assert schema is not None, 'llm_bedrock is not registered with the engine'
+    chat = _load_driver().Chat('llm_bedrock', resolveConfig(schema, config), {})
     # Counting is not what these tests are about; a fixed estimate keeps them
     # independent of how the node counts tokens.
     chat.getTokens = lambda value: (len(value) + 3) // 4

@@ -42,6 +42,16 @@ class IInstance(LLMBase):
     _cached_answer: str | None = None
     _cache_from_image: bool = False
 
+    def open(self, object):
+        """Reset the per-object buffers so nothing from a previous caller's object carries over.
+
+        Args:
+            object: The entry being opened (unused; the reset is the point).
+        """
+        self.image_data = None
+        self._cached_answer = None
+        self._cache_from_image = False
+
     def writeImage(self, action: int, mimeType: str, buffer: bytes):
         """Handle AVI image protocol for streaming image frames."""
         if action == AVI_ACTION.BEGIN:

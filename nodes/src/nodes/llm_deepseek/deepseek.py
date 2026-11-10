@@ -27,8 +27,9 @@ Deepseek binding for the ChatLLM.
 
 from typing import Any, Dict
 from ai.common.chat import ChatBase
-from ai.common.config import Config
 from langchain_openai import ChatOpenAI
+
+from .deepseek_endpoint import is_deepseek_api
 
 
 class Chat(ChatBase):
@@ -50,19 +51,24 @@ class Chat(ChatBase):
         super().__init__(provider, connConfig, bag)
 
         # Get the nodes configuration
-        config = Config.getNodeConfig(provider, connConfig)
+        config = self._config
 
-        # Get the serverbase url
-        serverbase = config.get('serverbase')
+        # The endpoint that serves the selected model: the DeepSeek API for the
+        # cloud branches, the Ollama server the local branches alias
+        serverbase = (config['serverbase'] or '').strip()
         if not serverbase:
+            # An empty endpoint would let the OpenAI client fall back to its own
+            # default host and fail with an unrelated authentication error
             raise ValueError('DeepSeek serverbase is required.')
 
-        # Get the api key, use some dummy key if not provided
-        apikey = config.get('apikey') or 'sk-local-dummy-key'
-
-        # API key validation logic, only if it's a cloud model, locals do not have the apikey property
-        if 'api.deepseek' in serverbase and not apikey.startswith('sk-'):
-            raise ValueError('Invalid DeepSeek API key format, please check your API key.')
+        # The API key belongs to the cloud endpoint; a local server takes any token
+        apikey = (config.get('apikey') or '').strip()
+        if is_deepseek_api(serverbase):
+            if not apikey:
+                raise ValueError('DeepSeek API key is required for the DeepSeek API endpoint.')
+            if not apikey.startswith('sk-'):
+                raise ValueError('Invalid DeepSeek API key format, please check your API key.')
+        apikey = apikey or 'sk-local-dummy-key'
 
         # Get the llm
         self._llm = ChatOpenAI(
