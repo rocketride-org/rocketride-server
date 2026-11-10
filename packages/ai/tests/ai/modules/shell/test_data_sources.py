@@ -489,7 +489,7 @@ def test_bound_renders_expire_after_the_source_ttl(acct, shell_root, monkeypatch
     assert 'New' in _crawl(client).text
     # Responses bound to no source never expire.
     (about,) = [key for key in pages._render_cache.keys() if key[0] == '/about']
-    assert math.isinf(pages._render_cache.get(about)[1])
+    assert math.isinf(pages._render_cache.get(about).expires)
 
 
 async def test_one_bind_reads_a_named_app_once(acct, monkeypatch):
@@ -525,6 +525,15 @@ def test_shared_caches_keep_a_bound_response_only_as_long_as_the_engine_would(ac
     # Data-free crawler responses and people's responses are unchanged.
     assert _crawl(client, '/about').headers['cache-control'] == 'public, max-age=3600'
     assert client.get('/pricing', headers={'User-Agent': BROWSER}).headers['cache-control'] == 'private, no-cache'
+
+
+def test_a_fresh_bound_response_never_advertises_more_than_the_ttl(acct, shell_root, monkeypatch):
+    # At this clock, (now + 300) - now is 300.0000000000582 in floating point,
+    # which ceil turned into max-age=301 (seen on a CI runner).
+    monkeypatch.setattr(pages, 'time', SimpleNamespace(monotonic=lambda: 524202.9789498676))
+    _seed()
+    _serve(_page('/pricing', ['plans:acme.brandy']))
+    assert _crawl(_client()).headers['cache-control'] == 'public, max-age=300'
 
 
 def test_a_failing_invalidation_listener_is_a_warning(monkeypatch):

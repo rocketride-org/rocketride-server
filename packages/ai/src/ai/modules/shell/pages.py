@@ -66,7 +66,7 @@ import sys
 import time
 from pathlib import Path
 from time import monotonic
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Tuple
 
 from fastapi import HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -290,15 +290,24 @@ class _FifoCache:
         self.total = 0
 
     def discard(self, key: Any) -> None:
+        """Drop the entry under ``key``, if there is one."""
         hit = self._entries.pop(key, None)
         if hit is not None:
             self.total -= hit[1]
 
 
+class _Rendered(NamedTuple):
+    """A rendered page response, as the render cache holds it."""
+
+    sources: Tuple[str, ...]  # the data entries the body binds
+    expires: float  # on the monotonic clock; inf when nothing is bound
+    body: bytes
+    headers: Dict[str, str]
+
+
 # Rendered page responses: (path, UA class, shell document, its mtime and size,
-# RR_APP_URL) -> (data entries bound, expiry on the monotonic clock, body
-# bytes, headers). Cleared on every aggregate swap; an entry bound to a data
-# source is dropped when that source is invalidated.
+# RR_APP_URL) -> _Rendered. Cleared on every aggregate swap; an entry bound to
+# a data source is dropped when that source is invalidated.
 _RENDER_CACHE_MAX_BYTES = 32 * 1024 * 1024
 _RENDER_CACHE_MAX = 4096
 _render_cache = _FifoCache(_RENDER_CACHE_MAX_BYTES, _RENDER_CACHE_MAX)
@@ -325,10 +334,11 @@ def _clear_rendered(old: Any, new: Any) -> None:
 
 
 def _drop_rendered_for(source: str) -> None:
+    """Invalidation listener: drop every render bound to ``source``; renders in flight are served, not cached."""
     global _generation
     _generation += 1
     for key in _render_cache.keys():
-        if any(data_sources.source_name(entry) == source for entry in _render_cache.get(key)[0]):
+        if any(data_sources.source_name(entry) == source for entry in _render_cache.get(key).sources):
             _render_cache.discard(key)
 
 
@@ -628,16 +638,19 @@ async def _render_page(request: Request, path: str, page: Page) -> Response:
     key = (path, crawler, document, mtime_ns, size, app_url())
     now = time.monotonic()
     cached = _render_cache.get(key)
-    if cached is None or cached[1] <= now:
+    if cached is None or cached.expires <= now:
         generation = _generation
         cached, cacheable = await _render(path, page, crawler, document, now)
         if cacheable and generation == _generation:
-            _render_cache.put(key, cached, len(cached[2]))
-    headers = dict(cached[3])
-    if cached[0] and headers['Cache-Control'] == CACHE_CONTROL:
+            _render_cache.put(key, cached, len(cached.body))
+    headers = dict(cached.headers)
+    if cached.sources and headers['Cache-Control'] == CACHE_CONTROL:
         # A shared cache keeps bound data no longer than this server would.
-        headers['Cache-Control'] = f'public, max-age={math.ceil(cached[1] - now)}'
-    return HTMLResponse(cached[2], headers=headers)
+        # min() caps it at the TTL: (now + TTL) - now can come out a hair over
+        # it in floating point, and ceil would round that up a whole second.
+        max_age = math.ceil(min(cached.expires - now, data_sources.TTL_SECONDS))
+        headers['Cache-Control'] = f'public, max-age={max_age}'
+    return HTMLResponse(cached.body, headers=headers)
 
 
 def _shell_document(request: Request, path: str) -> Tuple[Path, int, int]:
@@ -672,10 +685,8 @@ def _unchanged(document: Path, mtime_ns: int, size: int) -> bool:
     return stat.st_mtime_ns == mtime_ns and stat.st_size == size
 
 
-async def _render(
-    path: str, page: Page, crawler: bool, document: Path, now: float
-) -> Tuple[Tuple[Tuple[str, ...], float, bytes, Dict[str, str]], bool]:
-    """Render one page: ``((sources, expires, body, headers), cacheable)``, the entry as the render cache holds it.
+async def _render(path: str, page: Page, crawler: bool, document: Path, now: float) -> Tuple[_Rendered, bool]:
+    """Render one page: ``(rendered, cacheable)``, the entry as the render cache holds it.
 
     People get the shell document; crawlers get the page's snapshot rendered
     with its bound data sources (``_crawler_snapshot``), or the shell document
@@ -715,7 +726,7 @@ async def _render(
     if not page.listed:
         headers['X-Robots-Tag'] = 'noindex'
     expires = now + data_sources.TTL_SECONDS if sources else math.inf
-    return (sources, expires, body.encode('utf-8'), headers), cacheable
+    return _Rendered(sources, expires, body.encode('utf-8'), headers), cacheable
 
 
 async def register_public_pages(server: WebServer) -> None:

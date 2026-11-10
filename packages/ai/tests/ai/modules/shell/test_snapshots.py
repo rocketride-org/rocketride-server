@@ -576,7 +576,7 @@ def test_a_crawler_sweep_keeps_both_caches_under_their_byte_budgets(shell_root):
     assert f'{DIST}/pages/p0.html' not in pages._snapshot_cache
     # What each cache counts is what it holds: encoded bytes.
     snapshots = [pages._snapshot_cache.get(key) for key in pages._snapshot_cache.keys()]
-    bodies = [pages._render_cache.get(key)[2] for key in pages._render_cache.keys()]
+    bodies = [pages._render_cache.get(key).body for key in pages._render_cache.keys()]
     for held, cache in ((snapshots, pages._snapshot_cache), (bodies, pages._render_cache)):
         assert all(isinstance(value, bytes) for value in held)
         assert sum(map(len, held)) == cache.total
