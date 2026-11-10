@@ -34,18 +34,6 @@ import json
 
 from rocketlib import IValidatorBase, warning
 
-#: LlamaParse constructor options the advanced block may set.
-KNOWN_PARAMETERS = frozenset(
-    {
-        'parse_mode',
-        'vendor_multimodal_model_name',
-        'system_prompt_append',
-        'page_error_tolerance',
-        'spreadsheet_extract_sub_tables',
-        'verbose',
-    }
-)
-
 
 def advanced_config_problems(text: str) -> list:
     """
@@ -57,17 +45,19 @@ def advanced_config_problems(text: str) -> list:
     Returns:
         list: Human-readable problems; empty when the block is usable.
     """
+    # A blank block is an empty object at run time, so it is no problem here
     if not text or not text.strip():
-        return ['Advanced configuration is enabled but no configuration was provided.']
+        return []
     try:
         parsed = json.loads(text)
     except json.JSONDecodeError as e:
         return [f'Advanced configuration contains invalid JSON: {e}']
     if not isinstance(parsed, dict):
         return ['Advanced configuration must be a JSON object.']
-    unknown = sorted(key for key in parsed if key not in KNOWN_PARAMETERS)
-    if unknown:
-        return [f'Advanced configuration contains unknown parameters: {unknown}']
+    # Every other key is passed to the LlamaParse constructor unchanged; only
+    # api_key is dropped, since the API key field owns it
+    if 'api_key' in parsed:
+        return ['Advanced configuration must not set api_key; it is ignored. Use the API key field.']
     return []
 
 

@@ -95,8 +95,7 @@
 							"default": "parse_page_with_lvm",
 							"enum": {
 								"cost_effective": {
-									"title": "Cost-effective - Text-heavy documents",
-									"properties": ["llamaparse.lvm_model"]
+									"title": "Cost-effective - Text-heavy documents"
 								},
 								"agentic": {
 									"title": "Agentic - Documents with diagrams and images",
@@ -108,11 +107,10 @@
 								},
 								"parse_page_with_lvm": {
 									"title": "Parse with LVM (Legacy)",
-									"properties": ["llamaparse.lvm_model"]
+									"properties": ["llamaparse.lvm_model", "llamaparse.system_prompt_append"]
 								}
 							}
 						},
-						"llamaparse.system_prompt_append",
 						"llamaparse.spreadsheet_extract_sub_tables"
 					]
 				},

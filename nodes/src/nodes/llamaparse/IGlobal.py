@@ -80,19 +80,20 @@ class IGlobal(IGlobalBase):
                 if key != 'api_key':  # Don't override API key handling
                     parser_args[key] = value
         else:
+            # Each parse mode branch declares only the leaves it sends, so a
+            # leaf is read inside the branch that declares it
             parse_mode = config.parse_mode
-            lvm_model = config.lvm_model
-            system_prompt_append = (config.system_prompt_append or '').strip()
 
             if parse_mode == 'cost_effective':
                 parser_args['parse_mode'] = 'parse_page_with_llm'
             elif parse_mode in ('agentic', 'agentic_plus'):
                 parser_args['parse_mode'] = 'parse_page_with_agent'
-                parser_args['vendor_multimodal_model_name'] = lvm_model
+                parser_args['vendor_multimodal_model_name'] = config.lvm_model
             elif parse_mode == 'parse_page_with_lvm':
                 # Legacy LVM mode with special parameters
                 parser_args['parse_mode'] = parse_mode
-                parser_args['vendor_multimodal_model_name'] = lvm_model
+                parser_args['vendor_multimodal_model_name'] = config.lvm_model
+                system_prompt_append = (config.system_prompt_append or '').strip()
                 if system_prompt_append:
                     parser_args['system_prompt_append'] = system_prompt_append
                 parser_args['page_error_tolerance'] = 0.05
