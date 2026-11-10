@@ -97,11 +97,11 @@ def _claims(
     for pub in _claim_order(published):
         pages, site, errors = check_manifest(pub.app_id, pub.manifest, live_conflict)
         for err in errors:
-            debug(f'[public_pages] {pub.app_id}: {err} (page skipped)')
+            warning(f'[public_pages] {pub.app_id}: {err} (page skipped)')
         for page in pages:
             owner = exact.get(page.path)
             if owner is not None:
-                debug(f'[public_pages] {pub.app_id}: {page.path} already claimed by {owner.app_id} (page skipped)')
+                warning(f'[public_pages] {pub.app_id}: {page.path} already claimed by {owner.app_id} (page skipped)')
                 continue
             exact[page.path] = replace(page, dist_dir=pub.dist_dir, published_at=pub.published_at)
         if site is not None:

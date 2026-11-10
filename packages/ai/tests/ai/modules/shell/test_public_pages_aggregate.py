@@ -190,6 +190,19 @@ def test_first_claim_wins_across_root_claimants():
     assert agg.exact['/y'].app_id == 'rocketride.secret'
 
 
+def test_a_published_manifests_dropped_pages_are_warnings(warnings):
+    # A seeded platform row never passed the gate: without a warning, a broken
+    # home-ui manifest would fall back to the legacy list with nothing logged.
+    home = Published('rocketride.home', {'publicPages': [{'path': '/', 'title': 'H'}, {'path': '/x', 'title': 'H'}]})
+    other = Published(
+        'rocketride.secret', {'publicPages': [{'path': '/x', 'title': 'S'}, {'path': '/API', 'title': 'S'}]}
+    )
+    build_aggregate([home, other])
+    assert len(warnings) == 2
+    assert any('/x already claimed by rocketride.home' in w for w in warnings)
+    assert any("'/API'" in w for w in warnings)
+
+
 def test_site_only_from_the_root_owner():
     home = Published(
         'rocketride.home', {'publicPages': [{'path': '/', 'title': 'H'}], 'site': {'title': 'Home'}}, published_at=1
@@ -394,7 +407,8 @@ async def test_kept_pages_claim_against_the_fresh_ones(monkeypatch, warnings):
     # home's kept claims lose to the earlier binding, as fresh ones would.
     assert pp.current().exact['/pricing'].app_id == 'rocketride.other'
     assert pp.current().exact['/'].app_id == 'rocketride.home'
-    assert len(warnings) == 1
+    assert len(warnings) == 2 and 'unreadable this build' in warnings[0]
+    assert '/pricing already claimed by rocketride.other' in warnings[1]
 
 
 async def test_malformed_rows_are_skipped():
