@@ -68,7 +68,8 @@ also dropped when that source is invalidated, and expires after
 what is left of that time, so the TTL bounds staleness end to end. Snapshot
 bytes, immutable per version, are cached by store path under their own byte
 budget. A snapshot over ``MAX_SNAPSHOT_BYTES`` (sized by a stat) is never read.
-A feed's document is built once per page map.
+A feed's document is built once per page map, and the ``site.notFound``
+response once per page map and UA class.
 """
 
 import asyncio
@@ -344,8 +345,9 @@ class _Rendered(NamedTuple):
 
 
 # Rendered page responses: (path, UA class, shell document, its mtime and size,
-# RR_APP_URL) -> _Rendered. Cleared on every aggregate swap; an entry bound to
-# a data source is dropped when that source is invalidated.
+# RR_APP_URL) -> _Rendered, plus the site.notFound response (_NOT_FOUND_KEY).
+# Cleared on every aggregate swap; an entry bound to a data source is dropped
+# when that source is invalidated.
 _RENDER_CACHE_MAX_BYTES = 32 * 1024 * 1024
 _RENDER_CACHE_MAX = 4096
 _render_cache = _FifoCache(_RENDER_CACHE_MAX_BYTES, _RENDER_CACHE_MAX)
@@ -361,6 +363,12 @@ _documents: Dict[Tuple[str, bool], Tuple[Path, int, int]] = {}
 # Atom documents: (feed path, RR_APP_URL) -> the document. A feed reads only
 # the page map, so it is built once per page map; cleared on every swap.
 _atom_cache: Dict[Tuple[str, str], str] = {}
+
+# The render cache key of the site.notFound response, which no path changes:
+# one entry per UA class and shell document. Page keys start with a path ('/').
+_NOT_FOUND_KEY = 'site.notFound'
+# How long a site.notFound response that fell back on a storage error is kept.
+_NOT_FOUND_RETRY_SECONDS = 60.0
 
 # Bumped by every swap and data-source invalidation: a render that started
 # before one is served, not cached.
@@ -603,34 +611,65 @@ async def _not_found_page(request: Request, aggregate: Any) -> Optional[Response
 
     None when the site declares no ``notFound``, or the path is under a
     reserved prefix (``/.well-known`` among them), where API callers and
-    discovery probes (OAuth, MCP) expect the plain 404. Crawlers get the
-    snapshot from the root owner's production version, rendered like a
-    page's (``assets`` resolves; no data), or the shell's ``index.html`` when
-    it cannot be read; people get ``index.html``, never a capture, so the app
-    renders its own 404. Either way under a head titled ``Page not found |
-    <site.title>``, with noindex and no canonical URL. Built per request:
-    never cached as a page.
+    discovery probes (OAuth, MCP) expect the plain 404. The body does not
+    depend on the path, and scanners probing random paths make this the
+    busiest 404, so it comes from the render cache: one entry per UA class
+    and shell ``index.html`` (its mtime and size), under ``_NOT_FOUND_KEY``,
+    dropped on every swap (``_render_not_found`` builds it).
+
+    Raises:
+        HTTPException: 503 (from ``shell_document_path``) when the shell is not built.
     """
     path = route_path(request.scope) or '/'
     snapshot = aggregate.site.get('notFound')
     root = aggregate.exact.get('/')
     if not snapshot or root is None or reserved_error(path):
         return None
+    crawler = classify(request.headers.get('user-agent', '')) == CRAWLER
     index = shell_document_path(request, capture=False)
+    stat = index.stat()
+    key = (_NOT_FOUND_KEY, crawler, index, stat.st_mtime_ns, stat.st_size)
+    now = time.monotonic()
+    cached = _render_cache.get(key)
+    if cached is None or cached.expires <= now:
+        generation = _generation
+        cached = await _render_not_found(aggregate.site, root, snapshot, crawler, index, now)
+        if generation == _generation:
+            _render_cache.put(key, cached, len(cached.body))
+    return HTMLResponse(cached.body, status_code=404, headers=cached.headers)
+
+
+async def _render_not_found(
+    site: Mapping[str, Any], root: Page, snapshot: str, crawler: bool, index: Path, now: float
+) -> _Rendered:
+    """The ``site.notFound`` response, as the render cache holds it.
+
+    Crawlers get ``snapshot`` from the production version of ``root`` (the
+    page ``/``), rendered like a page's (``assets`` resolves; no data), or
+    ``index`` when it cannot be used; people get ``index`` (never a capture),
+    so the app renders its own 404. Either way under a head titled ``Page not
+    found | <site.title>``, with noindex and no canonical URL. A fallback the
+    next request would retry (a storage error) expires after
+    ``_NOT_FOUND_RETRY_SECONDS`` instead of with the page map, so the store
+    is retried, and its failure warned about, at most that often.
+    """
+    expires = math.inf
     rendered = None
-    if classify(request.headers.get('user-agent', '')) == CRAWLER:
+    if crawler:
         owner = Page('/', root.app_id, '', snapshot=snapshot, dist_dir=root.dist_dir, version=root.version)
-        rendered, _ = await _crawler_snapshot(owner, {}, where=f'404 for {path!r}')
+        rendered, final = await _crawler_snapshot(owner, {}, where='site.notFound')
+        if not final:
+            expires = now + _NOT_FOUND_RETRY_SECONDS
     body = rendered
     if body is None:
         body = await asyncio.to_thread(index.read_text, encoding='utf-8')
     title = 'Page not found'
-    site_title = aggregate.site.get('title', '')
+    site_title = site.get('title', '')
     if site_title:
         title = f'{title} | {site_title}'
     body = inject_head(body, title=title, noindex=True)
     headers = {'Vary': 'User-Agent', 'Cache-Control': 'private, no-cache', 'X-Robots-Tag': 'noindex'}
-    return HTMLResponse(body, status_code=404, headers=headers)
+    return _Rendered((), expires, body.encode('utf-8'), headers)
 
 
 def _feed(aggregate: public_pages.Aggregate, feed: Mapping[str, str]) -> Response:

@@ -469,10 +469,10 @@ page (query kept). Any path that is neither a page, a redirect nor a server
 route answers `404`. With `site.notFound` declared, a `GET` or `HEAD` on such
 a path (outside `/api`, `/task`, `/mcp` and `/.well-known`, which keep the
 plain `404`) answers `404` with a page titled `Page not found | <site.title>`,
-`noindex` and no canonical URL, never cached as a page: crawlers get the
-`site.notFound` snapshot, rendered like a page's (`{{assets}}` included), and
-people get the shell's `index.html`, so your app renders its own not-found
-view.
+`noindex`, no canonical URL and `Cache-Control: private, no-cache`: crawlers
+get the `site.notFound` snapshot, rendered like a page's (`{{assets}}`
+included), and people get the shell's `index.html`, so your app renders its
+own not-found view.
 
 ### Settings
 
