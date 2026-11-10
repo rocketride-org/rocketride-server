@@ -125,7 +125,7 @@ function doneReply(answer: string): string {
 
 /** A host in a team, with no workspace. */
 function hostIn(scopeKey: string): AgentHost {
-	return { vfs: undefined as never, scopeKey, scaffoldApp: async () => ({ appId: 'x', folder: 'x-ui' }), packApp: async () => new Uint8Array(), devSession: () => null };
+	return { vfs: undefined as never, scopeKey, scaffoldApp: async () => ({ appId: 'x', folder: 'x-ui' }), packApp: async () => new Uint8Array(), devSession: () => null, leasePreview: async () => ({ ok: false, why: 'no preview in this test' }) };
 }
 
 /** A host in team a over a workspace, with the given limits. */

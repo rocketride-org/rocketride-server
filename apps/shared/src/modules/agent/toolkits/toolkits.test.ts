@@ -23,7 +23,8 @@
 // =============================================================================
 // TOOLKIT TESTS — the agent never writes over the user's work and a Stop stops,
 // the user says yes first, secrets stay out of the model, deploy_app keeps its
-// version, check_app fails a broken app, and Auto stops only its own runs
+// version, check_app fails a broken app and builds in a preview it leases, and
+// Auto stops only its own runs
 // =============================================================================
 
 import assert from 'node:assert/strict';
@@ -42,7 +43,7 @@ import { isReferencePath } from '../../vfs/referenceTree';
 import { StaleVersionError, StaleWriteError, StagedFileSystem } from '../../vfs/stagedFileSystem';
 import type { IWorkspaceFileSystem, VfsEntry } from '../../vfs/vfsTypes';
 import { AgentSession } from '../agent';
-import { setAgentHost, type AgentDevSession, type AgentHost, type ApprovalPrefs, type ApprovalSettings, type EditorControl, type Grant } from '../host';
+import { setAgentHost, type AgentDevSession, type AgentHost, type ApprovalPrefs, type ApprovalSettings, type EditorControl, type Grant, type PreviewLease } from '../host';
 import { BUILDER_PROMPTS } from '../prompts';
 import { runAgent } from '../run';
 import type { AgentTool } from '../tools';
@@ -160,8 +161,14 @@ const ALPHA = { 'apps/a-ui/package.json': JSON.stringify({ name: 'x', appManifes
 /** The daybook app; Monaco holds its one source file. */
 const DAYBOOK = { 'apps/daybook-ui/package.json': JSON.stringify({ appManifest: { id: 'daybook', name: 'Daybook' } }), 'apps/daybook-ui/src/App.tsx': 'export default function App() { return null; }' };
 
-/** An agent host over `vfs`; `extra` adds or replaces its parts. */
-const hostFor = (vfs: IWorkspaceFileSystem, extra: Partial<AgentHost> = {}): AgentHost => ({ vfs, scaffoldApp: async () => ({ appId: 'x', folder: 'x-ui' }), packApp: async () => new Uint8Array([1, 2, 3]), devSession: () => null, ...extra });
+/** A lease that failed, as when a test has no preview. */
+const NO_PREVIEW: PreviewLease = { ok: false, why: 'no preview in this test' };
+
+/** A lease of `session`, held by the check; `release` hears its end. */
+const lent = (session: AgentDevSession, release: () => void = () => undefined): PreviewLease => ({ ok: true, session, release });
+
+/** An agent host over `vfs`, whose previews never start; `extra` adds or replaces its parts. */
+const hostFor = (vfs: IWorkspaceFileSystem, extra: Partial<AgentHost> = {}): AgentHost => ({ vfs, scaffoldApp: async () => ({ appId: 'x', folder: 'x-ui' }), packApp: async () => new Uint8Array([1, 2, 3]), devSession: () => null, leasePreview: async () => NO_PREVIEW, ...extra });
 
 /** A tool, and its call as the loop makes it: prepared, let through by `approvals` (every act, without them), then run. */
 function toolOf(toolkit: { tools(): AgentTool[] }, name: string, approvals?: Approvals): { tool: AgentTool; execute(args: Record<string, unknown>): Promise<string> } {
@@ -260,6 +267,13 @@ function scriptedModel(replies: Array<string | ((q: QuestionSpec) => string)>): 
 	return Object.assign(call, { questions });
 }
 
+/** The result entries a question shows the model, oldest first. */
+function resultsIn(q: QuestionSpec): Array<{ tool: string; key: string; summary?: string }> {
+	const head = 'Previous tool results:\n';
+	const block = q.context.find((c) => c.startsWith(head));
+	return block ? JSON.parse(block.slice(head.length)) : [];
+}
+
 /** A reply asking for tool calls. */
 const plan = (...calls: Array<[tool: string, args?: Record<string, unknown>]>): string => JSON.stringify({ thought: 'working', tool_calls: calls.map(([tool, args]) => ({ tool, args: args ?? {} })) });
 
@@ -269,7 +283,7 @@ const done = (answer: string): string => JSON.stringify({ thought: 'finishing', 
 /** Runs one agent turn as the Agent tab does, minus the browser: the chat's cards go to `ask`, the unsaved-changes dialog to `choose`. */
 async function agentTurn(ws: MemoryWorkspace, model: ModelCall, opts: { client?: RocketRideClient; history?: ChatMessage[]; dev?: AgentDevSession; queued?: string[]; ask?: (card: ChatAskCard) => ChatAsking; signal?: AbortSignal; choose?: ChoiceFn; editors?: Record<string, EditorControl> } = {}): Promise<Array<{ type: string; text: string }>> {
 	const { editors } = opts;
-	const host = hostFor(ws, { devSession: () => opts.dev ?? null, ...(editors ? { editor: (path: string) => editors[path] ?? null } : {}) });
+	const host = hostFor(ws, { devSession: () => opts.dev ?? null, leasePreview: async () => (opts.dev ? lent(opts.dev) : NO_PREVIEW), ...(editors ? { editor: (path: string) => editors[path] ?? null } : {}) });
 	const chunks: Array<{ type: string; text: string }> = [];
 	const queued = [...(opts.queued ?? [])];
 	const options = { history: opts.history ?? [], prompts: BUILDER_PROMPTS, chatModel: { name: 'test-model', ask: model }, signal: opts.signal ?? new AbortController().signal, takeQueued: () => queued.splice(0), ask: opts.ask };
@@ -278,7 +292,7 @@ async function agentTurn(ws: MemoryWorkspace, model: ModelCall, opts: { client?:
 }
 
 // =============================================================================
-// THE USER'S WORK — read before edit, unsaved changes, the save race, Stop
+// THE USER'S WORK — read before edit, unsaved changes, the save race, Stop, long reads
 // =============================================================================
 
 test('edit_file and write_file refuse a file not read, or changed since it was read, until it is read again', async () => {
@@ -356,6 +370,59 @@ test('a run the user stops closes its open unsaved-changes question as Keep mine
 	await agentTurn(ws, model, { choose, editors: { 'a.ts': editor }, signal: stop.signal });
 	assert.equal(closedAtStop, true, 'the question closed the moment the run was stopped');
 	assert.deepEqual([ws.files.get('a.ts'), ws.log, editor.did], ['a = 1', [], []], 'nothing was written, saved or discarded');
+});
+
+test('a read is shown as whole lines under its line header: a .pipe as its text, a long file a page at a time that reading on walks without a gap, and a memory reference to the read copies the file exactly', async () => {
+	const pipe = JSON.stringify({ components: Array.from({ length: 6 }, (_, i) => ({ id: `extract_${i}`, provider: 'extract_data', config: { fields: [`field_${i}a`, `field_${i}b`], prompt: `Extract the fields of invoice section ${i}.` } })) }, null, 1);
+	const lines = Array.from({ length: 300 }, (_, i) => `${i + 1}: ${'word '.repeat(i % 40)}`);
+	const ws = new MemoryWorkspace({ 'pipelines/extract.pipe': pipe, 'notes/long.md': lines.join('\n') });
+	const pages: string[] = [];
+	// The model reads on from each page's offset, then copies the first, whole read by reference.
+	const step = (q: QuestionSpec): string => {
+		const results = resultsIn(q);
+		const last = results.at(-1);
+		if (last?.tool === 'write_file') return done('Copied.');
+		pages.push(last?.summary ?? '');
+		const next = /\n\[Read on with offset=(\d+)\.\]$/.exec(last?.summary ?? '');
+		if (next) return plan(['read_file', { path: 'notes/long.md', offset: Number(next[1]) }]);
+		return plan(['write_file', { path: 'notes/copy.md', content: `{{memory.ref:${results[1].key}}}` }]);
+	};
+	const model = scriptedModel([plan(['read_file', { path: 'pipelines/extract.pipe' }], ['read_file', { path: 'notes/long.md' }]), ...Array.from({ length: 40 }, () => step)]);
+	await agentTurn(ws, model);
+
+	const shownPipe = resultsIn(model.questions[1])[0].summary ?? '';
+	assert.equal(shownPipe.slice(shownPipe.indexOf('\n') + 1), pipe, 'the model sees the .pipe as its text, every field in it');
+	assert.ok(pages.length > 1, 'the long file took more than one read');
+	const seen = pages.flatMap((page) => page.split('\n').slice(1, /\n\[Read on with offset=\d+\.\]$/.test(page) ? -1 : undefined));
+	assert.deepEqual(seen, lines, 'the pages together hold every line whole, once, in order');
+	assert.equal(ws.files.get('notes/copy.md'), lines.join('\n'), 'the copy holds the whole file, not the first page');
+});
+
+test('a whole read of a long Markdown file is shown as its sections with line ranges, and each range reads from its heading', async () => {
+	const prose = (n: number) => Array.from({ length: n }, (_, i) => `${'some prose '.repeat(8)}${i}`);
+	const lines = ['# Guide', ...prose(10), '## Setup', ...prose(20), '## Usage', '### Basics', '```sh', '# not a heading', '```', ...prose(20), '### Advanced', ...prose(20)];
+	const at = (heading: string) => lines.indexOf(heading) + 1;
+	const ws = new MemoryWorkspace({ 'docs/guide.md': lines.join('\n') });
+	const sectionsIn = (q: QuestionSpec): string[][] =>
+		(resultsIn(q)[0].summary ?? '')
+			.split('\n')
+			.slice(1, -1)
+			.map((row) => /^(\d+)-(\d+) (.+)$/.exec(row)?.slice(1) ?? [row]);
+	const readEach = (q: QuestionSpec): string => plan(...sectionsIn(q).map(([from, to]): [string, Record<string, unknown>] => ['read_file', { path: 'docs/guide.md', offset: Number(from), limit: Number(to) - Number(from) + 1 }]));
+	const model = scriptedModel([plan(['read_file', { path: 'docs/guide.md' }]), readEach, done('Read.')]);
+	await agentTurn(ws, model);
+
+	const sections = sectionsIn(model.questions[1]);
+	const end = lines.length;
+	assert.deepEqual(sections, [
+		['1', `${end}`, '# Guide'],
+		[`${at('## Setup')}`, `${at('## Usage') - 1}`, '## Setup'],
+		[`${at('## Usage')}`, `${end}`, '## Usage'],
+		[`${at('### Basics')}`, `${at('### Advanced') - 1}`, '### Basics'],
+		[`${at('### Advanced')}`, `${end}`, '### Advanced'],
+	]);
+	const pages = resultsIn(model.questions[2]).slice(1);
+	sections.forEach(([, , heading], i) => assert.equal(pages[i]?.summary?.split('\n')[1], heading, `${heading} reads from its heading`));
 });
 
 // =============================================================================
@@ -644,7 +711,7 @@ test('check_app fails an app with type errors, and one whose build fails', async
 		const heard: CheckReport[] = [];
 		const source = { modelUris: () => ['file:///daybook/src/App.tsx'], markers: () => markers, onChange: () => () => undefined };
 		const toolkit = new AppCheckToolkit(
-			hostFor(new MemoryWorkspace(DAYBOOK), { devSession: () => dev }),
+			hostFor(new MemoryWorkspace(DAYBOOK), { devSession: () => dev, leasePreview: async () => lent(dev) }),
 			async () => source,
 			(_folder, report) => heard.push(report),
 			{ build: { buildWaitMs: 1000, settleMs: 20, runtimeGraceMs: 20 }, types: { quietMs: 10, maxMs: 200 } }
@@ -667,7 +734,7 @@ test("check_app leaves the template build config's browser-only type errors out,
 		const heard: CheckReport[] = [];
 		const source = { modelUris: () => ['file:///daybook/src/App.tsx', 'file:///daybook/rsbuild.config.mts'], markers: () => markers, onChange: () => () => undefined };
 		const toolkit = new AppCheckToolkit(
-			hostFor(new MemoryWorkspace(DAYBOOK), { devSession: () => devSession() }),
+			hostFor(new MemoryWorkspace(DAYBOOK), { leasePreview: async () => lent(devSession()) }),
 			async () => source,
 			(_folder, report) => heard.push(report),
 			{ build: { buildWaitMs: 1000, settleMs: 20, runtimeGraceMs: 20 }, types: { quietMs: 10, maxMs: 200 } }
@@ -691,28 +758,41 @@ test('a check whose types or build step did not run is not checked, and a failed
 	assert.equal(reportVerdict(report(['types', 'pass'], ['build', 'pass'], ['runtime', 'fail'])), 'failed');
 });
 
-test('check_app says CHECK NOT COMPLETE, and why, when the preview is closed, and CHECK PASSED when types and build both pass', async () => {
+test('check_app builds an app with no open preview in one it leases and releases, and says CHECK NOT COMPLETE, and why, when none starts', async () => {
 	const source = { modelUris: () => ['file:///daybook/src/App.tsx'], markers: () => [], onChange: () => () => undefined };
-	const cases: Array<[dev: AgentDevSession | null, headline: RegExp, steps: string[]]> = [
-		[null, /^CHECK NOT COMPLETE: daybook\n/, ['types pass', 'build not_run']],
-		[devSession(), /^CHECK PASSED: daybook\n/, ['types pass', 'build pass', 'runtime pass']],
-	];
-	for (const [dev, headline, steps] of cases) {
+	const check = async (lease: PreviewLease): Promise<{ text: string; evidence: CheckReport['evidence'] }> => {
 		const heard: CheckReport[] = [];
 		const toolkit = new AppCheckToolkit(
-			hostFor(new MemoryWorkspace(DAYBOOK), { devSession: () => dev }),
+			hostFor(new MemoryWorkspace(DAYBOOK), { leasePreview: async () => lease }),
 			async () => source,
 			(_folder, report) => heard.push(report),
 			{ build: { buildWaitMs: 1000, settleMs: 20, runtimeGraceMs: 20 }, types: { quietMs: 10, maxMs: 200 } }
 		);
-		const result = await toolOf(toolkit, 'check_app').execute({ app: 'daybook-ui' });
-		assert.match(result, headline, steps.join());
-		if (!dev) assert.match(result, /- \[not_run\] build: .*\n {2}The app's Design preview is not open/);
-		assert.deepEqual(
-			heard[0].evidence.map((e) => `${e.step} ${e.status}`),
-			steps
-		);
-	}
+		const text = await toolOf(toolkit, 'check_app').execute({ app: 'daybook-ui' });
+		return { text, evidence: heard[0].evidence };
+	};
+
+	let releases = 0;
+	const held = await check(
+		lent(devSession(), () => {
+			releases += 1;
+		})
+	);
+	assert.match(held.text, /^CHECK PASSED: daybook\n/);
+	assert.deepEqual(
+		held.evidence.map((e) => `${e.step} ${e.status}`),
+		['types pass', 'build pass', 'runtime pass']
+	);
+	assert.equal(releases, 1, 'the check released its lease');
+
+	const failed = await check({ ok: false, why: 'the preview did not start within 30 s' });
+	assert.match(failed.text, /^CHECK NOT COMPLETE: daybook\n/);
+	assert.deepEqual(
+		failed.evidence.map((e) => `${e.step} ${e.status} ${e.summary}`),
+		['types pass types clean', 'build not_run build not checked: the preview did not start within 30 s']
+	);
+	assert.match(failed.text, /\(the preview did not start within 30 s\)/);
+	assert.doesNotMatch(failed.text, /ask the user/i);
 });
 
 test("Auto stops the conversation's own run after a fresh status read, and refuses any other: one it did not start, a token now holding a later run, a gone status, another team", async () => {

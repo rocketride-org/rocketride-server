@@ -69,6 +69,9 @@ export interface AgentDevSession {
 	subscribeWatch(l: (s: WatchStatus) => void): () => void;
 }
 
+/** A preview lent to one check. A failed lease says why; a held one must be released when the check ends. */
+export type PreviewLease = { readonly ok: true; readonly session: AgentDevSession; release(): void } | { readonly ok: false; readonly why: string };
+
 /**
  * A save that wrote nothing because the user dropped or replaced the editor's
  * text while it waited (Reload, Discard mine, Overwrite, Don't Save). Whatever
@@ -125,11 +128,20 @@ export interface AgentHost {
 	 */
 	packApp(folder: string): Promise<Uint8Array>;
 	/**
-	 * The running dev session for an app.
+	 * The running dev session for an app. A plain lookup: the app listings use it to mark which apps are
+	 * open, so it must never start a preview.
 	 *
 	 * @returns The session, or null when none is running.
 	 */
 	devSession(appId: string): AgentDevSession | null;
+	/**
+	 * A dev session with a preview attached, for one check. The user's attached preview is used when there is
+	 * one (release does nothing). Otherwise the host boots a hidden preview and release() tears it down.
+	 *
+	 * @param app - The app to preview: its manifest id, its folder under apps/ and its display name.
+	 * @param signal - Aborted when the user stops the run; a boot still under way gives up.
+	 */
+	leasePreview(app: { id: string; folder: string; name: string }, signal?: AbortSignal): Promise<PreviewLease>;
 	/**
 	 * The user's approval mode and grants, live. Without it a run asks for
 	 * everything the approval list rates as asking, nothing is always allowed,

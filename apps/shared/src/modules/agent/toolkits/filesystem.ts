@@ -40,16 +40,15 @@ import { StaleVersionError, StaleWriteError } from '../../vfs/stagedFileSystem';
 import type { IWorkspaceFileSystem } from '../../vfs/vfsTypes';
 import { SaveDroppedError, type EditorControl } from '../host';
 import { AgentTool, AgentToolkit, RefusedError, type ToolStep } from '../tools';
+import { SUMMARY_BUDGET } from '../wave/summary';
 import { replaceSpans, type ChoiceFn } from './common';
-import { SecretMarkers } from './secretMarkers';
+import { HIDDEN_NOTE_LINE, SecretMarkers } from './secretMarkers';
 import { UndoRecord } from './undo';
 
 // =============================================================================
 // CONSTANTS — caps and hygiene
 // =============================================================================
 
-const READ_DEFAULT_BYTES = 256 * 1024;
-const READ_MAX_BYTES = 4 * 1024 * 1024;
 /** Hard write cap in bytes — one whole-file write per call. */
 const WRITE_MAX_BYTES = 4 * 1024 * 1024;
 
@@ -88,7 +87,7 @@ const FILESYSTEM_INSTRUCTIONS = `File tools operate on the workspace virtual fil
 - Read a file before editing or overwriting it. edit_file and write_file refuse a file you have not read. write_file refuses a file that changed since you read it; edit_file then applies your anchor to the current content only when it still matches once. Either way, read the file again before your next change to it.
 - Prefer edit_file (exact-anchor find/replace) for changes; write_file replaces a whole file.
 - Reads see the user's unsaved editor buffers. Changing a file with unsaved changes asks the user first; if they keep their changes, the call is refused: ask them how to proceed instead of retrying.
-- Truncated reads are always labeled; use offset/limit to window large files cheaply.`;
+- A read shows at most about ${SUMMARY_BUDGET} characters of whole lines; a longer one ends with the offset to read on from, and a whole read of a long Markdown file returns its section outline with line ranges.`;
 
 const UNSAVED_TITLE = 'Unsaved changes';
 
@@ -313,6 +312,90 @@ export class FileTracker {
 }
 
 // =============================================================================
+// MARKDOWN OUTLINE — the sections of a file too long for one read
+// =============================================================================
+
+/**
+ * Each `#` to `###` heading outside a code fence, with the lines its section spans: up to the next
+ * heading of the same or a higher level. `###` headings go when the outline would not fit SUMMARY_BUDGET.
+ *
+ * @param note - The read's hidden-secret note, kept in the outline.
+ * @returns The outline, or null when the file has no headings or even its `#` and `##` ones do not fit.
+ */
+function markdownOutline(path: string, lines: string[], note: string): string | null {
+	const headings: Array<{ from: number; level: number; text: string }> = [];
+	let fenced = false;
+	lines.forEach((line, i) => {
+		if (/^\s*```/.test(line)) fenced = !fenced;
+		const level = fenced ? 0 : (/^(#{1,3})\s/.exec(line)?.[1].length ?? 0);
+		if (level > 0) headings.push({ from: i + 1, level, text: line.trimEnd() });
+	});
+	const sections = headings.map((heading, i) => {
+		const next = headings.slice(i + 1).find((later) => later.level <= heading.level);
+		return { ...heading, to: next ? next.from - 1 : lines.length };
+	});
+	for (const deepest of [3, 2]) {
+		const kept = sections.filter((section) => section.level <= deepest);
+		if (kept.length === 0) return null;
+		const rows = kept.map((section) => `${section.from}-${section.to} ${section.text}`);
+		const outline = `[${path} has ${lines.length} lines, more than one read shows. Its sections, with line ranges:]\n${rows.join('\n')}${note}\n[Read a section with offset=<from> and limit=<to-from+1>; you can read several in one step.]`;
+		if (outline.length <= SUMMARY_BUDGET) return outline;
+	}
+	return null;
+}
+
+// =============================================================================
+// READ PAGE — what the model is shown of a stored read
+// =============================================================================
+
+/** A stored window's header: its first line, the file's line count, and the path. */
+const WINDOW_HEADER = /^\[Lines (\d+)-\d+ of (\d+) in ([^\n]*)\]\n/;
+
+/**
+ * read_file's view of a stored read: the whole lines that fit SUMMARY_BUDGET under a
+ * `[Lines a-b of N in path]` header, ending with the offset to read on from when cut, and a whole
+ * read of a long Markdown file as its outline. Every page has the header, which also keeps a JSON
+ * file (a .pipe, package.json) from being shown as a structural summary that cuts its strings.
+ *
+ * @param result - The read as stored: the file, or a window under its header, then the hidden-secret note, if any.
+ * @param args - The read's arguments; a window's first line and the file's line count come from its header.
+ */
+function readPage(result: string, args: Record<string, unknown>): string {
+	const note = HIDDEN_NOTE_LINE.exec(result)?.[0] ?? '';
+	const text = result.slice(0, result.length - note.length);
+	const whole = args.offset === undefined && args.limit === undefined;
+	const window = whole ? null : WINDOW_HEADER.exec(text);
+	// an empty window has no header and no lines to page
+	if (!whole && !window) return result;
+	const path = window ? window[3] : normalizePath(args.path);
+	const start = window ? Number(window[1]) : 1;
+	const slice = (window ? text.slice(window[0].length) : text).split('\n');
+	const total = window ? Number(window[2]) : slice.length;
+	const header = (end: number) => `[Lines ${start}-${end} of ${total} in ${path}]\n`;
+	const all = header(start - 1 + slice.length) + slice.join('\n') + note;
+	if (all.length <= SUMMARY_BUDGET) return all;
+	const outline = whole && /\.md$/i.test(path) ? markdownOutline(path, slice, note) : null;
+	if (outline) return outline;
+
+	// step: stop at the last whole line that fits, so reading on from the next one skips nothing
+	const readOn = (next: number) => `\n[Read on with offset=${next}.]`;
+	let body = '';
+	let end = start - 1;
+	for (const line of slice) {
+		const grown = end < start ? line : `${body}\n${line}`;
+		if (header(end + 1).length + grown.length + note.length + readOn(end + 2).length > SUMMARY_BUDGET) break;
+		body = grown;
+		end += 1;
+	}
+	if (end >= start) return header(end) + body + note + readOn(end + 1);
+
+	const first = slice[0];
+	const cut = (kept: number) => `\n[Line ${start} cut to its first ${kept} of ${first.length} characters.${start < total ? ` Read on with offset=${start + 1}.` : ''}]`;
+	const kept = Math.max(0, SUMMARY_BUDGET - header(start).length - note.length - cut(first.length).length);
+	return header(start) + first.slice(0, kept) + note + cut(kept);
+}
+
+// =============================================================================
 // FILESYSTEM TOOLKIT
 // =============================================================================
 
@@ -509,18 +592,16 @@ export class FilesystemTools extends AgentToolkit {
 	// ── Executors ────────────────────────────────────────────────────────
 
 	/**
-	 * read_file: cached whole-file read, sliced locally. Line windows cost
-	 * nothing after the first read; overlays win over the cache so unsaved
-	 * buffers are what the agent sees.
+	 * read_file: the whole file or a line window of it, stored whole in run memory so a
+	 * reference to it copies the file; readPage builds the page the model is shown.
+	 * Overlays win over the cache so unsaved buffers are what the agent sees.
 	 *
-	 * @param maxBytes - Optional byte cap (clamped to READ_MAX_BYTES).
 	 * @param offset - Optional 1-based first line of a partial read.
 	 * @param limit - Optional line count of a partial read.
-	 * @returns The content or window, truncation always labeled.
+	 * @returns The file, or a window under its `[Lines a-b of N in path]` header; either ends with the hidden-secret note, if any.
 	 */
-	private async readFile(rawPath: unknown, maxBytes?: number, offset?: number, limit?: number): Promise<string> {
+	private async readFile(rawPath: unknown, offset?: number, limit?: number): Promise<string> {
 		const path = normalizePath(rawPath);
-		const cap = Math.min(Math.max(1, maxBytes ?? READ_DEFAULT_BYTES), READ_MAX_BYTES);
 		// step: under unsaved typing, also the stored copy a delete is based on. Both reads start together, so no save lands between them
 		const dirty = this.vfs.isDirty(path);
 		const [read, stored] = await Promise.all([this.vfs.readVersioned(path), dirty ? this.vfs.readVersioned(path, { stored: true }).catch(() => null) : null]);
@@ -532,24 +613,14 @@ export class FilesystemTools extends AgentToolkit {
 		const hidden = this.shown(path, text);
 		text = hidden.text;
 		const note = hidden.note ? `\n[${hidden.note}]` : '';
+		if (offset === undefined && limit === undefined) return text + note;
 
-		// step: line window first — the usual partial-read path
-		let header = '';
-		if (offset !== undefined || limit !== undefined) {
-			const lines = text.split('\n');
-			const start = Math.max(1, Math.floor(offset ?? 1));
-			const count = Math.max(1, Math.floor(limit ?? lines.length));
-			const slice = lines.slice(start - 1, start - 1 + count);
-			if (slice.length === 0) return `[EMPTY WINDOW: ${path} has ${lines.length} lines; requested from line ${start}]`;
-			header = `[Lines ${start}-${start - 1 + slice.length} of ${lines.length} in ${path}]\n`;
-			text = slice.join('\n');
-		}
-
-		// step: cap by UTF-8 byte length — the cap bounds payload, not chars
-		const bytes = new TextEncoder().encode(text);
-		if (bytes.length <= cap) return header + text + note;
-		const truncated = new TextDecoder().decode(bytes.slice(0, cap));
-		return `${header}${truncated}\n[TRUNCATED: showing first ${cap} of ${bytes.length} bytes — narrow with offset/limit or raise maxBytes]${note}`;
+		const lines = text.split('\n');
+		const start = Math.max(1, Math.floor(offset ?? 1));
+		const count = Math.max(1, Math.floor(limit ?? lines.length));
+		const slice = lines.slice(start - 1, start - 1 + count);
+		if (slice.length === 0) return `[EMPTY WINDOW: ${path} has ${lines.length} lines; requested from line ${start}]`;
+		return `[Lines ${start}-${start - 1 + slice.length} of ${lines.length} in ${path}]\n${slice.join('\n')}${note}`;
 	}
 
 	/**
@@ -863,19 +934,19 @@ export class FilesystemTools extends AgentToolkit {
 		return [
 			new AgentTool({
 				name: 'read_file',
-				description: `Read one file as UTF-8 text, or a line window of it via offset/limit (1-based; repeated windows on the same file are cheap — the content is cached). Reads see unsaved editor buffers. Truncation is always labeled. Default cap ${READ_DEFAULT_BYTES} bytes, maximum ${READ_MAX_BYTES}.`,
+				description: `Read one file as UTF-8 text, or a line window of it via offset/limit (1-based). Reads see unsaved editor buffers. One read shows at most about ${SUMMARY_BUDGET} characters of whole lines; a longer file or window comes back as its first part, ending with the offset to read on from, and a whole read of a long Markdown file returns its section outline with line ranges.`,
 				parameters: {
 					type: 'object',
 					properties: {
 						path: { type: 'string', description: 'Workspace-relative file path' },
 						offset: { type: 'number', description: 'Optional 1-based first line of a partial read' },
 						limit: { type: 'number', description: 'Optional number of lines to return' },
-						maxBytes: { type: 'number', description: `Optional read cap in bytes (1..${READ_MAX_BYTES})` },
 					},
 					required: ['path'],
 					additionalProperties: false,
 				},
-				execute: (a) => this.readFile(a.path, a.maxBytes === undefined ? undefined : Number(a.maxBytes), a.offset === undefined ? undefined : Number(a.offset), a.limit === undefined ? undefined : Number(a.limit)),
+				execute: (a) => this.readFile(a.path, a.offset === undefined ? undefined : Number(a.offset), a.limit === undefined ? undefined : Number(a.limit)),
+				show: readPage,
 			}),
 			new AgentTool({
 				name: 'list_directory',

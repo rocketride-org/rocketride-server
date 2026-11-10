@@ -126,6 +126,8 @@ interface ToolSpecBase {
 	description: string;
 	/** JSON Schema of the arguments object. */
 	parameters: Record<string, unknown>;
+	/** The text the model is shown of a stored result of the call made with `args`, instead of the loop's generic summary. */
+	show?: (result: string, args: Record<string, unknown>) => string;
 }
 
 /**
@@ -159,6 +161,8 @@ export class AgentTool {
 	readonly description: string;
 	/** JSON Schema of the arguments object. */
 	readonly parameters: Record<string, unknown>;
+	/** The text the model is shown of a stored result; absent, the loop's generic summary. */
+	readonly show?: (result: string, args: Record<string, unknown>) => string;
 	/** The spec's executor, in its two-step form. */
 	private readonly preparer: (args: Record<string, unknown>) => Promise<ToolStep>;
 
@@ -171,6 +175,7 @@ export class AgentTool {
 		this.name = spec.name;
 		this.description = spec.description;
 		this.parameters = spec.parameters;
+		this.show = spec.show;
 		this.preparer = spec.execute ? oneStep(spec.execute) : spec.prepare;
 	}
 

@@ -331,6 +331,9 @@ function hiddenNote(places: string[]): string {
 	return `${hidden} ${plain} ${keep} ${move}`;
 }
 
+/** hiddenNote as a read ends with it, on its own last line in brackets; match it here so a rewording changes both. */
+export const HIDDEN_NOTE_LINE = /\n\[\d+ secret values? hidden \([^\n]*\]$/;
+
 /** A new marker id: 8 random hex characters. */
 function randomId(): string {
 	return [...crypto.getRandomValues(new Uint8Array(4))].map((b) => b.toString(16).padStart(2, '0')).join('');
