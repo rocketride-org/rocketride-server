@@ -13,6 +13,10 @@ from PIL import Image
 import ai.common.models.vision.caption as capmod
 from ai.common.models.vision.caption import CaptionerLoader, Captioner
 
+# An exception escaping a caption worker thread (for example a second release of
+# the slot) fails the test instead of passing with a warning.
+pytestmark = pytest.mark.filterwarnings('error::pytest.PytestUnhandledThreadExceptionWarning')
+
 
 def test_postprocess_wraps_captions():
     out = CaptionerLoader.postprocess(None, ['a cat', 'a dog'], 2, ['caption'])
@@ -176,26 +180,26 @@ def test_disconnect_does_not_release_timed_out_worker(monkeypatch, local_caption
 
 def test_slot_wait_does_not_consume_the_next_inference_budget(monkeypatch, local_captioner):
     """After a timeout the next image waits for the slot, then still gets its own full budget."""
-    monkeypatch.setattr(capmod, 'INFERENCE_TIMEOUT', 1.0)
+    monkeypatch.setattr(capmod, 'INFERENCE_TIMEOUT', 2.0)
     first_release = threading.Event()
     first_done = threading.Event()
     started_after_first = []
 
     def infer(image, task):
-        """Hold image 0 until released; image 1 records whether image 0 had finished, then takes 0.5 s."""
+        """Hold image 0 until released; image 1 records whether image 0 had finished, then takes 1.0 s."""
         if image == 0:
             assert first_release.wait(5)
             first_done.set()
             return 'slow'
         started_after_first.append(first_done.is_set())
-        time.sleep(0.5)
+        time.sleep(1.0)
         return 'ok'
 
     monkeypatch.setattr(local_captioner, '_infer_local', infer)
     with pytest.raises(TimeoutError):
         local_captioner._caption_local(0, 'caption')
-    # Image 0 finishes 0.6 s into image 1's wait; 0.6 s + 0.5 s is past one shared 1.0 s deadline.
-    timer = threading.Timer(0.6, first_release.set)
+    # Image 0 finishes 1.2 s into image 1's wait; 1.2 s + 1.0 s is past one shared 2.0 s deadline.
+    timer = threading.Timer(1.2, first_release.set)
     timer.start()
     try:
         assert local_captioner._caption_local(1, 'caption') == 'ok'
@@ -206,14 +210,23 @@ def test_slot_wait_does_not_consume_the_next_inference_budget(monkeypatch, local
 
 
 def test_timed_out_inference_logs_once_when_it_finishes(monkeypatch, local_captioner):
-    """A worker that outlives its caller logs one warning when it returns; an on-time call logs none."""
+    """A worker that outlives its caller logs one warning when it returns, naming its error if it raised.
+
+    An on-time call logs none.
+    """
     monkeypatch.setattr(capmod, 'INFERENCE_TIMEOUT', 0.05)
     release = threading.Event()
+    late_release = threading.Event()
     logged = threading.Event()
     messages = []
 
+    def fail_late(*args):
+        """Raise only after the caller has stopped waiting."""
+        late_release.wait(5)
+        raise ValueError('late boom')
+
     class Recorder(logging.Handler):
-        """Collect warning messages from the caption logger and signal the first one."""
+        """Collect warning messages from the caption logger and signal each one."""
 
         def emit(self, record):
             """Record one message and wake the test."""
@@ -236,7 +249,18 @@ def test_timed_out_inference_logs_once_when_it_finishes(monkeypatch, local_capti
         monkeypatch.setattr(local_captioner, '_infer_local', lambda *args: 'ok')
         assert local_captioner._caption_local(None, 'caption') == 'ok'
         assert len(messages) == 1
+        # A late failure has no caller left to raise to, so the warning names it.
+        logged.clear()
+        monkeypatch.setattr(capmod, 'INFERENCE_TIMEOUT', 0.05)
+        monkeypatch.setattr(local_captioner, '_infer_local', fail_late)
+        with pytest.raises(TimeoutError, match='timed out after'):
+            local_captioner._caption_local(None, 'caption')
+        late_release.set()
+        assert logged.wait(5)
+        assert len(messages) == 2
+        assert 'caption: a timed-out inference failed (ValueError: late boom) after' in messages[1]
     finally:
         release.set()
+        late_release.set()
         capmod.logger.removeHandler(handler)
         capmod.logger.setLevel(previous_level)

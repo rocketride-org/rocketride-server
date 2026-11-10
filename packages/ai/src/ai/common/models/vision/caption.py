@@ -366,8 +366,14 @@ class Captioner:
                     late = outcome['abandoned']
                 try:
                     if late:
+                        # Nobody reads error[0] once the caller gave up, so name a late failure here.
+                        if error[0] is None:
+                            how = 'finished'
+                        else:
+                            how = f'failed ({type(error[0]).__name__}: {error[0]})'
                         logger.warning(
-                            'caption: a timed-out inference finished after %.1fs; the slot is free again',
+                            'caption: a timed-out inference %s after %.1fs; the slot is free again',
+                            how,
                             time.monotonic() - started,
                         )
                 finally:
