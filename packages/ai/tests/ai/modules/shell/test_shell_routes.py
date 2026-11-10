@@ -835,6 +835,13 @@ def test_unknown_paths_404_for_every_method(web_server, shell_root, monkeypatch)
 
 @pytest.mark.parametrize('method', ['TRACE', 'PROPFIND', 'MKCOL'])
 def test_unknown_methods_404_off_pages_and_405_on_them(web_server, shell_root, monkeypatch, method):
+    """Pins ``route.methods = None`` on the catch-all (``register_public_pages``).
+
+    Starlette gives a function endpoint ``["GET", "HEAD"]`` when no methods
+    are passed, so without the override every other method on an unclaimed
+    path would be the catch-all's 405, not a 404. A Starlette upgrade that
+    changes either side fails here.
+    """
     client = _start_engine(web_server, monkeypatch)  # anonymous: no route matches these paths
     assert client.request(method, '/nothing/here').status_code == 404
     for path in ('/', '/pricing'):
