@@ -512,7 +512,10 @@ class PageMap:
         Called on every public page and crawler file request; never waits for the
         build (the swap lands on a later request). The clock restarts when the
         rebuild is scheduled, not when it swaps: an unchanged map is not swapped,
-        and a failing store must not be retried on every request.
+        and a failing store must not be retried on every request. Deploy events
+        are in-process only, so this is how a pod learns of a publish another
+        pod handled. Takes and returns nothing; a failed rebuild keeps the
+        current aggregate (``rebuild``).
         """
         if time.monotonic() - self._built_at > REFRESH_SECONDS:
             self._built_at = time.monotonic()

@@ -336,6 +336,12 @@ def with_slash_twin(path: str) -> Tuple[str, ...]:
 
     A redirect source decides both forms' fate: the twin of a page already
     301s to the page, and the twin of a real route is the router's 307.
+
+    Args:
+        path: A path, with or without a trailing slash.
+
+    Returns:
+        ``(path, twin)``, or ``('/',)`` for the root.
     """
     if path == '/':
         return (path,)
@@ -395,10 +401,22 @@ def _redirect_source_error(
 def check_redirects(
     raw: Any, pages: List[Page], live_conflict: Optional[Callable[[str], Optional[str]]]
 ) -> Tuple[Dict[str, str], List[str]]:
-    """``site.redirects`` as ``({from: to}, errors)``; a bad entry drops only itself.
+    """Validate ``site.redirects``; a bad entry drops only itself.
 
     ``to`` must be the exact path of one of this manifest's own pages, so a
-    redirect never points at a URL that may 404.
+    redirect never points at a URL that may 404. A ``from`` follows the page
+    grammar (a trailing slash allowed), is not reserved, appears once, and
+    neither it nor its slash twin is a page of this manifest or a live route.
+
+    Args:
+        raw: The declared ``site.redirects``: a list of ``{"from", "to"}`` objects.
+        pages: This manifest's valid pages.
+        live_conflict: Optional ``path -> description`` of a live server
+            route the path would collide with (None = no collision).
+
+    Returns:
+        ``({from: to}, errors)``: the valid redirects, and one actionable
+        message per refused entry (or one for a malformed list).
     """
     if not isinstance(raw, list) or len(raw) > _MAX_REDIRECTS:
         return {}, [f'site.redirects: must be a list of at most {_MAX_REDIRECTS} {{"from", "to"}} objects']

@@ -74,11 +74,18 @@ _MAX_SEEN = 256
 
 
 def classify(user_agent: str) -> str:
-    """CRAWLER for a rostered UA, HUMAN otherwise (an unknown UA takes the human path).
+    """Classify a requester by its user agent: rostered crawler or human.
 
     Unknown UAs that do not look like a browser are logged once each (bounded)
     for roster upkeep. Spoofing either way is harmless: every document
     involved is public.
+
+    Args:
+        user_agent: The ``User-Agent`` header; empty or None reads as human.
+
+    Returns:
+        ``CRAWLER`` when the UA carries a rostered token, else ``HUMAN`` (an
+        unknown UA takes the human path).
     """
     ua = (user_agent or '').lower()
     if any(token in ua for token in _TOKENS):
@@ -108,6 +115,12 @@ def robots_groups(rule: str) -> str:
     RFC 9309: a crawler obeys only its most specific matching group and
     ignores the rest (``*`` included), so a rule meant for everyone is
     repeated in every group.
+
+    Args:
+        rule: The group's rule lines, e.g. ``'Allow: /'``.
+
+    Returns:
+        The groups, each ``User-agent: <token>``, the rule and a blank line.
     """
     tokens = list(dict.fromkeys(token for token, _ in CRAWLERS))
     return ''.join(f'User-agent: {token}\n{rule}\n\n' for token in tokens + ['*'])
