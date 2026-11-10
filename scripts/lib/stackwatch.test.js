@@ -96,7 +96,14 @@ test('POSIX paths are accepted for node.py', () => {
 });
 
 test('an empty file, a header only and a file without a header give no dumps', () => {
-	assert.deepStrictEqual(parseStackFile(''), { pid: null, started: null, interval: null, argv: null, dumps: [] });
+	assert.deepStrictEqual(parseStackFile(''), {
+		pid: null,
+		started: null,
+		interval: null,
+		argv: null,
+		kind: 'task',
+		dumps: [],
+	});
 	const headerOnly = parseStackFile(HEADER);
 	assert.strictEqual(headerOnly.pid, 9280);
 	assert.deepStrictEqual(headerOnly.dumps, []);
@@ -508,4 +515,161 @@ test('lockHoldersScript embeds the waiter pid and the sample count', () => {
 	assert.match(script, /Get-Process -Id 4242/);
 	assert.match(script, /\$n -le 3/);
 	assert.match(script, /^'@$/m);
+});
+
+// Pytest processes: the header names the kind, and the main thread is the one labelled [main]
+// or, in a file without labels, the one with the kind's bottom frame.
+const XDIST = `${WIN}\\dist\\server\\Lib\\site-packages\\xdist`;
+const GATEWAY = `${WIN}\\dist\\server\\Lib\\site-packages\\execnet\\gateway_base.py`;
+const THREADING = `${WIN}\\dist\\server\\Lib\\threading.py`;
+const pytestHeader = (kind, pid = 5180) =>
+	`pid=${pid} started=2026-11-06T18:31:51+0000 interval=60s kind=${kind}\n` +
+	`argv=${WIN}\\dist\\server\\engine.exe -u -c x\n`;
+
+// The main thread of an xdist worker; top holds its most recent frames.
+const workerMain = (top, label = '') =>
+	`Thread 0x00001590${label} (most recent call first):\n` +
+	top +
+	frame(`${WIN}\\nodes\\test\\embedding_video\\test_frame_names.py`, 25, '<module>') +
+	frame(`${XDIST}\\remote.py`, 427, '<module>') +
+	frame(GATEWAY, 1806, 'serve') +
+	frame('<string>', 8, '<module>') +
+	frame('<string>', 1, '<module>');
+// Stuck in "import cv2" during collection: the native extension load is on top.
+const CV2_TOP =
+	frame('<frozen importlib._bootstrap_external>', 1293, 'create_module') +
+	frame(`${WIN}\\dist\\server\\Lib\\site-packages\\cv2\\__init__.py`, 153, 'bootstrap');
+// An xdist worker waiting for its next test.
+const WORKER_IDLE_TOP =
+	frame(THREADING, 355, 'wait') + frame(THREADING, 655, 'wait') + frame(`${XDIST}\\remote.py`, 90, 'get');
+// The xdist controller (pytest-main) waiting for events from its workers.
+const MAIN_IDLE =
+	'Thread 0x0000069c (most recent call first):\n' +
+	frame(THREADING, 359, 'wait') +
+	frame(`${WIN}\\dist\\server\\Lib\\queue.py`, 180, 'get') +
+	frame(`${XDIST}\\dsession.py`, 154, 'loop_once') +
+	frame(`${WIN}\\dist\\server\\Lib\\site-packages\\pytest\\__main__.py`, 9, '<module>') +
+	frame('<frozen runpy>', 88, '_run_code') +
+	frame('<frozen runpy>', 198, '_run_module_as_main');
+
+const clock = (s) => {
+	const two = (n) => String(n).padStart(2, '0');
+	return `${Math.floor(s / 3600)}:${two(Math.floor((s % 3600) / 60))}:${two(s % 60)}`;
+};
+
+/**
+ * Build pytest dump blocks, each ending with an info line.
+ *
+ * @param {string} main - The main thread text
+ * @param {number[]} seconds - The elapsed time of each dump
+ * @param {string} worker - The xdist worker id of the info line
+ * @returns {string} The dump blocks
+ */
+const pytestDumps = (main, seconds, worker = 'gw2') =>
+	seconds
+		.map(
+			(s) =>
+				`Timeout (${clock(s)})!\n${LOOP_THREAD}${main}\n` +
+				`info: worker=${worker} current_test=test_x.py::t (call)\n\n`
+		)
+		.join('');
+// n dumps, one minute apart, from 0:01:00.
+const everyMinute = (n) => Array.from({ length: n }, (_, i) => (i + 1) * 60);
+
+test('a pytest main thread is found by its [main] label, and without a label by the kind bottom frame', () => {
+	for (const label of ['', ' [main]']) {
+		const text = pytestHeader('pytest-worker') + pytestDumps(workerMain(CV2_TOP, label), [60]);
+		const d = parseStackFile(text).dumps[0];
+		assert.ok(d.complete);
+		assert.strictEqual(d.frames[0].func, 'create_module');
+		assert.deepStrictEqual(d.info, { worker: 'gw2', test: 'test_x.py::t (call)' });
+	}
+	// pytest-main: the thread with pytest/__main__.py is the main thread.
+	const main = parseStackFile(pytestHeader('pytest-main', 7936) + pytestDumps(MAIN_IDLE, [60])).dumps[0];
+	assert.ok(main.complete);
+	assert.strictEqual(main.frames[0].func, 'wait');
+	// A label wins over the bottom frame; a labelled stack not closed by a blank line is a cut dump.
+	const labelled = `Thread 0x0000aaaa [main] (most recent call first):\n${frame('x.py', 1, 'f')}\n`;
+	assert.ok(parseDump(labelled.split('\n'), 'pytest-worker').complete);
+	assert.strictEqual(parseDump(labelled.trimEnd().split('\n'), 'pytest-worker').complete, false);
+	// Without a label a worker dump lacking the bootstrap bottom frame is incomplete.
+	assert.strictEqual(parseDump(LOOP_THREAD.split('\n'), 'pytest-worker').complete, false);
+});
+
+test('a worker stuck in a native import for 300 s or more is frozen', () => {
+	for (const label of ['', ' [main]']) {
+		const text = pytestHeader('pytest-worker') + pytestDumps(workerMain(CV2_TOP, label), everyMinute(6));
+		const verdict = checkFrozen(parseStackFile(text));
+		assert.strictEqual(verdict.frozen, true);
+		assert.strictEqual(verdict.seconds, 300);
+		assert.strictEqual(verdict.frames[0].func, 'create_module');
+	}
+});
+
+test('an identical pytest stack for less than 300 s is not frozen', () => {
+	const stuck = workerMain(CV2_TOP);
+	const header = pytestHeader('pytest-worker');
+	assert.strictEqual(checkFrozen(parseStackFile(header + pytestDumps(stuck, everyMinute(5)))).frozen, false);
+	assert.strictEqual(checkFrozen(parseStackFile(header + pytestDumps(stuck, [60]))).frozen, false);
+	// Only the trailing run of identical dumps counts.
+	const other = workerMain(frame('x.py', 1, 'other') + CV2_TOP);
+	const changed = header + pytestDumps(other, [60, 120, 180]) + pytestDumps(stuck, [240, 300, 360]);
+	assert.strictEqual(checkFrozen(parseStackFile(changed)).frozen, false);
+});
+
+test('idle pytest processes are not frozen: an xdist worker at get, the controller at loop_once', () => {
+	const header = pytestHeader('pytest-worker');
+	const worker = header + pytestDumps(workerMain(WORKER_IDLE_TOP), everyMinute(12));
+	assert.strictEqual(checkFrozen(parseStackFile(worker)).frozen, false);
+	const controller = pytestHeader('pytest-main', 7936) + pytestDumps(MAIN_IDLE, everyMinute(12), '-');
+	assert.strictEqual(checkFrozen(parseStackFile(controller)).frozen, false);
+	// A get called from a test is not the idle wait of xdist.
+	const busy = workerMain(frame(THREADING, 355, 'wait') + frame(`${WIN}\\nodes\\test\\x.py`, 9, 'get'));
+	assert.strictEqual(checkFrozen(parseStackFile(header + pytestDumps(busy, everyMinute(6)))).frozen, true);
+	// A pytest process that waits for install.lock is not frozen either.
+	const lock = workerMain(frame(DEPENDS_WIN, 276, '__enter__'));
+	assert.strictEqual(checkFrozen(parseStackFile(header + pytestDumps(lock, everyMinute(12)))).frozen, false);
+});
+
+test('a task child keeps its two-dump rule, with or without kind=task in the header', () => {
+	const two = dump(FROZEN_MAIN) + dump(FROZEN_MAIN, '0:01:00');
+	const header = HEADER.replace('interval=30s', 'interval=30s kind=task');
+	for (const text of [HEADER + two, header + two]) {
+		const parsed = parseStackFile(text);
+		assert.strictEqual(parsed.kind, 'task');
+		assert.deepStrictEqual(checkFrozen(parsed), { frozen: true, frames: parsed.dumps[1].frames });
+	}
+	assert.strictEqual(checkFrozen(parseStackFile(HEADER + dump(IDLE_MAIN) + dump(IDLE_MAIN))).frozen, false);
+});
+
+test('scan captures a stuck pytest worker and names the kind, the worker and the test', async () => {
+	const stuck = pytestHeader('pytest-worker') + pytestDumps(workerMain(CV2_TOP, ' [main]'), everyMinute(6));
+	const idle = pytestHeader('pytest-worker', 5500) + pytestDumps(workerMain(WORKER_IDLE_TOP), everyMinute(6), 'gw0');
+	const { dir, calls, watch } = makeWatch({ 'stacks_5180.txt': stuck, 'stacks_5500.txt': idle });
+	await watch.scan();
+	watch.stop();
+	assert.strictEqual(calls.filter((c) => c.file === __filename).length, 1);
+	const native = fs.readFileSync(path.join(dir, 'native_5180.txt'), 'utf8');
+	assert.match(native, /trigger: pytest-worker worker=gw2 current_test=test_x\.py::t \(call\)\n/);
+	assert.match(native, /main thread unchanged for 300 s/);
+	assert.match(native, /create_module/);
+	assert.ok(!fs.existsSync(path.join(dir, 'native_5500.txt')));
+});
+
+test('pytest captures have their own cap of two and do not use up the three task captures', async () => {
+	const files = {};
+	for (const pid of [201, 202, 203, 204]) {
+		const body = pytestDumps(workerMain(CV2_TOP), everyMinute(6));
+		files[`stacks_${pid}.txt`] = pytestHeader('pytest-worker', pid) + body;
+	}
+	for (const pid of [101, 102, 103, 104]) {
+		files[`stacks_${pid}.txt`] = HEADER.replace('9280', String(pid)) + dump(FROZEN_MAIN) + dump(FROZEN_MAIN);
+	}
+	const { dir, watch } = makeWatch(files);
+	await watch.scan();
+	await watch.scan();
+	watch.stop();
+	const natives = fs.readdirSync(dir).filter((n) => n.startsWith('native_'));
+	assert.strictEqual(natives.filter((n) => /native_20\d/.test(n)).length, 2);
+	assert.strictEqual(natives.filter((n) => /native_10\d/.test(n)).length, 3);
 });

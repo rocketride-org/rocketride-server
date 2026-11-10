@@ -1,5 +1,5 @@
 /**
- * Native stack of a task child that is stuck in startup (Windows only).
+ * Native stack of a task child or a pytest process that is stuck (Windows only).
  *
  * The Python dumps in <dir>/stacks_<pid>.txt (see stackdumps.js) cannot show native
  * frames. The watcher reads those files and attaches cdb.exe (Debugging Tools for
@@ -8,6 +8,10 @@
  *     that stack is neither the idle wait of a ready child nor a known wait (WAIT_FRAMES);
  *   - silent: the file has not been written for SILENT_INTERVALS dump intervals, which
  *     happens when a thread holds the GIL inside native code and the dumper cannot run.
+ * A pytest process (xdist worker or pytest main; `kind=` in the file header) is frozen when its
+ * main thread shows the same stack in dumps that span PYTEST_FROZEN_S or more, and that stack is
+ * not an idle wait of pytest-xdist (a worker waiting for work, the controller's event loop).
+ * Pytest captures have their own cap, so they never use up the task-child cap.
  * Before attaching, the watcher checks that the pid is an engine.exe that started no
  * later than the file's header says, so a reused pid is never attached.
  *
@@ -35,6 +39,10 @@ const SCAN_MS = 30_000;
 // leaves the child suspended.
 const CDB_TIMEOUT_MS = 300_000;
 const MAX_CAPTURES = 3;
+// Captures of pytest processes, counted apart from the task children.
+const MAX_PYTEST_CAPTURES = 2;
+// A pytest main thread with an identical stack for this long (dump time) is frozen.
+const PYTEST_FROZEN_S = 300;
 const SYMBOL_URL = 'https://msdl.microsoft.com/download/symbols';
 const CDB_COMMANDS = '~*kn 80; !locks; lm; qd';
 const CDB_OVERRIDE_VAR = 'ROCKETRIDE_TEST_CDB';
@@ -49,7 +57,19 @@ const START_SLACK_MS = 5_000;
 // PowerShell can take tens of seconds to start on a loaded runner, which is when a capture is needed.
 const START_TIME_TIMEOUT_MS = 60_000;
 
-const THREAD_RE = /^(?:Current thread|Thread) 0x[0-9a-fA-F]+(?: \[.*\])? \(most recent call first\):$/;
+// The optional [name] after the thread id is the label; the dumper labels the main thread [main].
+const THREAD_RE = /^(?:Current thread|Thread) 0x[0-9a-fA-F]+(?: \[(.*)\])? \(most recent call first\):$/;
+const INFO_RE = /^info: worker=(\S*) current_test=(.*)$/m;
+// The module frame of pytest-main (python -m pytest).
+const PYTEST_MAIN_RE = /[\\/]pytest[\\/]__main__\.py$/;
+// Frames of threading and queue are the generic part of a blocking wait; their caller tells what is awaited.
+const GENERIC_WAIT_RE = /[\\/](?:threading|queue)\.py$/;
+// Where a pytest main thread only waits: an xdist worker for its next test, the xdist controller
+// for events from its workers.
+const PYTEST_IDLE_FRAMES = [
+	{ file: /[\\/]xdist[\\/]remote\.py$/, func: 'get' },
+	{ file: /[\\/]xdist[\\/]dsession\.py$/, func: 'loop_once' },
+];
 const FRAME_RE = /^ {2}File "(.*)", line (\d+) in (.+)$/;
 const NODE_PY_RE = /[\\/]ai[\\/]node\.py$/;
 // Top frames where a child only waits and reports its status: not a freeze. Each entry
@@ -72,31 +92,60 @@ const MAX_HOLDER_CAPTURES = 12;
 const TIME_RE = /^(\d{4}-\d\d-\d\d)T(\d\d:\d\d:\d\d)(?:\.(\d+))?(Z|[+-]\d\d:?\d\d)$/;
 
 /**
+ * Tell whether a thread's oldest frame marks it as the main thread of a process of a kind.
+ *
+ * @param {string} kind - task, pytest-worker or pytest-main
+ * @param {object[]} frames - The thread's frames, most recent first
+ * @returns {boolean} True when the thread is that process's main thread
+ */
+function isMainBottom(kind, frames) {
+	const last = frames[frames.length - 1];
+	if (!last) return false;
+	// pytest-main runs `python -m pytest`: runpy's frames sit below pytest/__main__.py.
+	if (kind === 'pytest-main') return frames.some((f) => f.func === '<module>' && PYTEST_MAIN_RE.test(f.file));
+	if (last.func !== '<module>') return false;
+	// An xdist worker runs execnet's bootstrap code, which has no file.
+	if (kind === 'pytest-worker') return last.file === '<string>' && last.line === 1;
+	return NODE_PY_RE.test(last.file);
+}
+
+/**
  * Parse one faulthandler dump block (the text after a "Timeout" line).
  *
  * @param {string[]} lines - The lines of the block
+ * @param {string} [kind] - The process kind from the file header (task when absent)
  * @returns {{complete: boolean, frames: object[]}} The main thread's frames, most
- *   recent first, and whether the block is complete. The main thread is the thread
- *   whose oldest frame is `<module>` in ai/node.py; a block without such a thread is
- *   incomplete (the dump was cut) and has no frames.
+ *   recent first, and whether the block is complete. The main thread is the thread the
+ *   dumper labelled [main] (complete once a blank line closes its stack); without a label it
+ *   is the thread whose oldest frame is the kind's bottom frame (see isMainBottom). A block
+ *   without such a thread is incomplete (the dump was cut) and has no frames.
  */
-function parseDump(lines) {
+function parseDump(lines, kind = 'task') {
 	let thread = null;
 	const threads = [];
 	for (const line of lines) {
-		if (THREAD_RE.test(line)) {
-			thread = [];
+		const head = THREAD_RE.exec(line);
+		if (head) {
+			thread = { frames: [], label: head[1] ?? null, closed: false };
 			threads.push(thread);
 			continue;
 		}
+		if (thread && line === '') {
+			thread.closed = true;
+			thread = null;
+			continue;
+		}
 		const m = thread && FRAME_RE.exec(line);
-		if (m) thread.push({ file: m[1], line: Number(m[2]), func: m[3] });
+		if (m) thread.frames.push({ file: m[1], line: Number(m[2]), func: m[3] });
 	}
-	const main = threads.find((frames) => {
-		const last = frames[frames.length - 1];
-		return last && last.func === '<module>' && NODE_PY_RE.test(last.file);
-	});
-	return main ? { complete: true, frames: main } : { complete: false, frames: [] };
+	const labelled = threads.find((t) => t.label === 'main');
+	if (labelled) {
+		return labelled.closed && labelled.frames.length
+			? { complete: true, frames: labelled.frames }
+			: { complete: false, frames: [] };
+	}
+	const main = threads.find((t) => isMainBottom(kind, t.frames));
+	return main ? { complete: true, frames: main.frames } : { complete: false, frames: [] };
 }
 
 /**
@@ -104,16 +153,25 @@ function parseDump(lines) {
  *
  * @param {string} text - The file content
  * @returns {{pid: number|null, started: string|null, interval: number|null, argv: string|null,
- *   dumps: object[]}} The header fields (interval in seconds) and one parseDump result per
- *   dump block, oldest first, each with `elapsed` (seconds since the dumper started, or null)
+ *   kind: string, dumps: object[]}} The header fields (interval in seconds; kind is task when
+ *   the header has none) and one parseDump result per dump block, oldest first, each with
+ *   `elapsed` (seconds since the dumper started, or null) and, for a pytest process, `info`
+ *   (`{worker, test}` from the block's `info:` line)
  */
 function parseStackFile(text) {
 	// The capture group puts each dump's elapsed time in front of its block.
 	const parts = text.replace(/\r\n/g, '\n').split(/^Timeout \((.*)\)!$/m);
 	const header = parts[0];
+	const kindMatch = /\bkind=(\S+)/.exec(header.split('\n')[0]);
+	const kind = kindMatch ? kindMatch[1] : 'task';
 	const dumps = [];
 	for (let i = 1; i + 1 < parts.length; i += 2) {
-		dumps.push({ ...parseDump(parts[i + 1].split('\n')), elapsed: parseElapsed(parts[i]) });
+		const info = INFO_RE.exec(parts[i + 1]);
+		dumps.push({
+			...parseDump(parts[i + 1].split('\n'), kind),
+			elapsed: parseElapsed(parts[i]),
+			...(info ? { info: { worker: info[1], test: info[2] } } : {}),
+		});
 	}
 	const pid = /^pid=(\d+)/m.exec(header);
 	const started = /\bstarted=(\S+)/.exec(header);
@@ -124,6 +182,7 @@ function parseStackFile(text) {
 		started: started ? started[1] : null,
 		interval: interval ? Number(interval[1]) : null,
 		argv: argv ? argv[1] : null,
+		kind,
 		dumps,
 	};
 }
@@ -166,23 +225,70 @@ function parseTime(text) {
 }
 
 /**
+ * Tell whether two stacks are identical, frame by frame.
+ *
+ * @param {object[]} a - Frames
+ * @param {object[]} b - Frames
+ * @returns {boolean} True when file, line and function agree at every depth
+ */
+function sameFrames(a, b) {
+	const same = (f, i) => f.file === b[i].file && f.line === b[i].line && f.func === b[i].func;
+	return a.length === b.length && a.every(same);
+}
+
+/**
+ * Tell whether a pytest main thread is only waiting for work: the first frame that is not
+ * a generic threading or queue wait is an xdist worker's get or the controller's loop_once.
+ *
+ * @param {object[]} frames - Main-thread frames, most recent first
+ * @returns {boolean} True when the process is idle in pytest-xdist
+ */
+function isPytestIdleFrame(frames) {
+	const caller = frames.find((f) => !GENERIC_WAIT_RE.test(f.file));
+	return !!caller && PYTEST_IDLE_FRAMES.some((w) => w.func === caller.func && w.file.test(caller.file));
+}
+
+/**
+ * Decide whether a pytest process is frozen: its main-thread stack is identical in the
+ * trailing run of complete dumps, that run spans PYTEST_FROZEN_S or more, and the stack is
+ * not an idle wait (see isPytestIdleFrame, WAIT_FRAMES).
+ *
+ * @param {{dumps: object[]}} parsed - A parseStackFile result of a pytest kind
+ * @returns {{frozen: boolean, frames: object[], seconds?: number}} frames are the main-thread
+ *   frames (empty when not frozen); seconds is the dump-time span of the identical run
+ */
+function checkFrozenPytest(parsed) {
+	const none = { frozen: false, frames: [] };
+	const complete = parsed.dumps.filter((d) => d.complete);
+	const last = complete.at(-1);
+	if (!last || last.elapsed === null || isPytestIdleFrame(last.frames) || isWaitFrame(last.frames)) return none;
+	let first = last;
+	for (let i = complete.length - 2; i >= 0; i--) {
+		const d = complete[i];
+		if (d.elapsed === null || !sameFrames(d.frames, last.frames)) break;
+		first = d;
+	}
+	const seconds = last.elapsed - first.elapsed;
+	return seconds >= PYTEST_FROZEN_S ? { frozen: true, frames: last.frames, seconds } : none;
+}
+
+/**
  * Decide whether a child is frozen in startup.
  *
- * @param {{dumps: object[]}} parsed - A parseStackFile result
- * @returns {{frozen: boolean, frames: object[]}} frozen is true when the last two
- *   complete dumps have identical main-thread frames and the top frame is neither the
- *   idle wait nor a known wait; frames are those main-thread frames (empty when not frozen)
+ * @param {{dumps: object[], kind?: string}} parsed - A parseStackFile result
+ * @returns {{frozen: boolean, frames: object[], seconds?: number}} For a task child, frozen is
+ *   true when the last two complete dumps have identical main-thread frames and the top frame is
+ *   neither the idle wait nor a known wait; for a pytest kind see checkFrozenPytest. frames are
+ *   those main-thread frames (empty when not frozen)
  */
 function checkFrozen(parsed) {
+	if (parsed.kind && parsed.kind !== 'task') return checkFrozenPytest(parsed);
 	const complete = parsed.dumps.filter((d) => d.complete);
 	if (complete.length < 2) return { frozen: false, frames: [] };
 	const [a, b] = complete.slice(-2);
-	const sameFrame = (f, i) => {
-		const g = b.frames[i];
-		return f.file === g.file && f.line === g.line && f.func === g.func;
-	};
-	const same = a.frames.length === b.frames.length && a.frames.every(sameFrame);
-	if (!same || isIdleFrame(b.frames) || isWaitFrame(b.frames)) return { frozen: false, frames: [] };
+	if (!sameFrames(a.frames, b.frames) || isIdleFrame(b.frames) || isWaitFrame(b.frames)) {
+		return { frozen: false, frames: [] };
+	}
 	return { frozen: true, frames: b.frames };
 }
 
@@ -485,10 +591,11 @@ function startStackWatch(dumpDir, opts = {}) {
 	// Outside dumpDir, so the symbols are not uploaded with the dumps.
 	const cacheDir = opts.cacheDir ?? path.join(os.tmpdir(), 'rr-symcache');
 	const attempted = new Set();
-	let captures = 0;
+	// Captures taken per group (a task child, or a pytest process) and their caps.
+	const captures = { task: 0, pytest: 0 };
+	const caps = { task: MAX_CAPTURES, pytest: MAX_PYTEST_CAPTURES };
 	// Running cdb processes; stop() kills them.
 	const children = new Set();
-	let capped = false;
 	let lockHandled = false;
 	let busy = false;
 	let stopped = false;
@@ -700,7 +807,7 @@ function startStackWatch(dumpDir, opts = {}) {
 			}
 			for (const name of fs.readdirSync(dumpDir)) {
 				const m = /^stacks_(\d+)\.txt$/.exec(name);
-				if (!m || stopped || capped) continue;
+				if (!m || stopped || (captures.task >= caps.task && captures.pytest >= caps.pytest)) continue;
 				const pid = Number(m[1]);
 				// Another watcher (a parallel test server) may have captured it already.
 				if (attempted.has(pid) || fs.existsSync(path.join(dumpDir, `native_${pid}.txt`))) continue;
@@ -708,20 +815,29 @@ function startStackWatch(dumpDir, opts = {}) {
 				const file = path.join(dumpDir, name);
 				const parsed = parseStackFile(fs.readFileSync(file, 'utf8'));
 				if (parsed.pid !== pid) continue;
+				const group = parsed.kind === 'task' ? 'task' : 'pytest';
+				if (captures[group] >= caps[group]) continue;
 				const ageMs = Date.now() - fs.statSync(file).mtimeMs;
 				const silent = checkSilent(parsed, ageMs);
 				const list = (frames) => frames.map((f) => `  ${f.file}:${f.line} ${f.func}`).join('\n');
+				// A pytest trigger names the kind, the xdist worker and the running test of the last dump.
+				const info = parsed.dumps.findLast((d) => d.info)?.info;
+				const who =
+					group === 'pytest'
+						? `${parsed.kind} worker=${info?.worker ?? '-'} current_test=${info?.test ?? '-'}\n`
+						: '';
 				let trigger;
 				if (silent.silent) {
-					const last = silent.frames.length
+					const tail = silent.frames.length
 						? `main thread in the last complete dump, most recent frame first:\n${list(silent.frames)}`
 						: 'no complete dump';
-					trigger = `no dump for ${silent.seconds} s; ${last}`;
+					trigger = `${who}no dump for ${silent.seconds} s; ${tail}`;
 				} else {
 					const verdict = checkFrozen(parsed);
 					if (!verdict.frozen) continue;
-					const head = 'main thread unchanged in the last two dumps, most recent frame first:';
-					trigger = `${head}\n${list(verdict.frames)}`;
+					const span = group === 'pytest' ? `for ${verdict.seconds} s` : 'in the last two dumps';
+					const head = `main thread unchanged ${span}, most recent frame first:`;
+					trigger = `${who}${head}\n${list(verdict.frames)}`;
 				}
 				if (!(await isEngine(pid)) || !(await sameProcess(pid, parsed.started))) continue;
 				attempted.add(pid);
@@ -731,10 +847,9 @@ function startStackWatch(dumpDir, opts = {}) {
 					continue;
 				}
 				await capture(pid, trigger);
-				if (++captures >= MAX_CAPTURES) {
-					log(`stopped after ${MAX_CAPTURES} captures`);
+				if (++captures[group] >= caps[group]) {
 					// The lock-holder check keeps running.
-					capped = true;
+					log(`stopped ${group} captures after ${caps[group]}`);
 				}
 			}
 		} catch (err) {
@@ -775,6 +890,7 @@ module.exports = {
 	checkSilent,
 	isIdleFrame,
 	isWaitFrame,
+	isPytestIdleFrame,
 	parseTime,
 	findCdb,
 	startStackWatch,
