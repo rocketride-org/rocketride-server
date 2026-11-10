@@ -36,6 +36,14 @@ class IInstance(LLMBase):
     # Raw image data
     image_data: bytearray = None
 
+    def open(self, object):
+        """Reset the per-object buffers so nothing from a previous caller's object carries over.
+
+        Args:
+            object: The entry being opened (unused; the reset is the point).
+        """
+        self.image_data = None
+
     def writeImage(self, action: int, mimeType: str, buffer: bytes):
         # Handle AVI_BEGIN action
         if action == AVI_ACTION.BEGIN:

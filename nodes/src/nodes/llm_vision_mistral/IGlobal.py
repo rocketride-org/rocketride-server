@@ -23,7 +23,6 @@
 
 import os
 from rocketlib import IGlobalBase
-from ai.common.config import Config
 from ai.common.chat import ChatBase
 
 
@@ -40,7 +39,7 @@ class IGlobal(IGlobalBase):
         # Shared runtime state
         bag = self.IEndpoint.endpoint.bag
         # Get this node's config
-        config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
+        config = self.config
         # Get a chat to interface
         self._chat = Chat(self.glb.logicalType, config, bag)
 

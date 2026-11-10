@@ -27,7 +27,8 @@ import pytest
 
 pytest.importorskip('langchain_anthropic')
 
-from ai.common.config import Config  # noqa: E402
+import rocketlib  # noqa: E402
+from rocketlib.config import resolveConfig  # noqa: E402
 from ai.common.schema import Question  # noqa: E402
 
 _MOD_PATH = os.path.join(
@@ -74,17 +75,18 @@ def server(monkeypatch):
 
 
 def _chat(monkeypatch):
+    # The custom branch is the one place a test can set the reply limit itself.
     config = {
-        'model': 'claude-sonnet-4-6',
+        'model': 'custom',
         'apikey': 'sk-ant-test',
-        'modelTotalTokens': 200000,
-        'modelOutputTokens': 8192,
+        'custom': {'customModel': 'claude-sonnet-4-6', 'modelTotalTokens': 200000, 'modelOutputTokens': 8192},
     }
-    monkeypatch.setattr(Config, 'getNodeConfig', staticmethod(lambda *a, **k: dict(config)))
+    schema = rocketlib.getServiceSchema('llm_anthropic')
+    assert schema is not None, 'llm_anthropic is not registered with the engine'
     spec = importlib.util.spec_from_file_location('_llm_anthropic_cache_test', _MOD_PATH)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return module.Chat('anthropic', {}, {})
+    return module.Chat('llm_anthropic', resolveConfig(schema, config), {})
 
 
 def _agent_question(scratch: str, cache: bool = True) -> Question:

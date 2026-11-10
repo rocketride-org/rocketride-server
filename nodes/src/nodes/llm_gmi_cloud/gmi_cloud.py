@@ -26,7 +26,6 @@
 from typing import Any, Dict
 from openai import AuthenticationError, APIError, RateLimitError, APIConnectionError
 from ai.common.chat import ChatBase
-from ai.common.config import Config
 from langchain_openai import ChatOpenAI
 
 
@@ -45,7 +44,7 @@ class Chat(ChatBase):
         """
         super().__init__(provider, connConfig, bag)
 
-        config = Config.getNodeConfig(provider, connConfig)
+        config = self._config
 
         serverbase = config.get('serverbase')
         if not serverbase:

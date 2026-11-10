@@ -35,7 +35,7 @@
 	//
 	// Optional:
 	//		The path is the executable/script code - it is node dependent
-	// 		and is optional for most node
+	//		and is optional for most node
 	//
 	"path": "nodes.llm_gmi_cloud",
 	//
@@ -47,7 +47,14 @@
 	// Optional:
 	//		Description of this driver
 	//
-	"description": ["A component that connects to GMI Cloud's large language models for advanced ", "natural language processing. GMI Cloud hosts 100+ OpenAI-compatible models ", "including Llama 4, Qwen3, DeepSeek, GPT, Claude, and Gemini on owned H100/H200 ", "GPU infrastructure. It enables capabilities like text generation, summarization, ", "reasoning, and code understanding across a wide range of open-weight and ", "proprietary models through a unified OpenAI-compatible API."],
+	"description": [
+		"A component that connects to GMI Cloud's large language models for advanced ",
+		"natural language processing. GMI Cloud hosts 100+ OpenAI-compatible models ",
+		"including Llama 4, Qwen3, DeepSeek, GPT, Claude, and Gemini on owned H100/H200 ",
+		"GPU infrastructure. It enables capabilities like text generation, summarization, ",
+		"reasoning, and code understanding across a wide range of open-weight and ",
+		"proprietary models through a unified OpenAI-compatible API."
+	],
 	//
 	// Optional:
 	//		The icon is the icon to display in the UI for this node
@@ -55,13 +62,11 @@
 	"icon": "gmi_cloud.svg",
 	"documentation": "https://docs.rocketride.org/nodes/llm_gmi_cloud",
 	//
-	//
 	// Optional:
 	//		Rendering hints to the UI which indicate which fields of
 	//		the configuration should be used to display information
-	//		on the tile box
 	//
-	"tile": ["Model: ${parameters.llm_gmi_cloud.profile}"],
+	"tile": ["Model: ${parameters.llm_gmi_cloud.model}"],
 	//
 	// Optional:
 	//		As a pipe component, define what this pipe component takes
@@ -72,416 +77,232 @@
 	},
 	//
 	// Optional:
-	//		Profile section are configuration options used by the driver
-	//		itself
+	//		Local property definitions. The model is the selector (one branch per
+	//		model, the branch value is the model id); each branch pins its context
+	//		window and capabilities as constants, and the leaves every model shares
+	//		(credentials, generation settings) sit at the root and are stored flat.
+	//		The "custom" branch takes a model id the catalog does not list.
 	//
-	// Notes:
-	// GMI Cloud has two model tiers:
-	//   Shared (always-on): DeepSeek, GPT, Claude, Gemini, available immediately at the
-	//   shared endpoint; only an API key is required.
-	//   Deploy-on-demand: Llama, Qwen, must be deployed first in the GMI Cloud console
-	//   (console.gmicloud.ai), after which a unique endpoint URL is provided. Enter that
-	//   URL in the "Endpoint URL" field that appears for these profiles.
-	"preconfig": {
-		// Define the values that will be merged into any profile configuration
-		// specified, unless the profile is 'absolute'
-		"default": "deepseek-v3",
-		// Defines profiles used with the "profile": key
-		"profiles": {
-			"custom": {
-				"model": "",
-				"modelTotalTokens": 16384,
-				"serverbase": "https://api.gmi-serving.com/v1",
-				"apikey": ""
-			},
-			"llama-4-scout": {
-				"title": "Llama 4 Scout",
-				"model": "meta-llama/Llama-4-Scout-17B-16E-Instruct",
-				"serverbase": "",
-				"apikey": "",
-				"modelTotalTokens": 1048576
-			},
-			"llama-4-maverick": {
-				"title": "Llama 4 Maverick",
-				"model": "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8",
-				"serverbase": "",
-				"apikey": "",
-				"modelTotalTokens": 1048576
-			},
-			"qwen3-235b": {
-				"title": "Qwen3 235B",
-				"model": "Qwen/Qwen3-235B-A22B-FP8",
-				"serverbase": "",
-				"apikey": "",
-				"modelTotalTokens": 131072
-			},
-			"qwen3-32b": {
-				"title": "Qwen3 32B",
-				"model": "Qwen/Qwen3-32B-FP8",
-				"serverbase": "",
-				"apikey": "",
-				"modelTotalTokens": 131072
-			},
-			"qwen3-30b": {
-				"title": "Qwen3 30B",
-				"model": "Qwen/Qwen3-30B-A3B",
-				"serverbase": "",
-				"apikey": "",
-				"modelTotalTokens": 131072
-			},
-			"qwen3-coder-480b": {
-				"title": "Qwen3 Coder 480B",
-				"model": "Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8",
-				"serverbase": "",
-				"apikey": "",
-				"modelTotalTokens": 131072
-			},
-			"deepseek-v3-2": {
-				"title": "DeepSeek V3.2",
-				"model": "deepseek-ai/DeepSeek-V3.2",
-				"serverbase": "https://api.gmi-serving.com/v1",
-				"apikey": "",
-				"modelTotalTokens": 163840
-			},
-			"deepseek-v3": {
-				"title": "DeepSeek V3",
-				"model": "deepseek-ai/DeepSeek-V3-0324",
-				"serverbase": "https://api.gmi-serving.com/v1",
-				"apikey": "",
-				"modelTotalTokens": 163840
-			},
-			"deepseek-r1": {
-				"title": "DeepSeek R1",
-				"model": "deepseek-ai/DeepSeek-R1",
-				"serverbase": "https://api.gmi-serving.com/v1",
-				"apikey": "",
-				"modelTotalTokens": 131072
-			},
-			"deepseek-r1-distill-32b": {
-				"title": "DeepSeek R1 Distill 32B",
-				"model": "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B",
-				"serverbase": "",
-				"apikey": "",
-				"modelTotalTokens": 131072
-			},
-			"deepseek-r1-distill-1-5b": {
-				"title": "DeepSeek R1 Distill 1.5B",
-				"model": "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B",
-				"serverbase": "",
-				"apikey": "",
-				"modelTotalTokens": 131072
-			},
-			"deepseek-prover-v2": {
-				"title": "DeepSeek Prover V2",
-				"model": "deepseek-ai/DeepSeek-Prover-V2-671B",
-				"serverbase": "https://api.gmi-serving.com/v1",
-				"apikey": "",
-				"modelTotalTokens": 131072
-			},
-			"gpt-5-2": {
-				"title": "GPT-5.2",
-				"model": "openai/gpt-5.2",
-				"serverbase": "https://api.gmi-serving.com/v1",
-				"apikey": "",
-				"modelTotalTokens": 128000
-			},
-			"gpt-5-1": {
-				"title": "GPT-5.1",
-				"model": "openai/gpt-5.1",
-				"serverbase": "https://api.gmi-serving.com/v1",
-				"apikey": "",
-				"modelTotalTokens": 128000
-			},
-			"gpt-5": {
-				"title": "GPT-5",
-				"model": "openai/gpt-5",
-				"serverbase": "https://api.gmi-serving.com/v1",
-				"apikey": "",
-				"modelTotalTokens": 128000
-			},
-			"gpt-4o": {
-				"title": "GPT-4o",
-				"model": "openai/gpt-4o",
-				"serverbase": "https://api.gmi-serving.com/v1",
-				"apikey": "",
-				"modelTotalTokens": 128000
-			},
-			"claude-opus-4-5": {
-				"title": "Claude Opus 4.5",
-				"model": "anthropic/claude-opus-4.5",
-				"serverbase": "https://api.gmi-serving.com/v1",
-				"apikey": "",
-				"modelTotalTokens": 200000
-			},
-			"claude-sonnet-4-5": {
-				"title": "Claude Sonnet 4.5",
-				"model": "anthropic/claude-sonnet-4.5",
-				"serverbase": "https://api.gmi-serving.com/v1",
-				"apikey": "",
-				"modelTotalTokens": 200000
-			},
-			"gemini-3-pro": {
-				"title": "Gemini 3.1 Pro",
-				"model": "google/gemini-3.1-pro-preview",
-				"serverbase": "https://api.gmi-serving.com/v1",
-				"apikey": "",
-				"modelTotalTokens": 128000
-			},
-			"gemini-3-flash": {
-				"title": "Gemini 3 Flash",
-				"model": "google/gemini-3-flash-preview",
-				"serverbase": "https://api.gmi-serving.com/v1",
-				"apikey": "",
-				"modelTotalTokens": 128000
-			},
-			"gemini-3-1-flash-lite": {
-				"title": "Gemini 3.1 Flash Lite",
-				"model": "google/gemini-3.1-flash-lite-preview",
-				"serverbase": "https://api.gmi-serving.com/v1",
-				"apikey": "",
-				"modelTotalTokens": 128000
-			}
-		}
-	},
-	//
-	// Optional:
-	//		Local fields definitions - these define fields only for the
-	//		current service. You may specify them here, or directly
-	//		in the shape
-	//
-	"fields": {
-		"model": {
+	"propertyDefinitions": {
+		"llm_gmi_cloud.apikey": {
+			"base": "llm.cloud.apikey",
+			"description": "GMI Cloud API key",
+			"env": "ROCKETRIDE_LLM_GMI_CLOUD_APIKEY",
+			"required": true
+		},
+		"llm_gmi_cloud.serverbase": {
 			"type": "string",
-			"title": "Model",
-			"description": "GMI Cloud model identifier. Use org/model-name for open-weight models (e.g. deepseek-ai/DeepSeek-R1, Qwen/Qwen3-32B-FP8) or provider/model-name for proxied models (e.g. openai/gpt-4o, anthropic/claude-sonnet-4.5, google/gemini-3-flash-preview). Full list: https://www.gmicloud.ai/models"
+			"title": "Endpoint URL",
+			"description": "Deploy the model in the GMI Cloud console and paste its endpoint URL here.",
+			"required": true
 		},
-		"modelTotalTokens": {
-			"type": "number",
-			"title": "Tokens",
-			"description": "Total Tokens"
+		"llm_gmi_cloud.customModel": {
+			"type": "string",
+			"title": "Model id",
+			"description": "Model id exactly as the provider names it",
+			"required": true
 		},
-		"modelOutputTokens": {
+		"llm_gmi_cloud.custom.modelTotalTokens": { "type": "number", "title": "Tokens", "description": "Total Tokens", "minimum": 1, "default": 16384 },
+		"llm_gmi_cloud.custom.modelOutputTokens": {
 			"type": "integer",
 			"title": "Output Tokens",
 			"description": "Most tokens the model may write in one reply (at least 1,024). Leave it empty to keep the node's default. Reasoning models count their thinking against this limit: set it well above the reply you expect, or they can spend it all thinking and return nothing. It cannot exceed Tokens; a larger value is lowered to it.",
-			"minimum": 1024,
-			"optional": true
+			"minimum": 1024
 		},
-		"gmi_cloud.serverbase": {
+		"llm_gmi_cloud.custom.serverbase": {
 			"type": "string",
-			"title": "Endpoint URL",
-			"description": "Your GMI Cloud deployment endpoint URL. Deploy the model at console.gmicloud.ai, then paste the provided endpoint URL here.",
-			"optional": false
-		},
-		"gmi_cloud.custom": {
-			"object": "custom",
-			"properties": ["gmi_cloud.serverbase", "model", "modelTotalTokens", "modelOutputTokens", "llm.cloud.apikey"]
-		},
-		"gmi_cloud.llama-4-scout": {
-			"object": "llama-4-scout",
-			"properties": ["gmi_cloud.serverbase", "llm.cloud.apikey"]
-		},
-		"gmi_cloud.llama-4-maverick": {
-			"object": "llama-4-maverick",
-			"properties": ["gmi_cloud.serverbase", "llm.cloud.apikey"]
-		},
-		"gmi_cloud.qwen3-235b": {
-			"object": "qwen3-235b",
-			"properties": ["gmi_cloud.serverbase", "llm.cloud.apikey"]
-		},
-		"gmi_cloud.qwen3-32b": {
-			"object": "qwen3-32b",
-			"properties": ["gmi_cloud.serverbase", "llm.cloud.apikey"]
-		},
-		"gmi_cloud.qwen3-30b": {
-			"object": "qwen3-30b",
-			"properties": ["gmi_cloud.serverbase", "llm.cloud.apikey"]
-		},
-		"gmi_cloud.qwen3-coder-480b": {
-			"object": "qwen3-coder-480b",
-			"properties": ["gmi_cloud.serverbase", "llm.cloud.apikey"]
-		},
-		"gmi_cloud.deepseek-v3-2": {
-			"object": "deepseek-v3-2",
-			"properties": ["llm.cloud.apikey"]
-		},
-		"gmi_cloud.deepseek-v3": {
-			"object": "deepseek-v3",
-			"properties": ["llm.cloud.apikey"]
-		},
-		"gmi_cloud.deepseek-r1": {
-			"object": "deepseek-r1",
-			"properties": ["llm.cloud.apikey"]
-		},
-		"gmi_cloud.deepseek-r1-distill-32b": {
-			"object": "deepseek-r1-distill-32b",
-			"properties": ["gmi_cloud.serverbase", "llm.cloud.apikey"]
-		},
-		"gmi_cloud.deepseek-r1-distill-1-5b": {
-			"object": "deepseek-r1-distill-1-5b",
-			"properties": ["gmi_cloud.serverbase", "llm.cloud.apikey"]
-		},
-		"gmi_cloud.deepseek-prover-v2": {
-			"object": "deepseek-prover-v2",
-			"properties": ["llm.cloud.apikey"]
-		},
-		"gmi_cloud.gpt-5-2": {
-			"object": "gpt-5-2",
-			"properties": ["llm.cloud.apikey"]
-		},
-		"gmi_cloud.gpt-5-1": {
-			"object": "gpt-5-1",
-			"properties": ["llm.cloud.apikey"]
-		},
-		"gmi_cloud.gpt-5": {
-			"object": "gpt-5",
-			"properties": ["llm.cloud.apikey"]
-		},
-		"gmi_cloud.gpt-4o": {
-			"object": "gpt-4o",
-			"properties": ["llm.cloud.apikey"]
-		},
-		"gmi_cloud.claude-opus-4-5": {
-			"object": "claude-opus-4-5",
-			"properties": ["llm.cloud.apikey"]
-		},
-		"gmi_cloud.claude-sonnet-4-5": {
-			"object": "claude-sonnet-4-5",
-			"properties": ["llm.cloud.apikey"]
-		},
-		"gmi_cloud.gemini-3-pro": {
-			"object": "gemini-3-pro",
-			"properties": ["llm.cloud.apikey"]
-		},
-		"gmi_cloud.gemini-3-flash": {
-			"object": "gemini-3-flash",
-			"properties": ["llm.cloud.apikey"]
-		},
-		"gmi_cloud.gemini-3-1-flash-lite": {
-			"object": "gemini-3-1-flash-lite",
-			"properties": ["llm.cloud.apikey"]
-		},
-		"gmi_cloud.profile": {
-			"title": "Model",
-			"description": "GMI Cloud LLM model",
-			"type": "string",
-			"default": "deepseek-v3",
-			"enum": ["*>preconfig.profiles.*.title"],
-			"conditional": [
-				{
-					"value": "custom",
-					"properties": ["gmi_cloud.custom"]
-				},
-				{
-					"value": "llama-4-scout",
-					"properties": ["gmi_cloud.llama-4-scout"]
-				},
-				{
-					"value": "llama-4-maverick",
-					"properties": ["gmi_cloud.llama-4-maverick"]
-				},
-				{
-					"value": "qwen3-235b",
-					"properties": ["gmi_cloud.qwen3-235b"]
-				},
-				{
-					"value": "qwen3-32b",
-					"properties": ["gmi_cloud.qwen3-32b"]
-				},
-				{
-					"value": "qwen3-30b",
-					"properties": ["gmi_cloud.qwen3-30b"]
-				},
-				{
-					"value": "qwen3-coder-480b",
-					"properties": ["gmi_cloud.qwen3-coder-480b"]
-				},
-				{
-					"value": "deepseek-v3-2",
-					"properties": ["gmi_cloud.deepseek-v3-2"]
-				},
-				{
-					"value": "deepseek-v3",
-					"properties": ["gmi_cloud.deepseek-v3"]
-				},
-				{
-					"value": "deepseek-r1",
-					"properties": ["gmi_cloud.deepseek-r1"]
-				},
-				{
-					"value": "deepseek-r1-distill-32b",
-					"properties": ["gmi_cloud.deepseek-r1-distill-32b"]
-				},
-				{
-					"value": "deepseek-r1-distill-1-5b",
-					"properties": ["gmi_cloud.deepseek-r1-distill-1-5b"]
-				},
-				{
-					"value": "deepseek-prover-v2",
-					"properties": ["gmi_cloud.deepseek-prover-v2"]
-				},
-				{
-					"value": "gpt-5-2",
-					"properties": ["gmi_cloud.gpt-5-2"]
-				},
-				{
-					"value": "gpt-5-1",
-					"properties": ["gmi_cloud.gpt-5-1"]
-				},
-				{
-					"value": "gpt-5",
-					"properties": ["gmi_cloud.gpt-5"]
-				},
-				{
-					"value": "gpt-4o",
-					"properties": ["gmi_cloud.gpt-4o"]
-				},
-				{
-					"value": "claude-opus-4-5",
-					"properties": ["gmi_cloud.claude-opus-4-5"]
-				},
-				{
-					"value": "claude-sonnet-4-5",
-					"properties": ["gmi_cloud.claude-sonnet-4-5"]
-				},
-				{
-					"value": "gemini-3-pro",
-					"properties": ["gmi_cloud.gemini-3-pro"]
-				},
-				{
-					"value": "gemini-3-flash",
-					"properties": ["gmi_cloud.gemini-3-flash"]
-				},
-				{
-					"value": "gemini-3-1-flash-lite",
-					"properties": ["gmi_cloud.gemini-3-1-flash-lite"]
-				}
-			]
+			"title": "Server URL",
+			"description": "Base URL of the OpenAI-compatible endpoint serving the model",
+			"default": "https://api.gmi-serving.com/v1"
 		}
 	},
 	//
 	// Required:
-	//		Defines the fields (shape) of the service. Either source or target
-	//		may be specified, or both, but at least one is required
+	//		Defines the properties shown in the pipeline builder side panel, in order
 	//
-	"shape": [
+	"properties": [
 		{
-			"section": "Pipe",
-			"title": "GMI Cloud",
-			"properties": ["gmi_cloud.profile"]
-		}
+			"name": "model",
+			"type": "string",
+			"title": "Model",
+			"description": "GMI Cloud LLM model",
+			"default": "deepseek-ai/DeepSeek-V3-0324",
+			"enum": {
+				"meta-llama/Llama-4-Scout-17B-16E-Instruct": {
+					"title": "Llama 4 Scout",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 1048576 },
+						"llm_gmi_cloud.serverbase"
+					]
+				},
+				"meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8": {
+					"title": "Llama 4 Maverick",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 1048576 },
+						"llm_gmi_cloud.serverbase"
+					]
+				},
+				"Qwen/Qwen3-235B-A22B-FP8": {
+					"title": "Qwen3 235B",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 131072 },
+						"llm_gmi_cloud.serverbase"
+					]
+				},
+				"Qwen/Qwen3-32B-FP8": {
+					"title": "Qwen3 32B",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 131072 },
+						"llm_gmi_cloud.serverbase"
+					]
+				},
+				"Qwen/Qwen3-30B-A3B": {
+					"title": "Qwen3 30B",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 131072 },
+						"llm_gmi_cloud.serverbase"
+					]
+				},
+				"Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8": {
+					"title": "Qwen3 Coder 480B",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 131072 },
+						"llm_gmi_cloud.serverbase"
+					]
+				},
+				"deepseek-ai/DeepSeek-V3.2": {
+					"title": "DeepSeek V3.2",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 163840 },
+						{ "name": "serverbase", "type": "constant", "default": "https://api.gmi-serving.com/v1" }
+					]
+				},
+				"deepseek-ai/DeepSeek-V3-0324": {
+					"title": "DeepSeek V3",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 163840 },
+						{ "name": "serverbase", "type": "constant", "default": "https://api.gmi-serving.com/v1" }
+					]
+				},
+				"deepseek-ai/DeepSeek-R1": {
+					"title": "DeepSeek R1",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 131072 },
+						{ "name": "serverbase", "type": "constant", "default": "https://api.gmi-serving.com/v1" }
+					]
+				},
+				"deepseek-ai/DeepSeek-R1-Distill-Qwen-32B": {
+					"title": "DeepSeek R1 Distill 32B",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 131072 },
+						"llm_gmi_cloud.serverbase"
+					]
+				},
+				"deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B": {
+					"title": "DeepSeek R1 Distill 1.5B",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 131072 },
+						"llm_gmi_cloud.serverbase"
+					]
+				},
+				"deepseek-ai/DeepSeek-Prover-V2-671B": {
+					"title": "DeepSeek Prover V2",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 131072 },
+						{ "name": "serverbase", "type": "constant", "default": "https://api.gmi-serving.com/v1" }
+					]
+				},
+				"openai/gpt-5.2": {
+					"title": "GPT-5.2",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 128000 },
+						{ "name": "serverbase", "type": "constant", "default": "https://api.gmi-serving.com/v1" }
+					]
+				},
+				"openai/gpt-5.1": {
+					"title": "GPT-5.1",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 128000 },
+						{ "name": "serverbase", "type": "constant", "default": "https://api.gmi-serving.com/v1" }
+					]
+				},
+				"openai/gpt-5": {
+					"title": "GPT-5",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 128000 },
+						{ "name": "serverbase", "type": "constant", "default": "https://api.gmi-serving.com/v1" }
+					]
+				},
+				"openai/gpt-4o": {
+					"title": "GPT-4o",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 128000 },
+						{ "name": "serverbase", "type": "constant", "default": "https://api.gmi-serving.com/v1" }
+					]
+				},
+				"anthropic/claude-opus-4.5": {
+					"title": "Claude Opus 4.5",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 200000 },
+						{ "name": "serverbase", "type": "constant", "default": "https://api.gmi-serving.com/v1" }
+					]
+				},
+				"anthropic/claude-sonnet-4.5": {
+					"title": "Claude Sonnet 4.5",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 200000 },
+						{ "name": "serverbase", "type": "constant", "default": "https://api.gmi-serving.com/v1" }
+					]
+				},
+				"google/gemini-3.1-pro-preview": {
+					"title": "Gemini 3.1 Pro",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 128000 },
+						{ "name": "serverbase", "type": "constant", "default": "https://api.gmi-serving.com/v1" }
+					]
+				},
+				"google/gemini-3-flash-preview": {
+					"title": "Gemini 3 Flash",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 128000 },
+						{ "name": "serverbase", "type": "constant", "default": "https://api.gmi-serving.com/v1" }
+					]
+				},
+				"google/gemini-3.1-flash-lite-preview": {
+					"title": "Gemini 3.1 Flash Lite",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 128000 },
+						{ "name": "serverbase", "type": "constant", "default": "https://api.gmi-serving.com/v1" }
+					]
+				},
+				"custom": {
+					"title": "Custom model",
+					"properties": [
+						"llm_gmi_cloud.customModel",
+						"llm_gmi_cloud.custom.modelTotalTokens",
+						"llm_gmi_cloud.custom.modelOutputTokens",
+						"llm_gmi_cloud.custom.serverbase"
+					]
+				}
+			}
+		},
+		"llm_gmi_cloud.apikey"
 	],
+	//
+	// Optional:
+	//		Test configuration for automated node testing. "profiles" lists
+	//		values of the "model" selector; the framework writes the selected one
+	//		at "model" and the mock credentials at their paths.
+	//
 	"test": {
-		"profiles": ["deepseek-v3"],
+		"profiles": ["deepseek-ai/DeepSeek-V3-0324"],
 		"outputs": ["answers"],
 		"cases": [
 			{
 				"name": "LLM returns mock response",
 				"text": "What is 2+2?",
 				"expect": {
-					"answers": {
-						"contains": "Mock LLM response"
-					}
+					"answers": { "contains": "Mock LLM response" }
 				}
 			}
 		]

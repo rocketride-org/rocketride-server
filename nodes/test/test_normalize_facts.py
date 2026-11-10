@@ -533,7 +533,7 @@ finally:
 def _make_instance():
     """Build an IInstance wired to capture stubs; returns (inst, emitted, prevented)."""
     inst = _II.IInstance()
-    inst.IGlobal = types.SimpleNamespace(config=dict(CFG))
+    inst.IGlobal = types.SimpleNamespace(rules=dict(CFG))
     emitted = []
     prevented = []
     inst.instance = types.SimpleNamespace(writeAnswers=emitted.append)

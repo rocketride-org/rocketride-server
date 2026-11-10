@@ -1,163 +1,34 @@
 {
-	//
-	// Required:
-	//		The displayable name of this node
-	//
 	"title": "OCR",
-	//
-	// Required:
-	//		The protocol is the endpoint protocol
-	//
 	"protocol": "ocr://",
-	//
-	// Required:
-	//		Class type of the node - what it does
-	//
 	"classType": ["image"],
-	//
-	// Required:
-	//		Capabilities are flags that change the behavior of the underlying
-	//		engine
-	//
 	"capabilities": ["gpu"],
-	//
-	// Optional:
-	//		Register is either filter, endpoint or ignored if not specified. If the
-	//		type is specified, a factory is registered of that given type
-	//
 	"register": "filter",
-	//
-	// Optional:
-	//		The node is the actual physical node to instantiate - if
-	//		not specified, the protocol will be used
-	//
 	"node": "python",
-	//
-	// Optional:
-	//		The path is the executable/script code - it is node dependent
-	// 		and is optional for most node
-	//
 	"path": "nodes.ocr",
-	//
-	// Required:
-	//		The prefix map when added/removed when convertting URLs <=> paths
-	//
 	"prefix": "ocr",
-	//
-	// Optional:
-	//		Description to of this driver
-	//
-	"description": ["A component that extracts machine-readable text from images and scanned documents ", "using optical character recognition. It enables the transformation of visual content (such ", "as PDFs, screenshots, and photos) into structured text for further analysis and processing. ", "Supporting various image formats and multilingual text, the component is ideal for digitizing ", "printed materials, enabling search, indexing, and downstream natural language tasks."],
-	//
-	// Optional:
-	//	  The icon is the icon to display in the UI for this node
-	//
+	"description": [
+		"A component that extracts machine-readable text from images and scanned documents ",
+		"using optical character recognition. It enables the transformation of visual content (such ",
+		"as PDFs, screenshots, and photos) into structured text for further analysis and processing. ",
+		"Supporting various image formats and multilingual text, the component is ideal for digitizing ",
+		"printed materials, enabling search, indexing, and downstream natural language tasks."
+	],
 	"icon": "ocr.svg",
 	"documentation": "https://docs.rocketride.org/nodes/ocr",
-	//
-	//
-	//  Optional:
-	//      Rendering hints to the UI which indicate which fields of
-	//      the configuration should be used to display information
-	//
 	"tile": [],
-	//
-	//	Optional:
-	//		As a pipe component, define what this pipe component takes
-	//		and what it produces
-	//
 	"lanes": {
 		"documents": ["text"],
 		"image": ["text", "table"]
 	},
 	//
-	//	Optional:
-	//		Profile section are configuration optoins used by the driver
-	//		itself
-	//
-	"preconfig": {
-		"default": "latin",
-		"profiles": {
-			"latin": {
-				"title": "Latin (English)",
-				"engine": "easyocr",
-				"script_family": "latin",
-				"table_engine": "doctr"
-			},
-			"latin-extended": {
-				"title": "Latin Extended (European)",
-				"engine": "easyocr",
-				"script_family": "latin-extended",
-				"table_engine": "doctr"
-			},
-			"cyrillic": {
-				"title": "Cyrillic (Russian, etc.)",
-				"engine": "easyocr",
-				"script_family": "cyrillic",
-				"table_engine": "doctr"
-			},
-			"arabic": {
-				"title": "Arabic/Persian/Urdu",
-				"engine": "easyocr",
-				"script_family": "arabic",
-				"table_engine": "doctr"
-			},
-			"devanagari": {
-				"title": "Devanagari (Hindi, etc.)",
-				"engine": "easyocr",
-				"script_family": "devanagari",
-				"table_engine": "doctr"
-			},
-			"chinese-simplified": {
-				"title": "Chinese (Simplified)",
-				"engine": "easyocr",
-				"script_family": "chinese-simplified",
-				"table_engine": "doctr"
-			},
-			"chinese-traditional": {
-				"title": "Chinese (Traditional)",
-				"engine": "easyocr",
-				"script_family": "chinese-traditional",
-				"table_engine": "doctr"
-			},
-			"japanese": {
-				"title": "Japanese",
-				"engine": "easyocr",
-				"script_family": "japanese",
-				"table_engine": "doctr"
-			},
-			"korean": {
-				"title": "Korean",
-				"engine": "easyocr",
-				"script_family": "korean",
-				"table_engine": "doctr"
-			},
-			"doctr": {
-				"title": "DocTR (Language-agnostic)",
-				"engine": "doctr",
-				"script_family": "latin",
-				"table_engine": "doctr"
-			},
-			"surya": {
-				"title": "Surya (Multi-language)",
-				"engine": "surya",
-				"script_family": "latin",
-				"table_engine": "surya"
-			},
-			"trocr": {
-				"title": "TrOCR (Transformer)",
-				"engine": "trocr",
-				"script_family": "latin",
-				"table_engine": "doctr"
-			}
-		}
-	},
 	// Optional:
-	//		Local fields definitions - these define fields only for the
-	//		current service. You may specify them here, or directly
-	//		in the shape
+	//		Local property definitions. The profile is the selector: each profile
+	//		aliases the engine, script family and table engine with its own
+	//		defaults, so a profile is a starting point the user may still adjust.
+	//		The DocTR architectures and the TrOCR model are shared and stored flat.
 	//
-	"fields": {
+	"propertyDefinitions": {
 		"ocr.engine": {
 			"type": "string",
 			"title": "OCR Engine",
@@ -191,20 +62,6 @@
 				["telugu", "Telugu"]
 			]
 		},
-		"ocr.det_arch": {
-			"type": "string",
-			"title": "Detection Architecture (DocTR)",
-			"description": "Choose the architecture used for table text detection.\n Documentation: https://mindee.github.io/doctr/latest/using_doctr/using_models.html",
-			"default": "db_resnet50",
-			"enum": ["linknet_resnet18", "linknet_resnet34", "linknet_resnet50", "db_resnet50", "db_mobilenet_v3_large", "fast_tiny", "fast_small", "fast_base"]
-		},
-		"ocr.reco_arch": {
-			"type": "string",
-			"title": "Recognition Architecture (DocTR)",
-			"description": "Choose the architecture used for table text recognition.\n Documentation: https://mindee.github.io/doctr/latest/using_doctr/using_models.html",
-			"default": "crnn_vgg16_bn",
-			"enum": ["crnn_vgg16_bn", "crnn_mobilenet_v3_small", "crnn_mobilenet_v3_large", "sar_resnet31", "master", "vitstr_small", "vitstr_base", "parseq"]
-		},
 		"ocr.table_engine": {
 			"type": "string",
 			"title": "Table OCR Engine",
@@ -216,40 +73,172 @@
 				["surya", "Surya"]
 			]
 		},
-		"ocr.easyocr_options": {
-			"object": "easyocr_options",
-			"properties": ["ocr.script_family"]
-		},
-		"ocr.doctr_options": {
-			"object": "doctr_options",
-			"properties": ["ocr.det_arch", "ocr.reco_arch"]
-		},
-		"ocr.profile": {
-			"title": "OCR Profile",
-			"description": "Select a preconfigured OCR profile optimized for different languages and use cases.",
+		"ocr.det_arch": {
 			"type": "string",
-			"default": "latin",
-			"enum": ["*>preconfig.profiles.*.title"]
+			"title": "Detection Architecture (DocTR)",
+			"description": "Choose the architecture used for table text detection. Documentation: https://mindee.github.io/doctr/latest/using_doctr/using_models.html",
+			"default": "db_resnet50",
+			"enum": [
+				"linknet_resnet18",
+				"linknet_resnet34",
+				"linknet_resnet50",
+				"db_resnet50",
+				"db_mobilenet_v3_large",
+				"fast_tiny",
+				"fast_small",
+				"fast_base"
+			]
+		},
+		"ocr.reco_arch": {
+			"type": "string",
+			"title": "Recognition Architecture (DocTR)",
+			"description": "Choose the architecture used for table text recognition. Documentation: https://mindee.github.io/doctr/latest/using_doctr/using_models.html",
+			"default": "crnn_vgg16_bn",
+			"enum": [
+				"crnn_vgg16_bn",
+				"crnn_mobilenet_v3_small",
+				"crnn_mobilenet_v3_large",
+				"sar_resnet31",
+				"master",
+				"vitstr_small",
+				"vitstr_base",
+				"parseq"
+			]
+		},
+		"ocr.trocr_model": {
+			"type": "string",
+			"title": "TrOCR model",
+			"description": "HuggingFace TrOCR model used when the engine is TrOCR.",
+			"default": "microsoft/trocr-base-printed",
+			"minLength": 1
 		}
 	},
 	//
 	// Required:
-	//		Defines the fields (shape) of the service. Either source or target
-	//		map be specified, or both, but at least one is required
+	//		Defines the properties shown in the pipeline builder side panel, in order
 	//
-	"shape": [
+	"properties": [
 		{
-			"section": "Pipe",
-			"title": "OCR Settings",
-			"properties": ["ocr.profile", "ocr.engine", "ocr.script_family", "ocr.table_engine"]
-		}
+			"name": "profile",
+			"type": "string",
+			"title": "OCR Profile",
+			"description": "A combination of engine, script family and table engine tuned for a language or use case; each may be adjusted.",
+			"default": "latin",
+			"enum": {
+				"latin": {
+					"title": "Latin (English)",
+					"properties": [
+						{ "base": "ocr.engine", "default": "easyocr" },
+						{ "base": "ocr.script_family", "default": "latin" },
+						{ "base": "ocr.table_engine", "default": "doctr" }
+					]
+				},
+				"latin-extended": {
+					"title": "Latin Extended (European)",
+					"properties": [
+						{ "base": "ocr.engine", "default": "easyocr" },
+						{ "base": "ocr.script_family", "default": "latin-extended" },
+						{ "base": "ocr.table_engine", "default": "doctr" }
+					]
+				},
+				"cyrillic": {
+					"title": "Cyrillic (Russian, etc.)",
+					"properties": [
+						{ "base": "ocr.engine", "default": "easyocr" },
+						{ "base": "ocr.script_family", "default": "cyrillic" },
+						{ "base": "ocr.table_engine", "default": "doctr" }
+					]
+				},
+				"arabic": {
+					"title": "Arabic/Persian/Urdu",
+					"properties": [
+						{ "base": "ocr.engine", "default": "easyocr" },
+						{ "base": "ocr.script_family", "default": "arabic" },
+						{ "base": "ocr.table_engine", "default": "doctr" }
+					]
+				},
+				"devanagari": {
+					"title": "Devanagari (Hindi, etc.)",
+					"properties": [
+						{ "base": "ocr.engine", "default": "easyocr" },
+						{ "base": "ocr.script_family", "default": "devanagari" },
+						{ "base": "ocr.table_engine", "default": "doctr" }
+					]
+				},
+				"chinese-simplified": {
+					"title": "Chinese (Simplified)",
+					"properties": [
+						{ "base": "ocr.engine", "default": "easyocr" },
+						{ "base": "ocr.script_family", "default": "chinese-simplified" },
+						{ "base": "ocr.table_engine", "default": "doctr" }
+					]
+				},
+				"chinese-traditional": {
+					"title": "Chinese (Traditional)",
+					"properties": [
+						{ "base": "ocr.engine", "default": "easyocr" },
+						{ "base": "ocr.script_family", "default": "chinese-traditional" },
+						{ "base": "ocr.table_engine", "default": "doctr" }
+					]
+				},
+				"japanese": {
+					"title": "Japanese",
+					"properties": [
+						{ "base": "ocr.engine", "default": "easyocr" },
+						{ "base": "ocr.script_family", "default": "japanese" },
+						{ "base": "ocr.table_engine", "default": "doctr" }
+					]
+				},
+				"korean": {
+					"title": "Korean",
+					"properties": [
+						{ "base": "ocr.engine", "default": "easyocr" },
+						{ "base": "ocr.script_family", "default": "korean" },
+						{ "base": "ocr.table_engine", "default": "doctr" }
+					]
+				},
+				"doctr": {
+					"title": "DocTR (Language-agnostic)",
+					"properties": [
+						{ "base": "ocr.engine", "default": "doctr" },
+						{ "base": "ocr.script_family", "default": "latin" },
+						{ "base": "ocr.table_engine", "default": "doctr" }
+					]
+				},
+				"surya": {
+					"title": "Surya (Multi-language)",
+					"properties": [
+						{ "base": "ocr.engine", "default": "surya" },
+						{ "base": "ocr.script_family", "default": "latin" },
+						{ "base": "ocr.table_engine", "default": "surya" }
+					]
+				},
+				"trocr": {
+					"title": "TrOCR (Transformer)",
+					"properties": [
+						{ "base": "ocr.engine", "default": "trocr" },
+						{ "base": "ocr.script_family", "default": "latin" },
+						{ "base": "ocr.table_engine", "default": "doctr" }
+					]
+				}
+			}
+		},
+		"ocr.det_arch",
+		"ocr.reco_arch",
+		"ocr.trocr_model"
 	],
 	//
-	//	Test configuration for automated node testing
+	// Optional:
+	//		Test configuration for automated node testing. "profiles" lists values
+	//		of the root selector; the framework writes the selected one at its path.
 	//
 	"test": {
 		"profiles": ["latin"],
-		"requiresHardware": { "cuda": { "vramGb": 3 }, "mps": { "ramGb": 6 }, "cpu": { "ramGb": 6 } },
+		"requiresHardware": {
+			"cuda": { "vramGb": 3 },
+			"mps": { "ramGb": 6 },
+			"cpu": { "ramGb": 6 }
+		},
 		"outputs": ["text", "table"],
 		"timeout": 120,
 		"cases": [
@@ -257,50 +246,44 @@
 				"name": "Extract text from plain text image",
 				"image": "images/ocr_test_text.png",
 				"expect": {
-					"text": {
-						"notEmpty": true,
-						"contains": "quick brown fox"
-					}
+					"text": { "notEmpty": true, "contains": "quick brown fox" }
 				}
 			},
 			{
 				"name": "Extract table from table image",
 				"image": "images/ocr_test_table.png",
 				"expect": {
-					"text": {
-						"notEmpty": true
-					},
-					"table": {
-						"notEmpty": true,
-						"contains": "Alice"
-					}
+					"text": { "notEmpty": true },
+					"table": { "notEmpty": true, "contains": "Alice" }
 				}
 			},
 			{
 				"name": "Extract text and table from mixed image",
 				"image": "images/ocr_test_mixed.png",
 				"expect": {
-					"text": {
-						"notEmpty": true,
-						"contains": "Sales Report"
-					},
-					"table": {
-						"notEmpty": true,
-						"contains": "Widget"
-					}
+					"text": { "notEmpty": true, "contains": "Sales Report" },
+					"table": { "notEmpty": true, "contains": "Widget" }
 				}
 			}
 		]
 	},
-	//
-	//	Full test configuration - tests all OCR profiles (engines/script families).
-	//	Run via: builder nodes:test-full
-	//
 	"fulltest": [
 		{
-			// EasyOCR profiles (excluding Japanese): full text + table assertions
-			"profiles": ["latin", "latin-extended", "cyrillic", "arabic", "devanagari", "chinese-simplified", "chinese-traditional", "korean"],
-			"requiresHardware": { "cuda": { "vramGb": 3 }, "mps": { "ramGb": 6 }, "cpu": { "ramGb": 6 } },
+			"profiles": [
+				"latin",
+				"latin-extended",
+				"cyrillic",
+				"arabic",
+				"devanagari",
+				"chinese-simplified",
+				"chinese-traditional",
+				"korean"
+			],
+			"requiresHardware": {
+				"cuda": { "vramGb": 3 },
+				"mps": { "ramGb": 6 },
+				"cpu": { "ramGb": 6 }
+			},
 			"outputs": ["text", "table"],
 			"timeout": 120,
 			"cases": [
@@ -308,45 +291,34 @@
 					"name": "Extract text from plain text image",
 					"image": "images/ocr_test_text.png",
 					"expect": {
-						"text": {
-							"notEmpty": true,
-							"contains": "quick brown fox"
-						}
+						"text": { "notEmpty": true, "contains": "quick brown fox" }
 					}
 				},
 				{
 					"name": "Extract table from table image",
 					"image": "images/ocr_test_table.png",
 					"expect": {
-						"text": {
-							"notEmpty": true
-						},
-						"table": {
-							"notEmpty": true,
-							"contains": "Alice"
-						}
+						"text": { "notEmpty": true },
+						"table": { "notEmpty": true, "contains": "Alice" }
 					}
 				},
 				{
 					"name": "Extract text and table from mixed image",
 					"image": "images/ocr_test_mixed.png",
 					"expect": {
-						"text": {
-							"notEmpty": true,
-							"contains": "Sales Report"
-						},
-						"table": {
-							"notEmpty": true,
-							"contains": "Widget"
-						}
+						"text": { "notEmpty": true, "contains": "Sales Report" },
+						"table": { "notEmpty": true, "contains": "Widget" }
 					}
 				}
 			]
 		},
 		{
-			// EasyOCR Japanese: relaxed text assertion (Japanese models may misread English)
 			"profiles": ["japanese"],
-			"requiresHardware": { "cuda": { "vramGb": 3 }, "mps": { "ramGb": 6 }, "cpu": { "ramGb": 6 } },
+			"requiresHardware": {
+				"cuda": { "vramGb": 3 },
+				"mps": { "ramGb": 6 },
+				"cpu": { "ramGb": 6 }
+			},
 			"outputs": ["text"],
 			"timeout": 120,
 			"cases": [
@@ -354,18 +326,18 @@
 					"name": "Extract text from plain text image",
 					"image": "images/ocr_test_text.png",
 					"expect": {
-						"text": {
-							"notEmpty": true,
-							"contains": "quick"
-						}
+						"text": { "notEmpty": true, "contains": "quick" }
 					}
 				}
 			]
 		},
 		{
-			// DocTR engine: text assertions only (no table assertions)
 			"profiles": ["doctr"],
-			"requiresHardware": { "cuda": { "vramGb": 3 }, "mps": { "ramGb": 6 }, "cpu": { "ramGb": 6 } },
+			"requiresHardware": {
+				"cuda": { "vramGb": 3 },
+				"mps": { "ramGb": 6 },
+				"cpu": { "ramGb": 6 }
+			},
 			"outputs": ["text"],
 			"timeout": 180,
 			"cases": [
@@ -373,10 +345,7 @@
 					"name": "Extract text from plain text image",
 					"image": "images/ocr_test_text.png",
 					"expect": {
-						"text": {
-							"notEmpty": true,
-							"contains": "quick brown fox"
-						}
+						"text": { "notEmpty": true, "contains": "quick brown fox" }
 					}
 				}
 			]

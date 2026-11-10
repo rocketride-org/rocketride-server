@@ -21,9 +21,9 @@
 # SOFTWARE.
 # =============================================================================
 
-from rocketlib import IGlobalBase, debug, warning
+from rocketlib import IGlobalBase, debug
 
-from ..landing_ai_base import ensure_dependencies, get_node_config, validate_credentials
+from ..landing_ai_base import ensure_dependencies
 
 
 class IGlobal(IGlobalBase):
@@ -35,7 +35,7 @@ class IGlobal(IGlobalBase):
         self.parser = None
 
     def beginGlobal(self):
-        """Install dependencies and build the shared parser instance."""
+        """Install dependencies and build the shared parser instance from the resolved config."""
         debug('Landing.ai Parse Global: starting global initialization')
 
         ensure_dependencies()
@@ -43,19 +43,8 @@ class IGlobal(IGlobalBase):
         from .parse import Parser
 
         bag = self.IEndpoint.endpoint.bag
-        self.parser = Parser(self.glb.logicalType, self.glb.connConfig, bag)
+        self.parser = Parser(self.glb.logicalType, self.config, bag)
         debug('Landing.ai Parse Global: parser initialized')
-
-    def validateConfig(self):
-        """Validate config + credentials with a live ADE call (warn-only, like the LLM nodes)."""
-        try:
-            ensure_dependencies()
-            config = get_node_config(self.glb.logicalType, self.glb.connConfig)
-            err = validate_credentials(config)
-            if err:
-                warning(f'Landing.ai Parse: {err}')
-        except Exception as e:  # noqa: BLE001 — warn-only; never block canvas editing
-            warning(f'Landing.ai Parse: {e}')
 
     def endGlobal(self):
         """Clean up resources when global configuration is being destroyed."""

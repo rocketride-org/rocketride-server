@@ -118,16 +118,25 @@ class ChatBase:
         definition = getServiceDefinition(provider)
         converted = definition is not None and 'preconfig' not in definition
         config = connConfig if converted else Config.getNodeConfig(provider, connConfig)
+        # The resolved config, for the provider subclasses: they read their own
+        # keys (serverbase, region, temperature, ...) from here, never resolving again.
+        self._config = config
 
         # A key still written as ${ROCKETRIDE_...} would go to the provider as the key,
         # and the user would see an "invalid API key" reply instead of the missing name.
         check_credential_resolved(provider, 'apikey', config.get('apikey'), None if converted else connConfig)
 
         # Extract model configuration - these are the core settings that control
-        # how the chat driver behaves with respect to token limits
-        self._model = validate_model_name(config.get('model'))
-        self._modelTotalTokens = config.get('modelTotalTokens', 16384)  # Default to 16K if not specified
-        self._modelOutputTokens = config.get('modelOutputTokens', 4096)  # Default to 4K if not specified
+        # how the chat driver behaves with respect to token limits. A converted
+        # definition's model selector may have a "custom" branch whose free-text id
+        # lives in customModel; that leaf is reachable only on that branch, so its
+        # presence (not the selector value) says the id lives there.
+        model = config.get('customModel') or config.get('model')
+        self._model = validate_model_name(model)
+        # An unset optional leaf resolves to None in the view (defaults are never
+        # written), so "or" keeps the node's fallback for both config shapes.
+        self._modelTotalTokens = config.get('modelTotalTokens') or 16384  # Default to 16K if not specified
+        self._modelOutputTokens = config.get('modelOutputTokens') or 4096  # Default to 4K if not specified
 
         # Check what the author wrote, before the clamp below rewrites it — a value the
         # provider would reject can be clamped into a plausible-looking one, and then
@@ -157,8 +166,10 @@ class ChatBase:
         debug(f'    Total tokens             : {self._modelTotalTokens}')
         debug(f'    Output tokens            : {self._modelOutputTokens}')
 
-        # Reasoning capability comes from services.json (stamped by the model sync).
-        self._is_reasoning = bool((config.get('capabilities') or {}).get('reasoning'))
+        # Reasoning capability comes from services.json (stamped by the model sync): a
+        # converted definition pins it as the branch constant "reasoning", an
+        # unconverted profile carries it under "capabilities".
+        self._is_reasoning = bool(config.get('reasoning')) or bool((config.get('capabilities') or {}).get('reasoning'))
 
     def _ensure_openai_compat_reasoning_stream(self) -> None:
         """Lazily build the raw openai client used to stream reasoning for

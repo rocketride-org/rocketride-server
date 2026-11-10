@@ -35,34 +35,38 @@
 	//
 	// Optional:
 	//		The path is the executable/script code - it is node dependent
-	// 		and is optional for most node
+	//		and is optional for most node
 	//
 	"path": "nodes.llm_baidu_qianfan",
 	//
 	// Required:
-	//		The prefix map when added/removed when convertting URLs <=> paths
+	//		The prefix map when added/removed when converting URLs <=> paths
 	//
 	"prefix": "llm",
 	//
 	// Optional:
-	//		Description to of this driver
+	//		Description of this driver
 	//
-	"description": ["A component that connects to Baidu Qianfan ERNIE large language models through ", "Qianfan's OpenAI-compatible chat-completions API. It supports chat-based text generation, ", "question answering, summarization, and Chinese-language enterprise AI workflows with configurable ", "API keys and base URLs."],
+	"description": [
+		"A component that connects to Baidu Qianfan ERNIE large language models through ",
+		"Qianfan's OpenAI-compatible chat-completions API. It supports chat-based text generation, ",
+		"question answering, summarization, and Chinese-language enterprise AI workflows with configurable ",
+		"API keys and base URLs."
+	],
 	//
 	// Optional:
-	//	  The icon is the icon to display in the UI for this node
+	//		The icon is the icon to display in the UI for this node
 	//
 	"icon": "baidu-qianfan.svg",
 	"documentation": "https://docs.rocketride.org/nodes/llm_baidu_qianfan",
 	//
+	// Optional:
+	//		Rendering hints to the UI which indicate which fields of
+	//		the configuration should be used to display information
 	//
-	//  Optional:
-	//      Rendering hints to the UI which indicate which fields of
-	//      the configuration should be used to display information
+	"tile": ["Model: ${parameters.llm_baidu_qianfan.model}"],
 	//
-	"tile": ["Model: ${parameters.llm_baidu_qianfan.profile}"],
-	//
-	//	Optional:
+	// Optional:
 	//		As a pipe component, define what this pipe component takes
 	//		and what it produces
 	//
@@ -70,150 +74,112 @@
 		"questions": ["answers"]
 	},
 	//
-	//	Optional:
-	//		Profile section are configuration optoins used by the driver
-	//		itself
-	//
-	"preconfig": {
-		"default": "ernie-4-5-turbo-128k",
-		"profiles": {
-			"ernie-4-5-turbo-128k": {
-				"title": "ERNIE 4.5 Turbo 128K",
-				"model": "ernie-4.5-turbo-128k",
-				"modelSource": "provider",
-				"modelTotalTokens": 128000,
-				"modelOutputTokens": 4096,
-				"serverbase": "https://qianfan.baidubce.com/v2",
-				"apikey": ""
-			},
-			"ernie-4-5-turbo-32k": {
-				"title": "ERNIE 4.5 Turbo 32K",
-				"model": "ernie-4.5-turbo-32k",
-				"modelSource": "provider",
-				"modelTotalTokens": 32768,
-				"modelOutputTokens": 4096,
-				"serverbase": "https://qianfan.baidubce.com/v2",
-				"apikey": ""
-			},
-			"ernie-5-0-thinking-preview": {
-				"title": "ERNIE 5.0 Thinking Preview",
-				"model": "ernie-5.0-thinking-preview",
-				"modelSource": "provider",
-				"modelTotalTokens": 128000,
-				"modelOutputTokens": 8192,
-				"serverbase": "https://qianfan.baidubce.com/v2",
-				"apikey": ""
-			},
-			"custom": {
-				"title": "Custom",
-				"model": "",
-				"modelSource": "manual",
-				"modelTotalTokens": 32768,
-				"modelOutputTokens": 4096,
-				"serverbase": "https://qianfan.baidubce.com/v2",
-				"apikey": ""
-			}
-		}
-	},
-	//
 	// Optional:
-	//		Local fields definitions - these define fields only for the
-	//		current service. You may specify them here, or directly
-	//		in the shape
+	//		Local property definitions. The model is the selector (one branch per
+	//		model, the branch value is the model id); each branch pins its context
+	//		window and capabilities as constants, and the leaves every model shares
+	//		(credentials, generation settings) sit at the root and are stored flat.
+	//		The "custom" branch takes a model id the catalog does not list.
 	//
-	"fields": {
-		"model": {
-			"type": "string",
-			"title": "Model",
-			"description": "Baidu Qianfan model name"
+	"propertyDefinitions": {
+		"llm_baidu_qianfan.apikey": {
+			"base": "llm.cloud.apikey",
+			"description": "Baidu Qianfan API key",
+			"env": "ROCKETRIDE_LLM_BAIDU_QIANFAN_APIKEY",
+			"required": true
 		},
-		"modelTotalTokens": {
-			"type": "number",
-			"title": "Tokens",
-			"description": "Maximum context length in tokens"
-		},
-		"modelOutputTokens": {
-			"type": "integer",
-			"title": "Output Tokens",
-			"description": "Maximum generated tokens",
-			"minimum": 1024,
-			"optional": true
-		},
-		"baidu_qianfan.serverbase": {
-			"type": "string",
+		"llm_baidu_qianfan.serverbase": {
+			"base": "llm.local.serverbase",
+			"default": "https://qianfan.baidubce.com/v2",
 			"title": "Base URL",
 			"description": "Qianfan OpenAI-compatible API endpoint.",
-			"default": "https://qianfan.baidubce.com/v2",
 			"enum": [
 				["https://qianfan.baidubce.com/v2", "China (default)"],
 				["https://api.baiduqianfan.ai/v1", "International"]
 			]
 		},
-		"baidu_qianfan.ernie-4-5-turbo-128k": {
-			"object": "ernie-4-5-turbo-128k",
-			"properties": ["llm.cloud.apikey", "baidu_qianfan.serverbase", "llm.cloud.modelSource"]
-		},
-		"baidu_qianfan.ernie-4-5-turbo-32k": {
-			"object": "ernie-4-5-turbo-32k",
-			"properties": ["llm.cloud.apikey", "baidu_qianfan.serverbase", "llm.cloud.modelSource"]
-		},
-		"baidu_qianfan.ernie-5-0-thinking-preview": {
-			"object": "ernie-5-0-thinking-preview",
-			"properties": ["llm.cloud.apikey", "baidu_qianfan.serverbase", "llm.cloud.modelSource"]
-		},
-		"baidu_qianfan.custom": {
-			"object": "custom",
-			"properties": ["model", "modelTotalTokens", "modelOutputTokens", "baidu_qianfan.serverbase", "llm.cloud.apikey", "llm.cloud.modelSource"]
-		},
-		"baidu_qianfan.profile": {
-			"title": "Model",
-			"description": "Baidu Qianfan model selection",
+		"llm_baidu_qianfan.customModel": {
 			"type": "string",
-			"default": "ernie-4-5-turbo-128k",
-			"enum": ["*>preconfig.profiles.*.title"],
-			"conditional": [
-				{
-					"value": "ernie-4-5-turbo-128k",
-					"properties": ["baidu_qianfan.ernie-4-5-turbo-128k"]
-				},
-				{
-					"value": "ernie-4-5-turbo-32k",
-					"properties": ["baidu_qianfan.ernie-4-5-turbo-32k"]
-				},
-				{
-					"value": "ernie-5-0-thinking-preview",
-					"properties": ["baidu_qianfan.ernie-5-0-thinking-preview"]
-				},
-				{
-					"value": "custom",
-					"properties": ["baidu_qianfan.custom"]
-				}
-			]
+			"title": "Model id",
+			"description": "Model id exactly as the provider names it",
+			"required": true
+		},
+		"llm_baidu_qianfan.custom.modelTotalTokens": {
+			"type": "number",
+			"title": "Tokens",
+			"description": "Maximum context length in tokens",
+			"minimum": 1,
+			"default": 32768
+		},
+		"llm_baidu_qianfan.custom.modelOutputTokens": {
+			"type": "integer",
+			"title": "Output Tokens",
+			"description": "Maximum generated tokens",
+			"minimum": 1024,
+			"default": 4096
 		}
 	},
 	//
 	// Required:
-	//		Defines the fields (shape) of the service. Either source or target
-	//		map be specified, or both, but at least one is required
+	//		Defines the properties shown in the pipeline builder side panel, in order
 	//
-	"shape": [
+	"properties": [
 		{
-			"section": "Pipe",
-			"title": "Baidu Qianfan",
-			"properties": ["baidu_qianfan.profile"]
-		}
+			"name": "model",
+			"type": "string",
+			"title": "Model",
+			"description": "Baidu Qianfan model selection",
+			"default": "ernie-4.5-turbo-128k",
+			"enum": {
+				"ernie-4.5-turbo-128k": {
+					"title": "ERNIE 4.5 Turbo 128K",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 128000 },
+						{ "name": "modelOutputTokens", "type": "constant", "default": 4096 }
+					]
+				},
+				"ernie-4.5-turbo-32k": {
+					"title": "ERNIE 4.5 Turbo 32K",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 32768 },
+						{ "name": "modelOutputTokens", "type": "constant", "default": 4096 }
+					]
+				},
+				"ernie-5.0-thinking-preview": {
+					"title": "ERNIE 5.0 Thinking Preview",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 128000 },
+						{ "name": "modelOutputTokens", "type": "constant", "default": 8192 }
+					]
+				},
+				"custom": {
+					"title": "Custom model",
+					"properties": [
+						"llm_baidu_qianfan.customModel",
+						"llm_baidu_qianfan.custom.modelTotalTokens",
+						"llm_baidu_qianfan.custom.modelOutputTokens"
+					]
+				}
+			}
+		},
+		"llm_baidu_qianfan.apikey",
+		"llm_baidu_qianfan.serverbase"
 	],
+	//
+	// Optional:
+	//		Test configuration for automated node testing. "profiles" lists
+	//		values of the "model" selector; the framework writes the selected one
+	//		at "model" and the mock credentials at their paths.
+	//
 	"test": {
-		"profiles": ["ernie-4-5-turbo-128k"],
+		"profiles": ["ernie-4.5-turbo-128k"],
 		"outputs": ["answers"],
 		"cases": [
 			{
 				"name": "LLM returns mock response",
 				"text": "What is 2+2?",
 				"expect": {
-					"answers": {
-						"contains": "Mock LLM response"
-					}
+					"answers": { "contains": "Mock LLM response" }
 				}
 			}
 		]

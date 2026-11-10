@@ -59,8 +59,9 @@ value.
 
 ## Authentication
 
-Set each service's **API Key** to a Landing.ai ADE key, or set
-`ROCKETRIDE_LANDING_AI_KEY` when the field is blank. Save-time credential
+Set each service's **API Key** to a Landing.ai ADE key, normally as a
+`${ROCKETRIDE_LANDING_AI_APIKEY}` reference to an account variable; the field
+is required and there is no process-environment fallback. Save-time credential
 checks make a small read-only `parse_jobs.list` call and report problems as
 warnings; they do not block editing the pipeline.
 

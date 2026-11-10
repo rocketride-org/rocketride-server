@@ -1,69 +1,58 @@
+# =============================================================================
+# MIT License
+# Copyright (c) 2026 Aparavi Software AG
+# =============================================================================
+
 """
 Save-time and start-time handling of the GMI Cloud endpoint URL.
 
-Deploy-on-demand profiles ship with an empty `serverbase`: the user pastes the
-endpoint their GMI Cloud console gives them. Saying so while the node is being
-configured is worth a test, because the alternative is a failure at pipe start,
-far from the field that is missing.
+Deploy-on-demand models ship without a ``serverbase``: the user pastes the
+endpoint their GMI Cloud console gives them. The schema requires it on exactly
+those branches, so a missing URL is a hard resolver error at save time and at
+pipe start alike, while the host rule (HTTPS on gmi-serving.com) stays a
+semantic check shared by the validator and ``IGlobal``. Drives the real
+``IValidator`` and ``IGlobal`` over the engine-resolved schema.
 """
 
 from __future__ import annotations
 
-import importlib.util
 import sys
 import types
 from pathlib import Path
 
 import pytest
+from rocketlib.config import ConfigError
 
-_PACKAGE = 'gmi_cloud_under_test'
+NODES_SRC = Path(__file__).resolve().parents[1] / 'src' / 'nodes'
+while str(NODES_SRC) in sys.path:
+    sys.path.remove(str(NODES_SRC))
+sys.path.insert(0, str(NODES_SRC))
+
+from llm_gmi_cloud import IGlobal as gmi_global  # noqa: E402
+from llm_gmi_cloud import IValidator as gmi_validator  # noqa: E402
+
+_LOGICAL_TYPE = 'llm_gmi_cloud'
+_SHARED_MODEL = 'deepseek-ai/DeepSeek-V3-0324'
+_ON_DEMAND_MODEL = 'meta-llama/Llama-4-Scout-17B-16E-Instruct'
 
 
-def _load_iglobal(monkeypatch, config_overrides: dict | None = None, error_name: str | None = None):
-    """
-    Load the node's IGlobal against stub SDKs.
+def _config(model: str = _SHARED_MODEL, **branch) -> dict:
+    """A stored config for ``model``; ``branch`` keys go under the model's own block."""
+    config = {'model': model, 'apikey': 'gmi-key'}
+    if branch:
+        config[model] = branch
+    return config
 
-    Args:
-        monkeypatch: pytest monkeypatch fixture
-        config_overrides: keys to change in the node configuration
-        error_name: name of an openai error class the probe should raise
 
-    Returns:
-        (instance, probe requests, warnings, chats built)
-    """
+def _stubs(monkeypatch, error_name: str | None = None):
+    """Install the openai, depends and driver stubs; return (probe requests, warnings, chats built)."""
     requests: list[dict] = []
     warnings: list[str] = []
-    chats: list[dict] = []
+    chats: list = []
 
-    ai_module = types.ModuleType('ai')
-    common_module = types.ModuleType('ai.common')
-    chat_module = types.ModuleType('ai.common.chat')
-    config_module = types.ModuleType('ai.common.config')
-    rocketlib_module = types.ModuleType('rocketlib')
     openai_module = types.ModuleType('openai')
     depends_module = types.ModuleType('depends')
-
-    class ChatBase:
-        """Stand-in for the shared chat base."""
-
-    class Config:
-        """Serves one node configuration."""
-
-        @staticmethod
-        def getNodeConfig(_logical_type, _conn_config):
-            """Return the configuration under test."""
-            config = {
-                'apikey': 'gmi-key',
-                'model': 'deepseek-ai/DeepSeek-V3-0324',
-                'serverbase': 'https://api.gmi-serving.com/v1',
-                'modelTotalTokens': 163840,
-            }
-            if config_overrides:
-                config.update(config_overrides)
-            return config
-
-    class IGlobalBase:
-        """Stand-in for the engine's global base."""
+    driver_module = types.ModuleType('llm_gmi_cloud.gmi_cloud')
 
     class OpenAIError(Exception):
         """Stand-in for the SDK's base error."""
@@ -103,12 +92,6 @@ def _load_iglobal(monkeypatch, config_overrides: dict | None = None, error_name:
             """Record the configuration the node passed on."""
             chats.append(config)
 
-    chat_module.ChatBase = ChatBase
-    config_module.Config = Config
-    config_module.check_credential_resolved = lambda *args, **kwargs: None
-    config_module.warn_if_credential_unresolved = lambda *args, **kwargs: False
-    rocketlib_module.IGlobalBase = IGlobalBase
-    rocketlib_module.warning = warnings.append
     openai_module.OpenAI = OpenAI
     openai_module.OpenAIError = OpenAIError
     openai_module.APIStatusError = APIStatusError
@@ -116,97 +99,87 @@ def _load_iglobal(monkeypatch, config_overrides: dict | None = None, error_name:
     openai_module.RateLimitError = RateLimitError
     openai_module.APIConnectionError = APIConnectionError
     depends_module.depends = lambda _requirements: None
-
-    node_dir = Path(__file__).resolve().parents[1] / 'src' / 'nodes' / 'llm_gmi_cloud'
-    package = types.ModuleType(_PACKAGE)
-    package.__path__ = [str(node_dir)]
-    driver_module = types.ModuleType(f'{_PACKAGE}.gmi_cloud')
     driver_module.Chat = Chat
+    monkeypatch.setitem(sys.modules, 'openai', openai_module)
+    monkeypatch.setitem(sys.modules, 'depends', depends_module)
+    monkeypatch.setitem(sys.modules, 'llm_gmi_cloud.gmi_cloud', driver_module)
+    monkeypatch.setattr(gmi_validator, 'warning', warnings.append)
+    return requests, warnings, chats
 
-    for name, module in (
-        ('ai', ai_module),
-        ('ai.common', common_module),
-        ('ai.common.chat', chat_module),
-        ('ai.common.config', config_module),
-        ('rocketlib', rocketlib_module),
-        ('openai', openai_module),
-        ('depends', depends_module),
-        (_PACKAGE, package),
-        (f'{_PACKAGE}.gmi_cloud', driver_module),
-    ):
-        monkeypatch.setitem(sys.modules, name, module)
 
-    spec = importlib.util.spec_from_file_location(f'{_PACKAGE}.IGlobal', node_dir / 'IGlobal.py')
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
+def _validator(config: dict):
+    """The node's validator over ``config``."""
+    instance = gmi_validator.IValidator()
+    instance.glb = types.SimpleNamespace(logicalType=_LOGICAL_TYPE, connConfig=config)
+    return instance
 
-    instance = module.IGlobal()
-    instance.glb = types.SimpleNamespace(logicalType='llm_gmi_cloud', connConfig={})
+
+def _global(config: dict):
+    """The node's IGlobal over ``config``, with an endpoint bag."""
+    instance = gmi_global.IGlobal()
+    instance.glb = types.SimpleNamespace(logicalType=_LOGICAL_TYPE, connConfig=config)
     instance.IEndpoint = types.SimpleNamespace(endpoint=types.SimpleNamespace(bag={}))
-
-    return instance, requests, warnings, chats
+    return instance
 
 
 class TestSaveTime:
     """What the user is told while configuring the node."""
 
-    def test_a_missing_endpoint_is_reported_not_ignored(self, monkeypatch):
-        """A deploy-on-demand profile without its URL warns instead of passing silently."""
-        instance, requests, warnings, _chats = _load_iglobal(monkeypatch, {'serverbase': ''})
-
-        instance.validateConfig()
-
+    def test_a_missing_endpoint_is_a_hard_error(self, monkeypatch):
+        """A deploy-on-demand model without its URL fails the schema check, naming the field."""
+        requests, _warnings, _chats = _stubs(monkeypatch)
+        with pytest.raises(ConfigError, match=f'"{_ON_DEMAND_MODEL}.serverbase" is required'):
+            _validator(_config(_ON_DEMAND_MODEL)).validateConfig()
         assert requests == []
-        assert len(warnings) == 1
-        assert 'Endpoint URL is required' in warnings[0]
-        assert 'GMI Cloud console' in warnings[0]
 
     def test_a_configured_endpoint_is_probed(self, monkeypatch):
-        """With an endpoint set, the node probes the API as before."""
-        instance, requests, warnings, _chats = _load_iglobal(monkeypatch)
-
-        instance.validateConfig()
-
+        """With the endpoint set (pinned for the shared models), the node probes the API."""
+        requests, warnings, _chats = _stubs(monkeypatch)
+        _validator(_config()).validateConfig()
         assert warnings == []
-        assert [r['model'] for r in requests] == ['deepseek-ai/DeepSeek-V3-0324']
+        assert [r['model'] for r in requests] == [_SHARED_MODEL]
 
-    def test_an_incomplete_configuration_stays_quiet(self, monkeypatch):
-        """Nothing to say before the model and key are entered."""
-        instance, requests, warnings, _chats = _load_iglobal(monkeypatch, {'model': '', 'serverbase': ''})
+    def test_a_pasted_endpoint_is_probed(self, monkeypatch):
+        """The URL stored under the model's block reaches the probe."""
+        requests, warnings, _chats = _stubs(monkeypatch)
+        _validator(_config(_ON_DEMAND_MODEL, serverbase='https://my-deploy.gmi-serving.com/v1')).validateConfig()
+        assert warnings == []
+        assert [r['model'] for r in requests] == [_ON_DEMAND_MODEL]
 
-        instance.validateConfig()
+    def test_a_foreign_host_is_warned_about(self, monkeypatch):
+        """The SSRF guard rejects an endpoint outside gmi-serving.com before probing it."""
+        requests, warnings, _chats = _stubs(monkeypatch)
+        _validator(_config(_ON_DEMAND_MODEL, serverbase='https://evil.example.com/v1')).validateConfig()
+        assert requests == []
+        assert warnings == ['Endpoint URL must be a gmi-serving.com address.']
 
-        assert (requests, warnings) == ([], [])
+    def test_an_unlisted_model_is_a_hard_error(self, monkeypatch):
+        """A model id the catalog does not carry is refused by the resolver, not probed."""
+        requests, _warnings, _chats = _stubs(monkeypatch)
+        with pytest.raises(ConfigError, match="'no-such-model'"):
+            _validator(_config('no-such-model')).validateConfig()
+        assert requests == []
 
 
 class TestPipelineStart:
     """What happens when a pipeline using the node starts."""
 
-    def test_a_missing_endpoint_stops_the_start_with_a_usable_message(self, monkeypatch):
+    def test_a_missing_endpoint_stops_the_start(self, monkeypatch):
         """No silent fallback to the shared endpoint: that would 404 later, on the model."""
-        instance, _requests, _warnings, chats = _load_iglobal(monkeypatch, {'serverbase': ''})
-
-        with pytest.raises(ValueError, match='endpoint URL is required'):
-            instance.beginGlobal()
-
+        _requests, _warnings, chats = _stubs(monkeypatch)
+        with pytest.raises(ConfigError, match='serverbase'):
+            _global(_config(_ON_DEMAND_MODEL)).beginGlobal()
         assert chats == []
 
     def test_a_foreign_host_is_refused(self, monkeypatch):
         """The SSRF guard still rejects an endpoint outside gmi-serving.com."""
-        instance, _requests, _warnings, chats = _load_iglobal(
-            monkeypatch, {'serverbase': 'https://evil.example.com/v1'}
-        )
-
+        _requests, _warnings, chats = _stubs(monkeypatch)
         with pytest.raises(ValueError, match='gmi-serving.com'):
-            instance.beginGlobal()
-
+            _global(_config(_ON_DEMAND_MODEL, serverbase='https://evil.example.com/v1')).beginGlobal()
         assert chats == []
 
     def test_a_configured_endpoint_builds_the_client(self, monkeypatch):
-        """The happy path reaches Chat with the endpoint the profile carries."""
-        instance, _requests, _warnings, chats = _load_iglobal(monkeypatch)
-
-        instance.beginGlobal()
-
+        """The happy path reaches Chat with the endpoint the model pins."""
+        _requests, _warnings, chats = _stubs(monkeypatch)
+        _global(_config()).beginGlobal()
         assert [c['serverbase'] for c in chats] == ['https://api.gmi-serving.com/v1']

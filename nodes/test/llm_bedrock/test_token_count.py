@@ -31,7 +31,8 @@ import pytest
 
 pytest.importorskip('langchain_aws')
 
-from ai.common.config import Config  # noqa: E402
+import rocketlib  # noqa: E402
+from rocketlib.config import resolveConfig  # noqa: E402
 
 _MOD_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), '..', '..', 'src', 'nodes', 'llm_bedrock', 'bedrock.py'
@@ -93,19 +94,20 @@ def bedrock(monkeypatch):
 
 
 def _chat(monkeypatch, model: str):
+    # The custom branch is the one place a test can set the model and limits itself.
     config = {
-        'model': model,
+        'model': 'custom',
+        'custom': {'customModel': model, 'modelTotalTokens': 200000, 'modelOutputTokens': 8192},
         'accessKey': 'AKIDEXAMPLE',
         'secretKey': 'secret-example',
         'region': 'us-east-1',
-        'modelTotalTokens': 200000,
-        'modelOutputTokens': 8192,
     }
-    monkeypatch.setattr(Config, 'getNodeConfig', staticmethod(lambda *a, **k: dict(config)))
+    schema = rocketlib.getServiceSchema('llm_bedrock')
+    assert schema is not None, 'llm_bedrock is not registered with the engine'
     spec = importlib.util.spec_from_file_location('_llm_bedrock_token_test', _MOD_PATH)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return module.Chat('bedrock', {}, {})
+    return module.Chat('llm_bedrock', resolveConfig(schema, config), {})
 
 
 def test_a_claude_chat_is_sent_without_transformers(monkeypatch, no_transformers, bedrock):

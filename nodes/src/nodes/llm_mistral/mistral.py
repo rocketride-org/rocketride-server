@@ -40,7 +40,6 @@ depends(requirements)
 from typing import Any, Dict, Tuple
 from ai.common.schema import Answer, Question
 from ai.common.chat import ChatBase
-from ai.common.config import Config
 from ai.common.llm_adapter import report_llm_tokens
 from ai.common.validation import validate_prompt
 
@@ -81,10 +80,7 @@ class Chat(ChatBase):
         super().__init__(provider, connConfig, bag)
 
         # Get the nodes configuration
-        config = Config.getNodeConfig(provider, connConfig)
-
-        # Get the model
-        self._model = config.get('model')
+        config = self._config
 
         # Get the API key, don't save it
         api_key = config.get('apikey')

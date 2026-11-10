@@ -25,12 +25,14 @@ import types
 
 import pytest
 
-from ai.common.config import Config
+import rocketlib
+from rocketlib.config import ConfigError, resolveConfig
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _MOD_PATH = os.path.join(_HERE, '..', '..', 'src', 'nodes', 'llm_anthropic', 'anthropic.py')
 
-_MODEL = 'claude-sonnet-4-6'
+_MODEL = 'claude-sonnet-4-6'  # reasoning pinned on its branch
+_PLAIN_MODEL = 'claude-3-haiku'  # no reasoning constant on its branch
 
 
 def _load_node_module():
@@ -53,19 +55,19 @@ def _load_node_module():
 
 def _build_chat(monkeypatch, *, reasoning: bool, toggle=None):
     """Instantiate the node over a controlled config and return it."""
-    config = {
-        'model': _MODEL,
-        'apikey': 'sk-ant-test',
-        'modelTotalTokens': 200000,
-        'modelOutputTokens': 8192,
-        'capabilities': {'reasoning': reasoning},
-    }
+    # The reasoning capability is a constant of the model's branch, so the model
+    # picks it: a reasoning model for the armed cases, a plain one otherwise.
+    config = {'model': _MODEL if reasoning else _PLAIN_MODEL, 'apikey': 'sk-ant-test'}
     if toggle is not None:
         config['extendedThinking'] = toggle
+    return _load_node_module().Chat('llm_anthropic', _view('llm_anthropic', config), {})
 
-    # Both the node and ChatBase read their config through this one call.
-    monkeypatch.setattr(Config, 'getNodeConfig', staticmethod(lambda *a, **k: dict(config)))
-    return _load_node_module().Chat('anthropic', {}, {})
+
+def _view(logical_type, config):
+    """The config as the node reads it: resolved through the engine's schema."""
+    schema = rocketlib.getServiceSchema(logical_type)
+    assert schema is not None, f'{logical_type} is not registered with the engine'
+    return resolveConfig(schema, config)
 
 
 def test_toggle_absent_leaves_thinking_off(monkeypatch):
@@ -90,11 +92,15 @@ def test_toggle_on_non_reasoning_model_stays_off(monkeypatch):
     assert chat._native_stream_provider == ''
 
 
-@pytest.mark.parametrize('falsy', ['false', 'False', '0', ''])
-def test_string_false_from_the_form_stays_off(monkeypatch, falsy):
-    # The case that fails the moment parse_bool is swapped back for bool():
-    # a non-empty string like 'false' is truthy to bool().
-    chat = _build_chat(monkeypatch, reasoning=True, toggle=falsy)
+@pytest.mark.parametrize('falsy', ['false', 'False', '0'])
+def test_a_string_toggle_is_refused_by_the_schema(monkeypatch, falsy):
+    # extendedThinking is a boolean leaf: the resolver types it, so a form that
+    # wrote a string never reaches the node (and parse_bool never has to guess).
+    with pytest.raises(ConfigError, match='extendedThinking'):
+        _build_chat(monkeypatch, reasoning=True, toggle=falsy)
 
+
+def test_toggle_off_stays_off(monkeypatch):
+    chat = _build_chat(monkeypatch, reasoning=True, toggle=False)
     assert chat._thinking_mode_kwargs == {}
     assert chat._native_stream_provider == ''
