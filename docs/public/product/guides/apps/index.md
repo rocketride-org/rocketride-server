@@ -275,8 +275,9 @@ publish fails with a message naming the field):
 
 - Only platform apps (ids in the `rocketride` developer namespace) may declare
   `publicPages`, and only a root app (`RR_PUBLIC_ROOT_APPS`, default
-  `rocketride.home`) may declare pages. `site` is honored only from the app
-  that declares the `/` page; another app's `site` is ignored.
+  `rocketride.home`) may declare pages. `site` goes with the `/` page: a
+  platform app that declares `site` without declaring `/` is refused, and a
+  third-party app's `site` is ignored, since it can never take effect.
 - `path` is absolute and lowercase, with no query, fragment, trailing slash,
   empty or dot segment. Wildcard pages are not supported.
 - Paths under a root route the engine serves itself (`/api`, `/apps`, `/auth`,
