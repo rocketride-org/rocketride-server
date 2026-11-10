@@ -22,8 +22,8 @@
 	},
 	//
 	// Optional:
-	//		Local property definitions. Every field is stored flat; advanced_mode
-	//		is a plain flag, the system prompt is always declared.
+	//		Local property definitions. Every field is stored flat; the system
+	//		prompt and instructions are always declared.
 	//
 	"propertyDefinitions": {
 		"description": {
@@ -45,17 +45,11 @@
 			"title": "Instructions",
 			"description": "Additional instructions to guide this sub-agent. Each line is appended to the system prompt.",
 			"item": { "name": "instruction", "type": "string", "format": "textarea" }
-		},
-		"advanced_mode": {
-			"type": "boolean",
-			"title": "Advanced Mode",
-			"description": "When enabled, replace the Instructions list with a direct System Prompt field for full control.",
-			"default": false
 		}
 	},
 	//
 	// Required:
 	//		Defines the properties shown in the pipeline builder side panel, in order
 	//
-	"properties": ["type", "description", "system_prompt", "instructions", "advanced_mode"]
+	"properties": ["type", "description", "system_prompt", "instructions"]
 }

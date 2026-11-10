@@ -26,7 +26,7 @@
 	//
 	// Optional:
 	//		Local property definitions. Every field is stored flat; the CrewAI
-	//		Agent/Task fields are always declared (advanced_mode is a plain flag).
+	//		Agent/Task fields are always declared.
 	//
 	"propertyDefinitions": {
 		"agent_description": {
@@ -47,12 +47,6 @@
 			"title": "Require tool call",
 			"default": false,
 			"description": "Require the agent to invoke at least one tool before answering. When on, a run that answers without calling any tool fails with a guard error. Use for determinism-critical pipelines where an ungrounded or narrated answer must never be delivered. Off by default."
-		},
-		"advanced_mode": {
-			"type": "boolean",
-			"title": "Advanced Mode",
-			"description": "Expose CrewAI Agent and Task configuration directly.",
-			"default": false
 		},
 		"role": {
 			"type": "string",
@@ -93,5 +87,5 @@
 	// Required:
 	//		Defines the properties shown in the pipeline builder side panel, in order
 	//
-	"properties": ["type", "agent_description", "instructions", "require_tool_call", "advanced_mode", "role", "goal", "backstory", "task_description", "expected_output"]
+	"properties": ["type", "agent_description", "instructions", "require_tool_call", "role", "goal", "backstory", "task_description", "expected_output"]
 }

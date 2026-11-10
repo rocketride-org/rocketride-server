@@ -23,7 +23,7 @@
 	//
 	// Optional:
 	//		Local property definitions. Every field is stored flat; the CrewAI
-	//		Agent/Task fields are always declared (advanced_mode is a plain flag).
+	//		Agent/Task fields are always declared.
 	//
 	"propertyDefinitions": {
 		"instructions": {
@@ -31,12 +31,6 @@
 			"title": "Instructions",
 			"description": "Additional instructions to guide this sub-agent when the Manager delegates to it.",
 			"item": { "name": "instruction", "type": "string", "format": "textarea" }
-		},
-		"advanced_mode": {
-			"type": "boolean",
-			"title": "Advanced Mode",
-			"description": "Expose CrewAI Agent and Task configuration directly.",
-			"default": false
 		},
 		"role": {
 			"type": "string",
@@ -77,5 +71,5 @@
 	// Required:
 	//		Defines the properties shown in the pipeline builder side panel, in order
 	//
-	"properties": ["type", "instructions", "advanced_mode", "role", "goal", "backstory", "task_description", "expected_output"]
+	"properties": ["type", "instructions", "role", "goal", "backstory", "task_description", "expected_output"]
 }

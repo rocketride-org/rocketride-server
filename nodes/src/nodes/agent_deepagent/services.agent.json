@@ -29,8 +29,8 @@
 	},
 	//
 	// Optional:
-	//		Local property definitions. Every field is stored flat; advanced_mode
-	//		is a plain flag, the description and system prompt are always declared.
+	//		Local property definitions. Every field is stored flat; the description,
+	//		system prompt and instructions are always declared.
 	//
 	"propertyDefinitions": {
 		"agent_description": {
@@ -58,17 +58,11 @@
 			"title": "Require tool call",
 			"default": false,
 			"description": "Require the agent to invoke at least one tool before answering. When on, a run that answers without calling any tool fails with a guard error. Use for determinism-critical pipelines where an ungrounded or narrated answer must never be delivered. Off by default."
-		},
-		"advanced_mode": {
-			"type": "boolean",
-			"title": "Advanced Mode",
-			"description": "When enabled, replace the Instructions list with direct Agent Description and System Prompt fields for full control.",
-			"default": false
 		}
 	},
 	//
 	// Required:
 	//		Defines the properties shown in the pipeline builder side panel, in order
 	//
-	"properties": ["type", "agent_description", "system_prompt", "instructions", "require_tool_call", "advanced_mode"]
+	"properties": ["type", "agent_description", "system_prompt", "instructions", "require_tool_call"]
 }
