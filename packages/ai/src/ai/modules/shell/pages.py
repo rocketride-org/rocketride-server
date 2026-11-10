@@ -46,7 +46,6 @@ Rendered responses are cached per (path, UA class) under a byte budget and
 dropped on every aggregate swap.
 """
 
-import sys
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import HTTPException
@@ -75,7 +74,7 @@ _REDIRECT_CACHE_CONTROL = 'public, max-age=86400'
 
 
 def set_web_server(server: Any) -> None:
-    """Give the page handlers the live server, whose route table decides collisions and router misses."""
+    """Give this module the live server: its route table drives the auth predicate, router misses and collision checks."""
     global _web_server
     _web_server = server
 
@@ -115,13 +114,13 @@ def live_route_conflict(path: str) -> Optional[str]:
     if server is None:
         return None
     for route in server.app.router.routes:
-        route_path = getattr(route, 'path', None)
-        if not route_path or getattr(route, 'endpoint', None) is public_page:
+        template = getattr(route, 'path', None)
+        if not template or getattr(route, 'endpoint', None) is public_page:
             continue
         regex = getattr(route, 'path_regex', None)
         if regex is not None and regex.match(path):
             methods = ','.join(sorted(getattr(route, 'methods', None) or [])) or 'ANY'
-            return f'{methods} {route_path}'
+            return f'{methods} {template}'
     return None
 
 
@@ -132,7 +131,10 @@ def canonical_url(path: str) -> str:
 
 
 def _relative_location(request: Request, path: str) -> str:
-    """``path`` under the request's ``root_path``, plus its query: a Location on this origin, never built from the Host header."""
+    """``path`` under the request's ``root_path``, plus its query.
+
+    A Location on this origin, never built from the Host header.
+    """
     location = request.scope.get('root_path', '').rstrip('/') + path
     query = request.url.query
     if query:
@@ -149,6 +151,9 @@ def _router_miss(request: Request) -> Optional[Response]:
     served is a 307 to it (Starlette's redirect_slashes, with a relative
     Location instead of one built from the Host header). Otherwise None
     (a 404).
+
+    Raises:
+        HTTPException: 405, with ``Allow``, for a path a real route serves with other methods.
     """
     server = _web_server
     if server is None:
@@ -179,7 +184,7 @@ class _FifoCache:
     than the whole budget is never stored.
     """
 
-    def __init__(self, max_bytes: int, max_entries: int = sys.maxsize) -> None:
+    def __init__(self, max_bytes: int, max_entries: int) -> None:
         self.max_bytes = max_bytes
         self.max_entries = max_entries
         self.total = 0
@@ -187,9 +192,6 @@ class _FifoCache:
 
     def __len__(self) -> int:
         return len(self._entries)
-
-    def __contains__(self, key: Any) -> bool:
-        return key in self._entries
 
     def keys(self) -> List[Any]:
         """The keys, oldest first."""
@@ -221,21 +223,16 @@ class _FifoCache:
             self.total -= hit[1]
 
 
-# Rendered page responses: (path, UA class, shell document, its mtime,
+# Rendered page responses: (path, UA class, shell document, its mtime and size,
 # RR_APP_URL) -> (body bytes, headers). Cleared on every aggregate swap, so
-# the shell file is read and rewritten once per page and build, not per request.
+# the shell file is read and rewritten once per page, UA class and build.
 _RENDER_CACHE_MAX_BYTES = 32 * 1024 * 1024
 _RENDER_CACHE_MAX = 4096
 _render_cache = _FifoCache(_RENDER_CACHE_MAX_BYTES, _RENDER_CACHE_MAX)
 
-# Bumped by every swap: a render that started before one is served, not cached.
-_generation = 0
-
 
 def _clear_rendered(old: Any, new: Any) -> None:
     """Swap listener: renders of the previous page map are stale."""
-    global _generation
-    _generation += 1
     _render_cache.clear()
 
 
@@ -260,7 +257,7 @@ async def public_page(request: Request):
     ``/`` keeps its dedicated route: when the aggregate does not claim it,
     it serves the shell exactly as ``shell_static`` does.
     """
-    # The path the router matched (root_path stripped), as the auth middleware decided on.
+    # The path the router matched (root_path stripped): the one the auth middleware decided on.
     path = route_path(request.scope) or '/'
     aggregate = public_pages.current()
     # HEAD is GET without the body (the server drops it; status and headers
@@ -291,10 +288,10 @@ async def public_page(request: Request):
         return miss
     crawler = classify(request.headers.get('user-agent', '')) == CRAWLER
     document = shell_document_path(request)
-    key = (path, crawler, str(document), document.stat().st_mtime_ns, app_url())
+    stat = document.stat()
+    key = (path, crawler, document, stat.st_mtime_ns, stat.st_size, app_url())
     cached = _render_cache.get(key)
     if cached is None:
-        generation = _generation
         body = inject_head(
             document.read_text(encoding='utf-8'),
             title=page.head_title or page.title,
@@ -308,8 +305,7 @@ async def public_page(request: Request):
         if not page.listed:
             headers['X-Robots-Tag'] = 'noindex'
         cached = (body.encode('utf-8'), headers)
-        if generation == _generation:
-            _render_cache.put(key, cached, len(cached[0]))
+        _render_cache.put(key, cached, len(cached[0]))
     return HTMLResponse(cached[0], headers=dict(cached[1]))
 
 
@@ -328,7 +324,8 @@ async def register_public_pages(server: Any) -> None:
     # Not an API operation, so a plain route outside the schema. It takes every
     # method, unknown ones (TRACE, PROPFIND) included: with a method list, the
     # router would answer any other method on any path with its partial match
-    # (405, not 404), and a non-GET route registered after it would still fully
+    # (405, not 404), and a non-GET route appended after it (straight to
+    # ``router.routes``; ``add_route`` keeps the catch-all last) would fully
     # match a claimed path that the auth predicate already exempted.
     route = Route(FALLBACK_PATH, public_page, include_in_schema=False)
     route.methods = None

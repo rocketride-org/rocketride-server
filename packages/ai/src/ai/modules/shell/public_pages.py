@@ -54,7 +54,7 @@ from ai.account.app_rows import (
     serving_block_of,
 )
 
-from .contract import Page, check_redirects, with_slash_twin, check_manifest, is_privileged, may_claim_root
+from .contract import Page, check_manifest, check_redirects, is_privileged, may_claim_root, with_slash_twin
 
 
 @dataclass(frozen=True)

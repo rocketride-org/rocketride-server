@@ -20,7 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-"""Serve-time head injection and JSON-LD escaping."""
+"""Serve-time head injection."""
 
 from __future__ import annotations
 

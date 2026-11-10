@@ -169,8 +169,8 @@ async def shell_static(request: Request):
     if not (Path(_shell_root) / 'index.html').is_file():
         raise HTTPException(status_code=503, detail='Shell UI not built. Run: ./builder shell:build')
 
-    # Map the path the router matched (root_path stripped, as auth decided on)
-    # into the shell directory.
+    # Map the path the router matched (root_path stripped: the one the auth
+    # middleware decided on) into the shell directory.
     # "/" → index.html
     # "/shell/static/js/main.js" → static/js/main.js
     # "/shell/themes/dark.json" → themes/dark.json

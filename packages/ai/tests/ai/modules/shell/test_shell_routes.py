@@ -510,12 +510,17 @@ def test_crawler_gets_the_same_document_with_cache_headers(shell_root, app_url):
     assert resp.headers['vary'] == 'User-Agent'
 
 
-def test_the_shell_document_is_read_once_per_page_and_build(shell_root, app_url, monkeypatch):
+def test_the_shell_document_is_read_once_per_page_and_build(shell_root, monkeypatch):
     # Reading and rewriting the shell file on every request would put disk I/O
     # and regex passes on the hottest public path.
     reads = []
     real = Path.read_text
-    monkeypatch.setattr(Path, 'read_text', lambda self, *a, **k: reads.append(self.name) or real(self, *a, **k))
+
+    def counting_read(self, *args, **kwargs):
+        reads.append(self.name)
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, 'read_text', counting_read)
     _use(Page('/pricing', 'rocketride.home', 'Pricing', 'Plans.'))
     client = _client()
     for _ in range(3):
@@ -528,6 +533,36 @@ def test_the_shell_document_is_read_once_per_page_and_build(shell_root, app_url,
     os.utime(index, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))  # a new shell build
     client.get('/pricing', headers={'User-Agent': BROWSER})
     assert reads == ['index.html'] * 3
+
+
+def _serve_numbered_pages(count):
+    """``count`` pages, /p0 to /p<count-1>, whose renders are all the same size."""
+    _use(*(Page(f'/p{i}', 'rocketride.home', f'Page {i}') for i in range(count)))
+    return _client()
+
+
+def test_the_render_cache_drops_its_oldest_render_at_the_entry_cap(shell_root, monkeypatch):
+    monkeypatch.setattr(pages_mod, '_render_cache', pages_mod._FifoCache(pages_mod._RENDER_CACHE_MAX_BYTES, 3))
+    client = _serve_numbered_pages(5)
+    for i in range(5):
+        assert client.get(f'/p{i}', headers={'User-Agent': BROWSER}).status_code == 200
+    assert [key[0] for key in pages_mod._render_cache.keys()] == ['/p2', '/p3', '/p4']
+
+
+def test_the_render_cache_stays_within_its_byte_budget(shell_root, monkeypatch):
+    client = _serve_numbered_pages(3)
+    size = len(client.get('/p0', headers={'User-Agent': BROWSER}).content)
+    # Room for two renders: the third evicts the first.
+    monkeypatch.setattr(pages_mod, '_render_cache', pages_mod._FifoCache(2 * size, pages_mod._RENDER_CACHE_MAX))
+    for i in range(3):
+        client.get(f'/p{i}', headers={'User-Agent': BROWSER})
+    assert [key[0] for key in pages_mod._render_cache.keys()] == ['/p1', '/p2']
+    assert pages_mod._render_cache.total == 2 * size
+    # A render larger than the whole budget is served, never stored.
+    monkeypatch.setattr(pages_mod, '_render_cache', pages_mod._FifoCache(size - 1, pages_mod._RENDER_CACHE_MAX))
+    resp = client.get('/p0', headers={'User-Agent': BROWSER})
+    assert resp.status_code == 200 and len(resp.content) == size
+    assert len(pages_mod._render_cache) == 0 and pages_mod._render_cache.total == 0
 
 
 @pytest.mark.parametrize('ua', [GOOGLEBOT, BROWSER])
@@ -730,6 +765,8 @@ def test_a_late_private_route_on_a_page_path_stays_behind_auth(web_server, shell
     web_server.add_route('/late', _real_route, ['POST'])  # private, registered after the catch-all
     resp = client.post('/late')
     assert resp.status_code == 401 and resp.text != 'real route'
+    # Auth decides on the path, not the method: the page's GET is private now too.
+    assert client.get('/late').status_code == 401
 
 
 def test_fallback_never_makes_a_private_route_public(web_server, shell_root, monkeypatch):
