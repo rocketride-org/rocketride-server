@@ -874,15 +874,21 @@ export class ConnectionManager implements IConnectionManager {
 		// ── Dev token seeding ─────────────────────────────────────────────
 		// The terminal dev host (`rocketride app dev`) hands the workspace
 		// credential in the URL FRAGMENT — never sent on the wire, stripped
-		// before anything else reads the URL, honored ONLY in a top-level
-		// dev shell served from a LOOPBACK origin (framed previews inherit
-		// their embedder's session via rrdev:auth; production builds have no
-		// dev gate; and a dev flavor served from a real origin — the
+		// before anything else reads the URL. Seeding is honoured ONLY in a
+		// top-level dev shell served from a LOOPBACK origin (framed previews
+		// inherit their embedder's session via rrdev:auth; production builds
+		// have no dev gate; and a dev flavor served from a real origin — the
 		// production origin included — must not let a bare link sign the tab
 		// in as a chosen credential: the launcher only ever opens its own
 		// localhost dev server). Seeding goes
 		// through saveToken so the /apps cookie primes exactly like any
 		// other sign-in; the normal stored-token path below then connects.
+		// A REFUSED directive (production build, non-loopback origin) is
+		// never acted on, but a TOP-LEVEL shell still strips the fragment in
+		// every build so a credential in a link does not linger in the
+		// address bar or history. A FRAMED shell leaves the URL alone: the
+		// embedder owns it, and replaceState would edit shared session
+		// history. Only the exact `#rrtoken=` prefix is a directive.
 		// The fragment is the LAUNCHER's definitive session directive (the
 		// same vocabulary as the embedded flow's rrdev:auth answer): a
 		// value signs the tab in as that credential; EMPTY (`#rrtoken=`,
@@ -894,12 +900,16 @@ export class ConnectionManager implements IConnectionManager {
 		// is reserved for an explicit logout or an abandoned sign-in. An
 		// ABSENT fragment leaves the tab's own state alone.
 		const bootHash = String(window.location.hash ?? '');
-		const tokenSeedDirective = isDevHooksEnabled() && !isFramedShell() && bootHash.startsWith('#rrtoken=');
-		if (tokenSeedDirective && !isLoopbackShell()) {
-			console.warn('[shell] ignoring #rrtoken: dev token seeding is honoured only by a shell served from a loopback dev server');
+		const hasTokenDirective = bootHash.startsWith('#rrtoken=');
+		const framedBoot = isFramedShell();
+		const tokenSeedDirective = hasTokenDirective && isDevHooksEnabled() && !framedBoot;
+		if (hasTokenDirective && !framedBoot && !(tokenSeedDirective && isLoopbackShell())) {
+			if (tokenSeedDirective) {
+				console.warn('[shell] ignoring #rrtoken: dev token seeding is honoured only by a shell served from a loopback dev server');
+			}
 			// Ignored is not the same as harmless to leave: strip the fragment
-			// so a credential a launcher handed to a non-loopback dev tab (a
-			// LAN-IP dev server) does not linger in the URL bar and history.
+			// so a credential handed to a refused tab does not linger in the
+			// URL bar and history.
 			window.history.replaceState({ ...(window.history.state ?? {}) }, '', window.location.pathname + window.location.search);
 		}
 		if (tokenSeedDirective && isLoopbackShell()) {

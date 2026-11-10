@@ -91,9 +91,9 @@ that fact. `rrdev:registerRemote` entries must be absolute `http(s)` loopback
 URLs; console rows are posted only to the verified embedder origin. `#rrtoken=`
 seeding is honoured only in a dev build, on a top-level shell served from
 loopback (`localhost`, `*.localhost`, `127.0.0.0/8`, `[::1]`). In a dev build on
-a top-level shell that is NOT loopback-served the fragment is ignored and
-stripped from the URL; a framed shell, or a production build, never reads or
-strips it. The `rrauthorigin` sign-in relay is armed only on `http://localhost`
+a top-level shell that is NOT loopback-served, and in a production build, the
+fragment is ignored (nothing is saved or cleared) and stripped from the URL; a
+framed shell never reads or strips it. The `rrauthorigin` sign-in relay is armed only on `http://localhost`
 and `http://127.0.0.1`, the shells its OAuth bounce can return to (any port; the
 `pnpm start` server is `http://localhost:3000`, so it is armed there); on any
 other shell (an `https://` origin, `[::1]`, `*.localhost`, other `127.x.x.x`

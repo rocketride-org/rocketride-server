@@ -2487,20 +2487,37 @@ test('#rrtoken is IGNORED on a dev flavor served from a real origin: a bare link
 	}
 });
 
-test('#rrtoken is ignored by a PRODUCTION build, even on a loopback origin', async () => {
-	const seeded = await bootWithFragment({ origin: 'http://localhost:3925', hash: '#rrtoken=attacker_credential', nodeEnv: 'production' });
-	assert.deepEqual(seeded.saved, []);
-	assert.equal(seeded.cleared, 0);
-	assert.deepEqual(seeded.stripped, [], 'a production build does not consume the fragment at all');
-	const signedOut = await bootWithFragment({ origin: 'http://localhost:3925', hash: '#rrtoken=', nodeEnv: 'production' });
-	assert.equal(signedOut.cleared, 0);
+test('#rrtoken is ignored by a PRODUCTION build (nothing saved or cleared) but is stripped from a top-level shell, loopback or not', async () => {
+	for (const origin of ['http://localhost:3925', 'https://cloud.rocketride.example']) {
+		for (const hash of ['#rrtoken=attacker_credential', '#rrtoken=']) {
+			const label = `${origin} ${hash}`;
+			const res = await bootWithFragment({ origin, hash, nodeEnv: 'production' });
+			assert.deepEqual(res.saved, [], `${label}: no token was saved`);
+			assert.equal(res.cleared, 0, `${label}: nothing was cleared`);
+			assert.deepEqual(res.stripped, ['/?appid=local.alarm&rrdev=1'], `${label}: the refused fragment is stripped so it does not linger in the URL bar or history`);
+			assert.deepEqual(res.warned, [], `${label}: a production build does not log`);
+		}
+	}
 });
 
-test('#rrtoken is ignored by a FRAMED shell (previews inherit their embedder\'s session via rrdev:auth)', async () => {
-	const seeded = await bootWithFragment({ origin: 'http://localhost:3925', hash: '#rrtoken=attacker_credential', framed: true });
-	assert.deepEqual(seeded.saved, []);
-	assert.equal(seeded.cleared, 0);
-	assert.deepEqual(seeded.stripped, [], 'a framed shell does not consume the fragment either');
+test('#rrtoken is ignored by a FRAMED shell (previews inherit their embedder\'s session via rrdev:auth) and the embedder-owned URL is left alone', async () => {
+	for (const nodeEnv of [undefined, 'production']) {
+		for (const hash of ['#rrtoken=attacker_credential', '#rrtoken=']) {
+			const res = await bootWithFragment({ origin: 'http://localhost:3925', hash, framed: true, nodeEnv });
+			assert.deepEqual(res.saved, [], `${nodeEnv} ${hash}`);
+			assert.equal(res.cleared, 0, `${nodeEnv} ${hash}`);
+			assert.deepEqual(res.stripped, [], `${nodeEnv} ${hash}: a framed shell does not touch the URL`);
+		}
+	}
+});
+
+test('a hash that is not the exact #rrtoken= directive is left alone by a production build', async () => {
+	for (const hash of ['#section', '#rrtokenx=1', '#/rrtoken=abc', '#rrtoken', '']) {
+		const res = await bootWithFragment({ origin: 'http://localhost:3925', hash, nodeEnv: 'production' });
+		assert.deepEqual(res.saved, [], hash);
+		assert.equal(res.cleared, 0, hash);
+		assert.deepEqual(res.stripped, [], `${hash}: not stripped`);
+	}
 });
 
 test('the CloudAuthProvider relay redirects through the relay origin only in a top-level dev shell, never in a framed one', async () => {
