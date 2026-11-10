@@ -70,6 +70,9 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Res
 from ai.web import Request
 from ai.web.middleware import route_path
 
+# app_url lives in settings; the shell modules import it from here.
+from .settings import app_url
+
 # Engine binary directory — all static paths are relative to this.
 _root_dir = os.path.dirname(sys.executable)
 
@@ -662,23 +665,6 @@ async def apps_static(request: Request):
         return FileResponse(file_path)
 
     raise HTTPException(status_code=404, detail='Not found')
-
-
-def app_url() -> str:
-    """
-    Return the public base URL of the hosted SaaS deployment, if configured.
-
-    ``RR_APP_URL`` (also honored by ``ai.web.endpoints.auth_callback``) pins
-    the externally visible origin and doubles as the "this is the hosted
-    SaaS" signal. It is deliberately the ONLY source of absolute URLs here:
-    deriving them from ``X-Forwarded-Proto`` / ``X-Forwarded-Host`` would
-    let any client poison sitemap URLs through shared caches.
-
-    Returns:
-        Base URL without a trailing slash (e.g. ``https://app.example.com``),
-        or an empty string when unset.
-    """
-    return os.environ.get('RR_APP_URL', '').rstrip('/')
 
 
 def _md(text: str) -> str:

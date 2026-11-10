@@ -25,8 +25,7 @@ Deployment settings of the shell module, read from the environment in one place.
 
 A leaf module: it imports only the standard library, so every shell module can
 import it without a cycle. Each accessor reads the environment when called, so
-a deployment change applies to the next build and a test sets the variable
-with ``monkeypatch.setenv``. None of them runs per request.
+a test sets the variable with ``monkeypatch.setenv``.
 """
 
 import os
@@ -47,3 +46,20 @@ def public_root_apps() -> FrozenSet[str]:
     """
     raw = os.environ.get('RR_PUBLIC_ROOT_APPS', DEFAULT_ROOT_APPS)
     return frozenset(a.strip() for a in raw.split(',') if a.strip())
+
+
+def app_url() -> str:
+    """
+    Return the public base URL of the hosted SaaS deployment, if configured.
+
+    ``RR_APP_URL`` (also honored by ``ai.web.endpoints.auth_callback``) pins
+    the externally visible origin and doubles as the "this is the hosted
+    SaaS" signal. It is deliberately the ONLY source of absolute URLs here:
+    deriving them from ``X-Forwarded-Proto`` / ``X-Forwarded-Host`` would
+    let any client poison sitemap URLs through shared caches.
+
+    Returns:
+        Base URL without a trailing slash (e.g. ``https://app.example.com``),
+        or an empty string when unset.
+    """
+    return os.environ.get('RR_APP_URL', '').rstrip('/')
