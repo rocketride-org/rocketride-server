@@ -19,7 +19,8 @@ writes ``stacks_<pid>.txt`` there:
   thread except the dumper's own, in the text format of ``faulthandler``
   (``Timeout (h:mm:ss)!``, then ``Thread 0x<16 hex digits> (most recent call
   first):`` and ``  File "<file>", line <n> in <function>`` lines, then a blank
-  line). The time in the first line is the time since the hook started.
+  line). The main thread's heading carries a ``[main]`` label after the thread id.
+  The time in the first line is the time since the hook started.
   For a pytest process each dump ends with an ``info:`` line that gives the xdist
   worker id (``worker=gw0``, known only after startup) and the running test
   (``current_test=...``, from ``PYTEST_CURRENT_TEST``), read at dump time.
@@ -119,7 +120,7 @@ def _format_elapsed(seconds: float) -> str:
     return f'{total // 3600}:{total % 3600 // 60:02d}:{total % 60:02d}'
 
 
-def _format_stacks(frames: dict, skip_ident: int, elapsed: float) -> str:
+def _format_stacks(frames: dict, skip_ident: int, elapsed: float, main_ident: int | None = None) -> str:
     """
     Format the stack of every thread in the faulthandler text format.
 
@@ -127,6 +128,7 @@ def _format_stacks(frames: dict, skip_ident: int, elapsed: float) -> str:
         frames (dict): Thread ident to its current frame, as ``sys._current_frames()`` returns.
         skip_ident (int): Ident of the thread to leave out (the dumper itself).
         elapsed (float): Seconds since the hook started.
+        main_ident (int | None): Ident of the main thread; its heading gets a ``[main]`` label.
 
     Returns:
         str: The dump text, ending with a blank line.
@@ -135,7 +137,8 @@ def _format_stacks(frames: dict, skip_ident: int, elapsed: float) -> str:
     for ident, frame in frames.items():
         if ident == skip_ident:
             continue
-        lines.append(f'Thread 0x{ident:016x} (most recent call first):')
+        label = ' [main]' if ident == main_ident else ''
+        lines.append(f'Thread 0x{ident:016x}{label} (most recent call first):')
         while frame is not None:
             code = frame.f_code
             lines.append(f'  File "{code.co_filename}", line {frame.f_lineno} in {code.co_name}')
@@ -365,7 +368,8 @@ class _Dumper:
         """
         frames = sys._current_frames()
         try:
-            text = _format_stacks(frames, threading.get_ident(), time.monotonic() - self._started)
+            main_ident = threading.main_thread().ident
+            text = _format_stacks(frames, threading.get_ident(), time.monotonic() - self._started, main_ident)
             text += self._info_line()
             text += self._probe_block(frames.get(threading.main_thread().ident))
         finally:
