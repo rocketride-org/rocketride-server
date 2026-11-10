@@ -301,6 +301,13 @@ def test_a_post_leaves_out_the_fields_it_lacks():
     assert 'mainEntityOfPage' not in out and 'image' not in out and 'description' not in out
 
 
+def test_a_declared_organization_is_referenced_by_its_id():
+    post = Page('/blog/x', 'rocketride.home', 'X', published='2026-11-09')
+    site = {'title': 'RocketRide', 'organization': {'name': 'RocketRide', 'url': 'https://rocketride.ai'}}
+    out = blogposting(post, site, canonical='', image='')
+    assert out['publisher'] == out['author'] == {'@id': 'https://rocketride.ai#organization'}
+
+
 def test_without_rr_app_url_the_publisher_has_no_url(monkeypatch):
     monkeypatch.delenv('RR_APP_URL', raising=False)
     post = Page('/blog/x', 'rocketride.home', 'X', published='2026-11-09')

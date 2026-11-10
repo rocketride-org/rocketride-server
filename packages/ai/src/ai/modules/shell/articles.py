@@ -26,10 +26,11 @@ BlogPosting JSON-LD for dated public pages.
 A page that declares ``published`` is an article: crawlers get a BlogPosting
 naming its headline (its own title, without the site's brand suffix), dates,
 authors, image and canonical URL. Its publisher is the site's organization:
-an inline Organization named after ``site.title`` on the ``RR_APP_URL``
-origin. A post without authors is by its publisher. Serialization
-(``head.jsonld_script``) escapes ``<``, ``>`` and ``&``, so no value can close
-the script element.
+a reference to the ``@id`` of the Organization node the root owner's
+``site.organization`` declares, else an inline Organization named after
+``site.title`` on the ``RR_APP_URL`` origin. A post without authors is by its
+publisher. Serialization (``head.jsonld_script``) escapes ``<``, ``>`` and
+``&``, so no value can close the script element.
 """
 
 from typing import Any, Dict, Mapping
@@ -40,7 +41,15 @@ from .shell import app_url
 
 
 def publisher(site: Mapping[str, Any]) -> Dict[str, Any]:
-    """The site's organization: named after ``site.title`` (else the origin's host), on the ``RR_APP_URL`` origin."""
+    """The site's organization, as an ``@id`` reference when ``site.organization`` declares one, else inline.
+
+    The inline organization is named after ``site.title`` (else the origin's
+    host), on the ``RR_APP_URL`` origin.
+    """
+    organization = site.get('organization')
+    if organization:
+        # check_manifest keeps site.organization only with an https url.
+        return {'@id': f'{organization["url"]}#organization'}
     base = app_url()
     out: Dict[str, Any] = {'@type': 'Organization'}
     name = site.get('title') or urlsplit(base).netloc
