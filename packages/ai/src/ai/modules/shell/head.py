@@ -25,8 +25,8 @@ Serve-time head metadata injection for public pages.
 
 Replaces (never duplicates) the document's title, meta description,
 canonical link, robots meta and Open Graph title/description/url. Every value
-is escaped for its context: page titles are manifest text entering a platform-origin
-document, so escaping is a security boundary.
+is escaped for its context: page titles are manifest text entering a
+platform-origin document, so escaping is a security boundary.
 """
 
 import html
@@ -82,8 +82,10 @@ def inject_head(
     if span:
         start, end = span.span()
     else:
+        start, end = 0, len(document)
         body = _BODY_OPEN.search(document)
-        start, end = 0, body.start() if body else len(document)
+        if body:
+            end = body.start()
     region = document[start:end]
     for pattern in _REPLACED:
         region = pattern.sub('', region)

@@ -65,7 +65,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse
 from ai.web import oauth_resource
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.gzip import GZipMiddleware
-from starlette.routing import compile_path
+from starlette.routing import BaseRoute, compile_path
 from rocketlib import debug, warning
 from rocketride import CONST_WS_PING_INTERVAL, CONST_WS_PING_TIMEOUT
 from ai.constants import CONST_DEFAULT_WEB_PORT, CONST_DEFAULT_WEB_HOST, CONST_WEB_WS_MAX_SIZE
@@ -246,6 +246,7 @@ class WebServer:
         # Dynamic public-path predicates (data-driven routes, e.g. the shell's
         # public pages), consulted after the static patterns.
         self._public_predicates: List[Callable[[str], bool]] = []
+        self._catch_all: Optional[BaseRoute] = None
 
         # Add our metrics middleware to the app
         self.app.add_middleware(AuthMiddleware)
@@ -1014,12 +1015,16 @@ class WebServer:
 
         # Add the route to the FastAPI application's router
         self.app.router.add_api_route(path, routeHandler, methods=methods, deprecated=deprecated)
-        catch_all = getattr(self, '_catch_all', None)
-        if catch_all is not None:
+        if self._catch_all is not None:
             # Keep the catch-all last, or a route added after it (a module
-            # loaded through /use) would never match.
-            self.app.router.routes.remove(catch_all)
-            self.app.router.routes.append(catch_all)
+            # loaded through /use, in a worker thread) would never match. One
+            # slice assignment, so no request sees a table without it.
+            # Known gap: a request already judged public on the old table (an
+            # unrouted path) is routed on the new one, so for that instant a new
+            # private route can answer it unauthenticated. /use is admin-only;
+            # guard private routes if modules are loaded at runtime in production.
+            routes = self.app.router.routes
+            routes[:] = [r for r in routes if r is not self._catch_all] + [self._catch_all]
 
         # Record the pairs only once the router has accepted them, so a
         # rejected registration stays retryable.
@@ -1040,8 +1045,11 @@ class WebServer:
             # Invalidate the compiled cache so it is rebuilt on the next is_public_route() call
             self._compiled_private_paths = None
 
-    def add_catch_all(self, route: Any) -> None:
-        """Register ``route`` to match after every other route, including routes ``add_route`` adds later."""
+    def add_catch_all(self, route: BaseRoute) -> None:
+        """Register ``route`` to match after every other route, including routes ``add_route`` adds later.
+
+        A route appended to ``app.router.routes`` directly is not moved ahead of it.
+        """
         self._catch_all = route
         self.app.router.routes.append(route)
 
