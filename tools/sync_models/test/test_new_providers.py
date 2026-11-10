@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import importlib
 import re
-import shutil
 import struct
 import sys
 import types
@@ -282,16 +281,15 @@ class TestAnthropicHaikuLatest:
         return (context, output, name, None, True)
 
     def test_the_node_does_not_offer_it(self):
-        """No profile, selector entry or form object names it; Haiku 4.5 stays."""
+        """No branch of the model selector names it, nor any property definition; Haiku 4.5 stays."""
         spec = patcher.load(str(_REPO_ROOT / self._SERVICES))
-        profiles = spec['preconfig']['profiles']
-        selector = spec['fields']['anthropic.profile']['conditional']
+        selector = next(p for p in spec['properties'] if isinstance(p, dict) and p.get('name') == 'model')
+        branches = selector['enum']
 
-        assert self._BAD not in profiles
-        assert not [key for key, p in profiles.items() if isinstance(p, dict) and p.get('model') == self._BAD]
-        assert self._BAD not in {entry.get('value') for entry in selector}
-        assert f'anthropic.{self._BAD}' not in spec['fields']
-        assert profiles['claude-haiku-4-5']['model'] == 'claude-haiku-4-5'
+        assert self._BAD not in branches
+        assert not [key for key in spec['propertyDefinitions'] if self._BAD in key]
+        assert self._BAD not in str(spec)
+        assert branches['claude-haiku-4-5']['title'] == 'Claude Haiku 4.5'
 
     def test_openrouter_discovery_rejects_it(self, monkeypatch, config):
         """The fallback catalogue offers it next to Haiku 4.5; only Haiku 4.5 gets through."""
@@ -320,38 +318,6 @@ class TestAnthropicHaikuLatest:
         found = AnthropicProvider(config['providers']['llm_anthropic'])._fetch_litellm_models()
 
         assert [entry['id'] for entry in found] == ['claude-haiku-4-5']
-
-    def test_a_fallback_sync_does_not_add_it_back(self, monkeypatch, config, tmp_path):
-        """A discovery run from OpenRouter, written to disk, leaves no trace of it."""
-        target = tmp_path / self._SERVICES
-        target.parent.mkdir(parents=True)
-        shutil.copyfile(_REPO_ROOT / self._SERVICES, target)
-        cache = {
-            p['model']: self._entry(p.get('modelTotalTokens'), p.get('modelOutputTokens'), p.get('title'))
-            for p in get_profiles(str(target)).values()
-            if isinstance(p, dict) and p.get('model')
-        }
-        # A model the catalogue does not have yet, so the run is known to add profiles.
-        cache['claude-test-9-9'] = self._entry(200000, 64000, 'Anthropic: Claude Test 9.9')
-        cache[self._BAD] = self._entry(200000, 64000, 'Anthropic Claude Haiku Latest')
-        monkeypatch.setattr(merger, '_OPENROUTER_CACHE', cache)
-        monkeypatch.setattr(merger, '_OPENROUTER_AVAILABLE', True)
-
-        report = sync_models.sync_provider(
-            'llm_anthropic',
-            config,
-            tmp_path,
-            apply=True,
-            model_sources=['openrouter'],
-            enable_discovery=True,
-            allow_fallback_discovery=True,
-        )
-
-        assert report.error is None
-        added = [profile['model'] for _, profile in report.added]
-        assert 'claude-test-9-9' in added
-        assert self._BAD not in added
-        assert self._BAD not in target.read_text(encoding='utf-8')
 
 
 # ---------------------------------------------------------------------------

@@ -258,11 +258,24 @@ public:
     // Public functions - pipe support
     //-----------------------------------------------------------------
     virtual int getPipeCount() noexcept;
+
+    // Hands out a pipe as a new BINDING: mints its bindingId, sets its
+    // rootBindingId (its own id, or the root of the live parent binding
+    // it is opened from) and its trace level (the argument, or the parent's
+    // when a parent is given). The argless form binds at the endpoint's
+    // default level (the task file's pipelineTraceLevel).
+    virtual ErrorOr<ServicePipe> getPipe(PIPELINE_TRACE_LEVEL traceLevel,
+                                         uint64_t parentBindingId = 0) noexcept;
     virtual ErrorOr<ServicePipe> getPipe() noexcept;
 
     // Runs before getPipe() hands out a pipe; an error refuses it
     static inline std::function<Error()> pipeGate;
     virtual Error putPipe(ServicePipe &pipe) noexcept;
+
+    // Trace level names on the wire: none / metadata / summary / full
+    static bool parseTraceLevel(TextView name,
+                                PIPELINE_TRACE_LEVEL &level) noexcept;
+    static TextView traceLevelName(PIPELINE_TRACE_LEVEL level) noexcept;
 
     //-----------------------------------------------------------------
     // Public functions - Statics to get a specified type and
@@ -324,6 +337,14 @@ public:
     ServiceInstanceStacks m_instanceStacks;
 
     mutable async::Mutex m_stackLock;
+
+    //-----------------------------------------------------------------
+    /// @details
+    ///		Source of binding ids - one counter for the whole process,
+    ///		so a binding id is unique across every endpoint the engine
+    ///		holds and is never reused while the process lives
+    //-----------------------------------------------------------------
+    static inline std::atomic<uint64_t> s_nextBindingId{1};
 
     //-----------------------------------------------------------------
     // These are valid to be called during beginFilterGlobal and
@@ -444,15 +465,9 @@ public:
     //-----------------------------------------------------------------
     std::string taskId = "";
 
-    //-----------------------------------------------------------------
-    // The debugger for this endpoint
-    //-----------------------------------------------------------------
-    Debugger debugger;
-
 private:
     Error bindFilters(size_t pipeId, ServiceInstanceStack &filters) noexcept;
     Error buildGlobalPipe() noexcept;
-    Error buildBreakpoints() noexcept;
     Error buildPipeStack() noexcept;
     Error buildConnections() noexcept;
     Error generatePipelineStack() noexcept;

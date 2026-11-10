@@ -66,6 +66,8 @@ public:
         _const uint32_t FOCUS = BIT(14);   // Focus on this the driver
         _const uint32_t DEPRECATED = BIT(15);    // Driver is deprecated
         _const uint32_t EXPERIMENTAL = BIT(16);  // Driver is experimental
+        _const uint32_t MULTITENANT =
+            BIT(17);  // Node is certified reentrant-safe for cross-user sharing
     };
 
     //-----------------------------------------------------------------

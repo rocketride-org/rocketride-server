@@ -251,32 +251,13 @@ Error IServiceEndpoint::buildGlobalPipe() noexcept {
         // Set the self referential weak ptr
         global->global = global;
 
-        // We need to process autopipe first, as it adds new filters
-        if (filter.logicalType == "autopipe") {
-            // In pipeline mode, validate autopipe first
-            if (config.openMode == OPEN_MODE::PIPELINE) {
-                // If the filter is not valid, stop
-                if (auto ccode = global->validateConfig()) return ccode;
-            }
-
-            // Init and reset the pipeStackIndex
-            util::Guard pipeStackIndexGuard{[&] { pipeStackIndex = i; },
-                                            [&] { pipeStackIndex = -1; }};
-
-            // Begin the autopipe
-            if (auto ccode = global->beginFilterGlobal()) return ccode;
-        }
-
         // Save it in the pipe stack
         m_globalStack.push_back(global);
     }
 
-    // In pipeline mode, validate all the global filters first
+    // In pipeline mode, validate all the global filters first, in order
     if (config.openMode == OPEN_MODE::PIPELINE) {
         for (auto global : m_globalStack) {
-            if (global->pipeType.logicalType == "autopipe")
-                continue;  // Skip autopipe, it is already validated
-
             // If the filter is not valid, stop
             if (auto ccode = global->validateConfig()) return ccode;
         }
@@ -289,13 +270,10 @@ Error IServiceEndpoint::buildGlobalPipe() noexcept {
         util::Guard pipeStackIndexGuard{[this] { pipeStackIndex = 0; },
                                         [this] { pipeStackIndex = -1; }};
 
-        // And then begin the global filters
+        // And then begin the global filters, in order
         for (; _cast<size_t>(pipeStackIndex) < m_globalStack.size();
              ++pipeStackIndex) {
             auto global = m_globalStack[pipeStackIndex];
-
-            if (global->pipeType.logicalType == "autopipe")
-                continue;  // Skip autopipe, it is already begun
 
             // If the beginFilterGlobal has an error, stop
             if (auto ccode = global->beginFilterGlobal()) return ccode;
@@ -431,10 +409,20 @@ int IServiceEndpoint::getPipeCount() noexcept {
 ///		Gets a pipe for the endpoint - the pipe is a stacked set
 ///		of filters that we can read from/write to. If no pipes
 ///		are available, one will be created
+///		The pipe comes back as a new BINDING: a fresh, never-reused
+///		bindingId, a rootBindingId and a trace level. Opened from inside
+///		a live binding (parentBindingId != 0) it joins that binding's
+///		tree - the parent's root and the parent's trace level - so a
+///		sub-pipeline's trace reaches the caller that caused it.
+///	@param[in]	traceLevel
+///		The trace level of this binding (ignored when a parent is given)
+///	@param[in]	parentBindingId
+///		The live binding this one is opened from, or 0 for a root
 ///	@returns
 ///		ErrorOr<ServicePipe>
 //-------------------------------------------------------------------------
-ErrorOr<ServicePipe> IServiceEndpoint::getPipe() noexcept {
+ErrorOr<ServicePipe> IServiceEndpoint::getPipe(
+    PIPELINE_TRACE_LEVEL traceLevel, uint64_t parentBindingId) noexcept {
     // If we are not open, stop
     if (config.openMode == OPEN_MODE::NONE)
         return APERR(Ec::InvalidCommand,
@@ -444,11 +432,58 @@ ErrorOr<ServicePipe> IServiceEndpoint::getPipe() noexcept {
     if (pipeGate)
         if (auto ccode = pipeGate()) return ccode;
 
+    // What the new binding inherits - its own id as root, the requested
+    // level and depth zero, unless a parent binding is named: then the
+    // parent's root and level, and the parent's depth plus one, so the
+    // recursion guard counts the whole binding TREE (a node opening a
+    // sub-pipe that opens the node again...) and not each pipe alone
+    uint64_t rootBindingId = 0;
+    int bindDepth = 0;
+
+    // Stamps the binding onto a pipe that is busy for us. Runs UNDER
+    // m_stackLock: the parent lookup above reads these fields of every busy
+    // pipe under the same lock, so a pipe is never visible as busy with the
+    // previous holder's id. The id is minted from the process-wide counter
+    // and never comes back; the slot (pipeId) does
+    auto stamp = [&](ServicePipe &bound) noexcept {
+        bound->bindingId =
+            s_nextBindingId.fetch_add(1, std::memory_order_relaxed);
+        bound->rootBindingId = rootBindingId ? rootBindingId : bound->bindingId;
+        bound->traceLevel = traceLevel;
+        bound->bindDepth = bindDepth;
+    };
+
     // Find a pipe
     _block() {
         // Lock the pipes - we are manipulating the pipe stacks
         util::Guard stackGuard{[&] { m_stackLock.lock(); },
                                [&] { m_stackLock.unlock(); }};
+
+        // A parent must be a live binding on this endpoint
+        if (parentBindingId) {
+            bool found = false;
+            for (auto &stack : m_instanceStacks) {
+                ServicePipe &parent = (ServicePipe &)stack[0];
+                if (!parent->busy || parent->bindingId != parentBindingId)
+                    continue;
+                rootBindingId = parent->rootBindingId;
+                traceLevel = parent->traceLevel;
+                bindDepth = parent->bindDepth.load() + 1;
+                found = true;
+                break;
+            }
+            if (!found)
+                return APERR(Ec::NotFound, "Parent binding is not live",
+                             parentBindingId);
+
+            // Refuse the child BEFORE a pipe (a whole filter stack) is
+            // built or handed out for it: the tree is already at the limit
+            if (bindDepth > filter::pipe::CONST_MAX_BIND_DEPTH)
+                return APERR(Ec::Recursion,
+                             "Pipeline binding depth exceeded",
+                             filter::pipe::CONST_MAX_BIND_DEPTH,
+                             "opening a child binding of", parentBindingId);
+        }
 
         // Loop through them
         for (int i = 0; i < m_instanceStacks.size(); i++) {
@@ -462,22 +497,42 @@ ErrorOr<ServicePipe> IServiceEndpoint::getPipe() noexcept {
             // If it is busy, skip it
             if (pipe->busy) continue;
 
-            // Mark as busy
+            // Mark as busy and bind it before anyone else can see it busy
             pipe->busy = true;
+            stamp(pipe);
 
-            // Return the pipe
+            // Return the bound pipe
             return pipe;
         }
     }
 
-    // We don't have any available pipes, create one
+    // We don't have any available pipes, create one - it comes back busy
     auto result = buildInstancePipe();
 
     // If we got an error
     if (!result) return result.ccode();
 
-    // Return the pipe we just created
+    // Bind it under the same lock the parent lookup takes
+    _block() {
+        util::Guard stackGuard{[&] { m_stackLock.lock(); },
+                               [&] { m_stackLock.unlock(); }};
+        stamp(*result);
+    }
+
+    // Return the bound pipe
     return *result;
+}
+
+//-------------------------------------------------------------------------
+/// @details
+///		Gets a pipe bound at the endpoint's default trace level - the
+///		task file's pipelineTraceLevel. This is the binding C++-driven
+///		work (sources, scans) takes.
+///	@returns
+///		ErrorOr<ServicePipe>
+//-------------------------------------------------------------------------
+ErrorOr<ServicePipe> IServiceEndpoint::getPipe() noexcept {
+    return getPipe(config.pipelineTraceLevel);
 }
 
 //-------------------------------------------------------------------------
