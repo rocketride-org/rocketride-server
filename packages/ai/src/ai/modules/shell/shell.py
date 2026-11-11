@@ -151,7 +151,11 @@ def shell_document_path(request: Request, *, capture: bool = True) -> Path:
     index_path = Path(_shell_root) / 'index.html'
     if not index_path.is_file():
         raise HTTPException(status_code=503, detail='Shell UI not built. Run: ./builder shell:build')
-    return (_capture_for(request) if capture else None) or index_path
+    if capture:
+        capture_path = _capture_for(request)
+        if capture_path:
+            return capture_path
+    return index_path
 
 
 async def shell_static(request: Request):
@@ -675,6 +679,9 @@ async def apps_static(request: Request):
 async def ungated_noindex(request: Request, call_next):
     """HTTP middleware: ``X-Robots-Tag: noindex, nofollow`` on every response of an engine without ``RR_APP_URL``.
 
+    Only registered when ``RR_APP_URL`` is empty at init (see
+    ``initModule``), so it does not check again per response.
+
     Such an engine (OSS, self-hosted, desktop, a staging deployment) is not
     the public site. robots.txt ``Disallow: /`` stops crawling, not
     indexing: a disallowed URL found through links is still indexed by URL,
@@ -684,8 +691,7 @@ async def ungated_noindex(request: Request, call_next):
     in front keeps a non-public host out entirely.
     """
     response = await call_next(request)
-    if not app_url():
-        response.headers['X-Robots-Tag'] = 'noindex, nofollow'
+    response.headers['X-Robots-Tag'] = 'noindex, nofollow'
     return response
 
 
