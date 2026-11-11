@@ -857,7 +857,7 @@ export class RocketRideClient extends DAPClient {
 			const response = await this.request({ type: 'request', command: 'auth', seq: 0, arguments: authArguments }, timeout);
 			this._assertCurrentOperation(operation);
 			if (response.success !== true) {
-				if (response.message === NO_AUTH_MESSAGE && !authArguments.auth) {
+				if (response.message === NO_AUTH_MESSAGE && !String(authArguments.auth ?? '').trim()) {
 					throw new AuthenticationException({ ...(response as unknown as Record<string, unknown>), hint: NO_AUTH_HINT });
 				}
 				throw new AuthenticationException(response as unknown as Record<string, unknown>);

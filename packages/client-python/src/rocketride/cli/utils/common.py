@@ -81,7 +81,7 @@ def hint_for(err: Exception, uri: Optional[str] = None) -> str:
     """
     Derive the user-facing hint for a raised error.
 
-    An exception that carries its own ``hint`` (the SDK attaches one) wins.
+    An exception that carries its own single-line ``hint`` (the SDK attaches one) wins.
     Auth rejections name the fix (``rocketride login``); connection
     failures point at the server address; everything else gets no hint.
 
@@ -93,7 +93,7 @@ def hint_for(err: Exception, uri: Optional[str] = None) -> str:
         A hint sentence, possibly empty.
     """
     own_hint = getattr(err, 'hint', None)
-    if isinstance(own_hint, str) and own_hint:
+    if isinstance(own_hint, str) and own_hint.strip() and '\n' not in own_hint.strip():
         return own_hint
     message = str(err)
     if re.search(

@@ -164,7 +164,7 @@ export function takeInterrupt(): boolean {
 /**
  * Derive the user-facing hint for a thrown error.
  *
- * An error that carries its own `hint` (the SDK attaches one) wins.
+ * An error that carries its own single-line `hint` (the SDK attaches one) wins.
  * Auth rejections name the fix (`rocketride login`); connection failures
  * point at the server address; everything else gets no hint.
  *
@@ -174,7 +174,7 @@ export function takeInterrupt(): boolean {
  */
 export function hintFor(err: unknown, uri?: string): string {
 	const ownHint = (err as { hint?: unknown } | null | undefined)?.hint;
-	if (typeof ownHint === 'string' && ownHint) {
+	if (typeof ownHint === 'string' && ownHint.trim() && !ownHint.trim().includes('\n')) {
 		return ownHint;
 	}
 	const message = err instanceof Error ? err.message : String(err);

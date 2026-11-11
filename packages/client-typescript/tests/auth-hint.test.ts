@@ -33,6 +33,12 @@ test('an empty credential keeps the message and sets the hint', async () => {
 	assert.match(error.hint ?? '', /rocketride login/);
 });
 
+test('a whitespace-only credential counts as empty', async () => {
+	const error = await loginError('   ', 'No authorization provided');
+	assert.ok(error instanceof AuthenticationException);
+	assert.match(error.hint ?? '', /Set ROCKETRIDE_APIKEY or pass auth/);
+});
+
 test('a non-empty credential adds no hint', async () => {
 	const error = await loginError('bad-key', 'No authorization provided');
 	assert.ok(error instanceof AuthenticationException);
@@ -50,4 +56,11 @@ test('another message with an empty credential adds no hint', async () => {
 test('the CLI hint helper returns the error own hint first', () => {
 	const error = new AuthenticationException({ message: 'Invalid API key', hint: 'Set the key.' });
 	assert.equal(hintFor(error, 'http://x'), 'Set the key.');
+});
+
+test('a multi-line error hint falls through to the message-based hint', () => {
+	const error = new AuthenticationException({ message: 'Invalid API key', hint: 'Common causes:\n- one\n- two' });
+	const expected = hintFor(new Error('Invalid API key'), 'http://x');
+	assert.ok(expected);
+	assert.equal(hintFor(error, 'http://x'), expected);
 });

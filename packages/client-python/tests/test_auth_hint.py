@@ -57,6 +57,12 @@ class TestNoAuthHint(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(getattr(raised.exception, '__notes__', []), [raised.exception.hint])
         self.assertEqual(str(raised.exception), 'No authorization provided')
 
+    async def test_whitespace_only_credential_counts_as_empty(self) -> None:
+        client = _client('   ', {'success': False, 'message': 'No authorization provided'})
+        with self.assertRaises(AuthenticationException) as ctx:
+            await client._internal_login()
+        self.assertIn('Set ROCKETRIDE_APIKEY', ctx.exception.hint or '')
+
     async def test_non_empty_credential_adds_no_hint(self) -> None:
         client = _client('bad-key', {'success': False, 'message': 'No authorization provided'})
         with self.assertRaises(AuthenticationException) as ctx:
@@ -76,3 +82,9 @@ class TestCliHintFor(unittest.TestCase):
     def test_exception_hint_is_returned_first(self) -> None:
         err = AuthenticationException({'message': 'Invalid API key', 'hint': 'Set the key.'})
         self.assertEqual(hint_for(err, 'http://x'), 'Set the key.')
+
+    def test_multi_line_exception_hint_falls_through_to_the_message_hint(self) -> None:
+        err = AuthenticationException({'message': 'Invalid API key', 'hint': 'Common causes:\n- one\n- two'})
+        expected = hint_for(Exception('Invalid API key'), 'http://x')
+        self.assertTrue(expected)
+        self.assertEqual(hint_for(err, 'http://x'), expected)

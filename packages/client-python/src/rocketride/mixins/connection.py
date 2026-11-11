@@ -168,7 +168,7 @@ class ConnectionMixin(DAPClient):
         if not response.get('success', False):
             message = response.get('message', 'Authentication failed')
             result: Dict[str, Any] = {'message': message}
-            if message == _NO_AUTH_MESSAGE and not auth_args['auth']:
+            if message == _NO_AUTH_MESSAGE and not str(auth_args['auth'] or '').strip():
                 result['hint'] = _NO_AUTH_HINT
             error = AuthenticationException(result)
             if 'hint' in result and hasattr(error, 'add_note'):
