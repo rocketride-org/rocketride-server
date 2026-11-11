@@ -56,20 +56,16 @@ rather than wiring it into a data-flow branch.
 
 ### Access Token
 
-Supply an Oura API bearer token in the secure field. Use the environment
-fallback only when deployment configuration cannot hold the token; a missing
-token prevents the node from starting, while an expired or insufficiently
-scoped token produces a descriptive tool error.
+Supply an Oura API bearer token in the secure field, typically as a
+`${ROCKETRIDE_OURA_TOKEN}` reference resolved per call. A missing token
+prevents the node from starting, while an expired or insufficiently scoped
+token produces a descriptive tool error.
 
 ---
 
 ## Authentication
 
-The token is resolved in the following order:
-
-1. `token` in the node config
-2. `token` in the connection config
-3. The `ROCKETRIDE_OURA_TOKEN` environment variable
+The token comes only from the node config's `token` field, usually as a `${ROCKETRIDE_OURA_TOKEN}` reference resolved per call. The node does not read the engine host's environment: a pipeline that left the field empty and relied on `ROCKETRIDE_OURA_TOKEN` being set on the host must now put the `${ROCKETRIDE_OURA_TOKEN}` reference in the field.
 
 The node sends the token as a standard `Authorization: Bearer` header, so any valid Oura API v2 bearer token works. Oura deprecated personal access tokens in December 2025 (previously issued ones still work); new tokens come from the OAuth2 flow of a registered API application:
 
@@ -77,7 +73,7 @@ The node sends the token as a standard `Authorization: Bearer` header, so any va
 2. For quick personal use, run the implicit flow: open `https://cloud.ouraring.com/oauth/authorize?client_id=<CLIENT_ID>&redirect_uri=<REDIRECT_URI>&response_type=token` in a browser, approve, and copy the `access_token` from the redirect URL fragment. Implicit-flow tokens expire after ~30 days. **Omit the `scope` parameter** so the consent screen offers every scope enabled for your app — Oura's documented scope list (`email personal daily heartrate workout tag session spo2Daily`) is incomplete, and several of this node's tools need undocumented scopes (`ring_configuration`, `stress`, `heart_health`). A token minted with only the documented scopes gets `Oura scope not granted (401)` on ring configuration, battery level, stress, resilience, cardiovascular age, and VO2 max.
 3. For renewable tokens, use the authorization-code flow (`response_type=code`, then exchange at `https://api.ouraring.com/oauth/token` with the client secret) and rotate via the returned single-use `refresh_token`.
 
-If your pipeline only needs a subset of the data, you can still pass an explicit `scope` parameter to restrict the token. If no source provides a token, the pipeline fails at startup with `tool_oura: token is required`; the editor also surfaces a validation warning while configuring the node.
+If your pipeline only needs a subset of the data, you can still pass an explicit `scope` parameter to restrict the token. If the field is empty, the pipeline fails at startup with `tool_oura: token is required`.
 
 ---
 

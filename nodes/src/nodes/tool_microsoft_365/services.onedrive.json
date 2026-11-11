@@ -12,22 +12,12 @@
 	"description": ["Exposes Microsoft OneDrive operations as agent tools.", "List and search files and folders, read metadata, download and upload content, create folders, copy/move/rename items, trash and restore, and manage sharing (links and permission grants) on the acting user's OneDrive via the Microsoft Graph drive API.", "Anonymous sharing links, invites to non-individual recipients, and permanent delete, are gated behind explicit config flags. Authenticates via an Entra app (client credentials) or user OAuth."],
 	"tile": ["OneDrive (${parameters.onedrive.access})"],
 	"lanes": {},
-	"preconfig": {
-		"default": "default",
-		"profiles": {
-			"default": {
-				"title": "OneDrive",
-				"authType": "service",
-				"tenantId": "",
-				"clientId": "",
-				"clientSecret": "",
-				"userPrincipalName": "",
-				"userToken": "",
-				"access": "write"
-			}
-		}
-	},
-	"fields": {
+	//
+	// Optional:
+	//		Local property definitions. Authentication comes from the shared Microsoft
+	//		definitions (microsoft.authType selects the app or the signed-in user).
+	//
+	"propertyDefinitions": {
 		"onedrive.access": {
 			"type": "string",
 			"title": "Access level",
@@ -51,11 +41,5 @@
 			"default": false
 		}
 	},
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "OneDrive",
-			"properties": ["type", "microsoft.authType", "onedrive.access", "onedrive.allowPublicSharing", "onedrive.allowHardDelete"]
-		}
-	]
+	"properties": ["type", "microsoft.authType", "onedrive.access", "onedrive.allowPublicSharing", "onedrive.allowHardDelete"]
 }

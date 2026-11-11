@@ -1,6 +1,4 @@
 # =============================================================================
-# RocketRide Engine
-# =============================================================================
 # MIT License
 # Copyright (c) 2026 Aparavi Software AG
 #
@@ -26,17 +24,14 @@
 """
 Oura tool node - global (shared) state.
 
-Resolves the Oura API bearer token (an OAuth2 access token, or a legacy
-personal access token issued before their Dec 2025 deprecation) from node
-config, connection config, or the ROCKETRIDE_OURA_TOKEN environment variable.
+Reads the Oura API bearer token (an OAuth2 access token, or a legacy personal
+access token issued before their Dec 2025 deprecation) from the resolved node
+config.
 """
 
 from __future__ import annotations
 
-import os
-
-from ai.common.config import Config
-from rocketlib import IGlobalBase, OPEN_MODE, warning
+from rocketlib import IGlobalBase
 
 
 class IGlobal(IGlobalBase):
@@ -44,45 +39,24 @@ class IGlobal(IGlobalBase):
 
     token: str = ''
 
-    @staticmethod
-    def _get_token(cfg: dict, conn_config: dict) -> str:
-        """Resolve the Oura token from node config, connection config, or env."""
-        token = str((cfg.get('token') or '')).strip()
-        if token:
-            return token
-        token = str((conn_config.get('token') or '')).strip()
-        if token:
-            return token
-        return str((os.environ.get('ROCKETRIDE_OURA_TOKEN') or '')).strip()
-
     def beginGlobal(self) -> None:
-        """Validate credentials and install dependencies for execution mode.
+        """Read the token and install dependencies for execution mode.
 
         Raises:
-            Exception: If no Oura token is available from any source, so the
-                pipeline fails early with a node-specific message.
+            Exception: If the token is blank after stripping, so the pipeline
+                fails early with a node-specific message.
         """
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
-
         from depends import load_depends
 
         load_depends(__file__)
 
-        cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-        self.token = self._get_token(cfg, self.glb.connConfig)
-
+        # The token reaches the node through its config (a ${ROCKETRIDE_OURA_TOKEN}
+        # reference resolved per call); there is no process-env fallback
+        self.token = str(self.config.token or '').strip()
         if not self.token:
-            raise Exception('tool_oura: token is required (set it in the node config or ROCKETRIDE_OURA_TOKEN)')
-
-    def validateConfig(self) -> None:
-        """Surface a missing-token warning in the editor without starting the backend."""
-        try:
-            cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-            if not self._get_token(cfg, self.glb.connConfig):
-                warning('token is required (or set ROCKETRIDE_OURA_TOKEN)')
-        except Exception as e:
-            warning(str(e))
+            raise Exception(
+                'tool_oura: token is required (set it in the node config, a ${ROCKETRIDE_OURA_TOKEN} reference)'
+            )
 
     def endGlobal(self) -> None:
         """Release shared state."""

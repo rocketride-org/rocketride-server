@@ -1,6 +1,4 @@
 # =============================================================================
-# RocketRide Engine
-# =============================================================================
 # MIT License
 # Copyright (c) 2026 Aparavi Software AG
 #
@@ -23,10 +21,26 @@
 # SOFTWARE.
 # =============================================================================
 
+"""
+Vertex AI Vector Search tool node - global (shared) state.
+
+Reads the region and index ids from the resolved node config, authenticates
+through the shared GCP definitions (gcp.authType) and holds the index endpoint
+handle every instance call goes through.
+"""
+
 from __future__ import annotations
 
-from ai.common.config import Config
-from rocketlib import IGlobalBase, OPEN_MODE, debug, warning
+import os
+from rocketlib import IGlobalBase, debug, warning
+
+from depends import depends
+
+# google.cloud.aiplatform is imported at module scope, so the requirements are
+# installed before that happens. This module is only imported on the run path
+# (config mode imports the validator alone), so the install never runs while a
+# user is merely opening the node's settings panel.
+depends(os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt')
 
 try:
     from google.cloud import aiplatform
@@ -46,21 +60,18 @@ class IGlobal(IGlobalBase):
 
     def beginGlobal(self) -> None:
         """Connect to the configured Vertex Matching Engine index endpoint."""
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
-
         if aiplatform is None:
             raise ImportError('google-cloud-aiplatform is not installed.')
 
         # deferred: engine-path import
         from nodes.core.gcp_auth import get_gcp_credentials
 
-        cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-
-        self.location = str((cfg.get('location') or 'us-central1')).strip()
-        index_endpoint_id = str((cfg.get('indexEndpointId') or '')).strip()
-        self.deployed_index_id = str((cfg.get('deployedIndexId') or '')).strip()
-
+        # The resolved config: the active gcp.authType branch flattened beside the
+        # index settings, both ids required by the schema
+        cfg = self.config
+        self.location = cfg.location.strip()
+        index_endpoint_id = cfg.indexEndpointId.strip()
+        self.deployed_index_id = cfg.deployedIndexId.strip()
         if not index_endpoint_id or not self.deployed_index_id:
             raise ValueError('indexEndpointId and deployedIndexId are required for Vertex AI Vector Search.')
 
@@ -71,7 +82,7 @@ class IGlobal(IGlobalBase):
             warning(f'Vertex AI authentication failed: {e}')
             raise
 
-        # Pass project/location/credentials to the endpoint constructor — do not
+        # Pass project/location/credentials to the endpoint constructor - do not
         # call aiplatform.init(), which mutates process-global SDK state.
         try:
             self.index_endpoint = aiplatform.MatchingEngineIndexEndpoint(
@@ -90,23 +101,6 @@ class IGlobal(IGlobalBase):
         except Exception as e:
             warning(f'Vertex AI connection check failed: {e}')
             raise
-
-    def validateConfig(self) -> None:
-        """Warn on missing auth or required Vertex index settings."""
-        # deferred: engine-path import
-        from nodes.core.gcp_auth import get_gcp_credentials, GCPAuthError
-
-        try:
-            cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-            get_gcp_credentials(cfg, scopes=_VERTEX_SCOPES)
-            if not str(cfg.get('indexEndpointId') or '').strip():
-                warning('indexEndpointId is required')
-            if not str(cfg.get('deployedIndexId') or '').strip():
-                warning('deployedIndexId is required')
-        except GCPAuthError as e:
-            warning(f'Auth configuration error: {e}')
-        except Exception as e:
-            warning(str(e))
 
     def endGlobal(self) -> None:
         """Drop the index endpoint handle."""

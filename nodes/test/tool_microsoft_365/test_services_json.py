@@ -49,21 +49,21 @@ def test_service_shape(path):
     assert doc['register'] == 'filter'
     assert doc['path'].startswith('nodes.tool_microsoft_365.')
     assert doc['protocol'].startswith('tool_') and doc['protocol'].endswith('://')
-    # fields: dict of defs; shape properties: name strings only (engine jsoncpp aborts otherwise)
-    assert isinstance(doc['fields'], dict)
-    for section in doc['shape']:
-        for prop in section['properties']:
-            assert isinstance(prop, str)
-    # every service exposes authType and its access tier in the Pipe section
-    props = doc['shape'][0]['properties']
+    # propertyDefinitions: dict of defs; properties: name strings only (no inline selectors here)
+    assert isinstance(doc['propertyDefinitions'], dict)
+    assert 'preconfig' not in doc and 'fields' not in doc and 'shape' not in doc
+    for prop in doc['properties']:
+        assert isinstance(prop, str)
+    # every service exposes the shared authType selector and its access tier
+    props = doc['properties']
     assert 'microsoft.authType' in props
     prefix = doc['prefix']
     assert f'{prefix}.access' in props
     # every declared gate flag (<prefix>.allow*) is rendered in the form, else operators can't enable it
-    for name in doc['fields']:
+    for name in doc['propertyDefinitions']:
         if name.startswith(f'{prefix}.allow'):
-            assert name in props, f'{name} declared but not in shape properties'
-    # subpackage exists with the four required modules
+            assert name in props, f'{name} declared but not in properties'
+    # subpackage exists with the required modules (IValidator is what EaaS imports in CONFIG mode)
     pkg = ROOT / path.name.removeprefix('services.').removesuffix('.json')
-    for f in ('__init__.py', 'client.py', 'IGlobal.py', 'IInstance.py'):
+    for f in ('__init__.py', 'client.py', 'IGlobal.py', 'IInstance.py', 'IValidator.py'):
         assert (pkg / f).exists(), f'{pkg.name}/{f} missing'

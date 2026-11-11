@@ -12,32 +12,20 @@
 	"description": ["Exposes Oura Ring health data as read-only agent tools.", "Covers daily sleep, readiness, activity, stress, resilience, SpO2, heart rate,", "workouts, sessions, tags, VO2 max, cardiovascular age, battery level, and personal info."],
 	"tile": ["Oura Ring"],
 	"lanes": {},
-	"preconfig": {
-		"default": "default",
-		"profiles": {
-			"default": {
-				"title": "Oura",
-				"token": ""
-			}
-		}
-	},
-	"fields": {
+	//
+	// Optional:
+	//		Local property definitions. The access token is a required secret the
+	//		account variable supplies.
+	//
+	"propertyDefinitions": {
 		"oura.token": {
 			"type": "string",
 			"title": "Access Token",
-			"description": "Oura API bearer token: an OAuth2 access token from a registered app at cloud.ouraring.com (personal access tokens were deprecated in Dec 2025; previously issued ones still work). Grants read-only access to the token owner's data. Falls back to the ROCKETRIDE_OURA_TOKEN environment variable when empty.",
-			"default": "",
-			"secure": true,
-			"ui": {
-				"ui:widget": "ApiKeyWidget"
-			}
+			"description": "Oura API bearer token: an OAuth2 access token from a registered app at cloud.ouraring.com (personal access tokens were deprecated in Dec 2025; previously issued ones still work). Grants read-only access to the token owner's data.",
+			"secret": true,
+			"env": "ROCKETRIDE_OURA_TOKEN",
+			"required": true
 		}
 	},
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "Oura",
-			"properties": ["type", "oura.token"]
-		}
-	]
+	"properties": ["type", "oura.token"]
 }
