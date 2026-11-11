@@ -313,6 +313,7 @@ def _load_llm_base(stop_var):
     sys.modules['ai.common.llm_native_stream'] = nsmod
     tools = types.ModuleType('ai.common.llm_tools')
     tools.ToolsUnsupported = Exception
+    tools.InvalidTurn = ValueError
     tools.is_turn = lambda question: False
     sys.modules['ai.common.llm_tools'] = tools
     try:
