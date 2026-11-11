@@ -60,7 +60,7 @@ from . import public_pages
 from .contract import Page, with_slash_twin
 from .crawlers import CRAWLER, classify
 from .head import inject_head
-from .shell import CACHE_CONTROL, app_url, shell_document_path, shell_static
+from .shell import app_url, shell_document_path, shell_static
 
 # The web server whose route table the auth predicate and the live-route
 # collision check read (set by initModule).
@@ -400,9 +400,9 @@ def _render(path: str, page: Page, crawler: bool, document: Path) -> Tuple[bytes
         canonical=canonical_url(path),
         noindex=not page.listed,
     )
-    # Crawler responses may sit in shared caches; people's never do (the
-    # document names the current build's bundles), so caches key on the UA.
-    headers = {'Vary': 'User-Agent', 'Cache-Control': CACHE_CONTROL if crawler else 'private, no-cache'}
+    # No shared cache may keep either class's copy: the document names the
+    # current build's hashed bundles, which a deploy removes. Caches key on the UA.
+    headers = {'Vary': 'User-Agent', 'Cache-Control': 'private, no-cache'}
     if not page.listed:
         headers['X-Robots-Tag'] = 'noindex'
     return body.encode('utf-8'), headers
