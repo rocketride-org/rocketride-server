@@ -50,6 +50,26 @@ def test_replaces_every_head_tag_kind_without_duplicates():
     assert out.index('<title>') > out.index('<head>')
 
 
+def test_a_prefixed_attribute_is_not_the_attribute():
+    doc = '<html><head><meta data-name="description" content="keep me"></head><body></body></html>'
+    out = inject_head(doc, title='T', description='New.')
+    assert '<meta data-name="description" content="keep me">' in out
+    assert out.count(' name="description"') == 1
+
+
+def test_a_greater_than_sign_inside_a_quoted_value_does_not_end_the_tag():
+    doc = '<html><head><meta content="a>b" name="description"></head><body></body></html>'
+    out = inject_head(doc, title='T', description='New.')
+    assert 'a>b' not in out
+    assert out.count('name="description"') == 1 and 'content="New."' in out
+
+
+def test_an_attribute_inside_a_quoted_value_is_not_the_attribute():
+    doc = '<html><head><meta content="x name=description" property="og:image"></head><body></body></html>'
+    out = inject_head(doc, title='T', description='New.')
+    assert '<meta content="x name=description" property="og:image">' in out
+
+
 def test_listed_page_has_no_robots_and_no_canonical_without_base_url():
     out = inject_head(DOC, title='T', description='', canonical='', noindex=False)
     assert 'robots' not in out and 'canonical' not in out and 'og:url' not in out

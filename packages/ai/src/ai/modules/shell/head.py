@@ -34,10 +34,20 @@ import re
 
 _FLAGS = re.IGNORECASE | re.DOTALL
 
+# One unit of a tag's attribute text: a character outside quotes, or a whole
+# quoted value, so a '>' or an 'attr=' inside a value is not tag syntax.
+_ATTR_UNIT = r'(?:[^>"\']|"[^"]*"|\'[^\']*\')'
+
 
 def _tag_with(tag: str, attr: str, value: str) -> re.Pattern:
-    """A <tag ...> whose attr equals value (any attribute order/quoting)."""
-    return re.compile(rf'<{tag}\b(?=[^>]*\b{attr}\s*=\s*["\']?{re.escape(value)}["\'\s/>])[^>]*>\s*', _FLAGS)
+    """A <tag ...> whose attr equals value (any attribute order/quoting).
+
+    ``attr`` must be a whole attribute name: ``data-name`` is not ``name``.
+    """
+    return re.compile(
+        rf'<{tag}\b(?={_ATTR_UNIT}*?(?<![\w-]){attr}\s*=\s*["\']?{re.escape(value)}["\'\s/>]){_ATTR_UNIT}*>\s*',
+        _FLAGS,
+    )
 
 
 _REPLACED = (
