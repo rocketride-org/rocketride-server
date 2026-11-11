@@ -69,7 +69,10 @@ static application::Opt IsAtty{"--log.isAtty"};
 static application::Opt LogFile{"--log.file"};
 static application::Opt LogTruncate{"--log.truncate", "0"};
 
-// Initializes the log subsystem
+//-------------------------------------------------------------------------
+/// @details
+///		Initializes the log subsystem from command-line options
+//-------------------------------------------------------------------------
 void init() noexcept {
     // Log to file if indicated
     if (LogFile) {
@@ -105,8 +108,10 @@ void init() noexcept {
         options().disableAllColors = _fs<bool>(*DisableAllColors);
 
     if (DateTimeFormat) options().dateTimeFormat = _fs<Text>(*DateTimeFormat);
-    if (DecorationColor)
-        options().decorationColor = _fs<Color>(*DecorationColor);
+    if (DecorationColor) {
+        if (auto color = _fsc<Color>(*DecorationColor))
+            options().decorationColor = *color;
+    }
     if (ForceDecoration)
         options().forceDecoration = _fs<bool>(*ForceDecoration);
     if (IncludeDateTime)

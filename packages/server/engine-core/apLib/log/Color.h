@@ -49,6 +49,9 @@ std::ostream& operator<<(std::ostream& stream, Color color);
 template <typename BufferT>
 void __toString(BufferT& buff, FormatOptions opts) noexcept;
 
+template <typename BufferT>
+Error __fromString(Color& color, const BufferT& buff) noexcept;
+
 template <typename JsonT>
 Error __fromJson(Color& color, const JsonT& val) noexcept;
 
