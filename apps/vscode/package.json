@@ -1,30 +1,39 @@
 {
 	"name": "rocketride",
 	"displayName": "RocketRide",
-	"description": "RocketRide extension for Visual Studio Code",
+	"description": "RocketRide is the leading AI meta-harness with the only enterprise-grade runtime built on C++.",
 	"version": "1.6.0",
 	"publisher": "rocketride",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/rocketride-ai/rocketride-server.git"
+		"url": "https://github.com/rocketride-org/rocketride-server.git"
 	},
-	"homepage": "https://github.com/rocketride-ai/rocketride-server#readme",
+	"homepage": "https://github.com/rocketride-org/rocketride-server#readme",
 	"bugs": {
-		"url": "https://github.com/rocketride-ai/rocketride-server/issues"
+		"url": "https://github.com/rocketride-org/rocketride-server/issues"
 	},
 	"license": "MIT",
 	"keywords": [
 		"rocketride",
 		"data",
 		"pipeline",
-		"toolchain"
+		"toolchain",
+		"ai",
+		"llm",
+		"agents",
+		"ai-agents",
+		"meta-harness",
+		"mcp",
+		"rag"
 	],
 	"icon": "rocketride-dark-icon.png",
 	"engines": {
 		"vscode": "^1.99.3"
 	},
 	"categories": [
-		"Other"
+		"AI",
+		"Machine Learning",
+		"Data Science"
 	],
 	"activationEvents": [
 		"onStartupFinished"

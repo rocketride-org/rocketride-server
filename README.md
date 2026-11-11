@@ -15,6 +15,11 @@
 </p>
 
 <p>
+  RocketRide is the leading AI meta-harness with the only enterprise-grade runtime built on C++.<br/>
+  Open source, MIT licensed. 150+ nodes, 15+ LLM providers, 10+ vector stores.
+</p>
+
+<p>
 <img src="docs/public/assets/icon-cpp.png" alt="C++" />&nbsp;&nbsp;
 <img src="docs/public/assets/icon-python.png" alt="Python" />&nbsp;&nbsp;
 <img src="docs/public/assets/icon-typescript.png" alt="TypeScript" />
@@ -25,7 +30,7 @@
 </p>
 
 <p>
- Under the hood, RocketRide is an open source data pipeline builder and runtime built for AI and ML workloads. With 100+ pipeline nodes spanning 15+ LLM providers, 9 vector databases, OCR, NER, and more, pipelines are defined as portable JSON, built visually in VS Code, and executed by a multithreaded C++ runtime. From real-time data processing to multimodal AI search, RocketRide runs entirely on your own infrastructure.
+ Under the hood, RocketRide is an open source data pipeline builder and runtime built for AI and ML workloads. With 150+ pipeline nodes spanning 15+ LLM providers, 10+ vector databases, OCR, NER, and more, pipelines are defined as portable JSON, built visually in VS Code, and executed by a multithreaded C++ runtime. From real-time data processing to multimodal AI search, RocketRide runs entirely on your own infrastructure.
 </p>
 
 <p>
@@ -34,6 +39,7 @@
   <a href="https://pypi.org/project/rocketride/">Python SDK</a> |
   <a href="https://www.npmjs.com/package/rocketride">TypeScript SDK</a> |
   <a href="https://docs.rocketride.org/connect/mcp/http">MCP Server</a> |
+  For coding agents: <a href="https://docs.rocketride.org/quickstart/coding-agents/">start page</a>, <a href="https://docs.rocketride.org/llms.txt">llms.txt</a> |
   <a href="https://marketplace.visualstudio.com/items?itemName=RocketRide.rocketride">VS Code Marketplace</a> |
   <a href="https://open-vsx.org/extension/RocketRide/rocketride">Open VSX Registry</a>
 </p>
@@ -76,7 +82,7 @@ _Drop pipelines into any Python or TypeScript app with a few lines of code, no i
 | :-------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Rocket Builder**                | Drag, connect, and configure nodes visually, no boilerplate. Real-time observability tracks token usage, LLM calls, latency, and execution. Pipelines are portable JSON, version-controllable, shareable, and runnable anywhere. |
 | **High-Performance C++ Runtime**  | Native multithreading purpose-built for the throughput demands of AI and data workloads. No bottlenecks, no compromises for production scale.                                                                                        |
-| **100+ Pipeline Nodes**           | 15+ LLM providers, 9 vector databases, OCR, NER, PII anonymization, chunking strategies, embedding models, and more. All nodes are Python-extensible, build and publish your own.                                                    |
+| **150+ Pipeline Nodes**           | 15+ LLM providers, 10+ vector databases, OCR, NER, PII anonymization, chunking strategies, embedding models, and more. All nodes are Python-extensible, build and publish your own.                                                    |
 | **Multi-Agent Workflows**         | Built-in CrewAI and LangChain support. Chain agents, share memory across pipeline runs, and manage multi-step reasoning at scale.                                                                                                    |
 | **Coding Agent Ready**            | RocketRide auto-detects your coding agent: Claude, Cursor, and more. Build, modify, and deploy pipelines through natural language.                                                                                                  |
 | **TypeScript, Python & MCP SDKs** | Integrate pipelines into native apps, expose them as callable tools for AI assistants, or build programmatic workflows into your existing codebase.                                                                                  |
@@ -190,6 +196,8 @@ _Whether you build web apps, integrate APIs, or run backend services, you alread
      docker start rocketride-engine
      ```
 
+     The image is amd64 only. On Apple Silicon, add `--platform linux/amd64` to both `docker pull` and `docker create`.
+
    - **Local Deployment** - Download your preferred runtime as a standalone process from the **Deploy** page in the `Connection Manager`.
 
    - **RocketRide Cloud** - Skip the setup and ship straight to [managed hosting](https://cloud.rocketride.ai/). Same portable pipeline JSON, zero infrastructure to run, from prototype to production. [Get started](https://cloud.rocketride.ai/)
@@ -290,7 +298,7 @@ Connecting takes two lines. Same portable pipeline JSON, now hosted for you:
 
 ```bash
 ROCKETRIDE_URI=https://api.rocketride.ai
-ROCKETRIDE_AUTH=your-api-token
+ROCKETRIDE_APIKEY=your-api-key
 ```
 
 <p align="center">

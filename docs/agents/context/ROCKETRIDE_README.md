@@ -9,7 +9,7 @@ three layers:
   wire pipeline components (parsers, LLMs, vector stores, agents, tools) into
   executable dataflows on a RocketRide server.
 - **Pipeline components (nodes)** — the 150+ capabilities pipelines compose:
-  13+ LLM providers, vector/graph/relational stores, OCR, transcription,
+  15+ LLM providers, vector/graph/relational stores, OCR, transcription,
   vision, PII handling, agents, and a large tool ecosystem.
 
 You can build any layer alone — a script driving a pipeline is a complete
