@@ -82,10 +82,12 @@ OAuth clients need no pre-configuration beyond the URL:
 4. It calls `/mcp` again with `Authorization: Bearer <access_token>`.
 
 Users without a RocketRide account can sign up from the login screen and
-continue through the same flow. Dynamic client registration is on at
+continue through the same flow. On the hosted server (RocketRide Cloud), dynamic client registration is on at
 `https://api.rocketride.ai/oauth/register`, so a client that supports dynamic
-client registration registers itself the first time it connects, and in most
-cases you do not need to request a client id.
+client registration registers itself the first time it connects, and you do
+not need to request a client id. If your client cannot register itself,
+[contact us](https://discord.gg/PMXrtenMsY) for a client id or use an API key
+header instead.
 Every client is a public client that uses PKCE; no client secret is issued.
 
 Every request acts as the account behind the presented credential: tools see
@@ -111,7 +113,7 @@ No — that is the discovery flow. A compliant client follows the
 login. If your client cannot do OAuth, use an API key header instead.
 
 **Where do I get an OAuth client id?**
-You do not need to ask for one. Compliant clients register automatically at
+You do not need to ask for one on the hosted server (RocketRide Cloud). Compliant clients register automatically at
 `https://api.rocketride.ai/oauth/register`. If registration fails with an
 invalid redirect error, your client uses a callback address we have not added
 yet: [contact us](https://discord.gg/PMXrtenMsY) with the redirect address, or

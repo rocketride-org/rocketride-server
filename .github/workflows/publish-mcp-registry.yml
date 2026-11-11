@@ -3,8 +3,9 @@ name: Publish to MCP Registry
 # Manual only. Publishes server.json to the official MCP Registry
 # (registry.modelcontextprotocol.io) using GitHub OIDC; no secret is stored.
 # Runs in the `release` environment (same as n8n-nodes-release.yml and
-# release.yaml) and only from the default branch, so a contributor branch
-# cannot publish its own server.json. Registry versions are immutable: bump
+# release.yaml) and only from `main`, where released versions live (the `release`
+# environment allows deployments only from `main` and `n8n-nodes-v*` tags), so a
+# contributor branch cannot publish its own server.json. Registry versions are immutable: bump
 # the version in package.json before each run, or the publish step fails.
 on:
   workflow_dispatch:
@@ -24,10 +25,10 @@ jobs:
       MCP_PUBLISHER_VERSION: v1.8.1
 
     steps:
-      - name: Guard - publish only from develop
+      - name: Guard - publish only from main
         run: |
-          if [ "$GITHUB_REF" != "refs/heads/develop" ]; then
-            echo "::error::Publish must run from the develop branch."
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error::Publish must run from the main branch."
             exit 1
           fi
 
