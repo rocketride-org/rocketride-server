@@ -6,7 +6,7 @@
 
 <p>
   <strong>RocketRide is the leading AI meta-harness with the only enterprise-grade runtime built on C++.</strong><br/>
-  Designed for professional software developers and technical builders, whether solo or teams or organizations, to enable them to easily build, stage, test, publish and maintain agents and AI-enabled applications that scale in production. Leverage directly from an IDE with the VS Code extension, from the terminal with the SDK, or dynamically using the MCP server.
+  Designed for professional developers and technical builders to build, stage, test, publish and maintain agents and AI-enabled applications that scale in production. Use it from VS Code, from the terminal with the SDK, or through the MCP server.
 </p>
 
 <p>
