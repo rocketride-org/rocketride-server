@@ -338,6 +338,15 @@ const contractActions = [
 		}),
 	},
 	{
+		name: 'shell:remint-run',
+		action: () => ({
+			run: async (ctx, task) => {
+				const script = path.join(APP_ROOT, 'scripts', 'freeze-shell-api.js');
+				await execCommand('node', [script, '--remint'], { task, cwd: APP_ROOT });
+			},
+		}),
+	},
+	{
 		name: 'shell:regen-run',
 		action: () => ({
 			run: async (ctx, task) => {
@@ -372,6 +381,18 @@ const contractActions = [
 		action: () => ({
 			description: 'Check the shell-api contract is current (no write)',
 			steps: ['client-typescript:build', 'shell:check-run'],
+		}),
+	},
+	{
+		// Re-mint the NEWEST frozen version in place from the live surface,
+		// for the in-progress, unreleased version only: refuses when that
+		// version is already on origin/develop or origin/main, and never
+		// touches an older version file. `shell:freeze` (append) remains
+		// the release-time act.
+		name: 'shell:remint',
+		action: () => ({
+			description: 'Re-mint the unreleased newest shell-api version in place',
+			steps: ['client-typescript:build', 'shell:remint-run'],
 		}),
 	},
 	{
