@@ -456,7 +456,7 @@ class MiscCommands(DAPConn):
                 if substituted
                 else str(e)
             )
-            if substituted and isinstance(e, MultipleSourcesError):
+            if (substituted or secure) and isinstance(e, MultipleSourcesError):
                 message = 'Pipeline has multiple source components, please specify one explicitly. ' + message
             self.debug_message(f'Pipeline validation failed: {message}')
             if substituted or secure:

@@ -232,6 +232,7 @@ class IInstance(IInstanceBase):
         """Return matching users and count using read:users."""
 
         def op():
+            """Search for users matching the validated email."""
             data = _input(args, 'search_users')
             email = data.get('email')
             # Restrict to unquoted ASCII mailboxes; reject query syntax and ambiguous address forms.
@@ -286,6 +287,7 @@ class IInstance(IInstanceBase):
         """Return a sign-in profile using read:users."""
 
         def op():
+            """Fetch and sanitize the requested user."""
             user_id = _identifier(_input(args, 'get_user'), 'user_id')
             data = _object(self._client().request('get_user', identifier=user_id))
             if 'blocked' in data and not isinstance(data['blocked'], bool):
@@ -318,6 +320,7 @@ class IInstance(IInstanceBase):
         """Return sanitized events and count using read:logs_users and read:logs."""
 
         def op():
+            """Fetch and sanitize recent user events."""
             data = _input(args, 'get_user_logs')
             user_id, limit = _identifier(data, 'user_id'), _limit(data, 50)
             events = _list(
@@ -339,6 +342,7 @@ class IInstance(IInstanceBase):
         """Return an event and sanitized diagnostics using read:logs."""
 
         def op():
+            """Fetch and sanitize the requested log event."""
             log_id = _identifier(_input(args, 'get_log_event'), 'log_id')
             data = _object(self._client().request('get_log_event', identifier=log_id))
             event = _event(data)
@@ -361,6 +365,7 @@ class IInstance(IInstanceBase):
         """Return brute-force blocks and their count using read:users."""
 
         def op():
+            """Fetch brute-force blocks for the requested user."""
             user_id = _identifier(_input(args, 'get_user_blocks'), 'user_id')
             blocks = _blocks(self._client(), user_id)
             return {'has_blocks': bool(blocks), 'block_count': len(blocks), 'blocks': blocks}
@@ -371,6 +376,7 @@ class IInstance(IInstanceBase):
         """Deny unblock requests until independent authorization is available."""
 
         def op():
+            """Validate and reject an unauthorized unblock request."""
             _identifier(_input(args, 'unblock_user'), 'user_id')
             client = self._client()
             if not client.writes_enabled:

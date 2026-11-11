@@ -96,6 +96,7 @@ def resolve_parameter_tokens(pipeline: Dict[str, Any]) -> Dict[str, Any]:
     components = pipeline.get('components', [])
 
     def has_token(component: Any) -> bool:
+        """Check the active parameter sections for secure parameters."""
         if not isinstance(component, dict) or not isinstance(component.get('config'), dict):
             return False
         config = component['config']

@@ -672,6 +672,35 @@ async def test_on_rrext_validate_multiple_sources_keeps_fixed_reason(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_on_rrext_validate_multiple_sources_after_secure_decode(monkeypatch):
+    """Secure-only validation retains the source instruction without exposing decoded values."""
+    validator = MagicMock()
+    monkeypatch.setattr(cmd_misc, 'validatePipeline', validator)
+    conn = _validate_conn(monkeypatch, env={})
+    pipeline = {
+        'components': [
+            {'id': 'source-1', 'provider': 'source', 'config': {'mode': 'Source'}},
+            {'id': 'source-2', 'provider': 'source', 'config': {'mode': 'Source'}},
+        ],
+    }
+    decoded = copy.deepcopy(pipeline)
+    decoded['components'][0]['config']['password'] = 'decoded-secret'
+    monkeypatch.setattr(cmd_misc, 'resolve_parameter_tokens', lambda value: decoded)
+    request = {'seq': 7, 'command': 'rrext_validate', 'arguments': {'pipeline': pipeline}}
+
+    handled, response = await MiscCommands._call_method(conn, request, 'on_rrext_validate', None)
+
+    expected = (
+        'Pipeline has multiple source components, please specify one explicitly. '
+        'Pipeline validation failed for secure parameters.'
+    )
+    assert handled and response['success'] is False
+    assert response['message'] == expected
+    assert conn.debug_message.call_args.args == (f'Pipeline validation failed: {expected}',)
+    validator.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_on_rrext_validate_error_keeps_template_references(monkeypatch):
     """An exception that quotes expanded values reaches the log and the error reply with the references."""
 

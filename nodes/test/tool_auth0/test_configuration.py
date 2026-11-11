@@ -18,6 +18,16 @@ NODE = Path(__file__).resolve().parents[2] / 'src' / 'nodes' / 'tool_auth0'
 
 
 @pytest.fixture
+def pipeline():
+    """Load the task pipeline module for configuration tests."""
+    path = NODE.parents[3] / 'packages' / 'ai' / 'src' / 'ai' / 'modules' / 'task' / 'pipeline.py'
+    spec = importlib.util.spec_from_file_location('auth0_test_pipeline_config', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture
 def node(monkeypatch):
     rocketlib = types.ModuleType('rocketlib')
     rocketlib.IGlobalBase = type('IGlobalBase', (), {})
@@ -187,12 +197,8 @@ def test_credentials_are_not_taken_from_process_environment(node, monkeypatch):
 
 
 @pytest.mark.parametrize('secret', ['${ROCKETRIDE_AUTH0_WRITE_SECRET}', 'literal-write-secret'])
-def test_encrypted_write_credential_is_decoded_before_env_substitution(node, monkeypatch, secret):
+def test_encrypted_write_credential_is_decoded_before_env_substitution(node, monkeypatch, secret, pipeline):
     package, _, _, _ = node
-    path = NODE.parents[3] / 'packages' / 'ai' / 'src' / 'ai' / 'modules' / 'task' / 'pipeline.py'
-    spec = importlib.util.spec_from_file_location('auth0_test_pipeline_config', path)
-    pipeline = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(pipeline)
     encrypted = {
         'components': [
             {'config': {'parameters': {'secureParameters': {'secure': ['writeClientSecret'], 'token': 'opaque'}}}}
@@ -220,12 +226,7 @@ def test_encrypted_write_credential_is_decoded_before_env_substitution(node, mon
             package.auth0_client.validate_config(cfg)
 
 
-def test_parameter_decode_failure_does_not_expose_values(node, monkeypatch):
-    path = NODE.parents[3] / 'packages' / 'ai' / 'src' / 'ai' / 'modules' / 'task' / 'pipeline.py'
-    spec = importlib.util.spec_from_file_location('auth0_test_pipeline_config', path)
-    pipeline = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(pipeline)
-
+def test_parameter_decode_failure_does_not_expose_values(node, monkeypatch, pipeline):
     def fail(_):
         raise ValueError('credential-value')
 
@@ -237,11 +238,7 @@ def test_parameter_decode_failure_does_not_expose_values(node, monkeypatch):
     assert error.value.__suppress_context__
 
 
-def test_active_tokens_are_decoded_once_and_inactive_profiles_are_preserved(node, monkeypatch):
-    path = NODE.parents[3] / 'packages' / 'ai' / 'src' / 'ai' / 'modules' / 'task' / 'pipeline.py'
-    spec = importlib.util.spec_from_file_location('auth0_test_pipeline_config', path)
-    pipeline = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(pipeline)
+def test_active_tokens_are_decoded_once_and_inactive_profiles_are_preserved(node, monkeypatch, pipeline):
     inactive = {'secureParameters': {'secure': ['key'], 'token': 'inactive'}}
     original = {
         'components': [

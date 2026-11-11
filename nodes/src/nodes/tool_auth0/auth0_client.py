@@ -38,6 +38,7 @@ class Auth0Error(ValueError):
     """A safe, structured error for the calling tool."""
 
     def __init__(self, code, message, *, retryable=False, retry_after_seconds=None):
+        """Record a safe error and optional retry details."""
         super().__init__(message)
         self.code = code
         self.retryable = retryable
@@ -111,6 +112,7 @@ class Auth0Client:
     """Own credentials, independent token caches, and fixed Management API routes."""
 
     def __init__(self, cfg: dict) -> None:
+        """Validate credentials and initialize independent token caches."""
         validate_config(cfg)
         keys = ['domain', 'clientId', 'clientSecret', 'allowWrite']
         if cfg.get('allowWrite', False):
