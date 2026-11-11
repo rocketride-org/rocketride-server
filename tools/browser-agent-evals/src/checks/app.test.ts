@@ -59,6 +59,24 @@ test('a hand-made app passes its type-check and build, and a copy with type erro
 	fs.rmSync(work, { recursive: true });
 });
 
+test("an app that hands the shell's client to a function typed with rocketride's client passes types, as the deploy build does", async () => {
+	const work = fs.mkdtempSync(path.join(os.tmpdir(), 'app-check-'));
+	const files = readTree(path.join(DATA_DIR, 'fixtures/notes-app'));
+	files['apps/notes-ui/src/ai.ts'] = [
+		"import type { RocketRideClient } from 'rocketride';",
+		"import { useShellConnection } from 'shell';",
+		'',
+		'const score = (client: RocketRideClient) => client.isConnected();',
+		'export const useScore = () => {',
+		'\tconst { client } = useShellConnection();',
+		'\treturn client ? score(client) : false;',
+		'};',
+	].join('\n');
+	const [r] = Object.values(await checkApps(['apps/notes-ui'], files, work));
+	assert.equal(r.types.ok, true, r.types.output);
+	fs.rmSync(work, { recursive: true, force: true });
+});
+
 test('a failed Design preview load fails the app check, and an unread one only adds a note', () => {
 	const base = (ok: boolean) => ({ ok, detail: ok ? 'types and build pass' : 'types: 1 error', types: { ok, output: '' }, build: { ok: ok ? true : null, output: '' } });
 	const checks = { 'apps/a': base(true), 'apps/b': base(true), 'apps/c': base(true), 'apps/d': base(false), 'apps/e': base(true) };
