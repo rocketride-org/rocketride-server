@@ -143,9 +143,11 @@ API key (`ROCKETRIDE_APIKEY`) as a bearer token. See the
 
 ## Ingest documents
 
-POST a document to the webhook URL. The pipeline embeds and stores it:
+POST a document to the webhook URL. The pipeline embeds and stores it. curl
+reads the key from your shell, not from `.env`, so set it first:
 
 ```bash
+export ROCKETRIDE_APIKEY=<the key your engine was started with>
 curl -X POST http://localhost:5565/webhook/rag-example/source_1 \
   -H "Authorization: Bearer $ROCKETRIDE_APIKEY" \
   -F "file=@./my-document.pdf"
