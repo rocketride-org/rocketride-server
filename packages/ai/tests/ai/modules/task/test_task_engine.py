@@ -2634,3 +2634,38 @@ async def test_data_request_without_a_token_fails_at_once(monkeypatch):
         await Task._send_data(t, {'command': 'apaext_process', 'arguments': {}})
 
     transport.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# _terminated / wait_terminated
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_wait_terminated_returns_once_teardown_finishes():
+    """wait_terminated() releases after the teardown, and only once it ran."""
+    t = _task()
+    t._terminated_called = False
+    t._teardown_done = asyncio.Event()
+    t._teardown = AsyncMock()
+
+    waiter = asyncio.ensure_future(t.wait_terminated())
+    await asyncio.sleep(0)
+    assert not waiter.done()
+
+    await t._terminated()
+    await asyncio.wait_for(waiter, timeout=1)
+    t._teardown.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_wait_terminated_releases_when_teardown_raises():
+    """A failing teardown step still releases the waiters."""
+    t = _task()
+    t._terminated_called = False
+    t._teardown_done = asyncio.Event()
+    t._teardown = AsyncMock(side_effect=RuntimeError('teardown failed'))
+
+    with pytest.raises(RuntimeError):
+        await t._terminated()
+    await asyncio.wait_for(t.wait_terminated(), timeout=1)

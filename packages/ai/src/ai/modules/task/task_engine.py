@@ -664,6 +664,10 @@ class Task(DAPBase):
         # Guard against _terminated() being called more than once
         self._terminated_called = False
 
+        # Set when _terminated() has finished its teardown: the final status,
+        # the terminal events and the run-log close have all gone out
+        self._teardown_done = asyncio.Event()
+
         # Whether the task sent its own >EXIT event this run. Without one,
         # _terminated() falls back to the process exit code.
         self._exit_event_seen = False
@@ -1611,6 +1615,19 @@ class Task(DAPBase):
             return
         self._terminated_called = True
 
+        # Run the teardown, then signal anyone waiting in wait_terminated(),
+        # even when a teardown step raised
+        try:
+            await self._teardown()
+        finally:
+            self._teardown_done.set()
+
+    async def _teardown(self) -> None:
+        """
+        The body of _terminated(): stop the run's resources, set the terminal
+        state, send the final status and terminal events, and close the
+        run-log chapter. Called once per run, from _terminated() only.
+        """
         # Block new operations (e.g. data requests) during teardown
         self._is_terminating = True
 
@@ -2403,6 +2420,17 @@ class Task(DAPBase):
         """Mark status as updated for next broadcast cycle."""
         self._status_updated = True
 
+    async def wait_terminated(self) -> None:
+        """
+        Wait until the run's teardown has finished.
+
+        The terminal state is set part-way through teardown, so a caller that
+        must not act until the final status, the terminal events and the
+        run-log close have gone out (removing the control from the registry
+        stops event delivery) waits here after stop_task().
+        """
+        await self._teardown_done.wait()
+
     def is_task_complete(self) -> bool:
         """
         Check if task has reached terminal state.
@@ -2806,6 +2834,7 @@ class Task(DAPBase):
             self._status.completed = False
             self._final_events_sent = False
             self._terminated_called = False
+            self._teardown_done = asyncio.Event()
             self._exit_event_seen = False
             self._service_up_notes = []
             self._service_down_notes = []
