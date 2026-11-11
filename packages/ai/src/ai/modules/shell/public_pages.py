@@ -256,15 +256,11 @@ async def load_published(
             continue
         if 'publicPages' not in manifest and 'site' not in manifest:
             continue
-        published_at = row.get('publishedAt') or row.get('updatedAt')
-        out.append(
-            Published(
-                app_id=app_id,
-                manifest=manifest,
-                dist_dir=dist_dir,
-                published_at=float(published_at) if isinstance(published_at, (int, float)) else None,
-            )
-        )
+        bound_at = row.get('publishedAt') or row.get('updatedAt')
+        published_at: Optional[float] = None
+        if isinstance(bound_at, (int, float)):
+            published_at = float(bound_at)
+        out.append(Published(app_id=app_id, manifest=manifest, dist_dir=dist_dir, published_at=published_at))
     return out
 
 
