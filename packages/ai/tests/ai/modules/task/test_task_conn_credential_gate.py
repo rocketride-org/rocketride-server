@@ -397,7 +397,7 @@ def _team_run(address, task_id):
         userId='',
         teamId='team-1',
         orgId='org-1',
-        task=SimpleNamespace(get_status=lambda: status),
+        task=SimpleNamespace(get_status=lambda: status, is_task_complete=lambda: False),
     )
 
 
