@@ -453,8 +453,18 @@ async def gate_errors(app_id: str, manifest: Mapping[str, Any], dist_dir: str, a
         return errors
     # The publishing app's own current version is being replaced: never read it.
     others = await load_published(acct, strict=True, exclude=app_id)
-    exact, _ = _claims(others, page_map.live_conflict)
+    exact, sites = _claims(others, page_map.live_conflict)
+    root = exact.get('/')
+    root_feeds = {}
+    if root is not None:
+        root_feeds = sites.get(root.app_id, {}).get('feeds', {})
     for page in pages:
+        for candidate in with_slash_twin(page.path):
+            if candidate in root_feeds:
+                errors.append(
+                    f'publicPages path {page.path!r} is a feed of the published app {root.app_id}; choose another path'
+                )
+                break
         owner = exact.get(page.path)
         if owner is not None:
             errors.append(
@@ -493,6 +503,18 @@ async def gate_errors(app_id: str, manifest: Mapping[str, Any], dist_dir: str, a
                 f'publicPages path {page.path!r}: snapshot {page.snapshot!r} is {info["size"]} bytes, over the '
                 f'{MAX_SNAPSHOT_BYTES}-byte limit; move images, styles and scripts into the build output and '
                 'reference them through {{assets}}'
+            )
+    images = [(f'publicPages path {page.path!r}: image', page.image) for page in pages]
+    if site is not None:
+        images.append(('site.image', site.get('image', '')))
+    for label, image in images:
+        if not image or image.startswith(('https://', '/')):
+            continue
+        try:
+            await artifact_file_info(f'{dist_dir}/{image}')
+        except StorageNotFoundError:
+            errors.append(
+                f'{label} {image!r} is not in the built version; emit it into the build output or drop the field'
             )
     return errors
 
