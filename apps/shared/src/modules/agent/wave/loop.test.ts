@@ -182,6 +182,37 @@ test('calls on one file in one wave run in planned order', async () => {
 	assert.deepEqual(events, ['start 0', 'write 0', 'start 1', 'write 1']);
 });
 
+test('a read planned after a write of the same file in one wave sees what the write wrote, and a read of another file runs alongside', async () => {
+	const pipe = 'pipelines/a.pipe';
+	const files = new Map([
+		[pipe, 'old'],
+		['guide.md', 'guide'],
+	]);
+	const guideRead = deferred();
+	// The write lands only once the read of guide.md has started, so a wave that held that read back would time the write out.
+	const write = stub('write_file', async ({ path, content }) => {
+		await guideRead.promise;
+		files.set(String(path), String(content));
+		return 'saved';
+	});
+	const read = stub('read_file', ({ path }) => {
+		if (path === 'guide.md') guideRead.resolve();
+		return files.get(String(path)) ?? 'File not found';
+	});
+	// Like the real tool, validate reads params[0].filepath while it prepares.
+	const client = prepared('rocketride_client', async ({ params }) => {
+		const text = files.get(String((params as Array<{ filepath: string }>)[0].filepath));
+		if (text === undefined) throw new Error('File not found');
+		return { run: async () => `validate: ${text}` };
+	});
+	const model = scriptedModel([plan(['write_file', { path: pipe, content: 'new' }], ['rocketride_client', { method: 'validate', params: [{ filepath: pipe }] }], ['read_file', { path: pipe }], ['read_file', { path: 'guide.md' }]), new Error('stop')]);
+	await loop(model, [write, read, client], { timeoutMs: () => 1000 });
+	assert.deepEqual(
+		resultsIn(model.questions[1]).map((entry) => entry.summary ?? entry.error),
+		['saved', 'validate: new', 'new', 'guide']
+	);
+});
+
 test('waiting for an OK never counts against the limit, and a refused call runs nothing, blocks done and is no change', async () => {
 	const ran: string[] = [];
 	const asking = (name: string): AgentTool =>
