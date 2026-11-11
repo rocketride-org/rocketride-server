@@ -1,5 +1,6 @@
 ---
 title: Production
+description: Guidance for running the RocketRide engine as a production workload. Deployment topology is the load-bearing decision today.
 ---
 
 # Production

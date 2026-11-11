@@ -1,5 +1,6 @@
 ---
 title: FAQ / Get Help
+description: Support questions opened as issues get converted to Discussions, so starting there is faster. Find where to ask questions and report problems.
 ---
 
 # Get Help

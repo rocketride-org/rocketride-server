@@ -1,6 +1,7 @@
 ---
 title: Document Extraction
 sidebar_position: 3
+description: Read files from the local file system, parse them into structured text, extract specific fields, and return structured JSON in a RocketRide pipeline.
 ---
 
 # Document Extraction

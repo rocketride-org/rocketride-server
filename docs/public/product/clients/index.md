@@ -1,5 +1,7 @@
 ---
-title: Client Libraries
+title: RocketRide Client Libraries
+sidebar_label: Overview
+description: Official client libraries for the RocketRide Engine. The TypeScript and Python clients talk to the server over DAP on WebSocket and offer the same capabilities.
 ---
 
 # RocketRide Client Libraries

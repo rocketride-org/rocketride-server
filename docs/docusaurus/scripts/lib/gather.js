@@ -17,6 +17,7 @@ const path = require('path');
 const { glob } = require('glob');
 const { exists, mkdir, rm, copyFile, writeFileEnsure, readFile, readDir, symlink } = require('../../../../scripts/lib');
 const { allDocIds, docTitles, isValidMount, mountSlots, NODES_DIR } = require('./spine');
+const { describeText } = require('./description');
 
 // A node's co-located doc is README.md when it carries the generated
 // markers (GitHub-standard naming); legacy READMEs without markers are ignored.
@@ -324,10 +325,10 @@ function frontMatterTitle(content) {
 }
 
 /**
- * First-sentence description for a markdown/MDX page, mirroring what Docusaurus
- * derives for its meta description. A front-matter `description:` wins when the
- * page declares one; otherwise the first prose paragraph is used, skipping MDX
- * imports, JSX, headings, code fences, tables and admonitions. Node pages get
+ * Description for a markdown/MDX page, the same text the meta description tag
+ * gets (see describeText in description.js). A front-matter `description:` wins
+ * when the page declares one; otherwise the first prose paragraph is used,
+ * skipping MDX imports, JSX, headings, code fences, tables and admonitions. Node pages get
  * their description from services*.json instead (see extractDescription).
  * @param {string} content - raw page content (md/mdx).
  * @return {string} description, or '' when the page has no leading prose.
@@ -379,13 +380,7 @@ function pageDescription(content) {
 		}
 		para.push(t);
 	}
-	const prose = para
-		.join(' ')
-		.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
-		.replace(/[*`_]/g, '')
-		.trim();
-	const m = /^(.+?[.!?])(\s|$)/.exec(prose);
-	return (m ? m[1] : prose).slice(0, 200).trim();
+	return describeText(para.join(' '));
 }
 
 /** First markdown heading, as a title fallback. */

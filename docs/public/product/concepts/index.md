@@ -1,6 +1,7 @@
 ---
 title: Understanding RocketRide
 sidebar_label: Understanding RocketRide
+description: RocketRide has a few moving parts. Once you know how they fit together, the rest of the docs map cleanly onto them.
 ---
 
 # Understanding RocketRide

@@ -15,6 +15,9 @@ const algolia = process.env.ALGOLIA_APP_ID && process.env.ALGOLIA_API_KEY ? { ap
 // `pnpm build` work standalone after a gather has run.
 const contentPath = process.env.ROCKETRIDE_DOCS_CONTENT || path.resolve(__dirname, 'content');
 
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { describePage } = require('./scripts/lib/description.js');
+
 const config: Config = {
 	title: 'RocketRide Documentation',
 	tagline: 'Build, run, and ship data + AI pipelines',
@@ -61,6 +64,17 @@ const config: Config = {
 	// bare `{` in hand-written node prose.
 	markdown: {
 		format: 'detect',
+		// Docusaurus takes the first source line of the first paragraph as the meta
+		// description, which cuts hard-wrapped paragraphs mid-sentence. Pages
+		// without a `description:` get one built from their whole first paragraph.
+		parseFrontMatter: async (params) => {
+			const result = await params.defaultParseFrontMatter(params);
+			if (!result.frontMatter.description) {
+				const description = describePage(result.content);
+				if (description) result.frontMatter.description = description;
+			}
+			return result;
+		},
 	},
 
 	i18n: {

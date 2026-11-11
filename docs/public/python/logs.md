@@ -1,5 +1,6 @@
 ---
-title: Run Logs
+title: Run Logs (client.log)
+sidebar_label: Run Logs
 sidebar_position: 8
 ---
 

@@ -35,9 +35,9 @@ describe('pageDescription', () => {
 		assert.equal(pageDescription('---\ntitle: T\ndescription: "Quoted."\n---\n\n# T\n\nProse.\n'), 'Quoted.');
 	});
 
-	it('falls back to the first prose sentence, skipping the heading', () => {
+	it('falls back to the first prose paragraph (as the meta description does), skipping the heading', () => {
 		const md = '---\ntitle: Hi\n---\n\n# Hi\n\nA pipeline is a graph. More after the stop.\n';
-		assert.equal(pageDescription(md), 'A pipeline is a graph.');
+		assert.equal(pageDescription(md), 'A pipeline is a graph. More after the stop.');
 	});
 
 	it('skips MDX imports and JSX to reach the prose', () => {
