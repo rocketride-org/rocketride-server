@@ -10,11 +10,9 @@
  * (pull, create, start, stop, remove) to DockerManager.
  *
  * Lifecycle:
- *   install()  → pull image + create + start container
- *   start()    → start existing container
- *   stop()     → stop running container
- *   update()   → pull new image + recreate container
- *   remove()   → stop + remove container + optionally remove image
+ *   start() → start existing container (reconciler path)
+ *   stop()  → detach (the container keeps running independently)
+ *   install/update/remove ride the static ioControl() (panel commands).
  */
 
 import * as fs from 'fs';
@@ -41,11 +39,6 @@ export class EngineDocker extends EngineBackend {
 	constructor(emitStatus: StatusEmitter) {
 		super(emitStatus);
 		this.dockerManager = new DockerManager();
-	}
-
-	/** The underlying DockerManager (for advanced status queries). */
-	getDockerManager(): DockerManager {
-		return this.dockerManager;
 	}
 
 	/** Path to docker-version.json in the system install dir. */
@@ -95,26 +88,6 @@ export class EngineDocker extends EngineBackend {
 	// =========================================================================
 
 	/**
-	 * Pulls the Docker image and starts a container.
-	 *
-	 * @param versionSpec - Image tag to pull (e.g., '3.2.0', 'latest', 'prerelease').
-	 */
-	async install(versionSpec: string, _config: ConnectionGroupConfig, _token?: vscode.CancellationToken): Promise<void> {
-		const imageTag = this.resolveImageTag(versionSpec);
-		const onProgress = (message: string) => this.emitStatus({ phase: 'working', message });
-
-		await this.dockerManager.install(imageTag, onProgress);
-		EngineDocker.writeVersionFile(imageTag);
-
-		this.emitStatus({
-			phase: 'ready',
-			message: 'Docker container running',
-			uri: `http://localhost:${CONTAINER_PORT}`,
-			version: imageTag,
-		});
-	}
-
-	/**
 	 * Starts an existing container if it's not already running.
 	 * Checks the actual Docker daemon state first.
 	 */
@@ -152,34 +125,6 @@ export class EngineDocker extends EngineBackend {
 	 */
 	async stop(): Promise<void> {
 		this.emitStatus({ phase: 'idle', message: 'Docker engine detached' });
-	}
-
-	/**
-	 * Pulls a new image and recreates the container.
-	 */
-	async update(versionSpec: string, _config: ConnectionGroupConfig, _token?: vscode.CancellationToken): Promise<void> {
-		const imageTag = this.resolveImageTag(versionSpec);
-		const onProgress = (message: string) => this.emitStatus({ phase: 'working', message });
-
-		await this.dockerManager.update(imageTag, onProgress);
-		EngineDocker.writeVersionFile(imageTag);
-
-		this.emitStatus({
-			phase: 'ready',
-			message: 'Docker container updated and running',
-			uri: `http://localhost:${CONTAINER_PORT}`,
-			version: imageTag,
-		});
-	}
-
-	/**
-	 * Stops and removes the container and image.
-	 */
-	async remove(): Promise<void> {
-		this.emitStatus({ phase: 'working', message: 'Removing container and image...' });
-		await this.dockerManager.remove(true);
-		EngineDocker.deleteVersionFile();
-		this.emitStatus({ phase: 'idle', message: 'Container removed' });
 	}
 
 	/** Re-emits the current status (ready with URI, or idle). */
@@ -223,33 +168,11 @@ export class EngineDocker extends EngineBackend {
 	}
 
 	// =========================================================================
-	// HELPERS
-	// =========================================================================
-
-	/**
-	 * Resolves a version spec to a Docker image tag.
-	 * 'prerelease' is looked up from the cached GHCR tag list.
-	 *
-	 * @param versionSpec - 'latest', 'prerelease', or a specific semver tag.
-	 * @returns The resolved Docker image tag.
-	 */
-	private resolveImageTag(versionSpec: string): string {
-		if (versionSpec === 'latest') return 'latest';
-		if (versionSpec === 'prerelease') {
-			const tag = cachedDockerTags.find((t) => t.includes('prerelease') || t.includes('-pre'));
-			if (!tag) throw new Error('No prerelease tags available. Try refreshing versions.');
-			return tag;
-		}
-		return versionSpec;
-	}
-
-	// =========================================================================
 	// STATIC ioControl — panel commands
 	// =========================================================================
 
 	/**
 	 * Resolves 'prerelease' to an actual GHCR tag from the global cache.
-	 * Static variant of resolveImageTag for use in ioControl (no instance).
 	 *
 	 * @param versionSpec - 'latest', 'prerelease', or a specific semver tag.
 	 * @returns The resolved Docker image tag.

@@ -6,15 +6,16 @@
 /**
  * EnvironmentProvider — thin shell wrapper around shared EnvironmentView.
  *
- * Owns all DAP fetching and auth wiring. Passes pure data and async
- * callbacks down to the host-agnostic EnvironmentView. Unlike the VS Code
- * wrapper, this page has direct access to the RocketRide client — no
- * postMessage bridge required.
+ * Owns all env fetching and auth wiring. Passes pure data and async
+ * callbacks down to the host-agnostic EnvironmentView. Engine access is
+ * the realm's own client (`client.account.getEnv/setEnv`), so the component
+ * is realm-agnostic — the realm client's requests ride the bus off-root.
  */
 
 import React, { useState, useCallback } from 'react';
 import { EnvironmentView } from '../modules/environment';
 import type { EnvironmentSlotConfig, EnvironmentScope } from '../modules/environment';
+import { savedEnv } from '../modules/account/components/envChanges';
 import { useShellConnection } from '../connection/ConnectionContext';
 import { useAuthUser } from '../hooks/useAuthUser';
 
@@ -32,7 +33,8 @@ import { useAuthUser } from '../hooks/useAuthUser';
  * of org/team scope cards its account backend would reject.
  */
 const EnvironmentProvider: React.FC = () => {
-	const { client, isConnected } = useShellConnection();
+	const { client: shellClient, isConnected } = useShellConnection();
+	const client = isConnected ? shellClient : null;
 	const authUser = useAuthUser();
 	const isSaas = (authUser?.capabilities ?? []).includes('saas');
 
@@ -84,9 +86,8 @@ const EnvironmentProvider: React.FC = () => {
 		(slotId: string, scope: EnvironmentScope, scopeId?: string) => {
 			if (!client) return;
 			const cacheKey = `${slotId}:${scope}:${scopeId ?? ''}`;
-			client.account
-				.getEnv(scope, scopeId)
-				.then((env: Record<string, string>) => {
+			client.account.getEnv(scope, scopeId)
+				.then((env) => {
 					setEnvs((prev) => ({ ...prev, [cacheKey]: env }));
 					setError(null);
 				})
@@ -101,19 +102,20 @@ const EnvironmentProvider: React.FC = () => {
 
 	// ── Save callback ───────────────────────────────────────────────────
 	/**
-	 * Persists env data for a scope and updates the local cache.
+	 * Persists env changes for a scope; the cache then holds the saved names,
+	 * each masked, so it never holds a typed value.
 	 *
 	 * @param slotId - Slot identifier (always 'default' in shell).
 	 * @param scope - Env scope: 'org', 'team', or 'user'.
-	 * @param env - The full env dict to save.
+	 * @param env - Names to set, delete (null) or keep (mask).
 	 * @param scopeId - Required for 'org' and 'team' scopes.
 	 */
 	const handleSaveEnv = useCallback(
-		async (slotId: string, scope: EnvironmentScope, env: Record<string, string>, scopeId?: string) => {
+		async (slotId: string, scope: EnvironmentScope, env: Record<string, string | null>, scopeId?: string) => {
 			if (!client) return;
 			await client.account.setEnv(scope, env, scopeId);
 			const cacheKey = `${slotId}:${scope}:${scopeId ?? ''}`;
-			setEnvs((prev) => ({ ...prev, [cacheKey]: env }));
+			setEnvs((prev) => ({ ...prev, [cacheKey]: savedEnv(env) }));
 		},
 		[client]
 	);

@@ -119,6 +119,22 @@ def exposes_public_endpoint(components: Iterable) -> bool:
     return any(isinstance(c, dict) and c.get('provider') in PUBLIC_SOURCE_PROVIDERS for c in components or ())
 
 
+def source_is_public(pipeline: Mapping | None, source: str | None) -> bool:
+    """True when the run's own source component is a public source.
+
+    This is what a run's ``pk_`` key may reach: the public endpoint the run
+    serves is its source's. Read from the pipeline as submitted. A literal
+    provider name has no ``${...}`` to expand, so it is the provider that
+    runs; a placeholder is not a public provider name and reads as not public.
+    """
+    if not isinstance(pipeline, Mapping) or not source:
+        return False
+    for component in pipeline.get('components') or ():
+        if isinstance(component, Mapping) and component.get('id') == source:
+            return component.get('provider') in PUBLIC_SOURCE_PROVIDERS
+    return False
+
+
 def _describe(scope: str, target: str) -> str:
     if scope == 'org':
         return 'the org database'

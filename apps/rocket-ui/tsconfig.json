@@ -30,6 +30,7 @@
 		"paths": {
 			"shared": ["../shared/src"],
 			"shared/*": ["../shared/src/*"],
+			"shell/src/*": ["../../packages/shell/src/*"],
 			"@/*": ["./src/*"],
 			"@components/*": ["./src/components/*"],
 			"@pages/*": ["./src/pages/*"],

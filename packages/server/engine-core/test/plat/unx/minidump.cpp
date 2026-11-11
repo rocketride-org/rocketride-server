@@ -167,18 +167,17 @@ TEST_CASE("crashpad") {
     }
 
     SECTION("clean exit writes no dump") {
-        auto before = dumpsIn(crashDir);
+        auto dir = std::filesystem::temp_directory_path() / "rr-crashdb-clean";
+        std::error_code ec;
+        std::filesystem::remove_all(dir, ec);
 
-        int status = runCrashChild("clean");
+        int status = runCrashChild("clean", dir.c_str());
         REQUIRE(WIFEXITED(status));
 
-        // The sweep runs only with dumps on; this process was started without
-        auto dumps = dev::Dumps.val();
-        util::Guard restoreDumps = [&] { dev::Dumps.setValue(dumps); };
-        dev::Dumps.setValue("true");
-        plat::minidumpSweep();
+        REQUIRE(dumpsIn(dir / "pending").empty());
+        REQUIRE(dumpsIn(dir / "completed").empty());
 
-        REQUIRE(dumpsIn(crashDir) == before);
+        std::filesystem::remove_all(dir, ec);
     }
 
     // The crash DB sits in world-writable temp, so anything the engine does not

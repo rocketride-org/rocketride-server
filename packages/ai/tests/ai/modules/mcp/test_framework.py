@@ -12,7 +12,7 @@ import pytest
 
 from ai.modules.mcp.errors import HardError, _bad, _extract_dap_failure, normalize_error
 from ai.modules.mcp.registry import TaskRegistry
-from ai.modules.mcp.tooling import ToolRegistry
+from ai.modules.mcp.tooling import ToolHints, ToolRegistry
 
 
 # --- errors.py -------------------------------------------------------------
@@ -186,6 +186,83 @@ def test_tool_registry_register_and_tools():
     assert tools[0].name == 'do_thing'
     assert tools[0].description == 'Does a thing'
     assert tools[0].input_schema == schema
+
+
+def _hints(**overrides):
+    fields = {'read_only': False, 'destructive': True, 'open_world': True, 'reason': 'r'}
+    return ToolHints(**{**fields, **overrides})
+
+
+def test_tool_registry_emits_annotations_from_hints():
+    registry = ToolRegistry()
+
+    @registry.register('do_thing', 'desc', {'type': 'object', 'properties': {}}, hints=_hints())
+    async def _handler(client, tasks, args):
+        return {'ok': True}
+
+    tool = registry.tools()[0]
+
+    assert tool.annotations.read_only_hint is False
+    assert tool.annotations.destructive_hint is True
+    assert tool.annotations.open_world_hint is True
+    assert tool.model_dump(by_alias=True, exclude_none=True)['annotations'] == {
+        'readOnlyHint': False,
+        'destructiveHint': True,
+        'openWorldHint': True,
+    }
+
+
+def test_tool_registry_emits_always_load_meta_and_merges_ui_meta():
+    registry = ToolRegistry()
+    schema = {'type': 'object', 'properties': {}}
+
+    @registry.register('both', 'desc', schema, ui_resource_uri='ui://x', always_load=True)
+    async def _both(client, tasks, args):
+        return {}
+
+    @registry.register('alone', 'desc', schema, always_load=True)
+    async def _alone(client, tasks, args):
+        return {}
+
+    both, alone = registry.tools()
+
+    assert both.meta == {'ui': {'resourceUri': 'ui://x'}, 'anthropic/alwaysLoad': True}
+    assert alone.meta == {'anthropic/alwaysLoad': True}
+
+
+def test_tool_registry_without_hints_emits_no_annotations_or_meta():
+    registry = ToolRegistry()
+
+    @registry.register('plain', 'desc', {'type': 'object', 'properties': {}})
+    async def _handler(client, tasks, args):
+        return {}
+
+    tool = registry.tools()[0]
+
+    assert tool.annotations is None
+    assert tool.meta is None
+
+
+def test_tool_hints_reject_read_only_and_destructive_together():
+    with pytest.raises(ValueError):
+        _hints(read_only=True, destructive=True)
+
+
+def test_tool_hints_require_a_reason():
+    with pytest.raises(ValueError):
+        _hints(reason='  ')
+
+
+def test_tool_registry_hints_lookup():
+    registry = ToolRegistry()
+    hints = _hints()
+
+    @registry.register('do_thing', 'desc', {'type': 'object', 'properties': {}}, hints=hints)
+    async def _handler(client, tasks, args):
+        return {}
+
+    assert registry.hints('do_thing') is hints
+    assert registry.hints('nope') is None
 
 
 def test_tool_registry_handler_returns_registered_fn():

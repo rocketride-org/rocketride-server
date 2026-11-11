@@ -1,0 +1,359 @@
+// =============================================================================
+// MIT License
+// Copyright (c) 2026 Aparavi Software AG
+// =============================================================================
+
+// =============================================================================
+// APP BUILDER OPS — the VS Code implementations of host.preview.*
+// =============================================================================
+//
+// The host half of the App Builder page (declared in
+// shared/ops/previewOps.ts): workspace file IO against the app's native
+// folder, the OS pickers, the dev-session inner loop, and the staged
+// sign-in. The page's SDK half rides the brokered `client.app.*` ops through
+// the shared adapter — never through here. AppScreenProvider keeps only the
+// panel lifecycle (tabs, HTML, feeds onto topics); every request/response
+// verb lives in this table.
+// =============================================================================
+
+import * as vscode from 'vscode';
+import * as path from 'path';
+import { ConnectionManager } from '../connection/connection';
+import { appIconDataUri, MAX_README_IMAGE_BYTES, scanWorkspaceApps } from 'shared/tools/appdev';
+import type { IScannedWorkspaceApp as ScannedApp } from 'shared/tools/appdev';
+import { hostWorkspaceFs } from '../providers/toolhost/hostWorkspaceFs';
+import { readAppListing, saveAppListing } from 'rocketride/app-pack';
+// Deep file imports (never the barrel — it drags the React view layer into
+// the extension-host bundle).
+import { runListingPreflight } from 'shared/tools/appdev/preflight';
+import { probePackage } from 'shared/tools/appdev/compatProbe';
+import { getDevSessionManager } from '../appdev/devSessionManager';
+import { deployApp } from '../appdev/publish';
+import { adoptDeveloperId } from '../appdev/adoptDeveloperId';
+import { getLogger } from '../shared/util/output';
+import { signInPreview } from '../auth/previewAuth';
+import { ConfigManager } from '../config';
+import { registerOpHandlers } from 'shell/src/ops/busOps';
+import type { IOpBus, OpImplTable } from 'shell/src/ops/busOps';
+import type { IRetainedRegistry } from 'shell/src/ops/retained';
+import type { PreviewHostOpMap, AppBuilderLoadPayload } from 'shared/ops/previewOps';
+
+/** Longest wait for each server check before a move: a silent server fails
+ *  the move instead of holding the request open. */
+const SERVER_CHECK_TIMEOUT_MS = 10_000;
+
+/** What the registration needs from the extension. */
+interface IAppBuilderOpsDeps {
+	context: vscode.ExtensionContext;
+	connectionManager: ConnectionManager;
+	/** The root's retained registry — the login op republishes the app's
+	 *  one-shot :session credential there. */
+	retained: IRetainedRegistry;
+}
+
+/**
+ * Registers the App Builder's host verbs.
+ *
+ * @param bus - The root's op bus.
+ * @param deps - See {@link IAppBuilderOpsDeps}.
+ * @returns Unregister-all function.
+ */
+export function registerVscodePreviewOps(bus: IOpBus, deps: IAppBuilderOpsDeps): () => void {
+	const { context, connectionManager, retained } = deps;
+
+	/** The app's workspace binding, or throws the standard unbound error. */
+	const resolveApp = async (appId: string): Promise<ScannedApp> => {
+		const apps = await scanWorkspaceApps(hostWorkspaceFs);
+		const app = apps.find((a) => a.id === appId);
+		if (!app) throw new Error(`App "${appId}" has no bound folder in this workspace.`);
+		return app;
+	};
+
+	/** Traversal-guarded absolute path for an app-folder-relative file. */
+	const resolveAppFile = (folder: string, relPath: string): string => {
+		const rel = String(relPath ?? '').replace(/^\.\//, '');
+		const abs = path.resolve(folder, ...rel.split('/'));
+		if (!abs.startsWith(path.resolve(folder) + path.sep)) {
+			throw new Error('Path escapes the app folder.');
+		}
+		return abs;
+	};
+
+	/**
+	 * Replaces the App Builder tab of a renamed app with one on its new id.
+	 * The tab's document (the folder's .rrapp trigger) keeps its path, so the
+	 * old tab must close first or VS Code would only reveal it. The old dev
+	 * server stops right away (not after the closed-panel linger) so the new
+	 * one gets the app's port.
+	 */
+	const reopenRenamed = async (folder: string, oldId: string, newId: string): Promise<void> => {
+		await getDevSessionManager()?.stop(oldId, { immediate: true });
+		const folderKey = vscode.Uri.file(folder).fsPath;
+		const tabs = vscode.window.tabGroups.all
+			.flatMap((group) => group.tabs)
+			.filter((tab) => tab.input instanceof vscode.TabInputCustom && tab.input.viewType === 'rocketride.appBuilder' && path.dirname(tab.input.uri.fsPath) === folderKey);
+		const document = tabs.length > 0 ? (tabs[0].input as vscode.TabInputCustom).uri : undefined;
+		const column = tabs.length > 0 ? tabs[0].group.viewColumn : undefined;
+		if (tabs.length > 0) await vscode.window.tabGroups.close(tabs);
+		if (document) {
+			// Same document, same editor column: it now resolves to the new id.
+			await vscode.commands.executeCommand('vscode.openWith', document, 'rocketride.appBuilder', column);
+		} else {
+			await vscode.commands.executeCommand('rocketride.app.open', newId);
+		}
+	};
+
+	/**
+	 * Builds the preview URL: the Development Mode engine's shell with the
+	 * app locked + dev hooks on. (The old `rocketride.appdev.shellUrl`
+	 * override was deleted 2026-10-26 — the shell dev loop deploys the
+	 * rebuilt shell to the connected server instead.)
+	 */
+	const buildPreviewUrl = (appId: string): string => {
+		const base = connectionManager.getHttpUrl?.() || 'http://localhost:5565';
+		// _ts busts the browser's cached index.html — the flavor picker lives
+		// in the html, and a stale copy silently serves the wrong shell flavor.
+		return `${base.replace(/\/$/, '')}/?appid=${encodeURIComponent(appId)}&rrdev=1&_ts=${Date.now()}`;
+	};
+
+	const impls: OpImplTable<PreviewHostOpMap> = {
+		'host.preview.load': async (p): Promise<AppBuilderLoadPayload> => {
+			const apps = await scanWorkspaceApps(hostWorkspaceFs);
+			const app = apps.find((a) => a.id === p.app);
+			return {
+				app: {
+					id: p.app,
+					moduleId: app?.moduleId ?? p.app.replace(/[.-]/g, '_'),
+					name: app?.name ?? p.app,
+					version: app?.version,
+					description: app?.description,
+					// Workspace-bound with no server record = 'local'; server
+					// statuses (draft/pending/...) arrive with the marketplace
+					// wiring (M5).
+					status: 'local',
+				},
+				previewUrl: buildPreviewUrl(p.app),
+				// VSCode variant: files are native, F5 debug removed 2026-10-16.
+				// hasReviewLadder mirrors the server's account backend: only a
+				// server declaring 'oss' publishes @public directly;
+				// unknown/disconnected keeps the gated default.
+				capabilities: {
+					hasNativeFiles: true,
+					canDebug: false,
+					hasReviewLadder: !(connectionManager.getClient()?.getAccountInfo()?.capabilities ?? []).includes('oss'),
+				},
+			};
+		},
+
+		'host.preview.restart': async (p) => {
+			// Preview Reload = full inner-loop reset: kill the dev server, pnpm
+			// install (package.json may have changed), fresh rsbuild dev. The
+			// new server's first successful build triggers the preview reload.
+			const app = await resolveApp(p.app);
+			await getDevSessionManager()?.restart(app);
+		},
+
+		'host.preview.reveal': async (p) => {
+			const app = await resolveApp(p.app);
+			await vscode.commands.executeCommand('revealInExplorer', vscode.Uri.file(app.folder));
+		},
+
+		'host.preview.login': async (p) => {
+			// PREVIEW-SCOPED sign-in: its own PKCE round trip through the
+			// system browser (loopback redirect, the CLI's native client) —
+			// the EXTENSION's session is never read, written, or replaced.
+			// A developer testing their app's sign-in can use any account,
+			// repeatedly, while this window stays signed in as themselves.
+			// The minted session key travels ONLY down this app's retained
+			// :session lane (one-shot — the consuming page retracts after
+			// applying, the pipeline oauth pattern); the preview shell keeps
+			// it frame-local, so preview sign-in/out and window sign-in/out
+			// stay fully independent.
+			try {
+				const token = await signInPreview(ConfigManager.getInstance().getEffectiveCloudUrl());
+				if (token) retained.publish(`preview:app:${p.app}:session`, { token, source: 'preview' });
+			} catch (err) {
+				// Abandoned or rejected — the preview keeps its prompt.
+				getLogger().output(`[appdev] preview sign-in did not complete: ${err}`);
+			}
+		},
+
+		'host.preview.deploy': async (p) => {
+			// DEPLOY = zip the app folder from disk and upload it as the next
+			// immutable registry version (the server builds the one true bundle).
+			await deployApp(p.app, String(p.message ?? ''));
+		},
+
+		'host.preview.loadListing': async (p) => {
+			// The listing IS the appManifest — read it from disk.
+			const apps = await scanWorkspaceApps(hostWorkspaceFs);
+			const scanned = apps.find((a) => a.id === p.app);
+			return scanned ? readAppListing(scanned.folder) : null;
+		},
+
+		'host.preview.saveListing': async (p) => {
+			// Persist the listing back into package.json (files are truth; the
+			// next deploy packs it as metadata.manifest).
+			const app = await resolveApp(p.app);
+			saveAppListing(app.folder, p.draft);
+		},
+
+		'host.preview.adoptDeveloperId': async (p) => {
+			// The checks and the rewrite live in adoptDeveloperId (tested);
+			// this wires them to the server, the workspace and the editor.
+			const client = connectionManager.getClient();
+			if (!client) throw new Error('Not connected to server');
+			const result = await adoptDeveloperId(p.app, p.developerId, {
+				developerStatus: async () => (await client.call<{ developerId?: string | null } | undefined>('rrext_deploy_app', { subcommand: 'developer_status' }, { timeout: SERVER_CHECK_TIMEOUT_MS }))?.developerId ?? '',
+				versionsOf: async (appId) => (await client.call<{ versions?: unknown[] } | undefined>('rrext_deploy_app', { subcommand: 'versions', appId }, { timeout: SERVER_CHECK_TIMEOUT_MS }))?.versions?.length ?? 0,
+				scan: () => scanWorkspaceApps(hostWorkspaceFs),
+				dirtyPaths: (paths) => {
+					const keys = paths.map((f) => vscode.Uri.file(f).fsPath);
+					return vscode.workspace.textDocuments.filter((d) => d.isDirty && keys.includes(d.uri.fsPath)).map((d) => d.uri.fsPath);
+				},
+			});
+			for (const line of result.changes) getLogger().output(`[appdev] ${line}`);
+			// After this reply: the panel that asked is the one being replaced.
+			setTimeout(() => {
+				reopenRenamed(result.folder, p.app, result.appId).catch((err) => {
+					void vscode.window.showErrorMessage(`The app is now ${result.appId}, but the App Builder could not reopen: ${err instanceof Error ? err.message : String(err)}`);
+				});
+			}, 0);
+			return { appId: result.appId };
+		},
+
+		'host.preview.preflight': async (p) => {
+			// The SHARED tiered readiness bar (one implementation for every
+			// host), fed with this host's IO: native-fs existence + the
+			// dependency compat probe (Node fetch) — closes the gap where a
+			// Node-only dep would survive to deploy from VSCode.
+			const apps = await scanWorkspaceApps(hostWorkspaceFs);
+			const scanned = apps.find((a) => a.id === p.app);
+			if (!scanned) {
+				return runListingPreflight(null, { fileExists: async () => false });
+			}
+			const listing = readAppListing(scanned.folder);
+			const wsRoot = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(scanned.folder))?.uri;
+			// Declared runtime deps for the compat rows.
+			let dependencies: Record<string, string> = {};
+			try {
+				const pkgBytes = await vscode.workspace.fs.readFile(vscode.Uri.joinPath(vscode.Uri.file(scanned.folder), 'package.json'));
+				dependencies = (JSON.parse(Buffer.from(pkgBytes).toString('utf8')) as { dependencies?: Record<string, string> }).dependencies ?? {};
+			} catch { /* unreadable package.json — the manifest row already failed */ }
+			return runListingPreflight(listing, {
+				fileExists: async (rel) => {
+					try {
+						await vscode.workspace.fs.stat(vscode.Uri.joinPath(vscode.Uri.file(scanned.folder), ...rel.replace(/^\.\//, '').split('/')));
+						return true;
+					} catch {
+						return false;
+					}
+				},
+				includeExists: async (entry) => {
+					try {
+						if (!wsRoot) return false;
+						await vscode.workspace.fs.stat(vscode.Uri.joinPath(wsRoot, ...entry.split('/')));
+						return true;
+					} catch {
+						return false;
+					}
+				},
+				dependencies,
+				// Bounded fetches — without a timeout one hung module-source
+				// request stalls the whole readiness bar.
+				probeDependency: (name, range) => probePackage({
+					name,
+					version: range,
+					fetchText: async (url) => {
+						const response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+						return { ok: response.ok, status: response.status, text: response.ok ? await response.text() : '' };
+					},
+				}),
+			});
+		},
+
+		'host.preview.pickAppFile': async (p) => {
+			// Native picker for a manifest asset (icon/readme). The result is
+			// APP-FOLDER-relative: the server's harvest only copies
+			// app-root-relative paths, so a pick outside the app folder is
+			// refused, not silently accepted.
+			const app = await resolveApp(p.app);
+			const picked = await vscode.window.showOpenDialog({
+				canSelectMany: false,
+				defaultUri: vscode.Uri.file(app.folder),
+				openLabel: 'Select',
+				// Every format the icon reader inlines (ICON_MEDIA_TYPES), not
+				// SVG alone — the manifest and the overlay registration accept
+				// all of them.
+				filters: p.kind === 'icon' ? { Icon: ['svg', 'png', 'jpg', 'jpeg', 'gif', 'webp'] } : { Markdown: ['md'] },
+			});
+			if (!picked || picked.length === 0) return null;
+			const rel = path.relative(app.folder, picked[0].fsPath);
+			if (rel.startsWith('..') || path.isAbsolute(rel)) {
+				throw new Error('The file must live inside the app folder. The deploy only packs (and the server only serves) app-relative assets.');
+			}
+			return `./${rel.split(path.sep).join('/')}`;
+		},
+
+		'host.preview.pickIncludePath': async (p) => {
+			// Native picker for an include path — a workspace FOLDER or FILE.
+			// The result is WORKSPACE-relative (include entries pack from the
+			// workspace root, unlike app-relative assets). The native dialog
+			// cannot offer files and folders TOGETHER on Windows/Linux (macOS
+			// only), so a QuickPick asks which kind first.
+			const app = await resolveApp(p.app);
+			const wsRoot = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(app.folder))?.uri;
+			if (!wsRoot) throw new Error('The app folder is not inside an open workspace folder.');
+			const choice = await vscode.window.showQuickPick(
+				[
+					{ label: 'Folder', description: 'include a whole directory' },
+					{ label: 'File', description: 'include a single file' },
+				],
+				{ placeHolder: 'Include a folder or a single file?' }
+			);
+			if (!choice) return null;
+			const wantFolder = choice.label === 'Folder';
+			const picked = await vscode.window.showOpenDialog({
+				canSelectMany: false,
+				canSelectFiles: !wantFolder,
+				canSelectFolders: wantFolder,
+				defaultUri: wsRoot,
+				openLabel: 'Select',
+			});
+			if (!picked || picked.length === 0) return null;
+			const rel = path.relative(wsRoot.fsPath, picked[0].fsPath);
+			if (rel.startsWith('..') || path.isAbsolute(rel)) {
+				throw new Error('The path must live inside the workspace. Include paths are workspace-relative and packed from the workspace root.');
+			}
+			// The workspace root itself would pack the entire workspace into
+			// every deploy — an include entry names something in it.
+			if (!rel) throw new Error('Select a folder inside the workspace, not the workspace root itself.');
+			return rel.split(path.sep).join('/');
+		},
+
+		'host.preview.readTextFile': async (p) => {
+			// One app-folder-relative text file for preview (icon SVG, README
+			// markdown). Traversal-guarded and size-capped.
+			const app = await resolveApp(p.app);
+			const abs = resolveAppFile(app.folder, p.relPath);
+			// Stat BEFORE reading: the manifest can name an arbitrarily large
+			// file, and checking byteLength after the read means the whole
+			// thing is already in memory by then.
+			const stat = await vscode.workspace.fs.stat(vscode.Uri.file(abs));
+			if (stat.size > 512 * 1024) throw new Error('File is over the 512KB preview limit.');
+			const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(abs));
+			return Buffer.from(bytes).toString('utf8');
+		},
+
+		'host.preview.readImage': async (p) => {
+			// One app-folder-relative image as a data: URI — README images are
+			// binary, so the text-read path would corrupt them. Reuses the icon
+			// inliner with the README size budget.
+			const app = await resolveApp(p.app);
+			const abs = resolveAppFile(app.folder, p.relPath);
+			return (await appIconDataUri(hostWorkspaceFs, abs, MAX_README_IMAGE_BYTES)) ?? null;
+		},
+	};
+
+	return registerOpHandlers<PreviewHostOpMap>(bus, impls);
+}

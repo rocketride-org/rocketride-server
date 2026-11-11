@@ -102,7 +102,7 @@ surface (`rocketride/drizzle`), plus a deprecated Sequelize binding.
 
 | Method | Signature | Description |
 | --- | --- | --- |
-| `database.query` | `async def query(*, token, sql, node_id='', session_id='', params=None) -> dict` | Execute raw SQL or Cypher through the pipeline's `execute` tool function; `params` is a positional list for SQL nodes, or a dict keyed by placeholder name for the `rocketride_graph` and `graph_neo4j` nodes (`graph_falkordb` rejects params); returns `{rows, affected_rows}`. |
+| `database.query` | `async def query(*, token, sql, node_id='', session_id='', params=None) -> dict` | Execute raw SQL or Cypher through the pipeline's `execute` tool function; `params` is a positional list for SQL nodes, or a dict keyed by placeholder name for the graph nodes (`rocketride_graph`, `graph_neo4j`, `graph_falkordb`); returns `{rows, affected_rows}`, plus `truncated: True` from `graph_falkordb` when it saved a write but cut its rows, at `max_execute_rows` or at the server's `RESULTSET_SIZE`. |
 | `database.begin_transaction` | `async def begin_transaction(*, token, node_id='') -> dict` | Open a transaction (`begin` tool function); returns `{session_id}`. |
 | `database.commit` | `async def commit(*, token, session_id, node_id='') -> dict` | Commit the open transaction. |
 | `database.rollback` | `async def rollback(*, token, session_id, node_id='') -> dict` | Roll back the open transaction. |
@@ -172,19 +172,18 @@ Two raw DAP commands carry this surface (call via
 
 - **`rrext_deploy_app`** — the developer-account + review verbs (claiming a
   developerId is a deploy PREREQUISITE, not a marketplace action): the
-  `developer_*` family, `submit`, and `register_dev`.
+  `developer_*` family and `submit`.
 - **`rrext_app`** — the pure marketplace: browse (`list`/`get`/`list_mine`),
   install (`desktop_add`/`desktop_remove`), admin review (`admin_*`), and
   pricing (`pricing_*`).
 
-Grouped families (the `developer_*`/`submit`/`register_dev` rows are on
+Grouped families (the `developer_*`/`submit` rows are on
 `rrext_deploy_app`; the rest on `rrext_app`):
 
 | Subcommand family | Subcommands | Guard | Purpose |
 | ----------------- | ----------- | ----- | ------- |
 | developer_* | `developer_register` · `developer_stripe` · `developer_dashboard` · `developer_status` | org.admin (register) | Claim the org's developer id slug + Stripe Connect onboarding. |
-| submit | `submit` | developer org + namespace | Submit a deployed version for review — flips the DEPLOYMENT `private` → `submit`. |
-| register_dev | `register_dev` | self | Per-user live dev overlay (App Builder hot-reload); OSS-capable. |
+| submit | `submit` · `withdraw` · `reply` | developer org + namespace | Submit a deployed version for review (flips the DEPLOYMENT `private` → `submit`), cancel a pending review, or append a developer message to the review thread. |
 | catalog | `list` · `get` · `list_mine` · `desktop_add` · `desktop_remove` | authenticated | Browse reachable apps, the developer's own rail view, and desktop membership. |
 | admin_* | `admin_queue` · `admin_approve` · `admin_reject` · `admin_reply` · `admin_reseed` | sys.admin | Store review over the DEPLOYMENTS: the queue is deployments in `submit`; `admin_approve(appId, version)` → `ready`, `admin_reject(appId, version)` → `rejected`. |
 | pricing_* | `pricing_list` · `pricing_create` · `pricing_delete` | developer org | Manage Stripe price tiers for a monetized app. |

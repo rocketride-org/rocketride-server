@@ -10,6 +10,11 @@
 </p>
 
 <p>
+  <a href="https://trendshift.io/repositories/37651?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-37651" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/37651/daily" alt="rocketride-org/rocketride-server: Repository Of The Day on Trendshift" width="250" height="55"/></a>&nbsp;&nbsp;
+  <a href="https://trendshift.io/repositories/37651?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-37651" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/37651/daily?language=C%2B%2B" alt="rocketride-org/rocketride-server: C++ Repository Of The Day on Trendshift" width="250" height="55"/></a>
+</p>
+
+<p>
 <img src="docs/public/assets/icon-cpp.png" alt="C++" />&nbsp;&nbsp;
 <img src="docs/public/assets/icon-python.png" alt="Python" />&nbsp;&nbsp;
 <img src="docs/public/assets/icon-typescript.png" alt="TypeScript" />
@@ -69,7 +74,7 @@ _Drop pipelines into any Python or TypeScript app with a few lines of code, no i
 
 | Feature                           | Description                                                                                                                                                                                                                          |
 | :-------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Visual Pipeline Builder**       | Drag, connect, and configure nodes in VS Code, no boilerplate. Real-time observability tracks token usage, LLM calls, latency, and execution. Pipelines are portable JSON, version-controllable, shareable, and runnable anywhere. |
+| **Rocket Builder**                | Drag, connect, and configure nodes visually, no boilerplate. Real-time observability tracks token usage, LLM calls, latency, and execution. Pipelines are portable JSON, version-controllable, shareable, and runnable anywhere. |
 | **High-Performance C++ Runtime**  | Native multithreading purpose-built for the throughput demands of AI and data workloads. No bottlenecks, no compromises for production scale.                                                                                        |
 | **100+ Pipeline Nodes**           | 15+ LLM providers, 9 vector databases, OCR, NER, PII anonymization, chunking strategies, embedding models, and more. All nodes are Python-extensible, build and publish your own.                                                    |
 | **Multi-Agent Workflows**         | Built-in CrewAI and LangChain support. Chain agents, share memory across pipeline runs, and manage multi-step reasoning at scale.                                                                                                    |
