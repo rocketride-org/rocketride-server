@@ -37,8 +37,11 @@ stream.
 
 ### Processing and output
 
-Inputs whose MIME type is not `image/png` are opened with Pillow, converted to
-RGBA, and saved as PNG. The cleanup stages then decode the PNG with OpenCV,
+Inputs whose MIME type is not `image/png` (as well as PNG inputs carrying a
+non-default EXIF orientation) are opened with Pillow, transposed to upright
+orientation when possible (preserving original orientation if transposition
+fails), converted to RGBA, and saved as PNG; unoriented PNG inputs pass through
+without re-encoding. The cleanup stages then decode the PNG with OpenCV,
 convert it to grayscale, apply a 5×5 Gaussian blur and CLAHE contrast
 enhancement (clip limit 2.0; 8×8 tile grid), deskew it, and apply morphological
 closing with a 2×2 kernel. The output is therefore a grayscale `image/png`.
@@ -77,6 +80,7 @@ _No configuration fields._
 ## Dependencies
 
 - `pillow`
+- `pillow-heif`
 
 ## Source
 

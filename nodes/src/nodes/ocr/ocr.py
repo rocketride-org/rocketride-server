@@ -29,10 +29,18 @@ Supports EasyOCR, DocTR, Surya, and TrOCR engines.
 """
 
 import io
+import sys
 from typing import Any, Dict, List
 
 import numpy as np
 from PIL import Image
+
+try:
+    import pillow_heif
+
+    pillow_heif.register_heif_opener()
+except ImportError:
+    pass
 
 from ai.common.reader import ReaderBase
 from ai.common.config import Config
@@ -223,9 +231,19 @@ class Reader(ReaderBase):
             pil_image.save(buffer, format='PNG')
             return buffer.getvalue()
 
-        if isinstance(image_data, Image.Image):
+        pil_image_types = (Image.Image,)
+        if 'PIL.Image' in sys.modules and hasattr(sys.modules['PIL.Image'], 'Image'):
+            pil_image_types = (Image.Image, sys.modules['PIL.Image'].Image)
+
+        if isinstance(image_data, pil_image_types) or (hasattr(image_data, 'save') and hasattr(image_data, 'mode')):
+            try:
+                from PIL import ImageOps
+
+                pil_image = ImageOps.exif_transpose(image_data) or image_data
+            except Exception:
+                pil_image = image_data
             buffer = io.BytesIO()
-            image_data.save(buffer, format='PNG')
+            pil_image.save(buffer, format='PNG')
             return buffer.getvalue()
 
         raise TypeError(

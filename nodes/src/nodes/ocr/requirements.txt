@@ -9,4 +9,5 @@
 #
 img2table
 pillow
+pillow-heif
 numpy

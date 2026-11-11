@@ -286,7 +286,20 @@ def image_dims(image_bytes: Optional[bytes]) -> tuple:
         import io
         from PIL import Image
 
+        try:
+            import pillow_heif
+
+            pillow_heif.register_heif_opener()
+        except ImportError:
+            pass
+
         with Image.open(io.BytesIO(image_bytes)) as img:
+            try:
+                exif = img.getexif()
+                if exif.get(0x0112) in (5, 6, 7, 8):
+                    return img.height, img.width
+            except Exception:
+                pass
             return img.width, img.height
     except Exception:
         return None, None
