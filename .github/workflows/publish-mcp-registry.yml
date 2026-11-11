@@ -1,0 +1,78 @@
+name: Publish to MCP Registry
+
+# Manual only. Publishes server.json to the official MCP Registry
+# (registry.modelcontextprotocol.io) using GitHub OIDC; no secret is stored.
+# Runs in the `release` environment (same as n8n-nodes-release.yml and
+# release.yaml) and only from the default branch, so a contributor branch
+# cannot publish its own server.json. Registry versions are immutable: bump
+# the version in package.json before each run, or the publish step fails.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish server.json
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      id-token: write # Required for OIDC authentication
+      contents: read
+    env:
+      MCP_PUBLISHER_VERSION: v1.8.1
+
+    steps:
+      - name: Guard - publish only from develop
+        run: |
+          if [ "$GITHUB_REF" != "refs/heads/develop" ]; then
+            echo "::error::Publish must run from the develop branch."
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Download and verify mcp-publisher
+        run: |
+          set -euo pipefail
+          os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+          arch="$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
+          archive="mcp-publisher_${os}_${arch}.tar.gz"
+          base_url="https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}"
+
+          curl --fail --location --silent --show-error --output "$archive" "$base_url/$archive"
+          curl --fail --location --silent --show-error --output "$archive.sigstore.json" "$base_url/$archive.sigstore.json"
+          cosign verify-blob \
+            --bundle "$archive.sigstore.json" \
+            --certificate-identity "https://github.com/modelcontextprotocol/registry/.github/workflows/release.yml@refs/tags/${MCP_PUBLISHER_VERSION}" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "$archive"
+          tar xzf "$archive" mcp-publisher
+          rm -f "$archive" "$archive.sigstore.json"
+
+      - name: Set server.json version from package.json
+        run: |
+          set -euo pipefail
+          version="$(jq -r '.version // empty' package.json)"
+          if [ -z "$version" ]; then
+            echo "package.json has no version" >&2
+            exit 1
+          fi
+          jq --arg v "$version" '.version = $v' server.json > server.json.tmp
+          mv server.json.tmp server.json
+
+      - name: Validate server.json
+        run: ./mcp-publisher validate
+
+      - name: Authenticate to MCP Registry
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish server to MCP Registry
+        run: ./mcp-publisher publish
