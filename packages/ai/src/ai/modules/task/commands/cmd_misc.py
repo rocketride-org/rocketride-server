@@ -123,24 +123,17 @@ def _can_validate_echo(pipeline: Dict[str, Any]) -> bool:
         config = component.get('config')
         if not isinstance(config, dict):
             return False
-        if any(key in config and not isinstance(config[key], str) for key in ('profile', 'type')):
+        if 'type' in config and not isinstance(config['type'], str):
             return False
-        sections = []
-        if 'parameters' in config:
-            sections.append(config['parameters'])
-        profile = config.get('profile')
-        if profile in config:
-            sections.append(config[profile])
-        for section in sections:
-            if not isinstance(section, dict):
+        # The engine keeps the encrypted section at the config root, the root
+        # of the path-addressed stored tree, so that is the one place to screen
+        if 'secureParameters' in config:
+            parameters = config['secureParameters']
+            if not isinstance(parameters, dict) or not isinstance(parameters.get('token'), str):
                 return False
-            if 'secureParameters' in section:
-                parameters = section['secureParameters']
-                if not isinstance(parameters, dict) or not isinstance(parameters.get('token'), str):
-                    return False
-                fields = parameters.get('secure')
-                if not isinstance(fields, list) or not all(isinstance(field, str) for field in fields):
-                    return False
+            fields = parameters.get('secure')
+            if not isinstance(fields, list) or not all(isinstance(field, str) for field in fields):
+                return False
         for key, fields in (('input', ('lane', 'from')), ('control', ('classType', 'from'))):
             if key not in component:
                 continue

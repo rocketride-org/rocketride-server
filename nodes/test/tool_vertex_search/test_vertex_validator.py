@@ -117,6 +117,8 @@ def test_a_missing_google_auth_is_reported_not_mistaken_for_a_bad_key(validator,
         raise AssertionError('the helper must not run without google-auth')
 
     monkeypatch.setattr(gcp_auth, 'get_gcp_credentials', boom)
+    # The config checks that need no google-auth still run first, so the key must parse
+    instance.config['serviceAccountKey'] = '{"type": "service_account"}'
     instance.validateConfig()
     assert len(warnings) == 1 and warnings[0].startswith('Credential check skipped: google-auth is not installed')
 
@@ -133,6 +135,7 @@ def test_a_missing_google_parent_package_is_also_a_skipped_check(validator, monk
     monkeypatch.setattr(
         gcp_auth, 'get_gcp_credentials', lambda *a, **k: (_ for _ in ()).throw(AssertionError('must not run'))
     )
+    instance.config['serviceAccountKey'] = '{"type": "service_account"}'
     instance.validateConfig()
     assert len(warnings) == 1 and warnings[0].startswith('Credential check skipped: google-auth is not installed')
 

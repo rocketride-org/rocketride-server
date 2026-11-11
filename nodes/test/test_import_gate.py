@@ -107,8 +107,9 @@ def probe_report() -> Dict[str, Dict[str, object]]:
         tail = run.stdout[-1500:] + '\n' + run.stderr[-1500:]
         pytest.fail(f'import gate probe failed (exit {run.returncode}):\n{tail}')
     try:
-        report = json.loads(run.stdout)
-    except ValueError:
+        # The report is the probe's last stdout line (engine status lines may precede it)
+        report = json.loads(run.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
         tail = run.stdout[-1500:] + '\n' + run.stderr[-1500:]
         pytest.fail(f'import gate probe printed no report:\n{tail}')
     missing = sorted(set(PACKAGES) - set(report))
