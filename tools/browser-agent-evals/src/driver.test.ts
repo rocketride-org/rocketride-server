@@ -157,6 +157,11 @@ test('the scrubber leaves a task id that merely contains sk- alone', () => {
 	assert.equal(s.scrub(`key "${FAKE_OPENAI}"`), 'key "[redacted]"');
 });
 
+test('the scrubber blanks an AWS key ID it does not hold', () => {
+	const awsId = `AKIA${'0'.repeat(16)}`;
+	assert.equal(new Scrubber([]).scrub(`id ${awsId} end`), 'id [redacted] end');
+});
+
 test('findLeaks finds a held key, whole or cut short, by name only', () => {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'leaks-'));
 	fs.mkdirSync(path.join(dir, 'final'));

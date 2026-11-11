@@ -110,8 +110,8 @@ export function syntheticVariables(names: string[]): Record<string, string> {
 // SCRUB: what may be written to disk or printed
 // =============================================================================
 
-/** Strings shaped like provider keys. */
-const KEY_SHAPES = [/(?<![A-Za-z0-9_-])sk-ant-[A-Za-z0-9_-]{8,}/g, /(?<![A-Za-z0-9_-])sk-(?:proj-)?[A-Za-z0-9_-]{16,}/g, /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g];
+/** Strings shaped like provider keys, blanked here and by evidence.ts's Scrubber; a shape must start a token, so a task id such as ask-01-which-vector-db is not one. */
+export const KEY_SHAPES = [/(?<![A-Za-z0-9_-])sk-ant-[A-Za-z0-9_-]{8,}/g, /(?<![A-Za-z0-9_-])sk-(?:proj-)?[A-Za-z0-9_-]{16,}/g, /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g];
 
 /**
  * Blanks every key-shaped string in a text, so a key that leaked into an

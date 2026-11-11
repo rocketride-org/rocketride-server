@@ -35,6 +35,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { KEY_SHAPES } from './canary';
+
 /** A key the runner holds: its name, and its value, which nothing prints. */
 export interface HeldKey {
 	name: string;
@@ -85,9 +87,6 @@ export function readModelKeys(file: string): HeldKey[] {
 	if (missing.length) throw new Error(`${missing.join(' and ')} ${missing.length > 1 ? 'are' : 'is'} missing or empty in ${file}`);
 	return MODEL_KEYS.map((k) => ({ name: k.variable, value: values.get(k.source) as string }));
 }
-
-/** Key shapes to blank even when the runner does not hold the key; a shape must start a token, so a task id such as ask-01-which-vector-db is not one (canary.ts KEY_SHAPES). */
-const KEY_SHAPES = [/(?<![A-Za-z0-9_-])sk-ant-[A-Za-z0-9_-]{8,}/g, /(?<![A-Za-z0-9_-])sk-(?:proj-)?[A-Za-z0-9_-]{16,}/g];
 
 /**
  * A ROCKETRIDE_ variable whose name says it holds settings, not a secret: the
@@ -182,7 +181,7 @@ export class Scrubber {
 
 	/**
 	 * @param text - Text bound for an evidence file.
-	 * @returns The text with each held value replaced by its name, and other key shapes blanked.
+	 * @returns The text with each held value replaced by its name, and other key shapes (canary.ts KEY_SHAPES) blanked even when the runner does not hold the key.
 	 */
 	scrub(text: string): string {
 		let out = text;

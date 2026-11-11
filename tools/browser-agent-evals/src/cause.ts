@@ -59,8 +59,8 @@ const NOT_FAILED = new Set(['pass', 'pending']);
 /** A run error that comes from the engine's own install, not from the pipeline the agent wrote. */
 const ENGINE_INSTALL = /No module named|ModuleNotFoundError|ImportError|incompatible Protobuf|cannot open shared object/i;
 
-/** Error text that a provider or the model path produces, not the agent. */
-const PROVIDER_ERROR = /\*\*LLM error\*\*|\b(401|403|429|500|502|503|529)\b|unauthori[sz]ed|invalid[ _-]?api[ _-]?key|authentication|rate[ _-]?limit|overloaded|quota|could not be reached|not_found_error|ModelNotFound|Profile .* is not defined/i;
+/** Error text that a provider or the model path produces, not the agent. A pipeline the agent runs reports its own errors (**LLM error**, an undefined profile), so those are not here. */
+const PROVIDER_ERROR = /\b(401|403|429|500|502|503|529)\b|unauthori[sz]ed|invalid[ _-]?api[ _-]?key|authentication|rate[ _-]?limit|overloaded|quota|could not be reached|not_found_error|ModelNotFound/i;
 
 /**
  * The label of a graded trial, or null when it did not fail.
@@ -79,7 +79,7 @@ export function causeOf(result: TrialResult, record: BrowserTrialRecord, knownGo
 	const broken = result.checks.find((c) => c.status === 'fail' && ENGINE_INSTALL.test(c.detail));
 	if (broken) return { label: 'environment', evidence: `check ${broken.id} failed inside the engine: ${broken.detail.slice(0, 200)}`, ...kg };
 	const turn = record.turns.at(-1)?.result;
-	const errorText = [turn?.error ?? '', record.turns.at(-1)?.finalText ?? ''].join('\n');
-	if (turn?.outcome === 'failed' && PROVIDER_ERROR.test(errorText)) return { label: 'environment', evidence: `the turn failed with a provider error: ${(turn.error ?? '').slice(0, 200)}`, ...kg };
+	// the turn's error only: the answer may quote any error while explaining it
+	if (turn?.outcome === 'failed' && PROVIDER_ERROR.test(turn.error ?? '')) return { label: 'environment', evidence: `the turn failed with a provider error: ${(turn.error ?? '').slice(0, 200)}`, ...kg };
 	return { label: 'agent', evidence: `${result.status}: ${result.why.slice(0, 200)}${knownGood ? `; the known-good call to ${knownGood.model} answered in ${knownGood.seconds}s` : ''}`, ...kg };
 }

@@ -39,6 +39,7 @@
  *
  * A check that names a path the workspace does not have reads the one added
  * file that fits instead (resolve.ts), and the result lists the substitution.
+ * A scope glob with no wildcard is such a path: it also allows that file.
  */
 
 import { fnmatch, pointerGet, pyRegex, secretViolations, staticErrors, type Component, type Verdict } from './score';
@@ -53,10 +54,13 @@ import type { CheckResult, CheckStatus, RunStatus, ScenarioResult, ValidateResul
 export const KEYS_CHECK = 'keys-not-leaked';
 
 /** Check types that read the files, and so resolve their path. file_absent, file_unchanged and user_edit_kept mean that exact path. */
-const RESOLVED = new Set(['json_parses', 'pipe_static_valid', 'providers_present', 'providers_absent', 'count', 'edge', 'reaches', 'control', 'config_value', 'same_config', 'any_config_matches', 'extract_fields', 'project_id_unchanged', 'file_exists', 'file_matches', 'file_not_matches', 'json_value', 'validates', 'output']);
+const RESOLVED = new Set(['json_parses', 'pipe_static_valid', 'providers_present', 'providers_absent', 'count', 'edge', 'reaches', 'control', 'config_value', 'same_config', 'any_config_matches', 'extract_fields', 'secrets_are_placeholders', 'project_id_unchanged', 'file_exists', 'file_matches', 'file_not_matches', 'json_value', 'validates', 'output']);
 
 /** Check types graded on the final and starting files alone. */
-const STATIC = new Set([...RESOLVED].filter((t) => t !== 'validates' && t !== 'output').concat(['secrets_are_placeholders', 'file_unchanged', 'file_absent', 'glob_count', 'only_changed', 'user_edit_kept']));
+const STATIC = new Set([...RESOLVED].filter((t) => t !== 'validates' && t !== 'output').concat(['file_unchanged', 'file_absent', 'glob_count', 'only_changed', 'user_edit_kept']));
+
+/** An fnmatch glob with a wildcard; one without is a single exact path. */
+const WILDCARD = /[*?[]/;
 
 /** What grading needs besides the task and the record. */
 export interface GradeContext {
@@ -363,13 +367,23 @@ export function gradeTrial(task: Task, record: BrowserTrialRecord, ctx: GradeCon
 	const substitutions: Substitution[] = [];
 	const checks: CheckResult[] = task.checks.map((original) => {
 		let ck = original;
+		const swaps: Substitution[] = [];
 		if (RESOLVED.has(ck.type) && typeof ck.path === 'string') {
 			const r = resolvePath(ck.path, ctx.start, record.finalFiles);
 			if (r.substituted) {
-				substitutions.push({ check: ck.id, wanted: ck.path, used: r.path });
+				swaps.push({ check: ck.id, wanted: ck.path, used: r.path });
 				ck = { ...ck, path: r.path, wanted: ck.path };
 			}
+		} else if (ck.type === 'only_changed') {
+			// an exact path also allows its substitute; the path itself stays allowed, so deleting it is still in scope
+			const globs = (ck.globs as string[]) ?? [];
+			for (const g of globs.filter((x) => !WILDCARD.test(x))) {
+				const r = resolvePath(g, ctx.start, record.finalFiles);
+				if (r.substituted) swaps.push({ check: ck.id, wanted: g, used: r.path });
+			}
+			if (swaps.length) ck = { ...ck, globs: [...globs, ...swaps.map((s) => s.used)] };
 		}
+		substitutions.push(...swaps);
 		let status: CheckStatus;
 		let detail: string;
 		if (STATIC.has(ck.type)) {
@@ -377,7 +391,7 @@ export function gradeTrial(task: Task, record: BrowserTrialRecord, ctx: GradeCon
 			status = v.ok === null ? 'pending' : v.ok ? 'pass' : 'fail';
 			detail = v.msg;
 		} else ({ status, detail } = runCheck(ck, task, record, ctx));
-		if (ck !== original) detail = `${ck.path} for ${String(ck.wanted)}${detail ? `: ${detail}` : ''}`;
+		if (swaps.length) detail = `${swaps.map((s) => `${s.used} for ${s.wanted}`).join(', ')}${detail ? `: ${detail}` : ''}`;
 		return { id: ck.id, kind: ck.type, status, detail, blocker: !!ck.blocker, ...(ck.soft ? { soft: true } : {}) };
 	});
 	checks.push(keysCheck(record));

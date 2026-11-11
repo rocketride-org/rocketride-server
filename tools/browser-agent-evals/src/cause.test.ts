@@ -66,3 +66,11 @@ test('a failure with a working model is the agent', () => {
 	assert.equal(c?.knownGood?.answered, true);
 	assert.equal(causeOf(result('incomplete'), record({}, { outcome: 'incomplete', error: 'empty plan' }), answered)?.label, 'agent');
 });
+
+test("a failed turn is the agent when only its answer, or a pipeline it ran, shows a provider's error", () => {
+	const answer = record({ turns: [{ result: { outcome: 'failed', error: 'the agent stopped' }, finalText: 'Your key failed authentication with OpenAI.' }] });
+	assert.equal(causeOf(result('incomplete'), answer, null)?.label, 'agent');
+	for (const error of ['**LLM error**: the pipeline answered nothing', 'Profile «secret:abc» is not defined in llm_anthropic']) {
+		assert.equal(causeOf(result('incomplete'), record({}, { outcome: 'failed', error }), null)?.label, 'agent', error);
+	}
+});

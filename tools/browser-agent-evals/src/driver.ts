@@ -965,8 +965,10 @@ export class Driver {
 		const pattern = wanted === 'save_mine_first' ? /save/i : wanted === 'discard_mine' ? /discard/i : wanted === 'keep_mine' ? /keep/i : /cancel/i;
 		const choice = buttons.find((b) => pattern.test(b)) ?? buttons.at(-1) ?? '';
 		await this.shot(`unsaved-changes-${cards.length + 1}`);
+		// read before the click: the dialog unmounts right after it
+		const text = (await dialog.innerText().catch(() => '')).slice(0, 200);
 		await dialog.getByRole('button', { name: choice, exact: true }).click();
-		cards.push({ kind: 'unsaved_changes', title: this.opts.scrubber.scrub((await dialog.innerText().catch(() => '')).slice(0, 200)), detail: buttons.join(' | '), answer: choice, atMs: Date.now() - t0 });
+		cards.push({ kind: 'unsaved_changes', title: this.opts.scrubber.scrub(text), detail: buttons.join(' | '), answer: choice, atMs: Date.now() - t0 });
 		this.log('answer the unsaved-changes dialog', `${choice} (buttons: ${buttons.join(' | ')})`);
 		await dialog.waitFor({ state: 'detached', timeout: 10_000 }).catch(() => {});
 		return true;

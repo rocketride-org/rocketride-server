@@ -2,8 +2,8 @@
 	"id": "edit-03-fix-validation",
 	"type": "EDIT",
 	"target": "pipeline",
-	"title": "Fix a pipeline that fails validation",
-	"prompt": "faq-bot fails validation. Fix it without changing what it does.",
+	"title": "Fix a pipeline that doesn't answer",
+	"prompt": "faq-bot doesn't answer questions. Fix it without changing what it does.",
 	"files": [
 		{
 			"path": "pipelines/faq-bot.pipe",
@@ -126,5 +126,5 @@
 		}
 	],
 	"judge": [],
-	"hard_because": "Two faults, reported one at a time: validate_pipeline reports unknown providers first and stops, so the wrong lane only shows after the typo is fixed. Tests that the model re-validates instead of claiming the fix."
+	"hard_because": "Two faults: a misspelt provider (llm_opnai) and prompt_1 feeding the LLM on text, which prompt doesn't produce. Fixing only the typo leaves a pipeline that starts but never answers. Tests that the agent finds both and checks its fix, by validating or running it, instead of stopping after the first."
 }

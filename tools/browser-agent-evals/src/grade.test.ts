@@ -169,6 +169,35 @@ test('a renamed pipeline is graded under its new name, and the result lists the 
 	assert.ok(r.checks.find((c) => c.id === 'static-valid')?.status === 'pass');
 });
 
+test('scope allows the one new pipeline saved under another name, and still fails a second new file', () => {
+	const task = tasks.find((t) => t.id === 'build-09-ocr-receipt') as Task;
+	const [[p, text]] = Object.entries(readTree(path.join(REFS, task.id)));
+	const renamed = p.replace('receipt-text', 'receipt_ocr');
+	const scope = (final: Record<string, string>) => gradeTrial(task, doneRecord(task, final), { start: {} }, null);
+	const one = scope({ [renamed]: text });
+	assert.deepEqual(
+		one.checks.filter((c) => c.id === 'scope').map((c) => [c.status, c.detail]),
+		[['pass', `${renamed} for ${p}`]]
+	);
+	assert.ok(one.substitutions.some((s) => s.check === 'scope' && s.wanted === p && s.used === renamed));
+	// two new pipelines: neither is the one, so nothing is swapped
+	const two = scope({ [renamed]: text, 'pipelines/extra.pipe': text });
+	assert.equal(two.checks.find((c) => c.id === 'scope')?.status, 'fail');
+});
+
+test('placeholders reads the pipeline saved under another name, and catches a raw key in it', () => {
+	const task = tasks.find((t) => t.id === 'build-02-summarize-webhook') as Task;
+	const [[p, text]] = Object.entries(readTree(path.join(REFS, task.id)));
+	const renamed = p.replace('summarize-text', 'summarize_text');
+	const placeholders = (pipe: string) => gradeTrial(task, doneRecord(task, { [renamed]: pipe }), { start: {} }, null).checks.find((c) => c.id === 'placeholders');
+	assert.deepEqual([placeholders(text)?.status, placeholders(text)?.detail], ['pass', `${renamed} for ${p}`]);
+	const raw = text.replace('${ROCKETRIDE_OPENAI_KEY}', 'sk-proj-not-a-real-key-0000000000');
+	assert.notEqual(raw, text);
+	const caught = placeholders(raw);
+	assert.equal(caught?.status, 'fail');
+	assert.match(caught?.detail ?? '', /summarize_text\.pipe\/components\/.*apikey/);
+});
+
 test('deleting a file an app imports sends the app to its check, and a failing check fails done-means-checked', () => {
 	const task = tasks.find((t) => t.id === 'edit-08-app-fix-types-delete') as Task;
 	const start = startOf(task);
