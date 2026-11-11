@@ -11,7 +11,7 @@ ERNIE model and emitted on the `answers` lane.
 
 Uses **langchain-openai** (`ChatOpenAI`) over the **openai** Python SDK, pointed at
 Qianfan's OpenAI-compatible endpoint. Temperature is fixed at `0` for deterministic
-output, and generation is capped at the profile's output-token limit.
+output, and generation is capped at the selected model's output-token limit.
 
 When you save the node configuration, the node validates it live: it sends a tiny test
 completion (`"Hi"`, max 8 tokens) to the configured endpoint and surfaces a specific
@@ -27,27 +27,28 @@ and other API errors fail immediately with a user-facing message.
 | ----------- | --------- | ---------------------------------------------------- |
 | `questions` | `answers` | Send a question directly, receive a generated answer |
 
-## Profiles
-
-Default: **ERNIE 4.5 Turbo 128K** (`ernie-4-5-turbo-128k`).
-
-| Profile | Model | Context tokens | Output tokens |
-| ------- | ----- | -------------- | ------------- |
-| `ernie-4-5-turbo-128k` **(default)** | `ernie-4.5-turbo-128k` | 128,000 | 4,096 |
-| `ernie-4-5-turbo-32k` | `ernie-4.5-turbo-32k` | 32,768 | 4,096 |
-| `ernie-5-0-thinking-preview` | `ernie-5.0-thinking-preview` | 128,000 | 8,192 |
-| `custom` | _(user-specified)_ | 32,768 | 4,096 |
-
-The named profiles pin the model name and token limits; only the API key, base URL, and
-model source are editable. The **Custom** profile additionally exposes `model`,
-`modelTotalTokens`, and `modelOutputTokens` so you can target any model available on
-your Qianfan account.
-
 ## Configuration
 
-Choose a named profile for a supported ERNIE model or `custom` for another model on
-your account. Named profiles provide the model and token budgets; most pipelines only
-need an API key and the correct regional endpoint.
+Choose a model from the **Model** selector: one of the listed ERNIE models, or
+**Custom model** for another model on your account. Each listed model pins its
+model id, context window, and output limit, so most pipelines only need an API key
+and the correct regional endpoint. The default is **ERNIE 4.5 Turbo 128K**
+(`ernie-4.5-turbo-128k`).
+
+### Models
+
+| Model | Model id | Context tokens | Output tokens |
+| ----- | -------- | -------------- | ------------- |
+| ERNIE 4.5 Turbo 128K **(default)** | `ernie-4.5-turbo-128k` | 128,000 | 4,096 |
+| ERNIE 4.5 Turbo 32K | `ernie-4.5-turbo-32k` | 32,768 | 4,096 |
+| ERNIE 5.0 Thinking Preview | `ernie-5.0-thinking-preview` | 128,000 | 8,192 |
+| Custom model | _(user-specified)_ | editable | editable |
+
+### Custom model
+
+Select **Custom model** to enter a Qianfan model id, its context length, and its
+output limit, so you can target any model available on your Qianfan account. The
+custom defaults are 32,768 total tokens and 4,096 output tokens.
 
 ### Base URL
 
@@ -67,8 +68,8 @@ unauthorized" both at save-time validation and at runtime.
 
 ### Model sync
 
-Profiles are maintained by the `sync_models` tooling (`llm_baidu_qianfan` provider,
-`ROCKETRIDE_BAIDU_QIANFAN_KEY`), which reads Qianfan's own model list. The filter keeps
+The `sync_models` tooling has a provider for this node (`llm_baidu_qianfan`,
+`ROCKETRIDE_BAIDU_QIANFAN_KEY`) that reads Qianfan's own model list. Its filter keeps
 the `ernie-*` text chat models; embedding, rerank, image, vision-language (`vl`), audio
 and speech variants are excluded, because they belong in dedicated nodes.
 

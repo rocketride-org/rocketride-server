@@ -27,45 +27,49 @@ page boundaries, coordinates, or the original table-cell grid.
 
 ## Configuration
 
-Start with an API key and the default simple configuration. Simple mode builds
-the LlamaParse constructor arguments from the visible controls; advanced mode
-instead parses the supplied JSON and merges its entries into those arguments.
+Start with an API key and the default **Simple options** configuration. Simple
+mode builds the LlamaParse constructor arguments from the visible controls;
+**Advanced JSON configuration** instead parses the supplied JSON and merges its
+entries into those arguments.
 
 ### Advanced Configuration
 
-Enable **Advanced Configuration** only when the simple controls cannot express
-the parsing options you need. Its value must be valid JSON and must not set
-`api_key`, which the node ignores when merging the advanced object. Save-time
-validation only warns about unknown keys or invalid JSON, but startup aborts
-when advanced mode has no configuration or when JSON cannot be parsed. A good
-value is an object containing only the constructor options you intend to
-override, such as `{"parse_mode": "parse_page_with_llm"}`.
+Choose **Advanced JSON configuration** only when the simple controls cannot
+express the parsing options you need. Its value must be a JSON object; every
+key in it except `api_key` is passed to the LlamaParse constructor unchanged,
+and `api_key` is dropped because the **API Key** field owns it. Save-time
+validation warns only when the block is not valid JSON, is not an object, or
+sets `api_key`. An empty block counts as `{}`, so LlamaParse is created with
+only the API key; startup stops when the JSON cannot be parsed or is not an
+object. A good value is an object containing only the constructor
+options you intend to override, such as `{"parse_mode": "parse_page_with_llm"}`.
 
 ### Parse Mode and LVM Model
 
 The default **Parse Mode**, `parse_page_with_lvm`, passes that mode to the
-client, optionally passes **LVM Model** as `vendor_multimodal_model_name`, and
-sets a page-error tolerance of `0.05`. The `agentic` and `agentic_plus` choices
-both select `parse_page_with_agent` and can use the same LVM model setting.
+client with **LVM Model** as `vendor_multimodal_model_name` and a page-error
+tolerance of `0.05`. The `agentic` and `agentic_plus` choices both select
+`parse_page_with_agent` and pass the same LVM model setting.
 
-The displayed `cost_effective (LLM)` value does not match the code path that
-checks for `cost_effective`; as written, choosing it supplies no parse-mode
-argument. Keep the default or use an agentic choice when a specific mode must
-be sent. The LVM model is not used by the cost-effective path.
+The `cost_effective` choice sends `parse_page_with_llm` and nothing else from
+this group: it shows no **LVM Model** control, because that path does not use
+one.
 
 ### Additional Instructions and spreadsheet tables
 
-**Additional Instructions** are passed only for the legacy
-`parse_page_with_lvm` path, when non-blank; use them for parser guidance that
-belongs with that mode. **Extract Sub Tables** defaults to off and, when on,
-passes `spreadsheet_extract_sub_tables=True` to LlamaParse. Enable it only for
-spreadsheets whose nested tables need separate parsing; it has no special
-handling in the node beyond forwarding that setting.
+**Additional Instructions** appear only under the `parse_page_with_lvm` parse
+mode and are passed, when non-blank, as `system_prompt_append`; use them for
+parser guidance that belongs with that mode. **Extract Sub Tables** defaults to
+off and, when on, passes `spreadsheet_extract_sub_tables=True` to LlamaParse in
+every simple parse mode. Enable it only for spreadsheets whose nested tables
+need separate parsing; it has no special handling in the node beyond
+forwarding that setting.
 
 ## Authentication
 
-Set **API Key** to the LlamaParse service key. Missing keys generate a
-save-time warning and cause startup to raise before a parser is created.
+Set **API Key** to the LlamaParse service key. The key is required: a
+configuration without one fails validation when it is saved and when the
+pipeline starts, before a parser is created.
 
 ## Requirements
 

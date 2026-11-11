@@ -10,69 +10,71 @@ Start a pipeline, watch its progress, and stop it. Method tables live in the
 the workflow.
 
 ## Start with `use()`
+## Start with `use()`
 
 `use()` starts a pipeline from a file (Node only) or an in-memory config and
-resolves to an object whose `token` identifies the running task — every data and
-control call takes it.
+resolves to an object whose `token` field carries the task's **address** — every
+data and control call takes it.
 
 ```typescript
 const { token } = await client.use({ filepath: './pipeline.pipe', ttl: 3600 });
+// token === 'acme.docBrain.chat_1'
 ```
 
-Beyond `filepath`/`pipeline`, the options accept `token` (a custom task token;
-the server generates one when omitted), `source`, `threads`,
+The address is `developerId.pipelineId[.source]`: your organization's developer
+id, the pipe's `project_id`, and the source component, each a single dot-free
+segment. The server derives it; it is a name, not a secret, so it is safe to log
+or share. Treat it as opaque. Authority comes from the account on the request:
+every call carries your `rr_` API key (or your session), and the server checks on
+every call that this account may control, send to, or monitor the task.
+
+Beyond `filepath`/`pipeline`, the options accept `source`, `threads`,
 `useExisting`, `args`, `ttl`, `pipelineTraceLevel` (trace verbosity for the
 [run log](/clients/typescript/logs)), `name` (a display name for the task), and
-`env` (per-run variable overrides). Pass the pipeline config **as-is** — do not
-wrap it in `{ pipeline: ... }`; the client sends it to the server, which resolves
-`${ROCKETRIDE_*}` variables.
+`env` (per-run variable overrides). Do not pass `token`: the server names the task
+itself and refuses a caller-chosen name. Pass the pipeline config **as-is** — do
+not wrap it in `{ pipeline: ... }`; the client sends it to the server, which
+resolves `${ROCKETRIDE_*}` variables.
 
-**Running the same pipeline more than once at a time.** Without a custom `token`,
-the server names the task after its owner, `project_id` and source, so a second
-`use()` of the same pipe fails with an error that starts
-`Pipeline is already running`. Give each instance its own `token` and they run
-side by side:
+**One run per address.** The server keys a task by its owner and address, so a
+second `use()` of the same pipe and source while the first is running fails with
+an error that starts `Pipeline is already running`. Stop the running one, reuse
+it (below), or give the copy its own `project_id` so it gets its own address.
+`getTaskToken({ projectId, source })` returns the address of your running task
+for that pipe and source (pass `teamId` for the team's deployed run).
 
-```typescript
-const { token } = await client.use({ filepath: './pipeline.pipe', token: `tk_${crypto.randomUUID()}` });
-```
+**Check `reused` before trusting the result.** `useExisting` returns the task
+that is already running at that address rather than starting the one you
+submitted, and the result's `reused` flag is `true` when that happened. A reused
+task keeps the configuration it was created with — the pipeline in this call is
+ignored, edits included — along with whatever state it has accumulated.
+Benchmarks and A/B comparisons are where an unnoticed reuse costs the most. Call
+`restart()` to apply new configuration to a running task.
 
-The value you choose is the run's
-[private token](/operate/security#endpoint-authentication): full control of
-the run for anyone who presents it. So make it unguessable, and keep the `tk_`
-prefix (without it the token cannot authenticate on webhook or dropper
-endpoints). Tokens share one namespace across every user of the server: a
-predictable value collides with other people's tasks, and with `useExisting` a
-token that matches a running task attaches to it, whoever started it.
-
-What two instances still share:
-
-- **The `pk_` public authorization key.** Both get the same one, and a webhook
-  call or dropper upload that uses it always reaches the instance that started
-  first. To send data to one specific instance, use that instance's `tk_` token.
-- **`getTaskToken()`**, keyed by the pipe's `project_id` and source, returns only
-  one of them.
-- **The monitor subscription.** Both instances' events arrive in one
-  subscription. Each event carries the emitting run's id in `body.__id` (the
-  first eight characters of the token after `tk_`, plus the source id); it is
-  truncated and can collide, so treat it as a best-effort way to tell them
-  apart. A few minutes after one instance ends, when the server removes it
-  from its registry, the shared subscription is dropped and the surviving
-  instance's events stop arriving; resubscribe.
-- **The run log**, written per identity and not built for two instances at
-  once; treat a forked run's log as unreliable.
-
-**Check `reused` before trusting the result.** `useExisting` returns the
-instance that is already running under that token rather than starting the one
-you submitted, and the result's `reused` flag is `true` when that happened. A
-reused instance keeps the configuration it was created with — the pipeline in
-this call is ignored, edits included — along with whatever state it has
-accumulated. Benchmarks and A/B comparisons are where an unnoticed reuse costs
-the most. Call `restart()` to apply new configuration to a live token.
-
-**Why a token:** the server runs each pipeline as a separate task. The token
+**Why an address:** the server runs each pipeline as a separate task. The address
 targets `send()`, `sendFiles()`, `pipe()`, `chat()`, `getTaskStatus()`, and
 `terminate()` at the correct pipeline.
+
+## Calls from other systems
+
+A webhook caller (Stripe, GitHub, a CI job) authenticates the same way as the
+SDK: with an `rr_` API key in the `Authorization` header, never in the URL. Post
+to `/webhook/<address>` (or `/task/data/<address>`):
+
+```bash
+curl -X POST "https://your-server/webhook/acme.docBrain.parsePDF" \
+  -H "Authorization: Bearer $ROCKETRIDE_APIKEY" \
+  -F "file=@document.pdf"
+```
+
+For a key that lives in another system, create a **scoped** key on the owner's
+account rather than handing over a full one: permissions `['task.data']` and
+endpoints `['acme.docBrain.parsePDF']` (or `['acme.docBrain.*']` for every source
+of that pipe). The key can then send data to that address and nothing else, and
+the owner pays for its calls. A key scoped to exactly one exact address (not a
+`.*` pattern) may post to the bare `/webhook`, since the key already names it. A connected client can
+read its key's scope from `ConnectResult.endpoints`
+([Connection](/clients/typescript/connection)).
 
 ## Watch progress
 
@@ -121,13 +123,16 @@ without a `ttl` run until terminated.
 
 `getServices()` returns lightweight **summaries** of every service the server
 supports (plus a deduplicated icon table and the server version). For a full
-definition — config schema included — fetch one by name with `getService(name)`,
-which returns a `ServiceDefinition` and **throws** on failure (it never resolves to
-`undefined`).
+definition — the resolved `properties` (every leaf with its stored `path`) and the
+`params` descriptors included — fetch one by name with `getService(name)`, which
+returns a `ServiceDefinition` and **throws** on failure (it never resolves to
+`undefined`), or every service at once with `getServices({ definitions: true })`,
+which returns a `ServiceDefinitionsResponse` (no icon table in that form).
 
 ```typescript
 const services = await client.getServices();
 const ocr = await client.getService('ocr'); // throws if unknown
+const all = await client.getServices({ definitions: true });
 ```
 
 ## Liveness

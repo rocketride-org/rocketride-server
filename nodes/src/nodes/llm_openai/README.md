@@ -12,117 +12,72 @@ Provides an OpenAI-backed chat LLM for agents and other nodes that need a langua
 | ----------- | --------- | ---------------------------------------------------- |
 | `questions` | `answers` | Send a question directly, receive a generated answer |
 
-## Profiles
-
-Default: **GPT-5.2** (`openai-5-2`).
-
-| Profile | Model | Context | Output |
-| ------- | ----- | ------- | ------ |
-| `openai-5-2` **(default)** | `gpt-5.2` | 400,000 | 128,000 |
-| `gpt-5-6-sol` | `gpt-5.6-sol` | 1,050,000 | 128,000 |
-| `gpt-5-6-terra` | `gpt-5.6-terra` | 1,050,000 | 128,000 |
-| `gpt-5-6-luna` | `gpt-5.6-luna` | 1,050,000 | 128,000 |
-| `gpt-5-5` | `gpt-5.5` | 1,050,000 | 128,000 |
-
-<details>
-<summary><strong>View 80 more models</strong></summary>
-
-| Profile | Model | Context | Output |
-| ------- | ----- | ------- | ------ |
-| `custom` | _(user-specified)_ | 16,384 | editable |
-| `openai-5-4` | `gpt-5.4` | 1,050,000 | 128,000 |
-| `openai-5-4-pro` | `gpt-5.4-pro` | 1,050,000 | 128,000 |
-| `openai-5-4-mini` | `gpt-5.4-mini` | 400,000 | 128,000 |
-| `openai-5-4-nano` | `gpt-5.4-nano` | 400,000 | 128,000 |
-| `openai-4o` | `gpt-4o` | 128,000 | 16,384 |
-| `openai-4o-mini` | `gpt-4o-mini` | 128,000 | 16,384 |
-| `openai-5` | `gpt-5` | 400,000 | 128,000 |
-| `openai-5-1` | `gpt-5.1` | 400,000 | 128,000 |
-| `openai-5-mini` | `gpt-5-mini` | 400,000 | 128,000 |
-| `openai-5-nano` | `gpt-5-nano` | 400,000 | 128,000 |
-| `gpt-3-5-turbo` | `gpt-3.5-turbo` | 16,385 | 4,096 |
-| `gpt-3-5-turbo-16k` | `gpt-3.5-turbo-16k` | 16,385 | 4,096 |
-| `gpt-4` | `gpt-4` | 8,191 | 4,096 |
-| `gpt-4-1` | `gpt-4.1` | 1,047,576 | 32,768 |
-| `gpt-4-1-mini` | `gpt-4.1-mini` | 1,047,576 | 32,768 |
-| `gpt-4-1-nano` | `gpt-4.1-nano` | 1,047,576 | 32,768 |
-| `gpt-4-turbo` | `gpt-4-turbo` | 128,000 | 4,096 |
-| `gpt-5-1-chat-latest` | `gpt-5.1-chat-latest` | 128,000 | 16,384 |
-| `gpt-5-2-chat-latest` | `gpt-5.2-chat-latest` | 128,000 | 16,384 |
-| `gpt-5-3-chat-latest` | `gpt-5.3-chat-latest` | 128,000 | 16,384 |
-| `gpt-5-chat-latest` | `gpt-5-chat-latest` | 128,000 | 16,384 |
-| `o1` | `o1` | 200,000 | 100,000 |
-| `o3` | `o3` | 200,000 | 100,000 |
-| `o3-mini` | `o3-mini` | 200,000 | 100,000 |
-| `o4-mini` | `o4-mini` | 200,000 | 100,000 |
-| `gpt-4-turbo-preview` | `gpt-4-turbo-preview` | 128,000 | 4,096 |
-| `gpt-5-1-chat` | `gpt-5.1-chat` | 128,000 | 16,384 |
-| `gpt-5-3-chat` **(deprecated)** | `gpt-5.3-chat` | 128,000 | 16,384 |
-| `gpt-5-6-luna-pro` | `gpt-5.6-luna-pro` | 1,050,000 | 128,000 |
-| `gpt-5-6-sol-pro` | `gpt-5.6-sol-pro` | 1,050,000 | 128,000 |
-| `gpt-5-6-terra-pro` | `gpt-5.6-terra-pro` | 1,050,000 | 128,000 |
-| `gpt-5-chat` | `gpt-5-chat` | 128,000 | 16,384 |
-| `gpt-chat-latest` | `gpt-chat-latest` | 400,000 | 128,000 |
-| `gpt-latest` | `gpt-latest` | 1,050,000 | 128,000 |
-| `gpt-mini-latest` | `gpt-mini-latest` | 400,000 | 128,000 |
-| `gpt-oss-120b` | `gpt-oss-120b` | 131,072 | 117,964 |
-| `gpt-oss-120b-free` **(deprecated)** | `gpt-oss-120b:free` | 131,072 | 131,072 |
-| `gpt-oss-20b` | `gpt-oss-20b` | 131,072 | 117,964 |
-| `gpt-oss-20b-free` | `gpt-oss-20b:free` | 131,072 | 32,768 |
-| `gpt-oss-safeguard-20b` | `gpt-oss-safeguard-20b` | 131,072 | 65,536 |
-| `o3-mini-high` | `o3-mini-high` | 200,000 | 100,000 |
-| `o3-pro` | `o3-pro` | 200,000 | 100,000 |
-| `o4-mini-high` | `o4-mini-high` | 200,000 | 100,000 |
-| `gpt-3-5-turbo-batch` | `gpt-3.5-turbo:batch` | 16,385 | 4,096 |
-| `gpt-4-1-batch` | `gpt-4.1:batch` | 1,047,576 | 32,768 |
-| `gpt-4-1-mini-batch` | `gpt-4.1-mini:batch` | 1,047,576 | 32,768 |
-| `gpt-4-1-nano-batch` | `gpt-4.1-nano:batch` | 1,047,576 | 32,768 |
-| `gpt-4-turbo-batch` | `gpt-4-turbo:batch` | 128,000 | 4,096 |
-| `gpt-4o-batch` | `gpt-4o:batch` | 128,000 | 16,384 |
-| `gpt-4o-mini-batch` | `gpt-4o-mini:batch` | 128,000 | 16,384 |
-| `gpt-5-1-batch` | `gpt-5.1:batch` | 400,000 | 128,000 |
-| `gpt-5-2-batch` | `gpt-5.2:batch` | 400,000 | 128,000 |
-| `gpt-5-2-chat` | `gpt-5.2-chat` | 128,000 | 32,000 |
-| `gpt-5-2-pro-batch` | `gpt-5.2-pro:batch` | 400,000 | 128,000 |
-| `gpt-5-4-batch` | `gpt-5.4:batch` | 1,050,000 | 128,000 |
-| `gpt-5-4-mini-batch` | `gpt-5.4-mini:batch` | 400,000 | 128,000 |
-| `gpt-5-4-nano-batch` | `gpt-5.4-nano:batch` | 400,000 | 128,000 |
-| `gpt-5-4-pro-batch` | `gpt-5.4-pro:batch` | 1,050,000 | 128,000 |
-| `gpt-5-5-batch` | `gpt-5.5:batch` | 1,050,000 | 128,000 |
-| `gpt-5-5-pro-batch` | `gpt-5.5-pro:batch` | 1,050,000 | 128,000 |
-| `gpt-5-6-luna-batch` | `gpt-5.6-luna:batch` | 1,050,000 | 128,000 |
-| `gpt-5-6-luna-pro-batch` | `gpt-5.6-luna-pro:batch` | 1,050,000 | 128,000 |
-| `gpt-5-6-sol-batch` | `gpt-5.6-sol:batch` | 1,050,000 | 128,000 |
-| `gpt-5-6-sol-pro-batch` | `gpt-5.6-sol-pro:batch` | 1,050,000 | 128,000 |
-| `gpt-5-6-terra-batch` | `gpt-5.6-terra:batch` | 1,050,000 | 128,000 |
-| `gpt-5-6-terra-pro-batch` | `gpt-5.6-terra-pro:batch` | 1,050,000 | 128,000 |
-| `gpt-5-batch` | `gpt-5:batch` | 400,000 | 128,000 |
-| `gpt-5-mini-batch` | `gpt-5-mini:batch` | 400,000 | 128,000 |
-| `gpt-5-nano-batch` | `gpt-5-nano:batch` | 400,000 | 128,000 |
-| `gpt-5-pro-batch` | `gpt-5-pro:batch` | 400,000 | 128,000 |
-| `gpt-6-astra` | `gpt-6-astra` | 1,050,000 | 128,000 |
-| `gpt-6-astra-batch` | `gpt-6-astra:batch` | 1,050,000 | 128,000 |
-| `gpt-6-astra-pro` | `gpt-6-astra-pro` | 1,050,000 | 128,000 |
-| `gpt-6-astra-pro-batch` | `gpt-6-astra-pro:batch` | 1,050,000 | 128,000 |
-| `gpt-oss-120b-batch` | `gpt-oss-120b:batch` | 131,072 | 117,964 |
-| `gpt-oss-20b-batch` | `gpt-oss-20b:batch` | 131,072 | 117,964 |
-| `o3-batch` | `o3:batch` | 200,000 | 100,000 |
-| `o3-mini-batch` | `o3-mini:batch` | 200,000 | 100,000 |
-| `o4-mini-batch` | `o4-mini:batch` | 200,000 | 100,000 |
-
-</details>
-
 ## Configuration
 
-Choose a profile to pin the OpenAI model and token limits; most users only need to select a profile and provide an API key. Preconfigured profiles keep model details fixed, while `custom` exposes the model name, context limit and output limit for models not listed here.
+Choose a model from the **Model** selector to pin the OpenAI model id and token limits;
+most users only need to select a model and provide an API key. The default is
+**GPT-5.2** (`gpt-5.2`). Listed models keep their details fixed, while **Custom model**
+exposes the model id, context limit and output limit for models not listed here.
+
+### Models
+
+| Model | Model id | Context tokens | Output tokens |
+| ----- | -------- | -------------- | ------------- |
+| GPT-5.2 **(default)** | `gpt-5.2` | 400,000 | 128,000 |
+| GPT-5.4 | `gpt-5.4` | 1,050,000 | 128,000 |
+| GPT-5.4 Pro | `gpt-5.4-pro` | 1,050,000 | 128,000 |
+| GPT-5.4-mini | `gpt-5.4-mini` | 400,000 | 128,000 |
+| GPT-5.4-nano | `gpt-5.4-nano` | 400,000 | 128,000 |
+| GPT-4o | `gpt-4o` | 128,000 | 16,384 |
+| GPT-4o-mini | `gpt-4o-mini` | 128,000 | 16,384 |
+| GPT-5 | `gpt-5` | 400,000 | 128,000 |
+| GPT-5.1 | `gpt-5.1` | 400,000 | 128,000 |
+| GPT-5-mini | `gpt-5-mini` | 400,000 | 128,000 |
+| GPT-5-nano | `gpt-5-nano` | 400,000 | 128,000 |
+| OpenAI: GPT-3.5 Turbo | `gpt-3.5-turbo` | 16,385 | 4,096 |
+| OpenAI: GPT-3.5 Turbo 16k | `gpt-3.5-turbo-16k` | 16,385 | 4,096 |
+| OpenAI: GPT-4 | `gpt-4` | 8,191 | 4,096 |
+| OpenAI: GPT-4.1 | `gpt-4.1` | 1,047,576 | 32,768 |
+| OpenAI: GPT-4.1 Mini | `gpt-4.1-mini` | 1,047,576 | 32,768 |
+| OpenAI: GPT-4.1 Nano | `gpt-4.1-nano` | 1,047,576 | 32,768 |
+| OpenAI: GPT-4 Turbo | `gpt-4-turbo` | 128,000 | 4,096 |
+| GPT-5.1 Chat Latest | `gpt-5.1-chat-latest` | 128,000 | 16,384 |
+| GPT-5.2 Chat Latest | `gpt-5.2-chat-latest` | 128,000 | 16,384 |
+| GPT-5.3 Chat Latest | `gpt-5.3-chat-latest` | 128,000 | 16,384 |
+| GPT-5 Chat Latest | `gpt-5-chat-latest` | 128,000 | 16,384 |
+| OpenAI: o1 | `o1` | 200,000 | 100,000 |
+| OpenAI: o3 | `o3` | 200,000 | 100,000 |
+| OpenAI: o3 Mini | `o3-mini` | 200,000 | 100,000 |
+| OpenAI: o4 Mini | `o4-mini` | 200,000 | 100,000 |
+| OpenAI: GPT-5.5 | `gpt-5.5` | 1,050,000 | 128,000 |
+| OpenAI: GPT-4 Turbo Preview | `gpt-4-turbo-preview` | 128,000 | 4,096 |
+| OpenAI: GPT-5.6 Luna | `gpt-5.6-luna` | 1,050,000 | 128,000 |
+| OpenAI: GPT-5.6 Luna Pro | `gpt-5.6-luna-pro` | 1,050,000 | 128,000 |
+| OpenAI: GPT-5.6 Sol | `gpt-5.6-sol` | 1,050,000 | 128,000 |
+| OpenAI: GPT-5.6 Sol Pro | `gpt-5.6-sol-pro` | 1,050,000 | 128,000 |
+| OpenAI: GPT-5.6 Terra | `gpt-5.6-terra` | 1,050,000 | 128,000 |
+| OpenAI: GPT-5.6 Terra Pro | `gpt-5.6-terra-pro` | 1,050,000 | 128,000 |
+| OpenAI: GPT Chat Latest | `gpt-chat-latest` | 400,000 | 128,000 |
+| OpenAI GPT Latest | `gpt-latest` | 1,050,000 | 128,000 |
+| OpenAI GPT Mini Latest | `gpt-mini-latest` | 400,000 | 128,000 |
+| OpenAI: gpt-oss-120b | `gpt-oss-120b` | 131,072 | 117,964 |
+| OpenAI: gpt-oss-20b | `gpt-oss-20b` | 131,072 | 117,964 |
+| OpenAI: gpt-oss-safeguard-20b | `gpt-oss-safeguard-20b` | 131,072 | 65,536 |
+| OpenAI: o3 Mini High | `o3-mini-high` | 200,000 | 100,000 |
+| OpenAI: o3 Pro | `o3-pro` | 200,000 | 100,000 |
+| OpenAI: o4 Mini High | `o4-mini-high` | 200,000 | 100,000 |
+| OpenAI: GPT-5.2 Chat | `gpt-5.2-chat` | 128,000 | 32,000 |
+| OpenAI: GPT-6 Astra | `gpt-6-astra` | 1,050,000 | 128,000 |
+| OpenAI: GPT-6 Astra Pro | `gpt-6-astra-pro` | 1,050,000 | 128,000 |
+| Custom model | _(user-specified)_ | editable | editable |
 
 ### Custom models
 
-For `custom`, enter an OpenAI model ID and a positive context limit. The initial context value is 16,384 tokens; set it to the actual model limit so the pipeline can reject oversized prompts before sending them. Left empty, the output limit (`modelOutputTokens`) is the default model's; set it to your model's limit, keeping in mind that reasoning models count their thinking against it.
+For **Custom model**, enter an OpenAI model id and a positive context limit. The initial context value is 16,384 tokens; set it to the actual model limit so the pipeline can reject oversized prompts before sending them. The output limit (`modelOutputTokens`) defaults to 128,000 tokens and cannot exceed the context limit, so a larger value is lowered to it; set it to your model's limit, keeping in mind that reasoning models count their thinking against it.
 
 ## Authentication
 
-Set `apikey` to an OpenAI API key for every profile (including `custom`). The key is
+Set `apikey` to an OpenAI API key for every model (including **Custom model**). The key is
 verified with a live one-word test call during pipeline validation, so a bad key or model
 name is reported before the pipeline runs rather than at first invoke.
 
@@ -130,28 +85,28 @@ name is reported before the pipeline runs rather than at first invoke.
 
 ### Reasoning streaming
 
-For models whose configuration carries `capabilities.reasoning`, the node builds a raw
+For models whose selector entry pins `reasoning`, the node builds a raw
 `openai` client alongside the LangChain one and streams answers via the Responses API
 with `reasoning: {summary: 'auto'}`. Reasoning-summary deltas are forwarded over the
 `thinking` SSE lane while the answer streams normally. Non-reasoning models use plain
-LangChain streaming with the profile's output limit. `temperature` is configurable on
-every profile (range `0`-`2`, default `0`, which is generally more deterministic than
+LangChain streaming with the model's output limit. `temperature` is configurable on
+every model (range `0`-`2`, default `0`, which is generally more deterministic than
 higher values, though OpenAI does not guarantee identical output for identical input);
 reasoning models ignore it, because OpenAI's Responses API controls sampling separately.
 
 ### Validation and errors
 
-Pipeline validation makes a small live call to verify the API key and model name. Models whose names begin with `gpt-5` are probed with `max_completion_tokens`; older models use `max_tokens`. Rate-limit and connection errors are retryable, while authentication and other API errors fail immediately with a provider-specific message.
+Pipeline validation makes a small live call to verify the API key and model name. Models whose names begin with `gpt-5` are probed with `max_completion_tokens`; older models use `max_tokens`. Authentication errors fail immediately with `Invalid API key.`, and every other openai API error fails immediately with `An error occurred with the OpenAI API.` That includes rate-limit and connection errors: `RateLimitError` and `APIConnectionError` are subclasses of `APIError` in the openai SDK, and the node checks `APIError` first, so neither is retried.
 
 ### Testing
 
 Automated node tests are declared in `services.json`:
 
-- **Mock group**: runs the `openai-5-2`, `openai-5-4`, `openai-5-4-pro`, `openai-5-4-mini`,
-  and `openai-5-4-nano` profiles against a mocked `langchain_openai`; no real API key needed.
+- **Mock group**: runs the `gpt-5.2`, `gpt-5.4`, `gpt-5.4-pro`, `gpt-5.4-mini`, and
+  `gpt-5.4-nano` models against a mocked `langchain_openai`; no real API key needed.
   `ROCKETRIDE_MOCK` must point to `nodes/test/mocks`.
 - **Real group**: skipped unless `ROCKETRIDE_OPENAI_KEY` is set; calls the live API with
-  the `openai-4o-mini` profile.
+  the `gpt-4o-mini` model.
 
 ---
 

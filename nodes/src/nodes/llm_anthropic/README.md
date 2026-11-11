@@ -41,7 +41,7 @@ response.
 
 `webhook → agent_rocketride → response`, with this node connected to the
 agent's `llm` channel. The agent uses Claude for its reasoning and tool
-calling; swap profiles to trade cost against capability without touching the
+calling; swap models to trade cost against capability without touching the
 pipeline.
 
 **SQL generation for a database node**
@@ -56,64 +56,59 @@ database node validates and executes.
 | ----------- | --------- | ----------------------------------------------------- |
 | `questions` | `answers` | Send a question directly, receive a generated answer  |
 
-## Profiles
+## Configuration
 
-Default: **Claude Sonnet 4.6** (`claude-sonnet-4-6`).
+Choose a model from the **Model** selector and provide an API key — that is the
+whole configuration for most pipelines. Each listed model pins its model id,
+context window, and output limit. The default is **Claude Sonnet 4.6**
+(`claude-sonnet-4-6`).
 
-| Profile | Model ID | Context tokens | Output tokens |
-| ------- | -------- | -------------- | ------------- |
+### Models
+
+| Model | Model id | Context tokens | Output tokens |
+| ----- | -------- | -------------- | ------------- |
 | Claude Sonnet 4.6 **(default)** | `claude-sonnet-4-6` | 1,000,000 | 128,000 |
-| Anthropic: Claude Fable 5 | `claude-fable-5` | 1,000,000 | 128,000 |
-| Anthropic: Claude Sonnet 5 | `claude-sonnet-5` | 1,000,000 | 128,000 |
-| Anthropic: Claude Fable 5.1 | `claude-fable-5-1` | 1,000,000 | 128,000 |
-| Claude Opus 5 | `claude-opus-5` | 1,000,000 | 128,000 |
-| Anthropic: Claude Opus 4.8 | `claude-opus-4-8` | 1,000,000 | 128,000 |
-
-<details>
-<summary><strong>View 16 more models</strong></summary>
-
-| Profile | Model ID | Context tokens | Output tokens |
-| ------- | -------- | -------------- | ------------- |
-| `custom` | _(user-specified)_ | 200,000 (editable) | — |
 | Claude Opus 4.6 | `claude-opus-4-6` | 1,000,000 | 128,000 |
 | Claude Haiku 4.5 | `claude-haiku-4-5` | 200,000 | 64,000 |
 | Claude Sonnet 4.5 | `claude-sonnet-4-5` | 1,000,000 | 64,000 |
 | Claude Opus 4.5 | `claude-opus-4-5` | 200,000 | 64,000 |
 | Anthropic: Claude Opus 4.7 | `claude-opus-4-7` | 1,000,000 | 128,000 |
 | Anthropic: Claude 3 Haiku | `claude-3-haiku` | 200,000 | 4,096 |
+| Anthropic: Claude Fable 5 | `claude-fable-5` | 1,000,000 | 128,000 |
 | Anthropic: Claude Fable Latest | `claude-fable-latest` | 1,000,000 | 128,000 |
 | Anthropic: Claude Opus 4 | `claude-opus-4` | 200,000 | 32,000 |
-| Anthropic: Claude Opus 4.1 | `claude-opus-4-1` | 200,000 | 32,000 |
-| Claude Opus 5 (Fast) | `claude-opus-5-fast` | 1,000,000 | 128,000 |
-| Anthropic: Claude Opus 4.7 (Fast) | `claude-opus-4-7-fast` | 1,000,000 | 128,000 |
-| Anthropic: Claude Opus 4.8 (Fast) | `claude-opus-4-8-fast` | 1,000,000 | 128,000 |
+| Anthropic: Claude Opus 4.1 (deprecated) | `claude-opus-4-1` | 200,000 | 32,000 |
+| Anthropic: Claude Opus 4.8 | `claude-opus-4-8` | 1,000,000 | 128,000 |
 | Anthropic: Claude Opus Latest | `claude-opus-latest` | 1,000,000 | 128,000 |
 | Anthropic: Claude Sonnet 4 | `claude-sonnet-4` | 1,000,000 | 64,000 |
+| Anthropic: Claude Sonnet 5 | `claude-sonnet-5` | 1,000,000 | 128,000 |
 | Anthropic Claude Sonnet Latest | `claude-sonnet-latest` | 1,000,000 | 128,000 |
+| Claude Opus 5 | `claude-opus-5` | 1,000,000 | 128,000 |
+| Anthropic: Claude Fable 5.1 | `claude-fable-5-1` | 1,000,000 | 128,000 |
+| Custom model | _(user-specified)_ | editable | editable |
 
-</details>
+The `*-latest` models track Anthropic's current model aliases and update as
+Anthropic promotes new versions; pin a specific model when reproducibility
+matters. Models marked **(deprecated)** remain selectable for existing pipelines;
+move new pipelines to a current model.
 
-The `*-latest` profiles track Anthropic's current model aliases and update as
-Anthropic promotes new versions; pin a specific profile when reproducibility
-matters.
+### Custom model
 
-## Configuration
-
-Pick a profile and provide an API key — that is the whole configuration for
-most pipelines. The model ID and token limits for named profiles are fixed by
-the profile; only the `custom` profile exposes `model`, `modelTotalTokens` and
-`modelOutputTokens` (the reply limit; left empty, the default model's limit
-applies; extended thinking counts against it) directly. `modelSource` records where a custom model definition comes from
-(`manual` or `openrouter`).
+Select **Custom model** to enter an Anthropic model id, its total token limit,
+and its output limit (`modelOutputTokens`, the reply limit, at least 1,024;
+extended thinking counts against it). The custom defaults are 200,000 total
+tokens and 128,000 output tokens; set both to the actual limits of the model you
+enter.
 
 ### Extended thinking
 
 The `extendedThinking` toggle (off by default) requests the model's reasoning
-stream. Two switches must both be on for thinking to activate: the model's
-`capabilities.reasoning` flag (stamped from OpenRouter model sync) and this
-node's toggle. It affects the interactive streaming path only — the agent /
-`expectJson` path never requests thinking. Provider-correct parameters are
-chosen by model; see Notes for the exact per-model behavior.
+stream. Two switches must both be on for thinking to activate: the selected
+model's `reasoning` flag (pinned per model in `services.json`; Claude 3 Haiku and
+the Custom model carry none) and this node's toggle. It affects the interactive
+streaming path only — the agent / `expectJson` path never requests thinking.
+Provider-correct parameters are chosen by model; see Notes for the exact
+per-model behavior.
 
 ## Authentication
 
@@ -154,7 +149,7 @@ Anthropic reuses a prompt only up to an explicit `cache_control` marker. When a 
 When the node configuration is saved, a lightweight validation pass runs before
 the first pipeline execution:
 
-- Checks that `modelTotalTokens` (custom profile) is greater than 0.
+- Checks that `modelTotalTokens` (custom model) is greater than 0.
 - Sends a minimal one-token probe request (`max_tokens: 1`) to the configured
   model using the configured key.
 

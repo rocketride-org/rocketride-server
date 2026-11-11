@@ -17,26 +17,38 @@ All requests are sent with **temperature 0.0** for deterministic output. Transie
 | `image`     | `text`      | Analyze a single image, receive text                                           |
 | `documents` | `documents` | Analyze image documents, return text analysis with original metadata preserved |
 
-## Profiles
-
-Default: **Mistral Large 3 - Premier Vision (256k tokens)** (`mistral-large-3`).
-
-| Profile | Model | Context tokens |
-| ------- | ----- | -------------- |
-| `mistral-large-3` **(default)** | `mistral-large-2512` | 256,000 |
-| `mistral-medium-3.1` | `mistral-medium-2508` | 128,000 |
-| `mistral-small-3.2` | `mistral-small-2506` | 128,000 |
-| `ministral-14b-3` | `ministral-14b-2512` | 256,000 |
-| `ministral-8b-3` | `ministral-8b-2512` | 256,000 |
-| `ministral-3b-3` | `ministral-3b-2512` | 256,000 |
-
 ## Configuration
 
-Choose a profile for the quality, latency, and context window the task needs, then set
-the API key and prompts. The profile supplies the model identifier and token limit.
+Choose a model from the **Model** selector for the quality, latency, and context window
+the task needs, then set the API key and prompts. Each listed model pins its model id
+and token limit. The default is **Mistral Large 3 - Premier Vision (256k tokens)**
+(`mistral-large-2512`).
+
+### Models
+
+| Model | Model id | Context tokens | Output tokens |
+| ----- | -------- | -------------- | ------------- |
+| Mistral Large 3 - Premier Vision (256k tokens) **(default)** | `mistral-large-2512` | 256,000 | — |
+| Mistral Medium 3.1 - Balanced Vision (128k tokens) | `mistral-medium-2508` | 128,000 | — |
+| Mistral Small 3.2 - Fast & Cheap Vision (128k tokens) | `mistral-small-2506` | 128,000 | — |
+| Ministral 3 14B - High Performance Vision (256k tokens) | `ministral-14b-2512` | 256,000 | — |
+| Ministral 3 8B - Balanced Vision (256k tokens) | `ministral-8b-2512` | 256,000 | — |
+| Ministral 3 3B - Efficient Vision (256k tokens) | `ministral-3b-2512` | 256,000 | — |
+| Custom model | _(user-specified)_ | editable | editable |
+
+### Custom model
+
+Select **Custom model** to enter a Mistral model id exactly as Mistral names it, its
+total context length in tokens (default 256,000), and optionally its output token limit
+(at least 1,024). Choose a model that accepts image input. The output limit is
+not sent to Mistral (requests carry no output cap); the node lowers it to the context
+limit, requires at least 1,024, and reports it to nodes that ask for the model's
+output length.
+
+### Lane behavior
 
 On the `image` lane, incoming image bytes are buffered across chunks, base64-encoded
-with the source MIME type, and sent to the model with the analysis prompt. The answer
+with the source MIME type, and sent to the model with the **Prompt**. The answer
 is written downstream as text.
 
 On the `documents` lane, only documents of type `Image` are processed. Other document
@@ -47,30 +59,24 @@ other fields). A failed chunk is logged and skipped without stopping the batch.
 Documents the node does not convert — the original `Image` documents, skipped
 types, and failed chunks — do not flow downstream.
 
-### System Instructions and Analysis Prompt
+### System prompt and Prompt
 
-Use **System Instructions** to define the model's role and behavior. Use **Analysis
-Prompt** to describe what to extract or explain from every image.
+Use **System prompt** to define the model's role and behavior. Use **Prompt** to
+describe what to extract or explain from every image; it defaults to
+`Describe this image in detail.`
 
 ## Authentication
 
-Provide a Mistral AI API key in the `apikey` field for the selected profile. The node validates the key format at startup: if you supply an OpenAI key (starting with `sk-`) or a Google AI/Gemini key (starting with `AI`), initialization fails immediately with a specific error message pointing to the wrong provider.
+Provide a Mistral AI API key in the `apikey` field. The node validates the key format at startup: if you supply an OpenAI key (starting with `sk-`) or a Google AI/Gemini key (starting with `AI`), initialization fails immediately with a specific error message pointing to the wrong provider.
 
 ## Notes
 
 ### Image input
 
-The node accepts images in the following formats:
-
-- **HTTP(S) URL**: passed to the Mistral API as-is.
-- **Data URI** (`data:image/...` or `data:application/...`): passed as-is.
-- **Local file path**: read from disk, base64-encoded, and sent as a data URI. Files over **10 MB** are rejected. MIME type is inferred from the file extension (`.jpg`/`.jpeg` -> `image/jpeg`, `.png` -> `image/png`, `.gif` -> `image/gif`, `.webp` -> `image/webp`; any unrecognized extension defaults to `image/jpeg`).
-
-### Model sync
-
-Profiles are maintained by the `sync_models` tooling (`llm_vision_mistral` provider, `ROCKETRIDE_MISTRAL_KEY`). Only models Mistral reports as vision-capable (`capabilities.vision`) are added, and each new one is verified with a real image before it appears here.
-
-The sync runs **only** with that key: this node stores Mistral's versioned IDs (`mistral-medium-2508`), which OpenRouter does not list, so a keyless run would mark working profiles deprecated. Without the key the provider is skipped and nothing changes — see [Why some providers need their own key](https://github.com/rocketride-org/rocketride-server/blob/develop/tools/sync_models/README.md#why-some-providers-need-their-own-key).
+Both lanes hand the image to Mistral as a base64 data URI (`data:<mime>;base64,...`),
+passed through as-is. The node only picks up context items that begin with
+`data:image/` or `data:application/`; a request without one fails with an "Invalid
+image input" error. HTTP(S) URLs and local file paths are not accepted on either lane.
 
 ## Upstream docs
 

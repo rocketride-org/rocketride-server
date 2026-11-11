@@ -17,34 +17,36 @@ Each inference attempt is capped by a 30-second hard timeout; a timed-out or ret
 | `image`     | `text`      | Analyze a single image, receive text                                           |
 | `documents` | `documents` | Analyze image documents, return text analysis with original metadata preserved |
 
-## Profiles
-
-Default: **Llama 3.2 Vision 11B** (`llama3_2-vision-11b`).
-
-| Profile | Model | Context tokens |
-| ------- | ----- | -------------- |
-| `custom` | _(user-specified)_ | 16,385 |
-| `llama3_2-vision-11b` **(default)** | `llama3.2-vision:11b` | 128,000 |
-| `llama3_2-vision-90b` | `llama3.2-vision:90b` | 128,000 |
-| `llava-7b` | `llava:7b` | 32,768 |
-| `llava-13b` | `llava:13b` | 4,096 |
-| `llava-34b` | `llava:34b` | 4,096 |
-| `moondream` | `moondream` | 2,048 |
-| `minicpm-v` | `minicpm-v` | 8,192 |
-| `qwen2_5vl-3b` | `qwen2.5vl:3b` | 128,000 |
-| `qwen2_5vl-7b` | `qwen2.5vl:7b` | 128,000 |
-
 ## Configuration
 
-Choose a bundled profile for a known Ollama model or `custom` for another multimodal
-model. All profiles expose the server URL and prompts; `custom` also exposes the model
-name, context limit and output limit (4,096 by default). The default server is `http://localhost:11434/v1`.
+Choose a known Ollama model from the **Model** selector, or **Custom model** for another
+multimodal model. Every model exposes the server URL and prompts; **Custom model** also
+exposes the model id, context limit and output limit (4,096 by default). The default
+model is **Llama 3.2 Vision 11B** (`llama3.2-vision:11b`) and the default server is
+`http://localhost:11434/v1`.
+
+### Models
+
+| Model | Model id | Context tokens | Output tokens |
+| ----- | -------- | -------------- | ------------- |
+| Llama 3.2 Vision 11B **(default)** | `llama3.2-vision:11b` | 128,000 | — |
+| Llama 3.2 Vision 90B | `llama3.2-vision:90b` | 128,000 | — |
+| LLaVA 7B | `llava:7b` | 32,768 | — |
+| LLaVA 13B | `llava:13b` | 4,096 | — |
+| LLaVA 34B | `llava:34b` | 4,096 | — |
+| Moondream 2 | `moondream` | 2,048 | — |
+| MiniCPM-V | `minicpm-v` | 8,192 | — |
+| Qwen 2.5 VL 3B | `qwen2.5vl:3b` | 128,000 | — |
+| Qwen 2.5 VL 7B | `qwen2.5vl:7b` | 128,000 | — |
+| Custom model | _(user-specified)_ | editable | editable |
+
+The custom context default is 16,385 tokens.
 
 ### Image to text
 
 Raw image bytes arrive in chunks over the AVI protocol, are accumulated, encoded as a
 base64 data URL with the incoming MIME type, and sent to the model with the configured
-analysis prompt. The model's answer is written to the `text` lane.
+**Prompt**. The model's answer is written to the `text` lane.
 
 ### Documents to documents
 
@@ -55,11 +57,12 @@ documents and images with empty content are skipped with a warning; a per-docume
 failure is logged and skipped instead of failing the batch. The original image
 documents do not flow downstream.
 
-### System Instructions and Analysis Prompt
+### System prompt and Prompt
 
-Use **System Instructions** to define the model's role and **Analysis Prompt** for the
-image task. If the analysis prompt is empty, the node uses question text from the
-request; if that is also empty, it uses `Describe this image.`
+Use **System prompt** to define the model's role and **Prompt** for the image task;
+**Prompt** defaults to `Describe this image in detail.` If **Prompt** is empty, the node
+uses the question text from the request; both lanes send the **Prompt** value as that
+question, so when it is also empty the node uses `Describe this image.`
 
 The selected model must already be pulled into Ollama (`ollama pull <model>`).
 
