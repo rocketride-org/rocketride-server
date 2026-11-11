@@ -276,6 +276,34 @@ def namespace_of(artifact_id: str) -> str:
     return artifact_id.split('.', 1)[0]
 
 
+def developer_id_required(action: str) -> str:
+    """
+    The one refusal for an organization that has no developer id yet.
+
+    Apps, pipeline runs and deployments all live under the org's developer
+    id (the address namespace), so every door that needs one says the same
+    thing: what was refused, and the ways an org admin claims the id. The
+    claim itself is ``rrext_deploy_app developer_register`` (SaaS only);
+    users reach it through the App Builder's Deploy tab, the npm CLI's
+    ``rocketride app developer register <id>`` or
+    ``client.registerDeveloper(id)`` (Python: ``client.register_developer(id)``),
+    so the message names those, never the raw verb.
+
+    Args:
+        action: What was refused, as the sentence's subject
+            (``'Deploying or publishing an app'``).
+
+    Returns:
+        The message.
+    """
+    return (
+        f'{action} requires a registered developer id, and your organization has none. An org admin '
+        'claims it once, permanently: on the Deploy tab in the App Builder, with the npm CLI '
+        '(rocketride app developer register <id>), or in code with client.registerDeveloper(id) '
+        '(Python: client.register_developer(id)).'
+    )
+
+
 def _assert_owns_namespace(conn: Any, app_id: str) -> None:
     """GUARANTEE the app id lives in the caller org's developer namespace.
 
@@ -287,18 +315,16 @@ def _assert_owns_namespace(conn: Any, app_id: str) -> None:
     The platform org holds ``rocketride``, so ``rocketride.*`` is reachable
     by nobody else.
 
-    An org with no developer-id owns no namespace and cannot publish apps
-    until an org admin claims one (rrext_app developer_register).
+    An org with no developer-id owns no namespace and cannot deploy or publish
+    apps until an org admin claims one (``developer_id_required`` names the
+    ways in).
 
     Raises:
         ValueError: no developer-id, or app_id outside the owned namespace.
     """
     dev = _developer_id_of(conn)
     if not dev:
-        raise ValueError(
-            'Publishing an app requires a registered developer id — an org admin must '
-            'claim one (rrext_app developer_register) before apps can be deployed or published'
-        )
+        raise ValueError(developer_id_required('Deploying or publishing an app') + ' App ids must then be <id>.<name>.')
     if app_id != dev and not app_id.startswith(f'{dev}.'):
         raise ValueError(
             f'App id {app_id!r} is outside your developer namespace — it must be {dev!r} '

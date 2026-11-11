@@ -106,6 +106,7 @@ const SPINE = [
 		items: [
 			{ id: 'operate', label: 'Choose How to Run' },
 			{ id: 'operate/cloud', label: 'Cloud' },
+			{ id: 'operate/cloud-databases', label: 'Cloud Databases' },
 			{
 				label: 'Self-hosting',
 				items: [

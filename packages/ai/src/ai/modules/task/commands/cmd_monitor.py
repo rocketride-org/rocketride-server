@@ -298,6 +298,26 @@ class MonitorCommands(DAPConn):
 
         return
 
+    def _may_monitor(self) -> bool:
+        """
+        Return True when this connection holds ``task.monitor``.
+
+        Catch-up events carry the same payloads as the live SUMMARY and TASK
+        events, so they are held to the permission ``send_task_event`` checks
+        for those types. A credential without it is skipped quietly, the way
+        ``broadcast_task_event`` skips it for live events: the subscription
+        still stands (a machine key scoped to ``task.data`` subscribes for
+        its data pipe's SSE and nothing else).
+
+        Returns:
+            bool: True if the connection may receive monitor events.
+        """
+        try:
+            self.verify_permission('task.monitor')
+        except PermissionError:
+            return False
+        return True
+
     async def _send_updates(
         self,
         control: 'TASK_CONTROL | None',
@@ -321,6 +341,12 @@ class MonitorCommands(DAPConn):
         - TASK: Sends the list of all currently active tasks owned by this user,
           so the client knows which tasks are already in-progress.
 
+        The running-task snapshot and the active task list are sent only to a
+        connection that holds ``task.monitor``, the permission the live
+        SUMMARY and TASK events require (see ``send_task_event``). The empty
+        "not running" state is not gated: it echoes back only the project and
+        source the caller supplied.
+
         Args:
             control (TASK_CONTROL | None): The task control for the subscription,
                 or None if the task is not currently running.
@@ -339,12 +365,14 @@ class MonitorCommands(DAPConn):
         if new & EVENT_TYPE.SUMMARY:
             try:
                 if control:
-                    # Task is running: send current status
-                    await self.send_event(
-                        event='apaevt_status_update',
-                        id=control.id,
-                        body=control.task.get_status().model_dump(),
-                    )
+                    # Task is running: send current status, under the same
+                    # permission as a live status update
+                    if self._may_monitor():
+                        await self.send_event(
+                            event='apaevt_status_update',
+                            id=control.id,
+                            body=control.task.get_status().model_dump(),
+                        )
                 elif project_id is not None and source is not None:
                     # Task is not running: send empty state so client shows "not running"
                     empty_status = TASK_STATUS(
@@ -361,8 +389,8 @@ class MonitorCommands(DAPConn):
             except Exception:
                 pass
 
-        # If we just turned on task
-        if new & EVENT_TYPE.TASK:
+        # If we just turned on task (same permission as a live task event)
+        if new & EVENT_TYPE.TASK and self._may_monitor():
             try:
                 # Loop through all active tasks the caller has access to
                 tasks: List[Dict[str, Any]] = []

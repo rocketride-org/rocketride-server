@@ -79,6 +79,12 @@ export const CONST_WS_PING_INTERVAL = 15;
 export const CONST_WS_PING_TIMEOUT = 60;
 
 /**
+ * What `getEnv` answers in place of each stored value; sending it back to
+ * `setEnv` keeps that value.
+ */
+export const CONST_ENV_MASK = '••••••••';
+
+/**
  * Default store directory for project pipeline files.
  * Use this constant instead of hardcoding '.projects'.
  */

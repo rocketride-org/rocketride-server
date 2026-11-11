@@ -275,9 +275,9 @@ def expand(value: str) -> str:
 expand = engLib.expand  # noqa
 
 
-def validatePipeline(config: dict) -> dict:
+def validatePipeline(config: dict, custom: list = []) -> dict:
     """
-    Validate the pipeline configuration.
+    Validate the pipeline configuration, with the caller's custom service definitions if any.
     """
     pass
 
@@ -317,9 +317,9 @@ def getServiceSchema(logicalType: str) -> Dict:
 getServiceSchema = engLib.getServiceSchema  # noqa
 
 
-def getServiceDefinitions() -> Dict:
+def getServiceDefinitions(custom: list = []) -> Dict:
     """
-    Return a service definition given a logical name.
+    Return every service schema, plus the caller's custom service definitions if any.
     """
     ...
 

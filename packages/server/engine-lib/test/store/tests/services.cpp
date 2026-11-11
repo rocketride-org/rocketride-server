@@ -21,7 +21,17 @@
 // SOFTWARE.
 // =============================================================================
 
+#include <pybind11/embed.h>
+
 #include "test.h"
+
+namespace py = pybind11;
+
+namespace {
+json::Value customNode(const char *name);
+json::Value customList(std::initializer_list<json::Value> defs);
+Text registeredType();
+}  // namespace
 
 TEST_CASE("store::Services") {
     auto _res = IServices::getServiceSchemas();
@@ -656,3 +666,432 @@ TEST_CASE("store::Services::oldFormatFailsLoad") {
 
     *file::remove(definition);
 }
+
+//-----------------------------------------------------------------------------
+// A caller's own node definitions, passed as JSON with one call (develop
+// #2764, node rail 1a): parsed and expanded by the same property-model
+// parser as a scanned file, seen only by that call, never registered
+//-----------------------------------------------------------------------------
+TEST_CASE("store::Services::custom") {
+    // Custom services are seen by the lookups of the call they came with,
+    // and the registry is the same before and after
+    SECTION("custom services: call-scoped") {
+        REQUIRE_FALSE(IServices::getServiceDefinition("custom_a"));
+
+        {
+            auto scope = IServices::withCustomServices(
+                customList({customNode("custom_a")}));
+            REQUIRE_NO_ERROR(scope);
+
+            auto def = IServices::getServiceDefinition("custom_a");
+            REQUIRE(def);
+            CHECK((*def)->title == "custom_a");
+            CHECK((*def)->serviceSchema["properties"].isArray());
+            CHECK((*def)->serviceSchema["params"].isArray());
+            CHECK(IServices::isCustomService("custom_a"));
+
+            auto schemas = IServices::getServiceSchemas();
+            REQUIRE_NO_ERROR(schemas);
+            CHECK((*schemas)["services"].isMember("custom_a"));
+            CHECK((*schemas)["services"]["custom_a"]["icon"].asString() ==
+                  "data:image/svg+xml;base64,PHN2Zy8+");
+        }
+
+        REQUIRE_FALSE(IServices::getServiceDefinition("custom_a"));
+        CHECK_FALSE(IServices::isCustomService("custom_a"));
+        auto schemas = IServices::getServiceSchemas();
+        REQUIRE_NO_ERROR(schemas);
+        REQUIRE_FALSE((*schemas)["services"].isMember("custom_a"));
+
+        // Nothing is registered for it either
+        const auto names = Factory::getFactories("iFilterGlobal");
+        REQUIRE(std::find(names.begin(), names.end(), iTextView{"custom_a"}) ==
+                names.end());
+
+        // A registered node is not a custom one
+        CHECK_FALSE(IServices::isCustomService(registeredType()));
+    }
+
+    SECTION("custom services: nest") {
+        auto outer = IServices::withCustomServices(
+            customList({customNode("custom_outer")}));
+        REQUIRE_NO_ERROR(outer);
+
+        {
+            auto inner = IServices::withCustomServices(
+                customList({customNode("custom_inner")}));
+            REQUIRE_NO_ERROR(inner);
+            CHECK(IServices::getServiceDefinition("custom_inner"));
+        }
+
+        CHECK(IServices::getServiceDefinition("custom_outer"));
+        CHECK_FALSE(IServices::getServiceDefinition("custom_inner"));
+    }
+
+    // The same property-model parse as a scanned file: paths, params, the
+    // capabilities bitmask and the secret registrations
+    SECTION("custom services: the property model") {
+        auto node = customNode("custom_pm");
+        node["capabilities"].append("multitenant");
+        node["propertyDefinitions"] = R"({
+            "custom_pm.size": {
+                "type": "integer", "title": "Size", "default": 1,
+                "minimum": 1, "maximum": 8, "param": true
+            },
+            "custom_pm.apikey": { "type": "string", "title": "Key", "secret": true },
+            "custom_pm.mode": {
+                "type": "string", "title": "Mode", "default": "cloud",
+                "enum": {
+                    "cloud": { "title": "Cloud", "properties": ["custom_pm.host"] },
+                    "local": { "title": "Local", "properties": ["custom_pm.host"] }
+                }
+            },
+            "custom_pm.host": { "type": "string", "title": "Host" }
+        })"_json;
+        node["properties"] =
+            R"(["custom_pm.size", "custom_pm.apikey", "custom_pm.mode"])"_json;
+
+        auto scope = IServices::withCustomServices(customList({node}));
+        REQUIRE_NO_ERROR(scope);
+        auto def = IServices::getServiceDefinition("custom_pm");
+        REQUIRE(def);
+
+        const auto &schema = (*def)->serviceSchema;
+        REQUIRE(schema["params"].size() == 1u);
+        CHECK(schema["params"][0]["field"] == "size");
+        CHECK(schema["params"][0]["maximum"] == 8);
+        CHECK(schema["properties"][0]["path"] == "size");
+        CHECK_FALSE(schema["properties"][0].isMember("param"));
+        CHECK((schema["capabilities"].asUInt() &
+               url::UrlConfig::PROTOCOL_CAPS::MULTITENANT) != 0);
+
+        // The leaf listed in both branches is hoisted to the root
+        const auto &cloud = schema["properties"][2]["enum"]["cloud"];
+        CHECK(cloud["properties"][0]["path"] == "host");
+
+        // The secret leaf is registered by its path
+        REQUIRE((*def)->secureParameters.count("apikey"));
+        CHECK((*def)->secureParameters.at("apikey") == PARAM_TYPE::SECURE);
+    }
+
+    SECTION("custom services: defaults") {
+        // A custom node with no title takes its logical type
+        auto untitled = customNode("custom_untitled");
+        untitled.removeMember("title");
+        auto scope = IServices::withCustomServices(customList({untitled}));
+        REQUIRE_NO_ERROR(scope);
+        auto def = IServices::getServiceDefinition("custom_untitled");
+        REQUIRE(def);
+        CHECK((*def)->title == "custom_untitled");
+
+        // An empty list is an empty scope
+        REQUIRE(IServices::withCustomServices(json::Value{json::arrayValue}));
+        REQUIRE(IServices::withCustomServices(json::Value{}));
+    }
+
+    SECTION("custom services: refused") {
+        auto shadow = customNode("custom_b");
+        shadow["protocol"] = _ts(registeredType(), "://");
+
+        auto iconFile = customNode("custom_c");
+        iconFile["icon"] = "icon.svg";
+
+        auto noProtocol = customNode("custom_d");
+        noProtocol.removeMember("protocol");
+
+        auto badCap = customNode("custom_e");
+        badCap["capabilities"].append("nonsense");
+
+        auto cppNoLibrary = customNode("custom_f");
+        cppNoLibrary["node"] = "cpp";
+        cppNoLibrary["path"] = "";
+
+        auto colonOnly = customNode("custom_j");
+        colonOnly["protocol"] = ":";
+
+        // The old format is refused, as it is in a scanned file
+        auto oldFormat = customNode("custom_old");
+        oldFormat.removeMember("propertyDefinitions");
+        oldFormat.removeMember("properties");
+        oldFormat["fields"] = R"({})"_json;
+        oldFormat["shape"] = R"([])"_json;
+
+        // A group that lists itself
+        auto loop = customNode("custom_k");
+        loop["propertyDefinitions"]["custom_k.loop"] =
+            R"({"name": "loop", "properties": ["custom_k.loop"]})"_json;
+        loop["properties"].append("custom_k.loop");
+
+        // A selector whose only branch lists the selector
+        auto branchLoop = customNode("custom_kb");
+        branchLoop["propertyDefinitions"]["custom_kb.sel"] = R"({
+            "type": "string", "title": "Sel",
+            "enum": { "a": { "title": "A", "properties": ["custom_kb.sel"] } }
+        })"_json;
+        branchLoop["properties"].append("custom_kb.sel");
+
+        // Two aliases of each other
+        auto pingPong = customNode("custom_m");
+        pingPong["propertyDefinitions"]["custom_m.a"] =
+            R"({"base": "custom_m.b"})"_json;
+        pingPong["propertyDefinitions"]["custom_m.b"] =
+            R"({"base": "custom_m.a"})"_json;
+        pingPong["properties"].append("custom_m.a");
+
+        // A property definition that is not an object
+        auto notObject = customNode("custom_no");
+        notObject["propertyDefinitions"]["custom_no.x"] = "custom_no.x";
+        notObject["properties"].append("custom_no.x");
+
+        // A parameter on a secret: the parser's own load error
+        auto secretParam = customNode("custom_sp");
+        secretParam["propertyDefinitions"]["custom_sp.key"] = R"({
+            "type": "string", "title": "Key", "secret": true, "param": true
+        })"_json;
+        secretParam["properties"].append("custom_sp.key");
+
+        auto badLanes = customNode("custom_l");
+        badLanes["lanes"] = customList({"x"});
+        auto badTitle = customNode("custom_p");
+        badTitle["title"] = R"({})"_json;
+        auto badPrefix = customNode("custom_q");
+        badPrefix["prefix"] = customList({"x"});
+
+        // Read later as strings or lists, so refused when they are not
+        auto badIcon = customNode("custom_s");
+        badIcon["icon"] = R"({})"_json;
+        auto badTarget = customNode("custom_t");
+        badTarget["lanes"]["text"] = customList({R"({})"_json});
+        auto badInput = customNode("custom_u");
+        badInput["input"] = customList({"text"});
+        auto badInputLane = customNode("custom_v");
+        badInputLane["input"] = customList({R"({"lane": {}})"_json});
+        auto badOutput = customNode("custom_w");
+        badOutput["input"] =
+            customList({R"({"lane": "text", "output": "text"})"_json});
+        auto badTile = customNode("custom_x");
+        badTile["tile"] = customList({R"({})"_json});
+
+        // Each group lists the next one twice: no cycle, 2^16 references
+        auto fanOut = customNode("custom_r");
+        for (int level = 0; level < 15; level++) {
+            auto &group = fanOut["propertyDefinitions"][_ts("custom_r.f", level)];
+            group["name"] = _ts("s", level);
+            for (const char *copy : {"a", "b"}) {
+                json::Value ref;
+                ref["base"] = _ts("custom_r.f", level + 1);
+                ref["name"] = copy;
+                group["properties"].append(ref);
+            }
+        }
+        fanOut["propertyDefinitions"]["custom_r.f15"] =
+            R"({"type": "string"})"_json;
+        fanOut["properties"].append("custom_r.f0");
+
+        // A big property listed many times: few references, a large copy
+        // each time (1000 references, about 10^6 JSON values)
+        auto heavy = customNode("custom_y");
+        auto &big = heavy["propertyDefinitions"]["custom_y.big"];
+        big["type"] = "string";
+        for (int value = 0; value < 1000; value++)
+            big["enum"].append(_ts("v", value));
+        for (int copy = 0; copy < 1000; copy++) {
+            json::Value ref;
+            ref["base"] = "custom_y.big";
+            ref["name"] = _ts("c", copy);
+            heavy["properties"].append(ref);
+        }
+
+        // Each definition stays under its own budget (about 60 000 JSON
+        // values); twenty of them together go past the call's
+        json::Value many = json::arrayValue;
+        for (int copy = 0; copy < 20; copy++) {
+            const auto name = _ts("custom_many", copy);
+            auto def = customNode(name.c_str());
+            auto &field = def["propertyDefinitions"][_ts(name, ".big")];
+            field["type"] = "string";
+            for (int value = 0; value < 1000; value++)
+                field["enum"].append(_ts("v", value));
+            for (int ref = 0; ref < 60; ref++) {
+                json::Value spec;
+                spec["base"] = _ts(name, ".big");
+                spec["name"] = _ts("c", ref);
+                def["properties"].append(spec);
+            }
+            many.append(def);
+        }
+
+        const json::Value refused[] = {
+            customList({shadow}),
+            customList({customNode("custom_g"), customNode("custom_g")}),
+            customList({iconFile}),
+            customList({noProtocol}),
+            customList({badCap}),
+            customList({cppNoLibrary}),
+            customList({"custom_h"}),
+            customNode("custom_i"),
+            customList({colonOnly}),
+            customList({oldFormat}),
+            customList({loop}),
+            customList({branchLoop}),
+            customList({pingPong}),
+            customList({notObject}),
+            customList({secretParam}),
+            customList({badLanes}),
+            customList({badTitle}),
+            customList({badPrefix}),
+            customList({badIcon}),
+            customList({badTarget}),
+            customList({badInput}),
+            customList({badInputLane}),
+            customList({badOutput}),
+            customList({badTile}),
+            customList({fanOut}),
+            customList({heavy}),
+            many,
+        };
+        for (const auto &custom : refused)
+            REQUIRE_FALSE(IServices::withCustomServices(custom));
+
+        // ":" names no logical type: refused before anything reads one
+        auto colon = IServices::withCustomServices(customList({colonOnly}));
+        REQUIRE_FALSE(colon);
+        CHECK(std::string{colon.ccode().message()}.find("No logical type") !=
+              std::string::npos);
+
+        // The old format names what to declare instead
+        auto old = IServices::withCustomServices(customList({oldFormat}));
+        REQUIRE_FALSE(old);
+        CHECK(std::string{old.ccode().message()}.find(
+                  "declare \"properties\"") != std::string::npos);
+
+        // A property inside its own expansion is named
+        for (const auto &custom : {customList({loop}), customList({branchLoop})}) {
+            auto cycle = IServices::withCustomServices(custom);
+            REQUIRE_FALSE(cycle);
+            CHECK(std::string{cycle.ccode().message()}.find(
+                      "contains itself") != std::string::npos);
+        }
+
+        // The budget names the definition that went past it
+        for (const auto &custom : {customList({fanOut}), customList({heavy})}) {
+            auto expanded = IServices::withCustomServices(custom);
+            REQUIRE_FALSE(expanded);
+            CHECK(std::string{expanded.ccode().message()}.find(
+                      "expand to more than") != std::string::npos);
+        }
+
+        // One of them alone is accepted; the call's budget names the list
+        REQUIRE(IServices::withCustomServices(customList({many[0]})));
+        auto together = IServices::withCustomServices(many);
+        REQUIRE_FALSE(together);
+        CHECK(std::string{together.ccode().message()}.find(
+                  "expand to more than 1000000 JSON values together") !=
+              std::string::npos);
+
+        // A registered type keeps its own definition
+        REQUIRE(IServices::getServiceDefinition(registeredType()));
+        CHECK_FALSE(IServices::getServiceDefinition("custom_g"));
+    }
+
+    // The Python surface: the catalogue and validation take the same list
+    SECTION("custom services: rocketlib") {
+        const auto python = localfcn()->Error {
+            py::module_::import("__main__").attr("custom") =
+                engine::python::pyjson::jsonToDict(customNode("custom_py"));
+            py::exec(R"(
+import engLib, rocketlib, json
+assert 'custom_py' in rocketlib.getServiceDefinitions(custom=[custom])['services']
+assert 'custom_py' not in rocketlib.getServiceDefinitions()['services']
+
+shadow = dict(custom, protocol=next(iter(rocketlib.getServiceDefinitions()['services'])) + '://')
+try:
+    rocketlib.getServiceDefinitions(custom=[shadow])
+    raise AssertionError('a custom service that shadows a registered one was accepted')
+except AssertionError:
+    raise
+except Exception:
+    pass
+
+# The old format is refused through the Python surface as well
+old = {k: v for k, v in custom.items() if k not in ('propertyDefinitions', 'properties')}
+old.update(fields={}, shape=[])
+try:
+    rocketlib.getServiceDefinitions(custom=[old])
+    raise AssertionError('an old-format custom service was accepted')
+except AssertionError:
+    raise
+except Exception:
+    pass
+
+# Validation encrypts what the definition marks secret: a user's node secret
+# stays in the clear unless validation sees the custom definition. The value
+# lives at its path from the config root
+secret = dict(custom, propertyDefinitions={'custom_py.apikey': {'type': 'string', 'title': 'Key', 'secret': True}},
+              properties=['custom_py.apikey'])
+def pipeline():
+    return {'pipeline': {'source': 'c1', 'version': 1, 'components': [
+        {'id': 'c1', 'provider': 'custom_py', 'config': {'apikey': 's3cret-key'}}]}}
+assert 's3cret-key' in json.dumps(rocketlib.validatePipeline(pipeline()))
+validated = json.dumps(rocketlib.validatePipeline(pipeline(), custom=[secret]))
+assert 's3cret-key' not in validated and 'secureParameters' in validated, validated
+
+# The component form too: the node has no factory here, so only the schema
+# checks and the encryption apply
+def component():
+    return {'component': {'id': 'c1', 'provider': 'custom_py', 'config': {'apikey': 's3cret-key'}}}
+validated = rocketlib.validatePipeline(component(), custom=[secret])
+assert 'errors' not in validated, validated
+assert 's3cret-key' not in json.dumps(validated) and 'secureParameters' in json.dumps(validated), validated
+
+# ILoader.getPipeStack has no rocketlib wrapper; it is reached through engLib directly
+
+# The stack-only build EaaS runs at launch resolves the node the same way; the
+# source is not built there, so the custom node is a filter behind one
+source = {'pipeline': {'source': 's1', 'version': 1, 'components': [
+    {'id': 's1', 'provider': 'webhook', 'config': {}},
+    {'id': 'c1', 'provider': 'custom_py', 'config': {}, 'input': [{'lane': 'text', 'from': 's1'}]}]}}
+try:
+    engLib.ILoader.getPipeStack(source)
+    raise AssertionError('a pipeline naming an unknown node was built')
+except AssertionError:
+    raise
+except Exception as e:
+    assert 'custom_py' in str(e), e
+assert engLib.ILoader.getPipeStack(source, custom=[custom]) is not None
+)");
+            return {};
+        };
+        REQUIRE_NO_ERROR(callPython(python));
+    }
+}
+
+namespace {
+
+json::Value customNode(const char *name) {
+    json::Value def = R"({
+        "register": "filter", "node": "python", "classType": ["text"],
+        "capabilities": [], "lanes": {"text": ["text"]},
+        "propertyDefinitions": {}, "properties": [],
+        "icon": "data:image/svg+xml;base64,PHN2Zy8+"
+    })"_json;
+    def["title"] = name;
+    def["protocol"] = _ts(name, "://");
+    def["path"] = _ts("nodes.", name);
+    def["prefix"] = name;
+    return def;
+}
+
+json::Value customList(std::initializer_list<json::Value> defs) {
+    json::Value list = json::arrayValue;
+    for (auto &def : defs) list.append(def);
+    return list;
+}
+
+Text registeredType() {
+    auto schemas = IServices::getServiceSchemas();
+    REQUIRE_NO_ERROR(schemas);
+    return (*schemas)["services"].getMemberNames().front();
+}
+
+}  // namespace

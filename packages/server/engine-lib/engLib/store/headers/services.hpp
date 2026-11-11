@@ -154,6 +154,40 @@ public:
     //-----------------------------------------------------------------
     ///	Public API
     //-----------------------------------------------------------------
+    //-----------------------------------------------------------------
+    ///	@details
+    ///		Holds a call's custom services in front of every lookup the
+    ///		calling thread makes (getServiceDefinition,
+    ///		getServiceSchemas, isCustomService) until it is destroyed.
+    ///		Scopes nest: the inner one hides the outer one's services
+    ///		while it lives. Made by withCustomServices
+    //-----------------------------------------------------------------
+    class CustomServicesScope {
+    public:
+        CustomServicesScope(CustomServicesScope &&other) noexcept
+            : m_services(_mv(other.m_services)), m_outer(other.m_outer) {
+            if (m_outer) t_custom = &m_services;
+            other.m_outer = std::nullopt;
+        }
+        CustomServicesScope(const CustomServicesScope &) = delete;
+        ~CustomServicesScope() noexcept {
+            if (m_outer) t_custom = *m_outer;
+        }
+
+    private:
+        friend class IServices;
+
+        CustomServicesScope() noexcept = default;
+
+        explicit CustomServicesScope(ServiceDefinitions services) noexcept
+            : m_services(_mv(services)), m_outer(t_custom) {
+            t_custom = &m_services;
+        }
+
+        ServiceDefinitions m_services;
+        std::optional<ServiceDefinitions *> m_outer;
+    };
+
     static Error init() noexcept;
     static Error deinit() noexcept;
 
@@ -175,13 +209,37 @@ public:
 
     //-----------------------------------------------------------------
     ///	@details
+    ///		Is this one of the calling thread's custom services, not a
+    ///		registered one? Its code is not on this engine, so it has no
+    ///		factory
+    //-----------------------------------------------------------------
+    static bool isCustomService(const Text &logicalType) noexcept;
+
+    //-----------------------------------------------------------------
+    ///	@details
+    ///		Parses a caller's own service definitions (a JSON array of
+    ///		services.json objects) through the same parse and property
+    ///		expansion the start-up scan uses - an old-format definition
+    ///		is refused - and returns the scope that makes them visible
+    ///		to the calling thread for one call. Nothing is registered: no
+    ///		factory, no url mapper, and the registry is the same before
+    ///		and after. A definition whose logical type is registered or
+    ///		listed twice is refused, its icon must be inline (a data:
+    ///		URL), and the expansion is bounded per definition and per
+    ///		call. An empty or null list yields an empty scope
+    //-----------------------------------------------------------------
+    static ErrorOr<CustomServicesScope> withCustomServices(
+        const json::Value &custom) noexcept;
+
+    //-----------------------------------------------------------------
+    ///	@details
     ///		Rejects a parsed services.*json that is still in the old
     ///		format ("fields"/"shape" instead of "propertyDefinitions"/
     ///		"properties"). The error names the file. Public so a
     ///		fixture can be checked without walking the nodes tree
     //-----------------------------------------------------------------
     static Error requireNewFormat(const json::Value &serviceInfo,
-                                  const Path &definitionPath) noexcept;
+                                  const Path &definitionPath);
 
     //-----------------------------------------------------------------
     ///	@details
@@ -190,9 +248,12 @@ public:
     ///		carries its "path", "params" lists the flat descriptors of
     ///		the "param"-flagged properties, and "capabilities" is the
     ///		node's PROTOCOL_CAPS bitmask. Public so a
-    ///		fixture definition can be resolved without being loaded
+    ///		fixture definition can be resolved without being loaded.
+    ///		total, when given, accumulates the JSON values expanded by
+    ///		every definition of one call (custom services). A
+    ///		definition of the wrong JSON shape may throw
     //-----------------------------------------------------------------
-    static Error buildSchema(ServiceDefinition &def) noexcept;
+    static Error buildSchema(ServiceDefinition &def, size_t *total = nullptr);
 
 private:
     //-----------------------------------------------------------------
@@ -219,6 +280,15 @@ private:
 
         ServiceDefinition &def;
         ServiceFields privateFields;
+
+        // The property references being expanded, outermost first: one
+        // reached again inside its own expansion would recurse without end
+        std::vector<Text> chain;
+
+        // JSON values expanded so far for this definition, and by every
+        // definition of the call (nullptr on the start-up scan)
+        size_t expanded = 0;
+        size_t *total = nullptr;
 
         // The flat descriptors of every "param"-flagged property seen so
         // far, in schema order - becomes schema["params"]
@@ -248,20 +318,24 @@ private:
     static Error declareDefaultUrlMappers() noexcept;
     static Error loadGlobalFields(json::Value &definition) noexcept;
     static ErrorOr<json::Value> lookupField(ServiceContext &context,
-                                            TextView fieldId) noexcept;
+                                            TextView fieldId);
     static ErrorOr<json::Value> expandProperty(ServiceContext &context,
-                                               json::Value &property) noexcept;
+                                               json::Value &property);
     static ErrorOr<json::Value> expandChildren(ServiceContext &context,
-                                               json::Value property) noexcept;
-    static ErrorOr<json::Value> expandProperties(
-        ServiceContext &context, json::Value &specifiers) noexcept;
+                                               json::Value property);
+    static ErrorOr<json::Value> expandProperties(ServiceContext &context,
+                                                 json::Value &specifiers);
     static ErrorOr<json::Value> expandBranches(ServiceContext &context,
-                                               json::Value branches) noexcept;
-    static Error applyParam(ServiceContext &context,
-                            json::Value &field) noexcept;
+                                               json::Value branches);
+    static Error applyParam(ServiceContext &context, json::Value &field);
     static Error requireUniqueName(std::vector<Text> &seen, const Text &name,
                                    ServiceContext &context) noexcept;
-    static Error updateDefinitions() noexcept;
+    static Error charge(ServiceContext &context, size_t count) noexcept;
+    static Error updateDefinitions(ServiceDefinitions &services,
+                                   size_t *total = nullptr);
+    static ErrorOr<std::optional<ServiceDefinition>> parseDefinition(
+        json::Value serviceInfo, const Path &definitionPath);
+    static Error registerFactories(const ServiceDefinition &def) noexcept;
     static void resolveString(json::Value &value) noexcept;
     static void resolveDescriptions(json::Value &value) noexcept;
 
@@ -276,6 +350,12 @@ private:
     ///		Our list of global field defintions
     //-----------------------------------------------------------------
     inline static ServiceFields m_fields{};
+
+    //-----------------------------------------------------------------
+    /// @details
+    ///		The custom services of the call running on this thread, if any
+    //-----------------------------------------------------------------
+    inline static thread_local ServiceDefinitions *t_custom = nullptr;
 };
 
 }  // namespace engine::store

@@ -87,6 +87,7 @@ from ai.constants import (
 from ai.common.dap import TransportWebSocket, DAPBase
 from rocketride import EVENT_TYPE
 from ai.web import WebServer
+from ai.account.app_deploy import developer_id_required
 from ai.account.models import AccountInfo, resolve_run_permissions
 from ai.account.store import Store
 from .task_conn import TaskConn
@@ -1350,7 +1351,7 @@ class TaskServer(DAPBase):
         if not developer_id:
             raise TaskError(
                 TaskError.INVALID_ARGUMENT,
-                'Your organization has no developer id yet: an org admin must claim one before pipelines can run',
+                developer_id_required('Running a pipeline'),
                 field='developerId',
             )
         control.developer_id = developer_id

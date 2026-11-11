@@ -50,9 +50,11 @@ from ai.account import manifest_push
 from ai.account.app_deploy import (
     _REPLY_MAX_CHARS,
     _serving_block_of,
+    developer_id_required,
     entitled_version_dirs,
     handle_app_add,
     handle_deploy_app,
+    namespace_of,
     open_version_dirs,
     resolve_app_pins,
 )
@@ -544,11 +546,23 @@ async def test_add_rejects_foreign_namespace_app_id(registry, content_store):
 
 @pytest.mark.asyncio
 async def test_add_requires_a_developer_id(registry):
-    """An org with no developer id owns no namespace and cannot deploy apps."""
+    """An org with no developer id owns no namespace and cannot deploy apps.
+
+    The refusal names the ways a user can actually register (the Deploy tab,
+    the npm CLI verb and both SDK spellings), never ``rrext_app
+    developer_register``, a subcommand ``rrext_app`` rejects (#2471).
+    """
     conn = _FakeConn(developer_id=None)
     result = await handle_app_add(conn, _add_request(data=_app_zip()))
     assert result['success'] is False
-    assert 'developer id' in result['message']
+    message = result['message']
+    assert 'developer id' in message
+    assert 'Deploy tab' in message
+    assert 'npm CLI' in message
+    assert 'rocketride app developer register <id>' in message
+    assert 'registerDeveloper(id)' in message
+    assert 'register_developer(id)' in message
+    assert 'rrext_app' not in message
     assert registry.publish_calls == []
 
 
@@ -1690,3 +1704,87 @@ async def test_resolve_internal_serves_unapproved_but_not_failed(registry):
     registry.versions[0]['state'] = 'failed'
     resolved = await resolve_app_pins('org1', 'u1', ['t1'])
     assert resolved == []
+
+
+# =============================================================================
+# PUBLISHER: the store's DEVELOPER field is never empty (#2977), and it is the
+# app id's developer namespace, never a name the manifest declares
+# =============================================================================
+
+
+def _public_listing(registry, manifest, snapshot):
+    """Bind version 1 publicly with the given stored manifest and binding snapshot.
+
+    ``manifest=None`` models a version with no stored appManifest (a legacy
+    binary deploy): the artifact then carries no metadata. Otherwise the
+    artifact gets the registry entry's metadata attached, as both real
+    backends do for app artifacts.
+    """
+    registry.add_version(1, '1.0.0', state='ready', manifest=manifest)
+    if manifest is None:
+        registry.versions[0]['metadata'].pop('manifest')
+    else:
+        registry.artifacts[1]['metadata'] = registry.versions[0]['metadata']
+    registry.seed_publish(AUD_PUBLIC, 1)
+    registry.publishes[('acme.brandy', 'public~')]['snapshot'] = snapshot
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'manifest, snapshot',
+    [
+        # A version bound before the snapshot kept a publisher.
+        ({'name': 'Brandy', 'publisher': 'mithilesh_app'}, {'name': 'Brandy'}),
+        # A manifest and a snapshot that both declare a name.
+        ({'name': 'Brandy', 'publisher': 'Acme Labs'}, {'name': 'Brandy', 'publisher': 'an older copy'}),
+        # No stored manifest, a snapshot that declares one.
+        (None, {'name': 'Brandy', 'publisher': 'Acme Labs'}),
+        # Nothing declared anywhere.
+        ({'name': 'Brandy'}, {'name': 'Brandy'}),
+        ({'name': 'Brandy', 'publisher': '   '}, {'name': 'Brandy', 'publisher': ''}),
+        (None, {'name': 'Brandy'}),
+        # The scaffold's no-developer-id placeholder, left behind after the
+        # id was renamed into the org's namespace for deploy.
+        ({'name': 'Brandy', 'publisher': 'local'}, {'name': 'Brandy', 'publisher': 'local'}),
+    ],
+)
+async def test_resolve_publisher_is_the_developer_namespace(registry, manifest, snapshot):
+    """Every listing names the publishing org's developer id: the app id's
+    namespace segment, which deploy and publish guarantee is that org's
+    registered developer id. A declared ``publisher`` (free text, or the
+    reserved ``local`` placeholder) is never listed, so no manifest can claim
+    another publisher and no entry is left without one.
+    """
+    _public_listing(registry, manifest, snapshot)
+
+    resolved = await resolve_app_pins('org1', 'other-user', [])
+
+    assert resolved[0]['publisher'] == 'acme'
+
+
+@pytest.mark.parametrize(
+    'app_id, expected',
+    [
+        # A seeded platform app.
+        ('rocketride.aparavi', 'rocketride'),
+        # An app id may be the bare developer id itself.
+        ('acme', 'acme'),
+        ('acme.brandy', 'acme'),
+        ('acme.tools.viewer', 'acme'),
+    ],
+)
+def test_namespace_of_never_returns_empty(app_id, expected):
+    """The publisher is the id's first segment, for every id deploy accepts."""
+    assert namespace_of(app_id) == expected
+
+
+def test_developer_id_required_names_the_ways_in():
+    """One refusal for every door that needs a developer id (#3077)."""
+    message = developer_id_required('Running a deployment')
+    assert message.startswith('Running a deployment requires a registered developer id')
+    assert 'Deploy tab' in message
+    assert 'npm CLI' in message
+    assert 'rocketride app developer register <id>' in message
+    assert 'registerDeveloper(id)' in message
+    assert 'register_developer(id)' in message
+    assert 'rrext_' not in message

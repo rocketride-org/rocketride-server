@@ -99,6 +99,63 @@ task.debug          Allow debugging a specific task
 """
 
 
+# ---------------------------------------------------------------------------
+# Command gate for endpoints-scoped API keys
+# ---------------------------------------------------------------------------
+#
+# A key with an ``endpoints`` scope (a machine webhook's key, the MCP widget's
+# caller-minted upload key) is the OWNER's ``rr_`` key: its session carries
+# the owner's ``userId`` and org. The scope binds it to addresses, and only
+# the commands that resolve runs apply that binding. Handlers that act on the
+# account itself (account and key issuance, deploy, app pins, history, the
+# user's file and pipeline stores, the profiler, starting a new run) check
+# only the identity and never look at the scope, so a key that is public by
+# nature (configured into a third party, handed to a sandboxed widget) would
+# reach them. The socket's command set is therefore fixed here, at dispatch,
+# as an explicit allow-list. Everything else -- including commands added
+# later -- is refused (fail closed). Unscoped credentials are not affected.
+#
+# Allowed: the SDK handshake (``auth``/``deauth``), liveness and identity, and
+# every command whose targets are runs and which applies the scope to each of
+# them -- through the shared resolver (``get_control``: the data pipe, the
+# per-pipe monitor subscription, status, pipeline, terminate, restart) or the
+# listing filters (``rrext_get_tasks``, ``rrext_list_tasks``, the run-log
+# streams). Each of those still applies its own run-scoped permission check.
+# Not allowed although run-shaped: ``rrext_get_token`` (resolves by project
+# and source without the scope), ``rrext_dashboard`` and
+# ``rrext_list_connections`` (they list the owner's connections, which the
+# scope does not filter).
+SCOPED_KEY_COMMANDS = frozenset(
+    {
+        'auth',
+        'deauth',
+        'rrext_ping',
+        'rrext_identify',
+        'rrext_process',
+        'rrext_monitor',
+        'rrext_get_task_status',
+        'rrext_get_pipeline',
+        'terminate',
+        'restart',
+        'rrext_get_tasks',
+        'rrext_list_tasks',
+        'rrext_log',
+    }
+)
+
+
+def scoped_key_commands(account_info: Any) -> Optional[frozenset]:
+    """Return the allowed command set for an endpoints-scoped key, else None.
+
+    ``None`` means the session is unscoped and is not gated here. The scope is
+    read from the session (``AccountInfo.endpoints``, loaded at hydration),
+    the same field the resolver and the listing filters enforce.
+    """
+    if getattr(account_info, 'endpoints', None) is None:
+        return None
+    return SCOPED_KEY_COMMANDS
+
+
 class TaskConn(
     TaskCommands,
     DataCommands,
@@ -276,6 +333,19 @@ class TaskConn(
             await self.send(err)
             self._transport.disconnect()
             return
+
+        # Endpoints-scoped keys may only send their allow-listed commands.
+        # Checked on the same ``command`` string DAPConn turns into
+        # ``on_<command>``, before any handler is looked up.
+        allowed = scoped_key_commands(self._account_info)
+        if allowed is not None:
+            if message.get('type') != 'request':
+                # Nothing but requests is dispatched; do not forward the rest.
+                return
+            if not isinstance(cmd, str) or cmd not in allowed:
+                err = self.build_error(message, 'Command not permitted for an API key with an endpoints scope')
+                await self.send(err)
+                return
 
         await super().on_receive(message)
 

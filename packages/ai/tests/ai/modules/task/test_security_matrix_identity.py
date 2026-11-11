@@ -612,7 +612,11 @@ async def test_s13_dev_launch_asserts_client_id_is_the_user():
 
 @pytest.mark.asyncio
 async def test_s13_dev_launch_requires_a_developer_id():
-    """The address exists from the first run: no developer id, no run."""
+    """The address exists from the first run: no developer id, no run.
+
+    The refusal is the same one the app doors give (develop #3077): it names
+    the ways an org admin actually registers, never a raw DAP verb.
+    """
     ts = _server()
     with pytest.raises(TaskError) as err:
         await ts.start_task(
@@ -625,6 +629,13 @@ async def test_s13_dev_launch_requires_a_developer_id():
             developer_id='',
         )
     assert err.value.code == TaskError.INVALID_ARGUMENT
+    assert err.value.field == 'developerId'
+    message = str(err.value)
+    assert message.startswith('Running a pipeline requires a registered developer id')
+    assert 'Deploy tab' in message
+    assert 'rocketride app developer register <id>' in message
+    assert 'register_developer(id)' in message
+    assert 'rrext_' not in message
 
 
 # =============================================================================

@@ -107,14 +107,13 @@ async def start_server_task_as_team(
         PermissionError: The org has no developer id.
     """
     from ai.account import account
+    from ai.account.app_deploy import developer_id_required
     from ai.account.models import AccountInfo
 
     # The address namespace comes from the org, not from a session.
     developer_id = await account.get_developer_id(org_id)
     if not developer_id:
-        raise PermissionError(
-            'Your organization has no developer id yet: an org admin must claim one before deployments can run'
-        )
+        raise PermissionError(developer_id_required('Running a deployment'))
 
     # Trusted entry point, but still validate the owner pair: owner_kind='user'
     # with an empty owner_user_id would build an identity with userId='' — a
