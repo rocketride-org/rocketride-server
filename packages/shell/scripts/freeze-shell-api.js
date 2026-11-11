@@ -38,10 +38,24 @@
 // ever appends). This file also pins each exported TYPE against the earliest
 // version that froze it (contract-check.generated.ts).
 //
-// Usage:  node freeze-shell-api.js [--check | --regen | --regen-derived]
+// Usage:  node freeze-shell-api.js [--check | --remint | --regen | --regen-derived]
 //   (no flag)  full freeze — appends the next version + re-accumulates the contract.
+//              This APPEND is the release-time act: once a version reaches a
+//              published branch it is permanent.
 //   --check    CI mode — nonzero exit if the live surface differs from the newest
 //              frozen version (no freeze committed).
+//   --remint   RE-MINT the in-progress, UNRELEASED newest version vN in place:
+//              re-bundles the live surface into versions/vN.d.ts and regenerates
+//              the derived files exactly as a freeze does (N does not change, so
+//              apiver stays put). For a program that grows the surface over
+//              several steps before release, so it lands as ONE version instead
+//              of one per step. Guards: only the single newest file is ever
+//              written (v0..v(N-1) are never touched); the run refuses with a
+//              nonzero exit when vN is already PUBLISHED, i.e. present on
+//              origin/develop or origin/main (or when that cannot be proven
+//              because a ref is missing); an unchanged surface leaves vN
+//              byte-identical. Removing a member vN already froze still fails
+//              the pre-check (vN's floors stay in force while re-minting).
 //   --regen    RESET to a fresh v0 — drops every frozen version and re-mints v0
 //              from the CURRENT live surface (pre-1.0 policy: breaking surface
 //              changes collapse the history; no external consumers hold floors
@@ -587,8 +601,13 @@ function writeApiVersion(n) {
 	fs.writeFileSync(APIVER_TS, src.replace(re, `export const SHELL_API_VERSION = ${n} as const;`));
 }
 
-/** Build the provenance header stamped onto each frozen version file. */
-function versionHeader(next) {
+/**
+ * Build the provenance header stamped onto each frozen version file.
+ *
+ * @param {number} next - Version number.
+ * @param {string} [producer] - The builder target that produced the file.
+ */
+function versionHeader(next, producer = 'shell:freeze') {
 	return [
 		MIT_HEADER,
 		'',
@@ -598,7 +617,7 @@ function versionHeader(next) {
 		`// Generated:     ${new Date().toISOString()}`,
 		`// Source commit: ${gitCommit()}`,
 		`// Generator:     dts-bundle-generator@${DBG.version}`,
-		'// Produced by:   ./builder shell:freeze',
+		`// Produced by:   ./builder ${producer}`,
 		'// =============================================================================',
 	].join('\n');
 }
@@ -608,11 +627,12 @@ function versionHeader(next) {
  *
  * @param {number} next - Version number.
  * @param {string} candidateBody - The generated bundle body.
+ * @param {string} [producer] - The builder target stamped into the header.
  */
-function writeVersion(next, candidateBody) {
+function writeVersion(next, candidateBody, producer) {
 	fs.mkdirSync(VERSIONS_DIR, { recursive: true });
 	const content = [
-		versionHeader(next),
+		versionHeader(next, producer),
 		'',
 		BEGIN,
 		candidateBody.trim(),
@@ -813,6 +833,52 @@ function generateConformance(maxN) {
 }
 
 // =============================================================================
+// RE-MINT GUARD
+// =============================================================================
+
+// The refs whose presence of a version file means that version has been
+// PUBLISHED (released). A published version is permanent: it can only be
+// followed by a new appended version, never re-minted.
+const PUBLISHED_REFS = ['origin/develop', 'origin/main'];
+
+/**
+ * Find the published refs that already carry versions/v<n>.d.ts. Fails closed:
+ * a ref that cannot be resolved locally is reported as `missing`, and the
+ * caller refuses rather than assume the version is unreleased.
+ *
+ * @param {number} n - The version number about to be re-minted.
+ * @returns {{ publishedOn: string[], missing: string[] }}
+ */
+function publishedRefsFor(n) {
+	const rel = path
+		.relative(REPO_ROOT, path.join(VERSIONS_DIR, `v${n}.d.ts`))
+		.split(path.sep)
+		.join('/');
+	const publishedOn = [];
+	const missing = [];
+	for (const ref of PUBLISHED_REFS) {
+		// Step 1 — the ref itself must resolve, or nothing can be proven.
+		try {
+			execFileSync('git', ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], {
+				cwd: REPO_ROOT,
+				stdio: 'ignore',
+			});
+		} catch {
+			missing.push(ref);
+			continue;
+		}
+		// Step 2 — does the ref's tree hold the version file?
+		try {
+			execFileSync('git', ['cat-file', '-e', `${ref}:${rel}`], { cwd: REPO_ROOT, stdio: 'ignore' });
+			publishedOn.push(ref);
+		} catch {
+			// Not on this ref — unreleased as far as this ref is concerned.
+		}
+	}
+	return { publishedOn, missing };
+}
+
+// =============================================================================
 // MAIN
 // =============================================================================
 
@@ -821,6 +887,7 @@ function main() {
 	const checkMode = process.argv.includes('--check');
 	const regenMode = process.argv.includes('--regen');
 	const regenDerivedMode = process.argv.includes('--regen-derived');
+	const remintMode = process.argv.includes('--remint');
 
 	// --regen-derived: rebuild the derived files (barrels, conformance floors,
 	// apiver) from the immutable frozen versions — nothing is dropped, re-minted,
@@ -907,6 +974,74 @@ function main() {
 		}
 		cleanup();
 		log('Recreated the v0 freeze from the live surface (contract history reset to v0).');
+		return;
+	}
+
+	// --remint: re-bundle the live surface into the NEWEST existing version in
+	// place. Reserved for the in-progress, unreleased version — the append in
+	// the full freeze below remains the release-time act. Only versions/vN.d.ts
+	// is ever written; every older version file is read-only to this path.
+	if (remintMode) {
+		// Step M1 — there must be a version to re-mint.
+		const { prev } = determineVersions();
+		if (prev < 0) {
+			console.error(
+				'[shell:freeze --remint] No frozen version exists to re-mint. ' +
+					'Restore packages/shell/contract/versions/ or run `./builder shell:freeze`.'
+			);
+			process.exit(1);
+		}
+
+		// Step M2 — refuse a published version (fail closed on a missing ref).
+		const { publishedOn, missing } = publishedRefsFor(prev);
+		if (publishedOn.length > 0) {
+			console.error(
+				`[shell:freeze --remint] REFUSED: v${prev} is already published ` +
+					`(present on ${publishedOn.join(', ')}). ` +
+					'A published version is permanent; run `./builder shell:freeze` to append the next version instead.'
+			);
+			process.exit(1);
+		}
+		if (missing.length > 0) {
+			console.error(
+				`[shell:freeze --remint] REFUSED: cannot prove v${prev} is unpublished — ` +
+					`${missing.join(', ')} not available locally. Run \`git fetch origin\` and retry.`
+			);
+			process.exit(1);
+		}
+
+		// Step M3 — the normal pre-check + bundle. vN's existing floors stay in
+		// force, so a member vN already froze cannot be dropped by re-minting.
+		preCheck();
+		const candidateBody = generateCandidate();
+
+		// Step M4 — rewrite vN only when its bundle body actually changed, so an
+		// unchanged surface leaves the file byte-identical (no fresh timestamp
+		// or commit stamp churn).
+		const versionPath = path.join(VERSIONS_DIR, `v${prev}.d.ts`);
+		const original = fs.readFileSync(versionPath, 'utf8');
+		const changed = extractBundleBody(original) !== candidateBody.trim();
+		if (changed) writeVersion(prev, candidateBody, 'shell:remint');
+
+		// Step M5 — regenerate the derived files exactly as a freeze does. N is
+		// unchanged, so apiver keeps the same number.
+		try {
+			regenerateBarrels(prev);
+			generateConformance(prev);
+			writeApiVersion(prev);
+		} catch (err) {
+			// Put the previous vN back so the tree stays consistent with the
+			// derived files that were committed alongside it.
+			if (changed) fs.writeFileSync(versionPath, original);
+			throw err;
+		}
+		cleanup();
+		log(
+			changed
+				? `Re-minted ShellApiV${prev} in place -> packages/shell/contract/versions/v${prev}.d.ts ` +
+						`(v0..v${prev - 1} untouched).`
+				: `v${prev} already matches the live surface — left byte-identical; derived files regenerated.`
+		);
 		return;
 	}
 
