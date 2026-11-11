@@ -327,11 +327,40 @@ def test_site_only_from_the_root_owner():
         ({'docsUrl': 'http://docs.example/llms.txt'}, 'site.docsUrl'),
         ({'docsUrl': 'javascript:alert(1)'}, 'site.docsUrl'),
         ({'docsUrl': 'https://docs.example/llms.txt\n'}, 'site.docsUrl'),
+        ({'docsUrl': 'https://x/"><script>'}, 'site.docsUrl'),
     ],
 )
 def test_bad_site_fields(site, needle):
     _, out, errors = check_manifest(ROOT_APP, {'publicPages': [_page('/')], 'site': site})
     assert out is None and needle in errors[0]
+
+
+@pytest.mark.parametrize('char', ['<', '>', '"', "'", '`'])
+@pytest.mark.parametrize(
+    'template',
+    [
+        'https://docs{}.example/llms.txt',
+        'https://docs.example/llms{}.txt',
+        'https://docs.example/llms.txt?q={}',
+        'https://docs.example/llms.txt#{}',
+    ],
+)
+def test_a_docs_url_carrying_an_html_special_character_is_refused(char, template):
+    # A real URL percent-encodes these; raw, they would break out of an HTML attribute.
+    _, out, errors = check_manifest(ROOT_APP, {'publicPages': [_page('/')], 'site': {'docsUrl': template.format(char)}})
+    assert out is None and 'site.docsUrl' in errors[0]
+
+
+@pytest.mark.parametrize(
+    'url',
+    [
+        'https://docs.example/llms.txt?v=1&lang=en#top',
+        'https://docs.example:8443/a%22b%3C/c;d=e,f~g!h$i*j+k(l)@m',
+    ],
+)
+def test_a_docs_url_with_a_query_and_a_fragment_is_accepted(url):
+    _, out, errors = check_manifest(ROOT_APP, {'publicPages': [_page('/')], 'site': {'docsUrl': url}})
+    assert errors == [] and out == {'docsUrl': url}
 
 
 def test_errors_carry_no_em_dashes():

@@ -291,7 +291,8 @@ publish fails with a message naming the field):
 - Each `data` entry is `plans`, `plans:<appId>` or `app:<appId>`, and a page
   names each source (`plans`, `app`) at most once.
 - `snapshot` must be a relative `.html` path that exists in the built version.
-- `site.docsUrl` must be an `https://` URL.
+- `site.docsUrl` must be an `https://` URL, with `<`, `>`, `"`, `'` and
+  `` ` `` percent-encoded.
 
 Until a published platform app contributes a valid page, the page map holds
 the server's built-in page list instead. A published app whose storage cannot
