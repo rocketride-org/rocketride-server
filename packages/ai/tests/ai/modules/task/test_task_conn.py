@@ -49,7 +49,7 @@ def _make_conn(
     Attributes consumed by the methods under test are set explicitly:
     ``_server``, ``_transport``, ``_account_info``, ``_authenticated``,
     ``_connection_id``, ``_client_ip``, ``_auth_attempts``, counters,
-    ``_messages_in/out``, ``_last_activity``.
+    ``_messages_in/out``, ``_last_activity``, ``_monitors`` (empty).
 
     Real DAPConn helpers (``build_response``, ``build_error``,
     ``build_event``, ``debug_message``) are stubbed with MagicMocks that
@@ -76,6 +76,7 @@ def _make_conn(
     conn._last_activity = 0.0
     conn._connected_at = 0.0
     conn._client_info = {}
+    conn._monitors = {}
     conn._server = server or MagicMock()
 
     transport = MagicMock()

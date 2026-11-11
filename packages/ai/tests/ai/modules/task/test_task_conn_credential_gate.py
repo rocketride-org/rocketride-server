@@ -296,6 +296,7 @@ def _wire_real_auth(conn):
         broadcast_server_event=AsyncMock(),
         release_unauthed_slot=lambda ip: None,
         _unauthed_by_ip={},
+        _task_control={},
     )
 
 
@@ -488,3 +489,24 @@ async def test_unscoped_wildcard_subscription_still_receives_server_events():
 
     events = [m for m in _sent(conn) if m['type'] == 'event']
     assert [m['body']['action'] for m in events] == ['connection_added']
+
+
+@pytest.mark.asyncio
+async def test_wildcard_subscription_ends_with_the_session():
+    """A '*' subscription made by a scoped key does not outlive deauth.
+
+    Once deauthenticated the socket has no account, so nothing could scope a
+    retained subscription: it would receive every server event broadcast.
+    """
+    conn = await _wildcard_conn(_scoped_identity(permissions=('task.data', 'task.monitor')))
+    conn._server._unauthed_by_ip = {}
+
+    await _dispatch(conn, 'deauth')
+    assert conn._authenticated is False
+    assert conn._monitors == {}
+    conn._transport.send.reset_mock()
+
+    await TaskServer.broadcast_server_event(conn._server, EVENT_TYPE.DASHBOARD, _dashboard_event('connection_added'))
+    await TaskServer.broadcast_server_event(conn._server, EVENT_TYPE.DASHBOARD, _dashboard_event('auth_failed'))
+
+    assert [m for m in _sent(conn) if m['type'] == 'event'] == []

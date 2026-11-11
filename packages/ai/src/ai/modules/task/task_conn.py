@@ -436,7 +436,9 @@ class TaskConn(
 
         Reverts the connection to unauthenticated mode so only
         ``rrext_public_*`` commands are accepted. The WebSocket stays
-        open — callers can re-authenticate later via ``auth``.
+        open — callers can re-authenticate later via ``auth``. The
+        session's subscriptions end with it: every monitor is dropped and
+        the connection is detached from any task it debugs.
         """
         # Nothing to do if not authenticated
         if not self._authenticated:
@@ -445,6 +447,18 @@ class TaskConn(
         # Re-acquire an unauthenticated slot for this IP
         if self._client_ip:
             self._server._unauthed_by_ip[self._client_ip] = self._server._unauthed_by_ip.get(self._client_ip, 0) + 1
+
+        # Drop every subscription made under the ending session. Event
+        # delivery filters by the session's account, so one retained past
+        # it would keep receiving: a '*' monitor would get every server
+        # event (no account left to scope it), and an attached debugger
+        # would keep getting its task's debug events
+        self._monitors.clear()
+        for control in list(self._server._task_control.values()):
+            try:
+                await control.task.detach_task(self)
+            except Exception as e:
+                self.debug_message(f'Error detaching from task "{control.id}" on deauth: {e}')
 
         # Clear authentication state
         self._authenticated = False
