@@ -28,7 +28,7 @@ docker run -d --name rocketride-engine --platform linux/amd64 \
   ghcr.io/rocketride-org/rocketride-engine:latest
 ```
 
-To run it next to an existing engine, change `--name` and the host side of `-p` (for example `127.0.0.1:5566:5565`), and use that port in `ROCKETRIDE_URI` and the MCP address below.
+To run it next to an existing engine, change only `--name` and the host side of `-p` (for example `127.0.0.1:5566:5565`). Leave `-e ROCKETRIDE_URI=ws://127.0.0.1:5565` in the Docker command as it is: that address is inside the container. Then use the new host port in the `ROCKETRIDE_URI` you export in your shell and in the MCP address below.
 
 - The image is amd64 only. `--platform linux/amd64` is required on Apple Silicon (Docker runs it under emulation, and the port answers after about 25 seconds there) and harmless elsewhere.
 - `ROCKETRIDE_APIKEY=rr_local` sets the key clients must send. The value can be any string that starts with `rr_`: the built-in MCP server refuses other values, and the CLI and SDK must send the same one.
