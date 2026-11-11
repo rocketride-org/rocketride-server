@@ -34,7 +34,8 @@
  * the cached start stays identical.
  */
 
-import { redactText } from '../toolkits/common';
+import { isJsonObject, redactText } from '../toolkits/common';
+import { PIPELINE_METHODS } from '../toolkits/rocketrideClient';
 import type { SecretMarkers } from '../toolkits/secretMarkers';
 import { RefusedError, type AgentTool, type ToolAct, type ToolStep, type UserTime } from '../tools';
 import { CostLimitError } from '../usage';
@@ -347,11 +348,12 @@ function pauses(reason: StopReason): boolean {
 // =============================================================================
 
 /**
- * Wave starts every call in a wave at once, which is wrong for calls that change the same file.
- * Here a call starts once every earlier call in the wave whose write paths overlap its own has
- * finished or timed out; a call with no write paths never waits. A call over its per-tool limit is
- * reported as timed out and the wave moves on. The tool cannot be cancelled, so its promise goes
- * into `late` until the loop reads how it ended.
+ * Wave starts every call in a wave at once, which is wrong for calls that change the same file, or
+ * read a file an earlier call changes. Here a call starts once every earlier call in the wave whose
+ * write paths overlap the paths it reads or writes has finished or timed out; a call that reads and
+ * writes no named path never waits. A call over its per-tool limit is reported as timed out and the
+ * wave moves on. The tool cannot be cancelled, so its promise goes into `late` until the loop reads
+ * how it ended.
  */
 
 // =============================================================================
@@ -380,7 +382,7 @@ function hideSecrets(text: string, secrets?: SecretMarkers): string {
 }
 
 // =============================================================================
-// WRITE PATHS — what a call changes
+// PATHS — what a call reads and changes
 // =============================================================================
 
 /**
@@ -414,6 +416,26 @@ function writePaths(call: ToolCall): string[] {
 			return [...cleanPath(args.oldPath), ...cleanPath(args.newPath)];
 		case 'create_app':
 			return typeof args.appName === 'string' ? cleanPath(`apps/${args.appName}-ui`) : [];
+		default:
+			return [];
+	}
+}
+
+/**
+ * The workspace paths a call reads, spelled as in `writePaths`: the file a read or stat names, and
+ * the pipe a `rocketride_client` validate, use or deploy.add reads while it prepares
+ * (`withPipelineFile` in `../toolkits/rocketrideClient.ts`).
+ */
+function readPaths(call: ToolCall): string[] {
+	const { args } = call;
+	switch (call.tool) {
+		case 'read_file':
+		case 'stat_file':
+			return cleanPath(args.path);
+		case 'rocketride_client': {
+			const first: unknown = Array.isArray(args.params) ? args.params[0] : undefined;
+			return PIPELINE_METHODS.has(String(args.method)) && isJsonObject(first) ? cleanPath(first.filepath) : [];
+		}
 		default:
 			return [];
 	}
@@ -575,13 +597,15 @@ function trackLate(late: Map<Promise<unknown>, LateCall>, call: ToolCall, runnin
 
 /**
  * Runs a wave's calls and returns their outcomes in call order. A call starts once every earlier
- * call with overlapping write paths has settled, so calls on different files overlap and calls on
- * one file run as planned. A call is not started when an earlier overlapping call ran past its
- * limit or was held back, or when a timed-out call from an earlier wave still runs on its files: it
- * would land under a change still on its way. A failed prepare or refused act holds nothing back.
+ * call that writes a path it reads or writes has settled, so reads and calls on different files
+ * overlap, and calls on one file run as planned. A call is not started when an earlier overlapping
+ * call ran past its limit or was held back, or when a timed-out call from an earlier wave still
+ * writes a file it reads or writes: it would land under that change, or read the file before the
+ * change lands. A failed prepare or refused act holds nothing back.
  */
 async function runWave(calls: ToolCall[], steps: CallSteps, opts: { timeoutMs: (tool: string) => number; late: Map<Promise<unknown>, LateCall>; signal: AbortSignal; userTime?: UserTime }): Promise<CallOutcome[]> {
 	const held = calls.map(writePaths);
+	const touched = calls.map((call, i) => [...readPaths(call), ...held[i]]);
 	const outcomes: Promise<CallOutcome>[] = [];
 	// the timed-out call each held-back call waits for, by index; set before that call's outcome settles
 	const waitsFor: (ToolCall | undefined)[] = [];
@@ -593,12 +617,12 @@ async function runWave(calls: ToolCall[], steps: CallSteps, opts: { timeoutMs: (
 	const running = [...opts.late.values()].filter((late) => !late.ended);
 
 	calls.forEach((call, i) => {
-		const blocking = running.find((late) => overlaps(held[i], writePaths(late.call)));
+		const blocking = running.find((late) => overlaps(touched[i], writePaths(late.call)));
 		if (blocking) {
 			outcomes.push(Promise.resolve(holdBack(i, blocking.call)));
 			return;
 		}
-		const earlier = outcomes.flatMap((outcome, j) => (overlaps(held[i], held[j]) ? [{ outcome, j }] : []));
+		const earlier = outcomes.flatMap((outcome, j) => (overlaps(touched[i], held[j]) ? [{ outcome, j }] : []));
 		const start = (): Promise<CallOutcome> => runOne(call, steps, opts.timeoutMs(call.tool), opts.late, opts.signal, opts.userTime);
 		// With nothing to wait for, the call starts now, in this turn, so unrelated calls overlap fully.
 		if (earlier.length === 0) {

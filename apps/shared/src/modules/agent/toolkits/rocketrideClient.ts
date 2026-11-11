@@ -61,7 +61,7 @@ const NOT_JSON: Record<string, string> = {
 const SUB_CLIENTS = new Set(['account', 'billing', 'database', 'deploy', 'log']);
 
 /** The methods whose first argument may name a workspace pipeline by `filepath`. */
-const PIPELINE_METHODS = new Set(['use', 'validate', 'deploy.add']);
+export const PIPELINE_METHODS = new Set(['use', 'validate', 'deploy.add']);
 
 /** The methods whose top-level `token` is the run token, kept readable. */
 const RUN_TOKEN_METHODS = new Set(['use', 'deploy.run']);
