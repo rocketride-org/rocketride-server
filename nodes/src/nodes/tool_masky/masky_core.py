@@ -33,7 +33,6 @@ from __future__ import annotations
 import datetime
 import hashlib
 import math
-import os
 import re
 import time
 import urllib.parse
@@ -83,8 +82,8 @@ class MaskyError(RuntimeError):
 
 
 def resolve_api_key(configured: Any) -> str:  # noqa: ANN401
-    """Return the configured key, falling back to ROCKETRIDE_MASKY_KEY."""
-    return (str(configured or '').strip() or os.environ.get(ENV_API_KEY, '')).strip()
+    """Return the configured key, stripped; the key arrives through the node config only (no process-env fallback)."""
+    return str(configured or '').strip()
 
 
 def _body_text(body: Any) -> str:  # noqa: ANN401

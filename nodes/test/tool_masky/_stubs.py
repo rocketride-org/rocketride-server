@@ -42,7 +42,6 @@ STUB_MODULE_NAMES = (
     'ai',
     'ai.common',
     'ai.common.utils',
-    'ai.common.config',
     'ai.common.tools',
     'ai.common.avi',
     'ai.common.avi.descriptor',
@@ -96,18 +95,6 @@ def _load_source(name: str, path: Path):
 parse_bool = _load_source('_tool_masky_test_config_utils', _COMMON / 'utils' / 'config_utils.py').parse_bool
 
 
-def check_credential_resolved(logicalType, field, value, connConfig=None):
-    """Stand-in for ai.common.config.check_credential_resolved: rejects unfilled placeholders."""
-    if isinstance(value, str) and ('${' in value or '<REDACTED>' in value):
-        raise ValueError(f'{logicalType}.{field} is an unfilled placeholder')
-
-
-class Config:
-    @staticmethod
-    def getNodeConfig(*_a, **_k):
-        return {}
-
-
 def make_requests() -> types.ModuleType:
     req = types.ModuleType('requests')
     req.RequestException = type('RequestException', (Exception,), {})
@@ -142,9 +129,15 @@ def _make_rocketlib() -> types.ModuleType:
         def preventDefault(self):
             raise PreventDefault()
 
+    # The real base: its ``config`` property resolves self.glb.connConfig against
+    # the engine's schema for tool_masky. Imported before this stub shadows
+    # rocketlib.filters below; the real engine/config submodules stay in sys.modules.
+    from rocketlib.filters import IGlobalBase
+
     rl.IInstanceBase = IInstanceBase
-    rl.IGlobalBase = type('IGlobalBase', (), {})
-    rl.OPEN_MODE = type('OPEN_MODE', (), {'CONFIG': 'config', 'SOURCE': 'source'})
+    rl.IGlobalBase = IGlobalBase
+    rl.engine = importlib.import_module('rocketlib.engine')
+    rl.config = importlib.import_module('rocketlib.config')
     rl.AVI_ACTION = type('AVI_ACTION', (), {'BEGIN': BEGIN, 'WRITE': WRITE, 'END': END})
     rl.debug = rl.error = lambda *a, **k: None
     rl.warning = lambda msg, *a, **k: WARNINGS.append(msg)
@@ -161,7 +154,7 @@ def install_stubs(*, real_tools_base: bool = False, stub_network: bool = True) -
     """Install the stand-ins into ``sys.modules`` and return handles the tests need."""
     sys.modules['rocketlib'] = _make_rocketlib()
 
-    for name in ('ai', 'ai.common', 'ai.common.utils', 'ai.common.config', 'ai.common.tools', 'ai.common.avi'):
+    for name in ('ai', 'ai.common', 'ai.common.utils', 'ai.common.tools', 'ai.common.avi'):
         sys.modules[name] = types.ModuleType(name)
     for name in ('ai', 'ai.common', 'ai.common.avi'):
         sys.modules[name].__path__ = []
@@ -178,10 +171,6 @@ def install_stubs(*, real_tools_base: bool = False, stub_network: bool = True) -
     else:
         tools_base = type('ToolsBase', (), {})
     sys.modules['ai.common.tools'].ToolsBase = tools_base
-
-    cfg = sys.modules['ai.common.config']
-    cfg.Config = Config
-    cfg.check_credential_resolved = check_credential_resolved
 
     desc = types.ModuleType('ai.common.avi.descriptor')
     desc.forward_enriched_audio = _forwarder('Audio')

@@ -1,6 +1,4 @@
 # =============================================================================
-# RocketRide Engine
-# =============================================================================
 # MIT License
 # Copyright (c) 2026 Aparavi Software AG
 #
@@ -26,16 +24,13 @@
 """
 Exa Search tool node - global (shared) state.
 
-Reads the Exa API key and search configuration from the node config.
+Reads the Exa API key and search configuration from the resolved node config.
 Tool logic lives on IInstance via @tool_function.
 """
 
 from __future__ import annotations
 
-import os
-
-from ai.common.config import Config
-from rocketlib import IGlobalBase, OPEN_MODE, error, warning
+from rocketlib import IGlobalBase, error
 
 
 class IGlobal(IGlobalBase):
@@ -48,34 +43,24 @@ class IGlobal(IGlobalBase):
     include_text: bool = True
 
     def beginGlobal(self) -> None:
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
+        # The resolved config: defaults applied, numResults within 1-50, the
+        # booleans and the search type validated, the key a required secret
+        cfg = self.config
 
-        cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-
-        apikey = str(cfg.get('apikey') or os.environ.get('EXA_API_KEY', '')).strip()
-
+        # The key reaches the node through its config (a ${ROCKETRIDE_EXA_SEARCH_APIKEY}
+        # reference resolved per call); there is no process-env fallback
+        apikey = str(cfg.apikey or '').strip()
         if not apikey:
-            error('tool_exa_search: apikey is required — set it in node config or EXA_API_KEY env var')
+            error(
+                'tool_exa_search: apikey is required - set it in the node config (a ${ROCKETRIDE_EXA_SEARCH_APIKEY} reference)'
+            )
             raise ValueError('tool_exa_search: apikey is required')
 
         self.apikey = apikey
-        raw_num_results = cfg.get('numResults', 10)
-        if raw_num_results is None:
-            raw_num_results = 10
-        self.num_results = max(1, min(50, int(raw_num_results)))
-        self.use_autoprompt = bool(cfg.get('useAutoprompt', True))
-        self.search_type = str(cfg.get('searchType') or 'auto').strip()
-        self.include_text = bool(cfg.get('includeText', True))
-
-    def validateConfig(self) -> None:
-        try:
-            cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-            apikey = str(cfg.get('apikey') or os.environ.get('EXA_API_KEY', '')).strip()
-            if not apikey:
-                warning('apikey is required')
-        except Exception as e:
-            warning(str(e))
+        self.num_results = cfg.numResults
+        self.use_autoprompt = cfg.useAutoprompt
+        self.search_type = cfg.searchType
+        self.include_text = cfg.includeText
 
     def endGlobal(self) -> None:
         self.apikey = ''

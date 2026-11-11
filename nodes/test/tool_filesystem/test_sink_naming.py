@@ -37,8 +37,8 @@ class TestServicesContract:
             'filesystem.emitUrl',
             'filesystem.urlExpiresIn',
         ):
-            assert key not in d['fields']
-            assert key not in d['shape'][0]['properties']
+            assert key not in d['propertyDefinitions']
+            assert key not in d['properties']
 
     def test_store_variant_identity(self):
         d = _load_services('services.store.json')
@@ -61,7 +61,7 @@ class TestServicesContract:
 
     def test_store_variant_fields(self):
         d = _load_services('services.store.json')
-        f = d['fields']
+        f = d['propertyDefinitions']
         assert f['filesystem.targetDir']['type'] == 'string'
         assert f['filesystem.targetDir']['default'] == 'output/'
         assert f['filesystem.emitUrl']['type'] == 'boolean'
@@ -73,7 +73,7 @@ class TestServicesContract:
         assert f['filesystem.onConflict']['type'] == 'string'
         assert f['filesystem.onConflict']['default'] == 'unique', 'the safe outcome must be the default'
         assert [c[0] for c in f['filesystem.onConflict']['enum']] == ['unique', 'overwrite', 'skip']
-        assert 'filesystem.onConflict' in d['shape'][0]['properties']
+        assert 'filesystem.onConflict' in d['properties']
         # No agent-tool toggles on the store surface.
         assert not any(k.startswith('filesystem.allow') for k in f)
 
@@ -87,23 +87,21 @@ class TestServicesContract:
         assert d['path'] == 'nodes.tool_filesystem'
         # Raw objects go out on the tags lane for a downstream Parser.
         assert d['lanes'] == {'_source': ['tags']}
-        # The shape must route the declared fields through the source-parameters
-        # wrapper (telegram/dropper convention) — fields listed directly in the
-        # Pipe section never reach serviceConfig['parameters'] at runtime.
-        assert d['shape'][0]['properties'] == ['type', 'Pipe.source.parameters']
+        # The properties must route the declared leaves through the `parameters`
+        # group (telegram/dropper convention) — leaves listed at the root never
+        # reach serviceConfig['parameters'] at runtime.
+        assert d['properties'] == [
+            'type',
+            {'name': 'parameters', 'properties': ['filesystem.path', 'filesystem.recursive']},
+        ]
 
     def test_source_variant_fields(self):
         d = _load_services('services.source.json')
-        f = d['fields']
+        f = d['propertyDefinitions']
         assert f['filesystem.path']['type'] == 'string'
+        assert f['filesystem.path']['required'] is True
         assert f['filesystem.recursive']['type'] == 'boolean'
         assert f['filesystem.recursive']['default'] is False
-        # Source-parameters wrapper: the engine strips the 'filesystem.' prefix
-        # and delivers these flat under serviceConfig['parameters'].
-        assert f['Pipe.source.parameters'] == {
-            'section': 'parameters',
-            'properties': ['filesystem.path', 'filesystem.recursive'],
-        }
 
 
 def _install_stubs():
@@ -151,10 +149,6 @@ def _install_stubs():
         m = types.ModuleType('ai.account.store')
         m.Store = object
         sys.modules['ai.account.store'] = m
-    if 'ai.common.config' not in sys.modules:
-        m = types.ModuleType('ai.common.config')
-        m.Config = object
-        sys.modules['ai.common.config'] = m
     if 'ai.common.utils' not in sys.modules:
         m = types.ModuleType('ai.common.utils')
 
@@ -232,45 +226,28 @@ class TestSinkConfig:
         )
 
     def test_conflict_policy_defaults_to_the_non_destructive_choice(self):
-        """A mistyped or missing policy degrades to `unique`, never to overwriting."""
+        """The tool definition declares no policy, so the sink's schema default `unique` applies."""
         mod = _load_real_iglobal_module()
         IG = mod.IGlobal
         assert IG._sink_config({})[3] is mod.OnConflict.UNIQUE
-        assert IG._sink_config({'onConflict': 'nonsense'})[3] is mod.OnConflict.UNIQUE
-        assert IG._sink_config({'onConflict': None})[3] is mod.OnConflict.UNIQUE
-        assert IG._sink_config({'onConflict': '  skip  '})[3] is mod.OnConflict.SKIP
-        assert IG._sink_config({'onConflict': 'OVERWRITE'})[3] is mod.OnConflict.OVERWRITE
-
-    def test_overwriting_is_never_reached_by_accident(self):
-        """The destructive outcome has to be named exactly; nothing else degrades into it."""
-        mod = _load_real_iglobal_module()
-        IG = mod.IGlobal
-        for junk in ({}, {'onConflict': ''}, {'onConflict': 'true'}, {'onConflict': True}):
-            assert IG._sink_config(junk)[3] is mod.OnConflict.UNIQUE
+        assert IG._sink_config({'onConflict': 'skip'})[3] is mod.OnConflict.SKIP
+        assert IG._sink_config({'onConflict': 'overwrite'})[3] is mod.OnConflict.OVERWRITE
 
     def test_members_cover_exactly_the_services_json_enum(self):
-        """Member names are what resolves the dropdown value, so a new choice needs a member."""
+        """Member names are what resolves the dropdown value, so a new choice needs a member.
+
+        The resolver pins the stored value to this enum, so a value outside it never
+        reaches ``_sink_config``.
+        """
         mod = _load_real_iglobal_module()
-        fields = _load_services('services.store.json')['fields']
+        fields = _load_services('services.store.json')['propertyDefinitions']
         choices = [c[0] for c in fields['filesystem.onConflict']['enum']]
         assert sorted(m.name.lower() for m in mod.OnConflict) == sorted(choices)
 
-    def test_url_expires_clamped_to_ceiling(self):
-        mod = _load_real_iglobal_module()
-        IG = mod.IGlobal
-        assert IG._sink_config({'urlExpiresIn': 999999})[2] == 3600
-
-    def test_url_expires_non_positive_falls_back_to_default(self):
-        mod = _load_real_iglobal_module()
-        IG = mod.IGlobal
-        assert IG._sink_config({'urlExpiresIn': -5})[2] == 3600
-        assert IG._sink_config({'urlExpiresIn': 0})[2] == 3600
-
-    def test_url_expires_non_numeric_falls_back_to_default(self):
-        # A bad config value must not raise out of beginGlobal.
-        mod = _load_real_iglobal_module()
-        IG = mod.IGlobal
-        assert IG._sink_config({'urlExpiresIn': 'not-a-number'})[2] == 3600
+    def test_url_expiry_bounds_live_in_the_schema(self):
+        """The 1..3600 range is declared on the leaf; the resolver enforces it, the node does not clamp."""
+        field = _load_services('services.store.json')['propertyDefinitions']['filesystem.urlExpiresIn']
+        assert (field['minimum'], field['maximum'], field['default']) == (1, 3600, 3600)
 
 
 # ---------------------------------------------------------------------------

@@ -9,75 +9,54 @@
 	"prefix": "guild",
 	"icon": "guild.svg",
 	"documentation": "https://docs.rocketride.org/nodes/tool_guild",
-	"description": ["Run Guild.ai agents from a RocketRide pipeline or an agent.", "As a pipeline step, lane input is sent to a configured Guild agent as a session and its answer flows downstream; as a tool, an agent can start Guild sessions and inspect their status and transcript.", "Guild is the control plane for AI agents — RocketRide prepares the data, a governed Guild agent performs the action."],
+	"description": ["Run Guild.ai agents from a RocketRide pipeline or an agent.", "As a pipeline step, lane input is sent to a configured Guild agent as a session and its answer flows downstream; as a tool, an agent can start Guild sessions and inspect their status and transcript.", "Guild is the control plane for AI agents: RocketRide prepares the data, a governed Guild agent performs the action."],
 	"tile": ["Guild${parameters.tool_guild.agent ? ': ' + parameters.tool_guild.agent : ''}"],
 	"lanes": {
 		"text": ["text", "answers", "table"],
 		"questions": ["answers", "text", "table"],
 		"documents": ["documents", "text", "table"]
 	},
-	"preconfig": {
-		"default": "default",
-		"profiles": {
-			"default": {
-				"title": "Guild.ai",
-				"baseUrl": "https://app.guild.ai",
-				"apiKeyId": "",
-				"apiKeySecret": "",
-				"owner": "",
-				"workspace": "",
-				"agent": "",
-				"resultMode": "wait",
-				"timeout": 300,
-				"maxSessions": 10,
-				"verifyTls": true
-			}
-		}
-	},
-	"fields": {
+	"propertyDefinitions": {
 		"tool_guild.baseUrl": {
 			"type": "string",
 			"title": "Guild Base URL",
 			"default": "https://app.guild.ai",
+			"minLength": 1,
 			"description": "Base URL of the Guild API. Leave as the default for Guild Cloud; override only for an enterprise or self-hosted deployment."
 		},
 		"tool_guild.apiKeyId": {
 			"type": "string",
 			"title": "API Key ID",
-			"default": "",
-			"description": "The id half of a Guild trigger API key. Guild authenticates with HTTP Basic — the key id is the username. Create a key on the trigger's page in the Guild app.",
-			"secure": true,
-			"ui": {
-				"ui:widget": "ApiKeyWidget"
-			}
+			"description": "The id half of a Guild trigger API key. Guild authenticates with HTTP Basic: the key id is the username. Create a key on the trigger's page in the Guild app.",
+			"secret": true,
+			"env": "ROCKETRIDE_GUILD_KEY_ID",
+			"required": true
 		},
 		"tool_guild.apiKeySecret": {
 			"type": "string",
 			"title": "API Key Secret",
-			"default": "",
 			"description": "The secret half of the Guild trigger API key (the Basic auth password). Shown once when the key is created.",
-			"secure": true,
-			"ui": {
-				"ui:widget": "ApiKeyWidget"
-			}
+			"secret": true,
+			"env": "ROCKETRIDE_GUILD_KEY_SECRET",
+			"required": true
 		},
 		"tool_guild.owner": {
 			"type": "string",
 			"title": "Workspace owner",
-			"default": "",
-			"description": "The owner name that the workspace lives under, as it appears in the Guild app URL (app.guild.ai/<owner>/<workspace>)."
+			"description": "The owner name that the workspace lives under, as it appears in the Guild app URL (app.guild.ai/<owner>/<workspace>). Sessions are started at /api/workspaces/<owner>/<workspace>.",
+			"required": true
 		},
 		"tool_guild.workspace": {
 			"type": "string",
 			"title": "Workspace",
-			"default": "",
-			"description": "The Guild workspace holding the agent to run, as it appears in the app URL."
+			"description": "The Guild workspace holding the agent to run, as it appears in the app URL.",
+			"required": true
 		},
 		"tool_guild.agent": {
 			"type": "string",
 			"title": "Agent",
 			"default": "",
-			"description": "Agent to run as the pipeline step, and the default for the run_agent tool. Required for the pipeline step; an agent may override it per call.",
+			"description": "Agent to run as the pipeline step, and the default for the run_agent tool. Required for the pipeline step; an agent calling <node-id>.run_agent may pass an agent per call.",
 			"optional": true
 		},
 		"tool_guild.resultMode": {
@@ -88,7 +67,7 @@
 				["wait", "Wait for the session result"],
 				["start", "Start the session and return immediately"]
 			],
-			"description": "Guild runs agents asynchronously; 'wait' polls the session until it finishes. 'start' returns the session id without waiting — useful for fire-and-forget tool calls, but the pipeline step always waits (a session id is of no use downstream)."
+			"description": "Guild runs agents asynchronously; 'wait' polls the session until it finishes. 'start' returns the session id without waiting, useful for fire-and-forget tool calls, but the pipeline step always waits (a session id is of no use downstream)."
 		},
 		"tool_guild.timeout": {
 			"type": "integer",
@@ -96,7 +75,7 @@
 			"default": 300,
 			"minimum": 5,
 			"maximum": 3600,
-			"description": "Max seconds to wait for a session to finish before raising. Guild's own turn timeout is 3600s; a timeout here does NOT cancel the session on Guild's side — the session id is reported so the run stays traceable."
+			"description": "Max seconds to wait for a session to finish before raising. Guild's own turn timeout is 3600s; a timeout here does NOT cancel the session on Guild's side: the session id is reported so the run stays traceable."
 		},
 		"tool_guild.maxSessions": {
 			"type": "integer",
@@ -117,6 +96,7 @@
 			]
 		}
 	},
+	"properties": ["type", "tool_guild.baseUrl", "tool_guild.apiKeyId", "tool_guild.apiKeySecret", "tool_guild.owner", "tool_guild.workspace", "tool_guild.agent", "tool_guild.resultMode", "tool_guild.timeout", "tool_guild.maxSessions", "tool_guild.verifyTls"],
 	"test": {
 		"requires": ["ROCKETRIDE_GUILD_KEY_ID", "ROCKETRIDE_GUILD_KEY_SECRET", "ROCKETRIDE_GUILD_OWNER", "ROCKETRIDE_GUILD_WORKSPACE", "ROCKETRIDE_GUILD_AGENT"],
 		"profiles": ["default"],
@@ -129,17 +109,5 @@
 				}
 			}
 		]
-	},
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "Guild.ai",
-			"properties": ["type", "tool_guild.baseUrl", "tool_guild.apiKeyId", "tool_guild.apiKeySecret", "tool_guild.owner", "tool_guild.workspace", "tool_guild.agent", "tool_guild.resultMode", "tool_guild.timeout", "tool_guild.maxSessions", "tool_guild.verifyTls"],
-			"ui": {
-				"ui:options": {
-					"compactDescriptions": true
-				}
-			}
-		}
-	]
+	}
 }

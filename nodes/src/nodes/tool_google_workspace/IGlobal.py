@@ -29,20 +29,20 @@ Shared global lifecycle for the Google Workspace tool services.
 Each service subpackage (gmail/, sheets/, docs/, calendar/, drive/) subclasses
 :class:`GoogleToolGlobalBase`, sets ``SERVICE`` (its :class:`GoogleService`
 profile) and ``SPEC_NAME`` (its AccessSpec in ``nodes.core.google_access``),
-and inherits the whole beginGlobal / validateConfig / endGlobal lifecycle.
-Service-specific post-build state (e.g. drive's account-domain resolution)
-hooks in via :meth:`_after_begin`.
+and inherits the whole beginGlobal / endGlobal lifecycle. Save-time
+validation lives in the sibling ``IValidator`` modules. Service-specific
+post-build state (e.g. drive's account-domain resolution) hooks in via
+:meth:`_after_begin`.
 """
 
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import Any, Mapping
 
-from ai.common.config import Config
-from rocketlib import IGlobalBase, OPEN_MODE, warning
+from rocketlib import IGlobalBase
 
-from .google_client import GoogleService, build_service, token_scope_report
+from .google_client import GoogleService, access_spec, build_service
 
 
 class GoogleToolGlobalBase(IGlobalBase):
@@ -54,19 +54,10 @@ class GoogleToolGlobalBase(IGlobalBase):
     service: Any = None
     access: Any = None
 
-    def _spec(self):
-        """Resolve this service's AccessSpec (deferred: engine-path import)."""
-        from nodes.core import google_access
-
-        return getattr(google_access, self.SPEC_NAME)
-
-    def _after_begin(self, cfg: dict) -> None:
+    def _after_begin(self, cfg: Mapping) -> None:
         """Hook for service-specific post-build state (default: none)."""
 
     def beginGlobal(self) -> None:
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
-
         from depends import depends  # type: ignore
 
         # The shared requirements.txt lives at the tool_google_workspace/ level.
@@ -74,44 +65,13 @@ class GoogleToolGlobalBase(IGlobalBase):
 
         from nodes.core.google_access import resolve_google_access
 
-        cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-        # Pass the full config: gate flags (allowDelete, allowPublicSharing,
-        # allowHardDelete) live beside 'access' and must reach _resolve_flags.
-        self.access = resolve_google_access(cfg, self._spec())
-        auth_type = (cfg.get('authType') or 'service').strip()
-        self.service = build_service(self.SERVICE, auth_type, cfg, self.access.scopes)
+        # The resolved view holds the active authType branch flattened beside the
+        # gate flags (allowDelete, allowPublicSharing, allowHardDelete), which
+        # _resolve_flags reads next to 'access'.
+        cfg = self.config
+        self.access = resolve_google_access(cfg, access_spec(self.SPEC_NAME))
+        self.service = build_service(self.SERVICE, cfg['authType'], cfg, self.access.scopes)
         self._after_begin(cfg)
-
-    def validateConfig(self) -> None:
-        product = self.SERVICE.product
-        try:
-            from nodes.core.google_access import resolve_google_access
-
-            cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-            # Surfaces tier/flag misconfig (unknown tier, non-bool flag) as a warning.
-            resolved = resolve_google_access(cfg, self._spec())
-            auth_type = (cfg.get('authType') or 'service').strip()
-            if auth_type == 'user':
-                token_str = str(cfg.get('userToken') or '').strip()
-                if not token_str:
-                    warning(f'{product}: sign in with Google to provide an access token')
-                else:
-                    try:
-                        _granted, covered, missing = token_scope_report(self.SERVICE, cfg, resolved.scopes)
-                        if not covered:
-                            warning(
-                                f'{product}: your Google account authorization is missing scopes '
-                                'for the selected access tier. Please disconnect and reconnect '
-                                f'your Google account. Missing: {", ".join(missing)}'
-                            )
-                    except Exception as exc:
-                        # A corrupt token must warn at config time, not surface later
-                        # as a cryptic run-time failure.
-                        warning(f'{product}: invalid user token data ({exc})')
-            elif not str(cfg.get('serviceKey') or '').strip():
-                warning(f'{product}: a service account key file is required')
-        except Exception as e:
-            warning(str(e))
 
     def endGlobal(self) -> None:
         self.service = None

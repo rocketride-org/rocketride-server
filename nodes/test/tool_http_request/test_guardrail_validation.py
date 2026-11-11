@@ -28,23 +28,24 @@ def _load_node_modules(monkeypatch: pytest.MonkeyPatch):
     package.__path__ = [str(NODE_DIR)]
     monkeypatch.setitem(sys.modules, package_name, package)
 
+    # The real base: its ``config`` property resolves self.glb.connConfig against
+    # the engine's schema for tool_http_request (rocketlib.filters is never stubbed).
+    from rocketlib.filters import IGlobalBase
+
     rocketlib = types.ModuleType('rocketlib')
-    rocketlib.IGlobalBase = object
+    rocketlib.IGlobalBase = IGlobalBase
     rocketlib.IInstanceBase = object
-    rocketlib.OPEN_MODE = types.SimpleNamespace(CONFIG='config')
+    rocketlib.engine = importlib.import_module('rocketlib.engine')
+    rocketlib.config = importlib.import_module('rocketlib.config')
     rocketlib.warning = Mock()
     rocketlib.tool_function = lambda **_kwargs: lambda function: function
     monkeypatch.setitem(sys.modules, 'rocketlib', rocketlib)
 
-    config_module = types.ModuleType('ai.common.config')
-    config_module.Config = Mock()
     utils_module = types.ModuleType('ai.common.utils')
-    utils_module.config_int = Mock()
     ai_module = types.ModuleType('ai')
     common_module = types.ModuleType('ai.common')
     monkeypatch.setitem(sys.modules, 'ai', ai_module)
     monkeypatch.setitem(sys.modules, 'ai.common', common_module)
-    monkeypatch.setitem(sys.modules, 'ai.common.config', config_module)
     monkeypatch.setitem(sys.modules, 'ai.common.utils', utils_module)
 
     def load(name: str):
@@ -70,9 +71,9 @@ def _load_node_modules(monkeypatch: pytest.MonkeyPatch):
         ([{'whitelistPattern': True}], 'must be a string'),
         ([{'whitelistPattern': 123}], 'must be a string'),
         (['https://service.example'], 'must be an object'),
-        ({}, 'malformed and cannot be parsed'),
-        (False, 'malformed and cannot be parsed'),
-        (0, 'malformed and cannot be parsed'),
+        ({}, 'must be a list of rows'),
+        (False, 'must be a list of rows'),
+        (0, 'must be a list of rows'),
     ],
 )
 def test_invalid_url_whitelist_fails_closed(monkeypatch, whitelist, error):
@@ -159,11 +160,8 @@ def test_begin_global_warns_about_whitelist_migration(monkeypatch, pattern):
     """Every configured whitelist gets a canonical-matching migration warning."""
     _http_client, iglobal, _iinstance = _load_node_modules(monkeypatch)
     cfg = {'urlWhitelist': [{'whitelistPattern': pattern}]}
-    iglobal.Config.getNodeConfig.return_value = cfg
-    iglobal.config_int.side_effect = [1, 60, 10]
     instance = object.__new__(iglobal.IGlobal)
-    instance.IEndpoint = types.SimpleNamespace(endpoint=types.SimpleNamespace(openMode='run'))
-    instance.glb = types.SimpleNamespace(logicalType='tool_http_request', connConfig={})
+    instance.glb = types.SimpleNamespace(logicalType='tool_http_request', connConfig=cfg)
 
     instance.beginGlobal()
 

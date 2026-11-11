@@ -28,7 +28,8 @@ same configured scope.
 
 ## Configuration
 
-`api_key` is required (or set `MEM0_API_KEY`); a scope is required to store and recall. The full
+`api_key` is required, normally as a `${ROCKETRIDE_MEM0_APIKEY}` reference to the account variable
+(there is no process-environment fallback); a scope is required to store and recall. The full
 field set is in the [Schema](#schema) section below and in `services.json`.
 
 **Scope with `user_id`.** On the hosted platform a memory added with an `agent_id` / `app_id` is
@@ -67,7 +68,7 @@ fire-and-forget. `search` returns ranked rows (handled whether the API returns a
 ### Credentials
 
 Get an API key (`m0-…`) from [app.mem0.ai](https://app.mem0.ai) → API Keys. Never commit keys:
-use node config (encrypted) or the env var.
+put a `${ROCKETRIDE_MEM0_APIKEY}` reference in the API Key field and keep the value in the account variable.
 
 ## Upstream docs
 

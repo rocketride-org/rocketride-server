@@ -20,7 +20,7 @@ import pytest
 import requests
 
 from ._fake_github import FakeGitHub, app, app_config, claims, dispatch, real_node
-from ._stubs import scoped_stubs
+from ._stubs import conn_config, flat_config, scoped_stubs
 
 SENTINEL = 'ghp_sentinel_never_echo_2592pr3'
 
@@ -33,16 +33,32 @@ def github(monkeypatch):
 
 
 def _begin_error(cfg) -> str:
-    """The message beginGlobal raises for ``cfg``."""
-    with scoped_stubs(cfg):
-        from tool_github.IGlobal import IGlobal
+    """The message beginGlobal raises for ``cfg``: its readers, in its order, on the flat config.
 
-        glb = IGlobal()
-        glb.IEndpoint = types.SimpleNamespace(endpoint=types.SimpleNamespace(openMode='open'))
-        glb.glb = types.SimpleNamespace(logicalType='tool_github', connConfig={})
+    Past the schema on purpose: it stores a credentialMap as the form's rows, so the
+    object, JSON-text, bad-key and bad-value cases here are the node's own checks.
+    """
+    with scoped_stubs(cfg):
+        from tool_github import node_config
+
+        view = flat_config(cfg)
         with pytest.raises(ValueError) as error:
-            glb.beginGlobal()
+            node_config.read_options(view)
+            node_config.read_auth(view)
         return str(error.value)
+
+
+def _validate_warnings(cfg) -> list[str]:
+    """The warnings the package validator emits for ``cfg``, on the same flat config."""
+    with scoped_stubs(cfg):
+        from rocketlib import warning
+        from tool_github.IValidator import IValidator
+
+        validator = IValidator()
+        # The view the resolver would serve, handed in directly (see _begin_error)
+        validator._config_restricted = flat_config(cfg)
+        validator.validateConfig()
+        return [str(call.args[0]) for call in warning.call_args_list]
 
 
 # ---------------------------------------------------------------------------
@@ -52,10 +68,10 @@ def _begin_error(cfg) -> str:
 MAP = {'acme/payments': 'tok-exact', 'acme/*': 'tok-owner', '*': 'tok-default'}
 
 
-@pytest.mark.parametrize('form', ['object', 'json-text'])
-def test_map_precedence_exact_then_owner_then_default(github, form):
-    raw = MAP if form == 'object' else json.dumps(MAP)
-    with real_node({'credentialMap': raw}) as inst:
+def test_map_precedence_exact_then_owner_then_default(github):
+    # Stored as the form's rows (the schema's array leaf); the test stubs store the terse
+    # object form that way. A whole map as JSON text is not storable in the property model.
+    with real_node({'credentialMap': MAP}) as inst:
         glb = inst.IGlobal
         assert glb.get_token('acme/payments') == 'tok-exact'
         assert glb.get_token('acme/web') == 'tok-owner'
@@ -69,10 +85,8 @@ def test_map_precedence_exact_then_owner_then_default(github, form):
 ROWS = [{'credentialRepository': key, 'credentialValue': value} for key, value in MAP.items()]
 
 
-@pytest.mark.parametrize('form', ['rows', 'rows-json-text'])
-def test_map_rows_from_the_canvas_form_match_like_the_object(github, form):
-    raw = ROWS if form == 'rows' else json.dumps(ROWS)
-    with real_node({'credentialMap': raw}) as inst:
+def test_map_rows_from_the_canvas_form_match_like_the_object(github):
+    with real_node({'credentialMap': ROWS}) as inst:
         glb = inst.IGlobal
         assert glb.get_token('acme/payments') == 'tok-exact'
         assert glb.get_token('acme/web') == 'tok-owner'
@@ -330,15 +344,7 @@ def test_with_a_map_an_incomplete_node_credential_still_fails_at_start():
 
 def _begin_and_warning(cfg) -> tuple[str, list[str]]:
     """The beginGlobal error and the validateConfig warnings for ``cfg``."""
-    message = _begin_error(cfg)
-    with scoped_stubs(cfg):
-        from tool_github.IGlobal import IGlobal, warning
-
-        glb = IGlobal()
-        glb.glb = types.SimpleNamespace(logicalType='tool_github', connConfig={})
-        glb.validateConfig()
-        warnings = [str(call.args[0]) for call in warning.call_args_list]
-    return message, warnings
+    return _begin_error(cfg), _validate_warnings(cfg)
 
 
 INCOMPLETE = 'has a "${" that does not start a complete ${ROCKETRIDE_<name>} placeholder'
@@ -449,19 +455,16 @@ def test_keys_that_differ_only_in_case_fail_at_start():
 @pytest.mark.parametrize('raw', ['', '   ', {}, None, '{}'])
 def test_an_empty_map_means_the_node_credential(github, raw):
     assert _begin_error({'credentialMap': raw}) == 'tool_github: token is required'
-    with real_node({'credentialMap': raw, 'token': 'ghp_node'}) as inst:
+    # Only the forms the schema stores reach the node through the resolver: an absent
+    # map or an empty one (the text forms are the parser's own case above).
+    stored = None if isinstance(raw, str) and raw else raw
+    with real_node({'credentialMap': stored, 'token': 'ghp_node'}) as inst:
         assert inst.IGlobal.credential_map is None
         assert inst.IGlobal.get_token('a/b') == 'ghp_node'
 
 
 def test_validate_config_warns_with_the_start_message_without_raising():
-    with scoped_stubs({'credentialMap': {'acme': SENTINEL}}):
-        from tool_github.IGlobal import IGlobal, warning
-
-        glb = IGlobal()
-        glb.glb = types.SimpleNamespace(logicalType='tool_github', connConfig={})
-        glb.validateConfig()
-        messages = [call.args[0] for call in warning.call_args_list]
+    messages = _validate_warnings({'credentialMap': {'acme': SENTINEL}})
     assert len(messages) == 1
     assert messages[0].startswith('tool_github: credentialMap key 1 is not a repository (owner/repo)')
 
@@ -633,25 +636,30 @@ def test_services_json_lets_the_canvas_edit_the_map_as_rows_with_a_masked_creden
     # A free-form map of strings renders in the canvas with the form library's bare defaults
     # (a "newKey Key" label, an unlabeled value, an icon-less remove button): the canvas has
     # templates for lists but none for additional properties. Rows of two named columns use
-    # the canvas's list templates and its masked API key widget, like tool_http_request's
-    # default headers.
+    # the canvas's list templates and its secret widget, like tool_http_request's default
+    # headers; the map is declared in the property model beside the auth selector.
+    import importlib.util
     from pathlib import Path
 
-    text = (Path(__file__).resolve().parents[2] / 'src' / 'nodes' / 'tool_github' / 'services.json').read_text(
-        encoding='utf-8'
-    )
-    services = json.loads('\n'.join(line for line in text.splitlines() if not line.lstrip().startswith('//')))
-    field = services['fields']['github.credentialMap']
+    here = Path(__file__).resolve()
+    spec = importlib.util.spec_from_file_location('_github_discovery', here.parents[1] / 'framework' / 'discovery.py')
+    discovery = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(discovery)
+    services = discovery._parse_service_json(str(here.parents[2] / 'src' / 'nodes' / 'tool_github' / 'services.json'))
+    definitions = services['propertyDefinitions']
+    field = definitions['github.credentialMap']
     assert field['type'] == 'array'
     assert field['items'] == {'type': 'object', 'properties': ['github.credentialRepository', 'github.credentialValue']}
     assert field['default'] == []
-    assert field['secure'] is True
-    assert services['fields']['github.credentialRepository']['type'] == 'string'
-    value = services['fields']['github.credentialValue']
+    assert field['secret'] is True
+    assert definitions['github.credentialRepository']['type'] == 'string'
+    value = definitions['github.credentialValue']
     assert value['type'] == 'string'
-    assert value['secure'] is True
-    assert value['ui'] == {'ui:widget': 'ApiKeyWidget'}
-    assert services['preconfig']['profiles']['default']['credentialMap'] == []
+    assert value['secret'] is True
+    assert 'github.credentialMap' in services['properties']
+    # The node's own credential is optional once a map serves the calls: the node checks it
+    assert 'required' not in definitions['github.token']
+    assert 'required' not in definitions['github.appId']
 
 
 # ---------------------------------------------------------------------------
@@ -743,7 +751,7 @@ def test_tokens_are_cached_and_refreshed_per_installation(rsa_private_key_pem):
 
         glb = IGlobal()
         glb.IEndpoint = types.SimpleNamespace(endpoint=types.SimpleNamespace(openMode='open'))
-        glb.glb = types.SimpleNamespace(logicalType='tool_github', connConfig={})
+        glb.glb = types.SimpleNamespace(logicalType='tool_github', connConfig=conn_config())
         glb.beginGlobal()
         installations = {'acme/api': '11', 'beta/web': '22'}
         expiries = {'11': [2000.0, 5000.0], '22': [3000.0]}
@@ -784,7 +792,7 @@ def test_two_refreshes_keep_every_token_a_secret(rsa_private_key_pem):
 
         glb = IGlobal()
         glb.IEndpoint = types.SimpleNamespace(endpoint=types.SimpleNamespace(openMode='open'))
-        glb.glb = types.SimpleNamespace(logicalType='tool_github', connConfig={})
+        glb.glb = types.SimpleNamespace(logicalType='tool_github', connConfig=conn_config())
         glb.beginGlobal()
         expiries = iter([2000.0, 3000.0, 4000.0])
         minted = []
