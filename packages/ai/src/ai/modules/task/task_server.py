@@ -1187,8 +1187,8 @@ class TaskServer(DAPBase):
         Cleanup Process:
         1. Validate task ownership and existence
         2. Remove task from central registry
-        3. Stop task execution and cleanup resources
-        4. Remove all monitoring subscriptions
+        3. Remove all monitoring subscriptions
+        4. Stop task execution and cleanup resources
         5. Log removal for audit trail
         6. Return control structure for additional caller-specific cleanup
         """
@@ -1201,9 +1201,6 @@ class TaskServer(DAPBase):
         if not control:
             raise TaskError(TaskError.NOT_REGISTERED, 'Your pipeline is not running')
 
-        # Ensure task is properly stopped and resources are cleaned up
-        await control.task.stop_task()
-
         # Remove monitor subscriptions that reference this task from all
         # connections — keys are owner-scoped, so build from the control.
         # Matching is by ADDRESS EQUALITY: the run's own key, or a pipe-scoped
@@ -1215,6 +1212,10 @@ class TaskServer(DAPBase):
                 keys_to_remove = [k for k in conn._monitors if k == project_key or k.rsplit('.', 1)[0] == project_key]
                 for monitor_key in keys_to_remove:
                     conn._monitors.pop(monitor_key, None)
+
+        # Stop the run only after its subscriptions are gone: a subscription a
+        # client installs for a replacement run during the await must survive
+        await control.task.stop_task()
 
         # Notify dashboard subscribers
         await self.broadcast_server_event(
