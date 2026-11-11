@@ -45,6 +45,7 @@
  *  2. Commit  — two INSERTs inside a committed transaction: BOTH rows persist.
  */
 
+import { randomUUID } from 'crypto';
 import { RocketRideClient } from '../src/client';
 import { Sequelize, DataTypes, Transaction } from 'sequelize';
 import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
@@ -78,9 +79,6 @@ const TEST_TABLE = 'rr_sequelize_e2e_tx_smoke';
 
 /** Node ID for the db_postgres node in the pipeline below. */
 const DB_NODE_ID = 'db_postgres_1';
-
-/** Pipeline token used throughout this suite. */
-const E2E_TOKEN = 'TS-SQ-E2E';
 
 // ---------------------------------------------------------------------------
 // Pipeline definition — minimal webhook → db_postgres → response
@@ -158,11 +156,12 @@ async function ensureCleanPipeline(client: RocketRideClient, token: string): Pro
 		});
 
 		await client.connect();
-		await ensureCleanPipeline(client, E2E_TOKEN);
 
 		const result = await client.use({
 			pipeline: getPostgresPipeline(),
-			token: E2E_TOKEN,
+			// A unique token overrides the pipeline id, so this run has an
+			// address of its own and a leftover run never blocks the next one
+			token: `ts-sq-e2e-${randomUUID().slice(0, 8)}`,
 		});
 		pipelineToken = result.token;
 
@@ -190,7 +189,9 @@ async function ensureCleanPipeline(client: RocketRideClient, token: string): Pro
 		} catch {
 			// Best-effort cleanup
 		}
-		await ensureCleanPipeline(client, E2E_TOKEN);
+		if (pipelineToken) {
+			await ensureCleanPipeline(client, pipelineToken);
+		}
 		if (client.isConnected()) {
 			await Promise.race([client.disconnect(), new Promise<void>((resolve) => setTimeout(resolve, 10000))]);
 		}
