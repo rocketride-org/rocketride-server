@@ -169,9 +169,21 @@ async def _run_pipeline(client, tasks, args: Dict[str, Any]) -> dict:
             )
         result_payload['result'] = result
         # One-shot run: inputs were sent and a result came back synchronously,
-        # so this token is done -- drop it rather than leak it in the
+        # so this task is done -- drop it rather than leak it in the
         # registry for the life of the process (see registry.py).
         tasks.remove(token)
+
+        # A run this call started is terminated here: its address stays
+        # occupied until it ends, so leaving it to its idle ttl would make the
+        # next run_pipeline of the same pipe fail as already running. A run
+        # attached with use_existing (reused) belongs to whoever started it.
+        if not started.get('reused'):
+            try:
+                await asyncio.wait_for(client.terminate(token), timeout=DEFAULT_TIMEOUT_SECONDS)
+                result_payload['terminated'] = True
+            except Exception as e:
+                result_payload['terminated'] = False
+                result_payload['terminate_error'] = f'the task {token} is still running and ends on its ttl: {e}'
 
     return result_payload
 
@@ -287,7 +299,8 @@ def register(registry: ToolRegistry) -> None:
     registry.register(
         'run_pipeline',
         'Start a RocketRide pipeline from an inline definition, returning a task_token. '
-        'Pass inputs to also send data immediately and get a result back in the same call. '
+        'Pass inputs to also send data immediately and get a result back in the same call; '
+        'that one-shot run is terminated once the result is back (unless use_existing attached to a running one). '
         'Result includes projectId and source for use with log_traces/log_trace.',
         _RUN_PIPELINE_SCHEMA,
         hints=ToolHints(

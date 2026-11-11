@@ -95,7 +95,14 @@ from .task_engine import Task
 from .types import LAUNCH_TYPE, TaskError
 from .pipeline import resolve_implied_source
 from .commands.cmd_monitor import owner_key
-from .address import build_address, check_endpoint_scope, parse_address, validate_component_ids, validate_identity
+from .address import (
+    build_address,
+    check_endpoint_scope,
+    parse_address,
+    validate_component_ids,
+    validate_identity,
+    validate_segment,
+)
 
 from rocketlib import debug
 
@@ -1257,7 +1264,9 @@ class TaskServer(DAPBase):
 
         Args:
             request (Dict[str, Any]): Task creation request containing:
-                - arguments: Task configuration including the pipeline
+                - arguments: Task configuration including the pipeline; an
+                  optional ``token`` overrides the pipeline-id segment of the
+                  address (the spec's ``project_id``) and is not a credential
                 - command: Launch type (launch/execute) determining task behavior
             conn (TaskConn, optional): Connection to associate with task for monitoring
             env_source: Loads the values for ${...} placeholders at each (re)start (see Task)
@@ -1269,10 +1278,10 @@ class TaskServer(DAPBase):
                 (``developerId.pipelineId.source``) for subsequent operations
 
         Raises:
-            TaskError: TASK_INVALID_ARGUMENT when an identity, the project id,
-                the source or a component id breaks the address grammar, when
-                a client tries to name the registry key, or when a dev launch
-                does not name the authenticated user
+            TaskError: TASK_INVALID_ARGUMENT when an identity, the project id
+                (or the ``token`` override of it), the source or a component id
+                breaks the address grammar, or when a dev launch does not name
+                the authenticated user
             ValueError: If launch type is invalid or task already exists
             RuntimeError: If the pipeline is missing, empty or not an object
             Exception: If task creation or startup fails
@@ -1331,14 +1340,14 @@ class TaskServer(DAPBase):
         # Extract TTL from args (use server-configured default if not provided)
         ttl = args.get('ttl', CONST_DEFAULT_TTL)
 
-        # Nothing mints a registry key but the server: a caller naming one
-        # could alias another run.
-        if args.get('token') is not None:
-            raise TaskError(
-                TaskError.INVALID_ARGUMENT,
-                'token is not accepted on execute: tasks are addressed by name, which the server derives',
-                field='token',
-            )
+        # The token argument overrides the pipeline-id segment of the address
+        # (the spec's project_id). It is an identity choice inside the
+        # caller's own namespace, never a credential: it is validated with the
+        # same segment grammar as project_id, and the developer id, the owner
+        # and the registry key are still derived by the server.
+        token_override = args.get('token')
+        if token_override is not None:
+            validate_segment(token_override, 'token')
 
         # Identity boundary: the ids that enter the registry key, the monitor
         # keys and the storage tree carry no path or audience characters.
@@ -1388,6 +1397,12 @@ class TaskServer(DAPBase):
                 'Pipeline configuration is missing or invalid. Pass the pipeline object itself; '
                 'to run a .pipe file, pass its path as filepath.'
             )
+
+        # Apply the token override as the spec's project_id. The pipeline is
+        # copied so the caller's object is not rewritten, and the control
+        # records the spec it actually runs (useExisting compares against it).
+        if token_override is not None:
+            control.pipeline = {**control.pipeline, 'project_id': token_override}
 
         # If a source was not specified, in the args, get it from the pipeline
         if not control.source:

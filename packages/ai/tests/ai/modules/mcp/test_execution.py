@@ -125,6 +125,31 @@ async def test_run_pipeline_with_inputs_also_sends_and_returns_result(fake_engin
     assert fake_engine.sent == [{'token': fake_engine._token, 'data': 'hello world', 'objinfo': None, 'mimetype': None}]
     # One-shot run completed synchronously -- the token must not leak in the registry (#1).
     assert tasks.get(fake_engine._token) is None
+    # The run it started is terminated: its address would otherwise stay occupied until its ttl.
+    assert fake_engine.terminated == [fake_engine._token]
+    assert result['terminated'] is True
+
+
+@pytest.mark.asyncio
+async def test_run_pipeline_with_inputs_leaves_a_reused_run_running(fake_engine):
+    registry = ToolRegistry()
+    execution.register(registry)
+    tasks = TaskRegistry()
+
+    async def reused_use(**kwargs):
+        fake_engine.used.append(kwargs)
+        return {'token': fake_engine._token, 'projectId': 'proj-fake', 'source': 'src-fake', 'reused': True}
+
+    fake_engine.use = reused_use
+
+    result = await registry.handler('run_pipeline')(
+        fake_engine, tasks, {'pipeline': PIPE, 'inputs': 'hello world', 'use_existing': True}
+    )
+
+    # A run attached with use_existing belongs to whoever started it: never terminated here.
+    assert result['result'] == fake_engine._result
+    assert fake_engine.terminated == []
+    assert 'terminated' not in result
 
 
 @pytest.mark.asyncio
@@ -137,6 +162,7 @@ async def test_run_pipeline_without_inputs_does_not_call_send(fake_engine):
 
     assert 'result' not in result
     assert fake_engine.sent == []
+    assert fake_engine.terminated == []
     # No inputs -> long-lived run -- the token stays registered for later monitor/send_data/terminate calls.
     assert tasks.get(fake_engine._token) is not None
 

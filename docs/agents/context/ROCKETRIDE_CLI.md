@@ -107,7 +107,8 @@ rocketride upload files/*.csv --token TASK_TOKEN           # upload into an alre
 rocketride stop --token TASK_TOKEN                         # terminate a task
 ```
 
-- `start` options: `--pipeline <file>` (or `ROCKETRIDE_PIPELINE`; required), `--token <token>` (or `ROCKETRIDE_TOKEN`; your own unguessable `tk_` token also lets one pipe run twice at once), `--threads <num>` (default 4), `--args <args...>`
+- `start` options: `--pipeline <file>` (or `ROCKETRIDE_PIPELINE`; required), `--token <id>` (overrides the pipeline-id segment of the run's address, the pipeline's `project_id`, so one pipe can run twice at once; one segment of letters, digits, `_` and `-`; not a credential, and not read from `ROCKETRIDE_TOKEN`, which names an existing task), `--threads <num>` (default 4), `--args <args...>`
+- `upload --pipeline` runs its own private task under a fresh pipeline id and terminates it when the upload ends
 - `upload` options: `--pipeline <file>` or `--token <token>` (one required), `--threads <num>` (default 4), `--max-concurrent <num>` (default 5), `--args <args...>`
 - In the Python package, `--args` takes every argument after it, flags
   included, so put the other flags first:

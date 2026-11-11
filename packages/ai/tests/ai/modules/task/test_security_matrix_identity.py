@@ -31,6 +31,7 @@ identity work landed and is GREEN after it.
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -356,6 +357,26 @@ async def test_s4_terminating_a_dev_control_leaves_a_new_run_under_its_key():
     assert ts._task_control[old_run.key] is not old_run
 
 
+@pytest.mark.asyncio
+async def test_s4_a_dev_teardown_past_the_timeout_leaves_the_control_for_cleanup():
+    """A teardown that never finishes does not hold the caller: stop_task
+    returns once the bounded wait expires and the control stays registered
+    for the cleanup pass rather than being removed mid-teardown.
+    """
+    ts = _server()
+    stalled_run = _control(ts)
+
+    async def never_terminates() -> None:
+        await asyncio.Event().wait()
+
+    stalled_run.task.wait_terminated = AsyncMock(side_effect=never_terminates)
+    with patch('ai.modules.task.task_server.CONST_TEARDOWN_WAIT_TIMEOUT', 0.01):
+        await asyncio.wait_for(ts.stop_task(stalled_run.key), timeout=5)
+
+    stalled_run.task.stop_task.assert_any_await('user')
+    assert ts._task_control.get(stalled_run.key) is stalled_run
+
+
 # =============================================================================
 # S6 — address grammar: dot-free segments, validated at execute AND publish
 # =============================================================================
@@ -510,21 +531,97 @@ async def test_s6_start_task_returns_the_address_in_the_token_slot():
     assert list(ts._task_control) == ['dev.user-a.acme.docBrain.parsePDF']
 
 
-@pytest.mark.asyncio
-async def test_s6_a_client_supplied_token_is_refused_at_execute():
-    """Nothing mints a token: a caller cannot name the registry key either."""
-    ts = _server()
-    with pytest.raises(TaskError) as err:
-        await ts.start_task(
-            _launch_request(_pipeline('parsePDF'), token='tk_mine'),
+async def _start(ts: TaskServer, request: dict, *, user_id='user-a', developer_id='acme') -> dict:
+    """Run start_task with a stubbed Task, as the authenticated dev user."""
+    with patch('ai.modules.task.task_server.Task') as task_cls:
+        task = task_cls.return_value
+        task.start_task = AsyncMock()
+        task.wait_for_running = AsyncMock()
+        task.is_task_complete.return_value = False
+        task._stop_requested = False
+        return await ts.start_task(
+            request,
             conn=MagicMock(),
-            client_id='user-a',
-            user_id='user-a',
+            client_id=user_id,
+            user_id=user_id,
             team_id='team-1',
             org_id='org-1',
-            developer_id='acme',
+            developer_id=developer_id,
         )
+
+
+@pytest.mark.asyncio
+async def test_s6_token_overrides_the_pipeline_id_of_the_address():
+    """use(spec, token=X) runs at developerId.X.source and returns that address."""
+    ts = _server()
+    pipeline = _pipeline('parsePDF')
+
+    result = await _start(ts, _launch_request(pipeline, token='runA'))
+
+    # Step 1: the token replaced the spec's project_id in the address
+    assert result['token'] == 'acme.runA.parsePDF'
+    assert result['id'] == 'acme.runA.parsePDF'
+    assert result['projectId'] == 'runA'
+    assert list(ts._task_control) == ['dev.user-a.acme.runA.parsePDF']
+
+    # Step 2: the control records the overridden spec; the caller's object is untouched
+    assert ts._task_control['dev.user-a.acme.runA.parsePDF'].pipeline['project_id'] == 'runA'
+    assert pipeline['project_id'] == 'docBrain'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('bad', ['run.A', 'run/A', 'run A', '', 'run\n'])
+async def test_s6_token_override_obeys_the_segment_grammar(bad):
+    """A token that is not one address segment is the project_id grammar error, naming token."""
+    ts = _server()
+    with pytest.raises(TaskError) as err:
+        await _start(ts, _launch_request(_pipeline('parsePDF'), token=bad))
     assert err.value.code == TaskError.INVALID_ARGUMENT
+    assert err.value.field == 'token'
+    assert 'is not a valid address segment' in str(err.value)
+    assert ts._task_control == {}
+
+
+@pytest.mark.asyncio
+async def test_s6_different_tokens_on_one_spec_are_two_controls():
+    """Two use() calls with different tokens on the same spec start two private runs."""
+    ts = _server()
+    first = await _start(ts, _launch_request(_pipeline('parsePDF'), token='runA'))
+    second = await _start(ts, _launch_request(_pipeline('parsePDF'), token='runB'))
+
+    assert first['token'] == 'acme.runA.parsePDF'
+    assert second['token'] == 'acme.runB.parsePDF'
+    assert sorted(ts._task_control) == ['dev.user-a.acme.runA.parsePDF', 'dev.user-a.acme.runB.parsePDF']
+
+
+@pytest.mark.asyncio
+async def test_s6_use_existing_with_the_same_token_attaches():
+    """A useExisting call with the same token attaches to the live control at that address."""
+    ts = _server()
+    await _start(ts, _launch_request(_pipeline('parsePDF'), token='runA'))
+    live = ts._task_control['dev.user-a.acme.runA.parsePDF']
+
+    again = await _start(ts, _launch_request(_pipeline('parsePDF'), token='runA', useExisting=True))
+
+    assert again['token'] == 'acme.runA.parsePDF'
+    assert again['reused'] is True
+    assert ts._task_control == {'dev.user-a.acme.runA.parsePDF': live}
+
+    # Without useExisting the same address is already running: refused
+    with pytest.raises(ValueError):
+        await _start(ts, _launch_request(_pipeline('parsePDF'), token='runA'))
+
+
+@pytest.mark.asyncio
+async def test_s6_token_override_stays_inside_the_callers_namespace():
+    """The override names a pipeline id only: developer id and owner still come from the account."""
+    ts = _server()
+    result = await _start(
+        ts, _launch_request(_pipeline('parsePDF'), token='runA'), user_id='user-b', developer_id='globex'
+    )
+
+    assert result['token'] == 'globex.runA.parsePDF'
+    assert list(ts._task_control) == ['dev.user-b.globex.runA.parsePDF']
 
 
 # =============================================================================
