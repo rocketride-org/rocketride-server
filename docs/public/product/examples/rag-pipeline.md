@@ -120,40 +120,53 @@ Save this as `rag.pipe`:
 ## Start the pipeline
 
 ```bash
+export ROCKETRIDE_OPENAI_API_KEY=sk-...
+
 rocketride start --pipeline ./rag.pipe
 ```
 
-The engine prints the webhook URL and public auth key:
+The CLI sends your `ROCKETRIDE_*` variables to the engine, which fills the
+`${ROCKETRIDE_OPENAI_API_KEY}` placeholders in the pipeline. `start` prints a
+task token and exits; it does not print an address:
 
 ```text
-Webhook ready - system is ready to accept requests
-  URL:  http://localhost:5567/webhook/rag-example/source_1
-  Auth: abc123...
+Starting pipeline from ./rag.pipe...
+Pipeline started.
+Token: <task-token>
+Stop it with: rocketride stop --token <task-token>
 ```
+
+The webhook is on the engine port, at `/webhook/<project_id>/<source>`, which is
+`/webhook/rag-example/source_1` for this pipeline. Requests carry the engine's
+API key (`ROCKETRIDE_APIKEY`) as a bearer token. See the
+[webhook pipeline](/examples/webhook-pipeline) for details.
 
 ## Ingest documents
 
 POST a document to the webhook URL. The pipeline embeds and stores it:
 
 ```bash
-curl -X POST http://localhost:5567/webhook/rag-example/source_1 \
-  -H "Authorization: Bearer abc123..." \
+curl -X POST http://localhost:5565/webhook/rag-example/source_1 \
+  -H "Authorization: Bearer $ROCKETRIDE_APIKEY" \
   -F "file=@./my-document.pdf"
 ```
 
 ## Ask a question
 
-Send a plain-text question to the same endpoint:
+Send the question to the same endpoint as `application/rocketride-question`, so
+that it arrives on the `questions` lane (plain text goes to the `text` lane and
+is not treated as a question):
 
 ```bash
-curl -X POST http://localhost:5567/webhook/rag-example/source_1 \
-  -H "Authorization: Bearer abc123..." \
-  -H "Content-Type: text/plain" \
-  -d "What does the document say about refund policy?"
+curl -X POST http://localhost:5565/webhook/rag-example/source_1 \
+  -H "Authorization: Bearer $ROCKETRIDE_APIKEY" \
+  -H "Content-Type: application/rocketride-question" \
+  -d '{"type":"question","questions":[{"text":"What does the document say about refund policy?"}]}'
 ```
 
-The pipeline retrieves the relevant chunks from Qdrant, asks GPT-4o, and streams
-back the answer.
+The pipeline retrieves the relevant chunks from Qdrant and asks GPT-4o. The
+answer comes back in the `answers` array of the JSON reply, as shown on the
+[webhook pipeline](/examples/webhook-pipeline) page.
 
 ## Next steps
 

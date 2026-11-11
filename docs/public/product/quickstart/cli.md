@@ -8,7 +8,8 @@ The `rocketride` command-line tool runs pipelines from a terminal — the same
 operations the SDKs expose, no code required. It ships with both
 [clients](/clients): `pip install rocketride` (in a virtual environment) puts
 `rocketride` on your path, and for Node you run it with `npx rocketride`
-(`npm install rocketride` does not put it on your path).
+(`npm install rocketride` does not put it on your path). Node users run every
+`rocketride` command on this page as `npx rocketride`.
 
 The five steps below take you from a fresh install to a running pipeline. The
 full command and flag reference is on the [CLI page](/connect/cli).
