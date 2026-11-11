@@ -84,7 +84,8 @@ as `application/rocketride-question` with this JSON body. Plain text goes to the
 curl reads the key from your shell, not from `.env`, so set it first:
 
 ```bash
-export ROCKETRIDE_APIKEY=<the key your engine was started with>
+# Use the key your engine was started with. If it was started without one, any non-empty value works.
+export ROCKETRIDE_APIKEY=rr_local
 curl -X POST "http://localhost:5565/webhook/webhook-example/source_1" \
   -H "Authorization: Bearer $ROCKETRIDE_APIKEY" \
   -H "Content-Type: application/rocketride-question" \

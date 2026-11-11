@@ -147,7 +147,8 @@ POST a document to the webhook URL. The pipeline embeds and stores it. curl
 reads the key from your shell, not from `.env`, so set it first:
 
 ```bash
-export ROCKETRIDE_APIKEY=<the key your engine was started with>
+# Use the key your engine was started with. If it was started without one, any non-empty value works.
+export ROCKETRIDE_APIKEY=rr_local
 curl -X POST http://localhost:5565/webhook/rag-example/source_1 \
   -H "Authorization: Bearer $ROCKETRIDE_APIKEY" \
   -F "file=@./my-document.pdf"
