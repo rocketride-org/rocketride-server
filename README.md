@@ -21,7 +21,7 @@
 </p>
 
 <p>
- RocketRide turns the classic IDE you already use into one place to compose, debug, observe, and deploy AI runtimes using any model, any tool, any framework, with zero vendor lock-in. Equipped with deep observability and backed by a battle-tested, high-throughput C++ engine, what you build is production-ready the moment it runs. <strong>It's the harness for everything behind your AI applications, not just the agents, but the whole stack beneath them.</strong>
+ RocketRide gives you one place to compose, debug, observe, and deploy AI runtimes from the tools you already use: your IDE, your terminal or your coding agent. Use any model, any tool, any framework, with zero vendor lock-in. Equipped with deep observability and backed by a battle-tested, high-throughput C++ engine, what you build is production-ready the moment it runs. <strong>It's the harness for everything behind your AI applications, not just the agents, but the whole stack beneath them.</strong>
 </p>
 
 <p>
