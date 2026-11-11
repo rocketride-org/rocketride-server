@@ -64,11 +64,19 @@ npx skills add rocketride-org/rocketride-server
 ```
 
 Add `-a <agent>` to choose agents (for example `-a cursor github-copilot`) and
-`-y` to skip prompts. This installs the skills only; add the MCP server
+`-y` to skip prompts. Install all five skills together, because they refer to
+each other (for example the building skill's `tools/` and the node index in the
+designing skill). This installs the skills only; add the MCP server
 (`https://api.rocketride.ai/mcp`) in your agent's own MCP settings.
 
-Each skill directory is self-contained: `SKILL.md` plus its reference files,
-worked examples, and offline shims under `tools/`. The bundled
+This installer copies skill folders only, so the shared `MCP_TOOL_CONTRACT.md`
+(the frozen MCP tool names and result shapes) is not included. Read it in this
+repository at `docs/agents/skills/MCP_TOOL_CONTRACT.md`. The Claude Code and
+Codex plugin installs include everything.
+
+Each skill directory holds `SKILL.md` plus its reference files, worked examples,
+and offline shims under `tools/`; the skills point to each other and to
+`MCP_TOOL_CONTRACT.md` one level up. The bundled
 `LAYER1_NODE_INDEX.json` (167 nodes, corpus-reconciled) regenerates from a live engine via
 `rocketride-building-pipelines`' ladder — the engine remains the authority.
 
