@@ -169,7 +169,16 @@ public:
 private:
     //-------------------------------------------------------------
     /// @details
-    ///		Handle to our module object
+    ///		The node package (serviceDef.nodePath or the logical type)
+    ///		whose IGlobal/IValidator/IInstance files are imported as
+    ///		submodules by name
+    //-------------------------------------------------------------
+    Text m_modulePath;
+
+    //-------------------------------------------------------------
+    /// @details
+    ///		Handle to the imported <path>.IGlobal (or, in config mode,
+    ///		<path>.IValidator) submodule - empty when the file is absent
     //-------------------------------------------------------------
     py::object m_pyModule;
 
@@ -181,7 +190,8 @@ private:
 
     //-------------------------------------------------------------
     /// @details
-    ///		Handle to our python IGlobal object
+    ///		Handle to our python IGlobal object - in config mode this is
+    ///		the IValidator (the node's own, or rocketlib.IValidatorBase)
     //-------------------------------------------------------------
     py::object m_pyGlobal;
 

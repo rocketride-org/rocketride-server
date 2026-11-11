@@ -148,12 +148,6 @@ struct IServiceConfig {
 
     //-----------------------------------------------------------------
     ///	@details
-    ///		Saved copy of the raw services key
-    //-----------------------------------------------------------------
-    json::Value originalServiceConfig;
-
-    //-----------------------------------------------------------------
-    ///	@details
     ///		The set of parameters for the service
     //-----------------------------------------------------------------
     json::Value parameters;
