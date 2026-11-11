@@ -1801,18 +1801,7 @@ class Task(DAPBase):
         if restarting:
             await self._send_status_update()
         else:
-            try:
-                self._status.metrics.cpu_percent = 0.0
-                self._status.metrics.cpu_memory_mb = 0.0
-                self._status.metrics.gpu_memory_mb = 0.0
-                final_body = self._status.model_dump()
-                final_body['final'] = True
-                await self._forward_task_event(
-                    EVENT_TYPE.SUMMARY,
-                    self.build_event('apaevt_status_update', id=self.id, body=final_body),
-                )
-            except Exception as e:
-                self.debug_message(f'Final zeroed status emit failed: {e}')
+            await self._send_final_status()
 
         # Send out the final events - last you will every here from us...
         if not self._final_events_sent:
@@ -1835,54 +1824,7 @@ class Task(DAPBase):
 
             # If we are not restarting, send the final events
             if not restarting:
-                # Broadcast termination event
-                terminated_event = self.build_event(
-                    'terminated',
-                    id=self.id,
-                )
-
-                await self._forward_task_event(
-                    EVENT_TYPE.DEBUGGER,
-                    terminated_event,
-                )
-
-                # Send out an end task message
-                task_message = self.build_event(
-                    'apaevt_task',
-                    body={
-                        'action': 'end',
-                        'name': self._status.name,
-                        'projectId': self.project_id,
-                        'source': self.source,
-                        **({'reason': self._stop_reason} if self._stop_reason else {}),
-                    },
-                    id=self.id,
-                )
-                await self._forward_task_event(
-                    EVENT_TYPE.TASK,
-                    task_message,
-                )
-
-                # Notify dashboard of task errors (non-zero exit)
-                if self._status.exitCode and self._status.exitCode != 0:
-                    try:
-                        task_user_id = self._server.get_task_control(self.token).userId if self.token else None
-                    except Exception:
-                        task_user_id = None
-                    await self._server.broadcast_server_event(
-                        EVENT_TYPE.DASHBOARD,
-                        {
-                            'event': 'apaevt_dashboard',
-                            'body': {
-                                'action': 'task_error',
-                                'timestamp': time.time(),
-                                'taskId': self.id,
-                                'exitCode': self._status.exitCode,
-                                'exitMessage': self._status.exitMessage or None,
-                            },
-                        },
-                        user_id=task_user_id,
-                    )
+                await self._send_end_events()
 
         # Close out (or annotate) the run-log continuum LAST — after the
         # final zeroed status AND every terminal task event (exited /
@@ -1898,21 +1840,91 @@ class Task(DAPBase):
                 if restarting:
                     self._run_log.note_restart()
                 else:
-                    # A ttl-window expiry is SUCCESS: the run stayed up
-                    # exactly as configured, then shut down. Only a real
-                    # stop (or abnormal exit) reads as cancelled.
-                    if self._status.state == TASK_STATE.CANCELLED.value:
-                        outcome = 'ok' if self._stop_reason == 'ttl' else 'cancelled'
-                    elif self._status.exitCode == 0:
-                        outcome = 'ok'
-                    else:
-                        outcome = 'error'
-                    await self._run_log.end_run(outcome, self._status.exitMessage or '', reason=self._stop_reason)
-                    self._run_log = None
+                    await self._end_run_log()
             except Exception as e:
                 self.debug_message(f'Run-log close failed: {e}')
 
         self.debug_message('Resource cleanup completed successfully')
+
+    async def _send_final_status(self) -> None:
+        """Send the run's last status, utilization zeroed and marked final (see _tear_down)."""
+        try:
+            self._status.metrics.cpu_percent = 0.0
+            self._status.metrics.cpu_memory_mb = 0.0
+            self._status.metrics.gpu_memory_mb = 0.0
+            final_body = self._status.model_dump()
+            final_body['final'] = True
+            await self._forward_task_event(
+                EVENT_TYPE.SUMMARY,
+                self.build_event('apaevt_status_update', id=self.id, body=final_body),
+            )
+        except Exception as e:
+            self.debug_message(f'Final zeroed status emit failed: {e}')
+
+    async def _send_end_events(self) -> None:
+        """Send the run's terminated and end events, and a dashboard error for a non-zero exit."""
+        # Broadcast termination event
+        terminated_event = self.build_event(
+            'terminated',
+            id=self.id,
+        )
+
+        await self._forward_task_event(
+            EVENT_TYPE.DEBUGGER,
+            terminated_event,
+        )
+
+        # Send out an end task message
+        task_message = self.build_event(
+            'apaevt_task',
+            body={
+                'action': 'end',
+                'name': self._status.name,
+                'projectId': self.project_id,
+                'source': self.source,
+                **({'reason': self._stop_reason} if self._stop_reason else {}),
+            },
+            id=self.id,
+        )
+        await self._forward_task_event(
+            EVENT_TYPE.TASK,
+            task_message,
+        )
+
+        # Notify dashboard of task errors (non-zero exit)
+        if self._status.exitCode and self._status.exitCode != 0:
+            try:
+                task_user_id = self._server.get_task_control(self.token).userId if self.token else None
+            except Exception:
+                task_user_id = None
+            await self._server.broadcast_server_event(
+                EVENT_TYPE.DASHBOARD,
+                {
+                    'event': 'apaevt_dashboard',
+                    'body': {
+                        'action': 'task_error',
+                        'timestamp': time.time(),
+                        'taskId': self.id,
+                        'exitCode': self._status.exitCode,
+                        'exitMessage': self._status.exitMessage or None,
+                    },
+                },
+                user_id=task_user_id,
+            )
+
+    async def _end_run_log(self) -> None:
+        """End the run log with the run's outcome. Call it after the run's last event."""
+        # A ttl-window expiry is SUCCESS: the run stayed up exactly as
+        # configured, then shut down. Only a real stop (or abnormal exit)
+        # reads as cancelled.
+        if self._status.state == TASK_STATE.CANCELLED.value:
+            outcome = 'ok' if self._stop_reason == 'ttl' else 'cancelled'
+        elif self._status.exitCode == 0:
+            outcome = 'ok'
+        else:
+            outcome = 'error'
+        await self._run_log.end_run(outcome, self._status.exitMessage or '', reason=self._stop_reason)
+        self._run_log = None
 
     def _on_metrics_updated(self) -> None:
         """
@@ -2773,11 +2785,19 @@ class Task(DAPBase):
 
             # Stop the task (triggers full cleanup via _terminated)
             await self.stop_task()
+            stops_before = self._stop_count
 
             # Wait for the old run's teardown to finish, not only for its
             # terminal state (see _terminated)
             while not self.is_task_complete() or self._teardown_running:
                 await asyncio.sleep(0.1)
+
+            # A stop that arrived during the wait (a user stop or the ttl)
+            # found no engine to end. It wins: the teardown recorded a
+            # restart, so the run still gets its end here, and nothing starts.
+            if self._stop_count != stops_before:
+                await self._end_stopped_restart()
+                raise RuntimeError('the task was stopped while the restart waited for the old run to end')
 
             self._server.debug_message(f'Task "{self.id}" stopped, resetting state for restart...')
 
@@ -2802,6 +2822,21 @@ class Task(DAPBase):
             self._is_restarting = False
             self._restart_env = None
             self._restart_in_progress = False
+
+    async def _end_stopped_restart(self) -> None:
+        """End the run of a restart that was stopped before it started anything."""
+        self._status.status = 'Stopped'
+        self._status.state = TASK_STATE.CANCELLED.value
+        self._status.completed = True
+        self._status.endTime = time.time()
+        self.debug_task_message('stopped', reason=self._stop_reason or 'user')
+        await self._send_final_status()
+        await self._send_end_events()
+        if self._run_log is not None:
+            try:
+                await self._end_run_log()
+            except Exception as e:
+                self.debug_message(f'Run-log close failed: {e}')
 
     async def start_task(self) -> None:
         """
@@ -3067,7 +3102,9 @@ class Task(DAPBase):
                 self._run_log = None
                 self.debug_message(f'Run-log setup failed (task continues unlogged): {e}')
 
-            # The same check: the engine may have exited while the run log opened
+            # The same check: the engine may have exited while the run log
+            # opened. Nothing below awaits, so this also keeps a dead task out
+            # of INITIALIZING and its status loop.
             if self._terminated_called:
                 self.debug_message('The engine exited while the task was starting')
                 return
@@ -3093,14 +3130,6 @@ class Task(DAPBase):
             except Exception as e:
                 self._task_metrics = None
                 self.debug_message(f'Failed to initialize metrics tracking: {e}')
-
-            # The engine may already have exited during the awaits above, and
-            # _terminated() has then reported the run's end. Don't put a dead
-            # task back to INITIALIZING, or start a status loop after its
-            # final status.
-            if self._terminated_called:
-                self.debug_message('The engine exited while the task was starting')
-                return
 
             # Setup to initializing
             self._status.state = TASK_STATE.INITIALIZING.value
