@@ -19,6 +19,14 @@ services:
       # Container path: /opt/rocketride/nodes (WORKDIR /opt/rocketride; the engine scans ./nodes)
       # Requires a prior `dist/server/` build; the bind mount shadows the server's nodes/ with every node.
       - ../nodes/src/nodes:/opt/rocketride/nodes:ro
+      # The C++ nodes come from dist/server/nodes, which holds their built libraries;
+      # they reload from a build, not from source. A new C++ node needs a line here.
+      - ../dist/server/nodes/azure:/opt/rocketride/nodes/azure:ro
+      - ../dist/server/nodes/hash:/opt/rocketride/nodes/hash:ro
+      - ../dist/server/nodes/indexer:/opt/rocketride/nodes/indexer:ro
+      - ../dist/server/nodes/msservices:/opt/rocketride/nodes/msservices:ro
+      - ../dist/server/nodes/objstore:/opt/rocketride/nodes/objstore:ro
+      - ../dist/server/nodes/parse:/opt/rocketride/nodes/parse:ro
 
   etcd:
     ports:

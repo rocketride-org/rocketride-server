@@ -111,9 +111,15 @@ depends(CONST_AI_REQUIREMENTS)
 
 
 def install_node_baseline() -> None:
-    """Install the baseline every node assumes (numpy, requests, ...) from each `nodes` root."""
+    """Install the baseline every node assumes (numpy, requests, ...) from each `nodes` root.
+
+    Runs on `import ai`. `eaas.py` and `node.py` import `ai` first, so the server and
+    every task process install it before any node module loads. The engine run directly
+    on a task file does not import `ai` first; there a node finds the baseline only if it
+    is already installed (the Docker image installs it at build time, as does a server start).
+    """
     spec = importlib.util.find_spec('nodes')
-    for root in spec.submodule_search_locations if spec else ():
+    for root in (spec.submodule_search_locations if spec else None) or ():
         depends(join(root, 'requirements.txt'))
 
 
