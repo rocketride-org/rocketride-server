@@ -27,7 +27,7 @@
 /**
  * One list rates every action an agent tool can take outside its workspace edits:
  * each RocketRide client method by the guide's name (`publishApp`,
- * `deploy.setSchedule`) plus `delete_file`. Each entry is free, ask or never; a
+ * `deploy.setSchedule`) plus `delete_file` and `deploy_app`. Each entry is free, ask or never; a
  * name the list lacks asks. The model never rates its own risk, and the list's
  * type comes from the client's type, so tsc refuses a missing or extra method and
  * an ask on a sync method (it can't wait for a card). An ask shows a "Needs your
@@ -424,9 +424,10 @@ const CLIENT_POLICY: ClientPolicy = {
 /** The list by plain name, for lookups at run time. */
 const CLIENT_RULES: Readonly<Record<string, Rule>> = CLIENT_POLICY;
 
-/** The tool acts: tools whose work does not go through the client. Their params are their target. */
+/** The tool acts: tools rated by their own name, not by a client method (delete_file skips the client; deploy_app's deploy.add is free). Their params are their target. */
 const TOOL_LIST: Readonly<Record<string, Rule>> = {
 	delete_file: ask(async ([path, type]) => ({ title: type === 'dir' ? `Delete the folder ${text(path)} and everything in it` : `Delete ${text(path)}`, detail: 'There is no undo.' })),
+	deploy_app: ask(async ([appId], n) => ({ title: `Deploy ${await n.app(appId)} as a new version`, detail: 'The server builds it.' })),
 };
 
 /** What a name the list lacks gets: ask, with a plain card. */

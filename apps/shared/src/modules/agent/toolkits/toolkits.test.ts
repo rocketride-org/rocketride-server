@@ -823,6 +823,25 @@ test("deploy_app waits for the version it uploaded, not a teammate's newer one",
 	assert.equal(await toolOf(tools, 'deploy_app').execute({ app: 'a-ui', message: 'Mine' }), 'Deployed v5; server build OK.');
 });
 
+test('deploy_app asks the user first with its card, and a no packs and uploads nothing', async () => {
+	const { client, calls } = scriptedClient({ 'deploy.add': { artifact: { registryVersion: 5 } }, listDeployments: [row(5)] });
+	let packed = 0;
+	const asked = fakeAsk(['deny', 'approve']);
+	const approvals = approvalsFor(client, asked.ask);
+	const host = hostFor(new MemoryWorkspace(ALPHA), { packApp: async () => (packed++, new Uint8Array([1])) });
+	const deploy = toolOf(new AppToolkit(approvals.client, host, { pollMs: 0, buildWaitMs: 50 }), 'deploy_app', approvals);
+
+	await assert.rejects(deploy.execute({ app: 'a-ui', message: 'Mine' }), /The user declined: Deploy Alpha \(acme\.a\) as a new version/);
+	assert.deepEqual([packed, calls], [0, []], 'a declined deploy packs nothing and reaches no client method');
+	assert.equal(await deploy.execute({ app: 'a-ui', message: 'Mine' }), 'Deployed v5; server build OK.');
+	const card = { title: 'Deploy Alpha (acme.a) as a new version', detail: 'The server builds it.' };
+	assert.deepEqual(
+		asked.cards.map(({ title, detail }) => ({ title, detail })),
+		[card, card]
+	);
+	assert.equal(calls.filter(([method]) => method === 'deploy.add').length, 1, 'only the approved deploy uploaded');
+});
+
 test('check_app fails an app with type errors, and one whose build fails', async () => {
 	const typeError: MarkerInfo = { uri: 'file:///daybook/src/App.tsx', line: 3, message: "Type 'string' is not assignable to type 'number'.", severity: 8, owner: 'typescript' };
 	const cases: Array<[dev: AgentDevSession, markers: MarkerInfo[], steps: string[]]> = [

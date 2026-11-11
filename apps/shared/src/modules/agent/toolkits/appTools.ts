@@ -28,8 +28,8 @@
  * The tools that take an app from nothing to live: `create_app` scaffolds an app through the host,
  * `deploy_app` packs and uploads it as the next version and waits for the server build (an upload
  * that fails to build serves nothing), and `publish_app` puts a built version in front of you, a team,
- * or everyone. Creating and deploying are free; `publish_app` names the one client call it will make
- * (`publishApp` or `submitApp`) and the approval list decides whether the user is asked. A @public
+ * or everyone. Creating is free; `deploy_app` names its own act and `publish_app` the one client call it
+ * will make (`publishApp` or `submitApp`), and the approval list decides whether the user is asked. A @public
  * binding serves only a `ready` version: submitted, then approved by an admin.
  */
 
@@ -87,7 +87,6 @@ const INSTRUCTIONS = `## Apps
 
 - The app's preview rebuilds from your saves, and the user may be watching it.
 - Make a new app with create_app, not by writing its files, because the scaffold sets up the manifest and the build.
-- Deploy with deploy_app after check_app passes, because the server builds the app again and a broken build serves nothing.
 - Publish only when the user asks you to, because it puts the app in front of other people. publish_app asks the user first; if they say no, don't retry, ask what they want instead.
 - If deploy_app says the organization has no developer name, tell the user an org admin must claim one, because you can't.`;
 
@@ -103,7 +102,7 @@ Don't use it:
 - to put the version in front of people: use publish_app once the build is OK;
 - again after it reports a build failure, until you've fixed the source, because each call adds a version.
 
-Deploying is free and the user isn't asked. It refuses when the app has uncommitted changes (the user commits them first) and when the organization hasn't claimed a developer name (an org admin does that).
+The user is asked first; if they say no, don't retry, ask what they want instead. It refuses when the app has uncommitted changes (the user commits them first) and when the organization hasn't claimed a developer name (an org admin does that).
 
 Example: deploy_app { "app": "daybook-ui", "message": "Add the search box" } returns "Deployed v4; server build OK."`;
 
@@ -182,7 +181,7 @@ function uploadedVersion(reply: unknown): number | undefined {
 // TOOLKIT
 // =============================================================================
 
-/** The app toolkit: create and deploy are free, and publishing names its call for the approval list. */
+/** The app toolkit: create is free, and deploying and publishing name their act for the approval list. */
 export class AppToolkit extends AgentToolkit {
 	readonly name = 'apps';
 	readonly instructions = INSTRUCTIONS;
@@ -257,17 +256,30 @@ export class AppToolkit extends AgentToolkit {
 	}
 
 	/**
-	 * Uploads an app as its next version and waits for the server build. Free.
+	 * deploy_app, made ready: checks the arguments and names the act the user is asked about.
+	 * Only reads; packing, uploading and the build wait are the run's.
 	 *
-	 * @returns Whether the server build is OK, failed (with its log) or still running.
-	 * @throws When the app cannot be packed or uploaded; packing errors pass through unchanged.
+	 * @returns The step: its act and its run.
+	 * @throws When an argument is wrong or no client is connected.
 	 */
-	private async deploy(args: Record<string, unknown>): Promise<string> {
+	private async prepareDeploy(args: Record<string, unknown>): Promise<ToolStep> {
 		const app = await appArg(this.host, args, 'deployed');
 		const message = textArg(args, 'message');
 		if (!message) throw new Error('message is required. Say in a few words what changed; the registry keeps it with the version.');
 		const client = requireClient(this.client);
+		return {
+			act: { name: 'deploy_app', params: [app.id] },
+			run: () => this.deploy(client, app, message),
+		};
+	}
 
+	/**
+	 * deploy_app's run, once its act is let through: uploads the app as its next version and waits for the server build.
+	 *
+	 * @returns Whether the server build is OK, failed (with its log) or still running.
+	 * @throws When the app cannot be packed or uploaded; packing errors pass through unchanged.
+	 */
+	private async deploy(client: RocketRideClient, app: IdentifiedApp, message: string): Promise<string> {
 		const data = await this.host.packApp(app.folder);
 		const before = newestFirst(await client.listDeployments(app.id))[0]?.registryVersion ?? 0;
 		let reply: unknown;
@@ -435,7 +447,7 @@ export class AppToolkit extends AgentToolkit {
 					required: ['app', 'message'],
 					additionalProperties: false,
 				},
-				execute: (args) => this.deploy(args),
+				prepare: (args) => this.prepareDeploy(args),
 			}),
 			new AgentTool({
 				name: 'publish_app',
