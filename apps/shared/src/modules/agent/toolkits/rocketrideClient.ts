@@ -93,6 +93,7 @@ const INSTRUCTIONS = `## RocketRide client
 - Call any RocketRide client method with rocketride_client, named as .rocketride/docs/ROCKETRIDE_typescript_API.md names it, with its arguments in order in params, because that guide documents every method.
 - Skip the guide's install, environment and connect steps, because the client is already connected and signed in as the user.
 - Pass a workspace pipeline as {"filepath": "pipelines/<name>.pipe"}, because the tool reads it from the workspace, unsaved edits included.
+- account.getEnvironmentKeys() lists the names of the user's Variables, never their values. It can help you find a key they already set, or see which services they use.
 - Make file changes with the file tools, because they keep the editor in step and validate every .pipe save.`;
 
 /** What the model reads about `rocketride_client`: what to pass, what is refused, one example. */
