@@ -1893,6 +1893,9 @@ export class RocketRideClient extends DAPClient {
 				throw new Error('Question cannot be empty');
 			}
 
+			// A broken turn rule fails here, before a pipe opens, not when the engine reads it
+			question.checkTurn();
+
 			// Create unique identifier for this chat operation
 			const objinfo = { name: `Question ${this._nextChatId}` };
 			this._nextChatId += 1;

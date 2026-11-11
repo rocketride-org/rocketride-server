@@ -128,8 +128,8 @@ not send and arguments that do not match the tool's `inputSchema`.
   other LLM node answers with `answer.error.code === 'tools_unsupported'` before
   calling its model. Two tool names that become the same provider name get
   `invalid_request`: rename one rather than retry. A Question that breaks a turn
-  rule is refused when the engine reads it, so `client.chat()` throws. Call
-  `question.checkTurn()` first to catch it before sending.
+  rule (for example a last message from the assistant, after a `max_tokens` stop)
+  is never sent: `client.chat()` throws an `Error` that names the rule.
 - `toDict()` sends `messages` and `tools` only when set, so other questions go
   out exactly as before. An engine older than turn mode ignores `messages` and
   answers a near-empty prompt as text, so `fromResult` returns a text `Answer`

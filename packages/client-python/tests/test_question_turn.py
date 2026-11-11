@@ -11,6 +11,7 @@ import os
 import pytest
 from pydantic import ValidationError
 
+from rocketride.mixins.chat import ChatMixin
 from rocketride.schema import Answer, AssistantMessage, Question, QuestionHistory, ToolCallBlock, UserMessage
 from rocketride.schema.doc import Doc
 
@@ -154,3 +155,17 @@ def test_add_message_refuses_a_question_already_using_history():
     with pytest.raises(ValueError, match='history cannot be used with messages'):
         q.addMessage({'role': 'user', 'content': 'new'})
     assert q.messages == []
+
+
+async def test_chat_refuses_a_broken_turn_rule_before_it_opens_a_pipe():
+    client = ChatMixin.__new__(ChatMixin)
+
+    async def pipe(*_args, **_kwargs):
+        raise AssertionError('a pipe was opened')
+
+    client.pipe = pipe
+    q = Question(messages=[UserMessage(content='hi')])
+    q.addMessage(AssistantMessage(content='cut off at max_tokens'))
+
+    with pytest.raises(ValueError, match='the last message must be a user message'):
+        await client.chat(token='tk_test', question=q)
