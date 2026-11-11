@@ -32,7 +32,8 @@ offered on a local engine). Any MCP client that supports Streamable HTTP can con
 | Where | Address |
 |---|---|
 | Hosted (RocketRide Cloud) | `https://api.rocketride.ai/mcp` |
-| Self-hosted engine | `http://<host>:5565/mcp` |
+| Self-hosted engine, same machine as the client | `http://localhost:5565/mcp` |
+| Self-hosted engine, other machines (behind a TLS proxy) | `https://<host>/mcp` |
 
 ### Sign in
 
@@ -60,28 +61,44 @@ URL. Complete the OAuth flow on first use.
 
 ### Cursor
 
-Add to `.cursor/mcp.json` in your workspace:
+Add to `.cursor/mcp.json` in your workspace. The hosted server needs no key here, because
+sign-in happens in the browser:
 
 ```json
 {
 	"mcpServers": {
 		"rocketride": {
-			"url": "https://api.rocketride.ai/mcp",
-			"headers": { "Authorization": "Bearer rr_..." }
+			"url": "https://api.rocketride.ai/mcp"
 		}
 	}
 }
 ```
 
+If you need an API key header instead, keep the key out of files that are committed: put it
+in your user-level config or in an environment variable your client expands.
+
 ### Self-hosted engine
 
-Point the same client config at `http://<host>:5565/mcp`. Two rules apply:
+Point the same client config at your engine: `http://localhost:5565/mcp` (or
+`http://127.0.0.1:5565/mcp`) when the engine runs on the same machine as the client, or
+`https://<host>/mcp` behind a TLS proxy for any other host. Use plain `http://` only for
+`localhost` or `127.0.0.1`, because a Bearer key sent over `http://` to another host is
+unencrypted. Three rules apply:
 
 1. On an engine not bound to localhost (the Docker image is one), an API key must start
    with `rr_`. This does not apply on a localhost bind.
-2. An engine that is reachable from other machines should have `ROCKETRIDE_URI` (or
-   `MCP_RESOURCE_IDENTIFIER`) set explicitly, so tool calls and links point at that
-   engine.
+2. Set `ROCKETRIDE_URI` so tool calls reach your engine. For an engine in Docker on the
+   same machine as the client, use `ROCKETRIDE_URI=ws://127.0.0.1:5565`. For an engine
+   reached from other machines, put it behind a TLS proxy and use
+   `ROCKETRIDE_URI=wss://<public host>`. The MCP server refuses to start if
+   `ROCKETRIDE_URI` is an unencrypted address (`ws://` or `http://`) for any host other
+   than the engine's own machine. If neither `ROCKETRIDE_URI` nor `MCP_RESOURCE_IDENTIFIER`
+   is set, engine image 3.6.0 and earlier connect MCP tool calls to RocketRide Cloud, where
+   they fail with `Invalid or revoked API key`.
+3. `ROCKETRIDE_URI` and `MCP_RESOURCE_IDENTIFIER` are not interchangeable.
+   `MCP_RESOURCE_IDENTIFIER` is the public URL of your `/mcp` endpoint. For OAuth sign-in on
+   a self-hosted engine it must equal that URL exactly, and `MCP_EXPECTED_AUDIENCE` must be
+   set too. API key sign-in needs neither.
 
 More: https://docs.rocketride.org/connect/mcp/http/ and
 https://docs.rocketride.org/connect/mcp/http/self-hosting/.
