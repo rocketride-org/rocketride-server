@@ -31,7 +31,7 @@ The docs site (a separate origin) keeps its hand-authored policy in
 docs/docusaurus/static/robots.txt; its named groups follow the same intent.
 """
 
-from typing import Tuple
+from typing import Set, Tuple
 
 from rocketlib import debug
 
@@ -69,7 +69,7 @@ HUMAN = 'human'
 
 _TOKENS = tuple(token.lower() for token, _ in CRAWLERS)
 _NON_BROWSER_HINTS = ('bot', 'crawl', 'spider', 'fetch', 'preview')
-_seen_unknown: set = set()
+_seen_unknown: Set[str] = set()
 _MAX_SEEN = 256
 
 

@@ -54,18 +54,19 @@ from fastapi import HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from starlette.routing import Route, WebSocketRoute
 
-from ai.web import Request
+from ai.web import Request, WebServer
 from ai.web.middleware import route_path
 
 from . import public_pages
 from .contract import Page, with_slash_twin
 from .crawlers import CRAWLER, classify
 from .head import inject_head
-from .shell import app_url, shell_document_path, shell_static
+from .settings import app_url
+from .shell import shell_document_path, shell_static
 
 # The web server whose route table the auth predicate and the live-route
 # collision check read (set by initModule).
-_web_server: Any = None
+_web_server: Optional[WebServer] = None
 
 # Path parameter name of the catch-all (distinctive, so no handler signature
 # ever collides with it).
@@ -76,13 +77,17 @@ FALLBACK_PATH = '/{public_page_path:path}'
 _REDIRECT_CACHE_CONTROL = 'public, max-age=86400'
 
 
-def set_web_server(server: Any) -> None:
-    """Give this module the live server: its route table drives the auth predicate, router misses and collision checks."""
+def set_web_server(server: WebServer) -> None:
+    """Give this module the live server: its route table drives the auth predicate, router misses and collision checks.
+
+    Args:
+        server: The web server this module's routes are registered on.
+    """
     global _web_server
     _web_server = server
 
 
-def _real_routes(server: Any) -> list:
+def _real_routes(server: WebServer) -> list:
     """The server's HTTP routes in match order (websocket routes never match an HTTP request)."""
     return [r for r in server.app.router.routes if not isinstance(r, WebSocketRoute)]
 
@@ -465,7 +470,7 @@ def _render(path: str, page: Page, crawler: bool, document: Path) -> Tuple[bytes
     return body.encode('utf-8'), headers
 
 
-async def register_public_pages(server: Any) -> None:
+async def register_public_pages(server: WebServer) -> None:
     """Register the catch-all last, drop renders on every swap, and build the first aggregate.
 
     Call once, at the end of server startup, after every module's initModule

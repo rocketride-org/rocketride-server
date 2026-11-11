@@ -70,7 +70,6 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Res
 from ai.web import Request
 from ai.web.middleware import route_path
 
-# app_url lives in settings; the shell modules import it from here.
 from .settings import app_url
 
 # Engine binary directory — all static paths are relative to this.
