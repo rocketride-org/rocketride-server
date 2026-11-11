@@ -31,6 +31,7 @@ identity work landed and is GREEN after it.
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -118,6 +119,7 @@ def _control(
     control.task = MagicMock()
     control.task.is_task_complete.return_value = False
     control.task.stop_task = AsyncMock()
+    control.task.wait_terminated = AsyncMock()
     ts._task_control[control.key] = control
     return control
 
@@ -270,6 +272,109 @@ def test_s4_two_teams_deploying_one_address_resolve_to_the_active_team():
         ts.resolve_control(run_1.address, member('team-3'), 'task.monitor')
     assert err.value.code == TaskError.AMBIGUOUS
     assert err.value.teams == ['team-1', 'team-2']
+
+
+# =============================================================================
+# S4 — live controls answer first; a stopped @dev control ends with its run
+# =============================================================================
+
+
+def _finish(control: TASK_CONTROL) -> TASK_CONTROL:
+    """Mark ``control`` as a stopped run still waiting for the cleanup pass."""
+    control.task.is_task_complete.return_value = True
+    return control
+
+
+@pytest.mark.asyncio
+async def test_s4_a_stopped_dev_control_does_not_shadow_a_live_team_control():
+    """A dead @dev falls through (plan 3.2): terminate, status and monitor
+    reach the live team run at the same address, never the stopped dev run.
+    """
+    ts = _server()
+    dev_run = _finish(_control(ts, source='webhook_1'))
+    team_run = _control(ts, run_kind='deploy', owner_kind='team', user_id='', source='webhook_1')
+    account = _account()
+
+    for permission in ('task.control', 'task.data', 'task.monitor'):
+        assert ts.resolve_control(team_run.address, account, permission) is team_run
+
+    # Terminate lands on the team run; the stopped dev run is left alone.
+    await ts.stop_task(ts.resolve_control(team_run.address, account, 'task.control').key)
+    team_run.task.stop_task.assert_awaited_once()
+    dev_run.task.stop_task.assert_not_awaited()
+
+
+def test_s4_a_dead_source_never_makes_a_two_segment_address_ambiguous():
+    """One finished and one live source: the two-segment address is the live one."""
+    ts = _server()
+    _finish(_control(ts, source='parsePDF'))
+    webhook = _control(ts, source='webhook_1')
+
+    assert ts.resolve_control('acme.docBrain', _account(), 'task.data') is webhook
+
+
+def test_s4_a_finished_run_stays_readable_when_nothing_live_answers():
+    """With no live control on any rung, the finished run answers its address."""
+    ts = _server()
+    finished = _finish(_control(ts, run_kind='deploy', owner_kind='team', user_id=''))
+
+    assert ts.resolve_control(finished.address, _account(), 'task.monitor') is finished
+
+
+@pytest.mark.asyncio
+async def test_s4_terminating_a_dev_control_removes_it_after_teardown():
+    """Stop on @dev removes the control immediately (plan 7.1), once the
+    run's teardown has delivered its final events; a deploy run stays for the
+    cleanup pass.
+    """
+    ts = _server()
+    dev_run = _control(ts)
+    team_run = _control(ts, run_kind='deploy', owner_kind='team', user_id='', project_id='nightly')
+
+    await ts.stop_task(dev_run.key)
+    dev_run.task.stop_task.assert_any_await('user')
+    dev_run.task.wait_terminated.assert_awaited_once()
+    assert dev_run.key not in ts._task_control
+
+    await ts.stop_task(team_run.key)
+    team_run.task.wait_terminated.assert_not_awaited()
+    assert team_run.key in ts._task_control
+
+
+@pytest.mark.asyncio
+async def test_s4_terminating_a_dev_control_leaves_a_new_run_under_its_key():
+    """A run started under the same key while the old one tore down is kept."""
+    ts = _server()
+    old_run = _control(ts)
+
+    async def restarted() -> None:
+        _control(ts)
+
+    old_run.task.wait_terminated = AsyncMock(side_effect=restarted)
+    await ts.stop_task(old_run.key)
+
+    assert old_run.key in ts._task_control
+    assert ts._task_control[old_run.key] is not old_run
+
+
+@pytest.mark.asyncio
+async def test_s4_a_dev_teardown_past_the_timeout_leaves_the_control_for_cleanup():
+    """A teardown that never finishes does not hold the caller: stop_task
+    returns once the bounded wait expires and the control stays registered
+    for the cleanup pass rather than being removed mid-teardown.
+    """
+    ts = _server()
+    stalled_run = _control(ts)
+
+    async def never_terminates() -> None:
+        await asyncio.Event().wait()
+
+    stalled_run.task.wait_terminated = AsyncMock(side_effect=never_terminates)
+    with patch('ai.modules.task.task_server.CONST_TEARDOWN_WAIT_TIMEOUT', 0.01):
+        await asyncio.wait_for(ts.stop_task(stalled_run.key), timeout=5)
+
+    stalled_run.task.stop_task.assert_any_await('user')
+    assert ts._task_control.get(stalled_run.key) is stalled_run
 
 
 # =============================================================================
@@ -426,21 +531,97 @@ async def test_s6_start_task_returns_the_address_in_the_token_slot():
     assert list(ts._task_control) == ['dev.user-a.acme.docBrain.parsePDF']
 
 
-@pytest.mark.asyncio
-async def test_s6_a_client_supplied_token_is_refused_at_execute():
-    """Nothing mints a token: a caller cannot name the registry key either."""
-    ts = _server()
-    with pytest.raises(TaskError) as err:
-        await ts.start_task(
-            _launch_request(_pipeline('parsePDF'), token='tk_mine'),
+async def _start(ts: TaskServer, request: dict, *, user_id='user-a', developer_id='acme') -> dict:
+    """Run start_task with a stubbed Task, as the authenticated dev user."""
+    with patch('ai.modules.task.task_server.Task') as task_cls:
+        task = task_cls.return_value
+        task.start_task = AsyncMock()
+        task.wait_for_running = AsyncMock()
+        task.is_task_complete.return_value = False
+        task._stop_requested = False
+        return await ts.start_task(
+            request,
             conn=MagicMock(),
-            client_id='user-a',
-            user_id='user-a',
+            client_id=user_id,
+            user_id=user_id,
             team_id='team-1',
             org_id='org-1',
-            developer_id='acme',
+            developer_id=developer_id,
         )
+
+
+@pytest.mark.asyncio
+async def test_s6_token_overrides_the_pipeline_id_of_the_address():
+    """use(spec, token=X) runs at developerId.X.source and returns that address."""
+    ts = _server()
+    pipeline = _pipeline('parsePDF')
+
+    result = await _start(ts, _launch_request(pipeline, token='runA'))
+
+    # Step 1: the token replaced the spec's project_id in the address
+    assert result['token'] == 'acme.runA.parsePDF'
+    assert result['id'] == 'acme.runA.parsePDF'
+    assert result['projectId'] == 'runA'
+    assert list(ts._task_control) == ['dev.user-a.acme.runA.parsePDF']
+
+    # Step 2: the control records the overridden spec; the caller's object is untouched
+    assert ts._task_control['dev.user-a.acme.runA.parsePDF'].pipeline['project_id'] == 'runA'
+    assert pipeline['project_id'] == 'docBrain'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('bad', ['run.A', 'run/A', 'run A', '', 'run\n'])
+async def test_s6_token_override_obeys_the_segment_grammar(bad):
+    """A token that is not one address segment is the project_id grammar error, naming token."""
+    ts = _server()
+    with pytest.raises(TaskError) as err:
+        await _start(ts, _launch_request(_pipeline('parsePDF'), token=bad))
     assert err.value.code == TaskError.INVALID_ARGUMENT
+    assert err.value.field == 'token'
+    assert 'is not a valid address segment' in str(err.value)
+    assert ts._task_control == {}
+
+
+@pytest.mark.asyncio
+async def test_s6_different_tokens_on_one_spec_are_two_controls():
+    """Two use() calls with different tokens on the same spec start two private runs."""
+    ts = _server()
+    first = await _start(ts, _launch_request(_pipeline('parsePDF'), token='runA'))
+    second = await _start(ts, _launch_request(_pipeline('parsePDF'), token='runB'))
+
+    assert first['token'] == 'acme.runA.parsePDF'
+    assert second['token'] == 'acme.runB.parsePDF'
+    assert sorted(ts._task_control) == ['dev.user-a.acme.runA.parsePDF', 'dev.user-a.acme.runB.parsePDF']
+
+
+@pytest.mark.asyncio
+async def test_s6_use_existing_with_the_same_token_attaches():
+    """A useExisting call with the same token attaches to the live control at that address."""
+    ts = _server()
+    await _start(ts, _launch_request(_pipeline('parsePDF'), token='runA'))
+    live = ts._task_control['dev.user-a.acme.runA.parsePDF']
+
+    again = await _start(ts, _launch_request(_pipeline('parsePDF'), token='runA', useExisting=True))
+
+    assert again['token'] == 'acme.runA.parsePDF'
+    assert again['reused'] is True
+    assert ts._task_control == {'dev.user-a.acme.runA.parsePDF': live}
+
+    # Without useExisting the same address is already running: refused
+    with pytest.raises(ValueError):
+        await _start(ts, _launch_request(_pipeline('parsePDF'), token='runA'))
+
+
+@pytest.mark.asyncio
+async def test_s6_token_override_stays_inside_the_callers_namespace():
+    """The override names a pipeline id only: developer id and owner still come from the account."""
+    ts = _server()
+    result = await _start(
+        ts, _launch_request(_pipeline('parsePDF'), token='runA'), user_id='user-b', developer_id='globex'
+    )
+
+    assert result['token'] == 'globex.runA.parsePDF'
+    assert list(ts._task_control) == ['dev.user-b.globex.runA.parsePDF']
 
 
 # =============================================================================

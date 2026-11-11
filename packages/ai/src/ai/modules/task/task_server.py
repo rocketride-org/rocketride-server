@@ -79,6 +79,7 @@ from typing import Awaitable, Callable, Dict, Any, Optional, Set
 from ai.constants import (
     CONST_CLEANUP_DELAY_TIME,
     CONST_CLEANUP_SLEEP_TIME,
+    CONST_TEARDOWN_WAIT_TIMEOUT,
     CONST_DEFAULT_TTL,
     CONST_TTL_CHECK,
     CONST_MAX_UNAUTHED_CONNS_PER_IP,
@@ -94,7 +95,14 @@ from .task_engine import Task
 from .types import LAUNCH_TYPE, TaskError
 from .pipeline import resolve_implied_source
 from .commands.cmd_monitor import owner_key
-from .address import build_address, check_endpoint_scope, parse_address, validate_component_ids, validate_identity
+from .address import (
+    build_address,
+    check_endpoint_scope,
+    parse_address,
+    validate_component_ids,
+    validate_identity,
+    validate_segment,
+)
 
 from rocketlib import debug
 
@@ -745,8 +753,15 @@ class TaskServer(DAPBase):
         its scope. There is NO owner qualifier: nobody can name another
         user's control.
 
+        The walk runs over LIVE controls first: a stopped run never answers
+        its address while another rung has a live one (a dead ``@dev`` falls
+        through). Only when no rung has a live control is the walk repeated
+        over every registered control, so a run that just finished keeps its
+        final status readable until the cleanup pass removes it.
+
         A two-segment address (no source) resolves when exactly one live
         source answers; several live sources raise ``TASK_SOURCE_REQUIRED``.
+        A finished source never counts against a live one.
 
         Args:
             address (str): ``developerId.pipelineId[.source]`` (the token slot).
@@ -794,62 +809,74 @@ class TaskServer(DAPBase):
         user_id = account_info.userId
         rungs: List[str] = []
 
-        # @dev: the caller's own presence. Attach-only, and skipped for a
-        # scoped (machine) credential.
-        if endpoints is None:
-            rungs.append('@dev')
+        def _walk(pool: List[TASK_CONTROL]) -> Optional[TASK_CONTROL]:
+            """The rungs in order over ``pool``: the first hit, verified, or None."""
+            rungs.clear()
+
+            # @dev: the caller's own presence. Attach-only, and skipped for a
+            # scoped (machine) credential.
+            if endpoints is None:
+                rungs.append('@dev')
+                control = _pick([c for c in pool if c.run_kind == 'dev' and c.owner_id == user_id and _matches(c)])
+                if control is not None:
+                    return self._verify_control(control, account_info, require)
+
+            # @me: the caller's personal (user-owned) deployment run.
+            rungs.append('@me')
             control = _pick(
                 [
                     c
-                    for c in self._task_control.values()
-                    if c.run_kind == 'dev' and c.owner_id == user_id and _matches(c)
+                    for c in pool
+                    if c.run_kind == 'deploy' and c.owner_kind == 'user' and c.owner_id == user_id and _matches(c)
                 ]
             )
             if control is not None:
+                check_endpoint_scope(endpoints, control.address)
                 return self._verify_control(control, account_info, require)
 
-        # @me: the caller's personal (user-owned) deployment run.
-        rungs.append('@me')
-        control = _pick(
-            [
+            # @team: a team-owned deployment run the caller may reach. The address
+            # carries no owner, so two of the caller's teams can each have it live:
+            # the caller's active (development) team answers; with neither run on
+            # it the choice is the caller's, so the lookup is ambiguous, not a guess.
+            rungs.append('@team')
+            team_runs = [
                 c
-                for c in self._task_control.values()
-                if c.run_kind == 'deploy' and c.owner_kind == 'user' and c.owner_id == user_id and _matches(c)
+                for c in pool
+                if c.run_kind == 'deploy'
+                and c.owner_kind != 'user'
+                and _matches(c)
+                and resolve_run_permissions(account_info, c)
             ]
-        )
-        if control is not None:
-            check_endpoint_scope(endpoints, control.address)
-            return self._verify_control(control, account_info, require)
+            teams = sorted({c.owner_id for c in team_runs})
+            if len(teams) > 1:
+                active_team = getattr(account_info, 'devTeam', None)
+                team_runs = [c for c in team_runs if c.owner_id == active_team]
+                if not team_runs:
+                    raise TaskError(
+                        TaskError.AMBIGUOUS,
+                        f'{address!r} is deployed by several of your teams ({", ".join(teams)}); '
+                        'make the one you mean your development team',
+                        address=address,
+                        teams=teams,
+                    )
+            control = _pick(team_runs)
+            if control is not None:
+                check_endpoint_scope(endpoints, control.address)
+                return self._verify_control(control, account_info, require)
+            return None
 
-        # @team: a team-owned deployment run the caller may reach. The address
-        # carries no owner, so two of the caller's teams can each have it live:
-        # the caller's active (development) team answers; with neither run on
-        # it the choice is the caller's, so the lookup is ambiguous, not a guess.
-        rungs.append('@team')
-        team_runs = [
-            c
-            for c in self._task_control.values()
-            if c.run_kind == 'deploy'
-            and c.owner_kind != 'user'
-            and _matches(c)
-            and resolve_run_permissions(account_info, c)
-        ]
-        teams = sorted({c.owner_id for c in team_runs})
-        if len(teams) > 1:
-            active_team = getattr(account_info, 'devTeam', None)
-            team_runs = [c for c in team_runs if c.owner_id == active_team]
-            if not team_runs:
-                raise TaskError(
-                    TaskError.AMBIGUOUS,
-                    f'{address!r} is deployed by several of your teams ({", ".join(teams)}); '
-                    'make the one you mean your development team',
-                    address=address,
-                    teams=teams,
-                )
-        control = _pick(team_runs)
+        # Live controls first: a finished run never shadows a running one on
+        # this or a later rung
+        controls = list(self._task_control.values())
+        control = _walk([c for c in controls if not c.task.is_task_complete()])
         if control is not None:
-            check_endpoint_scope(endpoints, control.address)
-            return self._verify_control(control, account_info, require)
+            return control
+
+        # Nothing live answers: a finished run still in the registry does, so
+        # its final status stays readable until the cleanup pass removes it
+        control = _walk(controls)
+        if control is not None:
+            return control
 
         return self._resolve_published_rungs(address, account_info, require, rungs)
 
@@ -1167,8 +1194,8 @@ class TaskServer(DAPBase):
         Cleanup Process:
         1. Validate task ownership and existence
         2. Remove task from central registry
-        3. Stop task execution and cleanup resources
-        4. Remove all monitoring subscriptions
+        3. Remove all monitoring subscriptions
+        4. Stop task execution and cleanup resources
         5. Log removal for audit trail
         6. Return control structure for additional caller-specific cleanup
         """
@@ -1181,9 +1208,6 @@ class TaskServer(DAPBase):
         if not control:
             raise TaskError(TaskError.NOT_REGISTERED, 'Your pipeline is not running')
 
-        # Ensure task is properly stopped and resources are cleaned up
-        await control.task.stop_task()
-
         # Remove monitor subscriptions that reference this task from all
         # connections — keys are owner-scoped, so build from the control.
         # Matching is by ADDRESS EQUALITY: the run's own key, or a pipe-scoped
@@ -1195,6 +1219,10 @@ class TaskServer(DAPBase):
                 keys_to_remove = [k for k in conn._monitors if k == project_key or k.rsplit('.', 1)[0] == project_key]
                 for monitor_key in keys_to_remove:
                     conn._monitors.pop(monitor_key, None)
+
+        # Stop the run only after its subscriptions are gone: a subscription a
+        # client installs for a replacement run during the await must survive
+        await control.task.stop_task()
 
         # Notify dashboard subscribers
         await self.broadcast_server_event(
@@ -1236,7 +1264,9 @@ class TaskServer(DAPBase):
 
         Args:
             request (Dict[str, Any]): Task creation request containing:
-                - arguments: Task configuration including the pipeline
+                - arguments: Task configuration including the pipeline; an
+                  optional ``token`` overrides the pipeline-id segment of the
+                  address (the spec's ``project_id``) and is not a credential
                 - command: Launch type (launch/execute) determining task behavior
             conn (TaskConn, optional): Connection to associate with task for monitoring
             env_source: Loads the values for ${...} placeholders at each (re)start (see Task)
@@ -1248,10 +1278,10 @@ class TaskServer(DAPBase):
                 (``developerId.pipelineId.source``) for subsequent operations
 
         Raises:
-            TaskError: TASK_INVALID_ARGUMENT when an identity, the project id,
-                the source or a component id breaks the address grammar, when
-                a client tries to name the registry key, or when a dev launch
-                does not name the authenticated user
+            TaskError: TASK_INVALID_ARGUMENT when an identity, the project id
+                (or the ``token`` override of it), the source or a component id
+                breaks the address grammar, or when a dev launch does not name
+                the authenticated user
             ValueError: If launch type is invalid or task already exists
             RuntimeError: If the pipeline is missing, empty or not an object
             Exception: If task creation or startup fails
@@ -1310,14 +1340,14 @@ class TaskServer(DAPBase):
         # Extract TTL from args (use server-configured default if not provided)
         ttl = args.get('ttl', CONST_DEFAULT_TTL)
 
-        # Nothing mints a registry key but the server: a caller naming one
-        # could alias another run.
-        if args.get('token') is not None:
-            raise TaskError(
-                TaskError.INVALID_ARGUMENT,
-                'token is not accepted on execute: tasks are addressed by name, which the server derives',
-                field='token',
-            )
+        # The token argument overrides the pipeline-id segment of the address
+        # (the spec's project_id). It is an identity choice inside the
+        # caller's own namespace, never a credential: it is validated with the
+        # same segment grammar as project_id, and the developer id, the owner
+        # and the registry key are still derived by the server.
+        token_override = args.get('token')
+        if token_override is not None:
+            validate_segment(token_override, 'token')
 
         # Identity boundary: the ids that enter the registry key, the monitor
         # keys and the storage tree carry no path or audience characters.
@@ -1367,6 +1397,12 @@ class TaskServer(DAPBase):
                 'Pipeline configuration is missing or invalid. Pass the pipeline object itself; '
                 'to run a .pipe file, pass its path as filepath.'
             )
+
+        # Apply the token override as the spec's project_id. The pipeline is
+        # copied so the caller's object is not rewritten, and the control
+        # records the spec it actually runs (useExisting compares against it).
+        if token_override is not None:
+            control.pipeline = {**control.pipeline, 'project_id': token_override}
 
         # If a source was not specified, in the args, get it from the pipeline
         if not control.source:
@@ -1718,6 +1754,25 @@ class TaskServer(DAPBase):
             if control.launch_type in (LAUNCH_TYPE.LAUNCH, LAUNCH_TYPE.EXECUTE):
                 await control.task.stop_task(reason)
                 self.debug_message(f'Task "{control.id}" stopped on request (reason: {reason})')
+
+                # A @dev control ends with its run: no grace window and no
+                # reaper (plan 7.1). Wait for the teardown first, because the
+                # final status, the terminal events and the run-log close are
+                # delivered through the registered control. A new run started
+                # under the same key meanwhile is not this control's to remove.
+                # The wait is bounded: a stalled terminal-event forward must not
+                # hold this caller (the ttl monitor stops tasks serially); on a
+                # timeout the control is left to the cleanup pass instead.
+                if control.run_kind == 'dev':
+                    try:
+                        await asyncio.wait_for(control.task.wait_terminated(), timeout=CONST_TEARDOWN_WAIT_TIMEOUT)
+                    except asyncio.TimeoutError:
+                        self.debug_message(
+                            f'Task "{control.id}" teardown exceeded {CONST_TEARDOWN_WAIT_TIMEOUT}s; left to cleanup'
+                        )
+                        return
+                    if self._task_control.get(control.key) is control:
+                        await self.remove_task(control.key)
 
         except Exception as e:
             # Log but ignore errors - task may already be stopped or removed

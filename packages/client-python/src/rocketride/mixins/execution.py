@@ -127,12 +127,17 @@ class ExecutionMixin(DAPClient):
         it in ``{ "pipeline": { ... } }``.
 
         Args:
-            token: Custom task token (server generates one if not provided)
+            token: Overrides the pipeline-id segment of the task address (the
+                ``project_id`` of the spec): the run is addressed
+                ``developerId.<token>.source``. One segment of letters, digits,
+                ``_`` and ``-``. The returned value is the full address. Not a
+                credential: the developer id and the owner come from the account
             filepath: Path to a ``.pipe`` or JSON/JSON5 pipeline configuration file
             pipeline: Flat PipelineConfig dict (components, source, project_id at top level)
             source: Override the source specified in the pipeline config
             threads: Number of processing threads to use (default: server decides)
-            use_existing: Whether to reuse existing pipeline with same token
+            use_existing: Attach to the task already running at the same address
+                instead of failing with "Pipeline is already running"
             args: Command-line style arguments to pass to the pipeline
             ttl: Time-to-live in seconds for idle pipelines (optional, server default
                 if not provided; use 0 for no timeout)
@@ -142,7 +147,8 @@ class ExecutionMixin(DAPClient):
 
         Returns:
             Dict containing:
-            - token: Task token for sending data and monitoring (str)
+            - token: The task address ``developerId.pipelineId[.source]`` that
+              send/pipe/terminate/get_task_status take (str)
             - Additional pipeline startup information
 
         Raises:
