@@ -374,14 +374,21 @@ def _resolve_engine_uri(config: Dict[str, Any], bind_host: str, bind_port: int) 
        RocketRide Cloud's address; deriving from it on a self-hosted engine
        (for example the Docker image, which binds ``0.0.0.0``) sent every tool
        call, and the caller's key, to the cloud.
-    5. ``bind address`` -- a specific non-loopback host (an IP or a name) with
-       neither variable set listens only on that address, so loopback would be
-       refused; the engine connects to ``ws://<bind_host>:<port>`` instead. The
-       cleartext check does not apply: the target is this engine's own bind
-       address, so the credential is delivered locally. Failing at boot is not
-       used because ``server.use('mcp')`` runs inside engine start-up, and an
-       exception there stops the whole engine, including deployments that never
-       use MCP. ``initModule`` logs a warning naming ``ROCKETRIDE_URI``.
+    5. ``bind address`` -- a specific non-loopback IP literal (IPv4 or IPv6)
+       with neither variable set listens only on that address, so loopback
+       would be refused; the engine connects to ``ws://<bind_host>:<port>``
+       instead (IPv6 bracketed). The cleartext check does not apply: the
+       target is an address of this machine's own socket, so the credential is
+       delivered locally. Failing at boot is not used because
+       ``server.use('mcp')`` runs inside engine start-up, and an exception
+       there stops the whole engine, including deployments that never use MCP.
+       ``initModule`` logs a warning naming ``ROCKETRIDE_URI``.
+    6. ``bind name default`` -- a specific bind host that is a NAME (for
+       example ``engine.internal``) with neither variable set. A name is not
+       assumed to resolve back to this machine (a later DNS lookup could point
+       at another one, and the caller's key would then travel over ``ws://``),
+       so the rule falls back to ``ws://127.0.0.1:<port>``. Nothing may listen
+       there; ``initModule`` logs a warning naming ``ROCKETRIDE_URI``.
 
     Whatever rule wins, the resolved URI requires ENCRYPTED transport whenever
     it addresses a REMOTE engine: the caller's own credential is handed to the
@@ -392,7 +399,7 @@ def _resolve_engine_uri(config: Dict[str, Any], bind_host: str, bind_port: int) 
     somewhere else. Cleartext to a loopback target stays allowed, since that
     credential never reaches a wire. See ``_refuse_cleartext_engine_uri``.
 
-    ``bind_host`` therefore only selects the DEFAULT URI (rules 2 to 5); it
+    ``bind_host`` therefore only selects the DEFAULT URI (rules 2 to 6); it
     has no say in whether a value is encrypted enough.
 
     Args:
@@ -423,6 +430,12 @@ def _resolve_engine_uri(config: Dict[str, Any], bind_host: str, bind_port: int) 
             # to IPv6 only (IPV6_V6ONLY), so each needs the loopback it serves.
             host = '[::1]' if bind_host == '::' else '127.0.0.1'
             return f'ws://{host}:{bind_port}', 'self default'
+        try:
+            ipaddress.ip_address(bind_host)
+        except ValueError:
+            # A name may resolve to another machine later, so it is not trusted
+            # with the credential over ws://; loopback is the safe default.
+            return f'ws://127.0.0.1:{bind_port}', 'bind name default'
         # A specific address is listened on only there; loopback is refused.
         host = f'[{bind_host}]' if ':' in bind_host else bind_host
         return f'ws://{host}:{bind_port}', 'bind address'
@@ -535,6 +548,12 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
             'Upload links, the file-drop page and widget addresses use that address, so they only work on this '
             'machine. Set MCP_RESOURCE_IDENTIFIER (or ROCKETRIDE_URI) to the engine address clients on other '
             'machines can reach.',
+            _redacted_uri(engine_uri),
+        )
+    if engine_uri_rule == 'bind name default':
+        logger.warning(
+            'MCP engine address defaulted to loopback (%s) because the bind host is a name, not an IP address. '
+            'Nothing may be listening there. Set ROCKETRIDE_URI to the address MCP tool calls should use.',
             _redacted_uri(engine_uri),
         )
     config = {**config, 'rocketride_uri': engine_uri, 'local_engine': local_engine}

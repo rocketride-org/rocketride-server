@@ -22,11 +22,12 @@ values are refused with 401.
 
 > **Note:** when neither `ROCKETRIDE_URI` nor `MCP_RESOURCE_IDENTIFIER` is set,
 > the engine runs MCP tool calls against itself (`ws://127.0.0.1:<port>`; `ws://[::1]:<port>`
-> for a `::` bind, and `ws://<bind host>:<port>` for a specific bind address).
+> for a `::` bind, `ws://<bind address>:<port>` for a bind to one specific IP address, and
+> `ws://127.0.0.1:<port>` for a bind host that is a name, which also logs a warning).
 > Engine image 3.6.0 and earlier instead connect them to `wss://api.rocketride.ai`
 > (RocketRide Cloud), not to your engine: `initialize` and `tools/list` succeed,
 > then every tool call fails with `Invalid or revoked API key`. On those versions,
-> set `ROCKETRIDE_URI=ws://127.0.0.1:<port>`. Setting it is always safe.
+> set `ROCKETRIDE_URI=ws://127.0.0.1:<port>`. Setting it is safe on an engine that listens on loopback or on all interfaces (the default, and the Docker image).
 
 A Docker command that works end to end (MCP calls then use
 `Authorization: Bearer rr_local`):
@@ -49,7 +50,7 @@ docker run -d --name rocketride-engine --platform linux/amd64 \
 | `MCP_AUTHORIZATION_SERVER` | `https://auth.rocketride.ai` | OAuth authorization server advertised in discovery metadata. |
 | `MCP_EXPECTED_AUDIENCE` | _(unset)_ | Audience OAuth tokens must carry — for the default Zitadel setup this is a **project id**, not a URL. When unset, OAuth tokens are accepted only on loopback binds. |
 | `MCP_JWKS_URL` | `<issuer>/oauth/v2/keys` | Where token signing keys are fetched from. |
-| `ROCKETRIDE_URI` | _(derived)_ | Engine address MCP tools connect back to; also the origin of widget CSP and upload/dropper links. When unset: `ws://127.0.0.1:<port>` (or `ws://[::1]:<port>`) on a loopback bind, otherwise, when `MCP_RESOURCE_IDENTIFIER` is set, its origin with `https`→`wss` / `http`→`ws`; on a non-loopback bind with neither set (for example the Docker image), `ws://127.0.0.1:<port>`, so tool calls stay on this engine (`ws://[::1]:<port>` for a `::` bind, and `ws://<bind host>:<port>` for a specific bind address). In those cases upload links, the file-drop page and widget addresses use that address too, so set `MCP_RESOURCE_IDENTIFIER` (or `ROCKETRIDE_URI`) to the engine's public address for clients on other machines. The engine logs the resolved value at startup. |
+| `ROCKETRIDE_URI` | _(derived)_ | Engine address MCP tools connect back to; also the origin of widget CSP and upload/dropper links. When unset: `ws://127.0.0.1:<port>` (or `ws://[::1]:<port>`) on a loopback bind, otherwise, when `MCP_RESOURCE_IDENTIFIER` is set, its origin with `https`→`wss` / `http`→`ws`; on a non-loopback bind with neither set (for example the Docker image), `ws://127.0.0.1:<port>`, so tool calls stay on this engine (`ws://[::1]:<port>` for a `::` bind, `ws://<bind address>:<port>` for a bind to one specific IP address, and `ws://127.0.0.1:<port>` for a bind host that is a name, which logs a warning). In those cases upload links, the file-drop page and widget addresses use that address too, so set `MCP_RESOURCE_IDENTIFIER` (or `ROCKETRIDE_URI`) to the engine's public address for clients on other machines. The engine logs the resolved value at startup. |
 | `MCP_OPENAI_APPS_CHALLENGE_TOKEN` | _(unset)_ | Served as the plain-text body of `GET /.well-known/openai-apps-challenge` for OpenAI's plugin domain verification. Unset: the route answers 404. |
 
 Three related guards to know about:

@@ -92,7 +92,7 @@ MCP clients then send `Authorization: Bearer rr_local`. The key must start with
 engine runs MCP tool calls against itself (`ws://127.0.0.1:<port>`). Engine image 3.6.0
 and earlier instead connect them to RocketRide Cloud, where they fail with
 `Invalid or revoked API key`; on those versions set `ROCKETRIDE_URI` as in the
-command above (setting it is always safe). The CLI and SDK must send the same
+command above (setting it is safe on an engine that listens on loopback or on all interfaces, which is the default and the Docker image). The CLI and SDK must send the same
 `ROCKETRIDE_APIKEY` the engine was started with. See [MCP self-hosting](/connect/mcp/http/self-hosting).
 
 ## Persistence

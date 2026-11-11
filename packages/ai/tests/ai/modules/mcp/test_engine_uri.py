@@ -171,12 +171,11 @@ def test_wildcard_bind_without_identifier_stays_on_the_local_engine(monkeypatch,
 @pytest.mark.parametrize(
     ('host', 'uri', 'origin'),
     [
-        ('engine.internal', 'ws://engine.internal:6000', 'http://engine.internal:6000'),
         ('10.0.0.5', 'ws://10.0.0.5:6000', 'http://10.0.0.5:6000'),
         ('2001:db8::5', 'ws://[2001:db8::5]:6000', 'http://[2001:db8::5]:6000'),
     ],
 )
-def test_specific_bind_without_identifier_uses_the_bind_address(
+def test_ip_literal_bind_without_identifier_uses_the_bind_address(
     monkeypatch, fake_web_server, caplog, host, uri, origin
 ):
     """A socket bound to one address is reachable only there; loopback would be refused."""
@@ -187,13 +186,43 @@ def test_specific_bind_without_identifier_uses_the_bind_address(
     assert any('ROCKETRIDE_URI' in r.getMessage() for r in caplog.records if r.levelno == logging.WARNING)
 
 
+@pytest.mark.parametrize('host', ['engine.internal', 'my-host'])
+def test_hostname_bind_without_identifier_falls_back_to_loopback_with_one_warning(
+    monkeypatch, fake_web_server, caplog, host
+):
+    """A bind NAME could resolve to another machine later, so the key is not sent to it over ws://."""
+    with caplog.at_level(logging.INFO, logger='ai.modules.mcp'):
+        captured = _init(monkeypatch, fake_web_server, host=host, port=6000)
+    _assert_wiring(captured, 'ws://127.0.0.1:6000', 'http://127.0.0.1:6000')
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1, warnings
+    assert warnings[0] == (
+        'MCP engine address defaulted to loopback (ws://127.0.0.1:6000) because the bind host is a name, not an '
+        'IP address. Nothing may be listening there. Set ROCKETRIDE_URI to the address MCP tool calls should use.'
+    )
+    assert host not in warnings[0]
+
+
+@pytest.mark.parametrize('host', ['10.0.0.5', '2001:db8::5', 'engine.internal'])
+@pytest.mark.parametrize('variable', ['ROCKETRIDE_URI', 'MCP_RESOURCE_IDENTIFIER'])
+def test_explicit_address_still_wins_on_a_specific_bind(monkeypatch, fake_web_server, caplog, host, variable):
+    if variable == 'ROCKETRIDE_URI':
+        monkeypatch.setenv(variable, 'wss://engine.example')
+    else:
+        monkeypatch.setenv(variable, 'https://engine.example/mcp')
+    with caplog.at_level(logging.INFO, logger='ai.modules.mcp'):
+        captured = _init(monkeypatch, fake_web_server, host=host, port=6000)
+    _assert_wiring(captured, 'wss://engine.example', 'https://engine.example')
+    assert not [r for r in caplog.records if r.levelno == logging.WARNING]
+
+
 def test_public_bind_without_identifier_logs_the_self_default_rule(monkeypatch, fake_web_server, caplog):
     with caplog.at_level(logging.INFO, logger='ai.modules.mcp'):
         _init(monkeypatch, fake_web_server, host='0.0.0.0', port=5565)
     assert any('ws://127.0.0.1:5565' in r.getMessage() and 'self default' in r.getMessage() for r in caplog.records)
 
 
-@pytest.mark.parametrize('host', ['0.0.0.0', '::', '', 'engine.internal'])
+@pytest.mark.parametrize('host', ['0.0.0.0', '::', '', '10.0.0.5'])
 def test_defaulted_address_logs_one_warning_about_links(monkeypatch, fake_web_server, caplog, host):
     with caplog.at_level(logging.INFO, logger='ai.modules.mcp'):
         _init(monkeypatch, fake_web_server, host=host, port=5565)
