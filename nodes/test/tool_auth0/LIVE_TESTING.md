@@ -57,7 +57,8 @@ as part of these read-only checks.
 | User profile and administrative block state | Pass | Read for all three designated users. |
 | Recent user logs and individual event | Pass | Both tools succeeded; a direct client read also confirmed page limit and order. |
 | Brute-force block state and no-block response | Pass | No blocks returned for the three designated users. |
-| Minimum user-log scope | Not run | A separately scoped read-only application is needed. |
+| User-log scope | Pass, with qualification | User confirmed only `read:logs_users` was selected for a separate application; `get_user_logs` succeeded and `list_users` was denied. `search_logs` unexpectedly succeeded; token claims were not inspected. |
+| Connection-client continuation | Pass | A one-client page returned a cursor, and the next page returned a different client. |
 | Unblock | Not run | Node writes are disabled pending independent human authorization. |
 
 The OpenRouter chat pipeline returned an answer consistent with the direct

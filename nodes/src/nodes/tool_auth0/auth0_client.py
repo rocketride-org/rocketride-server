@@ -162,7 +162,12 @@ class Auth0Client:
                 raise Auth0Error('AUTH0_UNAVAILABLE', 'Auth0 could not be reached.', retryable=True) from None
             if not 200 <= response.status_code < 300:
                 if response.status_code == 429:
-                    raise Auth0Error('RATE_LIMITED', 'Auth0 rate limit reached.', retryable=True)
+                    raise Auth0Error(
+                        'RATE_LIMITED',
+                        'Auth0 rate limit reached.',
+                        retryable=True,
+                        retry_after_seconds=_retry_after(response.headers) or None,
+                    )
                 if response.status_code >= 500:
                     raise Auth0Error('AUTH0_UNAVAILABLE', 'Auth0 is unavailable.', retryable=True)
                 raise Auth0Error('AUTHENTICATION_FAILED', 'Auth0 authentication failed.')
@@ -195,10 +200,18 @@ class Auth0Client:
 
         routes = {
             'search_users': ('GET', '/users'),
+            'list_users': ('GET', '/users'),
+            'list_applications': ('GET', '/clients'),
+            'search_logs': ('GET', '/logs'),
+            'get_brute_force_settings': ('GET', '/attack-protection/brute-force-protection'),
+            'get_ip_throttling_settings': ('GET', '/attack-protection/suspicious-ip-throttling'),
             'get_user': ('GET', '/users/{id}'),
             'get_user_logs': ('GET', '/users/{id}/logs'),
             'get_log_event': ('GET', '/logs/{id}'),
             'get_user_blocks': ('GET', '/user-blocks/{id}'),
+            'get_connection': ('GET', '/connections/{id}'),
+            'get_connection_clients': ('GET', '/connections/{id}/clients'),
+            'list_connections': ('GET', '/connections'),
             'unblock_user': ('DELETE', '/user-blocks/{id}'),
         }
         if operation not in routes:

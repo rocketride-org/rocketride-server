@@ -252,7 +252,23 @@ def test_transport_errors_are_sanitized_and_not_replayed(client, operation):
 
 
 @pytest.mark.parametrize(
-    'operation', ['search_users', 'get_user', 'get_user_logs', 'get_log_event', 'get_user_blocks', 'unblock_user']
+    'operation',
+    [
+        'search_users',
+        'get_user',
+        'get_user_logs',
+        'get_log_event',
+        'get_user_blocks',
+        'get_connection',
+        'get_connection_clients',
+        'list_connections',
+        'list_users',
+        'list_applications',
+        'search_logs',
+        'get_brute_force_settings',
+        'get_ip_throttling_settings',
+        'unblock_user',
+    ],
 )
 @pytest.mark.parametrize('status,code', [(403, 'MISSING_SCOPE'), (404, None)])
 def test_all_tools_map_remote_errors_through_flat_contract(client, node, operation, status, code):
@@ -264,19 +280,44 @@ def test_all_tools_map_remote_errors_through_flat_contract(client, node, operati
         requests.request.side_effect = [response(200, {'blocked_for': [{'identifier': 'x'}]}), failed]
     else:
         requests.request.return_value = failed
-    args = (
-        {'email': 'a@example.com'}
-        if operation == 'search_users'
-        else {
-            'log_id' if operation == 'get_log_event' else 'user_id': 'id',
-        }
-    )
+    args = {'email': 'a@example.com'} if operation == 'search_users' else {}
+    if operation not in (
+        'search_users',
+        'list_connections',
+        'list_users',
+        'list_applications',
+        'search_logs',
+        'get_brute_force_settings',
+        'get_ip_throttling_settings',
+    ):
+        key = {
+            'get_log_event': 'log_id',
+            'get_connection': 'connection_id',
+            'get_connection_clients': 'connection_id',
+        }.get(operation, 'user_id')
+        args[key] = 'id'
     result = getattr(instance, operation)(args)
     if operation == 'unblock_user':
         assert result['error_code'] == 'WRITE_AUTHORIZATION_REQUIRED'
         requests.request.assert_not_called()
         return
-    expected = code or ('RESOURCE_NOT_FOUND' if operation in ('search_users', 'get_log_event') else 'USER_NOT_FOUND')
+    expected = code or (
+        'RESOURCE_NOT_FOUND'
+        if operation
+        in (
+            'search_users',
+            'get_log_event',
+            'get_connection',
+            'get_connection_clients',
+            'list_connections',
+            'list_users',
+            'list_applications',
+            'search_logs',
+            'get_brute_force_settings',
+            'get_ip_throttling_settings',
+        )
+        else 'USER_NOT_FOUND'
+    )
     assert result == {
         'success': False,
         'error': 'The Auth0 application lacks a required permission.'
@@ -297,6 +338,14 @@ def test_all_tools_map_remote_errors_through_flat_contract(client, node, operati
         ('get_user_logs', {'user_id': 'auth0|1'}, [], '/users/auth0%7C1/logs'),
         ('get_log_event', {'log_id': 'log1'}, {'log_id': 'log1'}, '/logs/log1'),
         ('get_user_blocks', {'user_id': 'auth0|1'}, {'blocked_for': []}, '/user-blocks/auth0%7C1'),
+        ('get_connection', {'connection_id': 'con/1'}, {'id': 'con/1'}, '/connections/con%2F1'),
+        ('get_connection_clients', {'connection_id': 'con/1'}, {'clients': []}, '/connections/con%2F1/clients'),
+        ('list_connections', {}, [], '/connections'),
+        ('list_users', {}, [], '/users'),
+        ('list_applications', {}, [], '/clients'),
+        ('search_logs', {}, [], '/logs'),
+        ('get_brute_force_settings', {}, {'enabled': True}, '/attack-protection/brute-force-protection'),
+        ('get_ip_throttling_settings', {}, {'enabled': True}, '/attack-protection/suspicious-ip-throttling'),
     ],
 )
 def test_read_tools_use_approved_http_routes_and_read_token(client, node, operation, argument, payload, path):
@@ -310,6 +359,21 @@ def test_read_tools_use_approved_http_routes_and_read_token(client, node, operat
     assert call.kwargs['headers']['Authorization'] == 'Bearer read-token'
     assert call.kwargs['allow_redirects'] is False
     assert requests.post.call_args.kwargs['json']['client_id'] == 'read'
+
+
+def test_connection_clients_route_passes_cursor_once(client, node):
+    """Send the cursor as an HTTP parameter and do not fetch another page."""
+    _, auth, requests, _ = client
+    instance = node[0].IInstance()
+    instance.IGlobal = types.SimpleNamespace(client=auth)
+    requests.request.return_value = response(200, {'clients': [], 'next': 'next-token'})
+    result = instance.get_connection_clients({'connection_id': 'con/1', 'limit': 3, 'cursor': 'cursor+/='})
+    assert result['next_cursor'] == 'next-token'
+    requests.request.assert_called_once()
+    call = requests.request.call_args
+    assert call.args == ('GET', 'https://tenant.us.auth0.com/api/v2/connections/con%2F1/clients')
+    assert call.kwargs['params'] == {'take': 3, 'from': 'cursor+/='}
+    assert call.kwargs['headers']['Authorization'] == 'Bearer read-token'
 
 
 def test_client_uses_separate_read_and_write_tokens(client):
@@ -398,3 +462,26 @@ def test_rate_limit_reset_header_and_invalid_values(client, monkeypatch):
     assert module._retry_after({'Retry-After': '2', 'x-ratelimit-reset': '1007'}) == 2
     for value in ('nan', 'inf', 'bad', '999'):
         assert module._retry_after({'x-ratelimit-reset': value}) == 0
+
+
+@pytest.mark.parametrize(
+    'headers,delay',
+    [
+        ({'Retry-After': '4'}, 4),
+        ({'x-ratelimit-reset': '1007'}, 7),
+        ({'Retry-After': 'invalid'}, None),
+        ({}, None),
+    ],
+)
+def test_token_rate_limit_reports_retry_delay_without_retry(client, monkeypatch, headers, delay):
+    """Report OAuth rate-limit headers without repeating the token request."""
+    module, auth, requests, _ = client
+    monkeypatch.setattr(module.time, 'time', lambda: 1000)
+    requests.post.side_effect = None
+    requests.post.return_value = response(429, headers=headers)
+    with pytest.raises(module.Auth0Error) as error:
+        auth.request('get_user', identifier='id')
+    assert error.value.code == 'RATE_LIMITED' and error.value.retry_after_seconds == delay
+    assert error.value.retryable is True
+    requests.post.assert_called_once()
+    requests.request.assert_not_called()
