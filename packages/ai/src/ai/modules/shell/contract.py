@@ -106,7 +106,8 @@ _DATA_ENTRY = re.compile(rf'plans|plans:{_APP_ID}|app:{_APP_ID}')
 # newline.
 _SEGMENT = re.compile(r'[a-z0-9\-._~]+')
 _SNAPSHOT = re.compile(r'[A-Za-z0-9_\-.]+(?:/[A-Za-z0-9_\-.]+)*\.html')
-_HTTPS_URL = re.compile(r'https://[^\s/?#]+[^\s]*')
+# A real URL percent-encodes < > " ' and `; raw, they could break out of the HTML attribute a URL lands in.
+_HTTPS_URL = re.compile(r'https://[^\s/?#<>"\'`]+[^\s<>"\'`]*')
 _MAX_TITLE = 300
 _MAX_DESCRIPTION = 1000
 
