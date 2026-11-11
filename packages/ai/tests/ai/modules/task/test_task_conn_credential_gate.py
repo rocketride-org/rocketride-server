@@ -753,6 +753,45 @@ async def test_an_open_racing_the_cleanup_never_leaves_a_handle(store_backend):
 
 
 @pytest.mark.asyncio
+@pytest.mark.asyncio
+async def test_a_request_during_a_replacing_auth_is_told_to_retry_and_creates_nothing(store_backend):
+    """While a replacing auth ends the old session, a request is answered 'session changing'
+    without a disconnect, and it can neither be served nor leave a monitor behind.
+    """
+    conn = _reauth_conn(_make_account_info(auth=FULL_KEY, user_id='owner-1'))
+    conn._monitors = {'*': object()}
+
+    run = _team_run(ADDRESS, 'task-in')
+    in_cleanup = asyncio.Event()
+    release = asyncio.Event()
+
+    async def slow_detach(_conn):
+        in_cleanup.set()
+        await release.wait()
+
+    run.task.detach_task = slow_detach
+    conn._server._task_control = {run.key: run}
+
+    auth = asyncio.create_task(_auth(conn, 'rr_other', seq=3))
+    await in_cleanup.wait()
+
+    # A request landing in the window: refused softly, socket kept, nothing created
+    sent_before = len(_sent(conn))
+    await _dispatch(conn, 'rrext_monitor', {'token': '*', 'types': ['SUMMARY']})
+    reply = _sent(conn)[sent_before]
+    assert reply['success'] is False and 'Session is changing' in reply['message']
+    conn._transport.disconnect.assert_not_called()
+    assert conn._monitors == {}
+
+    release.set()
+    await auth
+
+    # The switch completed: the transition is over and the new identity is served
+    assert conn._session_transition is False
+    assert conn._authenticated is True
+    assert conn._account_info is not None
+
+
 async def test_an_auth_during_cleanup_waits_and_starts_on_a_clean_session(store_backend):
     """A new identity is installed only after the previous session's cleanup has finished."""
     conn = _reauth_conn(_make_account_info(auth=FULL_KEY, user_id='owner-1'))

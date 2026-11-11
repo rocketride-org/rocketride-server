@@ -287,6 +287,9 @@ class TaskConn(
         # auth could install a new identity while the previous session's
         # cleanup is still closing handles and detaching debuggers.
         self._session_lock = asyncio.Lock()
+        # True while a replacing auth ends the previous session: the dispatch
+        # gate answers "session changing" instead of serving or disconnecting
+        self._session_transition: bool = False
 
         # Client IP — set by task_server.listen() immediately after construction,
         # used for per-IP unauthenticated connection tracking.
@@ -347,6 +350,14 @@ class TaskConn(
             err = self.build_error(message, 'Not authenticated')
             await self.send(err)
             self._transport.disconnect()
+            return
+
+        # A replacing auth is ending the previous session: nothing is served
+        # under the old identity (it could re-create the monitors and handles
+        # being cleared) and nothing is created for the new one until the
+        # switch completes. The caller retries; the connection is kept.
+        if self._session_transition:
+            await self.send(self.build_error(message, 'Session is changing; retry'))
             return
 
         # Endpoints-scoped keys may only send their allow-listed commands.
@@ -422,9 +433,13 @@ class TaskConn(
             # authentication.
             replacing = self._authenticated
             if replacing:
-                await self._end_session(replacing=True)
-
-            self._account_info = result
+                try:
+                    await self._end_session(replacing=True)
+                    self._account_info = result
+                finally:
+                    self._session_transition = False
+            else:
+                self._account_info = result
             self._authenticated = True
             if not replacing:
                 self._server.release_unauthed_slot(self._client_ip)
@@ -487,11 +502,13 @@ class TaskConn(
 
         Args:
             replacing: True when a new identity is about to be installed on
-                this same connection. The previous identity then stays on the
-                socket until the caller replaces it, so a request that lands
-                during the cleanup is answered as that identity instead of
-                being refused and disconnected; the epoch bump still ends the
-                session's handles. On deauth the identity is cleared first.
+                this same connection. The connection then enters a transition:
+                the dispatch gate answers every request with "Session is
+                changing; retry" and keeps the socket, so the old identity can
+                neither be served nor re-create what is being cleared, and the
+                socket is not dropped. The caller clears the transition once
+                the new identity is installed. On deauth the identity is
+                cleared first instead.
 
         Everything the session acquired on the socket is owned by the
         connection rather than the identity, so whatever is left behind would
@@ -509,7 +526,9 @@ class TaskConn(
         # installed, so an in-window request is served rather than dropped.
         # Either way the epoch bump lets a store open still in flight see,
         # when it resumes, that its session ended (StoreCommands._store_fs_open)
-        if not replacing:
+        if replacing:
+            self._session_transition = True
+        else:
             self._authenticated = False
             self._account_info = None
         self._session_epoch += 1

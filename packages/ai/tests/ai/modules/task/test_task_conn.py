@@ -75,6 +75,7 @@ def _make_conn(
     conn._auth_attempts = 0
     conn._session_epoch = 0
     conn._session_lock = asyncio.Lock()
+    conn._session_transition = False
     conn._messages_in = 0
     conn._messages_out = 0
     conn._last_activity = 0.0
