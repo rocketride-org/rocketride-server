@@ -211,8 +211,15 @@ that drive deploy/publish decisions:
 - `userId` / `displayName` / `email` — who authenticated
 - `devTeam` — id of the team used by default when an operation names no
   team; dev-mode runs bill to it
-- `organization` — `null` without an org membership, else:
+- `organization` — `null` without an org membership, else the ACTIVE
+  org (a user may belong to several; `account.getProfile()` lists them
+  as `memberships`, `account.setDefaultOrg(id)` switches, and
+  `account.leaveOrg(id)` leaves one):
   - `id`, `name`
+  - `defaultDevTeamId` — id of the org's default development team (the
+    team invites pre-select), or null when it has none
+  - `isLastAdmin` — true when the user is the org's only active admin
+    (`leaveOrg` is refused until another member is promoted)
   - `permissions` — ORG-level grants (e.g. `'org.admin'`)
   - `developerId` — the org's publisher slug, the first segment of every
     app id; `null` until the org registers as a developer, always absent
@@ -854,7 +861,7 @@ Without the `ttl` the run would start at 08:00 and simply run until the pipeline
 
 ## 10. Apps — Publish Automation
 
-The automation layer under the App Builder UI: the same scaffold, version rail, review flow, and audience bindings, scriptable. Scaffold a new app with `client.deploy.createApp(slug, { template, displayName, developerId, ... })` (Node.js) — the wizard's exact templates, written under `./apps/<slug>`, platform packages vendored from this client's own server, workspace install included. Deploy an app version with `client.deploy.addApp(appFolder, { comment, onProgress? })` (Node.js) — it packs the source exactly as the App Builder does (workspace-rooted layout, `appManifest.include` honored, gitignore + baseline filtering, the 50MB zipped / 512MB uncompressed caps) and ships it through the registry rail, narrating each step through `onProgress` when given; `client.deploy.add({ kind: 'app', data })` (section 9) remains the raw door when you packed the zip yourself. Pre-check everything first with `client.deploy.verifyApp(appFolder)` — a purely local dry run (no server call) returning `{ ok, checks: [{ id, ok, note }], fileCount, uncompressedBytes }` covering the manifest shape, id grammar, declared assets, include entries, and pack size. In CI the same ship is two commands: `rocketride app verify ./apps/reports && rocketride app deploy ./apps/reports --comment 'v1.4'` — both read the `ROCKETRIDE_DEPLOY_*` pair, and deploy refuses to run without a configured deployment target. The methods below manage the deployed versions. For building apps themselves, see ROCKETRIDE_APPS.md.
+The automation layer under the App Builder UI: the same scaffold, version rail, review flow, and audience bindings, scriptable. Scaffold a new app with `client.deploy.createApp(slug, { template, displayName, developerId, ... })` (Node.js) — the wizard's exact templates, written under `./apps/<slug>-ui`, platform packages vendored from this client's own server, workspace install included; `developerId` defaults to the connected org's developer id (else `'local'`), exactly as the wizard and `rocketride app create` resolve it. Deploy an app version with `client.deploy.addApp(appFolder, { comment, onProgress? })` (Node.js) — it packs the source exactly as the App Builder does (workspace-rooted layout, `appManifest.include` honored, gitignore + baseline filtering, the 50MB zipped / 512MB uncompressed caps) and ships it through the registry rail, narrating each step through `onProgress` when given; `client.deploy.add({ kind: 'app', data })` (section 9) remains the raw door when you packed the zip yourself. Pre-check everything first with `client.deploy.verifyApp(appFolder)` — a purely local dry run (no server call) returning `{ ok, checks: [{ id, ok, note }], fileCount, uncompressedBytes }` covering the manifest shape, id grammar, declared assets, include entries, and pack size. In CI the same ship is two commands: `rocketride app verify ./apps/reports-ui && rocketride app deploy ./apps/reports-ui --comment 'v1.4'` — both read the `ROCKETRIDE_DEPLOY_*` pair, and deploy refuses to run without a configured deployment target. The methods below manage the deployed versions. For building apps themselves, see ROCKETRIDE_APPS.md.
 
 - `listDeployments(appId): Promise<Array<{ registryVersion, appVersion, sha256, publishedAt, author, message, state, buildStatus, buildPhase, buildEndedAt?, rungs }>>` — the app's version rail, newest first. The developer org sees its FULL rail (published or not); other callers see only versions serving on rows visible to them. `buildStatus: 'ok'` means servable bytes exist; `buildPhase` is the build phase the version reached and `buildEndedAt` when its build finished (epoch seconds; `null` until it does); `rungs` names the audiences serving each version
 - `submitApp(appId, registryVersion): Promise<{ artifact }>` — submit a deployed version for store review: flips the deployment's state `'private'` → `'submit'` (it enters the review queue). Developer-org gated
@@ -865,10 +872,15 @@ The automation layer under the App Builder UI: the same scaffold, version rail, 
 - `removeAppPublish(appId, target): Promise<{ publish }>` — remove an audience binding (the app stops serving there). SOFT: registry versions and audit history survive; publishing again revives it
 - `disableAppPublish(appId, target): Promise<{ publish }>` — disable an audience binding: serving stops, but the row STAYS in the where-live listing marked `'disabled'` (a visible off switch), unlike remove which hides it. Publishing any version to that audience re-enables it
 - `whereApp(appId): Promise<Array<{ rung, handle, version, appVersion, state, deployedAt? }>>` — the reverse index: which audiences serve which version
+- `waitForAppBuild(appId, registryVersion, { timeoutMs?, intervalMs?, onStatus? })` — wait for a version's server build to finish (deploys return at once with `buildStatus: 'queued'`; publish needs `'ok'`). Throws on a failed build, an unknown version, or the timeout
+- Pure helpers exported from `rocketride` (shared with the CLI and the VS Code panels; the Python SDK exports snake_case twins): `parseRegistryVersion(value)`, `pickPublishVersion(rail)` (newest non-failed version), `resolveDeployTeams(client, deployments)`, `teamNameOf(teams, teamId, ownUserId)`, `wireTeamIdOf(teamId, ownUserId)`, `resolveTeamArg(input, teams)` ('@me' / name / id → wire id), `pipelineNameFromPath(path)`
+- Live preview (Node.js, `rocketride/app-dev`): `new DevSession({ app, workspaceRoot, client })` runs one app's dev loop — `start()` resolves the dev server origin, `stop()` kills the tree and drops your dev overlay; `devPreviewUrl(serverBase, appId)` is the preview to open. The `rocketride app dev` command is this loop in the foreground
+- `developerStatus(): Promise<{ developerId, stripeAccountId, stripeAccountStatus }>` — the caller org's developer namespace (the `<developerId>` half of its app ids); `developerId` is `null` until an org admin registers one
+- `registerDeveloper(developerId): Promise<Record<string, unknown>>` — claim the org's developer id slug (org.admin, SaaS only)
 
 ```typescript
 // Pack + deploy an app folder, check the build, then publish to your team:
-await client.deploy.addApp('./apps/reports', { comment: 'v1.4: dark mode' });
+await client.deploy.addApp('./apps/reports-ui', { comment: 'v1.4: dark mode' });
 const [latest] = await client.listDeployments('acme.reports');
 if (latest.buildStatus !== 'ok') {
 	console.error((await client.buildLog('acme.reports', latest.registryVersion)).log);
@@ -887,26 +899,26 @@ Typed wrapper for profile, organization, API keys, members, teams, and environme
 
 **Profile:** `getProfile(): Promise<ConnectResult>` (includes `memberships` and `defaultOrgId`, which the auth handshake omits) · `updateProfile(fields)` · `setDevTeam(teamId)` (the team dev-mode runs bill to and whose environment layer applies) · `setDefaultOrg(orgId)` (switches the active org; the server resets the default team and refreshes all your connections) · `deleteAccount()`
 
-**Organization:** `getOrg(orgId?): Promise<OrgDetail>` (id, name, plan, memberCount, teamCount) · `updateOrgName(orgId, name)`
+**Organization:** `getOrg(orgId?): Promise<OrgDetail>` (id, name, plan, memberCount, teamCount) · `updateOrgName(orgId, name)` · `leaveOrg(orgId)` (removes the caller from that organization; refused for its last admin; leaving the active org switches you to another membership and refreshes all your connections)
 
 **API keys:** `listKeys(): Promise<ApiKeyRecord[]>` · `createKey(params): Promise<{ key: string }>` (raw key string, shown once) · `revokeKey(keyId)`
 
-**Members:** `listMembers(orgId): Promise<MemberRecord[]>` · `inviteMember(orgId, { email, givenName, familyName, role })` · `updateMemberRole(orgId, userId, role)` · `removeMember(orgId, userId)` · `resendInvite(orgId, userId)`
+**Members:** `listMembers(orgId): Promise<MemberRecord[]>` · `invite(orgId, { email, givenName, familyName, role, teamAssignments?, devTeamId? }): Promise<InvitedMember>` (returns `{ userId, displayName, email, role, status, devTeamId }`; `inviteMember` is the deprecated form that returns nothing) · `updateMemberRole(orgId, userId, role)` · `removeMember(orgId, userId)` · `resendInvite(orgId, userId)`
 
 **Teams:** `listTeams(orgId): Promise<TeamRecord[]>` · `getTeamDetail(orgId, teamId): Promise<TeamDetail>` (includes members) · `createTeam(orgId, name)` · `deleteTeam(orgId, teamId)` · `addTeamMember(orgId, { teamId, userId, permissions })` · `updateTeamMemberPerms(orgId, { teamId, userId, permissions })` · `removeTeamMember(orgId, { teamId, userId })`
 
 **Environment secrets** (the layered `ROCKETRIDE_*` store, merged server-side at auth):
 
 - `getEnvironmentKeys(): Promise<string[]>` — available key NAMES from the merged environment (no values; for dropdowns)
-- `getEnv(scope: 'org' | 'team' | 'user', scopeId?): Promise<Record<string, string>>` — read one scope's dict (org: pass orgId; team: pass teamId; user: omit)
-- `setEnv(scope, env, scopeId?): Promise<void>` — write one scope's FULL dict (replaces the entire set at that level)
+- `getEnv(scope: 'org' | 'team' | 'user', scopeId?): Promise<Record<string, string>>` — the names stored at one scope, each mapped to the mask `CONST_ENV_MASK` (exported by `rocketride`); values are never returned (org: pass orgId; team: pass teamId; user: omit)
+- `setEnv(scope, env, scopeId?): Promise<void>` — merge into one scope: a value sets, `null` deletes, the mask keeps the stored value; names not sent are untouched
 
 #### What members can do vs admins
 
 Every operation above is role-checked server-side; an unauthorized call is refused with an explicit error (`'Admin role required ...'`) — nothing fails silently. The split for the documented operations:
 
-- **Any org member**: their own profile (`getProfile`, `updateProfile`, `setDevTeam`, `setDefaultOrg`); their OWN API keys (`listKeys`, `createKey`, revoking their own); reading the org (`getOrg`); listing members and teams and reading a team's detail; USER-scope environment (`getEnv('user')` / `setEnv('user')`) and the merged key names (`getEnvironmentKeys`); billing reads (`getDetails`, `getCreditBalance`, `getProductPrices`) and promo codes (`validatePromoCode`, `redeemPromoCode`).
-- **Org admin only**: renaming the org (`updateOrgName`); member management (`inviteMember`, `updateMemberRole`, `removeMember`, `resendInvite`); revoking ANOTHER member's key (own-org keys only); creating teams (`createTeam`); ORG-scope environment — both `getEnv('org', ...)` and `setEnv('org', ...)` (reads too: the org layer holds shared secrets); and every billing operation that moves money or reads the org's ledger — checkout/subscribe, portal, cancel, upgrade, credit purchases and top-ups, `getUsageByUser`/`getUsageByTeam`, `getTransactions`, `getTransactionDistinct`.
+- **Any org member**: their own profile (`getProfile`, `updateProfile`, `setDevTeam`, `setDefaultOrg`); leaving an organization they belong to (`leaveOrg` — refused for its last admin); their OWN API keys (`listKeys`, `createKey`, revoking their own); reading the org (`getOrg`); listing members and teams and reading a team's detail; USER-scope environment (`getEnv('user')` / `setEnv('user')`) and the merged key names (`getEnvironmentKeys`); billing reads (`getDetails`, `getCreditBalance`, `getProductPrices`) and promo codes (`validatePromoCode`, `redeemPromoCode`).
+- **Org admin only**: renaming the org (`updateOrgName`); member management (`invite`, `inviteMember`, `updateMemberRole`, `removeMember`, `resendInvite`); revoking ANOTHER member's key (own-org keys only); creating teams (`createTeam`); ORG-scope environment — both `getEnv('org', ...)` and `setEnv('org', ...)` (reads too: the org layer holds shared secrets); and every billing operation that moves money or reads the org's ledger — checkout/subscribe, portal, cancel, upgrade, credit purchases and top-ups, `getUsageByUser`/`getUsageByTeam`, `getTransactions`, `getTransactionDistinct`.
 - **Team admin** (the `team.admin` permission on that team; org admins pass implicitly): `deleteTeam`, `addTeamMember`, `updateTeamMemberPerms`, `removeTeamMember`, and TEAM-scope `getEnv`/`setEnv` — both read and write.
 
 ### `client.billing`
@@ -944,7 +956,7 @@ Typed wrapper for subscriptions, Stripe checkout, credit wallets, and usage.
 
 Direct SQL/Cypher execution against a database pipeline node, bypassing the LLM translation layer that `chat()` uses (and its safety checks — you own the statements you send).
 
-- `query(options): Promise<{ rows: Record<string, unknown>[]; affected_rows: number }>` (`rows: unknown[][]` when `rowMode: 'array'`) — execute a raw SQL or Cypher statement. Options: `token` and `sql` (required, non-empty); `nodeId?` (empty broadcasts to all tool-lane nodes — the first database node handles it); `sessionId?` (run within a transaction session); `params?: unknown[] | Record<string, unknown>` (an array of positional parameters for SQL nodes, e.g. `[1, 'foo']` for `$1`, `$2`; an object keyed by placeholder name for the built-in `rocketride_graph` node and `graph_neo4j`, e.g. `{ rows: [...] }` for `UNWIND $rows` (`graph_falkordb` rejects params) — bound values need no escaping and do not count toward `rocketride_graph`'s query-length limit); `rowMode?: 'object' | 'array'` (`'array'` returns positional `unknown[][]` rows, which is what ORM drivers need — duplicate column names in joins survive)
+- `query(options): Promise<{ rows: Record<string, unknown>[]; affected_rows: number; truncated?: boolean }>` (`rows: unknown[][]` when `rowMode: 'array'`) — execute a raw SQL or Cypher statement. Options: `token` and `sql` (required, non-empty); `nodeId?` (empty broadcasts to all tool-lane nodes — the first database node handles it); `sessionId?` (run within a transaction session); `params?: unknown[] | Record<string, unknown>` (an array of positional parameters for SQL nodes, e.g. `[1, 'foo']` for `$1`, `$2`; an object keyed by placeholder name for the graph nodes `rocketride_graph`, `graph_neo4j` and `graph_falkordb`, e.g. `{ rows: [...] }` for `UNWIND $rows` — bound values need no escaping and do not count toward `rocketride_graph`'s query-length limit); `rowMode?: 'object' | 'array'` (`'array'` returns positional `unknown[][]` rows, which is what ORM drivers need — duplicate column names in joins survive). When `graph_falkordb` saves a write but cuts its rows, at `max_execute_rows` or at the server's `RESULTSET_SIZE`, the result also carries `truncated: true`
 - `beginTransaction(options: { token: string; nodeId?: string }): Promise<{ session_id: string }>` — begin a transaction; thread the returned `session_id` through subsequent `query`/`commit`/`rollback` calls
 - `commit(options: { token: string; sessionId: string; nodeId?: string }): Promise<{ ok: boolean }>` / `rollback(...)` — same shape
 - `dialect(options: { token: string; nodeId?: string }): Promise<DatabaseDialect>` — discover the underlying engine (`DatabaseDialect.POSTGRES | MYSQL | NEO4J`); branch on SQL syntax differences or detect a graph DB
@@ -996,7 +1008,8 @@ try {
 ```
 
 **Graph bulk upsert** (`rocketride_graph`, see Pattern 14 in ROCKETRIDE_PIPELINES.md) — named
-params, and MERGE then a separate `MATCH ... SET`:
+params, and MERGE then a separate `MATCH ... SET` (works on every AGE version; on AGE 1.6.0 the
+MERGE and SET can also run as one call):
 
 ```typescript
 const rows = [{ id: 1, name: 'a' }, { id: 2, name: 'b' }];
@@ -1050,7 +1063,10 @@ Methods: `getState()`, `getDocument(uri)`, `useStore()`, `openDocument(uri, grou
 
 The package installs a `rocketride` command (use `pnpm exec rocketride` /
 `npx rocketride` for local installs). The Python client installs the
-IDENTICAL command — same verbs, same flags, same output. The full reference
+same command with fewer verbs: of the `app` commands it has only `create`,
+`verify`, and `deploy`, and it has no `deploy source-config`. It adds
+`diff` and `otel`, which this package lacks. ROCKETRIDE_CLI.md has the
+table of which package ships which command. The full reference
 (workspace, validate, task, store, app, and deploy verbs, the `--json`
 contract, and when to prefer it over SDK code) is ROCKETRIDE_CLI.md; every
 deploy and app verb there fronts a `client.deploy.*` method from §Deploy.
@@ -1164,13 +1180,22 @@ const tree = await client.cprofileReportTree(token);    // call tree
   completed session.
 - `cprofileReportTree(target?, maxDepth?, minPct?, includeSystem?, thread?)` —
   the call tree (defaults: depth 50, 0.1% cumtime threshold) with
-  `total_time` and `total_calls`; raise `minPct` or lower `maxDepth` to
+  `total_time`, `total_calls` and `functions` (exact per-function totals, as
+  the text report prints them; a function under several callers splits its
+  numbers between its copies in the tree); raise `minPct` or lower `maxDepth` to
   shrink it. Read it top-down: the widest cumulative-time branch under the
   run loop is the slow pipeline component. Pass `thread` to get one thread's
   tree instead of all threads merged.
 - `cprofileThreads(target?)` — the threads of the last session, busiest
   first: `id` (the `thread` to pass above), `name`, system thread id `tid`, `ttot`,
   `functions` and `calls`. Names are not unique; `tid` is.
+- Session failures come back as data, not exceptions: `cprofileStart` while a
+  session is active, and `cprofileStop` with no session (or on a
+  server-process session another connection started), resolve to
+  `{ status: 'error', message }`. With no completed session, `cprofileReport`
+  returns a placeholder text, and `cprofileReportTree` and `cprofileThreads`
+  return an `error` field. A missing `task.control` permission, or a `target`
+  you may not control, rejects with an `Error`.
 
 ## 18. Exceptions
 

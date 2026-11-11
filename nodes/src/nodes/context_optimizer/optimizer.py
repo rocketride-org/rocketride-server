@@ -133,6 +133,8 @@ class ContextOptimizer:
         'claude-sonnet-4': 1000000,
         'claude-sonnet-4-5': 1000000,
         'claude-sonnet-4-6': 1000000,
+        # OpenRouter's `~anthropic/claude-haiku-latest`, matched by its bare name.
+        # Anthropic's own API has no such id, so no llm_* profile publishes it.
         'claude-haiku-latest': 200000,
         'claude-opus-latest': 1000000,
         'claude-sonnet-latest': 1000000,

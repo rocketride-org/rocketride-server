@@ -28,7 +28,7 @@ Minimal MCP stdio client (no external SDK dependency).
 
 Implements the MCP JSON-RPC lifecycle and the two server tool methods we need:
 - initialize + notifications/initialized
-- tools/list
+- tools/list (all pages)
 - tools/call
 
 Transport is line-delimited JSON-RPC over stdin/stdout of a child process.
@@ -39,16 +39,19 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import sys
 import threading
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
+from hosting import is_shared_host
+
 try:
     from .mcp_schema import input_schema_needs_noop_placeholder, normalize_tool_input_schema
+    from .mcp_tools_list import fetch_all_tool_entries
 except ImportError:  # pragma: no cover - standalone import (e.g. unit tests)
     from mcp_schema import input_schema_needs_noop_placeholder, normalize_tool_input_schema
+    from mcp_tools_list import fetch_all_tool_entries
 
 
 class McpProtocolError(RuntimeError):
@@ -96,11 +99,11 @@ class McpStdioClient:
         if self._proc is not None:
             raise RuntimeError('MCP stdio client already started')
 
-        # A hosted engine starts its tasks with --hosted (task_engine
-        # CONST_HOSTED_CHILD_FLAG). There, pipelines must not launch processes
-        # in the engine's container. The engine also refuses these pipelines
-        # before launch; this is the second layer.
-        if '--hosted' in sys.argv:
+        # A task that shares the engine's host gets --shared-host (see the
+        # hosting module). There, pipelines must not launch processes in the
+        # engine's container. The engine also refuses these pipelines before
+        # launch; this is the second layer.
+        if is_shared_host():
             raise RuntimeError(
                 'The stdio MCP transport is not available on RocketRide Cloud. Use streamable-http or sse.'
             )
@@ -183,12 +186,7 @@ class McpStdioClient:
                 pass
 
     def list_tools(self) -> List[McpToolDef]:
-        result = self._request('tools/list', {})
-        if not isinstance(result, dict):
-            raise McpProtocolError(f'tools/list result expected object, got {type(result)}')
-        tools = result.get('tools', [])
-        if not isinstance(tools, list):
-            raise McpProtocolError(f'tools/list result.tools expected list, got {type(tools)}')
+        tools = fetch_all_tool_entries(self._request, error_cls=McpProtocolError)
 
         out: List[McpToolDef] = []
         for t in tools:

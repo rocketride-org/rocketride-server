@@ -165,20 +165,20 @@ the CI job below posts on the pull request:
 **Pipeline diff:** 1 node added, 2 nodes changed, 2 edges added, 1 edge removed, layout changed
 
 **Nodes**
-- + `reranker_1` (`reranker_cohere`)
+- `+` `reranker_1` (`reranker_cohere`)
 - ~ `llm_1` provider: `llm_openai` → `llm_anthropic`
 
 **Edges**
-- + `qdrant_1` --`documents`--> `reranker_1`
-- + `reranker_1` --`documents`--> `prompt_1`
-- - `qdrant_1` --`documents`--> `prompt_1`
+- `+` `qdrant_1` --`documents`--> `reranker_1`
+- `+` `reranker_1` --`documents`--> `prompt_1`
+- `-` `qdrant_1` --`documents`--> `prompt_1`
 
 **Config**
 
 | Node | Field | Change |
 | --- | --- | --- |
-| `llm_1` | `config.claude` | + `{'apikey': '${ROCKETRIDE_ANTHROPIC_KEY}'}` |
-| `llm_1` | `config.openai-4o` | - `{'apikey': '${ROCKETRIDE_OPENAI_KEY}'}` |
+| `llm_1` | `config.claude` | + `{"apikey": "${ROCKETRIDE_ANTHROPIC_KEY}"}` |
+| `llm_1` | `config.openai-4o` | - `{"apikey": "${ROCKETRIDE_OPENAI_KEY}"}` |
 | `llm_1` | `config.profile` | `openai-4o` → `claude` |
 | `prompt_1` | `config.instructions[0]` | `Answer using only the retrieved context.` → `Answer using only the retrieved context. Cite the source document for every claim.` |
 
@@ -241,8 +241,8 @@ Two things worth knowing before you wire it up:
   action then diffs the base branch against itself, reports no changes and warns.
   To comment on fork PRs, compute on `pull_request` and post from a
   `workflow_run` workflow.
-- **Before the CLI release.** `rocketride diff` ships in a release after 1.3.0;
-  until then pass `install-from: ./packages/client-python` so the action installs
+- **Before the CLI release.** `rocketride diff` is not in a PyPI release yet
+  (1.4.0 and earlier lack it); until then pass `install-from: ./packages/client-python` so the action installs
   the CLI from a checkout rather than PyPI.
 
 If you would rather not vendor the composite action, the same result can be
@@ -257,7 +257,7 @@ branch is present for `--git`, then diff and post the Markdown yourself:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
-      # `rocketride diff` ships in a release AFTER 1.3.0: until then `pip install
+      # `rocketride diff` is not in a PyPI release yet (1.4.0 and earlier lack it): until then `pip install
       # rocketride` installs a CLI without the subcommand and the next step fails
       # with "invalid choice: 'diff'". Install the client package from a checkout
       # of this repository instead -- the path below resolves only here, so from
@@ -267,6 +267,7 @@ branch is present for `--git`, then diff and post the Markdown yourself:
       - run: pip install ./packages/client-python
       - name: Semantic diff of the pipeline
         run: |
+          set -o pipefail  # keep an exit-2 input error from being masked by tee
           rocketride diff --git "origin/${{ github.base_ref }}" rag.pipe \
             --markdown --exit-zero | tee pipe-diff.md
       - name: Comment on the PR

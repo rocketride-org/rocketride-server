@@ -133,6 +133,7 @@ than inferring one from the prose.
 | `TASK_AMBIGUOUS` | An unscoped lookup matched several running tasks; retry with a scope. |
 | `TASK_COMPLETED` | The task finished before the request could be served. |
 | `TASK_STOPPED` | The task was stopped or cancelled before the request. |
+| `OUT_OF_CREDITS` | The org is out of credit, so the task refuses a new pipe; clears when it tops up. |
 
 These codes ride command replies. A task key rejected while the connection is
 still being established — on the HTTP request or the WebSocket upgrade — is
@@ -141,6 +142,18 @@ message nor a code, deliberately, so that a rejected credential reveals nothing
 about why it was rejected. A client therefore cannot tell an invalidated task
 key from any other bad credential at connect time; the codes above appear only
 once a command is in flight.
+
+### Validation (`rrext_validate`)
+
+Validation accepts a full pipeline or a `{version, component}` payload. It
+resolves `${ROCKETRIDE_*}` references for validation and returns the submitted
+template config in the response. The echoed config receives the usual
+structural normalization when its submitted field types permit it.
+
+When a reference was substituted, errors, warnings and validation exceptions
+use fixed messages listing the submitted references. Diagnostic counts and
+integer `ccode` values are retained. Component ids refer to the submitted
+components. With no substitution, diagnostic messages keep their usual text.
 
 ### Events
 

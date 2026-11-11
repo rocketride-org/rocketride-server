@@ -28,7 +28,7 @@ fix to the right phase. No re-running until the cause is identified and the fix 
      `rocketride-configuring-pipelines` (re-fetch schema, re-validate).
    - **Wiring/lane** — lane mismatch, missing converter, wrong source method → fix in
      `rocketride-designing-pipelines` (re-wire), then re-configure + re-validate.
-   - **Runtime** — event-loop blocked (`Connection closed`/timeout), `Pipeline already running`,
+   - **Runtime** — event-loop blocked (`Connection closed`/timeout), `Pipeline is already running`,
      blocking I/O → fix the run code in `rocketride-running-pipelines`.
    - **Data** — empty/garbage input, wrong response key (`KeyError`) → check input + `result_types`.
 4. **Propose a specific fix** tied to the evidence: "Node `llm_1` failed: `Invalid API key`. The
@@ -41,8 +41,9 @@ fix to the right phase. No re-running until the cause is identified and the fix 
 - `The service <provider> was not found` → misspelled `provider`; check the index.
 - `input has unknown lane` (validate) → lane mismatch; add a converter or pick compatible nodes.
 - `KeyError: '<key>'` → response key vs `laneName` mismatch; read `result_types`.
-- `Pipeline is already running.` → `use_existing=True` or `terminate()` first; a second instance of
-  the same pipe needs its own unguessable `tk_` token (SDK `use()` or `rocketride start --token`; not MCP).
+- `Pipeline is already running (task <id>) ...` → `use_existing=True` or `terminate()` first; a
+  second instance of the same pipe needs its own unguessable `tk_` token (SDK `use()` or
+  `rocketride start --token`; not MCP).
 - `Invalid API key` / a `project_id` rejection → config fix.
 
 ## Red flags

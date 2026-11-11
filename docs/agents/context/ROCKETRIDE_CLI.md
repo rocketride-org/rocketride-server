@@ -2,9 +2,23 @@
 
 The `rocketride` command is installed with the SDK in either language
 (`pip install rocketride` or `npm install rocketride`; use `pnpm exec
-rocketride` / `npx rocketride` for local installs). The Python and
-TypeScript packages install the IDENTICAL command — same verbs, same flags,
-same output — so recipes port between languages unchanged.
+rocketride` / `npx rocketride` for local installs). The two packages do not
+ship the same set of commands. This table lists every command and flag that
+only one package has:
+
+| Command or flag | TypeScript (`npm`) | Python (`pip`) |
+|---|---|---|
+| `app dev`, `app publish`, `app unpublish`, `app disable`, `app versions`, `app where`, `app log`, `app submit`, `app withdraw`, `app reply`, `app developer status`, `app developer register` | Yes | No |
+| `deploy source-config` | Yes | No |
+| `app verify --store`, `app deploy --publish`, `init --deploy` | Yes | No |
+| `diff`, `otel` | No | Yes |
+
+Both packages ship every other command and flag in this document, so a
+recipe that uses only those ports between languages unchanged. With only
+the Python package installed, run the TypeScript-only commands through
+`npx rocketride`.
+
+<!-- scripts/validate-cli-docs.py checks this table and every command in this document against both CLIs. Keep the table to commands and flags that only one package has. -->
 
 **When to use it.** You have a shell. Prefer the command for every one-shot
 lifecycle operation — validate, run, upload, store, deploy, publish,
@@ -12,27 +26,31 @@ schedule, scaffold — and write SDK code only for what the command cannot
 do. It reads the workspace `.env`, works against a local engine with no
 network, and needs no client configuration of any kind.
 
-**Common options** (every command): `--uri <uri>` (default:
+**Common options** (every command except `app verify`, `diff`, and `otel`;
+`app verify` needs no connection and takes only `--json` of these, and
+[Python-only commands](#python-only-commands) covers the other two): `--uri <uri>` (default:
 `ROCKETRIDE_URI` or `http://localhost:5565`), `--apikey <key>` (default:
 `ROCKETRIDE_APIKEY`), and `--json [file]` — the command's entire result
 as one JSON value on stdout (or written to `file`), built for scripts and
 agents; failures become an `{"error": {"message", "hint"}}` envelope with
 a non-zero exit. Deploy verbs (`deploy *`, `app deploy`) use the
-`ROCKETRIDE_DEPLOY_*` pair instead and refuse to run without it.
+`ROCKETRIDE_DEPLOY_*` pair instead and refuse to run without it. A variable
+exported in your shell takes precedence over the same one in `.env`.
 
 ## The loop, as commands
 
 | Step | Do this |
 |---|---|
-| Set up or refresh the workspace | `rocketride init` (first time and whenever the server changes); `rocketride login` when credentials are rejected |
+| Set up or refresh the workspace | `rocketride init` (first time and whenever the server changes); `rocketride login --apikey ""` when development credentials are rejected, `rocketride login --deploy --uri <uri> --apikey ""` for deployment ones (see `login` below) |
 | Find components and their config fields | Read `.rocketride/services-catalog.json` and `.rocketride/schema/` — synced by `init`; there is no lookup command (ROCKETRIDE_COMPONENT_REFERENCE.md explains the shapes) |
 | Validate a pipeline | `rocketride validate path/to/pipeline.pipe` (globs allowed) |
 | Run a pipeline | `rocketride start --pipeline file.pipe` prints the task token; `rocketride upload files/* --pipeline file.pipe` starts, uploads, and terminates in one go |
 | See what is running, stop it | `rocketride list`, `rocketride stop --token TOKEN` |
 | Read run logs and traces | No CLI verb — use the SDK (`client.log`, API doc §Templates & Run Logs) or ROCKETRIDE_OBSERVABILITY.md |
-| Files in the account store | `rocketride store dir|type|write|rm|mkdir|stat` |
+| Files in the account store | `rocketride store` with `dir`, `type`, `write`, `rm`, `mkdir`, or `stat` |
 | Deploy, publish, schedule | `rocketride deploy …` (deployment target) |
-| Apps | `rocketride app create|verify|deploy` (deployment target) |
+| Apps | `rocketride app` with `create`, `dev`, `verify`, `deploy`, `publish`, `versions`, `where`, and more (`dev` uses the development connection; lifecycle verbs use the deployment target; the Python package has only `create`, `verify`, and `deploy`) |
+| Review what changed in a pipeline | `rocketride diff old.pipe new.pipe` (Python package only) |
 | Find what is slow | `rocketride profile run --token TOKEN --duration 30`, then `rocketride profile tree --token TOKEN` |
 
 Two things the table cannot hide: component discovery is file-based, and
@@ -50,9 +68,21 @@ loop is a command.
 - `rocketride login [--deploy] [--apikey <key>]` — (re)authenticate and
   save credentials to `.env` (and make `.env` git-ignored in the same
   step). OSS servers take an API key; saas servers open the browser to
-  sign in and mint a durable personal API key. Run it whenever a command
-  reports rejected credentials. `--deploy` targets the
-  `ROCKETRIDE_DEPLOY_*` pair.
+  sign in and mint a durable personal API key. The browser tab waits
+  until the key is minted, then closes itself where the browser allows it (Chrome, Edge); elsewhere
+  (Firefox only lets scripts close windows scripts opened) it shows a
+  RocketRide-branded "You're signed in" page, in your light/dark setting,
+  with a link to the web app. A waitlisted account sees its access-queue
+  notice there, and a failed sign-in (including a failed key exchange)
+  shows the reason there and in the terminal. Run it whenever a command
+  reports rejected credentials. Without `--apikey`, `login` first tries the
+  key already in `.env`, so when that key is the rejected one, pass a new
+  key with `--apikey <key>`, or pass `--apikey ""` to sign in again (or be
+  prompted for a key on a self-hosted server). `--deploy` targets the
+  `ROCKETRIDE_DEPLOY_*` pair. Pass the deployment server's `--uri` with it,
+  because `--uri` defaults to `ROCKETRIDE_URI`, the development server. `--apikey <key>` saves that key without
+  opening a browser, on either kind of server, which is how to sign in
+  from CI or an agent.
 
 ## Validate
 
@@ -79,6 +109,10 @@ rocketride stop --token TASK_TOKEN                         # terminate a task
 
 - `start` options: `--pipeline <file>` (or `ROCKETRIDE_PIPELINE`; required), `--token <token>` (or `ROCKETRIDE_TOKEN`; your own unguessable `tk_` token also lets one pipe run twice at once), `--threads <num>` (default 4), `--args <args...>`
 - `upload` options: `--pipeline <file>` or `--token <token>` (one required), `--threads <num>` (default 4), `--max-concurrent <num>` (default 5), `--args <args...>`
+- In the Python package, `--args` takes every argument after it, flags
+  included, so put the other flags first:
+  `rocketride start --pipeline p.pipe --json --args a b`. Its `upload`
+  accepts `--max-concurrent` but ignores it.
 
 There is no live-monitor command: continuous monitoring belongs to the
 platform's event monitor and server monitor apps — the CLI is one-shot,
@@ -102,42 +136,118 @@ All store subcommands take the common `--uri`/`--apikey` options.
 
 ## App commands (`rocketride app ...`)
 
-`app deploy` is a **deployment-target** verb: it defaults to the
-`ROCKETRIDE_DEPLOY_URI` / `ROCKETRIDE_DEPLOY_APIKEY` pair and refuses to
-run when no deployment target is configured. `app create` reads the
-development connection (`ROCKETRIDE_URI`) for vendoring; `app verify`
-needs no connection.
+The terminal twin of the App Builder. Every lifecycle verb (`deploy`,
+`publish`, `unpublish`, `disable`, `versions`, `where`, `log`, `submit`,
+`withdraw`, `reply`, `developer`) is a **deployment-target** verb: it
+defaults to the `ROCKETRIDE_DEPLOY_URI` / `ROCKETRIDE_DEPLOY_APIKEY` pair
+(`rocketride login` writes it) and refuses to run when no deployment target
+is configured. `app create` reads the development connection
+(`ROCKETRIDE_URI` / `ROCKETRIDE_APIKEY`) for vendoring and for the
+developer id; `app verify` needs no connection.
+
+The Python package has only `app create`, `app verify`, and `app deploy`,
+and its `app verify` has no `--store` and its `app deploy` has no
+`--publish`. Every other command in this section needs the TypeScript
+package.
+
+`[app]` takes an app folder, an app id (`personal.clock`), its name part
+(`clock`), its folder name (`clock-ui`), or nothing — the current
+directory is the app. A lone number is read as the version, so
+`rocketride app publish 3` works from inside an app folder. In the Python
+package, `app verify` and `app deploy` take only an app folder, and it is
+required.
 
 - `rocketride app create <slug> [--template Blank|Dashboard] [--name <text>]
   [--developer <id>] [--sidebar] [--no-status-footer] [--doc-tabs]
   [--workspace <dir>] [--no-install]` — scaffold a new app under
-  `./apps/<slug>` with the same
-  templates as the App Builder wizard, vendoring the platform packages
-  from the development server (`ROCKETRIDE_URI`). SDK equivalent:
-  `client.deploy.createApp(slug, options)` / `client.deploy.create_app`.
-  Scaffolding only — nothing deploys.
-- `rocketride app verify <folder> [--workspace <dir>]` — the
+  `./apps/<slug>-ui` with the same scaffold as the App Builder wizard (one
+  SDK implementation serves both), vendoring the platform packages from
+  the development server. The app id is `<developerId>.<slug>`: without
+  `--developer`, the developer id comes from the account the development
+  credentials sign in as (run `rocketride login` or `rocketride init`
+  first); with no credentials, no reachable server, or an org that has
+  not registered one, it falls back to `local` and prints a warning to
+  stderr. SDK equivalent: `client.deploy.createApp(slug, options)` /
+  `client.deploy.create_app` (same developer-id default). Scaffolding
+  only — nothing deploys.
+- `rocketride app dev [app] [--open] [--no-auth] [--port <port>]
+  [--no-install] [--workspace <dir>]` — live preview from the terminal, the App Builder's
+  dev loop: runs `rsbuild dev` for the app as the preview's front door
+  (local-first — the dev server proxies the shell from the development
+  connection and serves the app's bundle itself) and prints the preview URL
+  (`--open` opens it; opening the bare `localhost:<port>` also works — it
+  redirects to the preview URL). The preview's signed-in/out state is the
+  browser's own session — but the printed URL carries the workspace
+  credential in its `#fragment` (never sent on the wire), so the tab opens
+  already signed in; `--no-auth` hands no credentials over and clears any session the browser remembers for that origin — the preview runs the app's own first-run sign-in
+  instead, and the footer's Log in button runs the real browser sign-in
+  either way (the shell relays it through the server's registered web
+  origin). `--port`
+  overrides the app's pinned dev port. The preview
+  updates on every save — edit in any editor. The preview tab is a full
+  shell workspace: Home and other apps are reachable, the Switch App menu
+  lists your app marked "(dev)" so you can always come back, and a hard
+  reload (Ctrl+F5) boots back into your app. Ctrl+C stops the server —
+  nothing to unregister, the server holds no dev state; the server is
+  tethered to the command, so it never outlives it. Several editors and
+  terminals can serve the same app at once: each dev server is its own
+  origin, and the preview tab registers whatever origin it was opened on.
+- `rocketride app verify [app] [--store] [--workspace <dir>]` — the
   no-side-effect precheck: manifest shape, id grammar, declared assets,
-  include entries, and a pack dry run against the caps. Exit 0 when ready,
-  1 with FAIL lines when not. Needs no server connection at all.
-- `rocketride app deploy <folder> [--workspace <dir>] [--comment <text>]
-  [--verbose]` — pack the app folder's source (App Builder rules:
-  workspace-rooted layout, `appManifest.include`, gitignore + baseline
-  filtering, size caps) and deploy it as the next registry version;
-  `--verbose` narrates every pack step. Deploying activates nothing —
-  publish a rung to serve it.
+  include entries, and a pack dry run against the caps; `--store` adds the
+  public store-submission bar (description, pricing plans). Exit 0 when
+  ready, 1 with FAIL lines when not. Needs no server connection at all.
+- `rocketride app deploy [app] [--comment <text>] [--publish <target>]
+  [--verbose] [--workspace <dir>]` — pack the app's source (App Builder
+  rules: workspace-rooted layout, `appManifest.include`, gitignore +
+  baseline filtering, size caps) and deploy it as the next registry
+  version; the server then builds it. `--publish @me|@team/<name>|@public`
+  waits for that build and publishes the new version in the same command.
+  Without it, deploying activates nothing.
+- `rocketride app publish [app] [version] [--to <target>]` — bind a
+  version to an audience: `@me` (default), `@team/<name>`, or `@public`
+  (`@public` needs an approved version on a reviewing server). Without a
+  version, the newest version that has not failed; it waits for that
+  version's build first.
+- `rocketride app unpublish [app] --from <target>` / `app disable [app]
+  --from <target>` — stop serving to an audience (unpublish hides the
+  binding; disable keeps it listed, switched off — publishing again
+  re-enables it). Versions and history survive both.
+- `rocketride app versions [app]` — the version rail, newest first:
+  version, app version, review state, build status, and live audiences.
+- `rocketride app where [app]` — which audiences serve which version.
+- `rocketride app log [app] [version]` — a version's server build log
+  (default: the newest version).
+- `rocketride app submit [app] [version]` / `app withdraw [app] [version]`
+  — enter or leave public store review (submit waits for the version's
+  server build first); `rocketride app reply [app] [version] -m
+  <text>` posts on the review thread.
+- `rocketride app developer status` / `app developer register <id>` —
+  your organization's developer id (the `<developerId>` in every app id);
+  registering is an org-admin step.
 
 ```bash
+# The whole loop, from a fresh workspace
+rocketride login
+rocketride app create clock
+rocketride app dev clock --open                # live preview; edit, save, watch it update; Ctrl+C to stop
+rocketride app deploy clock --publish @me      # waits for the server build, then publishes
+rocketride app versions clock
+rocketride app where clock
+
 # CI: precheck, then deploy the packed source as the next registry version
-rocketride app verify ./apps/reports
-rocketride app deploy ./apps/reports --comment "ci: $GITHUB_SHA"
+rocketride app verify ./apps/reports-ui
+rocketride app deploy ./apps/reports-ui --comment "ci: $GITHUB_SHA"
 ```
 
 ## Deploy commands (`rocketride deploy ...`)
 
 Deployment-target verbs (the `ROCKETRIDE_DEPLOY_*` pair), following the
 platform vocabulary — **deploy** = version to the server's registry,
-**publish** = bind a rung to a version:
+**publish** = bind a rung to a version. Every `--team` / `--deploy-to`
+takes `@me` (your personal space), a team name, or a team id, and output
+names teams instead of printing raw ids (`--json` keeps `teamId` and adds
+`teamName`). An unnamed pipeline deploys under its file name.
 
 ```bash
 rocketride deploy add pipelines/ingest.pipe --comment "v2 parse" [--deploy-to <teamId>]   # next registry version (--kind pipe|node; --deploy-to also points a team at it in the same call)
@@ -152,7 +262,8 @@ rocketride deploy schedule set <projectId> <sourceId> "0 9 * * 1-5" --team <team
 rocketride deploy schedule pause <projectId> <sourceId> --team <teamId>
 rocketride deploy schedule resume <projectId> <sourceId> --team <teamId>
 rocketride deploy schedule preview "0 9 * * 1-5"                    # validate a cron + next firings
-rocketride deploy log <appId> <version>                             # read an app version's build log
+rocketride deploy source-config <projectId> <sourceId> --team <teamId> --trace-level summary --debug-out   # per-source run settings (none|metadata|summary|full); a flag left out keeps its current value; TypeScript package only
+rocketride deploy log <appId> <version>                             # read an app version's build log (or: rocketride app log)
 rocketride deploy enable|disable|remove <projectId> --team <teamId>
 ```
 
@@ -185,12 +296,18 @@ rocketride profile tree [--token TOKEN] [--thread ID] [--min-pct 0.1] [--max-dep
   connection until Ctrl+C or `--duration` and then stops the session.
 - `report`, `threads` and `tree` read the last completed session, so run
   them after `stop` or `run`. `--thread` takes an ID from `threads`; without
-  it the tree covers every thread.
-- `tree` hides calls below `--min-pct` percent of the total time
-  (`--min-pct 0` keeps them all, useful on short runs), and
-  `--no-include-system` drops stdlib code while keeping the project code it
-  calls. A function can appear under several callers, each with its own
-  numbers.
+  it the tree covers every thread. With no completed session, `report`
+  prints `No profiling data available. Run a session first.` and exits 0,
+  while `threads` and `tree` fail with the same message, exit 1.
+- `tree` hides calls below `--min-pct` percent of the total time.
+  `--min-pct 0` prunes nothing down to `--max-depth`, and the task answers
+  nothing else while it builds the tree, so keep it to a few seconds of a
+  quiet process: on one 27 s document-processing session, `--max-depth 80`
+  took minutes and 8.9 GB. `--no-include-system` drops stdlib code while
+  keeping the project code it calls. A function can appear under several
+  callers; the profiler records caller → callee totals, not paths, so each
+  copy shows its share of them and the copies add up to the function's
+  totals. `report` has the exact per-function numbers.
 - `--session` only names the session in the report
   (default `session_<timestamp>`).
 - A task's session belongs to the server's link to that task, not to your
@@ -200,6 +317,32 @@ rocketride profile tree [--token TOKEN] [--thread ID] [--min-pct 0.1] [--max-dep
   usual and only then fails with `No active profiling session`, exit 1.
   Ctrl+C in `run` stops the session first; killing the command instead
   leaves it profiling until `profile stop --token TOKEN` or the task ends.
+
+## Python-only commands
+
+`diff` and `otel` ship with the Python package only.
+
+```bash
+rocketride diff old.pipe new.pipe                # semantic diff: nodes, edges, config; canvas moves collapse to one line
+rocketride diff --git HEAD pipelines/rag.pipe    # working-tree file against a git ref
+rocketride diff old.pipe new.pipe --markdown     # PR-comment form (or --json)
+rocketride otel --endpoint https://collector.example.com --no-metrics   # stream traces to an OTLP collector until Ctrl+C
+```
+
+- `diff` runs locally. It never connects to a server, takes no `--uri` or
+  `--apikey`, and does not read the workspace `.env`. Exit 0 when nothing
+  changed, 1 when something did, 2 on a usage error or an unreadable file.
+  `--exit-zero` makes a run that finds changes exit 0, and
+  `--include-layout` counts canvas moves as changes.
+- `otel` needs `pip install 'rocketride[otel]'`. It subscribes to every
+  task your API key owns and exports spans and metrics over OTLP until you
+  stop it. It has no `--json`. Pass collector secrets through
+  `OTEL_EXPORTER_OTLP_HEADERS`, not `--headers`, so they stay out of shell
+  history. Per-component spans appear only for runs started with a
+  `pipelineTraceLevel`.
+
+The site's Python SDK guides, Pipeline Diff and OpenTelemetry Bridge,
+cover every flag.
 
 ## MCP, if your harness has a client for it
 

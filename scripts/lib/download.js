@@ -26,6 +26,9 @@ let packageJsonLoaded = false;
 
 const TODAY = new Date().toISOString().slice(0, 10).replace(/-/g, '.'); // yyyy.MM.dd
 
+/** How long a force-pushed tag's assets are reused before being re-fetched */
+const PRERELEASE_TTL_MS = 60 * 60 * 1000;
+
 async function loadPackageJson() {
 	if (!packageJsonLoaded) {
 		const packageJson = await readJson(path.join(PROJECT_ROOT, 'package.json'));
@@ -36,6 +39,36 @@ async function loadPackageJson() {
 		packageJsonLoaded = true;
 	}
 	return { version: VERSION, repo: REPO };
+}
+
+// How long a request may stay silent (no response, no body data) before it is aborted
+// as ETIMEDOUT, so a host that accepts the connection but never answers is retried
+// and, in downloadFileFrom, left for the next URL.
+const REQUEST_IDLE_TIMEOUT_MS = 60_000;
+
+// Connection failures before any response that are worth another try: the host
+// did not answer, reset the connection, or name resolution failed for a moment.
+const RETRYABLE_NETWORK_CODES = new Set([
+	'ETIMEDOUT',
+	'ECONNRESET',
+	'ECONNREFUSED',
+	'EAI_AGAIN',
+	'ENETUNREACH',
+	'EHOSTUNREACH',
+	'EPIPE',
+]);
+
+/**
+ * Error code of a failed connection
+ *
+ * Node reports a connect that tried several addresses as an AggregateError, whose
+ * own code can be missing; the code of its first inner error is used then.
+ *
+ * @param {Error} err - The connection error
+ * @returns {string|undefined} The error code, if any
+ */
+function networkErrorCode(err) {
+	return err?.code ?? err?.errors?.find((inner) => inner?.code)?.code;
 }
 
 /**
@@ -70,6 +103,39 @@ async function downloadFile(url, filename, task) {
 	return destPath;
 }
 
+/**
+ * Download a file published at several URLs, from the first one that works (with caching)
+ *
+ * A copy already downloaded from any of the URLs is reused. Otherwise the URLs are
+ * tried in order through downloadFile, and a URL that fails moves on to the next.
+ *
+ * @param {string[]} urls - URLs of the same file, in order of preference
+ * @param {string} filename - Filename to save as (used as cache key)
+ * @param {Object} task - Optional Listr2 task for progress output
+ * @returns {Promise<string>} Full path to the downloaded file
+ */
+async function downloadFileFrom(urls, filename, task) {
+	const destPath = path.join(DOWNLOADS_DIR, filename);
+	for (const url of urls) {
+		if ((await getState(['downloads', url])) && (await exists(destPath))) {
+			return destPath;
+		}
+	}
+
+	const failures = [];
+	for (const url of urls) {
+		try {
+			return await downloadFile(url, filename, task);
+		} catch (err) {
+			failures.push(`${url}: ${err.message || networkErrorCode(err) || String(err)}`);
+			if (task) {
+				task.output = `Download from ${new URL(url).host} failed, trying the next source...`;
+			}
+		}
+	}
+	throw new Error(`Download failed from every source:\n  ${failures.join('\n  ')}`);
+}
+
 async function downloadGitHubFile(releaseTag, filename, task) {
 	const { repo } = await loadPackageJson();
 	const fileUrl = `https://github.com/${repo}/releases/download/${releaseTag}/${filename}`;
@@ -86,15 +152,19 @@ async function downloadGitHubFile(releaseTag, filename, task) {
 			return null;
 		}
 
-		// Download the new file or re-download the prerelease if it is out of date
-		if (!(await exists(filePath)) || (releaseTag.endsWith('-prerelease') && fileState?.date !== TODAY)) {
+		// Prerelease or experimental release 'server-vX.X.X-<suffix>'
+		const prerelease = /-v[\d.]+-.+$/.test(releaseTag);
+		const expired = Date.now() - (fileState?.timestamp ?? 0) >= PRERELEASE_TTL_MS;
+
+		// Download the new file or re-download a prerelease one if it is out of date
+		if (!(await exists(filePath)) || (prerelease && expired)) {
 			// Ensure downloads directory exists
 			await mkdir(DOWNLOADS_DIR);
 
 			// Download the file
 			await _download(fileUrl, filePath, task);
 
-			await setState(stateKey, { name: downloadName, date: TODAY });
+			await setState(stateKey, { name: downloadName, date: TODAY, timestamp: Date.now() });
 		}
 
 		return filePath;
@@ -115,7 +185,19 @@ async function _download(url, destPath, task) {
 	const makeRequest = (currentUrl) => {
 		return new Promise((resolve, reject) => {
 			const protocol = currentUrl.startsWith('https') ? https : require('http');
-			const req = protocol.get(currentUrl, { headers: { 'User-Agent': 'rocketride-build' } }, resolve);
+			const req = protocol.get(
+				currentUrl,
+				{ headers: { 'User-Agent': 'rocketride-build' }, timeout: REQUEST_IDLE_TIMEOUT_MS },
+				resolve
+			);
+			// A socket timeout does not abort the request by itself.
+			req.on('timeout', () => {
+				const err = new Error(
+					`No data from ${new URL(currentUrl).host} for ${REQUEST_IDLE_TIMEOUT_MS / 1000}s`
+				);
+				err.code = 'ETIMEDOUT';
+				req.destroy(err);
+			});
 			req.on('error', reject);
 		});
 	};
@@ -126,21 +208,42 @@ async function _download(url, destPath, task) {
 	const MAX_RETRIES = 15;
 	const RETRY_DELAY_MS = 1000;
 
+	// A connection that fails before any response is tried a few times, with a
+	// growing pause; a longer outage is left to the caller (e.g. a second URL).
+	const MAX_NETWORK_ATTEMPTS = 3;
+	const NETWORK_RETRY_DELAY_MS = 2000;
+	let networkAttempts = 0;
+
 	let response;
 	let lastError;
 
 	for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
 		// Follow redirects (up to 5)
 		let currentUrl = url;
-		for (let i = 0; i <= 5; i++) {
-			response = await makeRequest(currentUrl);
-			if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
-				// Destroy redirect response to close socket
-				response.destroy();
-				currentUrl = response.headers.location;
-				continue;
+		try {
+			for (let i = 0; i <= 5; i++) {
+				response = await makeRequest(currentUrl);
+				if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+					// Destroy redirect response to close socket
+					response.destroy();
+					currentUrl = response.headers.location;
+					continue;
+				}
+				break;
 			}
-			break;
+		} catch (err) {
+			networkAttempts++;
+			const code = networkErrorCode(err);
+			if (!RETRYABLE_NETWORK_CODES.has(code) || networkAttempts >= MAX_NETWORK_ATTEMPTS) {
+				throw err;
+			}
+			const delay = NETWORK_RETRY_DELAY_MS * networkAttempts;
+			if (task) {
+				const retry = `${networkAttempts}/${MAX_NETWORK_ATTEMPTS - 1}`;
+				task.output = `Connection failed (${code}), retrying in ${delay / 1000}s... (${retry})`;
+			}
+			await sleep(delay);
+			continue;
 		}
 
 		if (response.statusCode >= 300 && response.statusCode < 400) {
@@ -300,6 +403,7 @@ module.exports = {
 	DOWNLOADS_DIR,
 	loadPackageJson,
 	downloadFile,
+	downloadFileFrom,
 	downloadGitHubFile,
 	createArchive,
 	extractArchive,

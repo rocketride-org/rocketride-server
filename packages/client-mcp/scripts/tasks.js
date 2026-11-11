@@ -142,8 +142,8 @@ function makeRunPytestAction(options = {}) {
 			require('dotenv').config({ path: path.join(PROJECT_ROOT, '.env') });
 
 			const bracket = ctx.brackets?.['mcp-test-server'];
-			if (!bracket?.port) throw new Error('mcp-test-server bracket missing — server did not start');
-			const serverUri = bracket.serverUri || `http://localhost:${bracket.port}`;
+			if (!bracket?.serverUri) throw new Error('mcp-test-server bracket missing — server did not start');
+			const serverUri = bracket.serverUri;
 
 			// MCP and python-dotenv are installed by server:setup-pip
 
@@ -164,6 +164,12 @@ function makeRunPytestAction(options = {}) {
 					env: {
 						...process.env,
 						ROCKETRIDE_URI: serverUri,
+						// The server under test OWNS the credential pair: the bracket's
+						// key (what the server was started with) outranks the
+						// dotenv-loaded workspace .env, exactly like the URI (the
+						// client-python rule). CI can provide an empty
+						// ROCKETRIDE_APIKEY, which must not win either.
+						ROCKETRIDE_APIKEY: bracket.apikey || process.env.ROCKETRIDE_APIKEY || 'MYAPIKEY',
 						PYTHONPATH: buildSrcDir,
 					},
 				},
@@ -180,7 +186,8 @@ function makeStartTestServerAction(options = {}) {
 				const parsed = parseServerAddress(taskserver);
 				ctx.port = parsed.port;
 				task.output = `Using existing server at ${parsed.uri}`;
-				return { port: parsed.port, server: null, serverUri: parsed.uri };
+				const envKey = process.env.ROCKETRIDE_APIKEY || 'MYAPIKEY';
+				return { port: parsed.port, server: null, serverUri: parsed.uri, apikey: envKey };
 			}
 			const envUri = process.env.ROCKETRIDE_URI;
 			if (envUri) {
@@ -193,12 +200,22 @@ function makeStartTestServerAction(options = {}) {
 					// fall through and start server
 				}
 			}
+			// The key the SERVER authenticates — threaded through the bracket so
+			// the suite presents this exact credential (the URI already is; a
+			// workspace .env's key must never outrank it). Same rule as the
+			// client-python and client-typescript brackets.
+			const apikey = process.env.ROCKETRIDE_APIKEY || 'MYAPIKEY';
 			task.output = 'Starting server...';
 			let taskComplete = false;
 			const result = await startServer({
 				script: 'ai/eaas.py',
 				trace: options.trace,
+				logName: 'client-mcp',
+				verbose: ctx.options?.verbose,
 				basePort: 20000,
+				env: {
+					ROCKETRIDE_APIKEY: apikey,
+				},
 				onOutput: (text) => {
 					if (taskComplete) return;
 					const lines = text.trim().split('\n');
@@ -208,7 +225,7 @@ function makeStartTestServerAction(options = {}) {
 			ctx.port = result.port;
 			task.output = `Server ready on port ${result.port}`;
 			taskComplete = true;
-			return { port: result.port, server: result.server };
+			return { port: result.port, server: result.server, serverUri: result.uri, apikey };
 		},
 	};
 }
@@ -259,7 +276,7 @@ module.exports = {
 		{ name: 'client-mcp:build-wheel', action: makeBuildWheelAction },
 		{
 			name: 'client-mcp:test',
-			action: () => ({
+			action: (options) => ({
 				description: 'Testing client-mcp',
 				steps: [
 					'server:build',
@@ -269,7 +286,7 @@ module.exports = {
 					),
 					bracket({
 						name: 'mcp-test-server',
-						setup: makeStartTestServerAction(),
+						setup: makeStartTestServerAction(options),
 						teardown: makeStopTestServerAction(),
 						steps: ['client-mcp:run-pytest'],
 					}),

@@ -26,20 +26,24 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import os
 import sys
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from rocketride import TASK_STATE
 
 from ai.constants import CONST_STATUS_HISTORY_LIMIT
 from ai.modules.task.task_engine import (
+    CONST_PARAM_TOKEN_SECRET_ENV,
     CONST_TRACE_PAYLOAD_CAP,
     CONST_TRACE_PREVIEW_BYTES,
     Task,
     cap_trace_payload,
     filter_subprocess_env,
+    resolve_parameter_tokens,
     saas_pipeline_violation,
 )
 
@@ -70,6 +74,7 @@ def _task(*, source='src-id', task_name=None, pipeline=None, status=None):
     t = Task.__new__(Task)
     t.id = 'task-test'
     t.token = 'tk_test'
+    t._data_token = 'dt_test'
     t.client_id = 'user-1'
     t.team_id = 'team-1'
     t.org_id = 'org-1'
@@ -96,6 +101,8 @@ def _task(*, source='src-id', task_name=None, pipeline=None, status=None):
     # debug_message is normally inherited from DAPBase and requires
     # _call_debug_message to be wired by __init__. Bypass with a MagicMock.
     t.debug_message = MagicMock()
+    # Channel state __init__ would have set
+    Task._reset_channel_state(t)
     return t
 
 
@@ -206,6 +213,8 @@ def test_build_task_returns_subprocess_config_shape(tmp_path, monkeypatch):
     assert config['identity'] == {'userId': 'user-1', 'teamId': 'team-1', 'orgId': 'org-1'}
     # Dev runs anchor node storage at the owner's whole tree.
     assert config['storage'] == {'root': 'users/user-1/files'}
+    # The channel token stays with the engine; nothing of it is in the task file.
+    assert 'dt_test' not in json.dumps(config)
 
 
 def test_build_task_deploy_storage_anchor(monkeypatch, tmp_path):
@@ -755,28 +764,29 @@ async def test_forward_task_event_debugger_swallows_send_failure():
 
 
 # ---------------------------------------------------------------------------
-# _pipeline_uses_rocketride_db
+# _db_access
 # ---------------------------------------------------------------------------
 
 
-def test_pipeline_uses_rocketride_db_detects_each_provider():
-    """Any of the three RocketRide cloud DB providers triggers DSN injection."""
+def test_db_access_detects_each_provider():
+    """Each of the three RocketRide cloud DB providers asks for its database
+    (the org one by default); the chat source makes the pipeline public.
+    """
     for provider in ('rocketride_sql', 'rocketride_vector', 'rocketride_graph'):
-        t = _task(pipeline={'components': [{'id': 'a', 'provider': 'chat'}, {'id': 'b', 'provider': provider}]})
-        assert Task._pipeline_uses_rocketride_db(t), provider
+        pipeline = {'components': [{'id': 'a', 'provider': 'chat'}, {'id': 'b', 'provider': provider}]}
+        assert Task._db_access(_task(), pipeline) == ([('org', '')], True), provider
 
 
-def test_pipeline_uses_rocketride_db_false_without_db_nodes():
+def test_db_access_empty_without_db_nodes():
     """Ordinary pipelines never trigger provisioning."""
-    t = _task(pipeline={'components': [{'id': 'a', 'provider': 'chat'}, {'id': 'b', 'provider': 'db_postgres'}]})
-    assert not Task._pipeline_uses_rocketride_db(t)
+    pipeline = {'components': [{'id': 'a', 'provider': 'chat'}, {'id': 'b', 'provider': 'db_postgres'}]}
+    assert Task._db_access(_task(), pipeline) == ([], True)
 
 
-def test_pipeline_uses_rocketride_db_tolerates_malformed_components():
+def test_db_access_tolerates_malformed_components():
     """Missing components / non-dict entries must not raise at task start."""
-    assert not Task._pipeline_uses_rocketride_db(_task(pipeline={}))
-    t = _task(pipeline={'components': ['not-a-dict', {'no-provider': True}]})
-    assert not Task._pipeline_uses_rocketride_db(t)
+    assert Task._db_access(_task(), {}) == ([], False)
+    assert Task._db_access(_task(), {'components': ['not-a-dict', {'no-provider': True}]}) == ([], False)
 
 
 # ---------------------------------------------------------------------------
@@ -790,6 +800,11 @@ def _env_task(pipeline=None):
     t = _task(pipeline=pipeline if pipeline is not None else {})
     t.client_id = 'client-env-test'
     return t
+
+
+async def _build_env(t):
+    """Build the env the way start_task does: from _db_access of the pipeline."""
+    return await Task._build_subprocess_env(t, Task._db_access(t, t._pipeline))
 
 
 def _patch_resolve(monkeypatch, fake):
@@ -806,13 +821,15 @@ async def test_subprocess_env_scrubs_broker_credentials(monkeypatch):
     monkeypatch.setenv('ROCKETRIDE_DB_BROKER_URL', 'https://broker.example')
     monkeypatch.setenv('ROCKETRIDE_DB_BROKER_TOKEN', 'super-secret')
     monkeypatch.setenv('ROCKETRIDE_DB_DSN', 'postgresql://stale@parent/db')
+    monkeypatch.setenv('ROCKETRIDE_DB_DSNS', '{"org": "postgresql://stale@parent/db"}')
     monkeypatch.setenv('ROCKETRIDE_DB_RESOLVE_ERROR', 'stale reason')
 
-    env = await Task._build_subprocess_env(_env_task())  # no DB nodes
+    env = await _build_env(_env_task())  # no DB nodes
 
     assert 'ROCKETRIDE_DB_BROKER_URL' not in env
     assert 'ROCKETRIDE_DB_BROKER_TOKEN' not in env
     assert 'ROCKETRIDE_DB_DSN' not in env
+    assert 'ROCKETRIDE_DB_DSNS' not in env
     assert 'ROCKETRIDE_DB_RESOLVE_ERROR' not in env
     # Identity rides the task file (#1686), never the environment.
     assert 'ROCKETRIDE_CLIENT_ID' not in env
@@ -832,8 +849,8 @@ async def test_subprocess_env_injects_resolved_dsn(monkeypatch):
         return 'postgresql://tenant@pooler/db?sslmode=require'
 
     _patch_resolve(monkeypatch, fake_resolve)
-    env = await Task._build_subprocess_env(_env_task(pipeline=_DB_PIPELINE))
-    assert env['ROCKETRIDE_DB_DSN'] == 'postgresql://tenant@pooler/db?sslmode=require'
+    env = await _build_env(_env_task(pipeline=_DB_PIPELINE))
+    assert json.loads(env['ROCKETRIDE_DB_DSNS']) == {'org': 'postgresql://tenant@pooler/db?sslmode=require'}
     assert seen['tenant'] == 'org-1'
 
 
@@ -853,8 +870,8 @@ async def test_subprocess_env_dsn_tenant_is_the_org(monkeypatch):
     # A deploy-shaped task: no client identity at all, org present.
     t = _env_task(pipeline=_DB_PIPELINE)
     t.client_id = ''
-    env = await Task._build_subprocess_env(t)
-    assert env['ROCKETRIDE_DB_DSN'] == 'postgresql://tenant@pooler/db'
+    env = await _build_env(t)
+    assert json.loads(env['ROCKETRIDE_DB_DSNS']) == {'org': 'postgresql://tenant@pooler/db'}
     assert seen['tenant'] == 'org-1'
 
 
@@ -870,7 +887,7 @@ async def test_subprocess_env_dsn_falls_back_to_client_without_an_org(monkeypatc
     _patch_resolve(monkeypatch, fake_resolve)
     t = _env_task(pipeline=_DB_PIPELINE)
     t.org_id = ''
-    await Task._build_subprocess_env(t)
+    await _build_env(t)
     assert seen['tenant'] == 'client-env-test'
 
 
@@ -886,10 +903,12 @@ async def test_subprocess_env_stale_dsn_does_not_survive_broker_failure(monkeypa
 
     _patch_resolve(monkeypatch, fake_resolve)
     t = _env_task(pipeline=_DB_PIPELINE)
-    env = await Task._build_subprocess_env(t)
+    env = await _build_env(t)
 
     assert 'ROCKETRIDE_DB_DSN' not in env
-    assert env['ROCKETRIDE_DB_RESOLVE_ERROR'] == 'DB broker request failed: HTTP 503'
+    assert (
+        env['ROCKETRIDE_DB_RESOLVE_ERROR'] == 'the org database failed to resolve: DB broker request failed: HTTP 503'
+    )
     t.debug_message.assert_called_once()
 
 
@@ -908,7 +927,7 @@ async def test_subprocess_env_unconfigured_account_reports_missing_cloud_db(monk
     warn = MagicMock()
     monkeypatch.setattr('ai.modules.task.task_engine.warning', warn)
     t = _env_task(pipeline=_DB_PIPELINE)
-    env = await Task._build_subprocess_env(t)
+    env = await _build_env(t)
     assert 'ROCKETRIDE_DB_DSN' not in env
     assert env['ROCKETRIDE_DB_RESOLVE_ERROR'] == Task._NO_CLOUD_DB_REASON
     assert 'this server has no RocketRide cloud database' in env['ROCKETRIDE_DB_RESOLVE_ERROR']
@@ -937,7 +956,7 @@ async def test_subprocess_env_hosted_missing_broker_warns_and_directs_to_operato
     monkeypatch.setenv('ROCKETRIDE_DB_BROKER_URL', 'https://broker.example/provision')
     monkeypatch.setenv('ROCKETRIDE_DB_BROKER_TOKEN', 'secret-test-token')
     t = _env_task(pipeline=_DB_PIPELINE)
-    env = await Task._build_subprocess_env(t)
+    env = await _build_env(t)
     reason = env['ROCKETRIDE_DB_RESOLVE_ERROR']
     assert reason == Task._CLOUD_DB_CONFIG_ERROR_REASON
     assert 'Contact the server operator' in reason
@@ -946,6 +965,349 @@ async def test_subprocess_env_hosted_missing_broker_warns_and_directs_to_operato
         assert name not in env
     warn.assert_called_once_with(f'RocketRide DB DSN not resolved: {reason}')
     t.debug_message.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# _build_subprocess_env — per-scope authorization and the DSN map (SDD 4.6)
+# ---------------------------------------------------------------------------
+
+# One component per node type, in the shapes the canvas saves: nested under
+# the profile name (sql 'default', vector 'cloud'), or flat.
+_SCOPED_PIPELINE = {
+    'components': [
+        {'id': 'chat_1', 'provider': 'chat', 'config': {'mode': 'Source'}},
+        {'id': 'sql_1', 'provider': 'rocketride_sql', 'config': {'profile': 'default', 'default': {'table': 't'}}},
+        {'id': 'vec_1', 'provider': 'rocketride_vector', 'config': {'profile': 'cloud', 'cloud': {'scope': 'team'}}},
+        {'id': 'graph_1', 'provider': 'rocketride_graph', 'config': {'scope': 'user', 'target': 'user-2'}},
+    ]
+}
+
+
+def _fake_db_account(monkeypatch, deny=None, owner=None):
+    """Swap the account's authorize/resolve for recorders. ``deny(target)``
+    returns a reason to refuse that target, or None to allow it. An allow
+    names the requested team or user id as its owner_id, as the SaaS
+    account does, unless ``owner(target)`` names another.
+    """
+    import ai.account
+    from ai.account.base import DbDecision
+
+    calls = {'authorize': [], 'resolve': []}
+
+    async def authorize(identity, target=None):
+        calls['authorize'].append((identity, target))
+        reason = deny(target) if deny else None
+        if reason:
+            return DbDecision(False, reason, True)
+        approved = owner(target) if owner else target.get('team_id') or target.get('user_id') or ''
+        return DbDecision(True, 'ok', False, approved)
+
+    async def resolve(client_id, scope='org', owner_id=''):
+        calls['resolve'].append((client_id, scope, owner_id))
+        return f'postgresql://{scope}-{owner_id or client_id}@pooler/db'
+
+    monkeypatch.setattr(ai.account.account, 'authorize_db_target', authorize)
+    monkeypatch.setattr(ai.account.account, 'resolve_db_dsn', resolve)
+    return calls
+
+
+@pytest.mark.asyncio
+async def test_db_dsn_map_has_one_entry_per_scope(monkeypatch):
+    calls = _fake_db_account(monkeypatch)
+    env = await _build_env(_env_task(pipeline=_SCOPED_PIPELINE))
+
+    assert json.loads(env['ROCKETRIDE_DB_DSNS']) == {
+        'org': 'postgresql://org-org-1@pooler/db',
+        'team': 'postgresql://team-team-1@pooler/db',
+        'user:user-2': 'postgresql://user-user-2@pooler/db',
+    }
+    # The map is the only delivery: no single-DSN variable.
+    assert 'ROCKETRIDE_DB_DSN' not in env
+    assert [target for _, target in calls['authorize']] == [
+        {'scope': 'org'},
+        {'scope': 'team', 'team_id': 'team-1'},
+        {'scope': 'user', 'user_id': 'user-2'},
+    ]
+    # The org call is the unchanged single-tenant one; team and user are scoped.
+    assert calls['resolve'] == [('org-1', 'org', ''), ('org-1', 'team', 'team-1'), ('org-1', 'user', 'user-2')]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ('client_id', 'run_kind', 'owner_kind', 'expected_user'),
+    [
+        ('user-1', 'dev', 'user', 'user-1'),  # builder run, store app, pk_ fed dev run
+        ('', 'deploy', 'team', ''),  # @team deploy: no user
+        ('user-1', 'deploy', 'user', 'user-1'),  # @me deploy
+    ],
+)
+async def test_db_identity_comes_from_the_task(monkeypatch, client_id, run_kind, owner_kind, expected_user):
+    calls = _fake_db_account(monkeypatch)
+    t = _env_task(pipeline=_DB_PIPELINE)
+    t.client_id, t._run_kind, t._owner_kind = client_id, run_kind, owner_kind
+    await _build_env(t)
+
+    identity, target = calls['authorize'][0]
+    assert target == {'scope': 'org'}
+    assert identity == {
+        'org_id': 'org-1',
+        'user_id': expected_user,
+        'team_id': 'team-1',
+        'run_kind': run_kind,
+        'owner_kind': owner_kind,
+        'public_endpoint': False,
+        'path': 'pipeline',
+        'task_id': 'task-test',
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ('source', 'public'),
+    [('chat', True), ('dropper', True), ('webhook', True), ('discord', True), ('telegram', True), ('tools', False)],
+)
+async def test_public_endpoint_comes_from_the_source_nodes(monkeypatch, source, public):
+    """Every task carries a pk_ token (_task sets public_auth), so the token
+    can't decide this: the pipeline's source providers do (OQ 14).
+    """
+    calls = _fake_db_account(monkeypatch)
+    pipeline = {'components': [{'id': 's', 'provider': source}, {'id': 'db', 'provider': 'rocketride_sql'}]}
+    await _build_env(_env_task(pipeline=pipeline))
+    assert calls['authorize'][0][0]['public_endpoint'] is public
+
+
+@pytest.mark.asyncio
+async def test_denial_fails_task_start_before_anything_is_provisioned(monkeypatch):
+    calls = _fake_db_account(
+        monkeypatch, deny=lambda target: 'public_endpoint_cannot_use_user_db' if target['scope'] == 'user' else None
+    )
+    with pytest.raises(PermissionError, match="user database 'user-2': public_endpoint_cannot_use_user_db"):
+        await _build_env(_env_task(pipeline=_SCOPED_PIPELINE))
+    assert calls['resolve'] == []
+
+
+@pytest.mark.asyncio
+async def test_team_deploy_asks_for_a_user_database_with_no_user(monkeypatch):
+    """A team deploy has no user: the request carries user_id='' and the
+    account layer refuses it (hard rule 1). Nothing is resolved.
+    """
+    calls = _fake_db_account(
+        monkeypatch, deny=lambda target: 'team_deploy_has_no_user' if target['scope'] == 'user' else None
+    )
+    t = _env_task(pipeline={'components': [{'id': 'g', 'provider': 'rocketride_graph', 'config': {'scope': 'user'}}]})
+    t.client_id, t._run_kind, t._owner_kind = '', 'deploy', 'team'
+    with pytest.raises(PermissionError, match='team_deploy_has_no_user'):
+        await _build_env(t)
+    assert calls['authorize'][0][1] == {'scope': 'user', 'user_id': ''}
+    assert calls['resolve'] == []
+
+
+@pytest.mark.asyncio
+async def test_own_team_named_twice_is_one_database(monkeypatch):
+    """scope=team with no target and with the run's own team id are the same
+    database: authorized and resolved once, delivered under both keys.
+    """
+    calls = _fake_db_account(monkeypatch)
+    pipeline = {
+        'components': [
+            {'id': 'a', 'provider': 'rocketride_sql', 'config': {'scope': 'team'}},
+            {'id': 'b', 'provider': 'rocketride_graph', 'config': {'scope': 'team', 'target': 'team-1'}},
+        ]
+    }
+    env = await _build_env(_env_task(pipeline=pipeline))
+    assert json.loads(env['ROCKETRIDE_DB_DSNS']) == {
+        'team': 'postgresql://team-team-1@pooler/db',
+        'team:team-1': 'postgresql://team-team-1@pooler/db',
+    }
+    assert len(calls['authorize']) == 1 and len(calls['resolve']) == 1
+
+
+@pytest.mark.asyncio
+async def test_the_engine_resolves_the_database_the_decision_named(monkeypatch):
+    """rocketride-saas #833 review: the engine provisions decision.owner_id,
+    the id that was checked, never its own re-derivation of the target.
+    """
+    calls = _fake_db_account(monkeypatch, owner=lambda target: 'team-checked' if target['scope'] == 'team' else '')
+    pipeline = {'components': [{'id': 'a', 'provider': 'rocketride_sql', 'config': {'scope': 'team'}}]}
+    env = await _build_env(_env_task(pipeline=pipeline))
+    assert calls['authorize'][0][1] == {'scope': 'team', 'team_id': 'team-1'}
+    assert calls['resolve'] == [('org-1', 'team', 'team-checked')]
+    assert json.loads(env['ROCKETRIDE_DB_DSNS']) == {'team': 'postgresql://team-team-checked@pooler/db'}
+
+
+@pytest.mark.asyncio
+async def test_malformed_scope_fails_task_start(monkeypatch):
+    calls = _fake_db_account(monkeypatch)
+    pipeline = {'components': [{'id': 'sql_1', 'provider': 'rocketride_sql', 'config': {'scope': 'everyone'}}]}
+    with pytest.raises(ValueError, match='sql_1: scope must be one of org, team, user'):
+        await _build_env(_env_task(pipeline=pipeline))
+    assert calls['authorize'] == []
+
+
+@pytest.mark.asyncio
+async def test_authorize_raising_fails_task_start_and_issues_no_dsn(monkeypatch):
+    """An authorization check that errors (the account layer is down) fails
+    closed: the start raises and nothing is provisioned.
+    """
+    import ai.account
+
+    calls = _fake_db_account(monkeypatch)
+
+    async def authorize(identity, target=None):
+        raise RuntimeError('membership lookup failed')
+
+    monkeypatch.setattr(ai.account.account, 'authorize_db_target', authorize)
+    with pytest.raises(RuntimeError, match='membership lookup failed'):
+        await _build_env(_env_task(pipeline=_SCOPED_PIPELINE))
+    assert calls['resolve'] == []
+
+
+@pytest.mark.asyncio
+async def test_failed_resolve_names_the_database_that_failed(monkeypatch):
+    """One failed resolve delivers no DSN at all (fail closed), and the
+    reason every node reports names the database that failed, not the org
+    database the first node asked for.
+    """
+    calls = _fake_db_account(monkeypatch)
+
+    async def resolve(client_id, scope='org', owner_id=''):
+        calls['resolve'].append((client_id, scope, owner_id))
+        if scope == 'team':
+            raise RuntimeError('DB broker rejected provision for this account (HTTP 403)')
+        return f'postgresql://{scope}@pooler/db'
+
+    import ai.account
+
+    monkeypatch.setattr(ai.account.account, 'resolve_db_dsn', resolve)
+    env = await _build_env(_env_task(pipeline=_SCOPED_PIPELINE))
+    assert 'ROCKETRIDE_DB_DSNS' not in env and 'ROCKETRIDE_DB_DSN' not in env
+    assert env['ROCKETRIDE_DB_RESOLVE_ERROR'] == (
+        "the team database 'team-1' failed to resolve: DB broker rejected provision for this account (HTTP 403)"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ('components', 'env', 'target', 'public'),
+    [
+        # A provider that only becomes a public source after expansion.
+        (
+            [{'id': 'src', 'provider': '${ROCKETRIDE_SOURCE}'}, {'id': 'db', 'provider': 'rocketride_sql'}],
+            {'ROCKETRIDE_SOURCE': 'webhook'},
+            {'scope': 'org'},
+            True,
+        ),
+        # A DB node and its target that only appear after expansion.
+        (
+            [
+                {'id': 'src', 'provider': 'tools'},
+                {
+                    'id': 'db',
+                    'provider': '${ROCKETRIDE_DB_NODE}',
+                    'config': {'scope': 'team', 'target': '${ROCKETRIDE_TEAM}'},
+                },
+            ],
+            {'ROCKETRIDE_DB_NODE': 'rocketride_graph', 'ROCKETRIDE_TEAM': 'team-9'},
+            {'scope': 'team', 'team_id': 'team-9'},
+            False,
+        ),
+    ],
+)
+async def test_start_authorizes_the_resolved_pipeline(monkeypatch, components, env, target, public):
+    """start_task authorizes the pipeline it runs, not the raw one: ${...}
+    expansion can turn a provider into a public source or a DB node, and a
+    target into an id (PR #2626 review).
+    """
+    import ai.modules.task.task_engine as engine
+
+    calls = _fake_db_account(monkeypatch)
+    t = _env_task(pipeline={'components': components})
+    t.source = 'src'
+    t._env_source = AsyncMock(return_value=env)
+    t._restart_env = None
+    t._status = SimpleNamespace(name='', state=engine.TASK_STATE.NONE.value, exitMessage='', completed=False)
+    t._is_restarting = False
+    t._launch_args = {}
+    t._server = MagicMock(_config={})
+    t._is_debugging = lambda: False
+    t._write_task_file = AsyncMock(return_value='/tmp/task.json')
+    t._send_status_update = AsyncMock()
+    t._terminated = AsyncMock()
+
+    class Launched(Exception):
+        pass
+
+    monkeypatch.setattr(engine.asyncio, 'create_subprocess_exec', AsyncMock(side_effect=Launched))
+    with pytest.raises(Launched):
+        await Task.start_task(t)
+
+    assert [request for _, request in calls['authorize']] == [target]
+    assert calls['authorize'][0][0]['public_endpoint'] is public
+    # The task file is the resolved pipeline too: what was checked is what runs.
+    written = t._write_task_file.call_args.args[0]['components']
+    assert '${' not in json.dumps(written)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ('saas', 'startup', 'user', 'passed'),
+    [
+        # The hosting flags come from the engine itself, not from its arguments
+        (True, [], [], ['--hosted', '--shared-host']),
+        (False, [], [], []),
+        # Crash dumps follow the engine's own --dumps
+        (False, ['--dumps'], [], ['--dumps']),
+        # A pipeline's own is dropped, whatever spelling it used
+        (False, [], ['--dumps'], []),
+        (False, [], ['--DUMPS'], []),
+        (False, [], ['--trace=debugOut --Dumps=yes'], ['--trace=debugOut']),
+        (False, ['--dumps'], ['--dumps=false'], ['--dumps']),
+        # The trace level is the caller's if it set one, the engine's otherwise
+        (False, ['--trace=a'], [], ['--trace=a']),
+        (False, ['--trace=a'], ['--trace=b'], ['--trace=b']),
+    ],
+)
+async def test_start_passes_only_the_operators_options(monkeypatch, saas, startup, user, passed):
+    """The task's command line carries what the operator chose: --hosted and
+    --shared-host for a hosted engine, and --dumps as the engine itself was
+    started. The engine reads the first --dumps, and the operator's is written
+    before a pipeline's own arguments, so a pipeline cannot turn dumps on. The
+    pre-launch check is told the same about the shared host.
+    """
+    import ai.modules.task.task_engine as engine
+
+    _fake_db_account(monkeypatch)
+    monkeypatch.setattr(engine, '_is_saas_engine', lambda: saas)
+    monkeypatch.setattr(engine, 'startup_args', lambda: startup)
+    checked = []
+    monkeypatch.setattr(engine, 'saas_pipeline_violation', lambda *a, **k: checked.append(k['shared_host']))
+    t = _env_task(pipeline={'components': [{'id': 'src', 'provider': 'tools'}]})
+    t.source = 'src'
+    t._env_source = AsyncMock(return_value={})
+    t._restart_env = None
+    t._status = SimpleNamespace(name='', state=engine.TASK_STATE.NONE.value, exitMessage='', completed=False)
+    t._is_restarting = False
+    t._launch_args = {'args': user}
+    t._server = MagicMock(_config={})
+    t._is_debugging = lambda: False
+    t._write_task_file = AsyncMock(return_value='/tmp/task.json')
+    t._send_status_update = AsyncMock()
+    t._terminated = AsyncMock()
+
+    class Launched(Exception):
+        pass
+
+    spawn = AsyncMock(side_effect=Launched)
+    monkeypatch.setattr(engine.asyncio, 'create_subprocess_exec', spawn)
+    with pytest.raises(Launched):
+        await Task.start_task(t)
+
+    # Lower-cased: the engine matches options without regard to case, so the test must too
+    options = [
+        a for a in spawn.call_args.args if a.lower().startswith(('--hosted', '--shared-host', '--dumps', '--trace='))
+    ]
+    assert options == passed
+    assert checked == ([True] if saas else [])
 
 
 # ---------------------------------------------------------------------------
@@ -979,6 +1341,7 @@ def test_filter_subprocess_env_is_an_allowlist():
             # engine-only: deployment credentials and server-side settings
             'RR_DB_URL': 'postgresql://platform',
             'RR_MASTER_KEY': 'fernet',
+            'RR_PARAM_TOKEN_SECRET': 'param-token-secret',
             'RR_IDP_SERVICE_TOKEN': 'jwt',
             'RR_APP_URL': 'https://app.example',
             'ENGINE_API_KEY': 'engine',
@@ -1040,6 +1403,65 @@ def test_filter_subprocess_env_star_passes_everything():
     assert filter_subprocess_env(src) == src
 
 
+# ---------------------------------------------------------------------------
+# resolve_parameter_tokens — the child gets values, not tokens it cannot read
+# ---------------------------------------------------------------------------
+
+_TOKEN_PIPELINE = {
+    'source': 'source_1',
+    'components': [
+        {
+            'id': 'source_1',
+            'provider': 'filesys',
+            'config': {'parameters': {'secureParameters': {'secure': ['password'], 'token': 'UlJQVAI='}}},
+        }
+    ],
+}
+
+
+@pytest.fixture
+def engine_resolve(monkeypatch):
+    """Record calls to rocketlib.resolveSecureParameters and return a decoded pipeline."""
+    calls = []
+    decoded = {'source': 'source_1', 'components': [{'id': 'source_1', 'config': {'parameters': {'password': 'pw'}}}]}
+
+    def resolve(pipeline):
+        calls.append(pipeline)
+        return decoded
+
+    monkeypatch.setattr(sys.modules['rocketlib'], 'resolveSecureParameters', resolve, raising=False)
+    return SimpleNamespace(calls=calls, decoded=decoded)
+
+
+def test_resolve_parameter_tokens_without_secret_passes_through(engine_resolve):
+    """Without the deployment secret the child decodes its own tokens, as before."""
+    assert resolve_parameter_tokens(_TOKEN_PIPELINE, environ={}) is _TOKEN_PIPELINE
+    assert resolve_parameter_tokens(_TOKEN_PIPELINE, environ={CONST_PARAM_TOKEN_SECRET_ENV: ''}) is _TOKEN_PIPELINE
+    assert engine_resolve.calls == []
+
+
+def test_resolve_parameter_tokens_with_secret_decodes_in_engine(engine_resolve):
+    """With the deployment secret set, the engine decodes the tokens before the task file is written."""
+    result = resolve_parameter_tokens(_TOKEN_PIPELINE, environ={CONST_PARAM_TOKEN_SECRET_ENV: 'param-token-secret'})
+    assert result is engine_resolve.decoded
+    assert engine_resolve.calls == [_TOKEN_PIPELINE]
+
+
+def test_resolve_parameter_tokens_reads_process_environment(engine_resolve, monkeypatch):
+    """The default environment is the engine process's own."""
+    monkeypatch.delenv(CONST_PARAM_TOKEN_SECRET_ENV, raising=False)
+    assert resolve_parameter_tokens(_TOKEN_PIPELINE) is _TOKEN_PIPELINE
+
+    monkeypatch.setenv(CONST_PARAM_TOKEN_SECRET_ENV, 'param-token-secret')
+    assert resolve_parameter_tokens(_TOKEN_PIPELINE) is engine_resolve.decoded
+
+
+def test_param_token_secret_stays_out_of_subprocess():
+    """The child never gets the secret, which is why the engine decodes for it."""
+    env = filter_subprocess_env({'PATH': '/usr/bin', CONST_PARAM_TOKEN_SECRET_ENV: 'param-token-secret'})
+    assert env == {'PATH': '/usr/bin'}
+
+
 def test_filter_subprocess_env_matches_names_case_insensitively():
     """Windows env names are case-insensitive; the child sees the original spelling."""
     env = filter_subprocess_env({'Path': 'C:\\Windows', 'SystemRoot': 'C:\\Windows', 'Rr_Master_Key': 'fernet'})
@@ -1057,7 +1479,7 @@ async def test_subprocess_env_drops_engine_credentials(monkeypatch):
     monkeypatch.setenv('PATH', '/usr/bin')
     monkeypatch.delenv('RR_SUBPROCESS_ENV', raising=False)
 
-    env = await Task._build_subprocess_env(_env_task())  # no DB nodes
+    env = await _build_env(_env_task())  # no DB nodes
 
     assert 'RR_MASTER_KEY' not in env
     assert 'RR_DB_URL' not in env
@@ -1284,6 +1706,290 @@ def test_task_rejects_unknown_run_classifications():
         Task(**common, run_kind='prod')
     with pytest.raises(ValueError, match='trigger'):
         Task(**common, trigger='cron')
+
+
+@pytest.mark.asyncio
+async def test_task_loads_nothing_for_a_pipeline_without_placeholders():
+    """No ROCKETRIDE_* placeholder, no load: other ${...} are redacted anyway."""
+    from unittest.mock import MagicMock
+
+    source = AsyncMock(return_value={'ROCKETRIDE_KEY': 'v'})
+    task = Task(
+        server=MagicMock(),
+        id='t-1',
+        project_id='p-1',
+        source='s-1',
+        token='tk',
+        public_auth='pk',
+        pipeline={},
+        env_source=source,
+    )
+
+    assert (await task._resolve_pipeline({'config': 'plain', 'other': '${HOME}'})) == {
+        'config': 'plain',
+        'other': '<REDACTED>',
+    }
+    source.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_restart_loads_values_before_stopping_and_keeps_the_task_if_that_fails():
+    """A restart loads its values while the old process still runs. If the load
+    fails, nothing is stopped or changed; if it works, the next start uses
+    those values once instead of loading again.
+    """
+    from unittest.mock import MagicMock
+
+    old = {'components': [], 'config': '${ROCKETRIDE_KEY}'}
+    new = {'components': [], 'config': '${ROCKETRIDE_KEY}!'}
+    task = Task(
+        server=MagicMock(),
+        id='t-1',
+        project_id='p-1',
+        source='s-1',
+        token='tk',
+        public_auth='pk',
+        pipeline=old,
+        env_source=AsyncMock(side_effect=RuntimeError('db down')),
+    )
+    task.has_attached_debugger = lambda: False
+    task.stop_task = AsyncMock()
+    task.start_task = AsyncMock()
+
+    with pytest.raises(RuntimeError, match='db down'):
+        await task.restart_task(new, 'p-1', 's-1', 'tools')
+    task.stop_task.assert_not_awaited()
+    assert task._pipeline is old
+    assert task._restart_env is None
+
+    source = AsyncMock(return_value={'ROCKETRIDE_KEY': 'v2'})
+    task._env_source = source
+    task.is_task_complete = lambda: True
+    task._reset_status = lambda: None
+    seen = []
+
+    async def start():
+        seen.append(await task._resolve_pipeline(task._pipeline))
+
+    task.start_task = start
+    await task.restart_task(new, 'p-1', 's-1', 'tools')
+
+    assert seen[0]['config'] == 'v2!'
+    assert source.await_count == 1
+    assert task._restart_env is None
+
+
+@pytest.mark.asyncio
+async def test_a_stop_during_the_restart_load_wins():
+    """A stop that lands while a restart loads its values is kept: the restart
+    is refused, nothing is stopped again or started, and the pipeline is unchanged.
+    """
+    old = {'components': [], 'config': '${ROCKETRIDE_KEY}'}
+    task = Task(
+        server=MagicMock(),
+        id='t-1',
+        project_id='p-1',
+        source='s-1',
+        token='tk',
+        public_auth='pk',
+        pipeline=old,
+    )
+
+    async def load_while_stopping():
+        task._stop_requested = True  # what stop_task sets
+        task._stop_count += 1
+        return {'ROCKETRIDE_KEY': 'v'}
+
+    task._env_source = load_while_stopping
+    task.has_attached_debugger = lambda: False
+    task.stop_task = AsyncMock()
+    task.start_task = AsyncMock()
+
+    with pytest.raises(RuntimeError, match='stopped while the restart'):
+        await task.restart_task({'components': [], 'config': '${ROCKETRIDE_KEY}!'}, 'p-1', 's-1', 'tools')
+    task.stop_task.assert_not_awaited()
+    task.start_task.assert_not_awaited()
+    assert task._pipeline is old and task._stop_requested
+
+
+@pytest.mark.asyncio
+async def test_a_stop_during_the_restart_load_wins_on_an_already_stopped_task():
+    """A task whose last run was stopped still has _stop_requested set; a new
+    stop during the restart's load is still seen (counted, not just flagged).
+    """
+    task = Task(
+        server=MagicMock(),
+        id='t-1',
+        project_id='p-1',
+        source='s-1',
+        token='tk',
+        public_auth='pk',
+        pipeline={},
+    )
+    task._stop_requested = True  # the previous run was stopped
+
+    async def load_while_stopping():
+        task._stop_count += 1  # a second stop_task arrives during the load
+        return {}
+
+    task._env_source = load_while_stopping
+    task.has_attached_debugger = lambda: False
+    task.stop_task = AsyncMock()
+    task.start_task = AsyncMock()
+
+    with pytest.raises(RuntimeError, match='stopped while the restart'):
+        await task.restart_task({'components': [], 'config': '${ROCKETRIDE_KEY}'}, 'p-1', 's-1', 'tools')
+    task.start_task.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_stop_during_the_first_start_load_ends_the_start(monkeypatch):
+    """A stop that lands while start_task loads the placeholder values finds no
+    process yet; the start then ends through _terminated() instead of
+    launching the engine.
+    """
+    import ai.modules.task.task_engine as engine
+
+    _fake_db_account(monkeypatch)
+    t = _env_task(pipeline={'components': [{'id': 'src', 'provider': 'tools', 'config': {'k': '${ROCKETRIDE_KEY}'}}]})
+    t.source = 'src'
+
+    async def load_while_stopping():
+        t._stop_requested = True  # what stop_task sets when it arrives now
+        return {'ROCKETRIDE_KEY': 'v'}
+
+    t._env_source = load_while_stopping
+    t._restart_env = None
+    t._status = SimpleNamespace(name='', state=engine.TASK_STATE.NONE.value, exitMessage='', completed=False)
+    t._is_restarting = False
+    t._launch_args = {}
+    t._server = MagicMock(_config={})
+    t._is_debugging = lambda: False
+    t._write_task_file = AsyncMock(return_value='/tmp/task.json')
+    t._send_status_update = AsyncMock()
+    t._terminated = AsyncMock()
+    spawn = AsyncMock()
+    monkeypatch.setattr(engine.asyncio, 'create_subprocess_exec', spawn)
+
+    with pytest.raises(RuntimeError, match='stopped before it started'):
+        await Task.start_task(t)
+    spawn.assert_not_awaited()
+    t._terminated.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_start_that_fails_inside_a_restart_ends_the_run(monkeypatch):
+    """A stop that lands during a restart's start fails that start. The task
+    is dead, so _terminated() must see _is_restarting cleared and report it
+    stopped, not "Restarting".
+    """
+    import ai.modules.task.task_engine as engine
+
+    _fake_db_account(monkeypatch)
+    t = _env_task(pipeline={'components': [{'id': 'src', 'provider': 'tools', 'config': {'k': '${ROCKETRIDE_KEY}'}}]})
+    t.source = 'src'
+    t._env_source = AsyncMock(return_value={'ROCKETRIDE_KEY': 'v'})
+    t._restart_env = {'ROCKETRIDE_KEY': 'v'}  # loaded by restart_task before it stopped the old run
+    t._status = SimpleNamespace(name='', state=engine.TASK_STATE.NONE.value, exitMessage='', completed=False)
+    t._is_restarting = True
+    t._launch_args = {}
+    t._server = MagicMock(_config={})
+    t._is_debugging = lambda: False
+
+    async def write_while_stopping(*_):
+        t._stop_requested = True  # what stop_task sets when it arrives now
+        return '/tmp/task.json'
+
+    t._write_task_file = write_while_stopping
+    t._send_status_update = AsyncMock()
+    seen = []
+
+    async def terminated():
+        seen.append(t._is_restarting)
+
+    t._terminated = terminated
+    spawn = AsyncMock()
+    monkeypatch.setattr(engine.asyncio, 'create_subprocess_exec', spawn)
+
+    with pytest.raises(RuntimeError, match='stopped before it started'):
+        await Task.start_task(t)
+    spawn.assert_not_awaited()
+    assert seen == [False]
+
+
+@pytest.mark.asyncio
+async def test_a_second_restart_while_one_runs_is_refused():
+    """Two restarts of one task would share _restart_env: the second is refused
+    before it loads anything, the first starts with its own values, and a later
+    restart works again.
+    """
+    pipeline = {'components': [], 'config': '${ROCKETRIDE_KEY}'}
+    task = Task(
+        server=MagicMock(),
+        id='t-1',
+        project_id='p-1',
+        source='s-1',
+        token='tk',
+        public_auth='pk',
+        pipeline=pipeline,
+        env_source=AsyncMock(return_value={'ROCKETRIDE_KEY': 'first'}),
+    )
+    task.has_attached_debugger = lambda: False
+    task.is_task_complete = lambda: True
+    task._reset_status = lambda: None
+    stopping = asyncio.Event()
+    release = asyncio.Event()
+
+    async def stop():
+        stopping.set()
+        await release.wait()
+
+    seen = []
+
+    async def start():
+        seen.append(await task._resolve_pipeline(task._pipeline))
+
+    task.stop_task = stop
+    task.start_task = start
+
+    first = asyncio.ensure_future(task.restart_task(dict(pipeline), 'p-1', 's-1', 'tools'))
+    await stopping.wait()
+    second_source = AsyncMock(return_value={'ROCKETRIDE_KEY': 'second'})
+    task._env_source = second_source
+    with pytest.raises(RuntimeError, match='already in progress'):
+        await task.restart_task(dict(pipeline), 'p-1', 's-1', 'tools')
+    second_source.assert_not_awaited()
+
+    release.set()
+    await first
+    assert [run['config'] for run in seen] == ['first']
+
+    await task.restart_task(dict(pipeline), 'p-1', 's-1', 'tools')
+    assert [run['config'] for run in seen] == ['first', 'second']
+    assert task._restart_in_progress is False
+
+
+@pytest.mark.asyncio
+async def test_task_loads_placeholder_values_at_each_resolve():
+    """A Task given an env_source calls it every time it resolves the pipeline
+    and keeps no copy of the values; a plain env dict still works.
+    """
+    from unittest.mock import MagicMock
+
+    common = dict(
+        server=MagicMock(), id='t-1', project_id='p-1', source='s-1', token='tk', public_auth='pk', pipeline={}
+    )
+    source = AsyncMock(side_effect=[{'ROCKETRIDE_KEY': 'v1'}, {'ROCKETRIDE_KEY': 'v2'}])
+    task = Task(**common, env_source=source)
+    pipeline = {'config': '${ROCKETRIDE_KEY}'}
+
+    assert (await task._resolve_pipeline(pipeline))['config'] == 'v1'
+    assert (await task._resolve_pipeline(pipeline))['config'] == 'v2'
+    assert source.await_count == 2
+    assert not hasattr(task, '_env')
+
+    fixed = Task(**common, env={'ROCKETRIDE_KEY': 'fixed'})
+    assert (await fixed._resolve_pipeline(pipeline))['config'] == 'fixed'
 
 
 def test_cap_trace_payload_passes_small_payloads_through():
@@ -1608,6 +2314,14 @@ def test_saas_gate_matches_the_node_not_the_provider_name(component):
     assert problem and 'stdio MCP transport' in problem
 
 
+def test_saas_gate_off_the_engine_host_allows_stdio_mcp_but_not_nosaas():
+    def violation(component):
+        return saas_pipeline_violation({'components': [component]}, _get_service, _mcp_node_config, shared_host=False)
+
+    assert violation({'id': 'm', 'provider': 'mcp_client', 'config': {'transport': 'stdio'}}) is None
+    assert 'not available on RocketRide Cloud' in violation({'id': 'f', 'provider': 'filesys'})
+
+
 # ---------------------------------------------------------------------------
 # Exit code when the task sends no >EXIT event
 # ---------------------------------------------------------------------------
@@ -1712,3 +2426,197 @@ async def test_a_process_that_does_not_exit_is_killed_and_reaped(monkeypatch):
     t._engine_process = _LingeringProcess()
     assert await Task._process_exit_code(t) == -9
     assert t._engine_process.killed
+
+
+# ---------------------------------------------------------------------------
+# TaskData — the engine's data channel to the task
+# ---------------------------------------------------------------------------
+
+
+class _SilentTransport:
+    """A connected transport that accepts every message and never answers."""
+
+    def bind(self, **callbacks):
+        """Accept the client's callbacks; the test drives them directly.
+
+        Args:
+            **callbacks: Handlers a real transport would call.
+        """
+
+    def is_connected(self):
+        """Report the transport as open so requests are sent.
+
+        Returns:
+            bool: Always True.
+        """
+        return True
+
+    async def send(self, message):
+        """Swallow the message.
+
+        Args:
+            message: The DAP message that will never be answered.
+        """
+
+    def disconnect(self):
+        """Nothing to close."""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'reason, expected',
+    [
+        ('task exited', 'task exited'),
+        (None, 'Task data connection closed'),
+    ],
+)
+async def test_data_channel_disconnect_fails_pending_requests(reason, expected):
+    """A request waiting on the data channel fails when the channel closes, instead of waiting forever."""
+    parent = _task()
+    client = Task.TaskData(parent_task=parent, channel_id='c1', module='DATA-test', transport=_SilentTransport())
+    parent._data_client = client
+
+    pending = asyncio.ensure_future(client.dap_request(command='rrext_process', arguments={'subcommand': 'open'}))
+    await asyncio.sleep(0)
+    assert client._pending_requests
+
+    await client.on_disconnected(reason, has_error=True)
+
+    with pytest.raises(ConnectionError, match=expected):
+        await asyncio.wait_for(pending, timeout=1)
+    assert parent._data_client is None
+
+
+# ---------------------------------------------------------------------------
+# The data-channel token
+# ---------------------------------------------------------------------------
+
+
+class _LaunchStop(Exception):
+    """Raised by a stubbed launch step to end start_task early."""
+
+
+def _startable_task(monkeypatch):
+    """Build a Task that start_task can drive up to the subprocess launch.
+
+    The launch itself is stubbed: ``create_subprocess_exec`` records its
+    arguments and raises ``_LaunchStop``, so no process starts.
+
+    Args:
+        monkeypatch: pytest fixture.
+
+    Returns:
+        tuple: ``(task, launches)`` — ``launches`` collects ``(argv, env)``.
+    """
+    from ai.modules.task import task_engine
+
+    t = _task()
+    t._status = SimpleNamespace(state=TASK_STATE.NONE.value, completed=False, startTime=None)
+    t._is_restarting = False
+    t._launch_args = {}
+    t._resolve_pipeline = AsyncMock(return_value={'components': []})
+    t._check_pipeline = MagicMock()
+    t._write_task_file = AsyncMock(return_value='/tmp/task-1.json')
+    t._is_debugging = MagicMock(return_value=False)
+    t._send_status_update = AsyncMock()
+    t._build_subprocess_env = AsyncMock(return_value={'PATH': '/usr/bin'})
+    t._terminated = AsyncMock()
+    t._server = SimpleNamespace(assign_port=MagicMock(return_value=20001), _config={})
+
+    launches = []
+
+    async def fake_exec(*argv, env=None, **kwargs):
+        """Record the launch and stop it before any process starts."""
+        launches.append((argv, env))
+        raise _LaunchStop()
+
+    monkeypatch.setattr(task_engine.asyncio, 'create_subprocess_exec', fake_exec)
+    return t, launches
+
+
+async def test_start_task_mints_a_fresh_token_for_every_start(monkeypatch):
+    """Every start gets its own token, separate from the control token."""
+    t, _ = _startable_task(monkeypatch)
+    tokens = []
+
+    for _ in range(2):
+        t._status.state = TASK_STATE.NONE.value
+        with pytest.raises(_LaunchStop):
+            await Task.start_task(t)
+        tokens.append(t._data_token)
+
+    assert all(len(token) >= 32 for token in tokens)
+    assert tokens[0] != tokens[1]
+    assert t.token not in tokens
+
+
+async def test_start_task_passes_only_the_token_hash_ahead_of_pipeline_args(monkeypatch):
+    """The token's SHA-256 goes on argv before any pipeline arg; the token is in neither argv nor env."""
+    t, launches = _startable_task(monkeypatch)
+    t._launch_args = {'args': [f'--data_token_sha256={"b" * 64}']}
+
+    with pytest.raises(_LaunchStop):
+        await Task.start_task(t)
+
+    ((argv, env),) = launches
+    expected = f'--data_token_sha256={hashlib.sha256(t._data_token.encode("utf-8")).hexdigest()}'
+    assert [arg for arg in argv if arg.startswith('--data_token_sha256')][0] == expected
+    assert not any(t._data_token in arg for arg in argv)
+    assert not any(t._data_token in value for value in env.values())
+
+
+async def test_data_connection_presents_the_token(monkeypatch):
+    """The parent dials /task/data with its run's token on the handshake."""
+    from ai.modules.task import task_engine
+
+    transports = []
+
+    def fake_transport(uri, **kwargs):
+        """Record the URI and the handshake options; hand back a stand-in transport."""
+        transports.append((uri, kwargs))
+        return MagicMock(name='transport')
+
+    client = MagicMock(name='data-client')
+    client.connect = AsyncMock()
+    client.dap_request = AsyncMock(return_value={'success': True})
+    client.did_fail = MagicMock(return_value=False)
+
+    monkeypatch.setattr(task_engine, 'TransportWebSocket', fake_transport)
+    monkeypatch.setattr(Task, 'TaskData', MagicMock(return_value=client))
+
+    t = _task()
+    t._is_terminating = False
+    t._data_lock = asyncio.Lock()
+    t._data_client = None
+    t._data_port = 20001
+    t._data_token = 'run-token'
+    t._engine_process = None
+    t._provider = None
+
+    await Task._send_data(t, {'command': 'apaext_process', 'arguments': {}})
+
+    ((uri, kwargs),) = transports
+    assert uri == 'ws://127.0.0.1:20001/task/data'
+    assert kwargs['headers']['Authorization'] == 'Bearer run-token'
+    assert kwargs['headers']['X-Channel-Id']
+
+
+async def test_data_request_without_a_token_fails_at_once(monkeypatch):
+    """A request that outlived the run fails clearly, with no retries and no ``Bearer None``."""
+    from ai.modules.task import task_engine
+
+    transport = MagicMock(name='TransportWebSocket')
+    monkeypatch.setattr(task_engine, 'TransportWebSocket', transport)
+
+    t = _task()
+    t._is_terminating = False
+    t._data_lock = asyncio.Lock()
+    t._data_client = None
+    t._data_port = None
+    t._data_token = None
+    t._engine_process = None
+
+    with pytest.raises(RuntimeError, match='not running'):
+        await Task._send_data(t, {'command': 'apaext_process', 'arguments': {}})
+
+    transport.assert_not_called()

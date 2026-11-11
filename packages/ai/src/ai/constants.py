@@ -146,12 +146,40 @@ CONST_WEB_WS_MAX_SIZE = 250 * 1024 * 1024  # maximum WebSocket message size in b
 # the value is deliberately self-describing.
 CONST_DEFAULT_SIGNING_KEY = '<your signing key here -- replace in production>'
 
+# Key for a run's private task token (tk_): HMAC-SHA256 over the run's identity.
+# Engine-only: it is not on the task subprocess allowlist, so pipeline code
+# never sees it (RR_SIGNING_KEY is, which is why it is not reused here). Unset
+# means a random key per process: tokens stay unguessable and stable for the
+# life of the process, and change when it restarts. Set the same value on every
+# replica to keep a relaunched run's token across restarts and pods.
+CONST_TASK_TOKEN_KEY_ENV = 'RR_TASK_TOKEN_KEY'
+CONST_TASK_TOKEN_KEY_MIN_LENGTH = 32  # characters; a shorter configured key refuses to mint
+
 # =============================================================================
 # Data Connection Configuration
 # =============================================================================
 CONST_DATA_PIPE_TIMEOUT = 60.0  # seconds of inactivity before pipe is considered zombie
 CONST_DATA_SHUTDOWN_TIMEOUT = 30.0  # seconds to wait for data connection shutdown
-CONST_DATA_OPEN_TARGET_WAIT = 5.0  # seconds `_open` waits for source to bind `state.target`
+CONST_SPEND_CHECK_TIMEOUT = 10.0  # seconds a task waits for EaaS's answer, once connected
+CONST_BILLING_UNAVAILABLE = 'Billing is unavailable right now; try again shortly'
+CONST_SPEND_ALLOW_SECONDS = 5.0  # seconds a task trusts an "allowed" answer before asking again
+# seconds a data operation waits for the source to bind `state.target`
+CONST_DATA_OPEN_TARGET_WAIT = CONST_MAX_READY_TIME
+
+# =============================================================================
+# Task Channel (requests from a task to the engine over /task/data)
+# =============================================================================
+CONST_CHANNEL_CHUNK = 1024 * 1024  # bytes per frame; a larger reply is pulled in chunks
+CONST_CHANNEL_MAX_INLINE = 64 * 1024 * 1024  # largest reply assembled in memory without a sink
+CONST_CHANNEL_CONNECT_TIMEOUT = 30.0  # seconds a task's request waits for the engine's connection
+CONST_CHANNEL_REQUEST_TIMEOUT = 30.0  # seconds for one exchange (a request, or one chunk read)
+CONST_CHANNEL_HANDLER_TIMEOUT = 60.0  # seconds a command handler may run on the engine
+CONST_CHANNEL_STREAM_IDLE = 60.0  # seconds an unread stream lives on the engine
+CONST_CHANNEL_MAX_INFLIGHT = 8  # task requests in flight per connection
+CONST_CHANNEL_DATA_WAIT = 5.0  # seconds _send_data waits for the signalled connection
+CONST_CHANNEL_DIAL_LIMIT = 10  # dials per task per CONST_CHANNEL_DIAL_WINDOW
+CONST_CHANNEL_DIAL_WINDOW = 60.0  # seconds
+CONST_CHANNEL_REDIAL_DELAY = 5.0  # seconds before dialling again after a dial that failed
 
 # =============================================================================
 # HTTP/Stream Configuration

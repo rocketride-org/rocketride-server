@@ -178,6 +178,11 @@
 #define PYENUM(name, enumValue) value(#name, enumValue)
 
 namespace engine::store::pythonBase {
+// Set while a Python caller is inside getPipe(): the pipe gate's exception
+// goes there, so it is re-raised and released on the caller's thread
+static thread_local std::optional<pybind11::error_already_set> *pipeRefusal =
+    nullptr;
+
 //-----------------------------------------------------------------------------
 /// @details
 ///		Declare our engine interfaces
@@ -223,6 +228,29 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
             // Set the Python error
             PyErr_SetObject(exc_type.ptr(), exc_instance.ptr());
         }
+    });
+
+    //-------------------------------------------------------------
+    /// @details
+    ///		Set the callable that runs before every getPipe(); raising
+    ///		refuses the pipe. Call once, before any pipe is taken.
+    ///------------------------------------------------------------
+    engLib.PYBIND_FUNCTION(setPipeGate, [](py::object gate) {
+        // Held by the module, not the static hook, so Python owns its lifetime
+        py::module_::import("engLib").attr("_pipeGate") = gate;
+        IServiceEndpoint::pipeGate = []() -> Error {
+            engine::python::LockPython lock;
+            try {
+                py::module_::import("engLib").attr("_pipeGate")();
+                return {};
+            } catch (py::error_already_set &e) {
+                // The exception's own text: what() also carries the traceback
+                std::string reason = py::str(e.value());
+                auto ccode = APERR(Ec::LicenseLimit, reason);
+                if (pipeRefusal) *pipeRefusal = std::move(e);
+                return ccode;
+            }
+        };
     });
 
     //-------------------------------------------------------------
@@ -499,19 +527,28 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
     ///		to python strings. This is for nodes to output
     ///		under the DebugOut level
     ///------------------------------------------------------------
-    engLib.PYBIND_FUNCTION(getServiceDefinitions, []() -> py::object {
-        // Get the service type
-        const auto result = IServices::getServiceSchemas();
+    engLib.PYBIND_FUNCTION(
+        getServiceDefinitions,
+        [](py::list custom) -> py::object {
+            // Get the service type, with the caller's custom services
+            auto scope =
+                IServices::withCustomServices(pyjson::dictToJson(custom));
+            if (!scope) {
+                // A custom service that does not parse is the caller's to fix
+                if (custom.size()) throw scope.ccode();
+                return py::none();
+            }
 
-        // Return none or an object
-        if (!result) return py::none();
+            auto result = IServices::getServiceSchemas();
+            if (!result) {
+                if (custom.size()) throw result.ccode();
+                return py::none();
+            }
 
-        // Get a ptr to it
-        const auto services = *result;
-
-        // Return it
-        return pyjson::jsonToDict(services);
-    });
+            // Return it
+            return pyjson::jsonToDict(*result);
+        },
+        py::arg("custom") = py::list());
 
     //-------------------------------------------------------------
     /// @details
@@ -520,26 +557,12 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
     ///------------------------------------------------------------
     auto getPythonCallerLocation =
         []() -> std::optional<std::tuple<std::string_view, int, std::string_view>> {
-        // The names are interned for the life of the process, and the views handed out
-        // below point into that pool. ap::Location holds string_views and Error keeps a
-        // Location by value, so a location built over a caller-local std::string outlives
-        // its own storage the moment that scope ends - every later read of it, such as the
-        // completionError property, then lands in freed memory. A pipeline's distinct
-        // file/function names are bounded by its Python sources, so the pool stays small;
-        // it is never pruned, which is what makes the views permanently safe. unordered_set
-        // is node-based, so inserting never moves an element another view already points at.
-        //
-        // The pool and its lock are leaked on purpose rather than left as ordinary
-        // function-local statics. Those are destroyed in reverse order of construction, and
-        // engine::config::monitor() (config/global.hpp) is constructed first - so the pool
-        // would be gone while the monitor still holds Errors viewing into it, putting the
-        // same dangling read back at shutdown. Leaking is what makes "life of the process"
-        // exact; the memory is reclaimed by the OS when the process ends.
-        static auto &internLock = *new std::mutex();
-        static auto &internPool = *new std::unordered_set<std::string>();
+        // The names are interned for the life of the process (the engine's
+        // shared, leaked pool; see internLocationText in python/init.cpp),
+        // because ap::Location holds string_views and Error keeps a Location
+        // by value.
         const auto intern = [](std::string value) -> std::string_view {
-            const std::lock_guard<std::mutex> guard(internLock);
-            return *internPool.insert(std::move(value)).first;
+            return internLocationText(std::move(value));
         };
 
         try {
@@ -642,12 +665,37 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
     ///		Defines the validatePipeline function which can be
     ///		called by a python to validate a pipeline configuration.
     ///-------------------------------------------------------------
-    engLib.PYBIND_FUNCTION(validatePipeline, [](py::dict config) -> py::dict {
-        auto resConfig = store::pipeline::validatePipelineOrComponent(
-            _mv(pyjson::dictToJson(config)));
-        resConfig.checkThrow();
-        return pyjson::jsonToDict(*resConfig);
-    });
+    engLib.PYBIND_FUNCTION(
+        validatePipeline,
+        [](py::dict config, py::list custom) -> py::dict {
+            // Validated with the caller's custom services
+            auto root = pyjson::dictToJson(config);
+            auto scope =
+                IServices::withCustomServices(pyjson::dictToJson(custom));
+            if (!scope) throw scope.ccode();
+
+            auto result =
+                store::pipeline::validatePipelineOrComponent(_mv(root));
+            if (!result) throw result.ccode();
+            return pyjson::jsonToDict(*result);
+        },
+        py::arg("config"), py::arg("custom") = py::list());
+
+    ///-------------------------------------------------------------
+    /// @details
+    ///		Defines the resolveSecureParameters function which can be
+    ///		called by a python to replace the secure parameter tokens
+    ///		in a pipeline with the values they hold.
+    ///-------------------------------------------------------------
+    engLib.PYBIND_FUNCTION(
+        resolveSecureParameters, [](py::dict pipeline) -> py::dict {
+            json::Value root(json::objectValue);
+            root["pipeline"] = pyjson::dictToJson(pipeline);
+
+            store::pipeline::PipelineConfig config(_mv(root));
+            config.resolveSecureParameters().checkThrow();
+            return pyjson::jsonToDict(config.root()["pipeline"]);
+        });
 
     //-------------------------------------------------------------
     /// @details
@@ -847,11 +895,17 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
         .PYBIND_FUNCTION(
             getPipe,
             [](IServiceEndpoint &self) -> IServiceFilterInstance & {
-                // Allow others to run while we are doing this
-                engine::python::UnlockPython unlock;
+                // Keep a refusal from the pipe gate to re-raise it as raised
+                std::optional<py::error_already_set> refusal;
+                pipeRefusal = &refusal;
 
-                // Retrieve the processing pipeline
-                auto result = self.getPipe();
+                // Retrieve the pipe, letting others run meanwhile
+                auto result = [&] {
+                    engine::python::UnlockPython unlock;
+                    return self.getPipe();
+                }();
+                pipeRefusal = nullptr;
+                if (refusal) throw *refusal;
                 if (!result) throw result.ccode();
 
                 // Get the ServicePipe
@@ -1150,8 +1204,16 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
                                   : py::none();
             })
         .PYBIND(endLoad, &ILoader::endLoad)
-        .def_static("getPipeStack", &ILoader::getPipeStack,
-                    py::arg("pipes") = py::dict());
+        .def_static(
+            "getPipeStack",
+            [](const py::dict &pipes, py::list custom) -> py::dict {
+                // Built with the caller's custom services
+                auto scope =
+                    IServices::withCustomServices(pyjson::dictToJson(custom));
+                if (!scope) throw scope.ccode();
+                return ILoader::getPipeStack(pipes);
+            },
+            py::arg("pipes") = py::dict(), py::arg("custom") = py::list());
 
     //-------------------------------------------------------------
     /// @details

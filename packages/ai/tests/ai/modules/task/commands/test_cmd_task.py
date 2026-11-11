@@ -132,6 +132,28 @@ async def test_on_execute_starts_task_with_resolved_org_id():
     assert response == {'type': 'response', 'body': {'token': 'tk_new'}}
 
 
+def _assert_says_how_to_set_a_dev_team(message: str) -> None:
+    """Keep the UI message short and point at the real profile control."""
+    assert message == 'No development team selected. Open Account > Profile and choose your development team.'
+
+
+@pytest.mark.asyncio
+async def test_on_execute_refuses_without_a_dev_team():
+    """An empty devTeam denies the execute outright, before any permission check,
+    and the refusal says how to choose a development team.
+    """
+    server = MagicMock()
+    server.start_task = AsyncMock()
+    conn = _make_conn(account_info=_account_info(dev_team=''), server=server)
+
+    with pytest.raises(PermissionError) as excinfo:
+        await TaskCommands.on_execute(conn, {'arguments': {'pipeline': {'components': []}}})
+
+    _assert_says_how_to_set_a_dev_team(str(excinfo.value))
+    conn.verify_team_permission.assert_not_called()
+    server.start_task.assert_not_awaited()
+
+
 @pytest.mark.asyncio
 async def test_on_execute_requires_task_control_permission():
     """A PermissionError from the team permission check bubbles up after logging."""
@@ -206,6 +228,9 @@ async def test_on_execute_foreign_team_secrets_resolve_to_dev_team(monkeypatch):
 
     await TaskCommands.on_execute(conn, {'arguments': {'teamId': 'team-foreign'}})
 
+    # The task loads its env when it starts; load it as the task would.
+    await server.start_task.await_args.kwargs['env_source']()
+
     # The secret merge used the session's default team, not the foreign one.
     assert merged_env.await_args.kwargs['team_id'] == 'team-1'
     assert server.start_task.await_args.kwargs['team_id'] == 'team-1'
@@ -259,7 +284,36 @@ async def test_on_execute_trusted_attributes_classify_deploy_runs(monkeypatch):
     assert kwargs['run_kind'] == 'deploy'
     assert kwargs['trigger'] == 'schedule'
     # No user layer for deploy runs.
+    await kwargs['env_source']()
     assert merged.await_args.kwargs['user_id'] == ''
+
+
+@pytest.mark.asyncio
+async def test_on_execute_hands_the_task_a_loader_not_the_values(monkeypatch):
+    """on_execute decrypts nothing itself: the task gets a loader and calls it
+    at each (re)start, so the values are current and not kept on the task.
+    Caller ROCKETRIDE_* values still override the saved ones.
+    """
+    from ai.account import account as account_mod
+
+    merged = AsyncMock(side_effect=[{'ROCKETRIDE_A': 'v1', 'ROCKETRIDE_B': 'saved'}, {'ROCKETRIDE_A': 'v2'}])
+    monkeypatch.setattr(account_mod, 'get_merged_env', merged)
+
+    server = MagicMock()
+    server.start_task = AsyncMock(return_value={'token': 'tk_new'})
+    conn = _make_conn(account_info=_account_info(), server=server)
+
+    await TaskCommands.on_execute(
+        conn,
+        {'arguments': {'pipeline': {'components': []}, 'env': {'ROCKETRIDE_B': 'caller', 'OTHER': 'x'}}},
+    )
+
+    kwargs = server.start_task.await_args.kwargs
+    assert 'env' not in kwargs
+    merged.assert_not_awaited()
+
+    assert await kwargs['env_source']() == {'ROCKETRIDE_A': 'v1', 'ROCKETRIDE_B': 'caller'}
+    assert await kwargs['env_source']() == {'ROCKETRIDE_A': 'v2', 'ROCKETRIDE_B': 'caller'}
 
 
 @pytest.mark.asyncio
@@ -285,6 +339,28 @@ async def test_on_execute_skips_plan_check_without_pipeline():
     await TaskCommands.on_execute(conn, {'arguments': {}})
 
     conn.verify_plans.assert_not_called()
+
+
+@pytest.mark.parametrize('pipeline', ['x.pipe', ['a']], ids=['string', 'list'])
+@pytest.mark.asyncio
+async def test_on_execute_passes_a_non_object_pipeline_on_to_the_server_guard(pipeline):
+    """A pipeline that is not an object (a .pipe path or a list sent as
+    ``pipeline``) skips the plan check, which reads the object's keys, so the
+    request reaches start_task, whose guard says what to pass. Before, the
+    real plan check died first with ``'str' object has no attribute 'get'``.
+    """
+    from ai.modules.task.task_conn import TaskConn
+
+    server = MagicMock()
+    server.start_task = AsyncMock(return_value={'token': 'tk_new'})
+    conn = _make_conn(account_info=_account_info(), server=server)
+    conn.verify_plans = MethodType(TaskConn.verify_plans, conn)
+
+    request = {'arguments': {'pipeline': pipeline}}
+    await TaskCommands.on_execute(conn, request)
+
+    server.start_task.assert_awaited_once()
+    assert server.start_task.await_args.args[0] is request
 
 
 # ---------------------------------------------------------------------------
@@ -334,9 +410,10 @@ async def test_on_launch_refuses_without_a_dev_team():
     server.start_task = AsyncMock()
     conn = _make_conn(account_info=_account_info(dev_team=''), server=server)
 
-    with pytest.raises(PermissionError, match='No development team'):
+    with pytest.raises(PermissionError, match='No development team') as excinfo:
         await TaskCommands.on_launch(conn, {'arguments': {}})
 
+    _assert_says_how_to_set_a_dev_team(str(excinfo.value))
     conn.verify_team_permission.assert_not_called()
     server.start_task.assert_not_awaited()
 
@@ -426,6 +503,24 @@ async def test_on_terminate_denied_does_not_stop_the_task():
 # ---------------------------------------------------------------------------
 # on_restart
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_on_restart_rechecks_the_callers_access_to_the_team():
+    """A restart decrypts the team's current secrets again, so a caller who
+    passes get_task (the run's owner) but no longer holds task.control on the
+    team is refused before the task restarts and loads anything.
+    """
+    server = MagicMock()
+    server.restart_task = AsyncMock()
+    conn = _make_conn(account_info=_account_info(), server=server)
+    conn.get_task = MagicMock(return_value=MagicMock(team_id='team-9'))
+    conn.verify_team_permission = MagicMock(side_effect=PermissionError("Permission 'task.control' denied"))
+
+    with pytest.raises(PermissionError, match='denied'):
+        await TaskCommands.on_restart(conn, {'arguments': {'token': 'tk_x'}})
+    conn.verify_team_permission.assert_called_once_with('team-9', 'task.control')
+    server.restart_task.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -927,6 +1022,10 @@ def test_store_commands_init_builds_subcommand_dispatch_table():
         'fs_rmdir',
         'fs_stat',
         'fs_rename',
+        # Whole-document JSON in ONE operation (no open-handle window — the
+        # zero-byte global.json fix); see cmd_store.fs_put_json.
+        'fs_get_json',
+        'fs_put_json',
         'fs_geturl',
     }
 
@@ -951,6 +1050,6 @@ async def test_on_execute_never_exposes_server_settings_to_sys_admin(monkeypatch
 
     await TaskCommands.on_execute(conn, {'arguments': {'pipeline': {'components': []}}})
 
-    env = server.start_task.await_args.kwargs['env']
+    env = await server.start_task.await_args.kwargs['env_source']()
     assert env == {'ROCKETRIDE_SAVED': 'ok'}
     assert 'must-not-leak' not in env.values()

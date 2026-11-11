@@ -818,16 +818,20 @@ def expand(value: str) -> str:
     """Expand %key% environment tokens in *value* using the engine environment."""
     ...
 
-def validatePipeline(config: Dict[str, Any]) -> Dict[str, Any]:
-    """Validate a pipeline configuration dict; returns it annotated with errors."""
+def validatePipeline(config: Dict[str, Any], custom: List[Dict[str, Any]] = ...) -> Dict[str, Any]:
+    """Validate a pipeline configuration dict, seeing the custom service definitions too; returns it annotated with errors."""
+    ...
+
+def resolveSecureParameters(pipeline: Dict[str, Any]) -> Dict[str, Any]:
+    """Return the pipeline with its secure parameter tokens replaced by the values they hold."""
     ...
 
 def getServiceDefinition(logicalType: str) -> Dict[str, Any]:
     """Return the service definition for the given logical type name."""
     ...
 
-def getServiceDefinitions() -> Dict[str, Any]:
-    """Return all registered service definitions."""
+def getServiceDefinitions(custom: List[Dict[str, Any]] = ...) -> Dict[str, Any]:
+    """Return all registered service definitions, plus the custom ones passed in."""
     ...
 
 def getVersion() -> Dict[str, Any]:
@@ -836,6 +840,10 @@ def getVersion() -> Dict[str, Any]:
 
 def processArguments(args: List[str]) -> None:
     """Process engine command-line arguments."""
+    ...
+
+def setPipeGate(gate: Callable[[], None]) -> None:
+    """Set the callable run before every getPipe(); raising refuses the pipe. Call once, before any pipe is taken."""
     ...
 
 def isCancelled() -> bool:

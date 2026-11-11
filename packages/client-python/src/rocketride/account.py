@@ -41,8 +41,11 @@ from .types.account import (
     AccountProfile,
     ApiKeyRecord,
     CreateKeyResult,
+    DeleteOrgPrecheck,
+    InvitedMember,
     MemberRecord,
     OrgDetail,
+    TeamAssignment,
     TeamDetail,
     TeamRecord,
 )
@@ -132,6 +135,63 @@ class AccountApi:
         """
         await self._client.call('rrext_account_org', subcommand='update', orgId=org_id, name=name)
 
+    async def create_org(self, name: str) -> None:
+        """
+        Create a new organization (workspace); the caller becomes its admin.
+
+        On success the server switches the caller's default org to the new one
+        and pushes ``apaext_org_changed`` — clients rescope through their
+        normal org-switch path.
+
+        Args:
+            name: The new organization's name (non-empty; normal org-name rules).
+        """
+        await self._client.call('rrext_account_org', subcommand='create', name=name)
+
+    async def leave_org(self, org_id: str) -> None:
+        """
+        Remove the current user from an organization.
+
+        The server refuses — with a user-presentable message — to let the
+        organization's last admin leave. Leaving the user's ACTIVE
+        organization switches them to another membership and pushes a
+        refreshed identity (``apaext_org_changed``) to all of the user's
+        connections; leaving a non-active organization pushes nothing, so
+        callers that show memberships should re-read the profile afterwards.
+
+        Args:
+            org_id: Organisation UUID to leave.
+        """
+        await self._client.call('rrext_account_org', subcommand='leave', orgId=org_id)
+
+    async def delete_org_precheck(self, org_id: str) -> DeleteOrgPrecheck:
+        """
+        Dry-run of :meth:`delete_org`: what WOULD deletion involve. Lets the
+        confirm dialog name the member count and the billing blocker before
+        anything is destroyed.
+
+        Args:
+            org_id: Organisation UUID.
+
+        Returns:
+            The org's member count and whether a subscription is active.
+        """
+        return await self._client.call('rrext_account_org', subcommand='delete', orgId=org_id, confirm=False)
+
+    async def delete_org(self, org_id: str) -> None:
+        """
+        Permanently delete an organization and ALL of its data (pipelines,
+        deployments, apps, environment variables, API keys) for every member.
+        Admin-gated; the server rejects on the caller's last workspace or an
+        active subscription. Deleting the CURRENT org re-points the default
+        and pushes ``apaext_org_changed`` (other members are re-pointed on
+        their next touch).
+
+        Args:
+            org_id: Organisation UUID to delete.
+        """
+        await self._client.call('rrext_account_org', subcommand='delete', orgId=org_id, confirm=True)
+
     # =========================================================================
     # API KEYS
     # =========================================================================
@@ -212,6 +272,44 @@ class AccountApi:
         body = await self._client.call('rrext_account_members', subcommand='list', orgId=org_id)
         return body.get('members', [])
 
+    async def invite(
+        self,
+        org_id: str,
+        *,
+        email: str,
+        given_name: str,
+        family_name: str,
+        role: str,
+        team_assignments: list[TeamAssignment] | None = None,
+        dev_team_id: str | None = None,
+    ) -> InvitedMember:
+        """
+        Invite a person to an organization and return the membership the server created.
+
+        Only org admins can invite.
+
+        Args:
+            org_id: Organisation UUID.
+            email: Email address of the person to invite.
+            given_name: First / given name of the invitee.
+            family_name: Last / family name of the invitee.
+            role: Organization-level role to assign (e.g. "admin" or "member").
+            team_assignments: Optional teams to add the invitee to.
+            dev_team_id: Optional development team for the invitee. It must be one
+                of the ``team_assignments`` teams with ``task.control`` (any org
+                team when ``role`` is "admin"). When omitted the server picks one
+                if only one team qualifies.
+
+        Returns:
+            The invited member, including the development team the server recorded.
+        """
+        args = {'email': email, 'givenName': given_name, 'familyName': family_name, 'role': role}
+        if team_assignments is not None:
+            args['teamAssignments'] = team_assignments
+        if dev_team_id is not None:
+            args['devTeamId'] = dev_team_id
+        return await self._client.call('rrext_account_members', subcommand='invite', orgId=org_id, **args)
+
     async def invite_member(
         self,
         org_id: str,
@@ -220,9 +318,14 @@ class AccountApi:
         given_name: str,
         family_name: str,
         role: str,
+        team_assignments: list[TeamAssignment] | None = None,
+        dev_team_id: str | None = None,
     ) -> None:
         """
         Send an invitation to a new organization member.
+
+        .. deprecated::
+            Use :meth:`invite`, which returns the invited member.
 
         Args:
             org_id: Organisation UUID.
@@ -230,15 +333,17 @@ class AccountApi:
             given_name: First / given name of the invitee.
             family_name: Last / family name of the invitee.
             role: Organization-level role to assign (e.g. "admin" or "member").
+            team_assignments: Optional teams to add the invitee to.
+            dev_team_id: Optional development team for the invitee.
         """
-        await self._client.call(
-            'rrext_account_members',
-            subcommand='invite',
-            orgId=org_id,
+        await self.invite(
+            org_id,
             email=email,
-            givenName=given_name,
-            familyName=family_name,
+            given_name=given_name,
+            family_name=family_name,
             role=role,
+            team_assignments=team_assignments,
+            dev_team_id=dev_team_id,
         )
 
     async def update_member_role(self, org_id: str, user_id: str, role: str) -> None:
@@ -434,14 +539,18 @@ class AccountApi:
         scope_id: str | None = None,
     ) -> dict[str, str]:
         """
-        Read the environment dict for a scope (org, team, or user).
+        List the environment names stored at a scope (org, team, or user).
+
+        Values are write-only: every name maps to a mask, never to the
+        stored value. Pass the dict back to ``set_env`` unchanged to keep
+        the values it masks.
 
         Args:
             scope: One of 'org', 'team', 'user'.
             scope_id: For org: orgId. For team: teamId. For user: omit.
 
         Returns:
-            Decrypted key-value dict of ROCKETRIDE_* variables.
+            Dict of stored ROCKETRIDE_* names to the mask.
         """
         if scope == 'org':
             command = 'rrext_account_org'
@@ -463,31 +572,39 @@ class AccountApi:
     async def set_env(
         self,
         scope: str,
-        env: dict[str, str],
+        env: dict[str, str | None],
         scope_id: str | None = None,
     ) -> None:
         """
-        Write the full environment dict for a scope (org, team, or user).
+        Merge environment changes into a scope (org, team, or user).
 
-        Replaces the entire set of keys at that scope level.
+        A name with a value is set, a name with ``None`` is deleted, and a
+        name whose value is the mask from ``get_env`` keeps its stored value.
+        Names not in ``env`` are left as they are. A name outside
+        ``ROCKETRIDE_*``, or with whitespace, ``=``, ``#``, a quote or NUL in
+        it, rejects the whole write, and so does a server too old to merge.
 
         Args:
             scope: One of 'org', 'team', 'user'.
-            env: Full key-value dict to store.
+            env: Names to set, delete (``None``) or keep (mask).
             scope_id: For org: orgId. For team: teamId. For user: omit.
         """
+        # update_env merges; a server with only the old full-replacement set_env
+        # refuses it as unknown instead of wiping the names it was not sent.
+        to_set = {name: value for name, value in env.items() if value is not None}
+        to_delete = [name for name, value in env.items() if value is None]
         if scope == 'org':
             command = 'rrext_account_org'
-            kwargs = {'subcommand': 'set_env', 'env': env}
+            kwargs = {'subcommand': 'update_env', 'env': to_set, 'delete': to_delete}
             if scope_id:
                 kwargs['orgId'] = scope_id
         elif scope == 'team':
             command = 'rrext_account_teams'
-            kwargs = {'subcommand': 'set_env', 'env': env}
+            kwargs = {'subcommand': 'update_env', 'env': to_set, 'delete': to_delete}
             if scope_id:
                 kwargs['teamId'] = scope_id
         else:
             command = 'rrext_account_me'
-            kwargs = {'subcommand': 'set_env', 'env': env}
+            kwargs = {'subcommand': 'update_env', 'env': to_set, 'delete': to_delete}
 
         await self._client.call(command, **kwargs)

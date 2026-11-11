@@ -82,13 +82,18 @@ ORM drivers such as Drizzle require. It returns `{rows, affected_rows}`. A
 failed statement raises `SQL execution failed:` followed by the database's own
 primary message, identically with and without a `session_id`. What is removed
 is the tail: SQLAlchemy's `[SQL: ...]` / `[parameters: ...]` echo. The primary
-sentence itself is passed through as MySQL wrote it, so a syntax error quotes
-the fragment it stopped on (the driver interpolates bound values client-side,
-so that fragment can contain one) and a constraint error names the value that
-collided. That is deliberate: reaching this tool at all requires **Allow
-direct query execution**, and a caller who has it can read the same data with
-a `SELECT`. The full text stays in the server log. `begin` takes no arguments
-and returns `{session_id}`; `commit` and `rollback` require that ID and return
+sentence itself is passed through as MySQL wrote it: a `SIGNAL`'s text comes
+back whole, a constraint error names the value that collided, and a syntax
+error (1064) quotes the rest of the statement from where the parser stopped,
+up to 80 characters (`near '...' at line N`), so a value bound after that point
+can appear in it (the driver interpolates bound values client-side; see
+#2732). That is deliberate: reaching this tool at all requires **Allow direct
+query execution**, and a caller who has it can read the same data with a
+`SELECT`. The full text is written to the server log. For ClickHouse, use the
+`db_clickhouse` node: pointed at ClickHouse's MySQL interface, this node
+returns ClickHouse's error text as is, which can repeat the statement and its
+bound values. `begin` takes no arguments and returns `{session_id}`; `commit`
+and `rollback` require that ID and return
 `{ok: true}`. These four write-capable operations fail when **Allow direct
 query execution** is off; unknown or expired session IDs also fail. Invalid
 tool input raises an error.
@@ -156,11 +161,23 @@ from the environment where the pipeline runs.
 ### Generated-query safety
 
 For LLM-generated SQL, the node only accepts `SELECT`, optionally preceded by
-`EXPLAIN`. It strips comments, checks every semicolon-separated statement, and
-rejects CTEs plus `SELECT ... INTO OUTFILE` or `INTO DUMPFILE`. It validates
-each safe candidate with `EXPLAIN` and feeds database errors to the LLM for the
-next attempt. If the LLM decides a question is not a database query, its text
+`EXPLAIN`, and rejects a `SELECT` with `INTO` (`INTO OUTFILE` and
+`INTO DUMPFILE` included) or a row lock. It masks literals and comments before
+checking, under MySQL rules (backslash escapes, `#` and `-- ` comments) as well
+as PostgreSQL's, rejects comments MySQL runs (`/*! */`, `/*M! */`) and optimizer
+hints (`/*+ */`), and rejects multi-statement input and CTEs.
+It validates each safe candidate with `EXPLAIN` and feeds database errors to the
+LLM for the next attempt. If the LLM decides a question is not a database query, its text
 answer is emitted instead of executing SQL.
+
+The `EXPLAIN` and the query run in a read-only session
+(`SET SESSION TRANSACTION READ ONLY`), which refuses writes and DDL, with
+`max_execution_time` (`max_statement_time` on MariaDB) set to 60 seconds; both
+get back the values the session had before, not the server defaults, before the
+connection is reused. The shape check is a first pass, not
+the guarantee, and a read-only session does not stop `LOAD_FILE()` or
+`SELECT ... INTO OUTFILE`, because a file is not a table: connect as a user that
+has `SELECT` on the tables it should answer from and no `FILE` privilege.
 
 ### Inserting answers
 

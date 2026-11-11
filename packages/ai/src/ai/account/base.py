@@ -31,7 +31,48 @@
 # =============================================================================
 
 import os
+import re
 from abc import ABC, abstractmethod
+from typing import NamedTuple
+
+# What clients see in place of a stored environment value. A secret is
+# written once and never read back; sending the mask back keeps the value.
+# The SDKs export the same string as CONST_ENV_MASK.
+ENV_MASK = '••••••••'
+
+# The environment names accepted: a .env key ends at whitespace, '=' or '#',
+# a quote is stripped from it, and the process environment ends at a NUL
+ENV_NAME = re.compile(r'ROCKETRIDE_[^\s=#\'"\0]+')
+
+
+class DbDecision(NamedTuple):
+    """Answer of ``AccountBase.authorize_db_target``.
+
+    Same shape as the SaaS ``extension.saas.datacore_access.DbDecision``:
+    callers read ``.allowed``, ``.reason`` and ``.owner_id`` and never import
+    either class.
+
+    ``owner_id`` names the database an allow approved: the team or user id
+    for the team and user scopes, '' for the org database and on every
+    denial. Provision exactly that id; never re-derive the target.
+
+    Truthiness follows ``allowed``. A plain NamedTuple is always truthy, so
+    ``if decision:`` would issue a DSN on every denial; here it cannot.
+    """
+
+    allowed: bool
+    reason: str
+    audit: bool = False
+    owner_id: str = ''
+
+    def __bool__(self) -> bool:
+        return self.allowed
+
+
+class OutOfCreditsError(RuntimeError):
+    """The org is out of credit; ``code`` is what clients receive."""
+
+    code = 'OUT_OF_CREDITS'
 
 
 class AccountBase(ABC):
@@ -297,6 +338,10 @@ class AccountBase(ABC):
         """
         return {'balances': {}}
 
+    async def check_spend(self, org_id: str) -> 'str | None':
+        """Why the org may not open a pipe, or None if it may. OSS has no balance, so it always may."""
+        return None
+
     async def get_transactions(
         self,
         org_id: str,
@@ -333,15 +378,43 @@ class AccountBase(ABC):
     # CLOUD DATABASE — env-gated broker call; raises when unconfigured
     # =========================================================================
 
-    async def resolve_db_dsn(self, client_id: str) -> str:
+    async def authorize_db_target(self, identity: dict, target: dict | None = None) -> DbDecision:
         """
-        Resolve the per-tenant database DSN for the RocketRide cloud DB nodes.
+        Decide whether a run (or caller) may receive a cloud database DSN.
+
+        Called before every ``resolve_db_dsn``: by the task engine at task
+        start, once per distinct ``(scope, target)`` its DB nodes ask for.
+        The SaaS edition overrides this with the live org/team/user check
+        and its audit log (``extension/saas``, SDD 4.4). This default is for
+        editions with no orgs or teams: one tenant, so only the org scope
+        exists and anything else is refused.
+
+        Args:
+            identity: ``{org_id, user_id, team_id, run_kind, owner_kind,
+                public_endpoint, path, task_id}``. Unused here.
+            target: ``{scope, team_id, user_id}``, or None for the org
+                database.
+
+        Returns:
+            DbDecision(allowed, reason, audit, owner_id). A denial is falsy;
+            an allow's owner_id is the id to provision ('' for the org
+            database, the only one this default allows).
+        """
+        scope = (target or {}).get('scope', 'org')
+        if scope == 'org':
+            return DbDecision(True, 'single_tenant')
+        return DbDecision(False, 'scope_needs_rocketride_cloud')
+
+    async def resolve_db_dsn(self, client_id: str, scope: str = 'org', owner_id: str = '') -> str:
+        """
+        Resolve the DSN of one RocketRide cloud database.
 
         The ``rocketride_sql`` / ``rocketride_vector`` / ``rocketride_graph``
-        nodes take no connection configuration.  Instead of reading
-        host/user/password, they resolve a ready connection string for the
-        caller's own provisioned cloud database, keyed by the authenticated
-        ``client_id`` (``userId``).  One database per tenant backs all three.
+        nodes take no connection configuration. The task engine calls this at
+        task start, after ``authorize_db_target`` allowed the target, and hands
+        the DSNs to the nodes (``ROCKETRIDE_DB_DSNS``). One database per
+        tenant backs all three node types. A tenant is an org, a team or a
+        user inside an org (datacore isolation SDD 4.1).
 
         Default implementation (both editions): call the data-core provisioner
         configured via server-side environment —
@@ -350,20 +423,23 @@ class AccountBase(ABC):
             ROCKETRIDE_DB_BROKER_TOKEN  its Bearer token (from ASM/k8s; never
                                         hardcoded)
 
-        ``POST {url} {"tenant_id": client_id}`` -> ``{"database", "role",
-        "dsn", "created"}`` (only ``dsn`` is read here).
-        The endpoint is idempotent (same tenant -> same DSN; the per-tenant
-        password is derived, not stored), so this method is safe to call on
-        every task start with no caching or persistence on this side.
+        Org scope sends ``{"tenant_id": client_id}`` (unchanged, so existing
+        org databases keep their name and password). Team and user scope send
+        ``{"scope", "org_id": client_id, "owner_id"}``, and the provisioner
+        builds the key. The response is ``{"database", "role", "dsn",
+        "created"}`` (only ``dsn`` is read). The endpoint is idempotent (same
+        tenant -> same DSN; the password is derived, not stored), so this is
+        safe to call on every task start with no caching on this side.
 
         When the environment is not configured (the open-source default), this
         raises: the cloud databases require a RocketRide cloud deployment.
-        A SaaS overlay may still override this method entirely.
 
         Args:
-            client_id: The authenticated connection identity (``userId``).
-                Passed verbatim as the broker's ``tenant_id`` (the provisioner
-                owns slugging/hashing it into a database name).
+            client_id: The tenant's org id. On an edition with no orgs, the
+                user id (the task engine passes ``org_id or client_id``).
+            scope: ``'org'``, ``'team'`` or ``'user'``.
+            owner_id: The team id or user id for team and user scope. Must be
+                empty for org scope.
 
         Returns:
             A libpq/SQLAlchemy-compatible PostgreSQL DSN for the tenant DB
@@ -371,7 +447,9 @@ class AccountBase(ABC):
 
         Raises:
             NotImplementedError: broker environment not configured.
-            RuntimeError: the broker rejected the request or returned no DSN.
+            ValueError: empty id, unknown scope, or a scope/owner mismatch.
+            RuntimeError: the broker rejected the request (HTTP 409: the
+                database is retired or being deleted) or returned no DSN.
         """
         broker_url = os.environ.get('ROCKETRIDE_DB_BROKER_URL', '').strip()
         broker_token = os.environ.get('ROCKETRIDE_DB_BROKER_TOKEN', '').strip()
@@ -389,11 +467,22 @@ class AccountBase(ABC):
             )
         if not client_id or not client_id.strip():
             raise ValueError('resolve_db_dsn requires a non-empty client_id')
+        owner_id = (owner_id or '').strip()
+        if scope == 'org':
+            if owner_id:
+                raise ValueError('the org database takes no owner_id')
+            body = {'tenant_id': client_id.strip()}
+        elif scope in ('team', 'user'):
+            if not owner_id:
+                raise ValueError(f'a {scope} database needs an owner_id')
+            body = {'scope': scope, 'org_id': client_id.strip(), 'owner_id': owner_id}
+        else:
+            raise ValueError(f'unknown database scope: {scope!r}')
         self._check_broker_url(broker_url)
 
         import asyncio
 
-        return await asyncio.to_thread(self._call_db_broker, broker_url, broker_token, client_id.strip())
+        return await asyncio.to_thread(self._call_db_broker, broker_url, broker_token, body)
 
     @staticmethod
     def _check_broker_url(url: str) -> None:
@@ -421,8 +510,8 @@ class AccountBase(ABC):
         )
 
     @staticmethod
-    def _call_db_broker(url: str, token: str, tenant_id: str) -> str:
-        """Blocking POST to the provisioner; runs in a worker thread.
+    def _call_db_broker(url: str, token: str, body: dict) -> str:
+        """Blocking POST of ``body`` to the provisioner; runs in a worker thread.
 
         Stdlib-only on purpose: the account layer has no async-HTTP dependency,
         and one small request per task start does not justify adding one.
@@ -433,7 +522,7 @@ class AccountBase(ABC):
 
         request = urllib.request.Request(
             url,
-            data=json.dumps({'tenant_id': tenant_id}).encode('utf-8'),
+            data=json.dumps(body).encode('utf-8'),
             headers={
                 'Authorization': f'Bearer {token}',
                 'Content-Type': 'application/json',
@@ -445,8 +534,15 @@ class AccountBase(ABC):
                 body = json.loads(response.read().decode('utf-8'))
         except urllib.error.HTTPError as e:
             # 4xx = unknown/invalid tenant per the broker contract; 5xx = broker fault.
-            code = e.code
+            code, reason = e.code, e.reason
             e.close()
+            if code == 409:
+                # The provisioner refuses a retained or dropping tenant: its
+                # team was deleted or its user left the org. Only an operator
+                # /restore brings it back, so retrying will not help.
+                raise RuntimeError(
+                    f'this RocketRide cloud database has been retired and cannot be used (HTTP 409: {reason})'
+                ) from e
             raise RuntimeError(f'DB broker rejected provision for this account (HTTP {code})') from e
         except Exception as e:
             raise RuntimeError(f'DB broker unreachable: {e}') from e
@@ -755,16 +851,29 @@ class AccountBase(ABC):
         """
         Dispatch an app-family DAP command to the app/marketplace handler.
 
-        The ``rrext_app`` marketplace surface (browse/install/admin/pricing)
-        requires SaaS — OSS raises NotImplementedError. ``rrext_deploy_app`` is
+        The marketplace READ surface (``rrext_app`` list/get) is served on
+        BOTH editions with one shape, so clients never branch per edition:
+        this base implementation answers from the same scope walk the login
+        assembly uses, decorated exactly as OSS login decorates
+        (``appStatus: 'free'``, ``onDesktop: True`` — the catalog and the
+        handshake can never disagree). The desktop WRITES (``desktop_add`` /
+        ``desktop_remove``) are acknowledged as no-ops: OSS has no desktop
+        concept — every app the operator brought onto the server is
+        implicitly on it, so adding is vacuously satisfied and removing is
+        impossible (the tile stays; a UI should not offer Remove where every
+        entry is on the desktop). The rest of the marketplace
+        (``list_mine``/``admin_*``/``pricing_*`` — developer rails, the
+        review ladder, Stripe) is genuinely SaaS-only and raises
+        NotImplementedError. ``rrext_deploy_app`` is
         app deploy control on the shared deployments registry and works on both
-        editions, with three subcommands special on OSS: ``register_dev`` (the
-        per-user dev overlay — platform infrastructure so local app development
-        works without SaaS), ``developer_status`` (answered from the session's
-        org — OSS carries the fixed ``rocketride`` namespace), and the
-        remaining ``developer_*`` verbs (developer-account / Stripe
-        registration — SaaS only). The SaaS implementation overrides this
-        method entirely and delegates to ``app_handler.handle()``.
+        editions, with two subcommands special on OSS: ``developer_status``
+        (answered from the session's org — OSS carries the fixed
+        ``rocketride`` namespace) and the remaining ``developer_*`` verbs
+        (developer-account / Stripe registration — SaaS only). Dev previews
+        are LOCAL-FIRST: the dev server proxies the engine and preview pages
+        register the app client-side, so the server holds no dev state.
+        The SaaS implementation overrides this method entirely and delegates
+        to ``app_handler.handle()``.
 
         Args:
             conn:    ``TaskConn`` instance.
@@ -773,11 +882,6 @@ class AccountBase(ABC):
         command = request.get('command')
         sub = (request.get('arguments', {}) or {}).get('subcommand') or ''
         if command == 'rrext_deploy_app':
-            # Dev overlay: shared platform capability (not marketplace).
-            if sub == 'register_dev':
-                from ai.account.dev_overlay import handle_register_dev
-
-                return await handle_register_dev(conn, request)
             # Namespace status is readable on both editions — the session
             # already carries the org's developerId ('rocketride' on OSS), so
             # the App Builder's DEPLOY page can render without a SaaS lookup.
@@ -800,7 +904,62 @@ class AccountBase(ABC):
             from ai.account.app_deploy import handle_deploy_app
 
             return await handle_deploy_app(conn, request)
-        raise NotImplementedError('App marketplace requires SaaS mode')
+
+        # ── rrext_app: the marketplace surface, OSS emulation ────────────────
+        args = request.get('arguments', {}) or {}
+
+        if sub in ('list', 'get'):
+            # The caller's reachable set — the SAME walk the login assembly
+            # uses (public + the local team/user rails when authenticated;
+            # public only when anonymous), so the picker sees @me/@team rows.
+            info = getattr(conn, '_account_info', None)
+            if info and getattr(info, 'userId', None):
+                # AccountInfo carries ONE org (models.py); the walk wants a
+                # list. The OSS override ignores it (registry-only), so this
+                # exists for signature fidelity, not behaviour.
+                org = getattr(info, 'organization', None)
+                orgs = [org if isinstance(org, dict) else {'id': getattr(org, 'id', 'local')}] if org else []
+                apps = await self.get_apps_for_user(info.userId, orgs)
+            else:
+                apps = await self.get_public_apps()
+            # OSS decoration — identical to the login assembly's, so the
+            # catalog and the handshake agree by construction.
+            for entry in apps:
+                entry['appStatus'] = 'free'
+                entry['onDesktop'] = True
+            # Shell-compatibility narrowing, shape parity with SaaS.
+            shell = args.get('shell')
+            if shell:
+                apps = [a for a in apps if a.get('shells') is None or shell in (a.get('shells') or [])]
+            if sub == 'get':
+                app_id = args.get('appId', '')
+                if not app_id:
+                    return conn.build_error(request, 'appId is required')
+                entry = next((a for a in apps if a.get('id') == app_id), None)
+                if entry is None:
+                    return conn.build_error(request, 'App not found')
+                # No pricing backend on OSS — an empty price list, not an error.
+                return conn.build_response(request, body={'app': entry, 'prices': []})
+            return conn.build_response(request, body={'apps': apps})
+
+        if sub == 'desktop_add':
+            # Vacuously satisfied: everything on an OSS server is on the
+            # desktop already. Acknowledged so shared surfaces need no
+            # edition branch; nothing changes, so no account push follows.
+            app_id = args.get('appId', '')
+            if not app_id:
+                return conn.build_error(request, 'appId is required')
+            return conn.build_response(request, body={'added': True, 'appId': app_id})
+
+        if sub == 'desktop_remove':
+            # Accepted without error by decision (2026-10-19): the desktop IS
+            # the server inventory on OSS — nothing can leave it.
+            app_id = args.get('appId', '')
+            if not app_id:
+                return conn.build_error(request, 'appId is required')
+            return conn.build_response(request, body={'removed': True, 'appId': app_id})
+
+        raise NotImplementedError('App marketplace administration requires SaaS mode')
 
     async def handle_public(self, conn, request):
         """

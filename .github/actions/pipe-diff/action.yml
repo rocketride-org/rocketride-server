@@ -58,7 +58,7 @@ inputs:
   cli-version:
     description: >-
       pip version specifier appended to the "rocketride" requirement, e.g.
-      "==1.4.0" or ">=1.4,<2". Leave empty to install the latest published
+      ">=1.5,<2" (1.4.0 and earlier have no "diff"). Leave empty to install the latest published
       release. Ignored when "install-from" is set. The run fails fast with a
       clear message if the installed CLI does not provide the "diff" subcommand.
     required: false
@@ -138,7 +138,7 @@ runs:
         # is how this repository dogfoods the action before a release ships
         # `rocketride diff`. Otherwise build the PyPI requirement; CLI_VERSION,
         # when set, is a PEP 508 specifier appended to the distribution name
-        # (e.g. "==1.4.0", ">=1.4").
+        # (e.g. ">=1.5,<2").
         if [ -n "${INSTALL_FROM}" ]; then
           requirement="${INSTALL_FROM}"
         elif [ -n "${CLI_VERSION}" ]; then

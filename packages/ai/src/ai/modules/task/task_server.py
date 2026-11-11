@@ -67,6 +67,12 @@ Central orchestration server managing:
 
 import time
 import errno
+import hashlib
+import hmac
+import json
+import os
+import re
+import secrets
 import socket
 import sys
 import asyncio
@@ -74,7 +80,7 @@ import uuid
 from typing import List
 from fastapi import WebSocket
 from dataclasses import dataclass
-from typing import Dict, Any, Optional, Set
+from typing import Awaitable, Callable, Dict, Any, Mapping, Optional, Set
 from ai.constants import (
     CONST_CLEANUP_DELAY_TIME,
     CONST_CLEANUP_SLEEP_TIME,
@@ -82,11 +88,13 @@ from ai.constants import (
     CONST_TTL_CHECK,
     CONST_MAX_UNAUTHED_CONNS_PER_IP,
     CONST_MAX_UNAUTHED_IPS,
+    CONST_TASK_TOKEN_KEY_ENV,
+    CONST_TASK_TOKEN_KEY_MIN_LENGTH,
 )
 from ai.common.dap import TransportWebSocket, DAPBase
 from rocketride import TASK_STATUS, EVENT_TYPE
 from ai.web import WebServer
-from ai.account.models import AccountInfo, resolve_run_permissions
+from ai.account.models import AccountInfo, public_key_reaches, resolve_run_permissions
 from ai.account.store import Store
 from .task_conn import TaskConn
 from .task_engine import Task
@@ -94,7 +102,7 @@ from .types import LAUNCH_TYPE, TaskError
 from .pipeline import resolve_implied_source
 from .commands.cmd_monitor import owner_key
 
-from rocketlib import debug
+from rocketlib import debug, warning
 
 
 @dataclass
@@ -198,6 +206,49 @@ def _apply_source_defaults(pipeline: Dict[str, Any], source: str) -> Dict[str, A
     raise ValueError(f'Pipeline source component "{source}" not found in components list')
 
 
+def resolve_task_token_key(environ: Mapping[str, str]) -> Optional[bytes]:
+    """
+    Return the configured task-token key, or None when it is unset.
+
+    Args:
+        environ: The process environment.
+
+    Raises:
+        ValueError: If the key is set but shorter than
+            CONST_TASK_TOKEN_KEY_MIN_LENGTH. A configured key is an explicit
+            choice, so a weak one is refused rather than used.
+    """
+    raw = environ.get(CONST_TASK_TOKEN_KEY_ENV, '')
+    if not raw:
+        return None
+    if len(raw) < CONST_TASK_TOKEN_KEY_MIN_LENGTH:
+        raise ValueError(f'{CONST_TASK_TOKEN_KEY_ENV} must be at least {CONST_TASK_TOKEN_KEY_MIN_LENGTH} characters')
+    return raw.encode('utf-8')
+
+
+def keyed_task_token(key: bytes, content: Dict[str, Any]) -> str:
+    """
+    Build a run's private token: ``tk_`` + HMAC-SHA256(key, identity)[:32].
+
+    Same content and shape as the unkeyed ``AccountBase.generate_token`` digest
+    it replaces, so one identity still maps to one token under one key, but the
+    token cannot be computed without the key.
+    """
+    raw = json.dumps(content, sort_keys=True).encode('utf-8')
+    return f'tk_{hmac.new(key, raw, hashlib.sha256).hexdigest()[:32]}'
+
+
+# What a caller-chosen tk_ token must look like: at least as long as a minted
+# one (32 hex), from a URL-safe alphabet. A UUID (hex or with hyphens) passes.
+_STRONG_TASK_TOKEN = re.compile(r'tk_[A-Za-z0-9_-]{32,}')
+
+
+def _owner_identity(control: 'TASK_CONTROL') -> tuple:
+    """The owner a run's token is scoped by: (owner kind, owner id, run kind)."""
+    kind = control.owner_kind or ('team' if control.run_kind == 'deploy' else 'user')
+    return (kind, control.owner_id, control.run_kind)
+
+
 class TaskServer(DAPBase):
     """
     Central task management server orchestrating computational task lifecycles.
@@ -262,6 +313,12 @@ class TaskServer(DAPBase):
         4. Start background task cleanup process
         5. Configure DAP base class for protocol handling
         """
+        # Resolve the task-token key now (the web server has loaded .env by
+        # this point), so a misconfigured RR_TASK_TOKEN_KEY stops the engine at
+        # startup instead of failing every task start.
+        self._tk_key: Optional[bytes] = None
+        self._task_token_key()
+
         # Initialize registries for connection and task management
         self._task_control: Dict[str, TASK_CONTROL] = {}  # Task registry and metadata
         self._connections: Dict[int, TaskConn] = {}  # Active client connections
@@ -545,17 +602,9 @@ class TaskServer(DAPBase):
 
         conn_user_id = getattr(getattr(conn, '_account_info', None), 'userId', None)
 
-        # Expire this connection's dev-overlay entries (a closed dev session
-        # must not leave a stale bundle override in the user's manifest) and
-        # refresh the user's REMAINING connections so their shells drop it.
-        if conn_user_id:
-            try:
-                from ai.account.dev_overlay import drop_connection, push_refresh
-
-                if drop_connection(conn_user_id, connection_id):
-                    await push_refresh(self, conn_user_id, source='expiry')
-            except Exception as e:
-                self.debug_message(f'dev overlay disconnect cleanup failed: {e}')
+        # No dev-overlay cleanup: dev previews are LOCAL-FIRST — the
+        # registration lives in preview pages and dies with them; the
+        # server holds no per-connection dev state.
 
         await self.broadcast_server_event(
             EVENT_TYPE.DASHBOARD,
@@ -598,6 +647,32 @@ class TaskServer(DAPBase):
         # Log successful disconnection cleanup
         self.debug_message(f'Connection {connection_id} disconnected and cleaned up.')
 
+    def _task_token_key(self) -> bytes:
+        """
+        The key this process mints private task tokens (tk_) with.
+
+        Resolved on first use, so a .env loaded after import still counts, and
+        then kept for the life of the process: one identity must keep mapping to
+        one token, or the "already running" guard and the useExisting reconnect
+        stop working. Unset or empty, the key is random per process, and that
+        is a warning, not debug: on a deployed engine every restart would
+        change everyone's tk_ tokens, so it must show in the default log.
+
+        Raises:
+            ValueError: If RR_TASK_TOKEN_KEY is set but too short.
+        """
+        key = getattr(self, '_tk_key', None)
+        if key is None:
+            key = resolve_task_token_key(os.environ)
+            if key is None:
+                key = secrets.token_bytes(32)
+                warning(
+                    f'{CONST_TASK_TOKEN_KEY_ENV} is unset or empty: task tokens use a key of this process only and '
+                    'change when it restarts. Set it (the same value on every replica) to keep them.'
+                )
+            self._tk_key = key
+        return key
+
     def _build_task_account_info(self, token: str, control: 'TASK_CONTROL', permissions: list) -> AccountInfo:
         """Build a minimal AccountInfo for pk_*/tk_* task-scoped authentication."""
         return AccountInfo(
@@ -636,14 +711,16 @@ class TaskServer(DAPBase):
                 before task errors carried codes.
         """
         if authorization.startswith('pk_'):
-            for control in self._task_control.values():
-                if control.public_auth == authorization:
-                    return self._build_task_account_info(
-                        authorization,
-                        control,
-                        ['task.data'],
-                    )
-            raise TaskError(TaskError.NOT_REGISTERED, 'Your pipeline is not running')
+            # Only a run whose source is a public endpoint: a pk_ is derivable
+            # from the run's identity, so on any other run it would hand task.data
+            # to whoever can name the run. Refused as not running, which is what
+            # an unknown key gets, so the answer does not say the run exists.
+            control = self.get_task_control_by_public_key(authorization)
+            return self._build_task_account_info(
+                authorization,
+                control,
+                ['task.data'],
+            )
 
         if authorization.startswith('tk_'):
             control = self._task_control.get(authorization)
@@ -775,9 +852,10 @@ class TaskServer(DAPBase):
         Raises:
             TaskError: Code TASK_NOT_REGISTERED if the key names no live task
         """
-        # Look for it
+        # Look for it. A run whose source is not a public endpoint does not
+        # answer to its pk_ (see authenticate).
         for control in self._task_control.values():
-            if control.public_auth == public_auth:
+            if control.public_auth == public_auth and public_key_reaches(control):
                 return control
 
         # Couldn't find it
@@ -1235,6 +1313,7 @@ class TaskServer(DAPBase):
         team_id: str = '',
         org_id: str = '',
         env: Dict[str, str] | None = None,
+        env_source: Optional[Callable[[], Awaitable[Dict[str, str]]]] = None,
         run_kind: str = 'dev',
         owner_kind: str = '',
         trigger: str = '',
@@ -1251,19 +1330,20 @@ class TaskServer(DAPBase):
                 - arguments: Task configuration including Optional(token), pipeline
                 - command: Launch type (launch/execute) determining task behavior
             conn (TaskConn, optional): Connection to associate with task for monitoring
+            env_source: Loads the values for ${...} placeholders at each (re)start (see Task)
 
         Returns:
             str: Unique task token for subsequent operations
 
         Raises:
             ValueError: If launch type is invalid or task already exists
-            RuntimeError: If required pipeline configuration is missing
+            RuntimeError: If the pipeline is missing, empty or not an object
             Exception: If task creation or startup fails
 
         Task Creation Process:
         1. Parse and validate request parameters
-        2. Generate unique task token if not provided
-        3. Validate pipeline configuration
+        2. Validate pipeline configuration (before anything reads it)
+        3. Generate unique task token if not provided
         4. Check for task uniqueness and handle conflicts
         5. Create Task instance with full configuration
         6. Register task in central registry with security metadata
@@ -1311,8 +1391,9 @@ class TaskServer(DAPBase):
         # Initialize task control structure for new task
         control = TASK_CONTROL()
 
-        # For launch/exec token is in args
-        args = request.get('arguments', {})
+        # For launch/exec token is in args. An explicit "arguments": null is a
+        # request with no pipeline, refused by the guard below.
+        args = request.get('arguments') or {}
         use_existing_task = args.get('useExisting', False)
 
         # Extract TTL from args (use server-configured default if not provided)
@@ -1338,8 +1419,20 @@ class TaskServer(DAPBase):
             raise ValueError('owner_kind="team" is only valid for deploy runs')
         control.owner_kind = owner_kind or ('team' if run_kind == 'deploy' else 'user')
         control.token = args.get('token', None)
+        supplied_token = control.token is not None
         control.pipeline = args.get('pipeline', None)
         control.source = args.get('source', None)
+
+        # Validate required pipeline configuration. Checked before the first
+        # read of the pipeline below, which would otherwise fail first with an
+        # AttributeError or TypeError that does not say what is missing. An
+        # empty pipeline or one that is not an object (such as a .pipe path
+        # sent as `pipeline`) is refused the same way.
+        if not isinstance(control.pipeline, dict) or not control.pipeline:
+            raise RuntimeError(
+                'Pipeline configuration is missing or invalid. Pass the pipeline object itself; '
+                'to run a .pipe file, pass its path as filepath.'
+            )
 
         # If a source was not specified, in the args, get it from the pipeline
         if not control.source:
@@ -1349,7 +1442,9 @@ class TaskServer(DAPBase):
         if not control.source:
             control.source = resolve_implied_source(control.pipeline)
             if control.source is None:
-                raise ValueError('Pipeline does not have a source component defined')
+                raise ValueError(
+                    'Pipeline has no source. Select a source component or add a node configured as a source.'
+                )
 
         # Find the actual source component
         # Stamp the resolved source and give the source component a config if it has
@@ -1401,19 +1496,22 @@ class TaskServer(DAPBase):
             if control.run_kind == 'deploy':
                 owner_content['run_kind'] = 'deploy'
 
-        # Build the token
+        # Build the token. It is the run's private credential (full task
+        # control), so it is derived with the engine's server-held key rather
+        # than from the run identity alone.
         if control.token is None:
-            control.token = self._server.account.generate_token(
-                content={
+            control.token = keyed_task_token(
+                self._task_token_key(),
+                {
                     'kind': 'task',
                     **owner_content,
                     'project_id': control.project_id,
                     'source': control.source,
                 },
-                prefix='tk_',
             )
 
-        # Build the public token
+        # Build the public token. Unkeyed on purpose: a pk_ is a share link,
+        # and persisted links must keep resolving.
         control.public_auth = self._server.account.generate_token(
             content={
                 'kind': 'public',
@@ -1440,10 +1538,6 @@ class TaskServer(DAPBase):
         except (ValueError, TypeError):
             raise ValueError(f'Invalid launch type: "{command}"')
 
-        # Validate required pipeline configuration
-        if not control.pipeline:
-            raise RuntimeError('Missing pipeline configuration in launch request')
-
         # Save the owner so we know when to stop the task
         if control.launch_type == LAUNCH_TYPE.LAUNCH:
             control.launch_owner = conn
@@ -1452,6 +1546,23 @@ class TaskServer(DAPBase):
         if control.token in self._task_control:
             # Get the existing task control
             existing_control = self._task_control[control.token]
+
+            # A token names one owner's run. A caller-supplied token that names
+            # another owner's run must neither reuse it nor take over its slot
+            # once it finishes: holding a run's token must require being
+            # allowed to get it. A derived token cannot get here for another
+            # owner, since the owner is inside its HMAC.
+            #
+            # One exception keeps fixed names working (the CLIs' 'UPLOAD_TASK'):
+            # a FINISHED run under a name without the tk_ prefix may be
+            # replaced by anyone, as before. Such a name never authenticates,
+            # so taking over its slot hands the newcomer no access to the old
+            # run, and the old owner's clients reach the new run only through
+            # their own permissions on it, which a user-owned run denies.
+            if _owner_identity(existing_control) != _owner_identity(control):
+                finished_name = not control.token.startswith('tk_') and existing_control.task.is_task_complete()
+                if not finished_name:
+                    raise PermissionError('This task token belongs to another owner')
 
             # Prevent duplicate active tasks
             if not existing_control.task.is_task_complete():
@@ -1473,12 +1584,28 @@ class TaskServer(DAPBase):
                     return _return_results(existing_control, reused=True)
 
                 # We are absolutely supposed to create a task or the user did
-                # not specify the token (which means a random collision)
-                raise ValueError('Pipeline is already running.')
+                # not specify the token (which means a random collision). Name
+                # the running task, not this request's id: a caller's token is
+                # not scoped by source, so the two can differ.
+                raise ValueError(
+                    f'Pipeline is already running (task {existing_control.id}). '
+                    'Reuse it (useExisting / use_existing), or stop it and run again.'
+                )
 
             # Clean up completed task with same token
             self._task_control.pop(control.token, None)
             self.debug_message(f'Replaced completed task "{control.id}"...')
+
+        # A new run under a caller-chosen tk_ token: that value becomes the run's
+        # private credential (authenticate accepts any live tk_), so it must be
+        # as hard to guess as a minted one. Other custom tokens are names only:
+        # authenticate never accepts them, and every use is checked against the
+        # caller's own permissions on the run.
+        if supplied_token and control.token.startswith('tk_') and not _STRONG_TASK_TOKEN.fullmatch(control.token):
+            raise ValueError(
+                'A custom token that starts with tk_ is the private credential of the run: use tk_ followed by at '
+                'least 32 letters, digits, "-" or "_" (tk_ plus a random UUID, for example)'
+            )
 
         try:
             # Create new Task instance with complete configuration
@@ -1498,6 +1625,7 @@ class TaskServer(DAPBase):
                 team_id=control.teamId,
                 org_id=control.orgId,
                 env=env or {},
+                env_source=env_source,
                 run_kind=run_kind,
                 owner_kind=control.owner_kind,
                 trigger=trigger,

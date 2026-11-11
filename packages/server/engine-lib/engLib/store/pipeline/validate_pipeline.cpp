@@ -157,6 +157,14 @@ ErrorOr<json::Value> validateComponent(json::Value root) noexcept {
     if (!defVal) return defVal.ccode();
     auto &def = *defVal.value();
 
+    // A caller's own node has no factory on this engine: as in the pipeline
+    // form, only the schema checks and the encryption apply
+    if (IServices::isCustomService(provider)) {
+        if (auto ccode = PipelineConfig::encryptComponent(component))
+            PipelineConfig::addError(root, ccode, id);
+        return root;
+    }
+
     // This stub config is still needed to enpoint creation
     json::Value jobConfig = R"({
         "type": "pipeline",

@@ -61,6 +61,7 @@ if str(common_path) not in sys.path:
 import os
 from typing import Any, AsyncGenerator, Dict
 
+import pytest
 import pytest_asyncio
 
 from rocketride import RocketRideClient
@@ -71,7 +72,8 @@ from rocketride import RocketRideClient
 # =========================================================================
 
 TEST_CONFIG: Dict[str, Any] = {
-    'uri': os.getenv('ROCKETRIDE_URI', 'http://localhost:5565'),
+    # An IP, not 'localhost': on Windows the name tries ::1 first, ~2 s per connect.
+    'uri': os.getenv('ROCKETRIDE_URI', 'http://127.0.0.1:5565'),
     'auth': os.getenv('ROCKETRIDE_APIKEY', 'MYAPIKEY'),
     'timeout': 30.0,
 }
@@ -100,3 +102,23 @@ async def client() -> AsyncGenerator[RocketRideClient, None]:
     finally:
         if _client.is_connected():
             await _client.disconnect()
+
+
+_GRPC_EXPORTER = 'opentelemetry.exporter.otlp.proto.grpc'
+
+
+@pytest.fixture
+def no_grpc_exporter(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make the OTLP gRPC exporter unimportable for one test, installed or not.
+
+    Whether the package is on disk depends on which nodes have run on this
+    engine interpreter, and that can change while the suite is running.
+
+    Args:
+        monkeypatch: Restores sys.modules when the test ends.
+    """
+    prefix = _GRPC_EXPORTER + '.'
+    for name in [n for n in sys.modules if n.startswith(prefix)]:
+        monkeypatch.delitem(sys.modules, name)
+    # A None entry makes the import fail without looking on disk.
+    monkeypatch.setitem(sys.modules, _GRPC_EXPORTER, None)

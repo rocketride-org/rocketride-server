@@ -67,15 +67,15 @@ deepening and is worth it on a large repository:
         with:
           files: 'pipelines/**/*.pipe'   # restrict which .pipe files are considered
           python-version: '3.12'
-          cli-version: '==1.4.0'          # pin a specific published rocketride release
+          cli-version: '>=1.5,<2'         # a future release range; use install-from until it is published
           comment: 'true'                 # set 'false' to skip commenting
           include-layout: 'false'         # set 'true' to also report ui/viewport churn
 ```
 
 ### Running against an unreleased CLI
 
-`rocketride diff` ships in a release **after** 1.3.0. Until that release is on
-PyPI, point `install-from` at a checkout of the client package — this is how this
+`rocketride diff` is not in a PyPI release yet: 1.4.0 and earlier do not include
+it, and the first release with it will be 1.5.0 or later. Until then, point `install-from` at a checkout of the client package — this is how this
 repository dogfoods the action:
 
 ```yaml
@@ -98,7 +98,7 @@ repository dogfoods the action:
 | ---------------- | ------------- | ----------- |
 | `files`          | `**/*.pipe`   | Git pathspec glob selecting the `.pipe` files to consider. Git's `:(glob)` magic is applied automatically, so `**` matches across directories. Only files that actually changed versus the PR base are diffed. |
 | `python-version` | `3.12`        | Python version passed to `actions/setup-python`. RocketRide requires Python >= 3.10. |
-| `cli-version`    | `` (empty)    | pip version specifier appended to the `rocketride` requirement, e.g. `==1.4.0` or `>=1.4,<2`. Empty installs the latest published release. The run **fails fast** with a clear message if the installed CLI lacks the `diff` subcommand. |
+| `cli-version`    | `` (empty)    | pip version specifier appended to the `rocketride` requirement, e.g. `>=1.5,<2` (1.4.0 and earlier have no `diff`). Empty installs the latest published release. The run **fails fast** with a clear message if the installed CLI lacks the `diff` subcommand. |
 | `install-from`   | `` (empty)    | Install the CLI from this local path or pip source (e.g. `./packages/client-python`) instead of PyPI. Takes precedence over `cli-version`. Use it to run the action before a release ships `rocketride diff`. **Executable source:** pip runs its build/install code with the job's privileges, so point it only at trusted code — never at PR-controlled code in a `pull_request_target` workflow. |
 | `comment`        | `true`        | When `true`, post or update one sticky PR comment. Set to `false` to compute the diff without commenting; that mode needs no `pull-requests: write` permission. The report is written to the **job summary** either way. |
 | `include-layout` | `false`       | When `true`, treat canvas layout churn (per-node `ui` blocks and the top-level `viewport`) as meaningful and enumerate it as `ui.*` / `viewport.*` field changes. When `false` (default) a pure-layout change is reported as `No semantic changes.`. |
@@ -189,7 +189,9 @@ writes. Your options, in order of preference:
   to diff.
 - **Untrusted content.** File paths and CLI error text come from the pull
   request, so they are rendered inside code spans / a fenced block and stripped
-  of newlines before they reach a workflow-command annotation.
+  of newlines before they reach a workflow-command annotation. `rocketride diff`
+  already writes each of its error messages as one line with control, bidi and
+  invisible characters escaped.
 - **Failure semantics.** The action does **not** fail merely because semantic
   changes exist — it is informational. It **does** fail (and emits an `error`
   annotation) when a changed `.pipe` file cannot be parsed or diffed, so a broken

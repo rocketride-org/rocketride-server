@@ -32,7 +32,7 @@
 #      search uses the index instead of a sequential scan (the generic node
 #      creates no index at all). The operator class is derived from the
 #      configured ``similarity`` metric, else Postgres ignores the index.
-# Everything else (schema, upsert, keyword/semantic search, render) is identical.
+# Search also handles HNSW filtering and uses transaction-local scan settings.
 # ------------------------------------------------------------------------------
 import os
 from depends import depends
@@ -41,23 +41,20 @@ requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
 depends(requirements)
 
 from typing import List, Callable, Dict, Any, cast
-import numpy as np
 
 import psycopg2
 from pgvector.psycopg2 import register_vector
 
 from rocketlib import warning
 from ai.common.schema import Doc, DocFilter, DocMetadata, QuestionText
-from ai.common.store import DocumentStoreBase
+from ai.common.store import CONTROL_OBJECT_ID
+from ai.common.store.pgvector_store import MIN_SIMILARITY_SCORE, PgVectorStoreBase
 from ai.common.config import Config
-from ai.common.rocketride_db import parse_dsn_fields, resolve_rocketride_dsn
+from ai.common.rocketride_db import db_target, parse_dsn_fields, resolve_rocketride_dsn
 from .IGlobal import VALID_TABLE
 
 # Default PostgreSQL port
 DEFAULT_POSTGRES_PORT = 5432
-
-# Minimum similarity score threshold for document filtering
-MIN_SIMILARITY_SCORE = 0.20
 
 # pgvector HNSW cannot index vectors wider than this many dimensions.
 HNSW_MAX_DIMS = 2000
@@ -72,14 +69,17 @@ SQL_QUERIES = {
     # fmt: on
     'count_documents': 'SELECT COUNT(*) FROM {collection}',
     'search_keyword': 'SELECT * FROM {collection} WHERE content LIKE %s {where_clause} LIMIT %s',
-    'get_documents': 'SELECT * FROM {collection} {where_clause} LIMIT %s',
-    'get_paths': 'SELECT parent, objectId FROM {collection} WHERE {where_clause} OFFSET %s LIMIT %s',
+    'get_documents': 'SELECT * FROM {collection} {where_clause} ORDER BY objectId, chunkId, id LIMIT %s OFFSET %s',
+    # One row per distinct parent (the first document under it), so offset and
+    # limit count paths, which is what the objdir tool pages over.
+    'get_paths': 'SELECT DISTINCT ON (parent) parent, objectId FROM {collection} WHERE {where_clause} ORDER BY parent, objectId, id OFFSET %s LIMIT %s',
+    'list_documents': 'SELECT objectId, MIN(parent), COUNT(*) FROM {collection} WHERE {where_clause} GROUP BY objectId ORDER BY objectId OFFSET %s LIMIT %s',
+    'count_listed_documents': 'SELECT COUNT(DISTINCT objectId) FROM {collection} WHERE {where_clause}',
     'insert_chunk': 'INSERT INTO {collection} ({columns}) VALUES ({placeholders})',
     'delete_by_object_ids': 'DELETE FROM {collection} WHERE objectId = ANY(%s)',
     'mark_deleted': 'UPDATE {collection} SET isDeleted = TRUE WHERE objectId = ANY(%s)',
     'mark_active': 'UPDATE {collection} SET isDeleted = FALSE WHERE objectId = ANY(%s)',
     'render_document': 'SELECT content, chunkId FROM {collection} WHERE objectId = %s AND chunkId >= %s AND chunkId < %s ORDER BY chunkId',
-    'semantic_search': 'SELECT *, embedding {similarity_operator} %s AS distance FROM {collection} {where_clause} ORDER BY distance LIMIT %s',
     # fmt: off
     'create_hnsw_index': (
         'CREATE INDEX IF NOT EXISTS {index_name} ON {collection} USING hnsw (embedding {opclass}) WITH (m = {m}, ef_construction = {ef_construction});'
@@ -107,7 +107,11 @@ CHUNK_COLUMNS = (
 )
 
 
-class Store(DocumentStoreBase):
+class Store(PgVectorStoreBase):
+    # listDocuments and countDocuments below implement the optional listing
+    # of DocumentStoreBase, so the list_documents tool is offered on this store.
+    supports_document_listing = True
+
     apikey: str | None = None
     node: str = 'rocketride'
     collection: str = ''
@@ -151,11 +155,13 @@ class Store(DocumentStoreBase):
 
         # check if the similarity matches the pgvector configuration options
         similarity = config.get('similarity', 'cosine')
-        if similarity in ['cosine', 'l2', 'inner_product']:
+        supported = tuple(self.similarityDict)
+        if similarity in supported:
             self.similarity = self.similarityDict[similarity]
         else:
             raise Exception(
-                'The metric you provided in the config.json does not match required postgres configurations'
+                f'RocketRide Vector: unsupported similarity {similarity!r}. '
+                f'Set "similarity" to: {", ".join(supported)}.'
             )
 
         # HNSW index build parameters (overridable via config), clamped to
@@ -171,12 +177,11 @@ class Store(DocumentStoreBase):
             self.hnsw_ef_construction = 64
         self.hnsw_ef_construction = max(self.hnsw_ef_construction, 2 * self.hnsw_m)
 
-        # RocketRide cloud: no host/user/password fields. Resolve the
-        # per-tenant DSN (task-engine injected, or via the account broker) and
-        # connect directly. host/port/database are parsed only for bookkeeping
-        # (the connection subKey keys on database); the DSN is the source of
-        # truth.
-        dsn = resolve_rocketride_dsn()
+        # RocketRide cloud: no host/user/password fields. Read the DSN the
+        # task engine delivered for this node's scope / target and connect
+        # directly. host/port/database are parsed only for bookkeeping (the
+        # connection subKey keys on database); the DSN is the source of truth.
+        dsn = resolve_rocketride_dsn(*db_target(config))
         fields = parse_dsn_fields(dsn)
         self.host = fields['host']
         self.port = fields['port'] or DEFAULT_POSTGRES_PORT
@@ -185,6 +190,14 @@ class Store(DocumentStoreBase):
         # Bounded connect so an unreachable pooler fails fast (matches the
         # 3s timeout IGlobal.validateConfig uses) instead of the OS TCP timeout.
         self.client = psycopg2.connect(dsn, connect_timeout=3)
+
+        # Autocommit, so reads (and register_vector's type lookup) never open a
+        # transaction. The cloud DSN points at a transaction-mode pooler, which
+        # pins a server connection to a client for as long as it is inside a
+        # transaction: a node left "idle in transaction" between calls holds
+        # one of the database's few pooler slots for its whole lifetime.
+        # Atomic writes and searches with local settings use _transaction().
+        self.client.autocommit = True
 
         register_vector(self.client)
 
@@ -212,7 +225,7 @@ class Store(DocumentStoreBase):
 
         @returns: True if the collection exists, False otherwise.
         """
-        with self.client.cursor() as cur:
+        with self._cursor() as cur:
             cur.execute(SQL_QUERIES['check_collection_exists'], (self.collection,))
             return cur.fetchone()[0]
 
@@ -229,7 +242,8 @@ class Store(DocumentStoreBase):
 
         @param vectorSize: The size of the vector.
         """
-        with self.client.cursor() as cur:
+        # One transaction: the table never exists without its index.
+        with self._transaction() as cur:
             cur.execute(SQL_QUERIES['create_collection'].format(collection=self.collection, vector_size=vectorSize))
 
             if vectorSize > HNSW_MAX_DIMS:
@@ -251,8 +265,6 @@ class Store(DocumentStoreBase):
                         ef_construction=self.hnsw_ef_construction,
                     )
                 )
-
-            self.client.commit()
 
     def _convertFilter(self, docFilter: DocFilter) -> tuple[str, list]:
         """
@@ -411,7 +423,7 @@ class Store(DocumentStoreBase):
         if not self._doesCollectionExist():
             return 0
 
-        with self.client.cursor() as cur:
+        with self._cursor() as cur:
             cur.execute(SQL_QUERIES['count_documents'].format(collection=self.collection))
             return cur.fetchone()[0]
 
@@ -429,7 +441,7 @@ class Store(DocumentStoreBase):
         where_sql, params = self._convertFilter(docFilter)
         query_params = [f'%{query}%'] + params
 
-        with self.client.cursor() as cur:
+        with self._cursor() as cur:
             where_clause = ('AND ' + where_sql.split('WHERE ')[1]) if where_sql else ''
             cur.execute(
                 SQL_QUERIES['search_keyword'].format(collection=self.collection, where_clause=where_clause),
@@ -454,15 +466,77 @@ class Store(DocumentStoreBase):
 
         where_sql, params = self._convertFilter(docFilter)
 
-        with self.client.cursor() as cur:
+        with self._cursor() as cur:
             cur.execute(
                 SQL_QUERIES['get_documents'].format(collection=self.collection, where_clause=where_sql),
-                params + [docFilter.limit],
+                params + [docFilter.limit, docFilter.offset],
             )
             results = cur.fetchall()
 
         points = [dict(zip([desc[0] for desc in cur.description], row)) for row in results]
         return self._convertToDocs(points)
+
+    def _listingFilter(self, parent: str | None, deleted: bool) -> tuple[str, list]:
+        """
+        Build the WHERE clause shared by listDocuments and countDocuments.
+
+        Selects the chunks in one state (active or soft-deleted) and never the
+        store's own control row, which carries isDeleted like a trashed document.
+        All values are bound parameters; the collection name is validated in __init__.
+        """
+        where_clauses = ['isDeleted = %s', 'objectId <> %s']
+        params: list = [bool(deleted), CONTROL_OBJECT_ID]
+        if parent is not None:
+            where_clauses.append('parent = %s')
+            params.append(parent)
+        return ' AND '.join(where_clauses), params
+
+    def listDocuments(
+        self, parent: str | None = None, offset: int = 0, limit: int = 100, deleted: bool = False
+    ) -> List[Dict[str, Any]]:
+        """
+        List documents one by one, ordered by object ID.
+
+        @param parent: An exact parent path to filter on, or None for every path.
+        @param offset: The number of documents to skip.
+        @param limit: The maximum number of documents to return.
+        @param deleted: False lists active documents, True the soft-deleted ones.
+        @returns: One dict per document: object_id, parent (the lowest of its chunks' parents) and chunk_count.
+        """
+        if not self._doesCollectionExist():
+            return []
+
+        where_sql, params = self._listingFilter(parent, deleted)
+        with self._cursor() as cur:
+            cur.execute(
+                SQL_QUERIES['list_documents'].format(collection=self.collection, where_clause=where_sql),
+                params + [offset, limit],
+            )
+            rows = cur.fetchall()
+
+        return [
+            {'object_id': object_id, 'parent': parent_path, 'chunk_count': count}
+            for object_id, parent_path, count in rows
+        ]
+
+    def countDocuments(self, parent: str | None = None, deleted: bool = False) -> int:
+        """
+        Count the documents listDocuments pages through for the same filter.
+
+        @param parent: An exact parent path to filter on, or None for every path.
+        @param deleted: False counts active documents, True the soft-deleted ones.
+        @returns: The number of distinct object IDs.
+        """
+        if not self._doesCollectionExist():
+            return 0
+
+        where_sql, params = self._listingFilter(parent, deleted)
+        with self._cursor() as cur:
+            cur.execute(
+                SQL_QUERIES['count_listed_documents'].format(collection=self.collection, where_clause=where_sql),
+                params,
+            )
+            return cur.fetchone()[0]
 
     def getPaths(self, parent: str | None = None, offset: int = 0, limit: int = 1000) -> Dict[str, str]:
         """
@@ -476,7 +550,10 @@ class Store(DocumentStoreBase):
         if not self._doesCollectionExist():
             return {}
 
-        where_clauses = ['chunkId = 0']
+        # Never the store's own control row or a soft-deleted document (both
+        # carry isDeleted). DISTINCT ON keeps one row per parent, so a document
+        # is listed whatever chunk IDs it has.
+        where_clauses = ['isDeleted = FALSE']
         params = []
 
         if parent is not None:
@@ -485,7 +562,7 @@ class Store(DocumentStoreBase):
 
         where_sql = ' AND '.join(where_clauses)
 
-        with self.client.cursor() as cur:
+        with self._cursor() as cur:
             cur.execute(
                 SQL_QUERIES['get_paths'].format(collection=self.collection, where_clause=where_sql),
                 params + [offset, limit],
@@ -508,39 +585,29 @@ class Store(DocumentStoreBase):
         if checkCollection and not self.createCollection(chunks):
             return
 
-        objectIds = {chunk.metadata.objectId for chunk in chunks}
-        try:
-            with self.client.cursor() as cur:
-                # Replace in one transaction: an invalid new chunk must leave
-                # the previously stored document intact.
-                cur.execute(SQL_QUERIES['delete_by_object_ids'].format(collection=self.collection), (list(objectIds),))
-                for chunk in chunks:
-                    data = {'content': chunk.page_content, **chunk.metadata.model_dump(), 'embedding': chunk.embedding}
-                    if 'vectorSize' not in data or data['vectorSize'] is None:
-                        data['vectorSize'] = len(chunk.embedding) if chunk.embedding else 0
-                    if 'modelName' not in data or data['modelName'] is None:
-                        data['modelName'] = ''
-                    # Only the table's columns: DocMetadata.model_dump() also
-                    # yields signature and any extra keys, which have none.
-                    data = {key: value for key, value in data.items() if key in CHUNK_COLUMNS}
-                    columns = ', '.join(data.keys())
-                    placeholders = ', '.join(['%s'] * len(data))
-                    cur.execute(
-                        SQL_QUERIES['insert_chunk'].format(
-                            collection=self.collection, columns=columns, placeholders=placeholders
-                        ),
-                        list(data.values()),
-                    )
-            self.client.commit()
-        except Exception:
-            # Leave the connection usable: an aborted transaction would fail
-            # every later statement until it is rolled back. A rollback that
-            # fails itself (a broken connection) must not replace the write error.
-            try:
-                self.client.rollback()
-            except Exception as rollback_error:  # noqa: BLE001
-                warning(f'{self.collection}: rollback after a failed write also failed: {rollback_error}')
-            raise
+        objectIds = self.objectIdsToReplace(chunks)
+        # Replace in one transaction: an invalid new chunk must leave the
+        # previously stored document intact.
+        with self._transaction() as cur:
+            if objectIds:
+                cur.execute(SQL_QUERIES['delete_by_object_ids'].format(collection=self.collection), (objectIds,))
+            for chunk in chunks:
+                data = {'content': chunk.page_content, **chunk.metadata.model_dump(), 'embedding': chunk.embedding}
+                if 'vectorSize' not in data or data['vectorSize'] is None:
+                    data['vectorSize'] = len(chunk.embedding) if chunk.embedding else 0
+                if 'modelName' not in data or data['modelName'] is None:
+                    data['modelName'] = ''
+                # Only the table's columns: DocMetadata.model_dump() also
+                # yields signature and any extra keys, which have none.
+                data = {key: value for key, value in data.items() if key in CHUNK_COLUMNS}
+                columns = ', '.join(data.keys())
+                placeholders = ', '.join(['%s'] * len(data))
+                cur.execute(
+                    SQL_QUERIES['insert_chunk'].format(
+                        collection=self.collection, columns=columns, placeholders=placeholders
+                    ),
+                    list(data.values()),
+                )
 
     def remove(self, objectIds: List[str]) -> None:
         """
@@ -551,35 +618,44 @@ class Store(DocumentStoreBase):
         if not self._doesCollectionExist():
             return
 
-        with self.client.cursor() as cur:
+        with self._cursor() as cur:
             cur.execute(SQL_QUERIES['delete_by_object_ids'].format(collection=self.collection), (objectIds,))
-            self.client.commit()
 
-    def markDeleted(self, objectIds: List[str]) -> None:
+    def markDeleted(self, objectIds: List[str]) -> int | None:
         """
         Mark the set of documents with the given objectId as deleted.
 
         @param objectIds: A list of object IDs to mark as deleted.
+        @returns: The number of chunk rows matched (0 when none of the IDs exists or the collection does not),
+            or None when psycopg2 does not know the statement's row count.
         """
         if not self._doesCollectionExist():
-            return
+            return 0
 
-        with self.client.cursor() as cur:
+        with self._cursor() as cur:
             cur.execute(SQL_QUERIES['mark_deleted'].format(collection=self.collection), (objectIds,))
-            self.client.commit()
+            matched = cur.rowcount
+        # psycopg2 reports -1 when a statement's row count is not known; say so
+        # rather than claim no rows matched.
+        return matched if matched >= 0 else None
 
-    def markActive(self, objectIds: List[str]) -> None:
+    def markActive(self, objectIds: List[str]) -> int | None:
         """
         Mark the set of documents with the given objectId as active.
 
         @param objectIds: A list of object IDs to mark as active.
+        @returns: The number of chunk rows matched (0 when none of the IDs exists or the collection does not),
+            or None when psycopg2 does not know the statement's row count.
         """
         if not self._doesCollectionExist():
-            return
+            return 0
 
-        with self.client.cursor() as cur:
+        with self._cursor() as cur:
             cur.execute(SQL_QUERIES['mark_active'].format(collection=self.collection), (objectIds,))
-            self.client.commit()
+            matched = cur.rowcount
+        # psycopg2 reports -1 when a statement's row count is not known; say so
+        # rather than claim no rows matched.
+        return matched if matched >= 0 else None
 
     def render(self, objectId: str, callback: Callable[[str], None]) -> None:
         """
@@ -593,7 +669,7 @@ class Store(DocumentStoreBase):
 
         offset = 0
         while True:
-            with self.client.cursor() as cur:
+            with self._cursor() as cur:
                 cur.execute(
                     SQL_QUERIES['render_document'].format(collection=self.collection),
                     (objectId, offset, offset + self.renderChunkSize),
@@ -621,33 +697,3 @@ class Store(DocumentStoreBase):
                 break
 
             offset += self.renderChunkSize
-
-    def searchSemantic(self, query: QuestionText, docFilter: DocFilter) -> List[Doc]:
-        """
-        Perform a semantic search.
-
-        @param query: The query to search for.
-        @param docFilter: The document filter.
-        @returns: A list of documents that match the query.
-        """
-        if not self._doesCollectionExist():
-            return []
-
-        if query.embedding is None:
-            raise Exception('To use semantic search, you must bind to an embedding module')
-
-        where_sql, params = self._convertFilter(docFilter)
-        embedding_arr = np.array(query.embedding)
-
-        with self.client.cursor() as cur:
-            cur.execute(
-                SQL_QUERIES['semantic_search'].format(
-                    collection=self.collection, similarity_operator=self.similarity, where_clause=where_sql
-                ),
-                (embedding_arr, *params, docFilter.limit),
-            )
-            results = cur.fetchall()
-
-        # Convert results to dictionary
-        points = [dict(zip([desc[0] for desc in cur.description], row)) for row in results]
-        return self._convertToDocs(points)
