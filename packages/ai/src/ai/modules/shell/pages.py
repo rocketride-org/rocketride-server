@@ -274,14 +274,11 @@ _generation = 0
 
 
 def _clear_rendered(old: Any, new: Any) -> None:
-    """Swap listener: renders and resolved documents of the previous page map are stale."""
+    """Swap listener (installed by ``register_public_pages``): renders and resolved documents of the previous page map are stale."""
     global _generation
     _generation += 1
     _render_cache.clear()
     _documents.clear()
-
-
-public_pages.on_swap(_clear_rendered)
 
 
 def _moved(request: Request, path: str) -> Response:
@@ -458,16 +455,19 @@ def _render(path: str, page: Page, crawler: bool, document: Path) -> Tuple[bytes
 
 
 async def register_public_pages(server: Any) -> None:
-    """Register the catch-all last and build the first aggregate.
+    """Register the catch-all last, drop renders on every swap, and build the first aggregate.
 
-    Call at the end of server startup, after every module's initModule and
-    the account layer's init_account, and before serving. Routes that
+    Call once, at the end of server startup, after every module's initModule
+    and the account layer's init_account, and before serving. Routes that
     ``add_route`` registers later still match first: it keeps the catch-all last.
 
     Until the first build lands (it is bounded, see
     ``public_pages.build_at_startup``), the legacy page list serves, filtered
     against the now-complete route table so no legacy page opens a real
     route to anonymous callers.
+
+    Args:
+        server: The web server, its route table complete.
     """
     # Not an API operation, so a plain route outside the schema. It takes every
     # method, unknown ones (TRACE, PROPFIND) included: with a method list, the
@@ -479,6 +479,8 @@ async def register_public_pages(server: Any) -> None:
     # override; test_unknown_methods_404_off_pages_and_405_on_them pins it.
     route = Route(FALLBACK_PATH, public_page, include_in_schema=False)
     route.methods = None
+    # Before the first swap, so no render outlives the page map it came from.
+    public_pages.on_swap(_clear_rendered)
     server.add_catch_all(route)
     public_pages.swap(public_pages.legacy_aggregate(public_pages.live_conflict()))
     await public_pages.build_at_startup()

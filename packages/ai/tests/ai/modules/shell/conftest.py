@@ -33,10 +33,11 @@ def _public_pages_state(monkeypatch):
     its own rebuild lock (a lock binds to the event loop that first waits on
     it). ``_built_at = inf`` keeps the refresh backstop from scheduling a
     rebuild against the real account singleton. No web server is wired, so no
-    live route check is installed. The page map keeps the swap listeners
-    registered at import; the ones a test adds are dropped with it. The
-    artifact store is the hostile fixture's in-memory ``FILES`` (empty unless
-    a test seeds it), so unit tests never touch a real store.
+    live route check is installed. The render caches start empty and are
+    dropped on every swap, as after startup; swap listeners a test adds are
+    dropped with the page map. The artifact store is the hostile fixture's
+    in-memory ``FILES`` (empty unless a test seeds it), so unit tests never
+    touch a real store.
     """
     import ai.modules.shell.pages as pages
     import ai.modules.shell.public_pages as pp
@@ -45,13 +46,13 @@ def _public_pages_state(monkeypatch):
 
     fresh = pp.PageMap()
     fresh._built_at = float('inf')
-    fresh.listeners.extend(pp.page_map.listeners)
     monkeypatch.setattr(pp, 'page_map', fresh)
     monkeypatch.setattr(pages, '_web_server', None)
     monkeypatch.setattr(
         pages, '_render_cache', pages._FifoCache(pages._RENDER_CACHE_MAX_BYTES, pages._RENDER_CACHE_MAX)
     )
     monkeypatch.setattr(pages, '_documents', {})
+    pp.on_swap(pages._clear_rendered)  # as register_public_pages installs it
     FILES.clear()
     monkeypatch.setattr(pp, 'read_artifact_file', read_file)
     monkeypatch.setattr(pp, 'artifact_file_info', file_info)
