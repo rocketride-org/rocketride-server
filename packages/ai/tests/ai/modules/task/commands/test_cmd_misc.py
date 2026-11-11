@@ -999,7 +999,7 @@ async def test_on_rrext_dashboard_filters_to_caller_user_id(monkeypatch):
     """The dashboard only includes tasks owned by the caller."""
     monkeypatch.setattr(cmd_misc.time, 'time', lambda: 1000.0)
 
-    # Caller is a member of team-1 only; team-other is invisible to them.
+    # Caller is a member of team-1 with task.monitor.
     caller_account = SimpleNamespace(
         userId='user-1',
         auth='ak_caller',
@@ -1011,7 +1011,8 @@ async def test_on_rrext_dashboard_filters_to_caller_user_id(monkeypatch):
         },
     )
 
-    # Server state: one task in caller's team, one in a team they cannot see.
+    # Server state: two dev runs in the caller's team, owned by different
+    # users. Team membership must not expose the other user's private run.
     own_status = SimpleNamespace(
         name='task.reader',
         startTime=900.0,
@@ -1031,7 +1032,7 @@ async def test_on_rrext_dashboard_filters_to_caller_user_id(monkeypatch):
         _ttl=600,
     )
     own_control = SimpleNamespace(
-        id='task-1',
+        id='acme.proj-1.reader',
         key='dev.user-1.acme.proj-1.reader',
         address='acme.proj-1.reader',
         userId='user-1',
@@ -1046,11 +1047,11 @@ async def test_on_rrext_dashboard_filters_to_caller_user_id(monkeypatch):
         launch_type=SimpleNamespace(value='LAUNCH'),
     )
     other_control = SimpleNamespace(
-        id='task-2',
+        id='acme.proj-2.other-source',
         key='dev.other-user.acme.proj-2.other-source',
         address='acme.proj-2.other-source',
         userId='other-user',
-        teamId='team-other',
+        teamId='team-1',
         source='other-source',
         project_id='proj-2',
         run_kind='dev',
@@ -1071,7 +1072,7 @@ async def test_on_rrext_dashboard_filters_to_caller_user_id(monkeypatch):
     body = result['body']
     assert body['overview']['activeTasks'] == 1
     assert len(body['tasks']) == 1
-    assert body['tasks'][0]['id'] == 'task-1'
+    assert body['tasks'][0]['id'] == 'acme.proj-1.reader'
 
 
 @pytest.mark.asyncio
@@ -1103,8 +1104,24 @@ def _caller_account(auth='ak_caller'):
     )
 
 
-def _list_control(task_id, *, name=None, start=900.0, provider='node-x', team_id='team-1', completed=False):
-    """Build a minimal task control whose get_status() yields a stable row."""
+def _list_control(
+    task_id,
+    *,
+    name=None,
+    start=900.0,
+    provider='node-x',
+    team_id='team-1',
+    completed=False,
+    user_id='user-1',
+    legacy=False,
+):
+    """Build a minimal task control whose get_status() yields a stable row.
+
+    The control mirrors what launch stamps: id is the address, the key is
+    runKind.ownerId.address, and a dev run is owned by its user. legacy=True
+    builds an ownerless control (OSS single-user run), which resolves
+    through team permissions instead of ownership.
+    """
     status = SimpleNamespace(
         name=name or f'task.{task_id}',
         startTime=start,
@@ -1121,14 +1138,16 @@ def _list_control(task_id, *, name=None, start=900.0, provider='node-x', team_id
     # pipeline (the task id), so every control has its own address and key
     address = f'acme.{task_id}.reader'
     return SimpleNamespace(
-        id=task_id,
-        key=f'dev.user-1.{address}',
+        id=address,
+        key=f'dev.{user_id}.{address}',
         address=address,
-        userId='user-1',
+        userId=user_id,
         teamId=team_id,
         source='reader',
         project_id=task_id,
         run_kind='dev',
+        # A dev run is owned by its user; a legacy control carries no owner
+        owner_id='' if legacy else user_id,
         provider=provider,
         task=SimpleNamespace(
             get_status=lambda: status,
@@ -1193,7 +1212,7 @@ async def test_list_tasks_paging_math(monkeypatch):
     assert body['total'] == 5
     assert body['page'] == 2
     assert body['pageSize'] == 2
-    assert [row['id'] for row in body['rows']] == ['task-3', 'task-4']
+    assert [row['id'] for row in body['rows']] == ['acme.task-3.reader', 'acme.task-4.reader']
 
 
 @pytest.mark.asyncio
@@ -1232,7 +1251,7 @@ async def test_list_tasks_filter_by_provider(monkeypatch):
 
     body = result['body']
     assert body['total'] == 2
-    assert {row['id'] for row in body['rows']} == {'task-2', 'task-3'}
+    assert {row['id'] for row in body['rows']} == {'acme.task-2.reader', 'acme.task-3.reader'}
 
 
 @pytest.mark.asyncio
@@ -1250,25 +1269,32 @@ async def test_list_tasks_search_matches_name(monkeypatch):
 
     body = result['body']
     assert body['total'] == 1
-    assert body['rows'][0]['id'] == 'task-1'
+    assert body['rows'][0]['id'] == 'acme.task-1.reader'
 
 
 @pytest.mark.asyncio
 async def test_list_tasks_scopes_to_caller_permissions(monkeypatch):
-    """Tasks in teams the caller cannot monitor never enter the row set."""
+    """Only runs the caller may reach enter the row set: their own dev runs,
+    and ownerless (legacy) runs in a team they can monitor.
+    """
     monkeypatch.setattr(cmd_misc.time, 'time', lambda: 1000.0)
 
     controls = [
-        _list_control('task-1', team_id='team-1'),
-        _list_control('task-2', team_id='team-other'),  # invisible to caller
+        # The caller's own dev run
+        _list_control('task-1'),
+        # Another user's dev run in the caller's team: private to its owner
+        _list_control('task-2', user_id='other-user'),
+        # Legacy ownerless runs resolve through team permissions
+        _list_control('task-3', legacy=True),
+        _list_control('task-4', team_id='team-other', legacy=True),
     ]
     conn = _make_conn(account_info=_caller_account(), server=_make_server(controls))
 
     result = await MiscCommands.on_rrext_list_tasks(conn, {'arguments': {}})
 
     body = result['body']
-    assert body['total'] == 1
-    assert body['rows'][0]['id'] == 'task-1'
+    assert body['total'] == 2
+    assert {row['id'] for row in body['rows']} == {'acme.task-1.reader', 'acme.task-3.reader'}
 
 
 @pytest.mark.asyncio
