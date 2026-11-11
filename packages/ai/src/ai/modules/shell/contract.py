@@ -345,7 +345,9 @@ def with_slash_twin(path: str) -> Tuple[str, ...]:
     """
     if path == '/':
         return (path,)
-    return path, (path[:-1] if path.endswith('/') else path + '/')
+    if path.endswith('/'):
+        return path, path[:-1]
+    return path, path + '/'
 
 
 def slash_twin_label(source: str, candidate: str) -> str:

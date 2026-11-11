@@ -127,7 +127,10 @@ def _capture_for(request: Request) -> Optional[Path]:
         return None
     route = path.strip('/')
     prerender_root = (Path(_shell_root) / '_prerender').resolve()
-    capture = _resolve_safe(_shell_root, f'_prerender/{route}/index.html' if route else '_prerender/index.html')
+    relative = '_prerender/index.html'
+    if route:
+        relative = f'_prerender/{route}/index.html'
+    capture = _resolve_safe(_shell_root, relative)
     if capture.is_relative_to(prerender_root) and capture.is_file():
         return capture
     return None
@@ -792,7 +795,9 @@ async def llms_txt(request: Request):
     for path, page in sitemap_entries():
         bullet = f'- [{_md(page.title)}]({base_url}{path})'
         description = _md(page.description)
-        lines.append(f'{bullet}: {description}' if description else bullet)
+        if description:
+            bullet = f'{bullet}: {description}'
+        lines.append(bullet)
     if site.get('docsUrl'):
         lines += ['', '## Documentation', '', f'- [Docs]({_md(site["docsUrl"])})']
     return PlainTextResponse(

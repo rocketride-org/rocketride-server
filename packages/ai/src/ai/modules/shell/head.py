@@ -123,11 +123,31 @@ def inject_head(
     if noindex:
         parts.append('<meta name="robots" content="noindex">')
     block = ''.join(parts)
-    match = (
-        _CHARSET.search(document, start, start + len(region))
-        or _HEAD_OPEN.search(document)
-        or _HTML_OPEN.search(document)
-    )
-    if match:
-        return document[: match.end()] + block + document[match.end() :]
-    return block + document
+    at = _insertion_point(document, start, start + len(region))
+    return document[:at] + block + document[at:]
+
+
+def _insertion_point(document: str, head_start: int, head_end: int) -> int:
+    """Where the head block goes: right after the first of these the document has.
+
+    The head's charset declaration (it must stay within the first 1024
+    bytes), else ``<head>``, else ``<html>``, else the very start.
+
+    Args:
+        document: The HTML document, its old head tags already removed.
+        head_start: Where the head region starts.
+        head_end: Where the head region ends.
+
+    Returns:
+        The offset to insert the block at.
+    """
+    charset = _CHARSET.search(document, head_start, head_end)
+    if charset:
+        return charset.end()
+    head_open = _HEAD_OPEN.search(document)
+    if head_open:
+        return head_open.end()
+    html_open = _HTML_OPEN.search(document)
+    if html_open:
+        return html_open.end()
+    return 0
