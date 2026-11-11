@@ -60,27 +60,50 @@ rocketride start --pipeline ./chat.pipe
 Output:
 
 ```text
-Webhook ready - system is ready to accept requests
-  URL:  http://localhost:5567/webhook/webhook-example/source_1
-  Auth: <public-auth-key>
-  Token: <private-token>
+Starting pipeline from ./chat.pipe...
+Pipeline started.
+Token: <task-token>
+Stop it with: rocketride stop --token <task-token>
 ```
 
-Keep the terminal open — the pipeline runs until you stop it.
+`start` exits after it prints the token. The pipeline keeps running on the
+engine until you stop it with that command. The token is not an address.
 
 ## Send a question
 
+A running webhook pipeline is reached on the engine's own port, at
+`/webhook/<project_id>/<source>`. Both parts come from the pipeline file: here
+`project_id` is `webhook-example` and `source` is `source_1`. The request must
+carry the engine's API key (the `ROCKETRIDE_APIKEY` you set for the CLI) as a
+bearer token. A request without it is refused with 401.
+
+The LLM in this pipeline listens on the `questions` lane, so send the question
+as `application/rocketride-question` with this JSON body. Plain text goes to the
+`text` lane and gets no answer from this pipeline.
+
 ```bash
-curl -X POST "http://localhost:5567/webhook/webhook-example/source_1" \
-  -H "Authorization: Bearer <public-auth-key>" \
-  -H "Content-Type: text/plain" \
-  -d "What is the capital of France?"
+curl -X POST "http://localhost:5565/webhook/webhook-example/source_1" \
+  -H "Authorization: Bearer $ROCKETRIDE_APIKEY" \
+  -H "Content-Type: application/rocketride-question" \
+  -d '{"type":"question","questions":[{"text":"What is the capital of France?"}]}'
 ```
 
-Response:
+The reply is a JSON envelope. The `response_answers` node puts each answer in an
+`answers` array under the object it was sent as (`body`). Shape, with other
+fields left out:
 
 ```json
-{ "answer": "The capital of France is Paris." }
+{
+  "status": "OK",
+  "data": {
+    "objects": {
+      "body": {
+        "answers": ["The capital of France is Paris."],
+        "status": "OK"
+      }
+    }
+  }
+}
 ```
 
 ## Use the Chat UI variant
@@ -92,19 +115,16 @@ HTTP endpoint, no `curl` required:
 { "id": "source_1", "provider": "chat" }
 ```
 
-Restart the pipeline. The engine prints a chat URL:
-
-```text
-Chat ready - system is ready to accept questions
-  URL: http://localhost:5567/chat/webhook-example/source_1?auth=<public-auth-key>
-```
+Restart the pipeline. The chat page is on the engine port, at
+`http://localhost:5565/chat/webhook-example/source_1?auth=<ROCKETRIDE_APIKEY>`.
+`start` does not print this address.
 
 Open that URL in a browser and start typing. The `?auth=` query parameter is a
 convenience for supplying the credential to the browser; the Chat UI stores it
 in session storage for subsequent page loads. Webhook requests use the same key
-in an `Authorization: Bearer <public-auth-key>` header.
+in an `Authorization: Bearer <ROCKETRIDE_APIKEY>` header.
 
-Each displayed URL includes the project and source identifiers, so it remains
+The URL includes the project and source identifiers, so it is
 specific to this pipeline. The legacy `/webhook`, `/task/data`, `/chat`, and
 `/dropper` URLs continue to work for existing integrations.
 

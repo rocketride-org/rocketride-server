@@ -31,7 +31,7 @@ started without one accepts any value:
 
 ```bash
 export ROCKETRIDE_URI=ws://localhost:5565
-export ROCKETRIDE_APIKEY=local
+export ROCKETRIDE_APIKEY=rr_local
 ```
 
 The `127.0.0.1:` prefix keeps the engine reachable only from the machine
@@ -75,7 +75,7 @@ The engine reads configuration from its environment — pass variables with
 
 The image binds all container interfaces, so the engine treats itself as a
 public bind. For the built-in MCP server at `http://localhost:5565/mcp` to work,
-start the container with an `rr_` key and with `ROCKETRIDE_URI`:
+start the container with an `rr_` key and with `ROCKETRIDE_URI`. If you already ran the quickstart command, remove that container first with `docker rm -f rocketride-engine`; the `rocketride-data` volume is kept.
 
 ```bash
 docker run -d --name rocketride-engine --platform linux/amd64 \

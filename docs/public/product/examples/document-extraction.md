@@ -94,8 +94,17 @@ export ROCKETRIDE_OPENAI_API_KEY=sk-...
 rocketride start --pipeline ./extract.pipe
 ```
 
-The engine scans the directory, processes each file through the pipeline, and
-streams the extracted JSON:
+`start` prints a task token and exits; the pipeline keeps running on the engine:
+
+```text
+Starting pipeline from ./extract.pipe...
+Pipeline started.
+Token: <task-token>
+Stop it with: rocketride stop --token <task-token>
+```
+
+The engine scans the directory and processes each file through the pipeline.
+The extracted JSON for each file has this shape:
 
 ```json
 {
@@ -127,8 +136,9 @@ Or via the Drag & Drop UI by using the `dropper` provider:
 { "id": "source_1", "provider": "dropper" }
 ```
 
-The engine prints a browser URL where you can drop files and see results in
-JSON, text, and table tabs.
+`start` does not print an address. The page is on the engine port, at
+`http://localhost:5565/dropper/<project_id>/<source>?auth=<ROCKETRIDE_APIKEY>`.
+Drop files there and see results in JSON, text, and table tabs.
 
 ## Next steps
 
