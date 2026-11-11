@@ -276,8 +276,7 @@ pipelines/  - pipeline definitions. Each pipelines/<name>.pipe is one JSON
               "viewport", "version" }. Providers come from the platform
               component catalog; lanes are typed (text, documents, questions,
               answers, tags, ...) and a connection is valid only when the lane
-              types match. Control connections (LLM/tool/memory serving an
-              agent component) go in the controlled node's "control" array.
+              types match.
 
 Workspace rules:
 - Put files only under apps/, nodes/ and pipelines/, because .rocketride/ is read-only and nothing else is part of the workspace.
