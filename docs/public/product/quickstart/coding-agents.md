@@ -16,7 +16,7 @@ Open source, MIT licensed. 150+ nodes, 15+ LLM providers, 10+ vector stores.
 
 ## Run the engine locally
 
-The engine ships as a container image. Run it like this:
+The engine ships as a container image. If a container named `rocketride-engine` already exists (the VS Code extension and the other docs use the same name), remove it first with `docker rm -f rocketride-engine`; the `rocketride-data` volume is kept. Then run:
 
 ```bash
 docker run -d --name rocketride-engine --platform linux/amd64 \
@@ -53,7 +53,7 @@ source .venv/bin/activate
 pip install rocketride
 ```
 
-For Node, use `npx rocketride`. `npm install rocketride` does not put the command on your path.
+For Node, use `npx rocketride`. `npm install rocketride` does not put the command on your path. Node users run every `rocketride` command on this page as `npx rocketride`.
 
 Point the client at the engine. The key must match the one the engine was started with:
 
@@ -83,7 +83,36 @@ rocketride validate hello.pipe
 rocketride start --pipeline ./hello.pipe
 ```
 
-`start` prints a task token and exits; the pipeline keeps running on the engine. Keep `"source": "in"`: this example's webhook has an empty config, so the engine cannot work out the source by itself. Without it, `start` fails with `Pipeline has no source.` even though `validate` passes.
+`start` prints a task token and exits; the pipeline keeps running on the engine. It does not print an address. The token is what you pass to `rocketride stop --token <token>`, `rocketride upload --token <token>`, and `client.send(token, ...)` in the SDK. Keep `"source": "in"`: this example's webhook has an empty config, so the engine cannot work out the source by itself. Without it, `start` fails with `Pipeline has no source.` even though `validate` passes.
+
+### Send text and read the reply
+
+This script starts `hello.pipe`, sends the text `hello`, prints the reply and stops the task. It reads `ROCKETRIDE_URI` and `ROCKETRIDE_APIKEY` from the environment, so run it in the same shell and folder:
+
+```python
+import asyncio
+from rocketride import RocketRideClient
+
+
+async def main():
+    async with RocketRideClient() as client:
+        result = await client.use(filepath='hello.pipe')
+        token = result['token']
+        out = await client.send(token, 'hello', mimetype='text/plain')
+        print(out['text'])
+        await client.terminate(token)
+
+
+asyncio.run(main())
+```
+
+It prints:
+
+```text
+['hello\n\n']
+```
+
+The reply has a trailing blank line (`hello` followed by two newlines), so an exact-match check should trim it.
 
 More: [Run from the CLI](/quickstart/cli), [CLI Reference](/connect/cli), [Python SDK](/clients/python), [TypeScript SDK](/clients/typescript).
 
@@ -111,7 +140,7 @@ The hosted MCP server is at `https://api.rocketride.ai/mcp`.
 claude mcp add --transport http rocketride https://api.rocketride.ai/mcp
 ```
 
-Claude Code then lists the server as needing authentication. Run `/mcp` in Claude Code and pick the server to finish the browser sign-in (OAuth). Clients that can send headers can use a RocketRide API key instead: `Authorization: Bearer rr_...`. For the CLI against RocketRide Cloud, `rocketride login --uri https://api.rocketride.ai` signs in through the browser and saves `ROCKETRIDE_URI` and `ROCKETRIDE_APIKEY` (and the `ROCKETRIDE_DEPLOY_*` pair) to `.env`. Without a browser, create a key in the web app and run `rocketride login --uri https://api.rocketride.ai --apikey <key>`.
+Claude Code then lists the server as needing authentication. Run `/mcp` in Claude Code and pick the server to finish the browser sign-in (OAuth). Clients that can send headers can use a RocketRide API key instead: `Authorization: Bearer rr_...`. For the CLI against RocketRide Cloud, `rocketride login --uri https://api.rocketride.ai` signs in through the browser and saves `ROCKETRIDE_URI` and `ROCKETRIDE_APIKEY` (and the `ROCKETRIDE_DEPLOY_*` pair) to `.env`. Without a browser, create a key in the web app and run `rocketride login --uri https://api.rocketride.ai --apikey <key>`. Run `unset ROCKETRIDE_URI ROCKETRIDE_APIKEY` first if you exported them in the steps above: a value exported in the shell wins over the one `login` saves to `.env`, so the CLI would keep talking to the local engine.
 
 More: [Connect a Client](/connect/mcp/http/connect) and [HTTP MCP Server](/connect/mcp/http).
 
