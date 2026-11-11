@@ -371,7 +371,9 @@ function pageDescription(content) {
 			if (para.length) break;
 			continue;
 		}
-		if (/^(#{1,6}\s|:::|<!--|\||[<{]|import\s|export\s|-{3,})/.test(t)) {
+		// Lists and callouts are not descriptions: "1. Install" would end at "1.",
+		// bullets would run together, and "> Deprecated." says nothing about the page.
+		if (/^(#{1,6}\s|:::|<!--|\||[<{]|import\s|export\s|-{3,}|[-*+]\s|\d+[.)]\s|>)/.test(t)) {
 			if (para.length) break;
 			continue;
 		}
