@@ -273,6 +273,12 @@
 			"title": "Model",
 			"description": "Bedrock LLM model name or ARN for custom or provisioned models"
 		},
+		"modelProvider": {
+			"type": "string",
+			"title": "Provider",
+			"description": "Vendor of the model, such as anthropic, meta, amazon, cohere, mistral or ai21. Needed only for an ARN that does not name its model (a provisioned model, an imported model or an application inference profile); otherwise it is read from the model ID.",
+			"optional": true
+		},
 		"modelTotalTokens": {
 			"type": "number",
 			"title": "Tokens",
@@ -287,7 +293,7 @@
 		},
 		"bedrock.custom": {
 			"object": "custom",
-			"properties": ["model", "modelTotalTokens", "modelOutputTokens", "aws.accessKey", "aws.secretKey", "aws.region"]
+			"properties": ["model", "modelProvider", "modelTotalTokens", "modelOutputTokens", "aws.accessKey", "aws.secretKey", "aws.region"]
 		},
 		"bedrock.ai21_jamba-1_5-large": {
 			"object": "ai21_jamba-1_5-large",
