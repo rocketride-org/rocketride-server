@@ -79,6 +79,7 @@ from typing import Awaitable, Callable, Dict, Any, Optional, Set
 from ai.constants import (
     CONST_CLEANUP_DELAY_TIME,
     CONST_CLEANUP_SLEEP_TIME,
+    CONST_TEARDOWN_WAIT_TIMEOUT,
     CONST_DEFAULT_TTL,
     CONST_TTL_CHECK,
     CONST_MAX_UNAUTHED_CONNS_PER_IP,
@@ -1743,8 +1744,17 @@ class TaskServer(DAPBase):
                 # final status, the terminal events and the run-log close are
                 # delivered through the registered control. A new run started
                 # under the same key meanwhile is not this control's to remove.
+                # The wait is bounded: a stalled terminal-event forward must not
+                # hold this caller (the ttl monitor stops tasks serially); on a
+                # timeout the control is left to the cleanup pass instead.
                 if control.run_kind == 'dev':
-                    await control.task.wait_terminated()
+                    try:
+                        await asyncio.wait_for(control.task.wait_terminated(), timeout=CONST_TEARDOWN_WAIT_TIMEOUT)
+                    except asyncio.TimeoutError:
+                        self.debug_message(
+                            f'Task "{control.id}" teardown exceeded {CONST_TEARDOWN_WAIT_TIMEOUT}s; left to cleanup'
+                        )
+                        return
                     if self._task_control.get(control.key) is control:
                         await self.remove_task(control.key)
 
