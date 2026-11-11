@@ -1,5 +1,6 @@
 """Unit tests for the per-device admission guard (fake memory probe and NVML, no torch needed)."""
 
+import contextlib
 import os
 import sys
 import threading
@@ -183,47 +184,41 @@ def _fast_recheck(monkeypatch):
     monkeypatch.setattr(budgetmod, 'IDLE_RELEASE_S', 60.0)  # tests of the idle release set their own
 
 
-class _Timers:
-    """Stands in for ``threading.Timer`` in the guard: records each idle timer; the test ends the idle spells."""
+class _Clock:
+    """Stands in for the guard's monotonic clock: an idle spell ends only when the test moves the clock past it."""
 
     def __init__(self, monkeypatch):
-        """Route the guard's timers here; build the guard after this.
+        """Stop the guard's clock.
 
         Args:
             monkeypatch: The test's monkeypatch fixture.
         """
-        self._due = []
-        self.intervals = []
-        monkeypatch.setattr(budgetmod, 'threading', types.SimpleNamespace(**{**vars(threading), 'Timer': self._timer}))
+        self._now = 1000.0
+        monkeypatch.setattr(budgetmod, 'time', types.SimpleNamespace(**{**vars(time), 'monotonic': lambda: self._now}))
 
-    def _timer(self, interval, function, args=()):
-        """Return a timer whose ``start`` only records it.
+    def advance(self, budget, seconds):
+        """Move the clock on, wake the guard's releasing thread, and wait until it has acted.
 
         Args:
-            interval: The idle spell the guard asks for; noted in ``intervals``, the test ends it.
-            function: What the timer runs.
-            args: Its arguments.
-
-        Returns:
-            The stand-in timer.
+            budget: The guard under test.
+            seconds: How far to move the clock.
         """
-        self.intervals.append(interval)
-        return types.SimpleNamespace(daemon=False, start=lambda: self._due.append((function, args)))
-
-    def end_idle_spells(self):
-        """Fire every timer started so far, in the order they started."""
-        due, self._due = self._due, []
-        for function, args in due:
-            function(*args)
+        self._now += seconds
+        with budget._cond:
+            budget._cond.notify_all()
+        assert _settled(budget)
 
 
 class _Cond(threading.Condition):
-    """The guard's condition, noting each thread that waited on it."""
+    """The guard's condition, noting each thread that waited on it and whether a waiter has seen every notify."""
 
     def __init__(self):
         """Start with no thread noted."""
         super().__init__()
         self.waited = set()
+        self._notifies = 0
+        self._waits_since = {}
+        self._held = {}
 
     def wait(self, timeout=None):
         """Note the calling thread, then wait as ``threading.Condition`` does.
@@ -235,8 +230,51 @@ class _Cond(threading.Condition):
             False if the wait timed out, True otherwise.
         """
         # the thread object, not its id: the OS hands a finished thread's id to a new one
-        self.waited.add(threading.current_thread())
-        return super().wait(timeout)
+        me = threading.current_thread()
+        self.waited.add(me)
+        self._waits_since[me] = self._notifies
+        try:
+            return super().wait(timeout)
+        finally:
+            del self._waits_since[me]
+            held = self._held.get(me)
+            if held is not None:
+                # woken while held: give the lock back and stay out until let go
+                state = self._release_save()
+                held.wait(_HOLD)
+                self._acquire_restore(state)
+
+    def hold(self, thread):
+        """Keep a waiting thread from acting, without the lock, from its next wake until ``let_go``.
+
+        Args:
+            thread: The thread to hold.
+        """
+        self._held[thread] = threading.Event()
+
+    def let_go(self, thread):
+        """Let a held thread act again.
+
+        Args:
+            thread: The thread held by ``hold``.
+        """
+        self._held.pop(thread).set()
+
+    def notify_all(self):
+        """Count the notify, then wake every waiter."""
+        self._notifies += 1
+        super().notify_all()
+
+    def settled(self, thread):
+        """Tell whether a thread waits now and began after the last notify; the caller holds the lock.
+
+        Args:
+            thread: The thread to look at.
+
+        Returns:
+            True if it has acted on every notify and waits again.
+        """
+        return self._waits_since.get(thread) == self._notifies
 
 
 def _watched(budget):
@@ -252,18 +290,39 @@ def _watched(budget):
     return budget
 
 
-def _gpu(probe, neighbours=None, release=None):
+def _settled(budget):
+    """Wait until the guard's releasing thread, once started, waits again after the last notify.
+
+    Args:
+        budget: A guard built by ``_watched``.
+
+    Returns:
+        Whether it does within ``_ENTERS`` seconds.
+    """
+
+    def settled():
+        """Return whether the releasing thread has nothing left to act on."""
+        with budget._cond:
+            return budget._releaser is None or budget._cond.settled(budget._releaser)
+
+    return _wait_for(settled)
+
+
+def _gpu(probe, neighbours=None, release=None, warm=None):
     """Build a GPU guard on fakes.
 
     Args:
         probe: The memory probe.
         neighbours: The neighbour probe; none listed by default.
         release: The cache release; a counting fake by default.
+        warm: The workspace set-up; one that does nothing by default.
 
     Returns:
         The guard of ``cuda:0``.
     """
-    return _watched(DeviceBudget('cuda:0', probe, neighbours or _Neighbours(), release or _Release()))
+    return _watched(
+        DeviceBudget('cuda:0', probe, neighbours or _Neighbours(), release or _Release(), warm or (lambda: None))
+    )
 
 
 def test_first_call_enters_whatever_it_costs():
@@ -315,6 +374,16 @@ def test_memory_a_call_already_holds_is_not_counted_twice():
     assert second.enters()
     first.leave()
     second.leave()
+
+
+def test_memory_held_while_the_device_was_idle_is_not_a_calls_progress():
+    """What the process held when the device was last idle (loaded models) does not count against a call's cost."""
+    budget = _gpu(_Probe(free=3000, allocated=3000))
+    first = _Call(budget, 2000)
+    assert first.enters()
+    second = _Call(budget, 1000)  # the first may still claim its 2000 MB
+    assert second.stays_out()
+    _leave_all([first, second])
 
 
 def test_memory_freed_elsewhere_is_seen_without_a_release():
@@ -414,22 +483,23 @@ def test_a_failed_memory_read_leaves_the_queue():
 
 def test_the_cache_is_released_once_the_device_stays_idle(monkeypatch):
     """The cache goes back only after the last call left and the device stayed idle."""
-    monkeypatch.setattr(budgetmod, 'IDLE_RELEASE_S', 0.05)
+    clock = _Clock(monkeypatch)
     release = _Release()
     budget = _gpu(_Probe(free=4000), release=release)
     first, second = _Call(budget, 1000), _Call(budget, 1000)
     assert first.enters() and second.enters()
 
     first.leave()
-    time.sleep(_STAYS_OUT)
+    clock.advance(budget, budgetmod.IDLE_RELEASE_S)
     assert release.count == 0  # a call is still inside
     second.leave()
-    assert _wait_for(lambda: release.count == 1)
+    clock.advance(budget, budgetmod.IDLE_RELEASE_S)
+    assert release.count == 1
 
 
 def test_the_cache_is_kept_for_a_waiting_call(monkeypatch):
     """A call that leaves while another waits keeps the cache for it."""
-    monkeypatch.setattr(budgetmod, 'IDLE_RELEASE_S', 0.05)
+    clock = _Clock(monkeypatch)
     release = _Release()
     budget = _gpu(_Probe(free=1000), release=release)
     first = _Call(budget, 1000)
@@ -439,29 +509,30 @@ def test_the_cache_is_kept_for_a_waiting_call(monkeypatch):
 
     first.leave()
     assert second.enters()
-    time.sleep(_STAYS_OUT)
+    clock.advance(budget, budgetmod.IDLE_RELEASE_S)
     assert release.count == 0
     second.leave()
-    assert _wait_for(lambda: release.count == 1)
+    clock.advance(budget, budgetmod.IDLE_RELEASE_S)
+    assert release.count == 1
 
 
 def test_back_to_back_calls_keep_the_cache(monkeypatch):
-    """Calls in quick succession keep the cache; one release follows the last."""
-    timers = _Timers(monkeypatch)
+    """Calls in quick succession keep the cache; one release follows the last, a whole idle spell after it."""
+    clock = _Clock(monkeypatch)
     release = _Release()
     budget = _gpu(_Probe(free=1e6), release=release)
     for _ in range(3):
         with budget.reserve(100):
             pass
-    assert release.count == 0  # nothing goes back while the spells last
-    assert timers.intervals == [budgetmod.IDLE_RELEASE_S] * 3  # one spell per drain
-    timers.end_idle_spells()  # each drain's spell ends; only the last saw no call after it
+        clock.advance(budget, budgetmod.IDLE_RELEASE_S / 2)  # the next call comes within the spell
+    assert release.count == 0  # each drain starts the spell again
+    clock.advance(budget, budgetmod.IDLE_RELEASE_S / 2)
     assert release.count == 1
 
 
 def test_a_call_inside_when_the_idle_spell_ends_keeps_the_cache(monkeypatch):
-    """A call that entered during the idle spell is not robbed of its cache when the timer fires."""
-    timers = _Timers(monkeypatch)
+    """A call that entered during the idle spell is not robbed of its cache when the spell ends."""
+    clock = _Clock(monkeypatch)
     budget = None
     release = _Release(lambda: budget)
     budget = _gpu(_Probe(free=1e6), release=release)
@@ -469,11 +540,322 @@ def test_a_call_inside_when_the_idle_spell_ends_keeps_the_cache(monkeypatch):
         pass  # the device goes idle: a release is due
     call = _Call(budget, 100)
     assert call.enters()
-    timers.end_idle_spells()  # the spell ends with the call inside
+    clock.advance(budget, budgetmod.IDLE_RELEASE_S)  # the spell ends with the call inside
     assert release.count == 0
     call.leave()
-    timers.end_idle_spells()
+    assert _settled(budget)
+    assert release.count == 0  # its drain starts a new idle spell
+    clock.advance(budget, budgetmod.IDLE_RELEASE_S)
     assert release.inside_at == [0]
+
+
+def test_a_call_in_the_idle_spell_keeps_the_cache_for_the_call_queued_behind_it(monkeypatch):
+    """A call that enters during an idle spell ends it, so the cache stays when it hands over to a queued call."""
+    clock = _Clock(monkeypatch)
+    budget = None
+    release = _Release(lambda: budget)
+    budget = _gpu(_Probe(free=1e6), release=release)
+    with budget.reserve(100):
+        pass  # the device drains: an idle spell starts
+    clock.advance(budget, budgetmod.IDLE_RELEASE_S / 2)
+    first = _Call(budget, None)  # runs alone, so the next call queues
+    assert first.enters()
+    second = _Call(budget, 100)
+    assert second.stays_out()
+    clock.advance(budget, budgetmod.IDLE_RELEASE_S)  # the old spell's time is up
+    budget._cond.hold(second._thread)  # the releasing thread acts before the queued call can enter
+    first.leave()
+    assert _settled(budget)
+    assert release.count == 0
+    budget._cond.let_go(second._thread)
+    assert second.enters()
+    second.leave()
+    clock.advance(budget, budgetmod.IDLE_RELEASE_S)
+    assert release.inside_at == [0]
+
+
+def test_each_idle_spell_releases_once(monkeypatch):
+    """A release follows every idle spell, and only one per spell."""
+    clock = _Clock(monkeypatch)
+    release = _Release()
+    budget = _gpu(_Probe(free=1e6), release=release)
+    with budget.reserve(100):
+        pass
+    clock.advance(budget, budgetmod.IDLE_RELEASE_S)
+    assert release.count == 1
+    for _ in range(3):
+        clock.advance(budget, budgetmod.IDLE_RELEASE_S)
+    assert release.count == 1  # still idle: nothing more to hand back
+    with budget.reserve(100):
+        pass
+    clock.advance(budget, budgetmod.IDLE_RELEASE_S)
+    assert release.count == 2
+
+
+def test_the_releasing_thread_wakes_for_every_drain_on_the_real_clock(monkeypatch):
+    """With nothing due the releasing thread waits without a timeout, so each later drain must wake it."""
+    monkeypatch.setattr(budgetmod, 'IDLE_RELEASE_S', 0.05)
+    release = _Release()
+    budget = _gpu(_Probe(free=1e6), release=release)
+    for n in (1, 2, 3):
+        call = _Call(budget, 100)
+        assert call.enters()
+        assert _settled(budget)  # it has seen the call enter and waits again: only the leave can wake it
+        call.leave()
+        assert _wait_for(lambda: release.count == n)
+
+
+def test_drains_do_not_start_a_thread_each(monkeypatch):
+    """The guard keeps one releasing thread, however many times the device drains."""
+    monkeypatch.setattr(budgetmod, 'IDLE_RELEASE_S', 0.05)
+    budget = _gpu(_Probe(free=1e6))
+    before = threading.active_count()
+    for _ in range(20):
+        with budget.reserve(100):
+            pass
+    assert threading.active_count() - before <= 1
+
+
+def test_each_thread_sets_up_its_workspace_once():
+    """A thread's first call on a GPU sets up its cuBLAS workspace before the call runs; its later calls do not."""
+    warmed = []
+    budget = _gpu(_Probe(free=1e6), warm=lambda: warmed.append(threading.get_ident()))
+    for _ in range(2):
+        with budget.reserve(100):
+            assert warmed == [threading.get_ident()]
+    other = _Call(budget, 100)
+    assert other.enters()
+    other.leave()
+    assert len(warmed) == 2 and warmed[1] != warmed[0]
+
+
+def test_a_thread_given_a_finished_threads_id_sets_up_again(monkeypatch):
+    """A new thread sets up its workspace even when the OS gives it the id of a thread that has ended."""
+    monkeypatch.setattr(budgetmod, 'threading', types.SimpleNamespace(**{**vars(threading), 'get_ident': lambda: 1}))
+    warmed = []
+    budget = _gpu(_Probe(free=1e6), warm=lambda: warmed.append(1))
+    for _ in range(2):
+        call = _Call(budget, 100)
+        assert call.enters()
+        call.leave()
+    assert len(warmed) == 2
+
+
+def test_a_failed_workspace_set_up_does_not_fail_the_call(monkeypatch):
+    """A torch without memory pools is logged once, not tried again, and leaves the calls and the guard as they were."""
+    warnings = []
+    monkeypatch.setattr(budgetmod, 'logger', types.SimpleNamespace(warning=lambda *args: warnings.append(args)))
+    tries = []
+
+    def warm():
+        """Fail as a torch without memory pools would."""
+        tries.append(1)
+        raise AttributeError("module 'torch.cuda' has no attribute 'MemPool'")
+
+    budget = _gpu(_Probe(free=1e6), warm=warm)
+    with budget.reserve(100):
+        pass
+    other = _Call(budget, 100)
+    assert other.enters()
+    other.leave()
+    assert len(tries) == 1 and len(warnings) == 1 and 'cuBLAS' in warnings[0][0]
+    assert budget._inside == []
+
+
+def test_a_set_up_that_fails_in_one_thread_is_tried_by_the_next(monkeypatch):
+    """A failure other than a missing API (out of memory) stays with its thread; it is logged once."""
+    warnings = []
+    monkeypatch.setattr(budgetmod, 'logger', types.SimpleNamespace(warning=lambda *args: warnings.append(args)))
+    tries = []
+
+    def warm():
+        """Fail in the first two threads, as a set-up out of memory would."""
+        tries.append(threading.current_thread())
+        if len(tries) <= 2:
+            raise RuntimeError('CUDA out of memory')
+
+    budget = _gpu(_Probe(free=1e6), warm=warm)
+    for _ in range(3):
+        call = _Call(budget, 100)
+        assert call.enters()
+        call.leave()
+    assert len(set(tries)) == 3 and len(warnings) == 1
+
+
+class _FakeCuda:
+    """``torch.cuda`` as the workspace set-up uses it, with torch 2.10's rules for memory pools."""
+
+    def __init__(self):
+        """Start on device 0 in every thread, with no pool."""
+        self._current = threading.local()
+        self._lock = threading.Lock()
+        self._uses = {}  # (device, pool id) -> the pool's use count on that device
+        self._recorders = {}  # (device, pool id) -> the thread recording to it
+        self._next_id = 0
+        self.workspaces = []  # (thread, device, pool id or None for the default pool)
+        self.on_handle = lambda: None
+
+    def current_device(self):
+        """Return the calling thread's current device."""
+        return getattr(self._current, 'index', 0)
+
+    @contextlib.contextmanager
+    def device(self, index):
+        """Make a device current in the calling thread.
+
+        Args:
+            index: The device.
+
+        Yields:
+            None, while the device is current.
+        """
+        before = self.current_device()
+        self._current.index = index
+        try:
+            yield
+        finally:
+            self._current.index = before
+
+    def MemPool(self):
+        """Make a pool on the current device, as ``torch.cuda.MemPool`` does."""
+        with self._lock:
+            self._next_id += 1
+            pool = types.SimpleNamespace(id=(0, self._next_id), device=self.current_device())
+            self._uses[(pool.device, pool.id)] = 1
+        return pool
+
+    @contextlib.contextmanager
+    def use_mem_pool(self, pool):
+        """Route the calling thread's allocations on the current device to a pool.
+
+        Args:
+            pool: The pool.
+
+        Yields:
+            None, while the thread records to the pool.
+
+        Raises:
+            RuntimeError: As torch's allocator, when the pool has no use left on this device
+                or another thread already records to it.
+        """
+        key = (self.current_device(), pool.id)
+        with self._lock:
+            # create_or_incref_pool: a pool first met on a device starts there at 1 and must stay live
+            if key in self._uses and self._uses[key] <= 0:
+                raise RuntimeError('INTERNAL ASSERT FAILED: it->second->use_count > 0')
+            self._uses[key] = self._uses.get(key, 0) + 1
+            if key in self._recorders:
+                raise RuntimeError('beginAllocateToPool: already recording to mempool_id')
+            self._recorders[key] = threading.current_thread()
+        try:
+            yield
+        finally:
+            with self._lock:
+                del self._recorders[key]
+                self._uses[key] -= 1
+
+    def current_blas_handle(self):
+        """Allocate the calling thread's workspace where its allocations go now."""
+        self.on_handle()
+        key = (self.current_device(), None)
+        with self._lock:
+            pools = [k[1] for k, t in self._recorders.items() if t is threading.current_thread() and k[0] == key[0]]
+        self.workspaces.append((threading.current_thread(), key[0], pools[0] if pools else None))
+
+
+class _WatchedLock:
+    """A lock that notes when a thread has to wait for it."""
+
+    def __init__(self):
+        """Start unlocked, with no wait noted."""
+        self._lock = threading.Lock()
+        self.waited = threading.Event()
+
+    def __enter__(self):
+        """Take the lock, noting a wait if another thread holds it."""
+        if not self._lock.acquire(blocking=False):
+            self.waited.set()
+            self._lock.acquire()
+        return self
+
+    def __exit__(self, *exc):
+        """Give the lock back."""
+        self._lock.release()
+
+
+def _fake_warm(monkeypatch, device):
+    """Build the real workspace set-up of a device on a fake ``torch.cuda``.
+
+    Args:
+        monkeypatch: The test's monkeypatch fixture.
+        device: The device, ``'cuda:N'``.
+
+    Returns:
+        (the set-up, the fake ``torch.cuda``, the set-up's lock).
+    """
+    cuda, lock = _FakeCuda(), _WatchedLock()
+    monkeypatch.setitem(sys.modules, 'ai.common.torch', types.SimpleNamespace(torch=types.SimpleNamespace(cuda=cuda)))
+    with monkeypatch.context() as m:
+        m.setattr(budgetmod, 'threading', types.SimpleNamespace(**{**vars(threading), 'Lock': lambda: lock}))
+        warm = budgetmod._cuda_warm(device)
+    return warm, cuda, lock
+
+
+def test_a_thread_setting_up_beside_another_waits_and_gets_its_workspace_in_the_pool(monkeypatch):
+    """A second thread waits while the first records to the pool, which takes one recorder, and both land in it."""
+    warm, cuda, lock = _fake_warm(monkeypatch, 'cuda:0')
+    errors = []
+
+    def second():
+        """Set up a second thread, keeping what it raises."""
+        try:
+            warm()
+        except Exception as e:
+            errors.append(e)
+
+    other = threading.Thread(target=second)
+
+    def first_handle():
+        """While the first thread records, start the second and see it refused or waiting."""
+        cuda.on_handle = lambda: None
+        other.start()
+        assert _wait_for(lambda: errors or lock.waited.is_set())
+
+    cuda.on_handle = first_handle
+    warm()
+    other.join(_ENTERS)
+    assert errors == []
+    assert [(device, pool) for _, device, pool in cuda.workspaces] == [(0, (0, 1))] * 2
+    assert len({thread for thread, _, _ in cuda.workspaces}) == 2
+
+
+def test_the_workspace_pool_is_made_on_the_guards_device(monkeypatch):
+    """On ``cuda:1`` the pool is made there, though threads enter on device 0, so every thread's workspace lands in it."""
+    warm, cuda, _ = _fake_warm(monkeypatch, 'cuda:1')
+    errors = []
+
+    def one():
+        """Set up one thread, keeping what it raises."""
+        try:
+            warm()
+        except Exception as e:
+            errors.append(e)
+
+    for _ in range(3):
+        thread = threading.Thread(target=one)
+        thread.start()
+        thread.join(_ENTERS)
+    assert errors == []
+    assert [(device, pool) for _, device, pool in cuda.workspaces] == [(1, (0, 1))] * 3
+
+
+def test_no_workspace_set_up_on_cpu():
+    """Calls on the CPU leave cuBLAS alone."""
+    warmed = []
+    budget = DeviceBudget('cpu', warm=lambda: warmed.append(1))
+    with budget.reserve(100):
+        pass
+    assert warmed == []
 
 
 def test_beside_a_neighbour_every_call_starts_without_cache():
@@ -656,6 +1038,7 @@ def test_a_failed_process_name_read_falls_back_and_is_read_again(monkeypatch):
         nvmlDeviceGetHandleByUUID=lambda uuid: 'handle',
         nvmlDeviceGetComputeRunningProcesses=lambda handle: only_this_process,
         nvmlDeviceGetGraphicsRunningProcesses=lambda handle: [],
+        nvmlDeviceGetProcessUtilization=lambda handle, since: [],
     )
     cuda = types.SimpleNamespace(get_device_properties=lambda index: types.SimpleNamespace(uuid='0'))
     warnings = []
@@ -671,6 +1054,235 @@ def test_a_failed_process_name_read_falls_back_and_is_read_again(monkeypatch):
     assert len(warnings) == 1
 
 
+def test_an_idle_engine_process_is_not_a_neighbour():
+    """A process named like this one that was not seen busy only holds a context."""
+    assert not _has_neighbour({10, 11, 20}, 10, 'engine.exe', _name_of, busy=set())
+    assert _has_neighbour({10, 11, 20}, 10, 'engine.exe', _name_of, busy={11})
+    assert not _has_neighbour({10, 11, 20}, 10, 'engine.exe', _name_of, busy={20})  # a busy desktop does not count
+
+
+def test_without_utilisation_every_listed_process_counts():
+    """Without per-process utilisation (``busy`` is None) the old rule holds."""
+    assert _has_neighbour({10, 11}, 10, 'engine.exe', _name_of, busy=None)
+    assert _has_neighbour({10, 30}, 10, 'engine.exe', _name_of, busy=None)
+
+
+def test_an_unnamed_process_counts_only_when_busy():
+    """A process that cannot be named is told apart by utilisation when this process is listed."""
+    assert not _has_neighbour({10, 30}, 10, 'engine.exe', _name_of, busy=set())
+    assert _has_neighbour({10, 30}, 10, 'engine.exe', _name_of, busy={30})
+
+
+def test_in_another_pid_namespace_unnamed_processes_count_whatever_their_utilisation():
+    """Host pids cannot be matched to this process, so an idle unnamed one still counts beyond the first."""
+    assert not _has_neighbour({30}, 5, 'engine', _name_of, busy=set())
+    assert _has_neighbour({30, 31}, 5, 'engine', _name_of, busy=set())
+
+
+def test_in_another_pid_namespace_a_named_idle_process_is_not_a_neighbour():
+    """A host pid that can be named is told apart by utilisation as usual."""
+    names = {11: 'engine'}
+    assert not _has_neighbour({11}, 5, 'engine', lambda pid: names.get(pid, '?'), busy=set())
+    assert _has_neighbour({11}, 5, 'engine', lambda pid: names.get(pid, '?'), busy={11})
+
+
+class _NotFound(Exception):
+    """NVML's "no sample" error."""
+
+    value = 6
+
+
+def _sample(pid, sm, mem=0):
+    """Build a fake NVML utilisation sample.
+
+    Args:
+        pid: The process id.
+        sm: Its SM utilisation.
+        mem: Its memory utilisation.
+
+    Returns:
+        The sample.
+    """
+    return types.SimpleNamespace(pid=pid, smUtil=sm, memUtil=mem)
+
+
+def test_busy_pids_are_those_with_a_sample_above_zero():
+    """Only processes with SM or memory utilisation count as busy."""
+    seen = []
+
+    def util(handle, since):
+        """Record the start of the window and return the samples."""
+        seen.append(since)
+        return [_sample(1, 80), _sample(2, 0), _sample(3, 0, 5)]
+
+    nvml = types.SimpleNamespace(nvmlDeviceGetProcessUtilization=util, NVML_ERROR_NOT_FOUND=6)
+    before = time.time()
+    assert budgetmod._busy_pids(nvml, 'handle', 10.0) == {1, 3}
+    assert (before - 10.0) * 1e6 - 1 <= seen[0] <= (time.time() - 10.0) * 1e6  # int() truncates
+
+
+def test_no_sample_in_the_window_means_nothing_was_busy():
+    """NVML's not-found error is an empty answer, not a failure."""
+
+    def util(handle, since):
+        """Raise as NVML does when nothing ran."""
+        raise _NotFound()
+
+    nvml = types.SimpleNamespace(nvmlDeviceGetProcessUtilization=util, NVML_ERROR_NOT_FOUND=6)
+    assert budgetmod._busy_pids(nvml, 'handle', 10.0) == set()
+
+
+def test_another_utilisation_error_is_not_an_empty_answer():
+    """Any other NVML error is raised, so the caller keeps the old rule."""
+
+    def util(handle, since):
+        """Raise as NVML does on a device without the call."""
+        raise RuntimeError('not supported')
+
+    nvml = types.SimpleNamespace(nvmlDeviceGetProcessUtilization=util, NVML_ERROR_NOT_FOUND=6)
+    with pytest.raises(RuntimeError):
+        budgetmod._busy_pids(nvml, 'handle', 10.0)
+
+
+def test_an_error_is_not_an_empty_answer_without_the_not_found_code():
+    """A binding without NVML's not-found code cannot tell "nothing ran", so every error is raised."""
+
+    def util(handle, since):
+        """Raise an error that carries no NVML code."""
+        raise RuntimeError('not supported')
+
+    nvml = types.SimpleNamespace(nvmlDeviceGetProcessUtilization=util)
+    with pytest.raises(RuntimeError):
+        budgetmod._busy_pids(nvml, 'handle', 10.0)
+
+
+class _FakeNvml:
+    """NVML with a settable process list and per-process busy times."""
+
+    NVML_ERROR_NOT_FOUND = 6
+
+    def __init__(self, listed):
+        """List the given pids; ``busy_until`` maps a pid to the time it last ran.
+
+        Args:
+            listed: The pids on the device.
+        """
+        self.listed = listed
+        self.busy_until = {}
+        self.fail = None
+
+    def nvmlInit(self):
+        """Do nothing."""
+
+    def nvmlDeviceGetHandleByUUID(self, uuid):
+        """Return a placeholder handle."""
+        return 'handle'
+
+    def nvmlDeviceGetComputeRunningProcesses(self, handle):
+        """List the pids."""
+        return [types.SimpleNamespace(pid=pid) for pid in self.listed]
+
+    def nvmlDeviceGetGraphicsRunningProcesses(self, handle):
+        """List nothing."""
+        return []
+
+    def nvmlDeviceGetProcessUtilization(self, handle, since):
+        """Return a sample for each process that ran after ``since``, as NVML does."""
+        if self.fail:
+            raise self.fail
+        samples = [_sample(pid, 80) for pid, last in self.busy_until.items() if last * 1e6 > since]
+        if not samples:
+            raise _NotFound()
+        return samples
+
+
+@pytest.fixture
+def _nvml(monkeypatch):
+    """Install a fake NVML, psutil, torch and clock, this process just seen busy; return (probe, NVML, clock)."""
+    own = os.getpid()
+    clock = [1000.0]
+    nvml = _FakeNvml([own, 7777])
+    nvml.busy_until[own] = clock[0]
+    names = {own: 'engine.exe', 7777: 'engine.exe'}
+    cuda = types.SimpleNamespace(get_device_properties=lambda index: types.SimpleNamespace(uuid='0'))
+    process = types.SimpleNamespace(Process=lambda pid=own: types.SimpleNamespace(name=lambda: names[pid]))
+    monkeypatch.setitem(sys.modules, 'psutil', process)
+    monkeypatch.setitem(sys.modules, 'pynvml', nvml)
+    monkeypatch.setitem(sys.modules, 'ai.common.torch', types.SimpleNamespace(torch=types.SimpleNamespace(cuda=cuda)))
+    monkeypatch.setattr(budgetmod, '_process_name', lambda pid: names.get(pid, '?'))
+    monkeypatch.setattr(budgetmod, 'time', types.SimpleNamespace(time=lambda: clock[0], monotonic=time.monotonic))
+    return budgetmod._nvml_neighbours('cuda:0'), nvml, clock
+
+
+def test_an_idle_neighbour_does_not_count(_nvml):
+    """The idle process of a finished task holds a context but has run nothing for a minute."""
+    neighbours, nvml, clock = _nvml
+    nvml.busy_until[7777] = clock[0] - 60
+    assert neighbours() is False
+
+
+def test_a_busy_neighbour_counts_until_the_window_has_passed(_nvml):
+    """A neighbour counts while its last sample is inside the window, and not after."""
+    neighbours, nvml, clock = _nvml
+    nvml.busy_until[7777] = clock[0]
+    assert neighbours() is True
+    clock[0] += budgetmod.BUSY_WINDOW_S - 1
+    assert neighbours() is True
+    clock[0] += 2  # the neighbour paused for longer than the window
+    assert neighbours() is False
+    nvml.busy_until[7777] = clock[0]  # and it resumes
+    assert neighbours() is True
+
+
+def test_samples_count_once_they_have_shown_this_process_busy(_nvml, monkeypatch):
+    """Until NVML has sampled this process busy, an idle-looking neighbour counts; from then on it does not."""
+    neighbours, nvml, clock = _nvml
+    warnings = []
+    monkeypatch.setattr(budgetmod, 'logger', types.SimpleNamespace(warning=lambda *args: warnings.append(args)))
+    del nvml.busy_until[os.getpid()]
+    nvml.busy_until[3908] = clock[0]  # a busy desktop says nothing about engine processes
+    assert neighbours() is True
+    nvml.busy_until[os.getpid()] = clock[0]
+    assert neighbours() is False
+    clock[0] += budgetmod.BUSY_WINDOW_S + 1  # this process idle since
+    assert neighbours() is False
+    assert not warnings  # the first answer came from the samples, not from a failed read
+
+
+def test_a_driver_that_samples_no_process_keeps_the_old_rule(_nvml, monkeypatch):
+    """With no sample of this process ever, every listed engine process counts, without a warning."""
+    neighbours, nvml, clock = _nvml
+    del nvml.busy_until[os.getpid()]
+    warnings = []
+    monkeypatch.setattr(budgetmod, 'logger', types.SimpleNamespace(warning=lambda *args: warnings.append(args)))
+    assert neighbours() is True
+    clock[0] += 60
+    assert neighbours() is True
+    assert not warnings
+
+
+def test_without_a_utilisation_call_every_listed_engine_counts_and_it_is_logged_once(_nvml, monkeypatch):
+    """A device that cannot report utilisation keeps the old rule, with one warning."""
+    neighbours, nvml, clock = _nvml
+    nvml.fail = RuntimeError('not supported')
+    warnings = []
+    monkeypatch.setattr(budgetmod, 'logger', types.SimpleNamespace(warning=lambda *args: warnings.append(args)))
+    assert neighbours() is True
+    assert neighbours() is True
+    assert len(warnings) == 1
+    assert 'utilisation' in warnings[0][0]
+
+
+def test_a_failed_utilisation_read_is_tried_again(_nvml):
+    """A utilisation error keeps the old rule for that listing only, even once the samples were trusted."""
+    neighbours, nvml, clock = _nvml
+    assert neighbours() is False
+    nvml.fail = RuntimeError('busy driver')
+    assert neighbours() is True
+    nvml.fail = None
+    assert neighbours() is False
+
+
 def test_the_cuda_release_hands_the_cache_back():
     """The real release frees memory torch cached on a CUDA device."""
     torch = pytest.importorskip('torch')
@@ -681,8 +1293,47 @@ def test_the_cuda_release_hands_the_cache_back():
     cached = torch.cuda.memory_reserved(0) - torch.cuda.memory_allocated(0)
     assert cached >= 64 << 20
 
-    budgetmod._cuda_release('cuda:0')()
+    budgetmod._cuda_release()()
     assert torch.cuda.memory_reserved(0) - torch.cuda.memory_allocated(0) < 64 << 20
+
+
+def test_the_cuda_workspace_set_up_keeps_large_blocks_releasable():
+    """A workspace made by the first product sits in a freed large block and keeps it; one set up first does not."""
+    torch = pytest.importorskip('torch')
+    if not torch.cuda.is_available():
+        pytest.skip('needs a CUDA device')
+    big = 256 << 20
+
+    def kept_mb(warm):
+        """With no cuBLAS workspace left, so the product needs a new one, free a large block, run a product, release.
+
+        Args:
+            warm: Sets up the workspace once the large block is free, as a thread entering late finds it, or None.
+
+        Returns:
+            The MB still reserved above the start.
+        """
+        torch._C._cuda_clearCublasWorkspaces()  # a workspace kept from earlier would make the product allocate none
+        torch.cuda.empty_cache()
+        start = torch.cuda.memory_reserved(0)
+        with torch.cuda.stream(torch.cuda.Stream(0)):
+            block = torch.empty(big, dtype=torch.uint8, device='cuda:0')
+            del block  # a large free block in this stream's cache
+            if warm:
+                warm()
+            a = torch.ones(64, 64, device='cuda:0')
+            (a @ a).sum().item()
+            del a
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+        return (torch.cuda.memory_reserved(0) - start) / (1 << 20)
+
+    try:
+        assert kept_mb(None) >= 256  # the workspace was carved from the large block
+        assert kept_mb(budgetmod._cuda_warm('cuda:0')) < 64
+    finally:
+        torch._C._cuda_clearCublasWorkspaces()  # this test runs alone on the device
+        torch.cuda.empty_cache()
 
 
 def test_one_guard_per_device(monkeypatch):

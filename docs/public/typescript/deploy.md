@@ -88,8 +88,13 @@ listing is: submit → approve → repoint the public pointer.
 
 App ids are partitioned by the caller org's **developer id**: every app is
 `<developerId>.<name>` (globally unique), so an org can only deploy/publish
-ids inside its own namespace — the platform holds `rocketride`. Deploying or
-publishing an app requires the org to have claimed a developer id.
+ids inside its own namespace (the platform holds `rocketride`). Deploying an app, or
+publishing one from your own namespace, requires the org to have claimed a
+developer id (pinning another organization's store app to `@me` or `@team`
+does not): an org admin claims it once, permanently, with `client.registerDeveloper(id)`
+(RocketRide Cloud only), and `client.developerStatus()` reads it back. A self-hosted
+server registers nothing: its namespace is `rocketride`, and `client.developerStatus()`
+reports that.
 
 The lifecycle, verb by verb: scaffold with `deploy.createApp`, pre-check with
 `deploy.verifyApp`, then pack and deploy with `deploy.addApp` (or the raw
