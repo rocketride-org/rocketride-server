@@ -745,8 +745,15 @@ class TaskServer(DAPBase):
         its scope. There is NO owner qualifier: nobody can name another
         user's control.
 
+        The walk runs over LIVE controls first: a stopped run never answers
+        its address while another rung has a live one (a dead ``@dev`` falls
+        through). Only when no rung has a live control is the walk repeated
+        over every registered control, so a run that just finished keeps its
+        final status readable until the cleanup pass removes it.
+
         A two-segment address (no source) resolves when exactly one live
         source answers; several live sources raise ``TASK_SOURCE_REQUIRED``.
+        A finished source never counts against a live one.
 
         Args:
             address (str): ``developerId.pipelineId[.source]`` (the token slot).
@@ -794,62 +801,74 @@ class TaskServer(DAPBase):
         user_id = account_info.userId
         rungs: List[str] = []
 
-        # @dev: the caller's own presence. Attach-only, and skipped for a
-        # scoped (machine) credential.
-        if endpoints is None:
-            rungs.append('@dev')
+        def _walk(pool: List[TASK_CONTROL]) -> Optional[TASK_CONTROL]:
+            """The rungs in order over ``pool``: the first hit, verified, or None."""
+            rungs.clear()
+
+            # @dev: the caller's own presence. Attach-only, and skipped for a
+            # scoped (machine) credential.
+            if endpoints is None:
+                rungs.append('@dev')
+                control = _pick([c for c in pool if c.run_kind == 'dev' and c.owner_id == user_id and _matches(c)])
+                if control is not None:
+                    return self._verify_control(control, account_info, require)
+
+            # @me: the caller's personal (user-owned) deployment run.
+            rungs.append('@me')
             control = _pick(
                 [
                     c
-                    for c in self._task_control.values()
-                    if c.run_kind == 'dev' and c.owner_id == user_id and _matches(c)
+                    for c in pool
+                    if c.run_kind == 'deploy' and c.owner_kind == 'user' and c.owner_id == user_id and _matches(c)
                 ]
             )
             if control is not None:
+                check_endpoint_scope(endpoints, control.address)
                 return self._verify_control(control, account_info, require)
 
-        # @me: the caller's personal (user-owned) deployment run.
-        rungs.append('@me')
-        control = _pick(
-            [
+            # @team: a team-owned deployment run the caller may reach. The address
+            # carries no owner, so two of the caller's teams can each have it live:
+            # the caller's active (development) team answers; with neither run on
+            # it the choice is the caller's, so the lookup is ambiguous, not a guess.
+            rungs.append('@team')
+            team_runs = [
                 c
-                for c in self._task_control.values()
-                if c.run_kind == 'deploy' and c.owner_kind == 'user' and c.owner_id == user_id and _matches(c)
+                for c in pool
+                if c.run_kind == 'deploy'
+                and c.owner_kind != 'user'
+                and _matches(c)
+                and resolve_run_permissions(account_info, c)
             ]
-        )
-        if control is not None:
-            check_endpoint_scope(endpoints, control.address)
-            return self._verify_control(control, account_info, require)
+            teams = sorted({c.owner_id for c in team_runs})
+            if len(teams) > 1:
+                active_team = getattr(account_info, 'devTeam', None)
+                team_runs = [c for c in team_runs if c.owner_id == active_team]
+                if not team_runs:
+                    raise TaskError(
+                        TaskError.AMBIGUOUS,
+                        f'{address!r} is deployed by several of your teams ({", ".join(teams)}); '
+                        'make the one you mean your development team',
+                        address=address,
+                        teams=teams,
+                    )
+            control = _pick(team_runs)
+            if control is not None:
+                check_endpoint_scope(endpoints, control.address)
+                return self._verify_control(control, account_info, require)
+            return None
 
-        # @team: a team-owned deployment run the caller may reach. The address
-        # carries no owner, so two of the caller's teams can each have it live:
-        # the caller's active (development) team answers; with neither run on
-        # it the choice is the caller's, so the lookup is ambiguous, not a guess.
-        rungs.append('@team')
-        team_runs = [
-            c
-            for c in self._task_control.values()
-            if c.run_kind == 'deploy'
-            and c.owner_kind != 'user'
-            and _matches(c)
-            and resolve_run_permissions(account_info, c)
-        ]
-        teams = sorted({c.owner_id for c in team_runs})
-        if len(teams) > 1:
-            active_team = getattr(account_info, 'devTeam', None)
-            team_runs = [c for c in team_runs if c.owner_id == active_team]
-            if not team_runs:
-                raise TaskError(
-                    TaskError.AMBIGUOUS,
-                    f'{address!r} is deployed by several of your teams ({", ".join(teams)}); '
-                    'make the one you mean your development team',
-                    address=address,
-                    teams=teams,
-                )
-        control = _pick(team_runs)
+        # Live controls first: a finished run never shadows a running one on
+        # this or a later rung
+        controls = list(self._task_control.values())
+        control = _walk([c for c in controls if not c.task.is_task_complete()])
         if control is not None:
-            check_endpoint_scope(endpoints, control.address)
-            return self._verify_control(control, account_info, require)
+            return control
+
+        # Nothing live answers: a finished run still in the registry does, so
+        # its final status stays readable until the cleanup pass removes it
+        control = _walk(controls)
+        if control is not None:
+            return control
 
         return self._resolve_published_rungs(address, account_info, require, rungs)
 
@@ -1718,6 +1737,16 @@ class TaskServer(DAPBase):
             if control.launch_type in (LAUNCH_TYPE.LAUNCH, LAUNCH_TYPE.EXECUTE):
                 await control.task.stop_task(reason)
                 self.debug_message(f'Task "{control.id}" stopped on request (reason: {reason})')
+
+                # A @dev control ends with its run: no grace window and no
+                # reaper (plan 7.1). Wait for the teardown first, because the
+                # final status, the terminal events and the run-log close are
+                # delivered through the registered control. A new run started
+                # under the same key meanwhile is not this control's to remove.
+                if control.run_kind == 'dev':
+                    await control.task.wait_terminated()
+                    if self._task_control.get(control.key) is control:
+                        await self.remove_task(control.key)
 
         except Exception as e:
             # Log but ignore errors - task may already be stopped or removed
