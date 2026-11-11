@@ -123,17 +123,13 @@ def _public(app_id, org, **fields):
 @pytest.mark.parametrize('capabilities, org', [((), 'local'), (('saas',), '')], ids=['oss', 'saas'])
 async def test_public_winners_lists_the_public_rung_of_every_org_on_saas_only(capabilities, org):
     acct = _Account([], capabilities)
-    assert await public_winners(acct) == (acct, org, {})
+    assert await public_winners(acct) == (org, {})
     assert acct.listed == [(org, 'app', [{'type': 'public', 'id': ''}])]
 
 
-async def test_public_winners_reads_the_account_singleton_by_default(monkeypatch):
-    import ai.account
-
-    acct = _Account([_public('a.x', 'o1')])
-    monkeypatch.setattr(ai.account, 'account', acct)
-    found, org, winners = await public_winners()
-    assert found is acct and org == 'local' and list(winners) == ['a.x']
+async def test_public_winners_reads_the_account_it_is_given():
+    org, winners = await public_winners(_Account([_public('a.x', 'o1')]))
+    assert org == 'local' and list(winners) == ['a.x']
 
 
 async def test_public_winners_picks_each_apps_serving_precedence_winner():
@@ -147,8 +143,8 @@ async def test_public_winners_picks_each_apps_serving_precedence_winner():
         {**_binding(AUD_TEAM), 'appId': 'a.x', 'orgId': 'org-z'},
         _public('a.y', 'org-c', artifactState='submit'),
     ]
-    _, _, winners = await public_winners(_Account(rows))
+    _, winners = await public_winners(_Account(rows))
     assert {app: row['orgId'] for app, row in winners.items()} == {'a.x': 'org-a'}
     # Without a review ladder an unapproved public binding serves.
-    _, _, winners = await public_winners(_Account(rows, review_ladder=False))
+    _, winners = await public_winners(_Account(rows, review_ladder=False))
     assert {app: row['orgId'] for app, row in winners.items()} == {'a.x': 'org-a', 'a.y': 'org-c'}
