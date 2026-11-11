@@ -46,6 +46,7 @@ Rendered responses are cached per (path, UA class) under a byte budget and
 dropped on every aggregate swap.
 """
 
+import asyncio
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -260,10 +261,24 @@ _RENDER_CACHE_MAX_BYTES = 32 * 1024 * 1024
 _RENDER_CACHE_MAX = 4096
 _render_cache = _FifoCache(_RENDER_CACHE_MAX_BYTES, _RENDER_CACHE_MAX)
 
+# Shell documents by (page path, request has a query): (document, its mtime
+# and size). Finding the route's capture walks the disk (resolve, is_file),
+# so it runs once per page and shell build: a request re-checks only the
+# document's stat, which a new build changes. Bounded by the page map and
+# cleared on every swap.
+# shortcut: a capture added without rewriting the cached document is served from the next swap on.
+_documents: Dict[Tuple[str, bool], Tuple[Path, int, int]] = {}
+
+# Bumped by every swap: a render that started before one is served, not cached.
+_generation = 0
+
 
 def _clear_rendered(old: Any, new: Any) -> None:
-    """Swap listener: renders of the previous page map are stale."""
+    """Swap listener: renders and resolved documents of the previous page map are stale."""
+    global _generation
+    _generation += 1
     _render_cache.clear()
+    _documents.clear()
 
 
 public_pages.on_swap(_clear_rendered)
@@ -315,7 +330,7 @@ async def public_page(request: Request) -> Response:
     page = aggregate.exact.get(path)
     if page is None:
         return await _unclaimed(request, path)
-    return _render_page(request, path, page)
+    return await _render_page(request, path, page)
 
 
 def _other_method(request: Request, path: str, aggregate: public_pages.Aggregate) -> Response:
@@ -365,11 +380,12 @@ async def _unclaimed(request: Request, path: str) -> Response:
     return miss
 
 
-def _render_page(request: Request, path: str, page: Page) -> Response:
-    """The page from the render cache, rendered on a miss.
+async def _render_page(request: Request, path: str, page: Page) -> Response:
+    """The page from the render cache, rendered off the event loop on a miss.
 
     Keyed by (path, UA class, shell document, its mtime and size,
-    ``RR_APP_URL``), so a new shell build or origin renders afresh.
+    ``RR_APP_URL``), so a new shell build or origin renders afresh. A render
+    that a swap overtook is served, not cached.
 
     Returns:
         The page's response.
@@ -378,14 +394,47 @@ def _render_page(request: Request, path: str, page: Page) -> Response:
         HTTPException: 503 (from ``shell_document_path``) when the shell is not built.
     """
     crawler = classify(request.headers.get('user-agent', '')) == CRAWLER
-    document = shell_document_path(request)
-    stat = document.stat()
-    key = (path, crawler, document, stat.st_mtime_ns, stat.st_size, app_url())
+    document, mtime_ns, size = _shell_document(request, path)
+    key = (path, crawler, document, mtime_ns, size, app_url())
     cached = _render_cache.get(key)
     if cached is None:
-        cached = _render(path, page, crawler, document)
-        _render_cache.put(key, cached, len(cached[0]))
+        generation = _generation
+        cached = await asyncio.to_thread(_render, path, page, crawler, document)
+        if generation == _generation:
+            _render_cache.put(key, cached, len(cached[0]))
     return HTMLResponse(cached[0], headers=dict(cached[1]))
+
+
+def _shell_document(request: Request, path: str) -> Tuple[Path, int, int]:
+    """The shell document this page request boots from, with its mtime and size (see ``_documents``).
+
+    Args:
+        request: The page request; whether it carries a query decides if a capture may serve.
+        path: The page path (``route_path``, ``/`` for an empty one).
+
+    Returns:
+        ``(document, mtime_ns, size)``.
+
+    Raises:
+        HTTPException: 503 (from ``shell_document_path``) when the shell is not built.
+    """
+    key = (path, bool(request.url.query))
+    hit = _documents.get(key)
+    if hit is not None and _unchanged(*hit):
+        return hit
+    document = shell_document_path(request)
+    stat = document.stat()
+    _documents[key] = (document, stat.st_mtime_ns, stat.st_size)
+    return _documents[key]
+
+
+def _unchanged(document: Path, mtime_ns: int, size: int) -> bool:
+    """Whether ``document`` still has this mtime and size; False once it is gone."""
+    try:
+        stat = document.stat()
+    except OSError:
+        return False
+    return stat.st_mtime_ns == mtime_ns and stat.st_size == size
 
 
 def _render(path: str, page: Page, crawler: bool, document: Path) -> Tuple[bytes, Dict[str, str]]:
