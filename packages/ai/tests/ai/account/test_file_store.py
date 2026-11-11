@@ -235,6 +235,71 @@ class TestDelete:
         with pytest.raises(StorageError):
             await fs.delete('ghost.txt')
 
+    @pytest.mark.asyncio
+    async def test_delete_empty_directory(self, fs):
+        """Deleting an empty directory created with mkdir removes it cleanly."""
+        await fs.mkdir('emptydir')
+        assert (await fs.stat('emptydir'))['exists'] is True
+
+        await fs.delete('emptydir')
+        assert (await fs.stat('emptydir'))['exists'] is False
+
+    @pytest.mark.asyncio
+    async def test_delete_nonempty_directory_raises(self, fs):
+        """Deleting a non-empty directory via delete() raises Directory not empty."""
+        await fs.write('nonempty/file.txt', b'data')
+
+        with pytest.raises(StorageError, match='Directory not empty'):
+            await fs.delete('nonempty')
+
+        assert await fs.read('nonempty/file.txt') == b'data'
+
+    @pytest.mark.asyncio
+    async def test_delete_directory_with_empty_subdirectory_raises(self, fs):
+        """Deleting a directory containing an empty subdirectory raises Directory not empty."""
+        await fs.mkdir('parent/child')
+
+        with pytest.raises(StorageError, match='Directory not empty'):
+            await fs.delete('parent')
+
+        assert (await fs.stat('parent/child'))['exists'] is True
+
+    @pytest.mark.asyncio
+    async def test_delete_empty_directory_preserves_sibling_prefix(self, fs):
+        """Deleting 'foo' does not touch sibling 'foobar' even if list_files strips trailing slash."""
+        await fs.mkdir('foo')
+        await fs.mkdir('foobar')
+
+        orig_list_files = fs._store.list_files
+
+        async def prefix_stripped_list_files(prefix=''):
+            """Return both foo/.dirmarker and foobar/.dirmarker when listing foo."""
+            entries = await orig_list_files(prefix)
+            foo_prefix = fs._full_path('foo').rstrip('/')
+            if prefix.rstrip('/') == foo_prefix:
+                sibling_entries = await orig_list_files(fs._full_path('foobar/'))
+                return list(dict.fromkeys(entries + sibling_entries))
+            return entries
+
+        fs._store.list_files = prefix_stripped_list_files
+        try:
+            await fs.delete('foo')
+        finally:
+            fs._store.list_files = orig_list_files
+
+        assert (await fs.stat('foo'))['exists'] is False
+        assert (await fs.stat('foobar'))['exists'] is True
+
+    @pytest.mark.asyncio
+    async def test_rmdir_rejects_file_target(self, fs):
+        """Calling rmdir on a regular file raises StorageError instead of silently succeeding."""
+        await fs.write('regular.txt', b'hello')
+
+        with pytest.raises(StorageError, match='Not a directory'):
+            await fs.rmdir('regular.txt')
+
+        assert await fs.read('regular.txt') == b'hello'
+
 
 # ============================================================================
 # Directory Operations
