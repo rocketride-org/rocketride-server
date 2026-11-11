@@ -225,7 +225,8 @@ public:
     ///		factory, no url mapper, and the registry is the same before
     ///		and after. A definition whose logical type is registered or
     ///		listed twice is refused, its icon must be inline (a data:
-    ///		URL), and the expansion is bounded per definition and per
+    ///		URL), its JSON and its property expansion nest at most 64
+    ///		deep, and the expansion is bounded per definition and per
     ///		call. An empty or null list yields an empty scope
     //-----------------------------------------------------------------
     static ErrorOr<CustomServicesScope> withCustomServices(
@@ -284,6 +285,10 @@ private:
         // The property references being expanded, outermost first: one
         // reached again inside its own expansion would recurse without end
         std::vector<Text> chain;
+
+        // The property expansions nested so far, each a recursion: bounded
+        // by MaxDepth
+        size_t depth = 0;
 
         // JSON values expanded so far for this definition, and by every
         // definition of the call (nullptr on the start-up scan)

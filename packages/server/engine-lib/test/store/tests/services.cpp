@@ -728,6 +728,52 @@ TEST_CASE("store::Services::custom") {
         CHECK_FALSE(IServices::getServiceDefinition("custom_inner"));
     }
 
+    // A caller's definition is walked recursively, so its nesting is
+    // bounded (64 levels) before a deep one could exhaust the stack
+    SECTION("custom services: nesting depth") {
+        const auto nest = [](int levels) {
+            json::Value nested = "leaf";
+            for (int level = 0; level < levels; level++) {
+                json::Value wrap;
+                wrap["x"] = _mv(nested);
+                nested = _mv(wrap);
+            }
+            return nested;
+        };
+
+        // JSON nested within the limit is accepted ...
+        auto shallow = customNode("custom_shallow");
+        shallow["extra"] = nest(32);
+        REQUIRE(IServices::withCustomServices(customList({shallow})));
+
+        // ... and nested past it is refused, naming the limit
+        auto deep = customNode("custom_deep");
+        deep["extra"] = nest(100);
+        auto deepJson = IServices::withCustomServices(customList({deep}));
+        REQUIRE_FALSE(deepJson);
+        CHECK(std::string{deepJson.ccode().message()}.find(
+                  "nests deeper than 64 levels") != std::string::npos);
+
+        // Flat property definitions that chain through references: each
+        // group lists the next, no cycle, 100 expansions deep
+        auto chain = customNode("custom_chain");
+        for (int level = 0; level < 100; level++) {
+            auto &group =
+                chain["propertyDefinitions"][_ts("custom_chain.g", level)];
+            group["name"] = _ts("g", level);
+            group["properties"].append(_ts("custom_chain.g", level + 1));
+        }
+        chain["propertyDefinitions"]["custom_chain.g100"] =
+            R"({"type": "string"})"_json;
+        chain["properties"].append("custom_chain.g0");
+
+        auto deepChain = IServices::withCustomServices(customList({chain}));
+        REQUIRE_FALSE(deepChain);
+        CHECK(std::string{deepChain.ccode().message()}.find(
+                  "nest deeper than 64 levels") != std::string::npos);
+        CHECK_FALSE(IServices::getServiceDefinition("custom_chain"));
+    }
+
     // The same property-model parse as a scanned file: paths, params, the
     // capabilities bitmask and the secret registrations
     SECTION("custom services: the property model") {

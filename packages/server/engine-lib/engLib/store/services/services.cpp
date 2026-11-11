@@ -55,6 +55,15 @@ static constexpr size_t MaxExpandedPerCall = 10 * MaxExpanded;
 
 //-------------------------------------------------------------------------
 /// @details
+///		The deepest a definition may nest: the JSON objects and arrays of
+///		a caller's definition within each other, and property expansions
+///		within each other. Both are walked recursively, so a deeper one
+///		could exhaust the stack
+//-------------------------------------------------------------------------
+static constexpr size_t MaxDepth = 64;
+
+//-------------------------------------------------------------------------
+/// @details
 ///		The JSON values one more copy of this value adds
 //-------------------------------------------------------------------------
 static size_t weigh(const json::Value &value) noexcept {
@@ -62,6 +71,30 @@ static size_t weigh(const json::Value &value) noexcept {
     if (value.isObject() || value.isArray())
         for (const auto &item : value) total += weigh(item);
     return total;
+}
+
+//-------------------------------------------------------------------------
+/// @details
+///		Refuses a caller's definition whose JSON nests deeper than
+///		MaxDepth. Walked with an explicit stack, so the check itself
+///		cannot be what exhausts the thread's stack
+///	@param[in] definition
+///		The definition, as the caller passed it
+//-------------------------------------------------------------------------
+static Error checkDepth(const json::Value &definition) noexcept {
+    std::vector<std::pair<const json::Value *, size_t>> pending{
+        {&definition, 1}};
+    while (!pending.empty()) {
+        const auto [value, depth] = pending.back();
+        pending.pop_back();
+        if (!value->isObject() && !value->isArray()) continue;
+        if (depth > MaxDepth)
+            return APERR(Ec::InvalidParam,
+                         "A custom service definition nests deeper than",
+                         MaxDepth, "levels");
+        for (const auto &item : *value) pending.emplace_back(&item, depth + 1);
+    }
+    return {};
 }
 
 //-------------------------------------------------------------------------
@@ -289,9 +322,9 @@ static size_t weigh(const json::Value &value) noexcept {
 //	(IServices::withCustomServices). Nothing is registered for it: no
 //	factory, no url mapper. Its logical type may not be a registered one
 //	nor be listed twice, its icon must be inline (a data: URL), a
-//	property that contains itself is refused, and its expansion is
-//	bounded per definition (MaxExpanded) and per call
-//	(MaxExpandedPerCall).
+//	property that contains itself is refused, its JSON and its property
+//	expansion nest at most MaxDepth deep, and its expansion is bounded
+//	per definition (MaxExpanded) and per call (MaxExpandedPerCall).
 //
 //-------------------------------------------------------------------------
 
@@ -961,11 +994,21 @@ ErrorOr<json::Value> IServices::expandProperty(ServiceContext &context,
                              "contains itself in",
                              context.def.definitionPath);
 
-    const auto depth = context.chain.size();
+    // Expansions nest through references, which a flat set of property
+    // definitions can chain without end short of a cycle; each level is a
+    // recursion, so the nesting is bounded
+    if (context.depth >= MaxDepth)
+        return APERR(Ec::InvalidParam, "The properties of",
+                     context.def.logicalType, "nest deeper than", MaxDepth,
+                     "levels");
+
+    const auto chained = context.chain.size();
     context.chain.insert(context.chain.end(), followed.begin(),
                          followed.end());
+    ++context.depth;
     auto expanded = expandChildren(context, _mv(field));
-    context.chain.resize(depth);
+    --context.depth;
+    context.chain.resize(chained);
     return expanded;
 }
 
@@ -1739,7 +1782,8 @@ Error IServices::init() noexcept {
 ///		scope that puts them in front of every lookup this thread makes
 ///		until the scope is destroyed
 ///	@param[in] custom
-///		A JSON array of service definitions, as in services.json
+///		A JSON array of service definitions, as in services.json. Each
+///		may nest at most MaxDepth deep
 //-------------------------------------------------------------------------
 ErrorOr<IServices::CustomServicesScope> IServices::withCustomServices(
     const json::Value &custom) noexcept {
@@ -1754,6 +1798,9 @@ ErrorOr<IServices::CustomServicesScope> IServices::withCustomServices(
             if (!serviceInfo.isObject())
                 return APERR(Ec::InvalidParam,
                              "A custom service must be a JSON object");
+
+            // Before anything copies or walks it recursively
+            if (auto ccode = checkDepth(serviceInfo)) return ccode;
 
             auto def = parseDefinition(serviceInfo, {});
             if (!def) return def.ccode();
