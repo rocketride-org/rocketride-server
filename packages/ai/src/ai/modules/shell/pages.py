@@ -56,6 +56,7 @@ cached by store path under its own byte budget. A snapshot over
 import asyncio
 import sys
 from pathlib import Path
+from time import monotonic
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from fastapi import HTTPException
@@ -323,6 +324,13 @@ _snapshot_cache = _FifoCache(_SNAPSHOT_CACHE_MAX_BYTES)
 _UNUSABLE_SNAPSHOTS_MAX = 1024
 _unusable_snapshots = _FifoCache(_UNUSABLE_SNAPSHOTS_MAX, _UNUSABLE_SNAPSHOTS_MAX)
 
+# Store path -> when (monotonic seconds) its last storage failure was warned
+# about. While a store is down every crawler request retries the read, so each
+# path warns at most once per interval, not once per request.
+_STORAGE_WARNING_INTERVAL = 300.0
+_STORAGE_WARNED_MAX = 1024
+_storage_warned = _FifoCache(_STORAGE_WARNED_MAX, _STORAGE_WARNED_MAX)
+
 
 class _SnapshotTooLarge(Exception):
     """A stored snapshot over ``MAX_SNAPSHOT_BYTES`` (never read)."""
@@ -396,10 +404,11 @@ async def _crawler_document(page: Page, document: Path) -> Tuple[str, bool]:
     A fallback is cacheable when it is final for the page's version: a
     malformed snapshot path or no production version, a snapshot over
     ``MAX_SNAPSHOT_BYTES``, or a template the engine refuses (the last two
-    are remembered by store path and warned about once). Any other failure
-    falls back uncached and warned, so the next request tries again: a
-    storage error, or a snapshot the store does not have (yet). Anything
-    else is a bug and propagates.
+    are remembered by store path and warned about once). A storage failure
+    (a snapshot the store does not have yet included) falls back uncached,
+    so the next request tries again, and is warned about at most once per
+    store path per ``_STORAGE_WARNING_INTERVAL``. Anything else is a bug and
+    propagates.
     """
     if not page.snapshot:
         return document.read_text(encoding='utf-8'), True
@@ -416,7 +425,27 @@ async def _crawler_document(page: Page, document: Path) -> Tuple[str, bool]:
         _unusable_snapshots.put(path, True, 1)
         return _fallback(page, document, exc), True
     except StorageError as exc:
-        return _fallback(page, document, exc), False
+        if _storage_warning_due(path):
+            return _fallback(page, document, exc), False
+        return document.read_text(encoding='utf-8'), False
+
+
+def _storage_warning_due(path: str) -> bool:
+    """Whether a storage failure reading ``path`` is warned about now; if so, not again for an interval.
+
+    Args:
+        path: The snapshot's store path.
+
+    Returns:
+        True when ``path`` has no storage failure warned about in the last
+        ``_STORAGE_WARNING_INTERVAL`` seconds.
+    """
+    now = monotonic()
+    last = _storage_warned.get(path)
+    if last is not None and now - last < _STORAGE_WARNING_INTERVAL:
+        return False
+    _storage_warned.put(path, now, 1)
+    return True
 
 
 def _moved(request: Request, path: str) -> Response:

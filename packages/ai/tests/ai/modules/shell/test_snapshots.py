@@ -254,6 +254,34 @@ def test_a_failed_snapshot_read_is_served_uncached_and_warned(shell_root, monkey
     assert 'Pricing plans' in resp.text and resp.headers['cache-control'] == 'public, max-age=3600'
 
 
+def test_a_storage_failure_warns_once_per_store_path_per_interval(shell_root, monkeypatch, warned):
+    # While the store is down every crawler request retries; the log gets one line per path per interval.
+    _seed()
+    _seed(name='pages/other.html')
+    _serve(_page(), _page('/other', snapshot='pages/other.html'))
+
+    async def down(path):
+        raise StorageError('store down')
+
+    clock = [1000.0]
+    monkeypatch.setattr(pp, 'artifact_file_info', down)
+    monkeypatch.setattr(pages, 'monotonic', lambda: clock[0])
+    client = _client()
+    for _ in range(3):
+        resp = _crawl(client)
+        assert SHELL_BODY in resp.text and resp.headers['cache-control'] == 'private, no-cache'
+    assert len(warned) == 1 and 'store down' in warned[0]
+    _crawl(client, '/other')
+    assert len(warned) == 2 and 'pages/other.html' in warned[1]
+    clock[0] += pages._STORAGE_WARNING_INTERVAL - 1
+    _crawl(client)
+    assert len(warned) == 2
+    clock[0] += 1
+    _crawl(client)
+    assert len(warned) == 3 and "'pages/pricing.html'" in warned[2]
+    assert len(pages._storage_warned) == 2 <= pages._storage_warned.max_entries
+
+
 def test_a_programming_error_reading_a_snapshot_is_raised_not_served(shell_root, monkeypatch, warned):
     # Only storage failures fall back: a bug must surface, not be served as the shell document.
     _seed()
