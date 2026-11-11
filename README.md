@@ -5,8 +5,8 @@
 </a>
 
 <p>
-  <strong>RocketRide is the open source AIDE: the AI Development Environment.</strong><br/>
-  Build, deploy and harness production-ready AI solutions at light speed, all within your IDE or using the CLI in your terminal.
+  <strong>RocketRide is the leading AI meta-harness with the only enterprise-grade runtime built on C++.</strong><br/>
+  Designed for professional software developers and technical builders, whether solo or teams or organizations, to enable them to easily build, stage, test, publish and maintain agents and AI-enabled applications that scale in production. Leverage directly from an IDE with the VS Code extension, from the terminal with the SDK, or dynamically using the MCP server.
 </p>
 
 <p>
