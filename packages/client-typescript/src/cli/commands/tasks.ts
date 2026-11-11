@@ -250,6 +250,8 @@ export function registerTaskCommands(program: Command): void {
 						args: options.args || [],
 					});
 					taskToken = useResult.token;
+					// The private address, so a caller can follow or stop this run
+					out.line(`Token: ${taskToken}`);
 				}
 
 				// step: send the files and collect per-file results

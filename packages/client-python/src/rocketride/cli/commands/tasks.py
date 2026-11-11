@@ -194,6 +194,8 @@ async def run_upload(args) -> int:
                 args=args.pipeline_args or [],
             )
             task_token = use_result.get('token', '')
+            # The private address, so a caller can follow or stop this run
+            out.line(f'Token: {task_token}')
 
         # step: send the files and collect per-file results — the teardown
         # sits in a finally so a raised send still stops the pipeline this

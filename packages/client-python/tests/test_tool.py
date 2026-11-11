@@ -28,6 +28,8 @@ via the new DAP ``tool`` subcommand -- both standalone (borrowed pipe) and
 pipe-bound paths.
 """
 
+from uuid import uuid4
+
 import pytest
 import pytest_asyncio
 
@@ -43,8 +45,10 @@ from tool_pipeline import get_tool_pipeline
 
 @pytest_asyncio.fixture
 async def tool_pipeline(client: RocketRideClient):
-    """Start a tool_python pipeline, yield its token, terminate on teardown."""
-    result = await client.use(pipeline=get_tool_pipeline())
+    """Start a tool_python pipeline, yield its address, terminate on teardown."""
+    # A unique token overrides the pipeline id, so every fixture invocation
+    # gets an address of its own and a leftover run never blocks the next one
+    result = await client.use(pipeline=get_tool_pipeline(), token=f'py-tool-{uuid4().hex[:8]}')
     pipeline_token = result['token']
     try:
         yield pipeline_token

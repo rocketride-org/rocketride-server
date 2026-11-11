@@ -47,6 +47,7 @@
  *  4. Serialization — dates/numerics survive the JSON transport.
  */
 
+import { randomUUID } from 'crypto';
 import { RocketRideClient } from '../src/client';
 import { drizzle } from '../src/client/drizzle/index';
 import { inArray, sql } from 'drizzle-orm';
@@ -168,6 +169,9 @@ async function ensureCleanPipeline(client: RocketRideClient, token: string): Pro
 
 		const result = await client.use({
 			pipeline: getPostgresPipeline(),
+			// A unique token overrides the pipeline id, so this run has an
+			// address of its own and a leftover run never blocks the next one
+			token: `ts-dz-e2e-${randomUUID().slice(0, 8)}`,
 		});
 		pipelineToken = result.token;
 

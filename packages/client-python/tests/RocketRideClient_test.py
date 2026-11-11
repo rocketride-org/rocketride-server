@@ -67,6 +67,7 @@ import time
 from pathlib import Path
 from typing import Dict, Any
 from unittest.mock import AsyncMock
+from uuid import uuid4
 
 # Load .env from project root before any imports that need env vars
 from dotenv import load_dotenv
@@ -117,6 +118,23 @@ async def ensure_clean_pipeline(client: RocketRideClient, token: str) -> None:
     except Exception:
         # Ignore errors - pipeline might not be running
         pass
+
+
+def private_token(base: str) -> str:
+    """
+    Return a unique use() token so the run gets an address of its own.
+
+    use(token=X) overrides the pipeline-id segment of the task address, so a
+    unique X keeps this run apart from every other test, worker and client on
+    the same server. The test then works with the address use() returns.
+
+    Args:
+        base: Readable prefix naming the test family.
+
+    Returns:
+        The token: the prefix plus eight random hex characters.
+    """
+    return f'{base}-{uuid4().hex[:8]}'
 
 
 class TestServerConnection:
@@ -252,7 +270,7 @@ class TestPipelineOperations:
         try:
             await client.connect()
 
-            result = await client.use(pipeline=get_echo_pipeline())
+            result = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo'))
             pipeline_token = result['token']
 
             assert 'token' in result
@@ -271,7 +289,7 @@ class TestPipelineOperations:
         try:
             await client.connect()
 
-            result = await client.use(pipeline=get_echo_pipeline())
+            result = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo'))
             pipeline_token = result['token']
 
             status = await client.get_task_status(pipeline_token)
@@ -291,7 +309,7 @@ class TestPipelineOperations:
         try:
             await client.connect()
 
-            result = await client.use(pipeline=get_echo_pipeline())
+            result = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo'))
             pipeline_token = result['token']
 
             # Should not raise an exception
@@ -314,7 +332,7 @@ class TestDataOperations:
         try:
             await client.connect()
 
-            result = await client.use(pipeline=get_echo_pipeline())
+            result = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo'))
             pipeline_token = result['token']
 
             test_data = 'Hello from integration test!'
@@ -351,7 +369,7 @@ class TestDataOperations:
         try:
             await client.connect()
 
-            result = await client.use(pipeline=get_echo_pipeline())
+            result = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo'))
             pipeline_token = result['token']
 
             test_data = 'Hello from integration test!'
@@ -396,7 +414,7 @@ class TestDataOperations:
         try:
             await client.connect()
 
-            result = await client.use(pipeline=get_echo_pipeline())
+            result = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo'))
             pipeline_token = result['token']
 
             binary_data = bytes([72, 101, 108, 108, 111])  # "Hello" in bytes
@@ -433,7 +451,7 @@ class TestDataOperations:
         try:
             await client.connect()
 
-            result = await client.use(pipeline=get_echo_pipeline())
+            result = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo'))
             pipeline_token = result['token']
 
             pipe = await client.pipe(pipeline_token, {'name': 'test-stream.txt'}, 'text/plain')
@@ -482,7 +500,7 @@ class TestDataOperations:
         try:
             await client.connect()
 
-            result = await client.use(pipeline=get_echo_pipeline())
+            result = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo'))
             pipeline_token = result['token']
 
             pipe = await client.pipe(pipeline_token, {'name': 'test-split.txt'}, 'text/plain')
@@ -510,7 +528,7 @@ class TestDataOperations:
         try:
             await client.connect()
 
-            result = await client.use(pipeline=get_echo_pipeline())
+            result = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo'))
             pipeline_token = result['token']
 
             name = 'test.txt'
@@ -568,7 +586,7 @@ class TestDataOperations:
         try:
             await client.connect()
 
-            result = await client.use(pipeline=get_echo_pipeline())
+            result = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo'))
             pipeline_token = result['token']
 
             test_data = 'Multi-field result type test'
@@ -597,7 +615,7 @@ class TestDataOperations:
         try:
             await client.connect()
 
-            result = await client.use(pipeline=get_echo_pipeline())
+            result = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo'))
             pipeline_token = result['token']
 
             test_cases = [
@@ -649,7 +667,7 @@ class TestChatOperations:
         try:
             await client.connect()
 
-            result = await client.use(pipeline=get_chat_pipeline())
+            result = await client.use(pipeline=get_chat_pipeline(), token=private_token('py-chat'))
             chat_token = result['token']
 
             question = Question()
@@ -696,7 +714,7 @@ class TestChatOperations:
         try:
             await client.connect()
 
-            result = await client.use(pipeline=get_chat_pipeline())
+            result = await client.use(pipeline=get_chat_pipeline(), token=private_token('py-chat'))
             chat_token = result['token']
 
             question = Question(expectJson=True)
@@ -742,7 +760,7 @@ class TestChatOperations:
         try:
             await client.connect()
 
-            result = await client.use(pipeline=get_chat_pipeline())
+            result = await client.use(pipeline=get_chat_pipeline(), token=private_token('py-chat'))
             chat_token = result['token']
 
             question = Question()
@@ -787,7 +805,7 @@ class TestChatOperations:
         try:
             await client.connect()
 
-            result = await client.use(pipeline=get_chat_pipeline())
+            result = await client.use(pipeline=get_chat_pipeline(), token=private_token('py-chat'))
             chat_token = result['token']
 
             question = Question()
@@ -832,7 +850,7 @@ class TestChatOperations:
         try:
             await client.connect()
 
-            result = await client.use(pipeline=get_chat_pipeline())
+            result = await client.use(pipeline=get_chat_pipeline(), token=private_token('py-chat'))
             chat_token = result['token']
 
             question = Question()
@@ -948,7 +966,7 @@ class TestEventHandling:
         try:
             await client.connect()
 
-            result = await client.use(pipeline=get_echo_pipeline())
+            result = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo'))
             event_token = result['token']
 
             await client.set_events(event_token, ['summary'])
@@ -993,7 +1011,7 @@ class TestEventHandling:
         try:
             await client.connect()
 
-            result = await client.use(pipeline=get_echo_pipeline())
+            result = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo'))
             event_token = result['token']
 
             # Subscribe to status update events
@@ -1093,7 +1111,7 @@ class TestEventHandling:
         try:
             await client.connect()
 
-            result = await client.use(pipeline=get_echo_pipeline())
+            result = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo'))
             event_token = result['token']
 
             # Subscribe to task lifecycle events
@@ -1168,7 +1186,7 @@ class TestEventHandling:
         try:
             await client.connect()
 
-            result = await client.use(pipeline=get_echo_pipeline())
+            result = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo'))
             event_token = result['token']
 
             # Test subscribing to multiple event types using flag combinations
@@ -1217,7 +1235,7 @@ class TestEventHandling:
         try:
             await client.connect()
 
-            result = await client.use(pipeline=get_echo_pipeline())
+            result = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo'))
             event_token = result['token']
 
             # Subscribe to all relevant event types
@@ -1325,7 +1343,7 @@ class TestEventHandling:
         try:
             await client.connect()
 
-            result = await client.use(pipeline=get_echo_pipeline())
+            result = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo'))
             event_token = result['token']
 
             # Test that we only receive events we subscribed to
@@ -1502,7 +1520,7 @@ class TestErrorHandling:
         try:
             await client.connect()
 
-            result = await client.use(pipeline=get_echo_pipeline())
+            result = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo'))
             pipeline_token = result['token']
 
             await client.terminate(pipeline_token)
@@ -1534,7 +1552,7 @@ class TestEndToEndWorkflow:
         try:
             await client.connect()
 
-            result = await client.use(pipeline=get_echo_pipeline())
+            result = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo'))
             token = result['token']
 
             await client.set_events(token, ['summary', 'task'])
@@ -1571,7 +1589,7 @@ class TestEndToEndWorkflow:
         try:
             await client.connect()
 
-            result = await client.use(pipeline=get_echo_pipeline())
+            result = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo'))
             token = result['token']
 
             # Set up event monitoring
@@ -1622,7 +1640,7 @@ Line 3: random data {random.random()}"""
         try:
             await client.connect()
 
-            result = await client.use(pipeline=get_echo_pipeline())
+            result = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo'))
             token = result['token']
 
             await client.set_events(token, ['summary'])
@@ -1680,7 +1698,7 @@ Line 3: random data {random.random()}"""
         try:
             await client.connect()
 
-            result = await client.use(pipeline=get_chat_pipeline())
+            result = await client.use(pipeline=get_chat_pipeline(), token=private_token('py-chat'))
             token = result['token']
 
             await client.set_events(token, ['summary', 'task'])
@@ -1744,7 +1762,7 @@ Line 3: random data {random.random()}"""
         try:
             await client.connect()
 
-            result = await client.use(pipeline=get_echo_pipeline())
+            result = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo'))
             token = result['token']
 
             # Set up comprehensive event monitoring
@@ -1814,7 +1832,7 @@ Line 3: random data {random.random()}"""
         try:
             await client.connect()
 
-            result = await client.use(pipeline=get_echo_pipeline())
+            result = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo'))
             token = result['token']
 
             # Send valid data first
@@ -1849,7 +1867,7 @@ Line 3: random data {random.random()}"""
         try:
             await client.connect()
 
-            result = await client.use(pipeline=get_echo_pipeline())
+            result = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo'))
             token = result['token']
 
             # Generate large text content (10KB)
@@ -1903,14 +1921,20 @@ class TestConcurrentPipelineOperations:
         try:
             await client.connect()
 
-            # Create 16 concurrent use() calls — all share one subprocess via useExisting
+            # Create 16 concurrent use() calls — all share one subprocess via
+            # use_existing on one private token
+            shared_token = private_token('py-cc')
+
             async def create_pipeline(index):
-                result = await client.use(pipeline=get_echo_pipeline(), use_existing=True)
+                result = await client.use(pipeline=get_echo_pipeline(), token=shared_token, use_existing=True)
                 return {'index': index, 'token': result['token']}
 
             pipeline_tasks = [create_pipeline(i) for i in range(self.PIPELINE_COUNT)]
             pipelines = await asyncio.gather(*pipeline_tasks)
             pipeline_tokens = [p['token'] for p in pipelines]
+
+            # Every call attached to the same run, so one address came back
+            assert len(set(pipeline_tokens)) == 1
 
             # Generate unique test data for each pipeline
             def generate_test_data(pipeline, index):
@@ -1982,9 +2006,9 @@ class TestConcurrentPipelineOperations:
             print(f'- Received {len(results)} responses')
             print(f'- All responses unique: {len(unique_texts) == self.PIPELINE_COUNT}')
         finally:
-            # Clean up all pipelines
+            # Clean up the one shared run
             cleanup_tasks = []
-            for token in pipeline_tokens:
+            for token in set(pipeline_tokens):
                 cleanup_tasks.append(ensure_clean_pipeline(client, token))
             if cleanup_tasks:
                 await asyncio.gather(*cleanup_tasks, return_exceptions=True)
@@ -2000,7 +2024,7 @@ class TestConcurrentPipelineOperations:
             await client.connect()
 
             # Create a single pipeline
-            result = await client.use(pipeline=get_echo_pipeline())
+            result = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo'))
             pipeline_tokens = [result['token']]
 
             SEND_COUNT = 10
@@ -2074,22 +2098,20 @@ class TestConcurrentPipelineOperations:
             PIPELINE_COUNT = 4
             SENDS_PER_PIPELINE = 3
 
-            # Create pipelines concurrently — each needs a unique project_id
-            # to avoid server-side contention during concurrent startup.
-            MIXED_PROJECT_IDS = [
-                'a1b2c3d4-1111-4000-a000-000000000001',
-                'a1b2c3d4-1111-4000-a000-000000000002',
-                'a1b2c3d4-1111-4000-a000-000000000003',
-                'a1b2c3d4-1111-4000-a000-000000000004',
-            ]
+            # Create pipelines concurrently — each gets a private token, so
+            # each run has an address of its own.
+            mixed_tokens = [private_token(f'py-mixed-{index}') for index in range(PIPELINE_COUNT)]
 
             async def create_pipeline(index):
-                result = await client.use(pipeline=get_echo_pipeline(MIXED_PROJECT_IDS[index]))
+                result = await client.use(pipeline=get_echo_pipeline(), token=mixed_tokens[index])
                 return {'index': index, 'token': result['token']}
 
             pipeline_tasks = [create_pipeline(i) for i in range(PIPELINE_COUNT)]
             pipelines = await asyncio.gather(*pipeline_tasks)
             pipeline_tokens = [p['token'] for p in pipelines]
+
+            # Distinct tokens produced distinct runs
+            assert len(set(pipeline_tokens)) == PIPELINE_COUNT
 
             # Generate test data for multiple sends per pipeline
             all_send_data = []
@@ -2172,20 +2194,15 @@ class TestConcurrentPipelineOperations:
         try:
             await client.connect()
 
-            # Create 4 independent subprocesses concurrently — each needs a
-            # unique project_id to avoid server-side contention during startup.
-            CYCLE_PROJECT_IDS = [
-                'b2c3d4e5-2222-4000-b000-000000000001',
-                'b2c3d4e5-2222-4000-b000-000000000002',
-                'b2c3d4e5-2222-4000-b000-000000000003',
-                'b2c3d4e5-2222-4000-b000-000000000004',
-            ]
-            # The server derives each address from its project id; keep the
-            # returned addresses for the sends and the cleanup.
+            # Create 4 independent subprocesses concurrently — each gets a
+            # private token; keep the returned addresses for the sends and
+            # the cleanup.
+            cycle_tokens = [private_token(f'py-cycle-{index}') for index in range(SUBPROCESS_COUNT)]
             results = await asyncio.gather(
-                *[client.use(pipeline=get_echo_pipeline(project_id)) for project_id in CYCLE_PROJECT_IDS]
+                *[client.use(pipeline=get_echo_pipeline(), token=token) for token in cycle_tokens]
             )
             sub_tokens = [result['token'] for result in results]
+            assert len(set(sub_tokens)) == SUBPROCESS_COUNT
 
             # Each pipeline independently cycles 32 send/recv — all 4 run in parallel
             async def run_pipeline(token, pipeline_index):
@@ -2251,15 +2268,19 @@ class TestConcurrentPipelineOperations:
             # Both clients use the SAME task via use_existing so the second
             # client.use() attaches to the existing task instead of starting a
             # fresh one.  This is what makes both clients fan into ONE shared
-            # eaas->subprocess _data_client. The same pipeline derives the
-            # same address, so the second use() names the first one's task.
+            # eaas->subprocess _data_client. One private token gives both
+            # calls the same address, so the second use() names the first
+            # one's task.
+            two_client_token = private_token('py-2c')
             res_a = await client_a.use(
-                pipeline=get_echo_pipeline('c3d4e5f6-3333-4000-c000-000000000001'),
+                pipeline=get_echo_pipeline(),
+                token=two_client_token,
                 use_existing=True,
             )
             shared_token = res_a['token']
             res_b = await client_b.use(
-                pipeline=get_echo_pipeline('c3d4e5f6-3333-4000-c000-000000000001'),
+                pipeline=get_echo_pipeline(),
+                token=two_client_token,
                 use_existing=True,
             )
             assert res_b['token'] == res_a['token']

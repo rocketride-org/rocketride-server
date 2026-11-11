@@ -45,6 +45,7 @@
  *  2. Commit  — two INSERTs inside a committed transaction: BOTH rows persist.
  */
 
+import { randomUUID } from 'crypto';
 import { RocketRideClient } from '../src/client';
 import { Sequelize, DataTypes, Transaction } from 'sequelize';
 import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
@@ -158,6 +159,9 @@ async function ensureCleanPipeline(client: RocketRideClient, token: string): Pro
 
 		const result = await client.use({
 			pipeline: getPostgresPipeline(),
+			// A unique token overrides the pipeline id, so this run has an
+			// address of its own and a leftover run never blocks the next one
+			token: `ts-sq-e2e-${randomUUID().slice(0, 8)}`,
 		});
 		pipelineToken = result.token;
 

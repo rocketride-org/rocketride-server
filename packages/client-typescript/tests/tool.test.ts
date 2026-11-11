@@ -30,6 +30,7 @@
  * pipe-bound paths.
  */
 
+import { randomUUID } from 'crypto';
 import { RocketRideClient } from '../src/client';
 import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import { getToolPipeline } from './tool.pipeline';
@@ -53,6 +54,9 @@ describe('Tool Operations', () => {
 
 		const result = await client.use({
 			pipeline: getToolPipeline(),
+			// A unique token overrides the pipeline id, so this run has an
+			// address of its own and a leftover run never blocks the next one
+			token: `ts-tool-${randomUUID().slice(0, 8)}`,
 		});
 		pipelineToken = result.token;
 	});
