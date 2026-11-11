@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV11 — never edit by hand
 // =============================================================================
-// Generated:     2026-11-10T21:36:27.178Z
-// Source commit: 66dfdd696dd896bf7f8db43dc202ba593bbb1306
+// Generated:     2026-11-11T19:45:11.780Z
+// Source commit: 4117f461ecd6c6eca9ecbb8562be698ebc1f0d67
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -619,8 +619,8 @@ export interface UPLOAD_RESULT {
 export interface Tool {
     name: string;
     description?: string;
-    /** JSON Schema with `type: 'object'` at the top. */
-    inputSchema: Record<string, unknown>;
+    /** JSON Schema with `type: 'object'` at the top. Defaults to an object with no properties. */
+    inputSchema?: Record<string, unknown>;
 }
 /** Plain text inside a message. */
 export interface TextBlock {
@@ -647,7 +647,7 @@ export interface ToolResultBlock {
 /** Model reasoning the provider needs back. `text` is for display; keep `state` unchanged. */
 export interface ReasoningBlock {
     type: "reasoning";
-    text: string;
+    text?: string;
     state?: unknown;
 }
 /** A user turn: text, and the results of the calls in the assistant turn before it. */
@@ -663,9 +663,14 @@ export interface AssistantMessage {
 /** One turn of a turn-mode conversation. */
 export type Message = UserMessage | AssistantMessage;
 export type StopReason = "end_turn" | "tool_use" | "max_tokens" | "stop_sequence" | "refusal";
-/** Why a turn produced no message. `tools_unsupported` is decided before any provider call. */
+/**
+ * Why a turn produced no message. `tools_unsupported` and `invalid_request` are decided
+ * before any provider call. `invalid_request` is a mistake in the Question (a broken turn
+ * rule, or two tool names that become the same provider name): fix it, do not retry.
+ * `provider_error` gives only the exception type; the full text is in the engine log.
+ */
 export interface AnswerError {
-    code: "tools_unsupported" | "provider_error";
+    code: "tools_unsupported" | "invalid_request" | "provider_error";
     message: string;
 }
 /**
@@ -820,8 +825,14 @@ export declare class Question {
     addQuestion(question: string): void;
     /**
      * Append a message to the conversation, switching the Question to turn mode.
+     * Throws, leaving the Question as it was, if the Question uses a field turn mode does not allow.
      */
     addMessage(message: Message): void;
+    /**
+     * Check the turn-mode rules. `fromDict` runs this; call it after editing fields by hand.
+     * Throws an Error naming the broken rule.
+     */
+    checkTurn(): void;
     /**
      * Add the result of a tool call to the user message that answers it, opening that
      * message after an assistant turn. Throws if no assistant turn before it made the call.
