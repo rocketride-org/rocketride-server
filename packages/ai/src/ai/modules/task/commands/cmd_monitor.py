@@ -160,9 +160,10 @@ class MonitorCommands(DAPConn):
 
         Filtering order (each check short-circuits if it fails):
         1. Connection must have '*' in its monitor subscriptions
-        2. The event_type bitmask must match the subscription
-        3. If org_id is specified, connection's primary org must match
-        4. If user_id is specified, connection's userId must match
+        2. Connection must not be authenticated with an endpoints-scoped key
+        3. The event_type bitmask must match the subscription
+        4. If org_id is specified, connection's primary org must match
+        5. If user_id is specified, connection's userId must match
 
         Args:
             event_type: Event type bitmask (e.g. EVENT_TYPE.DASHBOARD, EVENT_TYPE.BILLING).
@@ -173,10 +174,18 @@ class MonitorCommands(DAPConn):
         # Step 1: must be subscribed to wildcard
         if '*' not in self._monitors:
             return
-        # Step 2: bitmask must match
+        # Step 2: an endpoints-scoped key receives no server events. They
+        # describe the owner's account and the server (connections and their
+        # subscriptions, failed sign-ins, deployments, billing), not runs, so
+        # the scope cannot filter them; the key carries the owner's userId and
+        # org and would pass steps 4 and 5. Its '*' subscription still gets
+        # task events, which send_task_event filters by the scope.
+        if getattr(getattr(self, '_account_info', None), 'endpoints', None) is not None:
+            return
+        # Step 3: bitmask must match
         if not (event_type & self._monitors['*']):
             return
-        # Step 3: org scoping
+        # Step 4: org scoping
         if org_id is not None and hasattr(self, '_account_info') and self._account_info:
             conn_org = ''
             if hasattr(self._account_info, 'organization') and self._account_info.organization:
@@ -184,7 +193,7 @@ class MonitorCommands(DAPConn):
                 conn_org = org.get('id', '') if isinstance(org, dict) else getattr(org, 'id', '')
             if conn_org != org_id:
                 return
-        # Step 4: user scoping
+        # Step 5: user scoping
         if user_id is not None and hasattr(self, '_account_info') and self._account_info:
             if self._account_info.userId != user_id:
                 return

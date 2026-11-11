@@ -124,7 +124,10 @@ task.debug          Allow debugging a specific task
 # Not allowed although run-shaped: ``rrext_get_token`` (resolves by project
 # and source without the scope), ``rrext_dashboard`` and
 # ``rrext_list_connections`` (they list the owner's connections, which the
-# scope does not filter).
+# scope does not filter). ``rrext_monitor`` is allowed, but a ``'*'``
+# subscription on a scoped socket delivers only task events inside the scope:
+# ``MonitorCommands.send_server_event`` drops every server event (dashboard,
+# deploy, billing) for it, for the same reason the dashboard commands are out.
 SCOPED_KEY_COMMANDS = frozenset(
     {
         'auth',

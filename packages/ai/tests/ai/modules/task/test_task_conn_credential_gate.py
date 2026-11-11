@@ -43,7 +43,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from rocketride import TASK_STATE
+from rocketride import EVENT_TYPE, TASK_STATE
 from ai.account.models import AccountInfo
 from ai.modules.task.task_conn import SCOPED_KEY_COMMANDS, TaskConn
 from ai.modules.task.task_server import TaskServer
@@ -423,3 +423,68 @@ async def test_data_only_scoped_key_is_sent_no_status_or_task_list():
     await _dispatch(conn, 'rrext_monitor', {'token': ADDRESS, 'types': ['SUMMARY', 'TASK', 'SSE']})
 
     assert [m for m in _sent(conn) if m['type'] == 'event'] == []
+
+
+# =============================================================================
+# A '*' subscription on a scoped socket: task events inside the scope only, no
+# server events. Server events (dashboard, deploy, billing) describe the
+# owner's account rather than runs, so the scope cannot filter them. These run
+# the REAL TaskServer.broadcast_server_event and MonitorCommands delivery.
+# =============================================================================
+
+
+def _dashboard_event(action):
+    """A server-level dashboard event as the server broadcasts it."""
+    return {'event': 'apaevt_dashboard', 'body': {'action': action, 'connectionId': 7}}
+
+
+async def _wildcard_conn(identity):
+    """A monitor connection subscribed to '*' for dashboard and summary events, transport cleared."""
+    conn = await _monitor_conn(identity)
+    conn._server._connections = {1: conn}
+    await _dispatch(conn, 'rrext_monitor', {'token': '*', 'types': ['DASHBOARD', 'SUMMARY']})
+    assert '*' in conn._monitors
+    conn._transport.send.reset_mock()
+    return conn
+
+
+@pytest.mark.asyncio
+async def test_scoped_wildcard_subscription_receives_no_server_events():
+    """The owner's connection details and unscoped auth failures never reach a scoped socket."""
+    conn = await _wildcard_conn(_scoped_identity(permissions=('task.data', 'task.monitor')))
+
+    await TaskServer.broadcast_server_event(
+        conn._server, EVENT_TYPE.DASHBOARD, _dashboard_event('connection_added'), user_id='owner-1'
+    )
+    await TaskServer.broadcast_server_event(conn._server, EVENT_TYPE.DASHBOARD, _dashboard_event('auth_failed'))
+    await conn.send_server_event(
+        EVENT_TYPE.DASHBOARD, _dashboard_event('monitor_changed'), user_id='owner-1', org_id='org-1'
+    )
+
+    assert [m for m in _sent(conn) if m['type'] == 'event'] == []
+
+
+@pytest.mark.asyncio
+async def test_scoped_wildcard_subscription_still_receives_task_events_in_scope():
+    """The same '*' subscription delivers a run's status inside the scope and nothing outside it."""
+    conn = await _wildcard_conn(_scoped_identity(permissions=('task.data', 'task.monitor')))
+    status = {'event': 'apaevt_status_update', 'body': {'state': TASK_STATE.RUNNING.value}}
+
+    await conn.send_task_event(EVENT_TYPE.SUMMARY, f'deploy.team-1.{ADDRESS}', status)
+    await conn.send_task_event(EVENT_TYPE.SUMMARY, f'deploy.team-1.{OTHER_ADDRESS}', status)
+
+    assert [m['event'] for m in _sent(conn) if m['type'] == 'event'] == ['apaevt_status_update']
+    assert [call.kwargs['id'] for call in conn.build_event.call_args_list] == ['task-in']
+
+
+@pytest.mark.asyncio
+async def test_unscoped_wildcard_subscription_still_receives_server_events():
+    """The owner's own full credential keeps its dashboard feed."""
+    conn = await _wildcard_conn(_make_account_info(auth=FULL_KEY, user_id='owner-1'))
+
+    await TaskServer.broadcast_server_event(
+        conn._server, EVENT_TYPE.DASHBOARD, _dashboard_event('connection_added'), user_id='owner-1'
+    )
+
+    events = [m for m in _sent(conn) if m['type'] == 'event']
+    assert [m['body']['action'] for m in events] == ['connection_added']
