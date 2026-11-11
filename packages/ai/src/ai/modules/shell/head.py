@@ -78,6 +78,12 @@ def jsonld_script(obj: Mapping[str, Any]) -> str:
 
     <, > and & (and the JS line separators) are emitted as unicode escapes,
     so no value can close the script element.
+
+    Args:
+        obj: The JSON-LD node.
+
+    Returns:
+        The ``<script>`` element, ready to put in a document head.
     """
     text = json.dumps(obj, ensure_ascii=False, separators=(',', ':'), sort_keys=True)
     for raw, escaped in (
