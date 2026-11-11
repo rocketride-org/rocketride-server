@@ -118,6 +118,9 @@ The extracted JSON for each file has this shape:
 }
 ```
 
+In the reply this object is inside the `answers` array of the result, as
+`"answers": [[ { ... } ]]`.
+
 ## Upload files on demand
 
 Swap the `filesys` source for a `webhook` source to process files as they
