@@ -25,12 +25,22 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import urllib.parse
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from rocketride import RocketRideClient
+
+logger = logging.getLogger(__name__)
+
+# Seconds the convenience tool waits for the server to acknowledge the
+# termination of its one-shot run. The server's stop of a @dev run can wait
+# up to 30 s for the teardown; the tool's answer does not depend on that
+# acknowledgement (the server finishes the teardown either way), so the wait
+# is bounded well below it.
+ONE_SHOT_TERMINATE_TIMEOUT = 10.0
 
 
 async def get_tools(client: RocketRideClient) -> List[Dict[str, Any]]:
@@ -149,7 +159,9 @@ async def execute_tool(
                         raise e
                     await asyncio.sleep(0.5 * (2**attempt))
         finally:
-            await client.terminate(convenience_token)
+            # Best-effort cleanup: it must never replace the send's result or
+            # its error, so it is bounded and its failures are only logged.
+            await _terminate_one_shot(client, convenience_token)
     else:
         if not isinstance(pipeline_token, str):
             return {'error': 'Pipeline token not available', 'status': 502}
@@ -160,6 +172,26 @@ async def execute_tool(
         )
 
     return {'status': 200, 'result': result, 'name': name, 'filepath': resolved_path}
+
+
+async def _terminate_one_shot(client: RocketRideClient, token: str) -> None:
+    """Terminate a convenience tool's one-shot run without raising.
+
+    Bounded by ONE_SHOT_TERMINATE_TIMEOUT. A timeout or an error from the
+    terminate call is logged and swallowed, so the caller's result or its own
+    exception is what the tool reports. Cancellation of the caller is not
+    swallowed.
+    """
+    try:
+        await asyncio.wait_for(client.terminate(token), timeout=ONE_SHOT_TERMINATE_TIMEOUT)
+    except asyncio.TimeoutError:
+        logger.warning(
+            'Terminating one-shot run %s was not acknowledged within %ss; the server finishes its teardown',
+            token,
+            ONE_SHOT_TERMINATE_TIMEOUT,
+        )
+    except Exception as e:
+        logger.warning('Terminating one-shot run %s failed: %s', token, e)
 
 
 _CONVENIENCE_TOOL_MAPPING = {

@@ -2,6 +2,7 @@
 # Copyright (c) 2026 Aparavi Software AG
 # Tests for rocketride_mcp.tools.
 
+import asyncio
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -149,6 +150,80 @@ def test_load_convenience_pipeline_known_tool() -> None:
     out = tools_mod._load_convenience_pipeline('RocketRide_Document_Processor')
     assert out is not None
     assert isinstance(out, dict)
+
+
+# -----------------------------------------------------------------------------
+# Convenience tool one-shot cleanup: bounded, logged, never masks the send
+# -----------------------------------------------------------------------------
+
+
+def _one_shot_client(mock_rocketride_client: MagicMock) -> MagicMock:
+    """A client whose task list is empty, so the convenience pipeline runs."""
+    mock_rocketride_client.request = AsyncMock(return_value={'body': {'tasks': []}})
+    mock_rocketride_client.use = AsyncMock(return_value={'token': 'acme.oneShot.parse_1'})
+    mock_rocketride_client.send = AsyncMock(return_value={'ok': True})
+    mock_rocketride_client.terminate = AsyncMock(return_value=None)
+    return mock_rocketride_client
+
+
+async def _run_convenience_tool(client: MagicMock, tmp_path: Path) -> dict[str, Any]:
+    (tmp_path / 'doc.txt').write_text('hello')
+    return await tools_mod.execute_tool(
+        client=client,
+        filepath=str(tmp_path / 'doc.txt'),
+        name='RocketRide_Document_Processor',
+    )
+
+
+async def test_execute_tool_convenience_terminates_its_run(
+    mock_rocketride_client: MagicMock,
+    tmp_path: Path,
+) -> None:
+    client = _one_shot_client(mock_rocketride_client)
+    result = await _run_convenience_tool(client, tmp_path)
+    assert result.get('status') == 200
+    assert result.get('result') == {'ok': True}
+    client.terminate.assert_awaited_once_with('acme.oneShot.parse_1')
+
+
+async def test_execute_tool_convenience_terminate_error_keeps_the_result(
+    mock_rocketride_client: MagicMock,
+    tmp_path: Path,
+) -> None:
+    client = _one_shot_client(mock_rocketride_client)
+    client.terminate = AsyncMock(side_effect=RuntimeError('connection lost'))
+    result = await _run_convenience_tool(client, tmp_path)
+    assert result.get('status') == 200
+    assert result.get('result') == {'ok': True}
+
+
+async def test_execute_tool_convenience_terminate_timeout_keeps_the_result(
+    mock_rocketride_client: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _one_shot_client(mock_rocketride_client)
+
+    async def never_acknowledged(token: str) -> None:
+        await asyncio.Event().wait()
+
+    client.terminate = AsyncMock(side_effect=never_acknowledged)
+    monkeypatch.setattr(tools_mod, 'ONE_SHOT_TERMINATE_TIMEOUT', 0.01)
+    result = await asyncio.wait_for(_run_convenience_tool(client, tmp_path), timeout=5)
+    assert result.get('status') == 200
+    assert result.get('result') == {'ok': True}
+
+
+async def test_execute_tool_convenience_send_error_survives_a_failing_terminate(
+    mock_rocketride_client: MagicMock,
+    tmp_path: Path,
+) -> None:
+    client = _one_shot_client(mock_rocketride_client)
+    client.send = AsyncMock(side_effect=RuntimeError('pipeline rejected the file'))
+    client.terminate = AsyncMock(side_effect=RuntimeError('connection lost'))
+    with pytest.raises(RuntimeError, match='pipeline rejected the file'):
+        await _run_convenience_tool(client, tmp_path)
+    client.terminate.assert_awaited_once()
 
 
 # -----------------------------------------------------------------------------

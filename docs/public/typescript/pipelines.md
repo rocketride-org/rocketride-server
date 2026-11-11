@@ -54,7 +54,10 @@ namespace, not a credential: the developer id and the owner still come from your
 account, and the returned `token` is the full address. Terminate a run you
 started this way when you are done with it.
 `getTaskToken({ projectId, source })` returns the address of your running task
-for that pipe and source (pass `teamId` for the team's deployed run).
+for that pipe and source (pass `teamId` for the team's deployed run). After an
+override the run's pipeline id is the `token` value, so look it up with
+`projectId: 'runB'`; the config's original `projectId` finds the run started
+without an override, if any.
 
 **Check `reused` before trusting the result.** `useExisting` returns the task
 that is already running at that address rather than starting the one you

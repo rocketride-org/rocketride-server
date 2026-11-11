@@ -31,6 +31,7 @@ identity work landed and is GREEN after it.
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -354,6 +355,26 @@ async def test_s4_terminating_a_dev_control_leaves_a_new_run_under_its_key():
 
     assert old_run.key in ts._task_control
     assert ts._task_control[old_run.key] is not old_run
+
+
+@pytest.mark.asyncio
+async def test_s4_a_dev_teardown_past_the_timeout_leaves_the_control_for_cleanup():
+    """A teardown that never finishes does not hold the caller: stop_task
+    returns once the bounded wait expires and the control stays registered
+    for the cleanup pass rather than being removed mid-teardown.
+    """
+    ts = _server()
+    stalled_run = _control(ts)
+
+    async def never_terminates() -> None:
+        await asyncio.Event().wait()
+
+    stalled_run.task.wait_terminated = AsyncMock(side_effect=never_terminates)
+    with patch('ai.modules.task.task_server.CONST_TEARDOWN_WAIT_TIMEOUT', 0.01):
+        await asyncio.wait_for(ts.stop_task(stalled_run.key), timeout=5)
+
+    stalled_run.task.stop_task.assert_any_await('user')
+    assert ts._task_control.get(stalled_run.key) is stalled_run
 
 
 # =============================================================================
