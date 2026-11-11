@@ -55,7 +55,9 @@ until it succeeds or a later build supersedes it; a baseline is never
 superseded, so the changes of the build after it are not lost. A build's
 URLs go in POSTs of at most 10,000 each (the protocol's cap), one after
 another, each bounded by ``TIMEOUT_SECONDS``. Failures and refusals are
-logged as warnings and never affect the rebuild.
+logged as warnings and never affect the rebuild. The paths of a failed or
+refused batch are kept (at most ``_MAX_FAILED``) and go out with the next
+submission; an accepted batch clears its paths.
 """
 
 import asyncio
@@ -87,6 +89,7 @@ MAX_RETRY_SECONDS = 600.0
 MAX_CONCURRENT_READS = 8
 _KEY = re.compile(r'[A-Za-z0-9-]{8,128}')
 _MAX_URLS = 10000  # the protocol's per-request cap
+_MAX_FAILED = 50000  # paths kept for resubmission; beyond it the rest are dropped
 
 
 @dataclass(frozen=True)
@@ -108,10 +111,16 @@ _last: Optional[Dict[str, _Content]] = None
 # The newest build not yet diffed, and the task diffing builds.
 _pending: Optional[Aggregate] = None
 _worker: Optional[asyncio.Task] = None
+# Paths of batches that failed or were refused, merged into the next submission.
+_failed: Set[str] = set()
 
 
 def key() -> str:
-    """The configured IndexNow key, or '' when absent or malformed."""
+    """The configured IndexNow key.
+
+    Returns:
+        The key from ``RR_INDEXNOW_KEY``, or '' when absent or malformed.
+    """
     value = indexnow_key()
     if not _KEY.fullmatch(value):
         return ''
@@ -119,7 +128,11 @@ def key() -> str:
 
 
 def enabled() -> bool:
-    """Whether this engine serves the key file and submits: a valid key and an https ``RR_APP_URL``."""
+    """Whether this engine serves the key file and submits.
+
+    Returns:
+        True with a valid key and an ``https://`` ``RR_APP_URL``.
+    """
     return bool(key()) and app_url().startswith('https://')
 
 
@@ -162,11 +175,18 @@ def _changed(last: Optional[_Content], now: _Content) -> bool:
 def diff(
     last: Dict[str, _Content], now: Dict[str, _Content], apps: Iterable[str]
 ) -> Tuple[List[str], Dict[str, _Content]]:
-    """``(paths to submit, the new last build)`` from the last build's listed pages and this one's.
+    """Compare this build's listed pages with the last build's.
 
-    ``apps`` are the app ids with any page in this build. A page the last
-    build listed is submitted when it is gone or unlisted, unless its app is
-    absent from this build: then it is kept as it was.
+    A page the last build listed is submitted when it is gone or unlisted,
+    unless its app is absent from this build: then it is kept as it was.
+
+    Args:
+        last: The last real build's listed pages, by path.
+        now: This build's listed pages, by path.
+        apps: The app ids with any page in this build.
+
+    Returns:
+        ``(paths to submit, the new last build)``, the paths sorted.
     """
     present: Set[str] = set(apps)
     kept = {path: c for path, c in last.items() if path not in now and c.entry.app_id not in present}
@@ -190,10 +210,26 @@ async def _process(aggregate: Aggregate) -> bool:
     if _last is None:
         _last = now
         return True
-    paths, _last = diff(_last, now, (p.app_id for p in aggregate.exact.values()))
+    changed, _last = diff(_last, now, (p.app_id for p in aggregate.exact.values()))
+    paths = sorted(_failed.union(changed))
     for start in range(0, len(paths), _MAX_URLS):
-        await submit(base, k, [base + path for path in paths[start : start + _MAX_URLS]])
+        batch = paths[start : start + _MAX_URLS]
+        if await submit(base, k, [base + path for path in batch]):
+            _failed.difference_update(batch)
+        else:
+            _keep_failed(batch)
     return True
+
+
+def _keep_failed(batch: List[str]) -> None:
+    """Remember the paths of a failed ``batch`` for the next submission, up to ``_MAX_FAILED`` in all."""
+    room = _MAX_FAILED - len(_failed)
+    kept = [path for path in batch if path in _failed]
+    kept += [path for path in batch if path not in _failed][: max(room, 0)]
+    dropped = len(batch) - len(kept)
+    _failed.update(kept)
+    if dropped:
+        warning(f'[indexnow] {dropped} failed URL(s) dropped: more than {_MAX_FAILED} are waiting for resubmission')
 
 
 def _backoff() -> Iterator[float]:
@@ -213,21 +249,32 @@ async def _post(payload: dict) -> Any:
         return await client.post(ENDPOINT, json=payload)
 
 
-async def submit(base: str, k: str, urls: List[str]) -> None:
-    """POST ``urls`` for the host of ``base``; the outcome is logged, never raised."""
+async def submit(base: str, k: str, urls: List[str]) -> bool:
+    """POST ``urls`` for the host of ``base``; the outcome is logged, never raised.
+
+    Args:
+        base: The public origin (``RR_APP_URL`` without a trailing slash).
+        k: The IndexNow key.
+        urls: The absolute URLs to submit, at most ``_MAX_URLS``.
+
+    Returns:
+        True when IndexNow accepted the batch (a 2xx answer), False when the
+        POST failed, timed out or was refused.
+    """
     payload = {'host': urlsplit(base).hostname, 'key': k, 'keyLocation': f'{base}/{k}.txt', 'urlList': urls}
     try:
         response = await asyncio.wait_for(_post(payload), TIMEOUT_SECONDS)
     except asyncio.TimeoutError:
         warning(f'[indexnow] submitting {len(urls)} URL(s) timed out after {TIMEOUT_SECONDS:g}s')
-        return
+        return False
     except Exception as exc:
         warning(f'[indexnow] submitting {len(urls)} URL(s) failed: {exc}')
-        return
+        return False
     if 200 <= response.status_code < 300:
         debug(f'[indexnow] submitted {len(urls)} URL(s): HTTP {response.status_code}')
-    else:
-        warning(f'[indexnow] {len(urls)} URL(s) refused: HTTP {response.status_code}')
+        return True
+    warning(f'[indexnow] {len(urls)} URL(s) refused: HTTP {response.status_code}')
+    return False
 
 
 async def _drain() -> None:
@@ -256,7 +303,16 @@ async def _drain() -> None:
 
 
 def on_swap(old: Aggregate, new: Aggregate) -> None:
-    """Aggregate swap listener: queue a real build for the background diff and submission."""
+    """Aggregate swap listener: queue a real build for the background diff and submission.
+
+    Nothing is queued for the legacy page list or when IndexNow is off.
+    Called with no running event loop, it queues nothing: the build is
+    diffed with the next swap.
+
+    Args:
+        old: The aggregate swapped out (unused).
+        new: The aggregate swapped in.
+    """
     global _pending, _worker
     if new.legacy or not enabled():
         return
@@ -273,5 +329,12 @@ def on_swap(old: Aggregate, new: Aggregate) -> None:
 
 
 async def key_file(request: Request) -> PlainTextResponse:
-    """``GET /<key>.txt``: the key, which IndexNow engines fetch to verify the host."""
+    """``GET /<key>.txt``: the key, which IndexNow engines fetch to verify the host.
+
+    Args:
+        request: The incoming request (unused).
+
+    Returns:
+        The key as plain text.
+    """
     return PlainTextResponse(key())
