@@ -67,14 +67,16 @@ class OrgInfo(TypedDict):
     name: str
     permissions: list[str]
     teams: list[TeamInfo]
-    # Public developer slug — the app publisher identity. Absent/None on OSS
-    # and task-scoped synthetic orgs, and on orgs not registered as developers.
+    # Public developer slug — the address namespace every task and artifact
+    # of this org lives under (``{developerId}.{pipeId}[.source]``). Fixed on
+    # OSS; on SaaS absent/None until an org admin claims one, and nothing
+    # that needs an address runs until then.
     developerId: NotRequired[Optional[str]]
     # The org's default DEVELOPMENT team (a team id): the one an invite records
     # for an admin, or among several eligible teams, and the one the shell
-    # pre-checks in the invite form. Absent/None on OSS and task-scoped
-    # synthetic orgs, and on orgs that have no teams (or whose default team
-    # was deleted).
+    # pre-checks in the invite form. Absent/None on OSS and on the deploy
+    # dispatch's synthetic orgs, and on orgs that have no teams (or whose
+    # default team was deleted).
     defaultDevTeamId: NotRequired[Optional[str]]
     # True when this user is the org's only active admin — leaving is refused
     # until another member is promoted. Absent on OSS and synthetic orgs.
@@ -89,7 +91,9 @@ class OrgInfo(TypedDict):
 class AccountInfo(BaseModel):
     """Internal representation of an authenticated session."""
 
-    # Raw credential that was used to authenticate (pk_/tk_ for task-scoped)
+    # Raw credential that was used to authenticate (an rr_ key or the
+    # session's bearer) — the ONLY kind of credential; tasks are addressed by
+    # name and authorized by this account on every request.
     auth: str = ''
 
     # Persistent per-user credential (rr_<user_token>)
@@ -119,6 +123,14 @@ class AccountInfo(BaseModel):
     # Single org/team/permissions structure — all permission checks resolve through this.
     # None when the user has no org membership (e.g. freshly invited, not yet provisioned).
     organization: Optional[OrgInfo] = None
+
+    # The API key's ``endpoints`` scope: address patterns this credential may
+    # send to (``developerId.pipelineId.source`` or ``developerId.pipelineId.*``).
+    # None = unscoped (every address the account may reach). Loaded at
+    # hydration; ENFORCED where the task address is resolved (the shared
+    # resolver and the HTTP door). A scoped key never attaches to the owner's
+    # @dev presence.
+    endpoints: Optional[list[str]] = None
 
     # Apps on the user's desktop — full manifest entries with appStatus + onDesktop.
     # OSS: all apps with appStatus="free", onDesktop=True.
@@ -168,12 +180,13 @@ class AccountInfo(BaseModel):
 
         A pushed account update fans out to every open connection of a user,
         matched by userId only. Unlike the connect/auth response, it must NOT
-        carry the user's real ``rr_`` session credential: a task-scoped
-        (``pk_``/``tk_``) connection matched by userId would otherwise ADOPT it
-        client-side, escalating a deliberately minimal task identity into the
-        full user. ``userToken`` is kept as an EMPTY STRING rather than removed
-        so the shell's ``isConnectResult`` guard (which requires ``userToken``
-        to be a string) still accepts the body and re-emits the update.
+        carry the user's real ``rr_`` session credential: a connection authed
+        with a narrower key (a scoped PAT) matched by userId would otherwise
+        ADOPT it client-side, escalating a deliberately minimal identity into
+        the full user. ``userToken`` is kept as an EMPTY STRING rather than
+        removed so the shell's ``isConnectResult`` guard (which requires
+        ``userToken`` to be a string) still accepts the body and re-emits the
+        update.
 
         Returns:
             dict: ``to_connect_result()`` with ``userToken`` blanked.
@@ -359,6 +372,12 @@ def resolve_run_permissions(account_info: AccountInfo, control: Any) -> list[str
     fall through to the team resolution so the synthetic local grants
     keep working.
 
+    The key's ``endpoints`` scope is NOT applied here — it binds a
+    credential to ADDRESSES, which the resolver checks once the address is
+    known (``address.check_endpoint_scope``), and which every path that
+    walks many runs at once (task listings, the dashboard snapshot, monitor
+    event delivery) applies beside this call (``address.in_endpoint_scope``).
+
     Args:
         account_info: The authenticated caller's session.
         control: The run's TASK_CONTROL (or any object carrying
@@ -368,21 +387,6 @@ def resolve_run_permissions(account_info: AccountInfo, control: Any) -> list[str
         Effective permission list, or empty list if the caller may not
         reach the run.
     """
-    # Task-scoped credentials (pk_/tk_) NEVER inherit owner identity: their
-    # synthetic AccountInfo copies the owner's userId for attribution, so the
-    # owner-private branch below would hand a pk_ public key the full owner
-    # permission set on a user-owned run. The key's grant is its capability
-    # set on exactly the run it was minted for — any other run resolves
-    # nothing, including other runs billed to the same team.
-    auth = getattr(account_info, 'auth', '') or ''
-    if auth.startswith(('pk_', 'tk_')):
-        if auth in (
-            getattr(control, 'public_auth', '') or None,
-            getattr(control, 'token', '') or None,
-        ):
-            return resolve_task_permissions(account_info, getattr(control, 'teamId', ''))
-        return []
-
     # Owner scope: explicit stamp wins; fall back to the run_kind default
     # for controls built before owner_kind existed.
     owner_kind = getattr(control, 'owner_kind', '') or (
@@ -429,7 +433,7 @@ def resolve_team_permissions(account_info: AccountInfo, team_id: str) -> list[st
     """
     # sys.admin and internal (pod service) credentials get full access
     # regardless of team membership — mirrors resolve_task_permissions so the
-    # team-scoped and task-scoped permission surfaces agree for these callers.
+    # team-scoped and run-scoped permission surfaces agree for these callers.
     # Identical lines exist on feat/alb; dedupe on merge.
     sys_perms = getattr(account_info, 'sysPermissions', []) or []
     if 'sys.admin' in sys_perms or 'internal' in sys_perms:

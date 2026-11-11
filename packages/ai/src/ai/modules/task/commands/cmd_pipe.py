@@ -492,7 +492,7 @@ class DeployPipeCommands(_DeployBase):
             # run window: the ttl window belongs to scheduled fires — a run the
             # user started runs until it finishes or the user stops it.
             sched = (dep.get('schedules') or {}).get(source_id) or {}
-            token = await start_server_task_as_team(
+            key = await start_server_task_as_team(
                 self._server,
                 pipeline,
                 org_id=org_id,
@@ -511,10 +511,10 @@ class DeployPipeCommands(_DeployBase):
             self._scheduler.release_run(team_id, project_id, source_id)
             raise
 
-        # Register the token with the scheduler so the next cron tick sees
-        # this run and skips instead of dispatching a second one (this
-        # overwrites the reservation marker with the real run token).
-        self._scheduler.register_manual_run(team_id, project_id, source_id, token)
+        # Register the control key with the scheduler so the next cron tick
+        # sees this run and skips instead of dispatching a second one (this
+        # overwrites the reservation marker with the real run key).
+        self._scheduler.register_manual_run(team_id, project_id, source_id, key)
         await account.deployments_mark_run(org_id, team_id, project_id, source_id)
         await account.audit(
             self._account_info.userId,
@@ -524,7 +524,9 @@ class DeployPipeCommands(_DeployBase):
             org_id=org_id,
         )
         await self._notify_deploy_changed(org_id, team_id, project_id, 'run')
-        return self.build_response(request, body={'token': token, 'version': dep['version']})
+        # The client gets the ADDRESS in the token slot, never the key
+        address = self._server.control_by_key(key).address
+        return self.build_response(request, body={'token': address, 'version': dep['version']})
 
     # =========================================================================
     # PREVIEW — the single cron evaluator

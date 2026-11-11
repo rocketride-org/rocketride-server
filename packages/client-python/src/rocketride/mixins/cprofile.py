@@ -35,7 +35,7 @@ Usage:
     print(report['report'])
 
     # Profile a specific pipeline
-    result = await client.cprofile_start(target='tk_abc123', session='pipeline_test')
+    result = await client.cprofile_start(target='acme.docBrain.parsePDF', session='pipeline_test')
 """
 
 from typing import Any, Dict, Optional

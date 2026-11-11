@@ -59,7 +59,7 @@ def _task(*, source='src-id', task_name=None, pipeline=None, status=None):
 
     Tests seed only the attributes consumed by the method under test:
     ``id``, ``source``, ``_task_name``, ``_pipeline``, ``_status``,
-    ``_threads``, ``_pipelineTraceLevel``, ``token``.
+    ``_threads``, ``_pipelineTraceLevel``, ``key``, ``address``.
 
     Args:
         source: id of the source component to look up in ``_check_pipeline``.
@@ -73,7 +73,8 @@ def _task(*, source='src-id', task_name=None, pipeline=None, status=None):
     """
     t = Task.__new__(Task)
     t.id = 'task-test'
-    t.token = 'tk_test'
+    t.key = 'dev.user-1.acme.proj-test.src-id'
+    t.address = 'acme.proj-test.src-id'
     t._data_token = 'dt_test'
     t.client_id = 'user-1'
     t.team_id = 'team-1'
@@ -92,7 +93,6 @@ def _task(*, source='src-id', task_name=None, pipeline=None, status=None):
     t._debugger = None
     t._idle_time = 5
     t._status_updated = False
-    t.public_auth = 'pk_test'
     t.info = {}
     # Run-log continuum state consulted by _forward_task_event's stamping
     # safety net (see Task.stamp_log_event): fresh-stream counter + no writer.
@@ -197,7 +197,7 @@ def test_build_task_returns_subprocess_config_shape(tmp_path, monkeypatch):
     config = Task._build_task(t, pipeline)
 
     assert config['type'] == 'pipeline'
-    assert config['taskId'] == 'tk_test'
+    assert config['taskId'] == 'dev.user-1.acme.proj-test.src-id'
     assert config['config']['threadCount'] == 4
     assert config['config']['pipelineTraceLevel'] is None
     assert config['config']['pipeline'] == {
@@ -626,25 +626,23 @@ def test_update_status_user_event_with_empty_notes_clears_notes():
 
 
 def test_update_status_user_event_replaces_token_placeholders_in_strings():
-    """String notes have {token} / {public_auth} placeholders substituted."""
+    """String notes have the {token} placeholder (the token SLOT) substituted with the address."""
     t = _task(status=_make_status_for_update())
-    t.token = 'tk_x'
-    t.public_auth = 'pk_x'
+    t.address = 'acme.proj-x.src-x'
     Task._update_status(
         t,
         {
             'event': 'apaevt_status_user',
-            'body': {'notes': ['use {token} with {public_auth}']},
+            'body': {'notes': ['send to {token}']},
         },
     )
-    assert t._status.notes == ['use tk_x with pk_x']
+    assert t._status.notes == ['send to acme.proj-x.src-x']
 
 
 def test_update_status_user_event_replaces_placeholders_in_dict_values():
     """Dict notes have placeholders replaced in every string value, keeping other types."""
     t = _task(status=_make_status_for_update())
-    t.token = 'tk_x'
-    t.public_auth = 'pk_x'
+    t.address = 'acme.proj-x.src-x'
     Task._update_status(
         t,
         {
@@ -652,7 +650,7 @@ def test_update_status_user_event_replaces_placeholders_in_dict_values():
             'body': {'notes': [{'msg': 'token is {token}', 'count': 42}]},
         },
     )
-    assert t._status.notes == [{'msg': 'token is tk_x', 'count': 42}]
+    assert t._status.notes == [{'msg': 'token is acme.proj-x.src-x', 'count': 42}]
 
 
 def test_update_status_user_event_keeps_unknown_note_types_as_is():
@@ -738,14 +736,14 @@ async def test_forward_task_event_non_debugger_routes_to_server_broadcast():
     server = MagicMock()
     server.broadcast_task_event = AsyncMock()
     t._server = server
-    t.token = 'tk_x'
+    t.key = 'dev.user-1.acme.proj-x.src-x'
 
     payload = {'event': 'summary', 'body': {}}
     await Task._forward_task_event(t, EVENT_TYPE.SUMMARY, payload)
 
     server.broadcast_task_event.assert_awaited_once()
     args = server.broadcast_task_event.await_args
-    assert args.kwargs['token'] == 'tk_x'
+    assert args.kwargs['key'] == 'dev.user-1.acme.proj-x.src-x'
     assert args.kwargs['event'] == payload
 
 
@@ -971,13 +969,14 @@ async def test_subprocess_env_hosted_missing_broker_warns_and_directs_to_operato
 # _build_subprocess_env — per-scope authorization and the DSN map (SDD 4.6)
 # ---------------------------------------------------------------------------
 
-# One component per node type, in the shapes the canvas saves: nested under
-# the profile name (sql 'default', vector 'cloud'), or flat.
+# One component per node type, in the shape the canvas saves: a tree addressed
+# by the schema paths (these nodes' properties all live at the root), with the
+# unset keys left to their defaults (sql: the org database).
 _SCOPED_PIPELINE = {
     'components': [
         {'id': 'chat_1', 'provider': 'chat', 'config': {'mode': 'Source'}},
-        {'id': 'sql_1', 'provider': 'rocketride_sql', 'config': {'profile': 'default', 'default': {'table': 't'}}},
-        {'id': 'vec_1', 'provider': 'rocketride_vector', 'config': {'profile': 'cloud', 'cloud': {'scope': 'team'}}},
+        {'id': 'sql_1', 'provider': 'rocketride_sql', 'config': {'table': 't'}},
+        {'id': 'vec_1', 'provider': 'rocketride_vector', 'config': {'scope': 'team'}},
         {'id': 'graph_1', 'provider': 'rocketride_graph', 'config': {'scope': 'user', 'target': 'user-2'}},
     ]
 }
@@ -1036,7 +1035,7 @@ async def test_db_dsn_map_has_one_entry_per_scope(monkeypatch):
 @pytest.mark.parametrize(
     ('client_id', 'run_kind', 'owner_kind', 'expected_user'),
     [
-        ('user-1', 'dev', 'user', 'user-1'),  # builder run, store app, pk_ fed dev run
+        ('user-1', 'dev', 'user', 'user-1'),  # builder run, store app, address-fed dev run
         ('', 'deploy', 'team', ''),  # @team deploy: no user
         ('user-1', 'deploy', 'user', 'user-1'),  # @me deploy
     ],
@@ -1067,8 +1066,8 @@ async def test_db_identity_comes_from_the_task(monkeypatch, client_id, run_kind,
     [('chat', True), ('dropper', True), ('webhook', True), ('discord', True), ('telegram', True), ('tools', False)],
 )
 async def test_public_endpoint_comes_from_the_source_nodes(monkeypatch, source, public):
-    """Every task carries a pk_ token (_task sets public_auth), so the token
-    can't decide this: the pipeline's source providers do (OQ 14).
+    """Every task is addressed the same way, so nothing on the task itself
+    can decide this: the pipeline's source providers do (OQ 14).
     """
     calls = _fake_db_account(monkeypatch)
     pipeline = {'components': [{'id': 's', 'provider': source}, {'id': 'db', 'provider': 'rocketride_sql'}]}
@@ -1137,9 +1136,10 @@ async def test_the_engine_resolves_the_database_the_decision_named(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_malformed_scope_fails_task_start(monkeypatch):
+    """The resolver refuses the value against the schema's enum before the DB layer sees it."""
     calls = _fake_db_account(monkeypatch)
     pipeline = {'components': [{'id': 'sql_1', 'provider': 'rocketride_sql', 'config': {'scope': 'everyone'}}]}
-    with pytest.raises(ValueError, match='sql_1: scope must be one of org, team, user'):
+    with pytest.raises(ValueError, match="sql_1: \"scope\" must be one of \\['org', 'team', 'user'\\], got 'everyone'"):
         await _build_env(_env_task(pipeline=pipeline))
     assert calls['authorize'] == []
 
@@ -1693,14 +1693,20 @@ def test_analytics_idle_reset():
 def test_task_rejects_unknown_run_classifications():
     """run_kind/trigger are a CLOSED vocabulary, validated at construction.
 
-    Both gate storage anchors, run-log scoping, and token ownership — a
+    Both gate storage anchors, run-log scoping, and run ownership — a
     value outside the vocabulary must fail before it can pick a scope.
     ('' trigger is the interactive-dev spelling and stays valid.)
     """
     from unittest.mock import MagicMock
 
     common = dict(
-        server=MagicMock(), id='t-1', project_id='p-1', source='s-1', token='tk', public_auth='pk', pipeline={}
+        server=MagicMock(),
+        id='t-1',
+        project_id='p-1',
+        source='s-1',
+        key='dev.u-1.acme.p-1.s-1',
+        address='acme.p-1.s-1',
+        pipeline={},
     )
     with pytest.raises(ValueError, match='run_kind'):
         Task(**common, run_kind='prod')
@@ -1719,8 +1725,8 @@ async def test_task_loads_nothing_for_a_pipeline_without_placeholders():
         id='t-1',
         project_id='p-1',
         source='s-1',
-        token='tk',
-        public_auth='pk',
+        key='dev.u-1.acme.p-1.s-1',
+        address='acme.p-1.s-1',
         pipeline={},
         env_source=source,
     )
@@ -1747,8 +1753,8 @@ async def test_restart_loads_values_before_stopping_and_keeps_the_task_if_that_f
         id='t-1',
         project_id='p-1',
         source='s-1',
-        token='tk',
-        public_auth='pk',
+        key='dev.u-1.acme.p-1.s-1',
+        address='acme.p-1.s-1',
         pipeline=old,
         env_source=AsyncMock(side_effect=RuntimeError('db down')),
     )
@@ -1790,8 +1796,8 @@ async def test_a_stop_during_the_restart_load_wins():
         id='t-1',
         project_id='p-1',
         source='s-1',
-        token='tk',
-        public_auth='pk',
+        key='dev.u-1.acme.p-1.s-1',
+        address='acme.p-1.s-1',
         pipeline=old,
     )
 
@@ -1822,8 +1828,8 @@ async def test_a_stop_during_the_restart_load_wins_on_an_already_stopped_task():
         id='t-1',
         project_id='p-1',
         source='s-1',
-        token='tk',
-        public_auth='pk',
+        key='dev.u-1.acme.p-1.s-1',
+        address='acme.p-1.s-1',
         pipeline={},
     )
     task._stop_requested = True  # the previous run was stopped
@@ -1929,8 +1935,8 @@ async def test_a_second_restart_while_one_runs_is_refused():
         id='t-1',
         project_id='p-1',
         source='s-1',
-        token='tk',
-        public_auth='pk',
+        key='dev.u-1.acme.p-1.s-1',
+        address='acme.p-1.s-1',
         pipeline=pipeline,
         env_source=AsyncMock(return_value={'ROCKETRIDE_KEY': 'first'}),
     )
@@ -1977,7 +1983,13 @@ async def test_task_loads_placeholder_values_at_each_resolve():
     from unittest.mock import MagicMock
 
     common = dict(
-        server=MagicMock(), id='t-1', project_id='p-1', source='s-1', token='tk', public_auth='pk', pipeline={}
+        server=MagicMock(),
+        id='t-1',
+        project_id='p-1',
+        source='s-1',
+        key='dev.u-1.acme.p-1.s-1',
+        address='acme.p-1.s-1',
+        pipeline={},
     )
     source = AsyncMock(side_effect=[{'ROCKETRIDE_KEY': 'v1'}, {'ROCKETRIDE_KEY': 'v2'}])
     task = Task(**common, env_source=source)
@@ -2178,9 +2190,11 @@ _TRACE_MESSAGE = {
     'event': 'apaevt_trace',
     'body': {
         'op': 'enter',
-        'id': 0,
-        'pipe_id': 'parse',
-        'total_pipes': 1,
+        'pipeId': 0,
+        'componentId': 'parse',
+        'totalPipes': 1,
+        'bindingId': 7,
+        'rootBindingId': 7,
         'trace': {'text': 'hello'},
         'eventTime': 1_000.0,
     },
@@ -2255,16 +2269,17 @@ def _get_service(provider):
 
 
 def _mcp_node_config(provider, config):
-    """Stand-in for Config.getNodeConfig: profile defaults under the component config."""
-    profiles = {
-        'default': {'transport': _DEFAULT_TRANSPORT[provider.lower()]},
-        'RocketRide': {'transport': 'stdio'},
-        'sse': {'transport': 'sse'},
-    }
-    profile = config.get('profile', 'default')
-    if profile not in profiles:
-        raise Exception(f'Profile {profile} is not defined in {provider}')
-    return {**profiles[profile], **{k: v for k, v in config.items() if k != 'profile'}}
+    """Stand-in for resolve_node_config: schema defaults under the component config.
+
+    Like the resolver, a key the schema does not declare is a ConfigError.
+    """
+    from rocketlib import ConfigError
+
+    defaults = {'transport': _DEFAULT_TRANSPORT[provider.lower()], 'commandLine': ''}
+    unknown = sorted(set(config) - set(defaults))
+    if unknown:
+        raise ConfigError(f'unknown config key "{unknown[0]}"')
+    return {**defaults, **{k: v for k, v in config.items() if v is not None}}
 
 
 def _violation(*components):
@@ -2274,7 +2289,7 @@ def _violation(*components):
 def test_saas_gate_allows_ordinary_nodes_and_http_mcp():
     assert _violation({'id': 'a', 'provider': 'llm_openai'}) is None
     assert _violation({'id': 'm', 'provider': 'mcp_client', 'config': {'transport': 'streamable-http'}}) is None
-    assert _violation({'id': 'm', 'provider': 'mcp_client', 'config': {'profile': 'sse'}}) is None
+    assert _violation({'id': 'm', 'provider': 'mcp_client', 'config': {'transport': 'sse'}}) is None
     assert _violation({'id': 'b', 'provider': 'tool_butterbase', 'config': {}}) is None  # HTTP by default
 
 
@@ -2285,12 +2300,11 @@ def test_saas_gate_refuses_nosaas_nodes():
 @pytest.mark.parametrize(
     'config',
     [
-        {},  # default profile is stdio
-        {'profile': 'RocketRide'},
+        {},  # the schema default is stdio
         {'transport': 'stdio'},
         {'transport': 'STDIO '},
-        {'profile': 'sse', 'transport': 'stdio'},  # component value wins over the profile
-        {'profile': 'nope'},  # unresolvable -> refused
+        {'transport': None},  # unset means the default, which is stdio
+        {'profile': 'sse'},  # the old profile shape is an unknown key: unresolvable -> refused
     ],
 )
 def test_saas_gate_refuses_stdio_mcp(config):
@@ -2535,7 +2549,7 @@ def _startable_task(monkeypatch):
 
 
 async def test_start_task_mints_a_fresh_token_for_every_start(monkeypatch):
-    """Every start gets its own token, separate from the control token."""
+    """Every start gets its own token, separate from the control's key."""
     t, _ = _startable_task(monkeypatch)
     tokens = []
 
@@ -2547,7 +2561,7 @@ async def test_start_task_mints_a_fresh_token_for_every_start(monkeypatch):
 
     assert all(len(token) >= 32 for token in tokens)
     assert tokens[0] != tokens[1]
-    assert t.token not in tokens
+    assert t.key not in tokens
 
 
 async def test_start_task_passes_only_the_token_hash_ahead_of_pipeline_args(monkeypatch):

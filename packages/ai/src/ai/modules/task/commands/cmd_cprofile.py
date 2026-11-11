@@ -117,15 +117,16 @@ class CProfileCommands(DAPConn):
 
         Args:
             request: The original inbound DAP request from the client.
-            target: The task token identifying which pipeline to profile.
+            target: The task address identifying which pipeline to profile.
 
         Returns:
             DAP response with the subprocess result body.
         """
-        # Look up the task control entry by token, requiring task.control on
-        # the TASK'S team. Without this, any dev-team task.control holder
-        # could drive the profiler inside another team's engine subprocess.
-        control = self._server.get_task_control(target, self._account_info, require='task.control')
+        # Resolve the address under the caller's account, requiring
+        # task.control on the TASK'S run. Without this, any dev-team
+        # task.control holder could drive the profiler inside another team's
+        # engine subprocess.
+        control = self._server.resolve_control(target, self._account_info, 'task.control')
         task = control.task
 
         # Wait for the task to reach running state
@@ -159,7 +160,7 @@ class CProfileCommands(DAPConn):
 
         Usage Examples:
         - Local: { "command": "rrext_cprofile_start", "arguments": { "session": "test" } }
-        - Proxy: { "command": "rrext_cprofile_start", "arguments": { "target": "tk_abc", "session": "test" } }
+        - Proxy: { "command": "rrext_cprofile_start", "arguments": { "target": "acme.docBrain.parsePDF", "session": "test" } }
         """
         self.verify_permission('task.control')
         args = request.get('arguments', {})

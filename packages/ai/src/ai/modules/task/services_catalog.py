@@ -224,6 +224,19 @@ async def get_summary() -> Dict[str, Any]:
     return summary
 
 
+async def get_definitions() -> Dict[str, Any]:
+    """
+    Return every service's FULL entry (configuration schema included).
+
+    The bulk shape of :func:`get_service`: ``{'services': {name: entry},
+    'version'}`` with no icon table. Served to callers that need the
+    properties of every service at once (credential discovery), where
+    one round trip per service would be the alternative.
+    """
+    master, summary = await _get_catalog()
+    return {'services': master, 'version': summary.get('version')}
+
+
 async def get_service(name: str) -> Optional[Dict[str, Any]]:
     """
     Return one service's full entry (configuration schema included).

@@ -53,9 +53,10 @@ def _make_conn(*, account_info=None, server=None, connection_id=1):
     conn.verify_team_permission = MagicMock()  # granted by default
     conn.verify_plans = MagicMock(return_value=True)
     conn.get_task = MagicMock()
-    # on_launch replies via send_response; on_terminate resolves its token.
+    conn.get_control = MagicMock()
+    # on_launch replies via send_response; on_terminate resolves its address.
     conn.send_response = AsyncMock()
-    conn.get_task_token = MagicMock(return_value='tk_x')
+    conn.get_task_address = MagicMock(return_value='acme.pipe.x')
     # Bind the REAL org resolver (defined on TaskConn, next to
     # verify_team_permission) so on_execute exercises real membership-based
     # resolution against the stub AccountInfo's organization.
@@ -114,11 +115,11 @@ def _account_info(*, user_id='user-1', auth='ak_x', dev_team='team-1', organizat
 @pytest.mark.asyncio
 async def test_on_execute_starts_task_with_resolved_org_id():
     """on_execute resolves org_id from the user's default team and calls start_task."""
-    organization = {'id': 'org-B', 'teams': [{'id': 'team-1'}, {'id': 'team-other'}]}
+    organization = {'id': 'org-B', 'teams': [{'id': 'team-1'}, {'id': 'team-other'}], 'developerId': 'acme'}
     account = _account_info(user_id='user-1', dev_team='team-1', organization=organization)
 
     server = MagicMock()
-    server.start_task = AsyncMock(return_value={'token': 'tk_new'})
+    server.start_task = AsyncMock(return_value={'token': 'acme.pipe.new'})
 
     conn = _make_conn(account_info=account, server=server)
     response = await TaskCommands.on_execute(conn, {'arguments': {'pipeline': {'components': []}}})
@@ -128,8 +129,10 @@ async def test_on_execute_starts_task_with_resolved_org_id():
     assert call_kwargs['org_id'] == 'org-B'
     assert call_kwargs['team_id'] == 'team-1'
     assert call_kwargs['user_id'] == 'user-1'
+    # The session org's developer id is the address namespace start_task requires
+    assert call_kwargs['developer_id'] == 'acme'
     assert call_kwargs['wait_for_running'] is True
-    assert response == {'type': 'response', 'body': {'token': 'tk_new'}}
+    assert response == {'type': 'response', 'body': {'token': 'acme.pipe.new'}}
 
 
 def _assert_says_how_to_set_a_dev_team(message: str) -> None:
@@ -177,7 +180,7 @@ async def test_on_execute_ignores_client_team_override(monkeypatch):
 
     organization = {'id': 'org-1', 'teams': [{'id': 'team-1'}, {'id': 'team-target'}]}
     server = MagicMock()
-    server.start_task = AsyncMock(return_value={'token': 'tk_new'})
+    server.start_task = AsyncMock(return_value={'token': 'acme.pipe.new'})
     conn = _make_conn(account_info=_account_info(dev_team='team-1', organization=organization), server=server)
 
     # A stray teamId must NOT raise — it is silently ignored.
@@ -202,7 +205,7 @@ async def test_on_execute_accepts_team_id_matching_session_team(monkeypatch):
     monkeypatch.setattr(account_mod, 'get_merged_env', AsyncMock(return_value={}))
 
     server = MagicMock()
-    server.start_task = AsyncMock(return_value={'token': 'tk_new'})
+    server.start_task = AsyncMock(return_value={'token': 'acme.pipe.new'})
     conn = _make_conn(account_info=_account_info(dev_team='team-1'), server=server)
 
     await TaskCommands.on_execute(conn, {'arguments': {'teamId': 'team-1'}})
@@ -223,7 +226,7 @@ async def test_on_execute_foreign_team_secrets_resolve_to_dev_team(monkeypatch):
     monkeypatch.setattr(account_mod, 'get_merged_env', merged_env)
 
     server = MagicMock()
-    server.start_task = AsyncMock(return_value={'token': 'tk_new'})
+    server.start_task = AsyncMock(return_value={'token': 'acme.pipe.new'})
     conn = _make_conn(account_info=_account_info(dev_team='team-1'), server=server)
 
     await TaskCommands.on_execute(conn, {'arguments': {'teamId': 'team-foreign'}})
@@ -249,7 +252,7 @@ async def test_on_execute_run_kind_cannot_be_spoofed_via_dap(monkeypatch):
     monkeypatch.setattr(account_mod, 'get_merged_env', AsyncMock(return_value={}))
 
     server = MagicMock()
-    server.start_task = AsyncMock(return_value={'token': 'tk_new'})
+    server.start_task = AsyncMock(return_value={'token': 'acme.pipe.new'})
     conn = _make_conn(account_info=_account_info(), server=server)
 
     await TaskCommands.on_execute(
@@ -273,7 +276,7 @@ async def test_on_execute_trusted_attributes_classify_deploy_runs(monkeypatch):
     monkeypatch.setattr(account_singleton, 'get_merged_env', merged)
 
     server = MagicMock()
-    server.start_task = AsyncMock(return_value={'token': 'tk_new'})
+    server.start_task = AsyncMock(return_value={'token': 'acme.pipe.new'})
     conn = _make_conn(account_info=_account_info(), server=server)
     conn._trusted_run_kind = 'deploy'
     conn._trusted_trigger = 'schedule'
@@ -300,7 +303,7 @@ async def test_on_execute_hands_the_task_a_loader_not_the_values(monkeypatch):
     monkeypatch.setattr(account_mod, 'get_merged_env', merged)
 
     server = MagicMock()
-    server.start_task = AsyncMock(return_value={'token': 'tk_new'})
+    server.start_task = AsyncMock(return_value={'token': 'acme.pipe.new'})
     conn = _make_conn(account_info=_account_info(), server=server)
 
     await TaskCommands.on_execute(
@@ -321,7 +324,7 @@ async def test_on_execute_checks_plan_for_pipeline():
     """When the request includes a pipeline, verify_plans is invoked."""
     account = _account_info()
     server = MagicMock()
-    server.start_task = AsyncMock(return_value={'token': 'tk_new'})
+    server.start_task = AsyncMock(return_value={'token': 'acme.pipe.new'})
 
     conn = _make_conn(account_info=account, server=server)
     await TaskCommands.on_execute(conn, {'arguments': {'pipeline': {'components': []}}})
@@ -333,7 +336,7 @@ async def test_on_execute_checks_plan_for_pipeline():
 async def test_on_execute_skips_plan_check_without_pipeline():
     """If the request omits pipeline, verify_plans is not invoked."""
     server = MagicMock()
-    server.start_task = AsyncMock(return_value={'token': 'tk_new'})
+    server.start_task = AsyncMock(return_value={'token': 'acme.pipe.new'})
 
     conn = _make_conn(account_info=_account_info(), server=server)
     await TaskCommands.on_execute(conn, {'arguments': {}})
@@ -372,13 +375,15 @@ async def test_on_execute_passes_a_non_object_pipeline_on_to_the_server_guard(pi
 async def test_on_launch_starts_task_with_resolved_org():
     """on_launch resolves org_id from devTeam and delegates to start_task."""
     server = MagicMock()
-    server.start_task = AsyncMock(return_value={'id': 'task-99', 'token': 'tk_99'})
-    conn = _make_conn(account_info=_account_info(), server=server)
+    server.start_task = AsyncMock(return_value={'id': 'task-99', 'token': 'acme.pipe.99'})
+    organization = {'id': 'org-1', 'teams': [{'id': 'team-1'}], 'developerId': 'acme'}
+    conn = _make_conn(account_info=_account_info(organization=organization), server=server)
 
     await TaskCommands.on_launch(conn, {'arguments': {}})
 
     server.start_task.assert_awaited_once()
     assert server.start_task.call_args.kwargs['org_id'] == 'org-1'
+    assert server.start_task.call_args.kwargs['developer_id'] == 'acme'
     conn.send_response.assert_awaited_once()
 
 
@@ -388,14 +393,14 @@ async def test_on_launch_replies_via_send_response_and_returns_none():
     to send — there is no 'initialized' event any more.
     """
     server = MagicMock()
-    server.start_task = AsyncMock(return_value={'id': 'task-99', 'token': 'tk_99'})
+    server.start_task = AsyncMock(return_value={'id': 'task-99', 'token': 'acme.pipe.99'})
     conn = _make_conn(account_info=_account_info(), server=server)
 
     result = await TaskCommands.on_launch(conn, {'arguments': {}})
 
     assert result is None
     conn.send_response.assert_awaited_once()
-    assert conn.send_response.call_args.kwargs['body'] == {'id': 'task-99', 'token': 'tk_99'}
+    assert conn.send_response.call_args.kwargs['body'] == {'id': 'task-99', 'token': 'acme.pipe.99'}
 
 
 @pytest.mark.asyncio
@@ -450,7 +455,7 @@ async def test_on_launch_rejects_client_team_override():
 async def test_on_launch_checks_task_debug_on_dev_team():
     """on_launch verifies task.debug against the development team."""
     server = MagicMock()
-    server.start_task = AsyncMock(return_value={'id': 'task-1', 'token': 'tk_1'})
+    server.start_task = AsyncMock(return_value={'id': 'task-1', 'token': 'acme.pipe.1'})
     conn = _make_conn(account_info=_account_info(dev_team='team-1'), server=server)
     await TaskCommands.on_launch(conn, {'arguments': {}})
     conn.verify_team_permission.assert_called_once_with('team-1', 'task.debug')
@@ -462,16 +467,19 @@ async def test_on_launch_checks_task_debug_on_dev_team():
 
 
 @pytest.mark.asyncio
-async def test_on_terminate_stops_task_with_request_token():
-    """on_terminate stops the task named by the request's token."""
+async def test_on_terminate_stops_task_with_request_address():
+    """on_terminate stops the control the request's address resolves to, by its key."""
     server = MagicMock()
     server.stop_task = AsyncMock()
     conn = _make_conn(account_info=_account_info(), server=server)
-    conn.get_task_token = MagicMock(return_value='tk_active')
+    conn.get_task_address = MagicMock(return_value='acme.pipe.active')
+    conn.get_control = MagicMock(return_value=SimpleNamespace(key='dev.user-1.acme.pipe.active'))
 
-    response = await TaskCommands.on_terminate(conn, {'token': 'tk_active', 'arguments': {}})
+    request = {'arguments': {'token': 'acme.pipe.active'}}
+    response = await TaskCommands.on_terminate(conn, request)
 
-    server.stop_task.assert_awaited_once_with('tk_active')
+    conn.get_control.assert_called_once_with(request, 'task.control')
+    server.stop_task.assert_awaited_once_with('dev.user-1.acme.pipe.active')
     assert response['type'] == 'response'
 
 
@@ -479,24 +487,24 @@ async def test_on_terminate_stops_task_with_request_token():
 async def test_on_terminate_denied_does_not_stop_the_task():
     """A failed authorization must stop the handler before stop_task runs.
 
-    get_task is what enforces task.control ownership here, so a caller
+    get_control is what enforces task.control ownership here, so a caller
     without it must not be able to terminate someone else's task — the
     refusal has to happen before any side effect.
     """
     server = MagicMock()
     server.stop_task = AsyncMock()
     conn = _make_conn(account_info=_account_info(), server=server)
-    conn.get_task_token = MagicMock(return_value='tk_foreign')
-    conn.get_task = MagicMock(side_effect=PermissionError("Permission 'task.control' denied"))
+    conn.get_task_address = MagicMock(return_value='acme.pipe.foreign')
+    conn.get_control = MagicMock(side_effect=PermissionError("Permission 'task.control' denied"))
 
-    request = {'token': 'tk_foreign', 'arguments': {}}
+    request = {'arguments': {'token': 'acme.pipe.foreign'}}
     with pytest.raises(PermissionError, match='denied'):
         await TaskCommands.on_terminate(conn, request)
 
     # Pin the permission itself, not just that some check ran — the mock
     # raises on any call, so without this the test would pass even if
     # on_terminate asked for the wrong right.
-    conn.get_task.assert_called_once_with(request, 'task.control')
+    conn.get_control.assert_called_once_with(request, 'task.control')
     server.stop_task.assert_not_awaited()
 
 
@@ -518,7 +526,7 @@ async def test_on_restart_rechecks_the_callers_access_to_the_team():
     conn.verify_team_permission = MagicMock(side_effect=PermissionError("Permission 'task.control' denied"))
 
     with pytest.raises(PermissionError, match='denied'):
-        await TaskCommands.on_restart(conn, {'arguments': {'token': 'tk_x'}})
+        await TaskCommands.on_restart(conn, {'arguments': {'token': 'acme.pipe.x'}})
     conn.verify_team_permission.assert_called_once_with('team-9', 'task.control')
     server.restart_task.assert_not_awaited()
 
@@ -529,7 +537,7 @@ async def test_on_restart_delegates_to_restart_task():
     server = MagicMock()
     server.restart_task = AsyncMock(return_value={'restarted': True})
     conn = _make_conn(account_info=_account_info(), server=server)
-    response = await TaskCommands.on_restart(conn, {'arguments': {'token': 'tk_x'}})
+    response = await TaskCommands.on_restart(conn, {'arguments': {'token': 'acme.pipe.x'}})
     server.restart_task.assert_awaited_once()
     assert response == {'type': 'response', 'body': {'restarted': True}}
 
@@ -557,7 +565,7 @@ async def test_on_restart_authorizes_against_the_tasks_team():
     conn.get_task = MagicMock(side_effect=PermissionError('denied for this task'))
 
     with pytest.raises(PermissionError, match='denied for this task'):
-        await TaskCommands.on_restart(conn, {'arguments': {'token': 'tk_other_team'}})
+        await TaskCommands.on_restart(conn, {'arguments': {'token': 'acme.pipe.other_team'}})
 
     conn.get_task.assert_called_once()
     assert conn.get_task.call_args.args[1] == 'task.control'
@@ -581,7 +589,7 @@ async def test_on_rrext_get_task_status_returns_task_status_dict():
     conn = _make_conn(account_info=_account_info())
     conn.get_task = MagicMock(return_value=task)
 
-    response = await TaskCommands.on_rrext_get_task_status(conn, {'arguments': {'token': 'tk_x'}})
+    response = await TaskCommands.on_rrext_get_task_status(conn, {'arguments': {'token': 'acme.pipe.x'}})
     conn.get_task.assert_called_once()
     assert response == {'type': 'response', 'body': {'name': 'task-1', 'state': 3}}
 
@@ -593,13 +601,13 @@ async def test_on_rrext_get_task_status_returns_task_status_dict():
 
 @pytest.mark.asyncio
 async def test_on_rrext_get_token_returns_token_from_server():
-    """The handler queries the server with project_id + source and returns the token."""
+    """The handler queries the server with project_id + source and returns the address."""
     server = MagicMock()
-    server.get_task_control_by_project = MagicMock(return_value=SimpleNamespace(token='tk_found'))
+    server.get_task_control_by_project = MagicMock(return_value=SimpleNamespace(address='acme.pipe.found'))
 
     conn = _make_conn(account_info=_account_info(), server=server)
     response = await TaskCommands.on_rrext_get_token(conn, {'arguments': {'projectId': 'proj-1', 'source': 'src-1'}})
-    assert response == {'type': 'response', 'body': {'token': 'tk_found'}}
+    assert response == {'type': 'response', 'body': {'token': 'acme.pipe.found'}}
     server.get_task_control_by_project.assert_called_once_with(
         'proj-1', 'src-1', conn._account_info, require='task.monitor', team_id='', run_kind=''
     )
@@ -609,14 +617,14 @@ async def test_on_rrext_get_token_returns_token_from_server():
 async def test_on_rrext_get_token_team_scope_resolves_deploy_run():
     """A teamId argument scopes the lookup (and permission check) to that team."""
     server = MagicMock()
-    server.get_task_control_by_project = MagicMock(return_value=SimpleNamespace(token='tk_deploy'))
+    server.get_task_control_by_project = MagicMock(return_value=SimpleNamespace(address='acme.pipe.deploy'))
 
     conn = _make_conn(account_info=_account_info(), server=server)
     conn.verify_team_permission = MagicMock()
     response = await TaskCommands.on_rrext_get_token(
         conn, {'arguments': {'projectId': 'proj-1', 'source': 'src-1', 'teamId': 'team-1'}}
     )
-    assert response == {'type': 'response', 'body': {'token': 'tk_deploy'}}
+    assert response == {'type': 'response', 'body': {'token': 'acme.pipe.deploy'}}
     conn.verify_team_permission.assert_called_once_with('team-1', 'task.monitor')
     server.get_task_control_by_project.assert_called_once_with(
         'proj-1', 'src-1', conn._account_info, require='task.monitor', team_id='team-1', run_kind=''
@@ -645,7 +653,7 @@ async def test_on_rrext_get_tasks_filters_to_caller_and_running_only():
         owner_kind = 'team' if run_kind == 'deploy' else 'user'
         owner_id = team_id if run_kind == 'deploy' else 'user-1'
         return SimpleNamespace(
-            token=token,
+            address=token,
             userId='user-1',
             teamId=team_id,
             run_kind=run_kind,
@@ -660,9 +668,9 @@ async def test_on_rrext_get_tasks_filters_to_caller_and_running_only():
     # tk_running_other is a TEAM-owned deploy run in a team the caller cannot
     # access — the only run here the caller neither owns nor has team rights to.
     server._task_control = {
-        'tk_running_mine': _ctrl('tk_running_mine', 'team-1', running_status),
-        'tk_done_mine': _ctrl('tk_done_mine', 'team-1', completed_status),
-        'tk_running_other': _ctrl('tk_running_other', 'team-other', running_status, run_kind='deploy'),
+        'acme.pipe.running_mine': _ctrl('acme.pipe.running_mine', 'team-1', running_status),
+        'acme.pipe.done_mine': _ctrl('acme.pipe.done_mine', 'team-1', completed_status),
+        'acme.pipe.running_other': _ctrl('acme.pipe.running_other', 'team-other', running_status, run_kind='deploy'),
     }
 
     # Caller has access to team-1 only; team-other is invisible.
@@ -675,7 +683,7 @@ async def test_on_rrext_get_tasks_filters_to_caller_and_running_only():
     response = await TaskCommands.on_rrext_get_tasks(conn, {})
 
     tokens = [t['token'] for t in response['body']['tasks']]
-    assert tokens == ['tk_running_mine']
+    assert tokens == ['acme.pipe.running_mine']
     assert response['body']['tasks'][0]['name'] == 'my-pipeline'
     # Run classification rides every row — clients must not infer deploy-ness
     # from a non-empty teamId (dev runs carry an attribution team too).
@@ -691,7 +699,7 @@ async def test_on_rrext_get_tasks_falls_back_to_source_name():
     task = MagicMock()
     task.get_status = MagicMock(return_value=status)
     control = SimpleNamespace(
-        token='tk_1',
+        address='acme.pipe.1',
         userId='user-1',
         teamId='team-1',
         run_kind='dev',
@@ -703,7 +711,7 @@ async def test_on_rrext_get_tasks_falls_back_to_source_name():
     )
 
     server = MagicMock()
-    server._task_control = {'tk_1': control}
+    server._task_control = {'acme.pipe.1': control}
 
     organization = {
         'id': 'org-1',
@@ -1045,7 +1053,7 @@ async def test_on_execute_never_exposes_server_settings_to_sys_admin(monkeypatch
     account = _account_info(dev_team='team-1')
     account.sysPermissions = ['sys.admin']
     server = MagicMock()
-    server.start_task = AsyncMock(return_value={'token': 'tk_new'})
+    server.start_task = AsyncMock(return_value={'token': 'acme.pipe.new'})
     conn = _make_conn(account_info=account, server=server)
 
     await TaskCommands.on_execute(conn, {'arguments': {'pipeline': {'components': []}}})

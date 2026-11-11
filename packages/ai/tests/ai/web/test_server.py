@@ -159,7 +159,6 @@ class TestAllowedModules:
             'dropper',
             'mcp',
             'pipe',
-            'remote',
             'services',
             'shell',
             'task',

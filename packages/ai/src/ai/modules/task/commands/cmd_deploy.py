@@ -54,10 +54,12 @@
 from typing import TYPE_CHECKING, Any, Dict, List
 
 from ai.account import account
+from ai.account.app_deploy import _assert_owns_namespace, _developer_id_of
 from ai.account.models import resolve_team_permissions
 from ai.common.dap import DAPConn, TransportBase
 from ai.common.list_rows import paginate_rows
 
+from ..address import validate_component_ids, validate_segment
 from ..deploy_events import broadcast_deploy_changed
 
 if TYPE_CHECKING:
@@ -340,6 +342,16 @@ class DeployCommands(_DeployBase):
         if not project_id:
             raise ValueError('pipeline.project_id is required')
 
+        # The file carries only the SHORT id; the full name is DERIVED from
+        # the actor's developer namespace, never read from the file, so no
+        # org can produce another's namespace (plan S7). The namespace
+        # guarantee is the same one apps pass; the grammar (dot-free short
+        # id, dot-free component ids) is the address grammar.
+        validate_segment(project_id, 'project_id')
+        validate_component_ids(pipeline)
+        full_name = f'{_developer_id_of(self) or ""}.{project_id}'
+        _assert_owns_namespace(self, full_name)
+
         org_id = self._org_id()
         metadata = args.get('metadata') if isinstance(args.get('metadata'), dict) else None
         entry = await account.deployments_publish(
@@ -356,7 +368,7 @@ class DeployCommands(_DeployBase):
         # The resolved org rides every deploy response (B1 transparency):
         # the caller always sees which organization the registry write
         # landed in — cross-org targeting goes through an org switch.
-        body: Dict[str, Any] = {'artifact': entry, 'orgId': org_id}
+        body: Dict[str, Any] = {'artifact': entry, 'orgId': org_id, 'fullName': full_name}
         await self._notify_deploy_changed(org_id, '', project_id, 'add')
         if args.get('deployTo'):
             # One-step add+deploy — same checks as rrext_deploy_pipe deploy,

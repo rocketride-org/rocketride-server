@@ -103,7 +103,7 @@ def config_int(
     "disabled / use default" rather than as a literal limit.
 
     Args:
-        cfg: The config dict (e.g. from ``Config.getNodeConfig``).
+        cfg: The config mapping (e.g. the node's resolved ``self.config`` view).
         key: The config key to read.
         default: Returned when the value is missing, invalid, or <= 0.
         min_value: If set, the returned value is at least this. Clamped, not

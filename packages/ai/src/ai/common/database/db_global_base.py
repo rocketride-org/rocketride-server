@@ -27,9 +27,10 @@ Shared global (connection-level) base class for relational database nodes.
 Derived classes must implement two methods that carry the only
 driver-specific knowledge:
 
-- ``_connection_params``: maps the node's stored config (whose keys are
-  DB-namespaced, e.g. ``mysql.host``) into a flat dict with canonical keys
-  ``host``, ``user``, ``password``, ``database``, ``table``.
+- ``_connection_params``: maps the node's effective config (the resolver's
+  ``ConfigView`` for a converted node: defaults applied, short names such as
+  ``host``) into a flat dict with canonical keys ``host``, ``user``,
+  ``password``, ``database``, ``table``.
 
 - ``_build_connection_url``: turns those flat params into a SQLAlchemy DSN
   string, e.g. ``mysql+pymysql://user:pass@host/db``.
@@ -63,7 +64,6 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.exc import DBAPIError
 
 from rocketlib import IGlobalBase, error, warning
-from ai.common.config import Config
 
 DEFAULT_MAX_EXECUTE_ROWS = 25000
 
@@ -376,7 +376,7 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
         """
         engine = None
         try:
-            raw = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
+            raw = self.config
             params = self._connection_params(raw)
             db_url = self._build_connection_url(params)
 
@@ -907,7 +907,7 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
         self.reflect_lock = threading.Lock()
 
         # Resolve connection parameters via the subclass-provided mapping.
-        raw = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
+        raw = self.config
         params = self._connection_params(raw)
 
         # Read behavior settings from config before opening the engine so

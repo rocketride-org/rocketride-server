@@ -40,10 +40,9 @@ A concrete node inherits this class with no per-driver overrides. See
 from abc import ABC
 from typing import List, Set
 
-from rocketlib import Entry, warning
+from rocketlib import Entry, IInstanceBase, warning
 
 from ai.common.schema import Doc, Question
-from ai.common.transform import IInstanceTransform
 
 from .document_store import DocumentStoreBase, VectorStoreToolMixin
 from .store_global_base import StoreGlobalBase
@@ -54,7 +53,7 @@ from .store_global_base import StoreGlobalBase
 NO_STORE_MESSAGE = 'Vector store connection is unavailable. Check its connection settings and startup errors.'
 
 
-class StoreInstanceBase(VectorStoreToolMixin, IInstanceTransform, ABC):
+class StoreInstanceBase(VectorStoreToolMixin, IInstanceBase, ABC):
     """Abstract base for the IInstance layer of any vector store node."""
 
     IGlobal: StoreGlobalBase

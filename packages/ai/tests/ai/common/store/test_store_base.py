@@ -2,16 +2,16 @@
 Unit tests for ai.common.store.store_global_base.StoreGlobalBase and
 ai.common.store.store_instance_base.StoreInstanceBase.
 
-The base classes are ABCs with three abstract driver hooks (``_open_store``,
-``_sub_key``, ``_probe_connection``). Tests use a concrete ``_TestableGlobal``
-that supplies a fake store, then drive the shared lifecycle with a stubbed
-``IEndpoint``/``glb`` and monkeypatched ``Config``/embedding so no engine or
-real driver is needed.
+The base is an ABC with one abstract driver hook (``_open_store``). Tests use a
+concrete ``_TestableGlobal`` that supplies a fake store and drive the shared
+lifecycle with a stubbed ``IEndpoint``/``glb``. The config is the real
+resolver's view of a converted definition registered with the engine: the
+qdrant node (a selector with the key on its cloud branch, no tool switches)
+and the RocketRide vector node (both tool switches declared, off by default).
 
 The behaviors pinned here are the ones a regression in this shared file could
-silently break across all eight store nodes at once — including the two
-review-driven fixes (the lane ``store is None`` guards and ``endGlobal``
-clearing the transform key), which otherwise have no test.
+silently break across all nine store nodes at once, including the lane
+``store is None`` guards, which otherwise have no test.
 """
 
 from __future__ import annotations
@@ -19,9 +19,9 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-from rocketlib import OPEN_MODE
+from rocketlib.config import ConfigError
 
-import ai.common.store.store_global_base as sgb
+from ai.common.config import UnresolvedCredentialError
 from ai.common.schema import Doc, DocMetadata
 from ai.common.store.store_global_base import StoreGlobalBase
 from ai.common.store.store_instance_base import NO_STORE_MESSAGE, StoreInstanceBase
@@ -33,7 +33,7 @@ from ai.common.store.store_instance_base import NO_STORE_MESSAGE, StoreInstanceB
 
 
 class _FakeStore:
-    """Minimal stand-in for a DocumentStoreBase with the attrs _sub_key reads."""
+    """Minimal stand-in for a DocumentStoreBase."""
 
     def __init__(self):
         self.host = 'Host'
@@ -52,28 +52,19 @@ class _FakeStore:
 
 
 class _TestableGlobal(StoreGlobalBase):
-    """Concrete StoreGlobalBase: fake store, deterministic sub-key, no-op probe."""
+    """Concrete StoreGlobalBase: fake store, records what the hook received."""
 
     serverName = 'defaultname'
 
     def __init__(self, store):
         self._store_to_return = store
-        self._conn_config = {}
         self.opened = False
+        self.opened_with = None
 
-    def getConnConfig(self):
-        # Bypass the filter/endpoint config plumbing; tests inject directly.
-        return self._conn_config
-
-    def _open_store(self, logical_type, conn_config, bag):
+    def _open_store(self, logical_type, config, bag):
         self.opened = True
+        self.opened_with = (logical_type, config, bag)
         return self._store_to_return
-
-    def _sub_key(self) -> str:
-        return f'{self.store.host}/{self.store.port}/{self.store.collection}'
-
-    def _probe_connection(self, config) -> None:
-        return
 
 
 class _TestableInstance(StoreInstanceBase):
@@ -85,129 +76,92 @@ class _TestableInstance(StoreInstanceBase):
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture
-def warnings(monkeypatch):
-    """Capture rocketlib.warning calls made from the base module."""
-    captured = []
-    monkeypatch.setattr(sgb, 'warning', lambda msg: captured.append(msg))
-    return captured
-
-
-def _make(open_mode=OPEN_MODE.SOURCE, store=None):
-    g = _TestableGlobal(store=store if store is not None else _FakeStore())
-    g.IEndpoint = SimpleNamespace(endpoint=SimpleNamespace(openMode=open_mode, bag={}))
-    g.glb = SimpleNamespace(logicalType='teststore', connConfig={})
+def _make(conn_config=None, logical_type='qdrant', cls=_TestableGlobal, store=None):
+    """A global on the stored config ``conn_config`` of the converted node ``logical_type``."""
+    g = cls(store=store if store is not None else _FakeStore())
+    g.IEndpoint = SimpleNamespace(endpoint=SimpleNamespace(bag={'bag': 1}))
+    # qdrant's default branch is the cloud, whose key is required: the tests start local unless they say otherwise
+    conn_config = dict(conn_config or {})
+    if logical_type == 'qdrant':
+        conn_config.setdefault('profile', 'local')
+    g.glb = SimpleNamespace(logicalType=logical_type, connConfig=conn_config)
     return g
 
 
-def _patch_config(monkeypatch, node_config, embedding=(None, None)):
-    """Stub Config.getNodeConfig (serverName source) and getMultiProviderConfig."""
-    monkeypatch.setattr(sgb.Config, 'getNodeConfig', staticmethod(lambda lt, cc: node_config))
-    monkeypatch.setattr(sgb.Config, 'getMultiProviderConfig', staticmethod(lambda kind, cc: embedding))
-
-
 # ---------------------------------------------------------------------------
-# 1. CONFIG mode short-circuits before the driver is loaded
+# 1. beginGlobal opens the driver on the resolved view
 # ---------------------------------------------------------------------------
 
 
-def test_config_mode_returns_before_open_store(monkeypatch):
-    """CONFIG open mode returns before _open_store; store stays None (driver never imported)."""
-    _patch_config(monkeypatch, {})
-    g = _make(open_mode=OPEN_MODE.CONFIG)
+def test_begin_global_hands_the_resolved_view_to_the_driver():
+    """The hook receives the logical type, the resolved config (defaults applied, active branch flat) and the bag."""
+    g = _make({'profile': 'local', 'collection': 'docs'})
     g.beginGlobal()
+
+    logical_type, config, bag = g.opened_with
+    assert logical_type == 'qdrant'
+    assert (config['profile'], config['host'], config['port'], config['collection']) == (
+        'local',
+        'localhost',
+        6333,
+        'docs',
+    )
+    assert 'apikey' not in config
+    assert bag == {'bag': 1}
+    assert g.store is g._store_to_return
+
+
+def test_a_key_the_schema_does_not_declare_stops_the_start():
+    """Resolving is validating: an unknown key is named and the driver never opens."""
+    g = _make({'bogus': 1})
+    with pytest.raises(ConfigError, match='bogus'):
+        g.beginGlobal()
     assert g.opened is False
-    assert g.store is None
 
 
 # ---------------------------------------------------------------------------
-# 2. serverName resolution from merged config
+# 2. serverName resolution from the resolved config
 # ---------------------------------------------------------------------------
 
 
-def test_server_name_taken_from_config_when_present(monkeypatch):
-    """A non-blank string serverName in the merged config overrides the class default."""
-    _patch_config(monkeypatch, {'serverName': 'custom'})
-    g = _make()
+def test_server_name_taken_from_config_when_present():
+    """A non-blank serverName in the resolved config overrides the class default."""
+    g = _make({'serverName': 'custom'})
     g.beginGlobal()
     assert g.serverName == 'custom'
 
 
-@pytest.mark.parametrize('node_config', [{}, {'serverName': ''}, {'serverName': '   '}, {'serverName': 123}])
-def test_server_name_default_survives_when_absent_blank_or_non_string(monkeypatch, node_config):
-    """The class default survives when serverName is missing, blank, or not a string."""
-    _patch_config(monkeypatch, node_config)
-    g = _make()
+def test_a_blank_server_name_keeps_the_class_default():
+    """A blank value passes the resolver as written and names no namespace: the class default stands."""
+    g = _make({'serverName': ''})
     g.beginGlobal()
     assert g.serverName == 'defaultname'
 
 
+def test_a_non_string_server_name_is_a_config_error():
+    """The schema types serverName (string, minLength 1); the base no longer papers over a bad value."""
+    g = _make({'serverName': 123})
+    with pytest.raises(ConfigError, match='serverName'):
+        g.beginGlobal()
+
+
 # ---------------------------------------------------------------------------
-# 3. _wire_embedding
+# 3. endGlobal clears the store
 # ---------------------------------------------------------------------------
 
 
-def test_wire_embedding_leaves_query_none_without_embedding_block(monkeypatch):
-    """With no embedding provider, embed_query stays None (tools fall back to keyword)."""
-    _patch_config(monkeypatch, {}, embedding=(None, None))
+def test_end_global_clears_store():
+    """The endGlobal teardown drops the store."""
     g = _make()
     g.beginGlobal()
-    assert g.embed_query is None
-    assert g.embed_model_name is None
-
-
-def test_wire_embedding_warns_instead_of_raising_when_getembedding_throws(monkeypatch, warnings):
-    """If getEmbedding raises, beginGlobal warns and leaves embed_query None rather than failing."""
-    _patch_config(monkeypatch, {}, embedding=('provider', {'k': 'v'}))
-
-    import ai.common.embedding as emb
-
-    def _boom(provider, config, bag):
-        raise RuntimeError('no model here')
-
-    monkeypatch.setattr(emb, 'getEmbedding', _boom)
-
-    g = _make()
-    g.beginGlobal()  # must not raise
-    assert g.embed_query is None
-    assert any('tool path embedder unavailable' in w for w in warnings)
-
-
-# ---------------------------------------------------------------------------
-# 4. transform key format
-# ---------------------------------------------------------------------------
-
-
-def test_transform_key_format(monkeypatch):
-    """TRANFORM_KEY_TAG_NAME is f'{logicalType}://{sub_key.lower()}/status'."""
-    _patch_config(monkeypatch, {})
-    g = _make()
-    g.beginGlobal()
-    # sub_key = 'Host/5555/Coll' -> lowercased in the key
-    assert g.TRANFORM_KEY_TAG_NAME == 'teststore://host/5555/coll/status'
-
-
-# ---------------------------------------------------------------------------
-# 5. endGlobal clears store, embedder AND the transform key
-# ---------------------------------------------------------------------------
-
-
-def test_end_global_clears_state_and_transform_key(monkeypatch):
-    """The endGlobal teardown drops store/embed_query/embed_model_name and clears the transform key."""
-    _patch_config(monkeypatch, {})
-    g = _make()
-    g.beginGlobal()
-    assert g.TRANFORM_KEY_TAG_NAME  # set by beginGlobal
+    assert g.store is not None
 
     g.endGlobal()
     assert g.store is None
-    assert g.embed_query is None
-    assert g.embed_model_name is None
-    assert g.TRANFORM_KEY_TAG_NAME == ''
 
 
 # ---------------------------------------------------------------------------
-# 6. lane handlers guard a missing store
+# 4. lane handlers guard a missing store
 # ---------------------------------------------------------------------------
 
 
@@ -264,104 +218,56 @@ def test_lane_handlers_delegate_to_store_when_present():
 
 
 # ---------------------------------------------------------------------------
-# 5. allow_write resolution from merged config (#2587)
+# 5. The two tool switches: declared by the definition, else the class default
 # ---------------------------------------------------------------------------
 
 
 class _ManagedGlobal(_TestableGlobal):
-    """A driver whose store is shared or managed: writes through tools are off unless configured."""
+    """A driver whose store is shared or managed: tools and writes are off unless configured."""
 
+    expose_tools = False
     allow_write = False
 
 
-@pytest.mark.parametrize(
-    'value, expected', [(True, True), ('true', True), ('on', True), (False, False), ('false', False), ('0', False)]
-)
-def test_allow_write_taken_from_config_when_present(monkeypatch, value, expected):
-    """A configured allow_write wins over the class default, with config-style string parsing."""
-    _patch_config(monkeypatch, {'allow_write': value})
-    g = _make()
-    g.beginGlobal()
-    assert g.allow_write is expected
-
-
-@pytest.mark.parametrize('node_config', [{}, {'allow_write': None}, {'allow_write': 'maybe'}])
-def test_allow_write_class_default_survives_when_absent_or_unrecognised(monkeypatch, node_config):
-    """An absent or garbage value falls back to the driver's class default.
-
-    True for an ordinary store, False for a managed one, so no existing driver changes behaviour.
-    """
-    _patch_config(monkeypatch, node_config)
-    g = _make()
-    g.beginGlobal()
-    assert g.allow_write is True
-
-    managed = _ManagedGlobal(store=_FakeStore())
-    managed.IEndpoint = SimpleNamespace(endpoint=SimpleNamespace(openMode=OPEN_MODE.SOURCE, bag={}))
-    managed.glb = SimpleNamespace(logicalType='managedstore', connConfig={})
+def test_switches_default_off_on_a_managed_node_and_on_elsewhere():
+    """The RocketRide vector definition declares both switches off; qdrant declares none, so the class defaults stand."""
+    managed = _make({}, logical_type='rocketride_vector', cls=_ManagedGlobal)
     managed.beginGlobal()
-    assert managed.allow_write is False
+    assert (managed.expose_tools, managed.allow_write) == (False, False)
+
+    g = _make({})
+    g.beginGlobal()
+    assert (g.expose_tools, g.allow_write) == (True, True)
 
 
-def test_managed_driver_can_be_opened_up_through_config(monkeypatch):
-    """The node owner opts in with allow_write=true on a driver that defaults to off."""
-    _patch_config(monkeypatch, {'allow_write': 'true'})
-    managed = _ManagedGlobal(store=_FakeStore())
-    managed.IEndpoint = SimpleNamespace(endpoint=SimpleNamespace(openMode=OPEN_MODE.SOURCE, bag={}))
-    managed.glb = SimpleNamespace(logicalType='managedstore', connConfig={})
+@pytest.mark.parametrize('switch', ['expose_tools', 'allow_write'])
+def test_a_managed_driver_can_be_opened_up_through_config(switch):
+    """The node owner opts in with the switch set to true on a driver that defaults to off."""
+    managed = _make({switch: True}, logical_type='rocketride_vector', cls=_ManagedGlobal)
     managed.beginGlobal()
-    assert managed.allow_write is True
+    assert getattr(managed, switch) is True
+    other = 'allow_write' if switch == 'expose_tools' else 'expose_tools'
+    assert getattr(managed, other) is False
+
+
+@pytest.mark.parametrize('switch', ['expose_tools', 'allow_write'])
+@pytest.mark.parametrize('value', ['true', 'maybe', 1])
+def test_a_switch_is_a_boolean_or_a_config_error(switch, value):
+    """The schema types the switches: a string or a number is refused, never parsed."""
+    managed = _make({switch: value}, logical_type='rocketride_vector', cls=_ManagedGlobal)
+    with pytest.raises(ConfigError, match=switch):
+        managed.beginGlobal()
+
+
+def test_a_switch_the_definition_does_not_declare_is_a_config_error():
+    """The qdrant definition declares no tool switches, so writing one is an unknown key."""
+    g = _make({'allow_write': True})
+    with pytest.raises(ConfigError, match='allow_write'):
+        g.beginGlobal()
 
 
 # ---------------------------------------------------------------------------
-# 6. expose_tools resolution from merged config (#2631 review)
-# ---------------------------------------------------------------------------
-
-
-class _ManagedToolsGlobal(_TestableGlobal):
-    """A driver whose store is shared or managed: the tool surface is off unless configured."""
-
-    expose_tools = False
-
-
-@pytest.mark.parametrize(
-    'value, expected', [(True, True), ('true', True), ('on', True), (False, False), ('false', False), ('0', False)]
-)
-def test_expose_tools_taken_from_config_when_present(monkeypatch, value, expected):
-    """A configured expose_tools wins over the class default, with config-style string parsing."""
-    _patch_config(monkeypatch, {'expose_tools': value})
-    g = _make()
-    g.beginGlobal()
-    assert g.expose_tools is expected
-
-
-@pytest.mark.parametrize('node_config', [{}, {'expose_tools': None}, {'expose_tools': 'maybe'}])
-def test_expose_tools_class_default_survives_when_absent_or_unrecognised(monkeypatch, node_config):
-    """An absent or garbage value falls back to the driver's class default: on for an ordinary store, off for a managed one."""
-    _patch_config(monkeypatch, node_config)
-    g = _make()
-    g.beginGlobal()
-    assert g.expose_tools is True
-
-    managed = _ManagedToolsGlobal(store=_FakeStore())
-    managed.IEndpoint = SimpleNamespace(endpoint=SimpleNamespace(openMode=OPEN_MODE.SOURCE, bag={}))
-    managed.glb = SimpleNamespace(logicalType='managedstore', connConfig={})
-    managed.beginGlobal()
-    assert managed.expose_tools is False
-
-
-def test_managed_driver_tools_can_be_exposed_through_config(monkeypatch):
-    """The node owner opts in with expose_tools=true on a driver that defaults to off."""
-    _patch_config(monkeypatch, {'expose_tools': 'true'})
-    managed = _ManagedToolsGlobal(store=_FakeStore())
-    managed.IEndpoint = SimpleNamespace(endpoint=SimpleNamespace(openMode=OPEN_MODE.SOURCE, bag={}))
-    managed.glb = SimpleNamespace(logicalType='managedstore', connConfig={})
-    managed.beginGlobal()
-    assert managed.expose_tools is True
-
-
-# ---------------------------------------------------------------------------
-# A credential still written as an unfilled ${ROCKETRIDE_...}
+# 6. A credential still written as an unfilled ${ROCKETRIDE_...}
 # ---------------------------------------------------------------------------
 
 
@@ -370,56 +276,38 @@ class _KeyedGlobal(_TestableGlobal):
 
     credential_fields = ('apikey',)
 
-    def __init__(self, store):
-        super().__init__(store)
-        self.probed = False
 
-    def _probe_connection(self, config) -> None:
-        self.probed = True
+def _cloud(apikey):
+    return {'profile': 'cloud', 'cloud': {'host': 'x.qdrant.io', 'apikey': apikey}}
 
 
-def _keyed(conn_config):
-    g = _KeyedGlobal(store=_FakeStore())
-    g.IEndpoint = SimpleNamespace(endpoint=SimpleNamespace(openMode=OPEN_MODE.SOURCE, bag={}))
-    g.glb = SimpleNamespace(logicalType='teststore', connConfig=conn_config)
-    g._conn_config = conn_config
-    return g
+def test_an_unfilled_key_stops_the_store_before_it_opens():
+    g = _make(_cloud('${ROCKETRIDE_QDRANT_KEY}'), cls=_KeyedGlobal)
 
-
-def test_an_unfilled_key_stops_the_store_before_it_opens(monkeypatch):
-    config = {'apikey': '${ROCKETRIDE_QDRANT_KEY}'}
-    _patch_config(monkeypatch, config)
-    g = _keyed(config)
-
-    with pytest.raises(ValueError, match='no variable named ROCKETRIDE_QDRANT_KEY was found'):
+    with pytest.raises(UnresolvedCredentialError, match='no variable named ROCKETRIDE_QDRANT_KEY was found'):
         g.beginGlobal()
     assert not g.opened, 'the driver opened a connection with the placeholder as its key'
 
 
-def test_an_unfilled_key_is_reported_at_save_time_without_a_probe(monkeypatch, warnings):
-    config = {'apikey': '${ROCKETRIDE_QDRANT_KEY}'}
-    _patch_config(monkeypatch, config)
-    g = _keyed(config)
+def test_a_filled_key_opens_the_store():
+    g = _make(_cloud('a-real-key'), cls=_KeyedGlobal)
 
-    g.validateConfig()
+    g.beginGlobal()
 
-    assert not g.probed, 'the probe sent the placeholder to the server'
-    assert any('no variable named ROCKETRIDE_QDRANT_KEY was found' in w for w in warnings)
+    assert g.opened and g.opened_with[1]['apikey'] == 'a-real-key'
 
 
-@pytest.mark.parametrize('config', [{'apikey': 'a-real-key'}, {'apikey': ''}, {}])
-def test_a_filled_empty_or_absent_key_opens_the_store(monkeypatch, config):
-    _patch_config(monkeypatch, config)
-    g = _keyed(config)
+def test_a_branch_without_the_credential_is_not_checked():
+    """The local branch has no key; ``_credentials`` reads nothing and the store opens."""
+    g = _make({'profile': 'local'}, cls=_KeyedGlobal)
 
     g.beginGlobal()
 
     assert g.opened
 
 
-def test_a_driver_without_credential_fields_is_not_checked(monkeypatch):
-    _patch_config(monkeypatch, {'apikey': '${ROCKETRIDE_NOT_SENT}'})
-    g = _make()
+def test_a_driver_without_credential_fields_is_not_checked():
+    g = _make(_cloud('${ROCKETRIDE_NOT_SENT}'))
 
     g.beginGlobal()
 

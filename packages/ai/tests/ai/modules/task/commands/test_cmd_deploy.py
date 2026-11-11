@@ -56,6 +56,7 @@ def _account_info(*, teams=None, dev_team='team-1', user_id='user-1'):
         organization={
             'id': 'org-1',
             'name': 'Acme',
+            'developerId': 'acme',
             'permissions': [],
             'teams': teams
             if teams is not None
@@ -365,7 +366,7 @@ class TestReads:
                 owner_kind=owner_kind,
                 owner_user_id=owner_user_id,
             )
-            return 'tk_manual'
+            return 'deploy.team-1.acme.proj-1.webhook_1'
 
         monkeypatch.setattr('ai.modules.task.task_server_facade.start_server_task_as_team', fake_dispatch)
         account_stub.deployments_get.return_value = {
@@ -381,8 +382,11 @@ class TestReads:
             },
         }
         conn = _make_conn(_account_info())
+        # The dispatch hands back the control KEY; the client gets the ADDRESS.
+        conn._server.control_by_key = MagicMock(return_value=SimpleNamespace(address='acme.proj-1.webhook_1'))
         result = await conn._deploy_run({}, {'projectId': 'proj-1', 'sourceId': 'webhook_1', 'teamId': 'team-1'})
-        assert result['body'] == {'token': 'tk_manual', 'version': 1}
+        assert result['body'] == {'token': 'acme.proj-1.webhook_1', 'version': 1}
+        conn._server.control_by_key.assert_called_once_with('deploy.team-1.acme.proj-1.webhook_1')
         assert dispatched['trigger'] == 'manual'
         assert dispatched['team_id'] == 'team-1'
         assert dispatched['pipeline']['source'] == 'webhook_1'
@@ -393,9 +397,11 @@ class TestReads:
         assert dispatched['trace_level'] == 'summary'
         assert dispatched['debug_out'] is True
         account_stub.deployments_mark_run.assert_awaited_once_with('org-1', 'team-1', 'proj-1', 'webhook_1')
-        # The manual token lands under the scheduler's overlap guard so the
+        # The control KEY lands under the scheduler's overlap guard so the
         # next cron tick sees this run and skips.
-        conn._test_scheduler.register_manual_run.assert_called_once_with('team-1', 'proj-1', 'webhook_1', 'tk_manual')
+        conn._test_scheduler.register_manual_run.assert_called_once_with(
+            'team-1', 'proj-1', 'webhook_1', 'deploy.team-1.acme.proj-1.webhook_1'
+        )
 
     @pytest.mark.asyncio
     async def test_run_refuses_while_source_run_active(self, account_stub, monkeypatch):
@@ -531,7 +537,7 @@ class TestPersonalDeploy:
 
         async def fake_dispatch(server, pipeline, **kw):
             dispatched.update(kw, pipeline=pipeline)
-            return 'tk_me'
+            return 'deploy.user-1.acme.proj-1.s1'
 
         monkeypatch.setattr('ai.modules.task.task_server_facade.start_server_task_as_team', fake_dispatch)
         account_stub.deployments_get.return_value = {
@@ -543,14 +549,18 @@ class TestPersonalDeploy:
             'billingTeamId': 'team-1',
         }
         conn = _make_conn(_account_info(teams=[]))
+        address = 'acme.proj-1.s1'
+        conn._server.control_by_key = MagicMock(return_value=SimpleNamespace(address=address))
         result = await conn._deploy_run({}, {'projectId': 'proj-1', 'sourceId': 's1', 'teamId': '@me'})
-        assert result['body'] == {'token': 'tk_me', 'version': 1}
+        assert result['body'] == {'token': address, 'version': 1}
         assert dispatched['owner_kind'] == 'user'
         assert dispatched['owner_user_id'] == 'user-1'
         # Billing team is the deployment's ABSOLUTE stamp, not the target.
         assert dispatched['team_id'] == 'team-1'
         # Overlap guard + mark_run key on the OWNER key.
-        conn._test_scheduler.register_manual_run.assert_called_once_with('user~user-1', 'proj-1', 's1', 'tk_me')
+        conn._test_scheduler.register_manual_run.assert_called_once_with(
+            'user~user-1', 'proj-1', 's1', 'deploy.user-1.acme.proj-1.s1'
+        )
         account_stub.deployments_mark_run.assert_awaited_once_with('org-1', 'user~user-1', 'proj-1', 's1')
 
     @pytest.mark.asyncio

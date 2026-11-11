@@ -43,7 +43,7 @@ class ServerTaskAuthError(Exception):
 
 
 async def start_server_task(server: 'TaskServer', token: str, pipeline: Dict[str, Any]) -> str:
-    """Authenticate ``token`` and execute ``pipeline`` on ``server``; return the task token (``tk_…``).
+    """Authenticate ``token`` and execute ``pipeline`` on ``server``; return the task address.
 
     Raises:
         ServerTaskAuthError: Authentication failed.
@@ -74,7 +74,7 @@ async def start_server_task_as_team(
     owner_kind: str = 'team',
     owner_user_id: str = '',
 ) -> str:
-    """Execute ``pipeline`` as a DEPLOYMENT run — no stored credential.
+    """Execute ``pipeline`` as a DEPLOYMENT run — no stored credential; return the control's KEY.
 
     The trusted dispatch path for scheduled/deployed runs: instead of
     replaying a user token, the connection's identity is CONSTRUCTED
@@ -94,12 +94,27 @@ async def start_server_task_as_team(
       - ``run_kind='deploy'``, the owner scope, and ``trigger`` travel as
         TRUSTED connection attributes read by on_execute — never as DAP
         arguments, so remote clients cannot spoof a deploy run.
+      - The org's developer id rides the synthetic organization: it is the
+        address namespace, and a run cannot start without one.
+
+    Returns:
+        The started control's registry KEY (an in-process handle for the
+        scheduler and the manual-run door) — never sent to a client; the
+        client-facing name is the control's ``address``.
 
     Raises:
         RuntimeError: Execute request did not succeed.
+        PermissionError: The org has no developer id.
     """
     from ai.account import account
     from ai.account.models import AccountInfo
+
+    # The address namespace comes from the org, not from a session.
+    developer_id = await account.get_developer_id(org_id)
+    if not developer_id:
+        raise PermissionError(
+            'Your organization has no developer id yet: an org admin must claim one before deployments can run'
+        )
 
     # Trusted entry point, but still validate the owner pair: owner_kind='user'
     # with an empty owner_user_id would build an identity with userId='' — a
@@ -134,6 +149,7 @@ async def start_server_task_as_team(
                     'permissions': ['task.control', 'task.monitor', 'task.data', 'task.store'],
                 }
             ],
+            'developerId': developer_id,
         },
         capabilities=list(account.capabilities),
     )
@@ -158,7 +174,14 @@ async def start_server_task_as_team(
         arguments['args'] = ['--trace=debugOut']
     exec_response = await conn.request('execute', arguments=arguments)
 
-    return exec_response['body']['token']
+    # The response carries the address; the in-process callers hold the key.
+    # The deploy run's key is built from its owner, never resolved through the
+    # caller rungs: for a @me deploy the synthetic account IS the owning user,
+    # so the resolver would try @dev first and hand back that user's Play'd
+    # run of the same pipeline (same address) instead of this deploy run.
+    address = exec_response['body']['token']
+    owner_id = owner_user_id if owner_kind == 'user' else team_id
+    return server.control_by_key(f'deploy.{owner_id}.{address}').key
 
 
 # =============================================================================

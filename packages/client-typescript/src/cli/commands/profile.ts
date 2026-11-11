@@ -92,8 +92,8 @@ function formatPercent(pct: number): string {
 /**
  * Describe what `--token` selects, for human output.
  *
- * @param token - Task token, or undefined for the server process.
- * @returns E.g. `task tk_abc` or `the server process`.
+ * @param token - Task address, or undefined for the server process.
+ * @returns E.g. `task acme.docBrain.parsePDF` or `the server process`.
  */
 function scopeOf(token?: string): string {
 	return token ? `task ${token}` : 'the server process';

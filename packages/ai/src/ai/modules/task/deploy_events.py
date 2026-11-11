@@ -170,10 +170,6 @@ async def broadcast_review_state(
         info = getattr(conn, '_account_info', None)
         if not info:
             continue
-        # Task-scoped sockets (pk_/tk_) carry the launching user's identity
-        # but never receive user-facing pushes (mirrors push_org_update).
-        if (getattr(info, 'auth', '') or '').startswith(('pk_', 'tk_')):
-            continue
         org = getattr(info, 'organization', None)
         conn_org = (org.get('id', '') if isinstance(org, dict) else getattr(org, 'id', '')) if org else ''
         perms = getattr(info, 'sysPermissions', None) or []

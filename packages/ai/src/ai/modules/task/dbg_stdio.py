@@ -36,7 +36,7 @@ Dependencies:
     - ai.common.dap: Base DAP client infrastructure
 
 Usage Pattern:
-    1. Create instance with subprocess: client = DbgStdio(process=subprocess, token="TASK1")
+    1. Create instance with subprocess: client = DbgStdio(process=subprocess, id="acme.docBrain.parsePDF", key="dev.user-1.acme.docBrain.parsePDF")
     2. Start client: await client.connect()
     3. External DAP system can send commands through this client
     4. Client uses TransportStdio to communicate with subprocess
@@ -100,7 +100,7 @@ class DbgStdio(DAPClient):
         )
 
         # Create DAP client with transport
-        client = DbgStdio(process=process, token='TASK1')
+        client = DbgStdio(process=process, id='acme.docBrain.parsePDF', key='dev.user-1.acme.docBrain.parsePDF')
 
         # Start debugging session
         await client.connect()  # Starts DAP client and subprocess monitoring
@@ -128,7 +128,7 @@ class DbgStdio(DAPClient):
     Attributes:
         _transport (TransportStdio): The stdio transport for subprocess communication
         _process (asyncio.subprocess.Process): The monitored subprocess
-        _token (str): Unique identifier for this debugging session
+        _key (str): The control's registry key for this debugging session
     """
 
     def __init__(self, **kwargs) -> None:
@@ -143,8 +143,11 @@ class DbgStdio(DAPClient):
             process (asyncio.subprocess.Process): The subprocess to communicate with.
                 Must have stdout and stderr streams available for reading protocol
                 messages, and stdin available for sending JSON commands.
-            token (str, optional): Unique identifier for this debugging session.
-                Used for logging and identification. Defaults to 'UNKNOWN'.
+            id (str, optional): The run's display id (its address); names the
+                DAP module in logs. Defaults to 'UNKNOWN'.
+            key (str, optional): The control's registry key
+                (``runKind.ownerId.address``) for this debugging session.
+                Defaults to 'UNKNOWN'.
             **kwargs: Additional arguments passed to parent DAPClient
 
         Raises:
@@ -153,7 +156,7 @@ class DbgStdio(DAPClient):
 
         Setup Process:
         1. Initializes parent DAPClient for DAP protocol handling
-        2. Stores subprocess reference and token
+        2. Stores subprocess reference, id and key
         3. Creates TransportStdio instance for subprocess communication
         4. Binds transport callbacks for protocol event handling
         5. Prepares connection lifecycle management
@@ -165,7 +168,7 @@ class DbgStdio(DAPClient):
         Example:
             ```python
             # Basic usage
-            client = DbgStdio(process=subprocess, token='TASK1')
+            client = DbgStdio(process=subprocess, id='acme.docBrain.parsePDF', key='dev.user-1.acme.docBrain.parsePDF')
             await client.connect()
 
 
@@ -175,13 +178,15 @@ class DbgStdio(DAPClient):
                     await self.send_to_subprocess({'command': 'pause'})
 
 
-            client = MyStdioClient(process=subprocess, token='TASK1')
+            client = MyStdioClient(
+                process=subprocess, id='acme.docBrain.parsePDF', key='dev.user-1.acme.docBrain.parsePDF'
+            )
             await client.connect()
             ```
         """
-        # Get the token for identification
+        # Get the display id and registry key for identification
         self._id = kwargs.get('id', 'UNKNOWN')
-        self._token = kwargs.get('token', 'UNKNOWN')
+        self._key = kwargs.get('key', 'UNKNOWN')
 
         # Get and validate the subprocess
         self._process = kwargs.get('process', None)

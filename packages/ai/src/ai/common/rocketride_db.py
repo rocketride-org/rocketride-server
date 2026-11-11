@@ -59,10 +59,9 @@ DB_RESOLVE_ERROR_ENV = 'ROCKETRIDE_DB_RESOLVE_ERROR'
 # The node providers that use a RocketRide cloud database.
 DB_PROVIDERS = frozenset({'rocketride_sql', 'rocketride_vector', 'rocketride_graph'})
 
-# Source providers whose callers reach the run as its owner with no identity
-# of their own: a pk_ chat, dropper or webhook link, or a chat bot. A pipeline
-# with any of them exposes a public endpoint (SDD 4.4 hard rule 2). Every task
-# gets a pk_ token, so the token alone can't decide this (open question 14).
+# Source providers that expose a public endpoint (SDD 4.4 hard rule 2): a
+# chat, dropper or webhook door, or a chat bot. The provider decides this;
+# every task is addressed the same way, so nothing on the task itself can.
 PUBLIC_SOURCE_PROVIDERS = frozenset({'chat', 'dropper', 'webhook', 'discord', 'telegram'})
 
 DB_SCOPES = ('org', 'team', 'user')
@@ -86,7 +85,7 @@ def db_target(config: Mapping) -> tuple[str, str]:
     """Read and check a DB node's ``(scope, target)`` from its resolved config.
 
     Args:
-        config: The node config after ``Config.getNodeConfig`` (flat keys).
+        config: The node's resolved config (``rocketlib.resolveConfig`` view, flat keys).
 
     Returns:
         ``(scope, target)``. scope defaults to ``'org'``; target ``''`` means

@@ -42,7 +42,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from rocketlib import IGlobalBase, debug, warning
 
-from ai.common.config import Config
 from ai.common.utils import config_int, parse_bool
 
 DEFAULT_MAX_EXECUTE_ROWS = 25000
@@ -179,7 +178,7 @@ class GraphGlobalBase(IGlobalBase, ABC):
         """Resolve config, open the driver, and cache the graph schema."""
         self.graph_schema = {'nodes': {}, 'relationships': []}
 
-        config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
+        config = self.config
 
         self.db_description = self._graph_description(config)
         self.max_validation_attempts = config_int(
@@ -223,7 +222,7 @@ class GraphGlobalBase(IGlobalBase, ABC):
     def validateConfig(self) -> None:
         """Save-time validation: probe the server so the user sees errors immediately."""
         try:
-            config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
+            config = self.config
             self._probe_connection(config)
         except Exception as e:
             warning(str(e))

@@ -262,6 +262,20 @@ def _developer_id_of(conn: Any) -> Optional[str]:
     return getattr(org, 'developerId', None)
 
 
+def namespace_of(artifact_id: str) -> str:
+    """The developer namespace an artifact id lives in: the id up to its FIRST dot.
+
+    ``acme.docBrain`` -> ``acme`` and ``acme.tools.viewer`` -> ``acme``; a
+    bare slug is its own namespace. A developer id is a dot-free slug (letters
+    and underscores only), so the first segment is always the whole namespace
+    whatever follows it. This is the ONLY source of a listing's publisher: it
+    is derived from the id, which the namespace guarantee
+    (``_assert_owns_namespace``) ties to the publishing org, so nothing a
+    manifest says can claim another publisher.
+    """
+    return artifact_id.split('.', 1)[0]
+
+
 def _assert_owns_namespace(conn: Any, app_id: str) -> None:
     """GUARANTEE the app id lives in the caller org's developer namespace.
 
@@ -1115,7 +1129,9 @@ def manifest_snapshot(entry: Dict[str, Any], artifact: Dict[str, Any]) -> Dict[s
     manifest = metadata.get('manifest') if isinstance(metadata.get('manifest'), dict) else {}
     return {
         'name': str(manifest.get('name') or artifact.get('name') or artifact.get('appId') or ''),
-        'publisher': str(manifest.get('publisher') or ''),
+        # DERIVED, never authored: the manifest's own publisher/author fields
+        # are ignored (plan S7).
+        'publisher': namespace_of(str(artifact.get('appId') or manifest.get('id') or '')),
         'description': str(manifest.get('description') or ''),
         'iconPath': str(manifest.get('icon') or ''),
         'readmePath': str(manifest.get('readme') or ''),
@@ -1383,10 +1399,6 @@ async def resolve_app_pins(org_id: str, user_id: Optional[str], team_ids: List[s
         if not isinstance(artifact, dict) or artifact.get('kind') != 'app':
             continue
         snapshot = row.get('snapshot') or {}
-        # The DB edition's fixed snapshot columns drop `publisher`, so fall
-        # back to the artifact's stored appManifest (metadata.manifest).
-        artifact_meta = artifact.get('metadata') if isinstance(artifact.get('metadata'), dict) else {}
-        artifact_manifest = artifact_meta.get('manifest') if isinstance(artifact_meta.get('manifest'), dict) else {}
         rung = 'personal' if audience_type == 'user' else audience_type
         mode = snapshot.get('mode') or 'free'
         # Internal-pin serving status. A public (store) entry gets its real
@@ -1407,7 +1419,7 @@ async def resolve_app_pins(org_id: str, user_id: Optional[str], team_ids: List[s
             'id': app_id,
             'moduleId': artifact.get('moduleId') or app_id.replace('.', '_'),
             'name': snapshot.get('name') or artifact.get('name') or app_id,
-            'publisher': str(snapshot.get('publisher') or artifact_manifest.get('publisher') or ''),
+            'publisher': namespace_of(app_id),
             'description': snapshot.get('description') or '',
             'icon': _icon_url_of(app_id, version, snapshot.get('iconPath')),
             'readme': snapshot.get('readmePath') or '',

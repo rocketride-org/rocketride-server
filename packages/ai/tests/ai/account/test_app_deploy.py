@@ -1094,8 +1094,8 @@ class _EventConn:
 @pytest.mark.asyncio
 async def test_review_transitions_push_both_signals(registry, quiet_push, monkeypatch):
     """submit/withdraw push the org-scoped rail invalidation AND the typed
-    app:statusChanged event — delivered to the owning org and to cross-org
-    reviewers (sys.app/sys.admin), never to strangers or task sockets — and
+    app:statusChanged event — delivered to EVERY connection of the owning org
+    and to cross-org reviewers (sys.app/sys.admin), never to strangers — and
     drop the app's server-side serving verdicts (#2461).
     """
     import ai.modules.shell.shell as shell_mod
@@ -1113,10 +1113,10 @@ async def test_review_transitions_push_both_signals(registry, quiet_push, monkey
     owner = _EventConn(org_id='org1')
     reviewer = _EventConn(org_id='other-org', perms=['sys.app'])
     stranger = _EventConn(org_id='other-org')
-    task_socket = _EventConn(org_id='org1', auth='pk_task')
+    member = _EventConn(org_id='org1', auth='rr_scoped_pat')
     dev._server = SimpleNamespace(
         broadcast_server_event=broadcast_server_event,
-        _connections={'a': owner, 'b': reviewer, 'c': stranger, 'd': task_socket},
+        _connections={'a': owner, 'b': reviewer, 'c': stranger, 'd': member},
     )
 
     result = await handle_deploy_app(dev, _request('submit', version=1))
@@ -1130,12 +1130,13 @@ async def test_review_transitions_push_both_signals(registry, quiet_push, monkey
     assert owner.events == [('app:statusChanged', submit_body)]
     assert reviewer.events == [('app:statusChanged', submit_body)]
     assert stranger.events == []
-    assert task_socket.events == []
+    assert member.events == [('app:statusChanged', submit_body)]
 
     # Withdraw pushes the same pair with the returned-to-draft state.
     broadcasts.clear()
     owner.events.clear()
     reviewer.events.clear()
+    member.events.clear()
     result = await handle_deploy_app(dev, _request('withdraw', version=1))
     assert result['success'] is True
     assert broadcasts == [
@@ -1145,7 +1146,7 @@ async def test_review_transitions_push_both_signals(registry, quiet_push, monkey
     assert owner.events == [('app:statusChanged', withdraw_body)]
     assert reviewer.events == [('app:statusChanged', withdraw_body)]
     assert stranger.events == []
-    assert task_socket.events == []
+    assert member.events == [('app:statusChanged', withdraw_body)]
     assert invalidated == ['acme.brandy', 'acme.brandy']
 
 

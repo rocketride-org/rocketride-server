@@ -322,6 +322,16 @@ class FileDeploymentBackend:
             raise ValueError('pipeline must be a non-empty object')
         if state is not None and state not in ('private', 'submit', 'ready', 'rejected', 'failed'):
             raise ValueError(f'Unknown artifact state: {state!r}')
+        # A PIPE artifact must satisfy the address grammar at publish exactly
+        # as at execute: the SHORT dot-free project id and dot-free component
+        # ids are what make ``developerId.pipelineId.source`` unambiguous.
+        # (Deferred import: ai.modules.task's package init pulls the task
+        # server, which imports this account layer.)
+        if str(pipeline.get('kind') or 'pipe') == 'pipe':
+            from ai.modules.task.address import validate_component_ids, validate_segment
+
+            validate_segment(project_id, 'project_id')
+            validate_component_ids(pipeline)
         who = _actor_record(actor)
 
         # The artifact bytes are canonical: stable key order so the sha256 is
