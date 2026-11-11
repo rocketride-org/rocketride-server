@@ -16,6 +16,13 @@ Open source, MIT licensed. 150+ nodes, 15+ LLM providers, 10+ vector stores.
 
 ## Run the engine locally
 
+There are four ways to run the engine. Pick one:
+
+- [VS Code extension](/clients/vscode): for people working in an editor. It downloads and manages a local engine for you. See [Build in your IDE](/quickstart/ide-walkthrough).
+- [Native download](/operate/self-hosting): for machines without Docker. Download the engine archive for Linux, macOS or Windows and run it directly.
+- [RocketRide Cloud](#use-the-hosted-server): for when you do not want to run anything locally. Skip to the hosted section below.
+- Docker: for any machine that runs Docker. The rest of this page uses it, because the command is the same everywhere.
+
 The engine ships as a container image. If a container named `rocketride-engine` already exists (the VS Code extension creates one with this name), do not remove it. Either use that engine and skip this step, or give this one another name and host port. Then run:
 
 ```bash
@@ -28,9 +35,9 @@ docker run -d --name rocketride-engine --platform linux/amd64 \
   ghcr.io/rocketride-org/rocketride-engine:latest
 ```
 
-To run it next to an existing engine, change only `--name` and the host side of `-p` (for example `127.0.0.1:5566:5565`). Leave `-e ROCKETRIDE_URI=ws://127.0.0.1:5565` in the Docker command as it is: that address is inside the container. Then use the new host port in the `ROCKETRIDE_URI` you export in your shell and in the MCP address below.
+To run it next to an existing engine, change only `--name` and the host side of `-p` (for example `127.0.0.1:5566:5565`). Leave `-e ROCKETRIDE_URI=ws://127.0.0.1:5565` in the Docker command as it is: that address is inside the container. Then use the new host port everywhere below that shows `localhost:5565`: the health check, the `ROCKETRIDE_URI` you export in your shell, and the MCP address.
 
-- The image is amd64 only. `--platform linux/amd64` is required on Apple Silicon (Docker runs it under emulation, and the port answers after about 25 seconds there) and harmless elsewhere.
+- The command is the same on every machine. The image is amd64 only: `--platform linux/amd64` is required on Apple Silicon (Docker runs it under emulation, and the port can take 15 seconds or more to answer there) and has no effect on Intel or AMD machines.
 - `ROCKETRIDE_APIKEY=rr_local` sets the key clients must send. The value can be any string that starts with `rr_`: the built-in MCP server refuses other values, and the CLI and SDK must send the same one.
 - `ROCKETRIDE_URI=ws://127.0.0.1:5565` tells the engine's MCP server to run tool calls against this engine. Engine image 3.6.0 and earlier need it: without it (and without `MCP_RESOURCE_IDENTIFIER`), an engine that is not bound to localhost connects tool calls to RocketRide Cloud instead. Setting it is always safe (see [Use it over MCP locally](#use-it-over-mcp-locally)).
 
@@ -90,7 +97,7 @@ rocketride validate code.pipe
 rocketride start --pipeline ./code.pipe
 ```
 
-`start` prints a task token and exits; the pipeline keeps running on the engine. Stop it before the next step with `rocketride stop --token <token>`. It does not print an address. The token is what you pass to `rocketride stop --token <token>`, `rocketride upload --token <token>`, and `client.send(token, ...)` in the SDK. Keep `"source": "in"`: this example's webhook has an empty config, so the engine cannot work out the source by itself. Without it, `start` fails with `Pipeline does not have a source component defined.` even though `validate` passes.
+`start` prints a task token and exits; the pipeline keeps running on the engine. Stop it before the next step with `rocketride stop --token <token>`. It does not print an address. The token is what you pass to `rocketride stop --token <token>`, `rocketride upload --token <token>`, and `client.send(token, ...)` in the SDK. Keep `"source": "in"`: this example's webhook has an empty config, so the engine cannot work out the source by itself. Without it, `start` fails with `Pipeline does not have a source component defined` even though `validate` passes.
 
 ### Send code and read the reply
 
