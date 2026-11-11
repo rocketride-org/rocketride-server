@@ -35,7 +35,8 @@ The `documents` lane is written only when at least one document survives the `mi
 ## Profiles
 
 Default: **Rerank v3.0** (`rerank-english-v3.0`). The **Model** dropdown
-selects a preconfigured profile:
+selects the Cohere model; the named entries pin their model name, Custom
+takes a free-form one:
 
 | Profile               | Title       | Model                           |
 |-----------------------|-------------|---------------------------------|

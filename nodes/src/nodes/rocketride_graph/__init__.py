@@ -20,19 +20,3 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-
-# ------------------------------------------------------------------------------
-# Main module
-# ------------------------------------------------------------------------------
-import os
-from depends import depends  # type: ignore
-
-# Install psycopg2-binary before importing any driver code (this node drives
-# psycopg2 directly; it does not use SQLAlchemy).
-requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
-depends(requirements)
-
-from .IGlobal import IGlobal  # noqa: E402
-from .IInstance import IInstance  # noqa: E402
-
-__all__ = ['IGlobal', 'IInstance']

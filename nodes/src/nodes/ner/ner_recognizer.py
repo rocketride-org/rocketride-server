@@ -28,8 +28,7 @@ This module provides named entity recognition capabilities using the
 RocketRide model server's transformers pipeline support.
 """
 
-from typing import Dict, Any, List
-from ai.common.config import Config
+from typing import Any, Dict, List, Mapping
 from ai.common.models.transformers import pipeline
 
 
@@ -41,23 +40,18 @@ class NERRecognizer:
     extraction with confidence thresholding and result formatting.
     """
 
-    def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
+    def __init__(self, config: Mapping[str, Any]):
         """
         Initialize NER recognizer.
 
         Args:
-            provider: Node provider name
-            connConfig: Node configuration
-            bag: Additional context bag
+            config: The node's resolved configuration (model, aggregation_strategy,
+                min_confidence, store_in_metadata); defaults are the schema's.
         """
-        # Get configuration
-        config = Config.getNodeConfig(provider, connConfig)
-
-        # Extract settings
-        self.model_name = config.get('model', 'dbmdz/bert-large-cased-finetuned-conll03-english')
-        self.aggregation_strategy = config.get('aggregation_strategy', 'simple')
-        self.min_confidence = config.get('min_confidence', 0.9)
-        self.store_in_metadata = config.get('store_in_metadata', True)
+        self.model_name = config['model']
+        self.aggregation_strategy = config['aggregation_strategy']
+        self.min_confidence = config['min_confidence']
+        self.store_in_metadata = config['store_in_metadata']
 
         # Initialize the NER pipeline
         # The pipeline will automatically use the model server if available,

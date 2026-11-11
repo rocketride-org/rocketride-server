@@ -21,7 +21,8 @@
 # SOFTWARE.
 # =============================================================================
 
-from rocketlib import IGlobalBase, OPEN_MODE
+from rocketlib import IGlobalBase
+
 from ai.common.preprocessor import PreProcessorBase
 
 
@@ -29,19 +30,12 @@ class IGlobal(IGlobalBase):
     preprocessor: PreProcessorBase | None = None
 
     def beginGlobal(self):
-        # Are we in config mode or some other mode?
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            # We are going to get a call to configureService but
-            # we don't actually need to load the driver for that
-            pass
-        else:
-            from .code import PreProcessor
+        """Create the code splitter from the resolved config (language, strlen)."""
+        # Imported here: the module installs tree-sitter when it loads
+        from .code import PreProcessor
 
-            # Get our bag
-            bag = self.IEndpoint.endpoint.bag
-
-            # Create the preprocessor
-            self.preprocessor = PreProcessor(self.glb.logicalType, self.glb.connConfig, bag)
+        bag = self.IEndpoint.endpoint.bag
+        self.preprocessor = PreProcessor(self.glb.logicalType, self.config, bag)
 
     def endGlobal(self):
         # Destroy the preprocessor

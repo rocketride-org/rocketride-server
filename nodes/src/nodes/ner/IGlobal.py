@@ -21,8 +21,9 @@
 # SOFTWARE.
 # =============================================================================
 
-from rocketlib import IGlobalBase, debug, OPEN_MODE
-from ai.common.config import Config
+from rocketlib import IGlobalBase, debug
+
+from .ner_recognizer import NERRecognizer
 
 
 class IGlobal(IGlobalBase):
@@ -37,23 +38,11 @@ class IGlobal(IGlobalBase):
 
     def beginGlobal(self):
         """Initialize the NER recognizer when the pipeline starts."""
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            # Configuration mode - no need to load the model
-            pass
-        else:
-            # Import what we need
-            from .ner_recognizer import NERRecognizer
-
-            # Get our bag
-            bag = self.IEndpoint.endpoint.bag
-
-            # Get this node's config
-            config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-
-            # Initialize the NER recognizer
-            debug(f'    Loading NER model: {config.get("model", "default")}')
-            self.recognizer = NERRecognizer(self.glb.logicalType, config, bag)
-            debug('    NER model loaded successfully')
+        # The resolved config: the profile's model (or the custom id) and the thresholds, flat
+        config = self.config
+        debug(f'    Loading NER model: {config.model}')
+        self.recognizer = NERRecognizer(config)
+        debug('    NER model loaded successfully')
 
     def endGlobal(self):
         """Clean up the NER recognizer when the pipeline ends."""

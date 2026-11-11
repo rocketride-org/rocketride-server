@@ -450,53 +450,55 @@ def rerank_pkg():
 
 
 class TestIGlobal:
-    def _make_iglobal(self, iglobal_mod, open_mode='CONFIG', config=None):
-        from rocketlib import OPEN_MODE
-
-        mode_value = getattr(OPEN_MODE, open_mode)
+    def _make_iglobal(self, iglobal_mod, config=None):
+        """An IGlobal on the stored config ``config`` (the resolver supplies the rest)."""
         iglobal = iglobal_mod.IGlobal()
 
         mock_endpoint = Mock()
         mock_endpoint.endpoint = Mock()
-        mock_endpoint.endpoint.openMode = mode_value
         mock_endpoint.endpoint.bag = {}
         iglobal.IEndpoint = mock_endpoint
 
         mock_glb = Mock()
         mock_glb.logicalType = 'rerank_cohere'
-        mock_glb.connConfig = config or {
-            'profile': 'rerank-english-v3.0',
-            'rerank-english-v3.0': {'apikey': 'test-key'},
-        }
+        mock_glb.connConfig = {'apikey': 'test-key'} if config is None else config
         iglobal.glb = mock_glb
         return iglobal
 
-    def test_begin_global_config_mode_no_client(self, rerank_pkg):
+    def test_begin_global_creates_reranker_on_the_default_model(self, rerank_pkg):
         iglobal_mod, _ = rerank_pkg
-        iglobal = self._make_iglobal(iglobal_mod, open_mode='CONFIG')
-        iglobal.beginGlobal()
-        assert iglobal._reranker is None
-
-    def test_begin_global_creates_reranker(self, rerank_pkg):
-        iglobal_mod, _ = rerank_pkg
-        iglobal = self._make_iglobal(iglobal_mod, open_mode='SOURCE')
+        iglobal = self._make_iglobal(iglobal_mod)
 
         mock_cohere_client = _make_cohere_client_mock(_make_mock_rerank_response([]))
-        config = {
-            'model': 'rerank-english-v3.0',
-            'top_n': 5,
-            'min_score': 0.0,
-            'apikey': 'test-api-key',
-        }
-        with patch.object(iglobal_mod, 'Config') as mock_config_cls:
-            mock_config_cls.getNodeConfig.return_value = config
-            with patch.object(_rerank_client_mod, 'CohereClient', return_value=mock_cohere_client):
-                iglobal.beginGlobal()
+        with patch.object(_rerank_client_mod, 'CohereClient', return_value=mock_cohere_client):
+            iglobal.beginGlobal()
         assert iglobal._reranker is not None
+        assert iglobal._reranker._model == 'rerank-english-v3.0'
+        assert (iglobal._reranker._top_n, iglobal._reranker._min_score) == (5, 0.0)
+
+    def test_a_named_entry_pins_its_model(self, rerank_pkg):
+        iglobal_mod, _ = rerank_pkg
+        iglobal = self._make_iglobal(iglobal_mod, {'profile': 'rerank-v3.5', 'apikey': 'test-key', 'top_n': 2})
+
+        mock_cohere_client = _make_cohere_client_mock(_make_mock_rerank_response([]))
+        with patch.object(_rerank_client_mod, 'CohereClient', return_value=mock_cohere_client):
+            iglobal.beginGlobal()
+        assert (iglobal._reranker._model, iglobal._reranker._top_n) == ('rerank-v3.5', 2)
+
+    def test_custom_takes_a_free_form_model(self, rerank_pkg):
+        iglobal_mod, _ = rerank_pkg
+        iglobal = self._make_iglobal(
+            iglobal_mod, {'profile': 'custom', 'custom': {'model': 'my-reranker'}, 'apikey': 'test-key'}
+        )
+
+        mock_cohere_client = _make_cohere_client_mock(_make_mock_rerank_response([]))
+        with patch.object(_rerank_client_mod, 'CohereClient', return_value=mock_cohere_client):
+            iglobal.beginGlobal()
+        assert iglobal._reranker._model == 'my-reranker'
 
     def test_mock_mode_skips_dependency_install(self, rerank_pkg):
         iglobal_mod, _ = rerank_pkg
-        iglobal = self._make_iglobal(iglobal_mod, open_mode='SOURCE')
+        iglobal = self._make_iglobal(iglobal_mod)
 
         # _ensure_dependencies imports ``depends`` lazily. Confirm that
         # ROCKETRIDE_MOCK short-circuits before that import even runs.
@@ -509,22 +511,6 @@ class TestIGlobal:
                 if saved_depends is not None:
                     sys.modules['depends'] = saved_depends
 
-    def test_begin_global_invalid_config_warns_without_raising(self, rerank_pkg):
-        iglobal_mod, _ = rerank_pkg
-        iglobal = self._make_iglobal(iglobal_mod, open_mode='SOURCE')
-        config = {
-            'model': 'rerank-english-v3.0',
-            'top_n': 5,
-            'min_score': 0.0,
-            'apikey': '',
-        }
-        with patch.object(iglobal_mod, 'Config') as mock_config_cls:
-            mock_config_cls.getNodeConfig.return_value = config
-            with patch.object(iglobal_mod, 'warning') as mock_warning:
-                iglobal.beginGlobal()
-        assert iglobal._reranker is None
-        mock_warning.assert_called_once()
-
     def test_end_global_clears_reranker(self, rerank_pkg):
         iglobal_mod, _ = rerank_pkg
         iglobal = self._make_iglobal(iglobal_mod)
@@ -532,43 +518,28 @@ class TestIGlobal:
         iglobal.endGlobal()
         assert iglobal._reranker is None
 
-    def test_validate_config_missing_apikey(self, rerank_pkg):
-        iglobal_mod, _ = rerank_pkg
-        iglobal = self._make_iglobal(iglobal_mod)
-        with patch.object(iglobal_mod, 'Config') as mock_config_cls:
-            mock_config_cls.getNodeConfig.return_value = {'apikey': '', 'model': 'rerank-english-v3.0'}
-            with patch.object(iglobal_mod, 'warning') as mock_warning:
-                iglobal.validateConfig()
-        mock_warning.assert_called_once()
+    @pytest.mark.parametrize(
+        'config, fragment',
+        [
+            ({}, 'apikey'),
+            ({'apikey': ''}, 'apikey'),
+            ({'profile': 'custom', 'apikey': 'test-key'}, 'model'),
+            ({'profile': 'custom', 'custom': {'model': 42}, 'apikey': 'test-key'}, 'model'),
+            ({'apikey': 'test-key', 'top_n': 0}, 'top_n'),
+            ({'apikey': 'test-key', 'min_score': 1.5}, 'min_score'),
+        ],
+        ids=['no-key', 'empty-key', 'custom-without-model', 'custom-non-string-model', 'top_n', 'min_score'],
+    )
+    def test_the_schema_refuses_an_unusable_config(self, rerank_pkg, config, fragment):
+        """The key and the custom model are required, and the numbers are bounded: resolving names the key."""
+        from rocketlib.config import ConfigError
 
-    def test_validate_config_empty_model(self, rerank_pkg):
         iglobal_mod, _ = rerank_pkg
-        iglobal = self._make_iglobal(iglobal_mod)
-        with patch.object(iglobal_mod, 'Config') as mock_config_cls:
-            mock_config_cls.getNodeConfig.return_value = {'apikey': 'test-key', 'model': '  '}
-            with patch.object(iglobal_mod, 'warning') as mock_warning:
-                iglobal.validateConfig()
-        mock_warning.assert_called_once()
-
-    def test_validate_config_non_string_apikey(self, rerank_pkg):
-        """Non-string apikey (e.g. None) is rejected before .strip()."""
-        iglobal_mod, _ = rerank_pkg
-        iglobal = self._make_iglobal(iglobal_mod)
-        with patch.object(iglobal_mod, 'Config') as mock_config_cls:
-            mock_config_cls.getNodeConfig.return_value = {'apikey': None, 'model': 'rerank-english-v3.0'}
-            with patch.object(iglobal_mod, 'warning') as mock_warning:
-                iglobal.validateConfig()
-        mock_warning.assert_called_once()
-
-    def test_validate_config_non_string_model(self, rerank_pkg):
-        """Non-string model (e.g. 42) is rejected before .strip()."""
-        iglobal_mod, _ = rerank_pkg
-        iglobal = self._make_iglobal(iglobal_mod)
-        with patch.object(iglobal_mod, 'Config') as mock_config_cls:
-            mock_config_cls.getNodeConfig.return_value = {'apikey': 'test-key', 'model': 42}
-            with patch.object(iglobal_mod, 'warning') as mock_warning:
-                iglobal.validateConfig()
-        mock_warning.assert_called_once()
+        iglobal = self._make_iglobal(iglobal_mod, config)
+        with pytest.raises(ConfigError) as raised:
+            iglobal.beginGlobal()
+        assert fragment in str(raised.value)
+        assert iglobal._reranker is None
 
 
 class TestIInstance:

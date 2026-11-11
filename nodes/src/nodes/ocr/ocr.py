@@ -35,7 +35,6 @@ import numpy as np
 from PIL import Image
 
 from ai.common.reader import ReaderBase
-from ai.common.config import Config
 from ai.common.models import EasyOCR, DocTR, Surya, TrOCR
 from rocketlib import debug
 
@@ -123,12 +122,12 @@ class Reader(ReaderBase):
         """
         super().__init__(provider, connConfig, bag)
 
-        # Get node configuration
-        config = Config.getNodeConfig(provider, connConfig)
+        # The resolved node configuration (defaults and enums are the schema's)
+        config = connConfig
 
         # Get OCR settings
-        engine = config.get('engine', 'easyocr').lower()
-        script_family = config.get('script_family', 'latin')
+        engine = config['engine']
+        script_family = config['script_family']
 
         # Get languages for this script family (used by EasyOCR)
         languages = SCRIPT_FAMILIES.get(script_family, ['en'])
@@ -162,8 +161,8 @@ class Reader(ReaderBase):
 
         elif engine == 'doctr':
             # DocTR supports detection and recognition architecture options
-            det_arch = config.get('det_arch', 'db_resnet50')
-            reco_arch = config.get('reco_arch', 'crnn_vgg16_bn')
+            det_arch = config['det_arch']
+            reco_arch = config['reco_arch']
             return OCRClass(detection_model=det_arch, recognition_model=reco_arch)
 
         elif engine == 'surya':
@@ -171,7 +170,7 @@ class Reader(ReaderBase):
 
         elif engine == 'trocr':
             # TrOCR supports different model variants
-            model = config.get('trocr_model', 'microsoft/trocr-base-printed')
+            model = config['trocr_model']
             return OCRClass(recognition_model=model)
 
         else:

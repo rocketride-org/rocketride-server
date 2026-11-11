@@ -59,7 +59,7 @@
 	//      Rendering hints to the UI which indicate which fields of
 	//      the configuration should be used to display information
 	//
-	"tile": ["Table: ${parameters.rocketride_vector.${profile}.collection}", "Similarity: ${parameters.rocketride_vector.${profile}.similarity}"],
+	"tile": ["Table: ${parameters.rocketride_vector.collection}", "Similarity: ${parameters.rocketride_vector.similarity}"],
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes
@@ -70,34 +70,12 @@
 		"questions": ["documents", "answers", "questions"]
 	},
 	//
-	//	Optional:
-	//		Profile section are configuration options used by the driver
-	//		itself
-	//
-	"preconfig": {
-		"default": "cloud",
-		"profiles": {
-			"cloud": {
-				"mode": "cloud",
-				"title": "RocketRide cloud",
-				"collection": "rocketride",
-				"score": 0.5,
-				"similarity": "cosine",
-				"hnsw_m": 16,
-				"hnsw_ef_construction": 64,
-				"serverName": "rrvector",
-				"expose_tools": false,
-				"allow_write": false
-			}
-		}
-	},
-	//
 	// Optional:
-	//     Local fields definitions - these define fields only for the
-	//     current service. You may specify them here, or directly
-	//     in the shape
+	//     Local property definitions. The RocketRide cloud database has one
+	//     connection, delivered by the task engine, so every property is
+	//     stored flat: no host, user or password.
 	//
-	"fields": {
+	"propertyDefinitions": {
 		"rrvector.collection": {
 			"title": "Table",
 			"description": "Name of the table to store vectors in your RocketRide cloud database.",
@@ -108,14 +86,20 @@
 			"title": "Score threshold",
 			"description": "Minimum similarity score for a document to be returned by search.",
 			"type": "number",
-			"default": 0.5
+			"default": 0.5,
+			"minimum": 0,
+			"maximum": 1
 		},
 		"rrvector.similarity": {
 			"title": "Similarity Metric",
 			"description": "The similarity metric to use for vector search. Also selects the HNSW index operator class.",
 			"type": "string",
 			"default": "cosine",
-			"enum": ["cosine", "l2", "inner_product"]
+			"enum": [
+				["cosine", "Cosine"],
+				["l2", "L2 (Euclidean)"],
+				["inner_product", "Inner product"]
+			]
 		},
 		"rrvector.hnsw_m": {
 			"title": "HNSW m",
@@ -127,11 +111,25 @@
 		},
 		"rrvector.hnsw_ef_construction": {
 			"title": "HNSW ef_construction",
-			"description": "HNSW build-time candidate list size used when the index is first created.",
+			"description": "HNSW build-time candidate list size used when the index is first created. Raised to twice HNSW m when set lower, as pgvector requires.",
 			"type": "integer",
 			"default": 64,
 			"minimum": 4,
 			"maximum": 1000
+		},
+		"rrvector.scope": {
+			"type": "string",
+			"title": "Database",
+			"default": "org",
+			"enum": [["org", "Organization"], ["team", "Team"], ["user", "Personal"]],
+			"description": "Organization (default): shared by everyone in the organization. Team: the run's team (your current dev team, or the team a deploy is billed to). Personal: your own, for runs you start yourself. Each is a separate database: switching doesn't move data, and a new one starts empty."
+		},
+		"rrvector.target": {
+			"hidden": true,
+			"type": "string",
+			"title": "Team or user",
+			"default": "",
+			"description": "Another team's or user's database (admins only). Leave empty to use your own team's or your own"
 		},
 		"rrvector.serverName": {
 			"type": "string",
@@ -151,84 +149,22 @@
 			"title": "Allow writes through tools",
 			"default": false,
 			"description": "Permit the upsert, delete, soft_delete and restore tool functions to change this table in your RocketRide cloud database. Applies only while Expose as tools is on. Leave OFF unless a trusted application or agent needs to manage documents through tools; the documents lane and the read tools (search, objdir, list_documents, get, stats) are unaffected."
-		},
-		"rrvector.scope": {
-			"type": "string",
-			"title": "Database",
-			"default": "org",
-			"enum": [["org", "Organization"], ["team", "Team"], ["user", "Personal"]],
-			"description": "Organization (default): shared by everyone in the organization. Team: the run's team (your current dev team, or the team a deploy is billed to). Personal: your own, for runs you start yourself. Each is a separate database: switching doesn't move data, and a new one starts empty."
-		},
-		"rrvector.target": {
-			"hidden": true,
-			"type": "string",
-			"title": "Team or user",
-			"default": "",
-			"description": "Another team's or user's database (admins only). Leave empty to use your own team's or your own"
-		},
-		"rrvector.cloud": {
-			"object": "cloud",
-			"properties": ["rrvector.collection", "rrvector.score", "rrvector.similarity", "rrvector.hnsw_m", "rrvector.hnsw_ef_construction", "rrvector.scope", "rrvector.target", "rrvector.serverName", "rrvector.expose_tools", "rrvector.allow_write"]
-		},
-		"rrvector.profile": {
-			"hidden": true,
-			"title": "RocketRide cloud database",
-			"description": "Connect to...",
-			"type": "string",
-			"default": "cloud",
-			"enum": ["*>preconfig.profiles.*.title"],
-			"conditional": [
-				{
-					"value": "cloud",
-					"properties": ["rrvector.cloud"]
-				}
-			]
-		},
-		"rrvector.provider": {
-			"type": "string",
-			"const": "rocketride_vector",
-			"default": "rocketride_vector"
-		},
-		"rrvector.rocketride_vector": {
-			"object": "rocketride_vector",
-			"properties": ["rrvector.profile"]
-		},
-		"rrvector.store": {
-			"object": "store",
-			"title": "Store",
-			"properties": ["rrvector.provider", "rrvector.rocketride_vector"]
-		},
-		"rrvector.target.autopipe": {
-			"object": "parameters",
-			"title": "Parameters",
-			"properties": ["remote", "rrvector.store", "all.embedding"]
-		},
-		"rrvector.target.parameters": {
-			"object": "parameters",
-			"title": "Parameters",
-			"properties": ["rrvector.target.autopipe"]
 		}
 	},
 	//
 	// Required:
-	//     Defines the fields (shape) of the service. Either source or target
-	//     map be specified, or both, but at least one is required
+	//     Defines the properties shown in the node's config panel, in order
 	//
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "RocketRide Vector Store",
-			"properties": ["rrvector.profile"],
-			"ui": {
-				"ui:options": {
-					"compactDescriptions": true
-				}
-			}
-		},
-		{
-			"section": "Transform",
-			"title": "RocketRide Vector",
-			"properties": ["type", "rrvector.target.parameters"]
-		}
+	"properties": [
+		"rrvector.collection",
+		"rrvector.score",
+		"rrvector.similarity",
+		"rrvector.hnsw_m",
+		"rrvector.hnsw_ef_construction",
+		"rrvector.scope",
+		"rrvector.target",
+		"rrvector.serverName",
+		"rrvector.expose_tools",
+		"rrvector.allow_write"
 	]
 }

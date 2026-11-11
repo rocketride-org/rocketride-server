@@ -21,48 +21,30 @@
 # SOFTWARE.
 # =============================================================================
 
-import re
-
-from rocketlib import IGlobalBase, warning
-from ai.common.config import Config
+from rocketlib import IGlobalBase
 
 from .normalize import build_mapping
 
 
 class IGlobal(IGlobalBase):
-    """Global lifecycle: read and normalise the node configuration once per run."""
+    """Global lifecycle: read the node configuration once per run and pre-merge the mapping."""
+
+    rules = None
 
     def beginGlobal(self):
-        raw = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig) or {}
-
-        # Label->metric overrides must be an object; ignore (with a warning)
-        # anything else so a misconfigured field never fails the run.
-        overrides = raw.get('label_to_metric')
-        if overrides is not None and not isinstance(overrides, dict):
-            warning('normalize_facts: label_to_metric must be an object; ignoring it.')
-            overrides = {}
-
-        decimal_format = str(raw.get('decimal_format') or 'auto').strip().lower()
-        if decimal_format not in ('auto', 'us', 'eu'):
-            warning(f"normalize_facts: unknown decimal_format {decimal_format!r}; using 'auto'.")
-            decimal_format = 'auto'
-
-        # default_currency is written verbatim into normalized.currency, which
-        # downstream currency conversion matches on — accept only an ISO-4217
-        # shape (3 letters) so a value like "dollars" cannot poison the tag.
-        default_currency = str(raw.get('default_currency') or '').strip()
-        if default_currency and not re.fullmatch(r'[A-Za-z]{3}', default_currency):
-            warning(f'normalize_facts: default_currency {default_currency!r} is not a 3-letter ISO code; ignoring it.')
-            default_currency = ''
-
-        self.config = {
-            'label_field': str(raw.get('label_field') or 'label').strip() or 'label',
-            'value_field': str(raw.get('value_field') or 'value').strip() or 'value',
-            'default_currency': default_currency.upper(),
-            'decimal_format': decimal_format,
+        """Build the normalisation rules from the resolved config (types and enums are the schema's)."""
+        config = self.config
+        self.rules = {
+            'label_field': config.label_field,
+            'value_field': config.value_field,
+            # Written verbatim into normalized.currency, which downstream currency
+            # conversion matches on; the schema holds it to three letters, the
+            # case is normalised here.
+            'default_currency': config.default_currency.upper(),
+            'decimal_format': config.decimal_format,
             # Pre-merge the built-in mapping with the user overrides once per run.
-            'mapping': build_mapping(overrides),
+            'mapping': build_mapping(config.label_to_metric),
         }
 
     def endGlobal(self):
-        self.config = None
+        self.rules = None

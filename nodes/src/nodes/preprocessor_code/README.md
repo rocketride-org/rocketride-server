@@ -13,8 +13,8 @@ parser for the selected language.
 ## What it does
 
 Receives `text` and emits `documents` made from syntax-tree nodes. It supports
-the C, C++, Python, JavaScript, and TypeScript profiles; in automatic mode it
-detects one of those languages from the text itself. A matched class or
+C, C++, Python, JavaScript, and TypeScript; in automatic mode it detects one
+of those languages from the text itself. A matched class or
 function can coexist with chunks for nested constructs, so output may overlap.
 
 ## Lanes
@@ -23,33 +23,21 @@ function can coexist with chunks for nested constructs, so output may overlap.
 | --- | --- | --- |
 | `text` | `documents` | Split source-code text into syntax-aware documents. |
 
-## Profiles
-
-Default: `auto`, which detects the language from the source text.
-
-| Profile | Language |
-| --- | --- |
-| `auto` *(default)* | Detect from source text |
-| `c` | C |
-| `cpp` | C++ |
-| `python` | Python |
-| `javascript` | JavaScript |
-| `typescript` | TypeScript |
-
 ## Configuration
 
-Select the language profile that matches the input when its language is known;
-otherwise leave the default automatic profile. The maximum string length is
-present in the configuration, but the current implementation determines output
-boundaries from syntax nodes.
+Select the language that matches the input when it is known; otherwise leave
+the default automatic detection. The maximum string length is present in the
+configuration, but the current implementation determines output boundaries
+from syntax nodes.
 
-### Code splitter profile
+### Language
 
-The automatic profile samples up to the first 5,000,000 characters and scores regex signals
-for the five supported languages. It needs a score of at least 3 and a lead of
-at least 2 over the runner-up; otherwise the input produces no documents and a
-warning is emitted. Use an explicit profile for short snippets, unusual code,
-or content that automatic detection cannot classify reliably.
+The language selector defaults to `auto`, which samples up to the first
+5,000,000 characters and scores regex signals for the five supported
+languages. It needs a score of at least 3 and a lead of at least 2 over the
+runner-up; otherwise the input produces no documents and a warning is emitted.
+Select an explicit language for short snippets, unusual code, or content that
+automatic detection cannot classify reliably.
 
 For C and C++, automatic detection favors C for header-like ties and for
 `extern "C"` without C++-only markers. Pick `cpp` explicitly when that

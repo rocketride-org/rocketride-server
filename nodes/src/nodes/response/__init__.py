@@ -20,19 +20,3 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-
-import os
-from depends import depends  # type: ignore
-
-# Load the requirements
-requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
-depends(requirements)
-
-# Import the filters
-from .IGlobal import IGlobal
-from .IInstance import IInstance
-
-__all__ = [
-    'IGlobal',
-    'IInstance',
-]

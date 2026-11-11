@@ -24,38 +24,27 @@
 
 """Configuration for media_inspect."""
 
-from rocketlib import IGlobalBase, OPEN_MODE
-from ._support.config import load_node_config
-
-DEFAULTS = {
-    'request': '{}',
-    'event_type': 'media_inspect',
-    'chunk_kb': 1024,
-    'max_input_mb': 16384,
-    'silence_db': -40.0,
-    'silence_ms': 700,
-    'peak_ms': 100,
-    'scene_threshold': 0.35,
-}
+from rocketlib import IGlobalBase
 
 
 class IGlobal(IGlobalBase):
-    """Node-wide configuration; input files live only in each instance."""
+    """Node-wide configuration; input files live only in each instance.
+
+    The leaves (request, event_type, thresholds, chunk and input sizes) are read
+    from ``self.config``; the two byte counts derived from them are kept here.
+    """
+
+    chunk_bytes: int = 1024 * 1024
+    max_input_bytes: int = 16384 * 1024 * 1024
 
     def beginGlobal(self):
-        """Initialize dependencies and profile configuration outside editor validation."""
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
+        """Install the dependencies and derive the byte sizes from the resolved config."""
         from depends import load_depends
 
         load_depends(__file__)
-        self.config = load_node_config(self, DEFAULTS, 'media_inspect')
-        self.config['max_input_mb'] = max(1, min(1048576, int(self.config['max_input_mb'])))
-        self.config['max_input_bytes'] = self.config['max_input_mb'] * 1024 * 1024
-        self.config['chunk_bytes'] = max(64, min(8192, int(self.config['chunk_kb']))) * 1024
-        self.config['event_type'] = str(self.config['event_type'] or 'media_inspect').strip() or 'media_inspect'
-        self.config['peak_ms'] = max(10, int(self.config['peak_ms']))
-        self.config['silence_ms'] = max(1, int(self.config['silence_ms']))
+        config = self.config
+        self.chunk_bytes = config.chunk_kb * 1024
+        self.max_input_bytes = config.max_input_mb * 1024 * 1024
 
     def endGlobal(self):
         """No persistent media or storage binding is retained by the global."""
