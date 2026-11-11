@@ -31,12 +31,13 @@
  * then `rsbuild build`, the two steps check_app runs in the browser (types,
  * then a rebuild), on the same sources.
  *
- * The app's dependencies are this checkout's: react, the React types,
- * rsbuild and the Module Federation plugin from rocket-ui's node_modules (an
- * app built the same way), `rocketride` from packages/client-typescript, and
- * `shell` as a types-only package whose types are the shell's newest frozen
- * contract (packages/shell/contract/versions/vN.d.ts), which is the
- * `shell.d.ts` that shell.tgz ships.
+ * The app's dependencies: react, the React types, rsbuild and the Module
+ * Federation plugin from this checkout's rocket-ui node_modules (an app built
+ * the same way), and `shell` and `rocketride` from the server's own
+ * shell.tgz and rocketride-*.tgz, which the deploy build installs
+ * (app_build.py _place_platform_tgzs). Not packages/client-typescript: its
+ * dist can keep private members, and TypeScript then rejects the shell's
+ * client wherever the SDK's is expected.
  *
  * The other halves come from the browser trial, added to each app's result:
  * the app's load in its Design preview (withLoads), the agent's own
@@ -44,7 +45,7 @@
  * on the engine (checks/appRun.ts withRuns).
  */
 
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -137,16 +138,24 @@ export function withLoads(checks: Record<string, AppCheckResult>, loads: Record<
 	}
 }
 
-/** The newest frozen shell contract. */
-export function shellContract(): string {
-	const dir = path.join(REPO_ROOT, 'packages/shell/contract/versions');
-	const newest = fs
-		.readdirSync(dir)
-		.map((f) => /^v(\d+)\.d\.ts$/.exec(f))
-		.filter((m): m is RegExpExecArray => m !== null)
-		.sort((a, b) => Number(b[1]) - Number(a[1]))[0];
-	if (!newest) throw new Error(`no frozen shell contract in ${dir}`);
-	return path.join(dir, newest[0]);
+/** The client packages the runner's engine (dist/server) serves. */
+const PLATFORM_CLIENTS = path.join(REPO_ROOT, 'dist/server/static/clients');
+
+/**
+ * The server's shell and SDK tgz files, by the package name each installs as,
+ * picked as the deploy build picks them: shell/shell.tgz and the one
+ * typescript/rocketride-*.tgz. Several SDK tgz files throw, as they fail the
+ * deploy build, rather than check against a guess.
+ *
+ * @param clientsDir - The server's static/clients folder.
+ */
+export function platformTgzs(clientsDir: string): { shell: string; rocketride: string } {
+	const shell = path.join(clientsDir, 'shell', 'shell.tgz');
+	if (!fs.existsSync(shell)) throw new Error(`no shell.tgz at ${shell}. Build the engine for this checkout first (README: the engine)`);
+	const sdkDir = path.join(clientsDir, 'typescript');
+	const sdks = fs.existsSync(sdkDir) ? fs.readdirSync(sdkDir).filter((f) => /^rocketride-.*\.tgz$/.test(f)) : [];
+	if (sdks.length !== 1) throw new Error(`${sdkDir} must hold exactly one rocketride-*.tgz, as the deploy build needs, and holds ${sdks.length ? sdks.sort().join(', ') : 'none'}`);
+	return { shell, rocketride: path.join(sdkDir, sdks[0] as string) };
 }
 
 function run(cmd: string, args: string[], cwd: string): Promise<{ code: number; output: string }> {
@@ -224,7 +233,8 @@ export function appsToCheck(checks: Array<{ type: string; app?: unknown }>, star
 }
 
 /**
- * Lays an app folder out on disk with its dependencies linked.
+ * Lays an app folder out on disk with its build tools linked and the
+ * server's shell and SDK unpacked into node_modules.
  *
  * @param files - The workspace files.
  * @param app - The folder, `apps/<name>`.
@@ -245,11 +255,11 @@ export function materializeApp(files: Record<string, string>, app: string, dir: 
 		fs.mkdirSync(path.dirname(path.join(modules, dep)), { recursive: true });
 		fs.symlinkSync(fs.realpathSync(from), path.join(modules, dep), 'dir');
 	}
-	fs.symlinkSync(path.join(REPO_ROOT, 'packages/client-typescript'), path.join(modules, 'rocketride'), 'dir');
-	const shell = path.join(modules, 'shell');
-	fs.mkdirSync(shell, { recursive: true });
-	fs.writeFileSync(path.join(shell, 'package.json'), JSON.stringify({ name: 'shell', version: '0.0.0-eval', types: 'shell.d.ts' }));
-	fs.copyFileSync(shellContract(), path.join(shell, 'shell.d.ts'));
+	for (const [name, tgz] of Object.entries(platformTgzs(PLATFORM_CLIENTS))) {
+		const to = path.join(modules, name);
+		fs.mkdirSync(to, { recursive: true });
+		execFileSync('tar', ['-xzf', tgz, '-C', to, '--strip-components=1']);
+	}
 }
 
 /**
