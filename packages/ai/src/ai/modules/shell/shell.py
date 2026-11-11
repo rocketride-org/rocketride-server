@@ -71,7 +71,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Res
 from ai.web import Request
 from ai.web.middleware import route_path
 
-from .contract import Page, page_instant
+from .contract import Page, own_title, page_instant
 from .settings import app_url
 
 # Engine binary directory — all static paths are relative to this.
@@ -679,18 +679,6 @@ def _md(text: str) -> str:
     """
     text = re.sub(r'\s+', ' ', text or '').strip()
     return text.replace('\\', '\\\\').replace('[', '\\[').replace(']', '\\]')
-
-
-def own_title(title: str, site_title: str) -> str:
-    """A page title without the trailing `` | <site title>`` the site brands it with.
-
-    For where the title names the page by itself, as an article headline, a
-    feed entry or an llms.txt section heading does: search engines and
-    readers then see the article's own title. The title stays whole when
-    there is no site title, or when the suffix is all there is.
-    """
-    own = title.removesuffix(f' | {site_title}') if site_title else title
-    return own if own.strip() else title
 
 
 def sitemap_entries() -> list:

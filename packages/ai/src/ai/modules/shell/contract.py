@@ -172,6 +172,18 @@ class Page:
     extra: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}), hash=False)
 
 
+def own_title(title: str, site_title: str) -> str:
+    """A page title without the trailing `` | <site title>`` the site brands it with.
+
+    For where the title names the page by itself, as an article headline, a
+    feed entry or an llms.txt section heading does: search engines and
+    readers then see the article's own title. The title stays whole when
+    there is no site title, or when the suffix is all there is.
+    """
+    own = title.removesuffix(f' | {site_title}') if site_title else title
+    return own if own.strip() else title
+
+
 def is_privileged(app_id: str) -> bool:
     """Whether ``app_id`` is a platform app (inside the platform developer namespace)."""
     return app_id == PLATFORM_DEVELOPER_ID or app_id.startswith(PLATFORM_DEVELOPER_ID + '.')

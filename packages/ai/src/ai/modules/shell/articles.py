@@ -35,8 +35,8 @@ the script element.
 from typing import Any, Dict, Mapping
 from urllib.parse import urlsplit
 
-from .contract import Page
-from .shell import app_url, own_title
+from .contract import Page, own_title
+from .shell import app_url
 
 
 def publisher(site: Mapping[str, Any]) -> Dict[str, Any]:

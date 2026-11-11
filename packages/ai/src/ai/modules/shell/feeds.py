@@ -44,8 +44,7 @@ from typing import Any, List, Mapping
 from urllib.parse import urlsplit
 from xml.sax.saxutils import escape, quoteattr
 
-from .contract import Page, page_instant
-from .shell import own_title
+from .contract import Page, own_title, page_instant
 
 MAX_ENTRIES = 50
 
