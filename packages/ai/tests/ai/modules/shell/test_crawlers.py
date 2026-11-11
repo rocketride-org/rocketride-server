@@ -54,6 +54,8 @@ REAL_UAS = [
     'Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; GoogleOther) Chrome/131.0 Safari/537.36',
     'Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Mobile Safari/537.36 (compatible; Google-InspectionTool/1.0)',
     'Google-CloudVertexBot',
+    # Claude Code's web fetch: a roster match, so it reads the snapshot.
+    'Claude-User (claude-code/2.1.0; +https://support.anthropic.com/)',
 ]
 
 BROWSERS = [
@@ -75,7 +77,8 @@ def test_everything_else_is_human(ua):
 def test_unknown_non_browser_uas_are_logged_once_and_bounded(monkeypatch):
     logged = []
     monkeypatch.setattr(crawlers, '_seen_unknown', set())
-    monkeypatch.setattr(crawlers, 'debug', lambda msg: logged.append(msg))
+    # A warning, not debug: production runs without debug tracing, and this log is how the roster grows.
+    monkeypatch.setattr(crawlers, 'warning', lambda msg: logged.append(msg))
     classify('SomeNewBot/1.0')
     classify('SomeNewBot/1.0')
     classify(BROWSERS[0])
