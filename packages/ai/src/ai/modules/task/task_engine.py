@@ -804,6 +804,8 @@ class Task(DAPBase):
         self._restart_in_progress = False
         # True while _terminated() runs, final broadcasts and run-log close included
         self._teardown_running = False
+        # True when the last teardown held back the run's end for a restart
+        self._end_deferred = False
         self._is_terminating = False
         self._termination_lock = asyncio.Lock()
 
@@ -1635,6 +1637,7 @@ class Task(DAPBase):
         # while this teardown still has broadcasts to make; reading it again
         # later would send this run a second end.
         restarting = self._is_restarting
+        self._end_deferred = restarting
 
         # Block new operations (e.g. data requests) during teardown
         self._is_terminating = True
@@ -2793,10 +2796,12 @@ class Task(DAPBase):
                 await asyncio.sleep(0.1)
 
             # A stop that arrived during the wait (a user stop or the ttl)
-            # found no engine to end. It wins: the teardown recorded a
-            # restart, so the run still gets its end here, and nothing starts.
+            # found no engine to end. It wins and nothing starts. If the
+            # teardown held back the run's end for this restart, it is sent
+            # here; a teardown that began before the restart sent it already.
             if self._stop_count != stops_before:
-                await self._end_stopped_restart()
+                if self._end_deferred:
+                    await self._end_stopped_restart()
                 raise RuntimeError('the task was stopped while the restart waited for the old run to end')
 
             self._server.debug_message(f'Task "{self.id}" stopped, resetting state for restart...')

@@ -1965,6 +1965,7 @@ async def test_a_restart_teardown_keeps_the_restart_meaning_it_started_with():
     t._run_log.note_restart.assert_called_once()
     t._run_log.end_run.assert_not_awaited()
     assert t._status.status == 'Restarting'
+    assert t._end_deferred is True  # restart_task ends the run if a stop wins
 
 
 @pytest.mark.asyncio
@@ -2194,6 +2195,7 @@ async def test_a_stop_while_a_restart_waits_ends_the_run_and_starts_nothing():
     task.start_task = AsyncMock()
     log = task._run_log = MagicMock(end_run=AsyncMock())
     task._stop_reason = 'user'
+    task._end_deferred = True  # the teardown recorded a restart, not an end
     sent = []
 
     async def forward(kind, event):
@@ -2214,6 +2216,41 @@ async def test_a_stop_while_a_restart_waits_ends_the_run_and_starts_nothing():
     assert task._run_log is None
     assert task._status.status == 'Stopped'
     assert task._status.completed is True
+
+
+@pytest.mark.asyncio
+async def test_a_stop_while_a_restart_waits_does_not_end_a_run_twice():
+    """If the engine exited on its own before the restart began, the teardown
+    already sent the run's end. A stop during the wait still refuses the
+    restart, but sends nothing more.
+    """
+    task = Task(
+        server=MagicMock(),
+        id='t-1',
+        project_id='p-1',
+        source='s-1',
+        token='tk',
+        public_auth='pk',
+        pipeline={'components': []},
+        env_source=AsyncMock(return_value={}),
+    )
+    task.has_attached_debugger = lambda: False
+    task.is_task_complete = lambda: True
+    task._reset_status = lambda: None
+    task.stop_task = AsyncMock()
+    task._teardown_running = True
+    task.start_task = AsyncMock()
+    task._end_deferred = False  # the teardown began before the restart and ended the run
+    task._forward_task_event = AsyncMock()
+    restart = asyncio.ensure_future(task.restart_task({'components': []}, 'p-1', 's-1', 'tools'))
+    await asyncio.sleep(0.15)
+    task._stop_count += 1
+    task._teardown_running = False
+
+    with pytest.raises(RuntimeError, match='stopped while the restart waited'):
+        await restart
+    task.start_task.assert_not_awaited()
+    task._forward_task_event.assert_not_awaited()
 
 
 @pytest.mark.asyncio
