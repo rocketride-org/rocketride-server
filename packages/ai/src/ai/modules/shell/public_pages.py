@@ -347,6 +347,11 @@ async def gate_errors(app_id: str, manifest: Mapping[str, Any], dist_dir: str, a
     manifests, so unpublishing releases it, with no table), and snapshot
     files missing from the built version.
 
+    The collision check sees only what is already published: two platform
+    apps publishing the same path at the same moment can both pass. The
+    aggregate then keeps the first claim and drops the other with a warning
+    naming both apps.
+
     The sections come from the version's build-emitted ``app-manifest.json``
     when present, else ``manifest`` (``metadata.manifest``): the same
     resolution the aggregate uses. Only platform apps' build output is read
