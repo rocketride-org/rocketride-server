@@ -65,7 +65,7 @@ def test_begin_global_app_missing_fields_raises():
         from tool_github.IGlobal import IGlobal
 
         glb = _make_global(IGlobal)
-        with pytest.raises(ValueError, match='App ID, private key, installation ID required'):
+        with pytest.raises(ValueError, match='App ID, private key required'):
             glb.beginGlobal()
 
 
@@ -146,7 +146,8 @@ def test_begin_global_app_valid_does_not_call_network(rsa_private_key_pem):
         assert glb.auth_type == 'app'
         assert glb.app_id == '123'
         assert glb.installation_id == '456'
-        assert glb._cached_token == ''
+        # Nothing minted yet: the only secrets are the key as decoded and as configured.
+        assert set(glb.secrets()) == {glb.private_key_pem, rsa_private_key_pem}
 
 
 # ---------------------------------------------------------------------------
@@ -174,7 +175,7 @@ def test_validate_config_warns_on_unknown_auth_type():
 
 def test_validate_config_warns_on_missing_app_fields():
     warnings = _validate_warnings({'authType': 'app'})
-    assert warnings == ['tool_github: App ID, private key, installation ID required for GitHub App auth']
+    assert warnings == ['tool_github: App ID, private key required for GitHub App auth']
 
 
 def test_validate_config_warns_on_malformed_key(rsa_private_key_pem):
@@ -227,7 +228,7 @@ def test_get_token_caches_and_refreshes(rsa_private_key_pem):
 
         with (
             patch('tool_github.IGlobal.github_client.mint_installation_token') as mock_mint,
-            patch('tool_github.IGlobal.time.time') as mock_time,
+            patch('tool_github.credentials.time.time') as mock_time,
         ):
             mock_mint.return_value = ('ghs_token1', 2000.0)  # expires at t=2000
 
@@ -257,7 +258,7 @@ def test_get_token_keeps_cached_token_when_early_refresh_fails(rsa_private_key_p
 
         with (
             patch('tool_github.IGlobal.github_client.mint_installation_token') as mock_mint,
-            patch('tool_github.IGlobal.time.time') as mock_time,
+            patch('tool_github.credentials.time.time') as mock_time,
         ):
             mock_mint.return_value = ('ghs_token1', 2000.0)
             mock_time.return_value = 1000.0
@@ -287,7 +288,7 @@ def test_get_token_does_not_retry_refresh_within_backoff_window(rsa_private_key_
 
         with (
             patch('tool_github.IGlobal.github_client.mint_installation_token') as mock_mint,
-            patch('tool_github.IGlobal.time.time') as mock_time,
+            patch('tool_github.credentials.time.time') as mock_time,
         ):
             mock_mint.return_value = ('ghs_token1', 2000.0)
             mock_time.return_value = 1000.0
@@ -321,7 +322,7 @@ def test_get_token_backoff_window_starts_when_the_slow_refresh_fails(rsa_private
 
         with (
             patch('tool_github.IGlobal.github_client.mint_installation_token') as mock_mint,
-            patch('tool_github.IGlobal.time.time') as mock_time,
+            patch('tool_github.credentials.time.time') as mock_time,
         ):
             mock_mint.return_value = ('ghs_token1', 2000.0)
             mock_time.return_value = 1000.0
@@ -349,7 +350,7 @@ def test_get_token_raises_when_the_slow_refresh_fails_after_expiry(rsa_private_k
 
         with (
             patch('tool_github.IGlobal.github_client.mint_installation_token') as mock_mint,
-            patch('tool_github.IGlobal.time.time') as mock_time,
+            patch('tool_github.credentials.time.time') as mock_time,
         ):
             mock_mint.return_value = ('ghs_token1', 2000.0)
             mock_time.return_value = 1000.0
@@ -371,7 +372,7 @@ def test_get_token_backoff_ends_at_expiry(rsa_private_key_pem):
 
         with (
             patch('tool_github.IGlobal.github_client.mint_installation_token') as mock_mint,
-            patch('tool_github.IGlobal.time.time') as mock_time,
+            patch('tool_github.credentials.time.time') as mock_time,
         ):
             mock_mint.return_value = ('ghs_token1', 2000.0)
             mock_time.return_value = 1000.0
@@ -396,7 +397,7 @@ def test_get_token_first_mint_failure_has_no_backoff(rsa_private_key_pem):
 
         with (
             patch('tool_github.IGlobal.github_client.mint_installation_token') as mock_mint,
-            patch('tool_github.IGlobal.time.time') as mock_time,
+            patch('tool_github.credentials.time.time') as mock_time,
         ):
             mock_mint.side_effect = ValueError('GitHub App token request failed: 503')
             mock_time.return_value = 1000.0
@@ -420,7 +421,7 @@ def test_get_token_raises_when_refresh_fails_after_expiry(rsa_private_key_pem):
 
         with (
             patch('tool_github.IGlobal.github_client.mint_installation_token') as mock_mint,
-            patch('tool_github.IGlobal.time.time') as mock_time,
+            patch('tool_github.credentials.time.time') as mock_time,
         ):
             mock_mint.return_value = ('ghs_token1', 2000.0)
             mock_time.return_value = 1000.0

@@ -31,12 +31,17 @@ The configured tool-server name defaults to `weaviate`.
 | Function | Description |
 | --- | --- |
 | `search` | Searches the store for a non-empty `query`; accepts optional `top_k` and metadata `filter`, and returns matching content, metadata, and scores. |
+| `objdir` | Lists the distinct parent paths of active documents in the collection as a map of parent path to one object ID each; accepts optional `parent` (exact match), `offset`, and `limit` (default and cap 1000). `offset` and `limit` count documents, not paths: documents that share a parent path appear as one entry, so a page can hold fewer than `limit` entries while more follow. |
+| `get` | Returns up to `limit` chunks (default and cap 100) of one document by `object_id`, ordered by chunk ID, with `total`, `has_more`, and `truncated`; an object ID the store does not hold, or one in the trash, returns a failure object. |
+| `stats` | Returns the collection's count as this store reports it, `document_count` (null on this store, which does not list documents), the embedding model name, and the vector size. |
 | `upsert` | Adds or updates a non-empty `documents` array. Each document requires content and an object ID; it can provide an embedding and embedding model or use the bound embedding provider. |
 | `delete` | Deletes documents for a non-empty `object_ids` array and returns the deleted count. |
+| `soft_delete` | Moves the documents of a non-empty `object_ids` array to the trash, keeping their chunks; the reply echoes the distinct IDs, and `matched_chunks` is null on this store. |
+| `restore` | Takes the documents of a non-empty `object_ids` array out of the trash. A document removed with `delete` cannot be restored. |
 
-`search` requires a bound embedding provider for semantic similarity search. The three functions return a failure object when their required input or an embedding cannot be obtained.
+`search` requires a bound embedding provider for semantic similarity search. The functions return a failure object when their required input or an embedding cannot be obtained; `get` answers an unknown object ID the same way.
 
-`search` accepts an optional `filter` object honoring only `objectId`, `nodeId` and `parent`; any other key is rejected. `upsert` accepts an optional `metadata` object storing `nodeId`, `parent` and `chunkId`, defaulting to `"vectordb_tool"`, `"/"` and `0` respectively.
+`search` accepts an optional `filter` object honoring only `objectId`, `nodeId` and `parent`; any other key is rejected. `upsert` accepts an optional `metadata` object storing `nodeId`, `parent` and `chunkId`; `nodeId` defaults to `"vectordb_tool"`, `parent` to `"/"`, and `chunkId` to the document's position among the chunks sent for its object ID in the call (0 for the first), and an explicit `chunkId` may not repeat within the call.
 
 ## Profiles
 
@@ -82,7 +87,7 @@ key instead of treating it as a retrieval-score problem.
 
 ### Tool Server Name
 
-The tool-server name defaults to `weaviate` and prefixes the three agent functions. Change it when multiple Weaviate stores are connected to the same agent so their functions do not share a namespace.
+The tool-server name defaults to `weaviate` and labels this store in tool-response messages. Pipeline agents address all eight functions listed above by node ID, for example `<node id>.search` or `<node id>.restore`; changing this label does not change those addresses.
 
 ## Authentication
 
@@ -92,7 +97,7 @@ For a cloud profile, provide the API key; the runtime uses it for the cloud conn
 
 ### Search and document lifecycle
 
-Semantic search requires an embedding and does not accept a non-zero offset. Keyword search matches content with the metadata filters. Re-ingesting an object deletes its existing chunks before replacement chunks are added. The store can mark chunks deleted or active, and its default filters exclude marked-deleted chunks.
+Semantic search requires an embedding and does not accept a non-zero offset. Keyword search matches content with the metadata filters. A batch that holds an object's chunk 0 deletes that object's existing chunks before the new chunks are added, so a re-ingest replaces the object; a batch without chunk 0 adds its chunks to the stored ones, so an object written in several batches keeps them all. A row's ID is a hash of its content and metadata, so a batch without chunk 0 that repeats a chunk number already stored keeps both copies when the content differs (the same content and metadata overwrite the stored row); to change a chunk, write the object again from chunk 0. The store can mark chunks deleted or active, and its default filters exclude marked-deleted chunks.
 
 Before semantic search, the driver checks that the collection is compatible with
 the query's embedding model. The collection's batch import reports an error if
@@ -108,8 +113,8 @@ scoped at query time without using collection names as routine access filters.
 
 Rendering retrieves an object's chunks in `chunkId` order and sends joined text to the callback in `renderChunkSize` groups. The node's document count is a count of stored vectors (chunks).
 
-When an object is re-ingested, the driver deletes its existing objects before
-adding replacements through Weaviate's dynamic batch API. A batch with failed
+When a batch holds an object's chunk 0, the driver deletes that object's existing
+chunks before adding the batch through Weaviate's dynamic batch API. A batch with failed
 objects raises an error after the batch ends. Keep the original source
 available for a retry, since the replacement behavior is not an all-or-nothing
 transaction across the prior objects and the new batch.
@@ -132,7 +137,7 @@ transaction across the prior objects and the new batch.
 | `vector.local.port` |  |  | `8080` |
 | `weaviate.profile` | `string` | **Type of Weaviate host**<br/>Connect to... | `"local"` |
 | `weaviate.provider` | `string` |  | const: `"weaviate"` |
-| `weaviate.serverName` | `string` | **Tool Server Name**<br/>Namespace for agent-facing tool names, e.g. 'weaviate' exposes tools as weaviate.search / weaviate.upsert / weaviate.delete. Change this when running multiple Weaviate nodes in the same pipeline so their tool names do not collide. | `"weaviate"` |
+| `weaviate.serverName` | `string` | **Tool Server Name**<br/>Label for this store in tool-response messages (for example, a refused write names weaviate.delete). Pipeline agents address the available functions as node-id.function; apps use the function name and node ID. Changing this label does not change those addresses. See the node README for the available functions and their tool-exposure and write-permission settings. | `"weaviate"` |
 
 ## Dependencies
 

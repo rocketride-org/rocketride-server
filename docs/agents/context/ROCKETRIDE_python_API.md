@@ -873,9 +873,10 @@ If you omit `ttl`, each scheduled run executes until the pipeline finishes on it
 The app methods are the **automation layer under the App Builder UI** — everything the UI does to move an app from source to store, scriptable. The flow: pack and upload source (`deploy.add_app`), watch the build (`list_deployments`, `build_log`), bind versions to audiences (`publish_app`), and go through store review (`submit_app`, `withdraw_app`, `reply_app`).
 
 **Scaffolding:** `await client.deploy.create_app(slug, template='Blank', display_name=..., ...)`
-scaffolds a new app under `./apps/<slug>`, the same templates as
+scaffolds a new app under `./apps/<slug>-ui`, the same templates as
 `rocketride app create <slug>` and the App Builder wizard (mirrors the TypeScript
-`deploy.createApp`). Everything below (pack, deploy, publish, review) has full
+`deploy.createApp`). `developer_id` defaults to the connected org's developer
+id, else `'local'`. Everything below (pack, deploy, publish, review) has full
 Python parity.
 
 **Packing and uploading:** `deploy.add_app` packs an app folder exactly as
@@ -890,12 +891,12 @@ shape, id grammar, declared assets, include entries, pack size.
 ```python
 # Run from the workspace root (or pass workspace_root=...); use the
 # DEPLOY pair when the deploy target is a different server.
-report = await client.deploy.verify_app('apps/reports')
+report = await client.deploy.verify_app('apps/reports-ui')
 if not report.ok:
     for check in report.checks:
         print(f'{"OK " if check.ok else "FAIL"} {check.id}: {check.note}')
     raise SystemExit(1)
-result = await client.deploy.add_app('apps/reports', comment='v3: new settings panel')
+result = await client.deploy.add_app('apps/reports-ui', comment='v3: new settings panel')
 ```
 
 The raw rail door remains for a zip you packed yourself:
@@ -913,6 +914,10 @@ The zip contains the app's SOURCE (the server owns the build and never trusts cl
 - `async remove_app_publish(app_id: str, target: str) -> Dict[str, Any]` — remove an audience binding; the app stops serving to that audience. SOFT: registry versions and audit history survive; publishing again revives it.
 - `async disable_app_publish(app_id: str, target: str) -> Dict[str, Any]` — disable an audience binding: serving stops, but the row STAYS in the where-live listing marked `'disabled'` (a visible off switch), unlike remove which hides it. Publishing any version to that audience re-enables it. Returns the `publish` binding row.
 - `async where_app(app_id: str) -> List[Dict[str, Any]]` — the reverse index: which audiences serve which version. Returns pin rows (`{'rung', 'handle', 'version', 'appVersion', 'state', 'deployedAt'}`).
+- `async wait_for_app_build(app_id: str, registry_version: int, *, timeout=600.0, interval=3.0, on_status=None) -> Dict[str, Any]` — wait for a version's server build to finish (deploys return at once with `buildStatus: 'queued'`; publish needs `'ok'`). Raises on a failed build, an unknown version, or the timeout
+- Pure helpers exported from `rocketride` (twins of the TypeScript `deploy-helpers`): `parse_registry_version(value)` (positive int; accepts `3`, `'3'`, `'v3'`), `pick_publish_version(rail)` (newest non-failed version), `resolve_deploy_teams(client, deployments)`, `team_name_of(teams, team_id, own_user_id)`, `wire_team_id_of(team_id, own_user_id)`, `resolve_team_arg(value, teams)` ('@me' / name / id → wire id), `pipeline_name_from_path(path)`
+- `async developer_status() -> Dict[str, Any]` — the caller org's developer namespace (the `<developerId>` half of its app ids): `{'developerId', 'stripeAccountId', 'stripeAccountStatus'}`, `developerId` None until an org admin registers one
+- `async register_developer(developer_id: str) -> Dict[str, Any]` — claim the org's developer id slug (org.admin, SaaS only)
 - `async submit_app(app_id: str, registry_version: int) -> Dict[str, Any]` — submit a deployed version for store review: flips the deployment `'private'` to `'submit'` (it enters the review queue). Developer-org and developer-namespace gated. Returns the refreshed `artifact` rail entry.
 - `async withdraw_app(app_id: str, registry_version: int) -> Dict[str, Any]` — withdraw a pending review (the developer's own cancel): flips `'submit'` back to `'private'`; history records the withdrawal. Only a version in `'submit'` withdraws.
 - `async reply_app(app_id: str, message: str, registry_version: Optional[int] = None) -> Dict[str, Any]` — append a developer message to the app's review thread (the same history stream `deploy.history()` reads). Returns `{'replied': True, 'appId': app_id}`.
@@ -954,7 +959,7 @@ Account management: profile, API keys, organization, members, teams, and server-
 **Members:**
 
 - `async list_members(org_id: str) -> list[MemberRecord]`
-- `async invite_member(org_id: str, *, email: str, given_name: str, family_name: str, role: str) -> None`
+- `async invite(org_id: str, *, email: str, given_name: str, family_name: str, role: str, team_assignments: list[TeamAssignment] | None = None, dev_team_id: str | None = None) -> InvitedMember`: returns `{userId, displayName, email, role, status, devTeamId}`. `dev_team_id` must be one of the `team_assignments` teams with `task.control` (any org team for an admin). `invite_member` takes the same arguments, returns `None`, and is deprecated.
 - `async update_member_role(org_id: str, user_id: str, role: str) -> None`
 - `async remove_member(org_id: str, user_id: str) -> None`
 
@@ -970,8 +975,8 @@ Account management: profile, API keys, organization, members, teams, and server-
 **Server-side environment layers** (`ROCKETRIDE_*` secrets stored per scope and merged org -> team -> user for pipeline resolution):
 
 - `async get_environment_keys() -> list[str]` — merged list of key NAMES across all scopes (no values).
-- `async get_env(scope: str, scope_id: str | None = None) -> dict[str, str]` — read one scope's env dict. `scope` is `'org'`, `'team'`, or `'user'`; `scope_id` is the orgId/teamId (omit for user).
-- `async set_env(scope: str, env: dict[str, str], scope_id: str | None = None) -> None` — write one scope's FULL env dict (replaces the entire set of keys at that scope level).
+- `async get_env(scope: str, scope_id: str | None = None) -> dict[str, str]` — the names stored at one scope, each mapped to the mask `CONST_ENV_MASK` (exported by `rocketride`); values are never returned. `scope` is `'org'`, `'team'`, or `'user'`; `scope_id` is the orgId/teamId (omit for user).
+- `async set_env(scope: str, env: dict[str, str | None], scope_id: str | None = None) -> None` — merge into one scope: a value sets, `None` deletes, the mask keeps the stored value; names not sent are untouched.
 
 ```python
 new_key = await client.account.create_key(name='ci-runner')
@@ -983,7 +988,7 @@ await client.account.set_env('team', {'ROCKETRIDE_OPENAI_KEY': 'sk-...'}, scope_
 Every operation above is role-checked server-side; an unauthorized call is refused with an explicit error (`'Admin role required ...'`) — nothing fails silently. The split for the documented operations:
 
 - **Any org member**: their own profile (`get_profile`, `update_profile`, `set_dev_team`, `set_default_org`); their OWN API keys (`list_keys`, `create_key`, revoking their own); reading the org (`get_org`); listing members and teams and reading a team's detail; USER-scope environment (`get_env('user')` / `set_env('user')`) and the merged key names (`get_environment_keys`); billing reads (`get_details`, `get_credit_balance`, `get_product_prices`) and promo codes (`validate_promo_code`, `redeem_promo_code`).
-- **Org admin only**: renaming the org (`update_org_name`); member management (`invite_member`, `update_member_role`, `remove_member`); revoking ANOTHER member's key (own-org keys only); creating teams (`create_team`); ORG-scope environment — both `get_env('org', ...)` and `set_env('org', ...)` (reads too: the org layer holds shared secrets); and every billing operation that moves money or reads the org's ledger — checkout/subscribe, portal, cancel, upgrade, credit purchases and top-ups, `get_usage_by_user`/`get_usage_by_team`, `get_transactions`, `get_transaction_distinct`.
+- **Org admin only**: renaming the org (`update_org_name`); member management (`invite`, `invite_member`, `update_member_role`, `remove_member`); revoking ANOTHER member's key (own-org keys only); creating teams (`create_team`); ORG-scope environment — both `get_env('org', ...)` and `set_env('org', ...)` (reads too: the org layer holds shared secrets); and every billing operation that moves money or reads the org's ledger — checkout/subscribe, portal, cancel, upgrade, credit purchases and top-ups, `get_usage_by_user`/`get_usage_by_team`, `get_transactions`, `get_transaction_distinct`.
 - **Team admin** (the `team.admin` permission on that team; org admins pass implicitly): `delete_team`, `add_team_member`, `update_team_member_perms`, `remove_team_member`, and TEAM-scope `get_env`/`set_env` — both read and write.
 
 ### `client.billing`
@@ -1031,7 +1036,7 @@ print(f'{page["total"]} tasks, showing {len(page["rows"])}')
 
 `client.database` issues raw SQL or Cypher directly against a database pipeline node (via the node's tool functions), **bypassing the LLM translation layer** the default `chat()` flow uses — and its safety checks: you are responsible for the statements you pass. On every method, `node_id=''` broadcasts to all tool-lane nodes and the first database node handles it. Empty token/sql/session_id raise `ValueError`; server failures raise `RuntimeError`.
 
-- `async database.query(*, token: str, sql: str, node_id: str = '', session_id: str = '', params: list | dict | None = None) -> Dict[str, Any]` — execute a raw SQL/Cypher statement. `params` binds positional placeholders for SQL nodes (e.g. `[1, 'foo']` for `$1`, `$2`), or named placeholders as a dict for the built-in `rocketride_graph` node and `graph_neo4j` (e.g. `{'rows': [...]}` for `UNWIND $rows`; `graph_falkordb` rejects params; bound values need no escaping and do not count toward `rocketride_graph`'s query-length limit); pass a `session_id` from `begin_transaction` to run inside that transaction. Returns `{'rows': [...], 'affected_rows': int}`.
+- `async database.query(*, token: str, sql: str, node_id: str = '', session_id: str = '', params: list | dict | None = None) -> Dict[str, Any]` — execute a raw SQL/Cypher statement. `params` binds positional placeholders for SQL nodes (e.g. `[1, 'foo']` for `$1`, `$2`), or named placeholders as a dict for the graph nodes `rocketride_graph`, `graph_neo4j` and `graph_falkordb` (e.g. `{'rows': [...]}` for `UNWIND $rows`; bound values need no escaping and do not count toward `rocketride_graph`'s query-length limit); pass a `session_id` from `begin_transaction` to run inside that transaction. Returns `{'rows': [...], 'affected_rows': int}`; `graph_falkordb` adds `'truncated': True` when it saved a write but cut its rows, at `max_execute_rows` or at the server's `RESULTSET_SIZE`.
 - `async database.begin_transaction(*, token: str, node_id: str = '') -> Dict[str, Any]` — begin a transaction; returns a dict containing the `session_id` to thread through subsequent `query`/`commit`/`rollback` calls.
 - `async database.commit(*, token: str, session_id: str, node_id: str = '') -> Dict[str, Any]` — commit an open transaction. Returns `{'ok': True}` on success.
 - `async database.rollback(*, token: str, session_id: str, node_id: str = '') -> Dict[str, Any]` — roll back an open transaction, discarding its changes.
@@ -1049,7 +1054,8 @@ except Exception:
 ```
 
 **Graph bulk upsert** (`rocketride_graph`, see Pattern 14 in ROCKETRIDE_PIPELINES.md) — named
-params, and MERGE then a separate `MATCH ... SET`:
+params, and MERGE then a separate `MATCH ... SET` (works on every AGE version; on AGE 1.6.0 the
+MERGE and SET can also run as one call):
 
 ```python
 rows = [{'id': 1, 'name': 'a'}, {'id': 2, 'name': 'b'}]
@@ -1064,7 +1070,9 @@ await client.database.query(
 
 The package installs a `rocketride` command-line tool (`pip install
 rocketride`, then `rocketride --help`). The TypeScript client installs the
-IDENTICAL command — same verbs, same flags, same output. The full reference
+same command with more `app` verbs and `deploy source-config`, but without
+`diff` and `otel`, which only this package has. ROCKETRIDE_CLI.md has the
+table of which package ships which command. The full reference
 (workspace, validate, task, store, app, and deploy verbs, the `--json`
 contract, and when to prefer it over SDK code) is ROCKETRIDE_CLI.md; every
 deploy and app verb there fronts a `client.deploy.*` method from §Deploy.
@@ -1177,6 +1185,13 @@ tree = await client.cprofile_report_tree(target=token)  # call tree
 - `cprofile_threads(target=None)` — the threads of the last session,
   busiest first: `id` (the `thread` to pass above), `name`, system thread id `tid`,
   `ttot`, `functions` and `calls`. Names are not unique; `tid` is.
+- Session failures come back as data, not exceptions: `cprofile_start` while
+  a session is active, and `cprofile_stop` with no session (or on a
+  server-process session another connection started), return
+  `{'status': 'error', 'message': ...}`. With no completed session,
+  `cprofile_report` returns a placeholder text, and `cprofile_report_tree`
+  and `cprofile_threads` return an `error` key. A missing `task.control`
+  permission, or a `target` you may not control, raises `RuntimeError`.
 
 ## 17. Exceptions & Error Handling
 

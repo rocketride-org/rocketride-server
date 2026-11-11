@@ -60,15 +60,28 @@
 
 import React, { createContext, useContext, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
+import type { ShellSidebarMode, SidebarViewContainer } from '../../types/sidebarChrome';
 
 // =============================================================================
 // TYPES
 // =============================================================================
 
+/** The app's sidebar chrome declaration riding alongside the content node. */
+export interface SidebarChromeOptions {
+	/** Declared view containers, or null for the legacy single-node form. */
+	views?: SidebarViewContainer[] | null;
+	/** Requested sidebar chrome; the frame clamps it to what `views` supports. */
+	mode?: ShellSidebarMode | null;
+}
+
 /** The resolved chrome state the shell reads to place content. */
 export interface HostChromeState {
 	/** App-declared sidebar content, or null when none is registered. */
 	sidebarContent: ReactNode | null;
+	/** App-declared sidebar view containers, or null (legacy single-node form). */
+	sidebarViews: SidebarViewContainer[] | null;
+	/** App-requested sidebar chrome, or null (classic 'rocketride'). */
+	sidebarMode: ShellSidebarMode | null;
 	/** App-declared status-bar content, or null when none is registered. */
 	statusBarContent: ReactNode | null;
 }
@@ -76,7 +89,7 @@ export interface HostChromeState {
 /** The stable registration API apps call. Identity never changes across renders. */
 interface HostChromeApi {
 	/** Register/replace the sidebar content owned by `token`. */
-	registerSidebarContent: (token: object, content: ReactNode | null) => void;
+	registerSidebarContent: (token: object, content: ReactNode | null, chrome?: SidebarChromeOptions) => void;
 	/** Clear the sidebar content if `token` still owns it. */
 	unregisterSidebarContent: (token: object) => void;
 	/** Register/replace the status-bar content owned by `token`. */
@@ -103,7 +116,7 @@ const NOOP_API: HostChromeApi = {
 };
 
 /** Empty state used when the reader is mounted outside a provider. */
-const EMPTY_STATE: HostChromeState = { sidebarContent: null, statusBarContent: null };
+const EMPTY_STATE: HostChromeState = { sidebarContent: null, sidebarViews: null, sidebarMode: null, statusBarContent: null };
 
 const HostChromeApiContext = createContext<HostChromeApi>(NOOP_API);
 const HostChromeStateContext = createContext<HostChromeState>(EMPTY_STATE);
@@ -116,6 +129,10 @@ const HostChromeStateContext = createContext<HostChromeState>(EMPTY_STATE);
 interface ContentSlot {
 	token: object;
 	content: ReactNode | null;
+	/** Sidebar slot only: declared view containers (null elsewhere/legacy). */
+	views?: SidebarViewContainer[] | null;
+	/** Sidebar slot only: requested chrome mode (null elsewhere/legacy). */
+	mode?: ShellSidebarMode | null;
 }
 
 /**
@@ -132,10 +149,17 @@ export const HostChromeProvider: React.FC<{ children: ReactNode }> = ({ children
 
 	// --- Stable registration API (identity fixed for the provider's life) ---
 	const api = useMemo<HostChromeApi>(() => ({
-		registerSidebarContent: (token, content) => {
-			// Replace only when the owner changed or the node identity changed,
-			// so a stable node registered repeatedly does not churn the chrome.
-			setSidebarSlot((cur) => (cur && cur.token === token && cur.content === content ? cur : { token, content }));
+		registerSidebarContent: (token, content, chrome) => {
+			// Replace only when the owner changed or any declared identity
+			// changed (node, views array, mode), so a stable declaration
+			// registered repeatedly does not churn the chrome.
+			const views = chrome?.views ?? null;
+			const mode = chrome?.mode ?? null;
+			setSidebarSlot((cur) => (
+				cur && cur.token === token && cur.content === content && cur.views === views && cur.mode === mode
+					? cur
+					: { token, content, views, mode }
+			));
 		},
 		unregisterSidebarContent: (token) => {
 			// Clear only if this token still owns the slot (last-writer-wins).
@@ -154,6 +178,8 @@ export const HostChromeProvider: React.FC<{ children: ReactNode }> = ({ children
 	// --- Resolved state the shell chrome consumes --------------------------
 	const state = useMemo<HostChromeState>(() => ({
 		sidebarContent: sidebarSlot ? sidebarSlot.content : null,
+		sidebarViews: sidebarSlot?.views ?? null,
+		sidebarMode: sidebarSlot?.mode ?? null,
 		statusBarContent: statusBarSlot ? statusBarSlot.content : null,
 	}), [sidebarSlot, statusBarSlot]);
 
@@ -196,9 +222,15 @@ export function useHostChromeState(): HostChromeState {
  * and choose their collapsed form (SidebarMenu iconifies; free-form content
  * typically returns null).
  *
+ * Mode declaration: the optional `chrome` argument carries the app's view
+ * containers and requested sidebar mode (AppLayout's `sidebarViews` /
+ * `sidebarMode` props). Omitting it declares the legacy single-node form,
+ * which the frame renders as the classic 'rocketride' column.
+ *
  * @param content - The sidebar node to mount, or null to declare nothing.
+ * @param chrome - Optional view-container/mode declaration riding with it.
  */
-export function useSidebarContent(content: ReactNode | null): void {
+export function useSidebarContent(content: ReactNode | null, chrome?: SidebarChromeOptions): void {
 	const api = useContext(HostChromeApiContext);
 	// Stable per-instance ownership token for last-writer-wins arbitration.
 	const tokenRef = useRef<object>({});
@@ -210,11 +242,13 @@ export function useSidebarContent(content: ReactNode | null): void {
 		return () => api.unregisterSidebarContent(token);
 	}, [api]);
 
-	// Sync the current content into the slot whenever it changes. The provider
-	// dedupes by node identity, so a stable node registers once.
+	// Sync the current declaration into the slot whenever any part changes.
+	// The provider dedupes by identity, so stable nodes/arrays register once.
+	const views = chrome?.views ?? null;
+	const mode = chrome?.mode ?? null;
 	useLayoutEffect(() => {
-		api.registerSidebarContent(tokenRef.current, content ?? null);
-	}, [api, content]);
+		api.registerSidebarContent(tokenRef.current, content ?? null, { views, mode });
+	}, [api, content, views, mode]);
 }
 
 /**

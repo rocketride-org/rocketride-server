@@ -26,6 +26,11 @@ const { DIST_ROOT } = require('./paths');
 const SERVER_DIR = path.join(DIST_ROOT, 'server');
 const READY_MESSAGE = 'Application startup complete.';
 
+// The address a local test server listens on and its tests connect to. An IP,
+// never the name 'localhost': Windows resolves the name to ::1 first, and a
+// Python client waits ~2 s for each refused IPv6 connect before it tries IPv4.
+const LOOPBACK_HOST = '127.0.0.1';
+
 // Runtime output, so it lives in the server's own working directory, next to
 // test_files/ and htmlcov/. Packaging takes an explicit file list, so the logs
 // never reach a release archive.
@@ -206,7 +211,9 @@ function openServerLog(logName, diagnostics) {
  *   all of the server's stdout and stderr until it exits goes to
  *   dist/server/test-logs/<logName>-server.log, replaced on every run
  * @param {boolean} [options.verbose] - The builder's --verbose
- * @returns {Promise<{server: ChildProcess|null, port: number, diagnostics?: object}>}
+ * @returns {Promise<{server: ChildProcess|null, port: number, uri?: string, diagnostics?: object}>}
+ *   `uri` is the address tests connect to (`http://127.0.0.1:<port>`), set when
+ *   this call started the server.
  *   `diagnostics` (also reachable as `server.rocketrideDiagnostics`) carries the
  *   retained output tail and, once it exits, the exit code/signal. If the server
  *   dies after reporting ready without stopServer being called, that is reported
@@ -238,15 +245,16 @@ async function startServer(options) {
 	// --port=0 lets the OS assign a free port; we parse the actual port from
 	// Uvicorn's stdout to avoid the race between findFreePort() releasing the
 	// port and the engine binding to it (same pattern as engine-manager.ts).
-	// --host=127.0.0.1 is deliberate: never bind the *name* 'localhost'. Where it
+	// --host is the LOOPBACK_HOST IP, never the *name* 'localhost'. Where it
 	// resolves to both ::1 and 127.0.0.1 (any container - a bare host usually maps
 	// only IPv4), asyncio binds one socket per address family and --port=0 gives
 	// each its own ephemeral port, while only the first socket's port is logged.
 	// We parse that port and hand it to the tests, so whenever IPv6 sorts first
 	// the tests dial a port nothing listens on over IPv4 and every request fails
-	// with ECONNREFUSED against a healthy engine.
+	// with ECONNREFUSED against a healthy engine. The returned `uri` names the
+	// same IP, so the tests dial exactly the socket that listens.
 	const scriptArgs = script.split(/\s+/);
-	const serverArgs = ['--autoterm', ...scriptArgs, '--host=127.0.0.1', '--port=0', ...args];
+	const serverArgs = ['--autoterm', ...scriptArgs, `--host=${LOOPBACK_HOST}`, '--port=0', ...args];
 	if (basePort) {
 		serverArgs.push(`--base_port=${basePort}`);
 	}
@@ -324,6 +332,7 @@ async function startServer(options) {
 			if (!resolved && actualPort && outputBuffer.includes(READY_MESSAGE)) {
 				resolved = true;
 				diagnostics.port = actualPort;
+				const uri = `http://${LOOPBACK_HOST}:${actualPort}`;
 
 				// The server says it's listening; confirm it before handing the port
 				// to tests. "Ready but unreachable" otherwise shows up only as every
@@ -358,13 +367,13 @@ async function startServer(options) {
 							);
 						}
 
-						resolve({ server: serverProcess, port: actualPort, diagnostics });
+						resolve({ server: serverProcess, port: actualPort, uri, diagnostics });
 					})
 					.catch((err) => {
 						// The probe is diagnostics only: if it fails, report the server
 						// ready rather than leave startup waiting forever
 						diagnostics.reachability = { error: err.message };
-						resolve({ server: serverProcess, port: actualPort, diagnostics });
+						resolve({ server: serverProcess, port: actualPort, uri, diagnostics });
 					});
 			}
 		};
@@ -526,8 +535,11 @@ async function stopServer(serverObj, timeout = 5000) {
  * Parse a server address string into host, port, and full URI.
  *
  * Accepts two formats:
- *   - Bare port: "5565" → { host: 'localhost', port: 5565, uri: 'http://localhost:5565' }
+ *   - Bare port: "5565" → { host: '127.0.0.1', port: 5565, uri: 'http://127.0.0.1:5565' }
  *   - Host:port: "myhost:5590" → { host: 'myhost', port: 5590, uri: 'http://myhost:5590' }
+ *
+ * A bare port names a server on this machine, reached over LOOPBACK_HOST: a local
+ * engine listens on IPv4 whether it binds 127.0.0.1 or the name localhost.
  *
  * @param {string|number} value - The address to parse
  * @returns {{ host: string, port: number, uri: string }}
@@ -537,7 +549,7 @@ function parseServerAddress(value) {
 	// Bare port number
 	if (/^\d+$/.test(s)) {
 		const port = parseInt(s, 10);
-		return { host: 'localhost', port, uri: `http://localhost:${port}` };
+		return { host: LOOPBACK_HOST, port, uri: `http://${LOOPBACK_HOST}:${port}` };
 	}
 	// host:port
 	const idx = s.lastIndexOf(':');

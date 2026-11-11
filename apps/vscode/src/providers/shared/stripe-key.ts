@@ -16,6 +16,7 @@
  */
 
 import { RocketRideClient } from 'rocketride';
+import { getLogger } from '../../shared/util/output';
 
 // =============================================================================
 // TYPES
@@ -75,7 +76,7 @@ export async function getStripePublishableKey(client: RocketRideClient | undefin
 	} catch (error) {
 		// Probe failure (server down / no probe support) — do not cache, a
 		// later attempt may succeed once the server is reachable again.
-		console.log(`[stripe-key] probe failed for ${uri}: ${error}`);
+		getLogger().output(`[stripe-key] probe failed for ${uri}: ${error}`);
 		return { key: '', probed: false };
 	}
 }

@@ -24,13 +24,21 @@ the same loop runs from a terminal or CI.
 - Node and **pnpm**. Use pnpm, not npm: running `npm install` inside an app
   folder can corrupt the workspace layout. Dependencies install once at the
   workspace root.
-- A developer id for your organization. Every app id is
-  `<developerId>.<name>`. Your organization claims its developer id once,
-  on the Deploy tab (lowercase letters and underscores, starting with a
-  letter), and can then deploy
-  only apps inside that namespace. Until the prefix of your app's id
-  matches, the Deploy tab is read-only with a banner; the fix is to rename
-  the id in `package.json`. Design and Package always work.
+- A developer id for your organization, on RocketRide Cloud. Every app id
+  is `<developerId>.<name>`. Your organization claims its developer id
+  once, on the Deploy tab or with the npm CLI's
+  `rocketride app developer register <id>`, which talks to the deployment
+  target named by `ROCKETRIDE_DEPLOY_URI` and `ROCKETRIDE_DEPLOY_APIKEY`
+  (the pip CLI has no `app developer` verbs). The id is lowercase letters
+  and underscores, starting with a letter; `local`, the prefix of an app
+  scaffolded before registering, is reserved, so pick another id.
+  Registering is an org admin's step, and permanent. The organization can
+  then deploy only apps inside that namespace. A self-hosted server
+  registers nothing: it publishes under the fixed id `rocketride`. Until
+  the prefix of your app's id matches, the Deploy tab is read-only with a
+  banner. An app still on `local.<name>` can move into your namespace from
+  that banner in VS Code (see [Create](#create-dashboard-tab)); rename any
+  other id by hand. Design and Package always work.
 - Catalog nodes only, if the app is headed for the store. Pipelines in a
   store app use the nodes that ship with the engine and nothing else; see
   [Adding a pipeline to your app](#adding-a-pipeline-to-your-app).
@@ -44,12 +52,12 @@ that, you come back to Design and Deploy most often.
 
 Start from the Dashboard tab, or run **RocketRide: New App** from the
 command palette. The wizard asks for a name and a template (Blank or
-Dashboard) and scaffolds the app under `apps/<slug>`. Always create apps
+Dashboard) and scaffolds the app under `apps/<slug>-ui`. Always create apps
 this way; a hand-made folder fails later with symptoms far from the cause.
 The scaffold starts the id at `local.<slug>` until your organization has a
 developer id; renaming the id later makes it a different app.
 
-The `<name>.rrapp` file it creates is empty on purpose. Opening it opens
+The `<name>.rrapp` file it creates holds only the app id. Opening it opens
 the App Builder; the app's identity lives in `package.json`.
 
 What you will edit:
@@ -65,6 +73,23 @@ What you will edit:
 ```bash
 rocketride app create reports --template Dashboard
 ```
+
+Both the wizard and the command create the app in `apps/reports-ui` and take
+the developer id from your account. The command reads the account from the
+credentials in `.env`, so run `rocketride login` (or `rocketride init`)
+first. Without an account it warns and uses `local`; pass
+`--developer <id>` to choose one yourself.
+
+An app created as `local.<slug>` can move into your organization's
+namespace once the organization has a developer id: in VS Code, the
+read-only banner on the Store and Deploy tabs offers **Move to
+`<developerId>.<slug>`**. After you confirm, it rewrites the id in
+`package.json` (plus the publisher and package name, if they still hold
+the scaffold's values), and in the `.rrapp` file and
+`src/AppDescriptor.ts` where they carry it, then reopens the App Builder
+on the new id. Nothing on the server is renamed: the app's saved settings in
+the App Builder and the preview start fresh. Only `local.` ids move this
+way; rename any other id by hand in the same files.
 
 ### Design
 
@@ -101,7 +126,7 @@ The Package tab edits the `appManifest` block in `package.json`. The file
 is the truth, so editing it by hand is fine. Verification needs no server:
 
 ```bash
-rocketride app verify ./apps/reports
+rocketride app verify ./apps/reports-ui
 ```
 
 ### Your listing
@@ -125,7 +150,10 @@ Two verbs, and they are not the same:
 A deploy returns as soon as the server accepts the upload; the version
 can be published, and served, only once its server build finishes. The
 version card shows the build's progress (`queued`, `building`, …) until
-then. Once you publish, **Where this app is live** on the Deploy tab shows
+then. If the build fails, the Dashboard says so, and its **View build log**
+button opens the server's build log with the reason at the end. From the
+terminal, run `rocketride deploy log <appId> <version>`. Once you publish,
+**Where this app is live** on the Deploy tab shows
 what a browser in each audience actually gets: `serving`, or why not
 (`not serving: still building`, `not serving: build failed`, `disabled`,
 `in review`). The dashboard says which version you would get right now.
@@ -136,14 +164,27 @@ A deploy packs the app folder plus any folders listed under
 `appManifest.include`, and nothing else. Every `include` entry must exist.
 
 ```bash
-rocketride app deploy ./apps/reports --comment "first version"
+rocketride app deploy ./apps/reports-ui --comment "first version"
 ```
 
-`rocketride app deploy` needs a deployment target (`ROCKETRIDE_DEPLOY_URI`
-and `ROCKETRIDE_DEPLOY_APIKEY`) and refuses to run without one; `app
-create` uses the development connection (`ROCKETRIDE_URI`) to vendor
-platform packages, and `app verify` needs no connection. Publishing
-happens on the Deploy tab.
+To preview from the terminal instead of the App Builder, run `rocketride app
+dev reports --open`: it serves the app, opens the preview, and updates it on
+every save, whichever editor you use. Ctrl+C stops it.
+
+Publishing happens on the Deploy tab, or from the terminal:
+
+```bash
+rocketride app deploy reports --publish @me   # deploy, wait for the build, publish to your desktop
+rocketride app publish reports 2 --to @team/QA
+rocketride app versions reports                # the version rail
+rocketride app where reports                   # which audiences serve which version
+```
+
+The deploy and publish commands need a deployment target
+(`ROCKETRIDE_DEPLOY_URI` and `ROCKETRIDE_DEPLOY_APIKEY`, written by
+`rocketride login`) and refuse to run without one; `app create` uses the
+development connection (`ROCKETRIDE_URI`) to vendor platform packages, and
+`app verify` needs no connection.
 
 ## Adding a pipeline to your app
 

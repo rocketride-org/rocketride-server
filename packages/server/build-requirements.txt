@@ -2,10 +2,16 @@
 # constraints (pydantic/cryptography pins) instead of a direct pip install.
 # These are NOT runtime module deps, so they stay out of the node/ai requirement
 # files that ship to production. Versions come from the constraints, not here.
-pytest
+
+# Capped for xdist --dist loadgroup; the reason and when to drop it are in
+# nodes/test/requirements.txt. The two files must agree.
+pytest<9.2
 pytest-asyncio
 pytest-timeout
 pytest-xdist
+# nodes/test/_sys_modules_guard.py uses @pytest.hookimpl(wrapper=True), which needs
+# pluggy 1.2 or later; the reason is in nodes/test/requirements.txt.
+pluggy>=1.2
 python-dotenv
 tiktoken>=0.7.0,<1.0.0
 mcp>=1.2.0

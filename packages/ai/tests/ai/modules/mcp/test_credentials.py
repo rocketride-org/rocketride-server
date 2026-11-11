@@ -1,4 +1,6 @@
 # Copyright 2026 Aparavi Software AG. MIT License.
+import pytest
+
 from ai.modules.mcp import credentials as creds
 
 RAW = {
@@ -148,3 +150,44 @@ def test_shipped_http_request_does_not_auto_wire():
     state = creds.evaluate(spec, ['ROCKETRIDE_HTTP_REQUEST_AUTH_TOKEN'])
     assert state['status'] == 'configured'
     assert state['wiring'] is None
+
+
+@pytest.mark.parametrize(
+    'required_setting', [{}, {'required': True}, {'required': False}], ids=['omitted', 'true', 'false']
+)
+@pytest.mark.parametrize('row_variable_present', [False, True], ids=['variable_absent', 'variable_present'])
+def test_auto_wire_false_field_is_described_but_never_required_or_wired(required_setting, row_variable_present):
+    """A descriptive row field must not gate readiness, request setup, or produce a top-level binding."""
+    raw = {
+        'tool_x': {
+            'title': 'X',
+            'fields': [
+                {
+                    'path': 'x.token',
+                    'title': 'Token',
+                    'kind': 'secret',
+                    'suggests': 'ROCKETRIDE_X_TOKEN',
+                },
+                {
+                    'path': 'x.rowValue',
+                    'title': 'Row value',
+                    'kind': 'secret',
+                    'auto_wire': False,
+                    'suggests': 'ROCKETRIDE_X_ROW_VALUE',
+                    **required_setting,
+                },
+            ],
+        }
+    }
+    spec = creds.catalog_from_dict(raw)['tool_x']
+    assert [f.auto_wire for f in spec.fields] == [True, False]
+    assert [f.required for f in spec.fields] == [True, False]
+    assert creds.setup_block(spec)['variables'] == ['ROCKETRIDE_X_TOKEN']
+    assert creds.evaluate(spec, [])['missing'] == ['ROCKETRIDE_X_TOKEN']
+    env_keys = ['ROCKETRIDE_X_TOKEN']
+    if row_variable_present:
+        env_keys.append('ROCKETRIDE_X_ROW_VALUE')
+    state = creds.evaluate(spec, env_keys)
+    assert state['status'] == 'configured'
+    assert state['missing'] == []
+    assert state['wiring'] == {'x.token': '${ROCKETRIDE_X_TOKEN}'}

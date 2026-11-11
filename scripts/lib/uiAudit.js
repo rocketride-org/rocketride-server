@@ -80,13 +80,13 @@ const CANONICAL_BROWSERSLIST = ['chrome >= 81', 'edge >= 83', 'firefox >= 76', '
 // Scripts block every app package.json must expose.
 const REQUIRED_SCRIPTS = ['build', 'build:prod', 'dev', 'typecheck'];
 
-// The optional dev block, exactly as it appears in conforming configs.
+// The optional writeToDisk lines, exactly as they appear nested inside a
+// conforming config's dev block (the dev block itself is now canonical —
+// every conforming app carries it for the lazyCompilation/HMR-client fix).
 const DEV_BLOCK =
-	'\t\tdev: {\n' +
 	"\t\t\t// Write built assets to disk so the shell's static file server\n" +
 	'\t\t\t// picks up changes without a full saas:dev restart.\n' +
-	'\t\t\twriteToDisk: true,\n' +
-	'\t\t},\n';
+	'\t\t\twriteToDisk: true,\n';
 
 // =============================================================================
 // DISCOVERY

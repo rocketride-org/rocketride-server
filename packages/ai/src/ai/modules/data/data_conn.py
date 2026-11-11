@@ -19,10 +19,12 @@ processing operations, enabling remote data pipeline control and monitoring.
 """
 
 import asyncio
+import codecs
 import json
 import time
 from dataclasses import dataclass, field
 from typing import Dict, Any, Optional, TYPE_CHECKING
+from starlette.websockets import WebSocketDisconnect
 from ai.constants import CONST_DATA_OPEN_TARGET_WAIT, CONST_DATA_PIPE_TIMEOUT, CONST_DATA_SHUTDOWN_TIMEOUT
 from ai.common.dap import DAPConn
 from ai.common.cprofile_manager import profiler
@@ -37,6 +39,7 @@ from rocketlib import (
     IServiceEndpoint,
     IServiceFilterPipe,
     getObject,
+    isCancelled,
     monitorCompleted,
     monitorFailed,
     monitorOther,
@@ -116,6 +119,8 @@ class DataConnPipe:
     created_time: float = field(default_factory=time.time)  # Track when pipe was created
     last_activity_time: float = field(default_factory=time.time)  # Track last write/close activity
     in_use: bool = False  # True while a sync operation (write) is actively running in a thread
+    # Text lane: holds the bytes of a character that a write cut in half
+    text_decoder: codecs.IncrementalDecoder = field(default_factory=codecs.getincrementaldecoder('utf-8'))
 
 
 class DataConn(DAPConn):
@@ -161,6 +166,8 @@ class DataConn(DAPConn):
         # `self._server` must be set before reading `self._target` — the
         # property delegates to `self._server._target`.
         self._server = server
+        # The engine's name for this connection, from the handshake
+        self.channel_id: Optional[str] = None
 
         # Deferred to first `_open` via `_ensure_pipe_sem` — `state.target`
         self._thread_count: Optional[int] = None
@@ -172,14 +179,14 @@ class DataConn(DAPConn):
         # Key: pipe_id (int), Value: DataConnPipe instance
         self._pipe_map: Dict[int, DataConnPipe] = {}
 
-        # Requests this connection sent to EaaS, by seq, waiting for its response
-        self._asked: Dict[int, asyncio.Future] = {}
-
         # Pipe timeout for zombie detection
         self._pipe_timeout = CONST_DATA_PIPE_TIMEOUT
 
         # Connection shutdown event
         self._shutdown_event = asyncio.Event()
+
+        # Requests this task sent to the engine, awaiting their response by seq
+        self._pending: Dict[int, asyncio.Future] = {}
 
         # Start cleanup task for zombie pipes
         self._monitor_task = asyncio.create_task(self._monitor_pipes())
@@ -189,33 +196,148 @@ class DataConn(DAPConn):
             f'Initializing data connection (concurrency limit deferred, zombie timeout {self._pipe_timeout}s)...'
         )
 
+    async def on_connected(self, connection_info: Optional[str] = None) -> None:
+        """Hand this connection to ``task_channel`` once the socket is accepted.
+
+        Args:
+            connection_info: The peer, as the transport reports it.
+        """
+        await super().on_connected(connection_info)
+        from .channel import task_channel
+
+        task_channel.attach(self)
+
+    async def on_closing(self) -> None:
+        """Fail this task's pending requests and ask the engine to reconnect, before handlers are drained."""
+        await self._server._closing(self, self.channel_id)
+
+    async def on_receive(self, message: Optional[Dict[str, Any]] = None) -> None:
+        """Resolve a response to one of this task's requests; route anything else as before.
+
+        Args:
+            message: The parsed DAP message.
+        """
+        if message is not None and message.get('type') == 'response':
+            future = self._pending.pop(message.get('request_seq'), None)
+            if future is not None and not future.done():
+                future.set_result(message)
+            return
+        await super().on_receive(message)
+
+    async def send_request(
+        self,
+        command: str,
+        arguments: Optional[Dict[str, Any]] = None,
+        *,
+        data: Optional[bytes] = None,
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Send a request to the engine and wait for its response.
+
+        Args:
+            command: The command name.
+            arguments: The command's arguments.
+            data: Binary payload, sent as a DAP binary frame.
+            timeout: Seconds to wait, or ``None`` for no limit.
+
+        Returns:
+            dict: The response message.
+
+        Raises:
+            ConnectionError: The socket is not open or closed while waiting.
+            asyncio.TimeoutError: No response within ``timeout``.
+        """
+        request = self.build_request(command, arguments=dict(arguments or {}))
+        if data is not None:
+            request['arguments']['data'] = data
+
+        future = asyncio.get_running_loop().create_future()
+        self._pending[request['seq']] = future
+        try:
+            try:
+                await self.send(request)
+            except (RuntimeError, WebSocketDisconnect) as e:
+                # The socket closed under the send
+                raise ConnectionError(f'the engine connection closed: {e}') from e
+            return await asyncio.wait_for(future, timeout)
+        finally:
+            self._pending.pop(request['seq'], None)
+
+    def fail_pending(self, error: Exception) -> None:
+        """Fail every request still waiting for a response.
+
+        Args:
+            error: The exception each waiter receives.
+        """
+        pending, self._pending = self._pending, {}
+        for future in pending.values():
+            if not future.done():
+                future.set_exception(error)
+
+    async def _wait_for_target(self) -> 'IServiceEndpoint':
+        """Wait for the source node to bind ``state.target``, then return it.
+
+        A client may open a pipe as soon as ``use()`` returns, while the source
+        node is still starting and has not bound its target. This connection
+        lives in the task's own process and cannot see the engine's task state,
+        so it watches what it can see: it stops at once when the connection is
+        closing or the task is being cancelled, and otherwise gives up after
+        ``CONST_DATA_OPEN_TARGET_WAIT`` seconds (the task's ready time). Every
+        waiter polls on its own, so none holds a lock or a pipe slot.
+
+        Returns:
+            IServiceEndpoint: The bound source target.
+
+        Raises:
+            RuntimeError: The connection closed or the task was cancelled while
+                waiting, or no source bound a target within the wait.
+        """
+        deadline = time.monotonic() + CONST_DATA_OPEN_TARGET_WAIT
+        while True:
+            target = self._target
+            if target is not None:
+                return target
+            if self._shutdown_event.is_set() or isCancelled():
+                raise RuntimeError(
+                    'The task stopped before its source node was ready, so the data operation was dropped.'
+                )
+            if time.monotonic() >= deadline:
+                break
+            await asyncio.sleep(0.05)
+        raise RuntimeError(
+            f'The pipeline source did not become ready within {CONST_DATA_OPEN_TARGET_WAIT:g} seconds, '
+            'so the data operation was dropped. Check that the pipeline has a source node that accepts data '
+            '(for example webhook, chat or dropper) and that it started without errors.'
+        )
+
     async def _ensure_pipe_sem(self) -> asyncio.Semaphore:
         """Lazy-init `_thread_count` + `_pipe_sem` once `state.target` is bound.
 
         Folds two concerns:
 
-        1. The race-window wait that used to live at the top of `_open` —
-           EaaS may send `data/open` BEFORE the source node's `_run()` has
-           bound `state.target`. Poll the lazy `_target` property for up
-           to ``CONST_DATA_OPEN_TARGET_WAIT`` seconds.
-        2. The semaphore size — read `target.taskConfig['threadCount']`
-           once target is actually available. Doing this in `__init__`
-           would always see `None` and silently default to 4, ignoring
-           any user-configured `threadCount`.
+        1. The wait for the source node to bind `state.target`, which can
+           trail a client's first open (see :pyfunc:`_wait_for_target`).
+        2. The semaphore size: read `target.taskConfig['threadCount']`
+           once the target is bound, because it is not available when the
+           connection is created.
 
         Idempotent. The lock guards against concurrent first-`_open`
         calls on the same connection racing to init the semaphore.
+
+        Returns:
+            asyncio.Semaphore: The semaphore limiting concurrent pipes.
+
+        Raises:
+            RuntimeError: No source bound a target; see :pyfunc:`_wait_for_target`.
         """
         if self._pipe_sem is not None:
             return self._pipe_sem
+        # Outside the lock, so concurrent opens wait side by side
+        target = await self._wait_for_target()
         async with self._pipe_sem_init_lock:
             if self._pipe_sem is not None:  # double-check after acquiring lock
                 return self._pipe_sem
-            deadline = time.monotonic() + CONST_DATA_OPEN_TARGET_WAIT
-            while self._target is None and time.monotonic() < deadline:
-                await asyncio.sleep(0.05)
-            target = self._target
-            self._thread_count = target.taskConfig.get('threadCount', 4) if target is not None else 4
+            self._thread_count = target.taskConfig.get('threadCount', 4)
             self._pipe_sem = asyncio.Semaphore(self._thread_count)
             self.debug_message(f'Initialized pipe semaphore: max {self._thread_count} concurrent pipes')
             return self._pipe_sem
@@ -224,36 +346,6 @@ class DataConn(DAPConn):
     def _target(self) -> Optional['IServiceEndpoint']:
         """Read the source target lazily — never snapshot at connection time."""
         return self._server._target
-
-    async def on_receive(self, message: Dict[str, Any]) -> None:
-        """Hand EaaS's answer to the ask_spend waiting for it; route the rest as usual."""
-        answer = self._asked.pop(message.get('request_seq'), None)
-        if answer and not answer.done():
-            answer.set_result(message)
-        else:
-            await super().on_receive(message)
-
-    async def on_disconnected(self, reason: Optional[str] = None, has_error: bool = False) -> None:
-        """Fail the questions still waiting for EaaS: no answer will come on this connection."""
-        for answer in self._asked.values():
-            if not answer.done():
-                answer.set_exception(ConnectionError(reason or 'EaaS disconnected'))
-        self._asked.clear()
-        await super().on_disconnected(reason, has_error)
-
-    async def ask_spend(self) -> Optional[str]:
-        """Ask EaaS whether this task's org may open a pipe: None, or the refusal."""
-        request = self.build_request('rrext_check_spend')
-        answer = asyncio.get_running_loop().create_future()
-        self._asked[request['seq']] = answer
-        try:
-            await self.send(request)
-            response = await answer
-        finally:
-            self._asked.pop(request['seq'], None)
-        if self.did_fail(response):
-            raise RuntimeError(response.get('message'))
-        return response['body']['refusal']
 
     def _require_target(self) -> 'IServiceEndpoint':
         """Return the registered source target, or raise a controlled error.
@@ -628,9 +720,8 @@ class DataConn(DAPConn):
         if mime_type is None:
             raise ValueError('No mimeType specified')
 
-        # Lazy-init the semaphore using the now-bound target's threadCount
-        # config. Also folds the race-window wait for `state.target` — see
-        # `_ensure_pipe_sem` docstring.
+        # Waits for the source to bind `state.target`, then sizes the semaphore
+        # from its threadCount config; see `_ensure_pipe_sem`.
         pipe_sem = await self._ensure_pipe_sem()
 
         # Acquire semaphore in async context (non-blocking for event loop)
@@ -734,7 +825,12 @@ class DataConn(DAPConn):
             raise ValueError(f'Write pipe with id {pipe_id} has failed')
 
         def write_sync():
+            """Write this request's data to the pipe on its lane (runs in a worker thread).
 
+            Raises:
+                ValueError: The request has no data, the lane is unknown, or the data does not parse for its lane.
+                UnicodeDecodeError: Text-lane data is not valid UTF-8.
+            """
             # Get the data to write
             data: bytes = args.get('data', None)
             if data is None:
@@ -754,8 +850,10 @@ class DataConn(DAPConn):
 
                 # Handle different lane types with appropriate data writing
                 if lane == 'text':
-                    string_data = data.decode('utf-8')
-                    pipe.writeText(string_data)
+                    # Writes are cut at any byte (an HTTP body arrives in stream chunks)
+                    string_data = conn_pipe.text_decoder.decode(data)
+                    if string_data:
+                        pipe.writeText(string_data)
 
                 elif lane == 'json':
                     try:
@@ -863,6 +961,18 @@ class DataConn(DAPConn):
             self._reset_pipe_activity(conn_pipe)
 
             def close_sync():
+                """End and close the pipe, then collect the pipeline's results (runs in a worker thread).
+
+                Returns:
+                    The object's response with its objectId, and its error when the object failed.
+
+                Raises:
+                    UnicodeDecodeError: The text-lane data ended inside a character.
+                """
+                # Text that ends inside a character is truncated; a failed pipe already reported its error
+                if conn_pipe.lane == 'text' and not conn_pipe.has_failed:
+                    conn_pipe.text_decoder.decode(b'', final=True)
+
                 # End the pipe and close it.  If either step throws (e.g. a
                 # node's writeText/writeAudio raised during closing flush),
                 # we still need to extract whatever results and error info

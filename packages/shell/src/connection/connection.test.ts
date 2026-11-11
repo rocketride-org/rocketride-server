@@ -27,8 +27,8 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { AuthenticationException, LoginAttemptCancelledError, RocketRideClient, type ConnectResult } from 'rocketride';
-import { ConnectionState } from '../types/connection';
+import { AuthenticationException, LoginAttemptCancelledError, RocketRideClient, type ConnectResult, type PkceCredential, type SignupProperties } from 'rocketride';
+import { ConnectionState, AuthPhase } from '../types/connection';
 import type { ConnectionStatus } from '../types/connection';
 import { ConnectionManager } from './connection';
 import { ConnectionFailure, withTimeout } from './errors';
@@ -37,10 +37,16 @@ import { ApiKeyAuthProvider } from '../auth/ApiKeyAuthProvider';
 import { CloudAuthProvider } from '../auth/CloudAuthProvider';
 import { CONNECT_TIMEOUT_MS, LS_TOKEN } from '../constants';
 import { resetDevGateForTests } from '../util/devGate';
+import { createRetainedRegistry, localRetainedPort } from '../ops/retained';
+import { createOpBus } from '../ops/busOps';
+import type { IRetainedPort } from '../ops/retained';
+import { TELEMETRY_STORAGE_KEY, type TelemetryFact } from '../util/telemetryChannel';
+import { generatePkce } from '../util/pkce';
+import { currentSignupProperties, stashSignupProperties, takeSignupProperties } from '../util/signupAttribution';
 
 type EmittedEvent = { event: string; payload: unknown };
 
-type TestCredential = string | { code: string; verifier: string; redirectUri: string };
+type TestCredential = string | PkceCredential;
 type TestClient = Pick<RocketRideClient, 'login' | 'getAccountInfo' | 'isConnected'> &
 	Partial<Pick<RocketRideClient, 'detach' | 'disconnect' | 'getServices'>>;
 type TestOperation = {
@@ -82,11 +88,22 @@ type ConnectionManagerTestAdapter = {
 	emit(event: string, payload: unknown): void;
 	saveToken(token: string): void;
 	getPendingAppId(): string;
+	setPendingAppId(id: string): void;
+	clearPendingAppId(): void;
+	getConnectionStatus(): ConnectionStatus;
 	initialize(): void;
 	connect(credential?: unknown): Promise<ConnectResult | null>;
 	bootstrap(): Promise<{ result: ConnectResult; appId: string } | null>;
 	disconnect(): Promise<void>;
 	logout(): Promise<void>;
+	reportTelemetry(event: string, props: Record<string, unknown>): void;
+	drainTelemetry(): TelemetryFact[];
+	on(event: 'shell:telemetry', handler: (fact: TelemetryFact) => void): () => void;
+	on(event: 'shell:myApps', handler: () => void): () => void;
+	getDebugLog(): Array<{ event: string; payload: unknown }>;
+	startOAuth(register?: boolean, context?: { appId?: string; auto?: boolean; signupProperties?: SignupProperties }): Promise<void>;
+	authProvider: { signIn(appId?: string, register?: boolean, signup?: SignupProperties | null): Promise<void> } | null;
+	dropRejectedCredential(): void;
 };
 
 const authenticatedResult: ConnectResult = {
@@ -107,10 +124,15 @@ const authenticatedResult: ConnectResult = {
 	capabilities: [],
 };
 
+/**
+ * A ConnectionManager from its own (empty, private) constructor, so every field holds its initial value:
+ * emitted events and saved tokens are recorded; telemetry is held as the staged globals allow (in memory
+ * without a sessionStorage).
+ */
 function createTestManager(lastFailure?: ConnectionStatus['lastFailure']) {
 	const emitted: EmittedEvent[] = [];
 	const savedTokens: string[] = [];
-	const manager = Object.create(ConnectionManager.prototype) as ConnectionManagerTestAdapter;
+	const manager: ConnectionManagerTestAdapter = Reflect.construct(ConnectionManager, []);
 	manager.connectionStatus = {
 		state: ConnectionState.DISCONNECTED,
 		connectionMode: 'cloud',
@@ -342,6 +364,425 @@ test('handleStoredTokenFailure keeps the network latch when the probe answers 20
 	}
 });
 
+/** Stage browser globals for one test and restore them afterwards; the dev gate recomputes from the staged window. */
+async function withGlobals(globals: Record<string, unknown>, run: () => void | Promise<void>): Promise<void> {
+	const originals = Object.keys(globals).map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)] as const);
+	for (const [key, value] of Object.entries(globals)) Object.defineProperty(globalThis, key, { configurable: true, value });
+	resetDevGateForTests();
+	try {
+		await run();
+	} finally {
+		resetDevGateForTests();
+		for (const [key, original] of originals) {
+			if (original) Object.defineProperty(globalThis, key, original);
+			else delete (globalThis as Record<string, unknown>)[key];
+		}
+	}
+}
+
+/** A sessionStorage double over a Map that records every write and removal. */
+function recordingSession(initial: Array<[string, string]> = []) {
+	const data = new Map<string, string>(initial);
+	const writes: string[] = [];
+	const storage = {
+		getItem: (k: string) => data.get(k) ?? null,
+		setItem: (k: string, v: string) => { writes.push(`set:${k}`); data.set(k, v); },
+		removeItem: (k: string) => { writes.push(`remove:${k}`); data.delete(k); },
+	};
+	return { data, writes, storage };
+}
+
+/** A top-level tab: self and top are the same window. */
+function topLevelWindow(extra: Record<string, unknown>): Record<string, unknown> {
+	const win: Record<string, unknown> = { ...extra };
+	win.self = win;
+	win.top = win;
+	return win;
+}
+
+/** startOAuth's round-trip stamp: shell-internal, read and removed by the callback that completes the sign-in. */
+const AUTH_START_STAMP = 'rr:shell:auth_start_ts';
+
+/** An OAuth callback page load (`?code=abc`) whose PKCE verifier is stored, with the given entries in sessionStorage. */
+function callbackPage(entries: Array<[string, string]> = []) {
+	const session = recordingSession([['rr:pkce_verifier', 'verifier-1'], ...entries]);
+	const win = topLevelWindow({
+		location: { search: '?code=abc', pathname: '/', origin: 'https://shell.example.test' },
+		history: { state: null, replaceState: () => {} },
+	});
+	return { session, globals: { window: win, sessionStorage: session.storage } };
+}
+
+/** A manager whose code exchange resolves `result`, ready for bootstrap() on a callback page load. */
+function callbackManager(result: ConnectResult = authenticatedResult) {
+	const { manager } = createTestManager();
+	manager.client = testClient();
+	manager._attachPromise = Promise.resolve();
+	const exchanged: TestCredential[] = [];
+	manager.connectForBootstrap = async (credential) => {
+		exchanged.push(credential);
+		return { result, appId: '' };
+	};
+	return { manager, exchanged };
+}
+
+test('a stored credential the server rejects drops the held telemetry facts and the round-trip stamp', async () => {
+	const session = recordingSession([[AUTH_START_STAMP, '123']]);
+	await withGlobals({ window: topLevelWindow({ location: { search: '', pathname: '/' } }), sessionStorage: session.storage }, async () => {
+		const { manager } = createTestManager();
+		manager.reportTelemetry('auth:complete', { is_new: true, waitlisted: false, source: 'shell' });
+		assert.ok(session.data.has(TELEMETRY_STORAGE_KEY), 'nobody listens: the fact is held and mirrored');
+		manager.client = testClient();
+		manager._attachPromise = Promise.resolve();
+		manager.loadToken = () => 'stored-token';
+		manager.clearToken = () => {};
+		manager.connectForBootstrap = async () => {
+			throw new AuthenticationException({ message: 'Invalid or revoked API key' });
+		};
+
+		assert.equal(await manager.bootstrap(), null);
+
+		assert.deepEqual(manager.drainTelemetry(), [], 'no held fact survives the rejected credential');
+		assert.equal(session.data.has(TELEMETRY_STORAGE_KEY), false, 'the mirror is removed');
+		assert.equal(session.data.has(AUTH_START_STAMP), false, 'the round-trip stamp is removed');
+	});
+});
+
+test('logout drops held telemetry facts and the round-trip stamp, so the next account cannot inherit them', async () => {
+	const session = recordingSession([[AUTH_START_STAMP, '123']]);
+	await withGlobals({ window: topLevelWindow({ location: { search: '', pathname: '/' } }), sessionStorage: session.storage }, async () => {
+		const { manager, emitted } = createTestManager();
+		// logout's own side effects beyond telemetry (the token, the session app, the transport) are not under test
+		manager.clearToken = () => {};
+		manager.clearSessionAppId = () => {};
+		manager.disconnect = async () => {};
+		// nobody listens: the facts of this session are held and mirrored
+		manager.reportTelemetry('auth:start', { register: false, auto: true });
+		manager.reportTelemetry('auth:complete', { is_new: false, waitlisted: false, source: 'shell' });
+		assert.ok(session.data.has(TELEMETRY_STORAGE_KEY), 'held facts are mirrored before the sign-out');
+
+		await manager.logout();
+
+		assert.deepEqual(manager.drainTelemetry(), [], 'no held fact survives the sign-out');
+		assert.equal(session.data.has(TELEMETRY_STORAGE_KEY), false, 'the mirror is removed');
+		assert.equal(session.data.has(AUTH_START_STAMP), false, 'the round-trip stamp is removed');
+		assert.ok(emitted.some((e) => e.event === 'shell:logout'), 'logout still emits shell:logout');
+	});
+});
+
+test('reportTelemetry delivers a fact live to a shell:telemetry listener and holds it when nobody listens', async () => {
+	const { manager } = createTestManager();
+	delete (manager as { emit?: unknown }).emit; // the shell's own event bus, so the test holds however reportTelemetry dispatches
+	const received: TelemetryFact[] = [];
+	const leave = manager.on('shell:telemetry', (fact) => received.push(fact));
+	manager.reportTelemetry('auth:start', { register: true });
+	await Promise.resolve(); // delivered on a microtask, like every shell event
+	assert.equal(received.length, 1, 'delivered once, live');
+	const fact = received[0];
+	assert.equal(fact.event, 'auth:start');
+	assert.deepEqual(fact.props, { register: true });
+	assert.ok(fact.ts > 0 && fact.id.length > 0, 'carries its time and a once-per-fact id');
+	assert.ok(
+		manager.getDebugLog().some((e) => e.event === 'shell:telemetry' && (e.payload as TelemetryFact).id === fact.id),
+		'the live fact is in the debug log, like every shell event',
+	);
+	assert.deepEqual(manager.drainTelemetry(), [], 'a delivered fact is not held for a later drain');
+
+	leave();
+	manager.reportTelemetry('auth:complete', { is_new: null, waitlisted: false, source: 'shell' });
+	await Promise.resolve();
+	assert.equal(received.length, 1, 'nobody listens: nothing more is delivered');
+	assert.deepEqual(
+		manager.drainTelemetry().map((f) => [f.event, f.props]),
+		[['auth:complete', { is_new: null, waitlisted: false, source: 'shell' }]],
+		'held, then handed over',
+	);
+	assert.deepEqual(manager.drainTelemetry(), [], 'a drain hands each fact over only once');
+});
+
+test('a listener that throws is logged and the next one still runs, for emit and for a telemetry fact alike', async () => {
+	const { manager } = createTestManager();
+	delete (manager as { emit?: unknown }).emit; // the shell's own event bus
+	const reached: string[] = [];
+	manager.on('shell:telemetry', () => { throw new Error('boom'); });
+	manager.on('shell:telemetry', (fact) => reached.push(fact.event));
+	manager.on('shell:myApps', () => { throw new Error('boom'); });
+	manager.on('shell:myApps', () => reached.push('shell:myApps'));
+	const logged: unknown[] = [];
+	const originalError = console.error;
+	console.error = (...args: unknown[]) => { logged.push(args[0]); };
+	try {
+		manager.reportTelemetry('auth:start', { register: false, auto: false });
+		manager.emit('shell:myApps', {});
+		await Promise.resolve();
+	} finally {
+		console.error = originalError;
+	}
+	assert.deepEqual(reached, ['auth:start', 'shell:myApps'], 'the second listener of each event ran');
+	assert.deepEqual(logged, ["[ConnectionManager] Handler for 'shell:telemetry' threw:", "[ConnectionManager] Handler for 'shell:myApps' threw:"]);
+});
+
+test('a fact held because nobody listens is in the debug log too, so the ALT+D panel shows every fact', () => {
+	const { manager } = createTestManager();
+	manager.reportTelemetry('auth:complete', { is_new: true, waitlisted: true, source: 'shell' });
+	const [held] = manager.drainTelemetry();
+	assert.ok(held, 'held for the next drain');
+	assert.deepEqual(
+		manager.getDebugLog().filter((e) => e.event === 'shell:telemetry').map((e) => (e.payload as TelemetryFact).id),
+		[held.id],
+		'logged once, as the fact the drain hands over',
+	);
+});
+
+test('a fact whose listener leaves before the dispatch is held as logged, id included, unless the held facts are dropped first', async () => {
+	const { manager } = createTestManager();
+	delete (manager as { emit?: unknown }).emit; // the shell's own event bus, so the test holds however reportTelemetry dispatches
+	const received: TelemetryFact[] = [];
+
+	const leave = manager.on('shell:telemetry', (fact) => received.push(fact));
+	manager.reportTelemetry('auth:complete', { is_new: true, waitlisted: false, source: 'shell' });
+	leave(); // the forwarding app unmounts in the same tick (an app switch)
+	await Promise.resolve();
+	assert.equal(received.length, 0, 'nobody was listening by the dispatch');
+	const held = manager.drainTelemetry();
+	assert.deepEqual(held.map((f) => [f.event, f.props]), [['auth:complete', { is_new: true, waitlisted: false, source: 'shell' }]], 'held for the next drain, not lost');
+	assert.deepEqual(
+		manager.getDebugLog().filter((e) => e.event === 'shell:telemetry').map((e) => (e.payload as TelemetryFact).id),
+		[held[0].id],
+		'the drained fact carries the id the debug log shows',
+	);
+
+	const leaveAgain = manager.on('shell:telemetry', (fact) => received.push(fact));
+	manager.reportTelemetry('auth:start', { register: false, auto: false });
+	leaveAgain();
+	manager.dropRejectedCredential(); // a rejected credential (or a sign-out) in the same tick
+	await Promise.resolve();
+	assert.equal(received.length, 0, 'still nobody listening');
+	assert.deepEqual(manager.drainTelemetry(), [], 'a fact raised before a drop is not held after it');
+});
+
+test('facts on their way to a listener keep their order and are delivered or held exactly once', async () => {
+	const { manager } = createTestManager();
+	delete (manager as { emit?: unknown }).emit; // the shell's own event bus, so the test holds however reportTelemetry dispatches
+	const received: TelemetryFact[] = [];
+
+	// the listener leaves, then a second fact is raised in the same tick: both are held, in the order raised
+	const leave = manager.on('shell:telemetry', (fact) => received.push(fact));
+	manager.reportTelemetry('auth:start', { register: false, auto: false });
+	leave();
+	manager.reportTelemetry('auth:complete', { is_new: false, waitlisted: false, source: 'shell' });
+	await Promise.resolve();
+	assert.equal(received.length, 0, 'nobody was listening by the dispatch');
+	assert.deepEqual(manager.drainTelemetry().map((f) => f.event), ['auth:start', 'auth:complete'], 'held in the order raised');
+
+	// a remount in the same tick (StrictMode cleanup and mount): the new listener receives the fact, nothing is held
+	const first = manager.on('shell:telemetry', (fact) => received.push(fact));
+	manager.reportTelemetry('auth:start', { register: true, auto: false });
+	first();
+	manager.on('shell:telemetry', (fact) => received.push(fact));
+	await Promise.resolve();
+	assert.deepEqual(received.map((f) => f.event), ['auth:start'], 'delivered once, to the listener subscribed by the dispatch');
+	assert.deepEqual(manager.drainTelemetry(), [], 'delivered, so not held');
+
+	// a drop while the listener stays: the fact raised before it still reaches that listener, and nothing is held
+	manager.reportTelemetry('auth:complete', { is_new: true, waitlisted: false, source: 'shell' });
+	manager.dropRejectedCredential();
+	await Promise.resolve();
+	assert.deepEqual(received.map((f) => f.event), ['auth:start', 'auth:complete'], 'delivered live');
+	assert.deepEqual(manager.drainTelemetry(), [], 'nothing held');
+});
+
+test('startOAuth raises auth:start once per page load, past its one-shot guard', async () => {
+	const session = recordingSession();
+	await withGlobals({ window: topLevelWindow({ location: { search: '', pathname: '/pricing' } }), sessionStorage: session.storage }, async () => {
+		const { manager } = createTestManager();
+		let signIns = 0;
+		manager.authProvider = { signIn: async () => { signIns++; } };
+		await manager.startOAuth(true, { appId: 'rocketride.home' });
+		await manager.startOAuth(true, { appId: 'rocketride.home' });
+		assert.equal(signIns, 1, 'the guard lets one redirect start per page load');
+		assert.deepEqual(
+			manager.drainTelemetry().map((f) => [f.event, f.props]),
+			[['auth:start', { register: true, app_id: 'rocketride.home', from_path: '/pricing', auto: false }]],
+			'one auth:start, raised past the guard',
+		);
+	});
+});
+
+test('auth:start is held even with an app listening, and the callback page drains it once, before auth:complete', async () => {
+	const tab = recordingSession();
+	await withGlobals({ window: topLevelWindow({ location: { search: '', pathname: '/pricing' } }), sessionStorage: tab.storage }, async () => {
+		const { manager } = createTestManager();
+		const received: TelemetryFact[] = [];
+		manager.on('shell:telemetry', (fact) => received.push(fact));
+		manager.authProvider = { signIn: async () => {} };
+		await manager.startOAuth(true, { appId: 'rocketride.home' });
+		await Promise.resolve();
+		assert.deepEqual(received, [], 'not delivered live: the redirect may unload the page before the app forwards it');
+		assert.ok(tab.data.has(TELEMETRY_STORAGE_KEY), 'mirrored to the tab, so it survives the redirect');
+	});
+
+	// The callback page load of the same tab: the identity resolves before the home app mounts and drains.
+	const page = callbackPage([...tab.data.entries()]);
+	await withGlobals(page.globals, async () => {
+		const { manager } = callbackManager();
+		await manager.bootstrap();
+		assert.deepEqual(
+			manager.drainTelemetry().map((f) => [f.event, f.props]),
+			[
+				['auth:start', { register: true, app_id: 'rocketride.home', from_path: '/pricing', auto: false }],
+				['auth:complete', { is_new: null, waitlisted: false, source: 'shell', duration_ms: null }],
+			],
+			'the start, then the completion',
+		);
+		assert.deepEqual(manager.drainTelemetry(), [], 'handed over once');
+		assert.equal(page.session.data.has(TELEMETRY_STORAGE_KEY), false, 'the mirror is cleared by the drain');
+	});
+});
+
+test("a sign-in's redirect stamps the round trip with its PKCE verifier, replacing an abandoned start's stamp", async () => {
+	const session = recordingSession([[AUTH_START_STAMP, '1']]);
+	await withGlobals({ window: topLevelWindow({ location: { search: '', pathname: '/' } }), sessionStorage: session.storage }, async () => {
+		const { manager } = createTestManager();
+		// as CloudAuthProvider.signIn() does before it redirects
+		manager.authProvider = { signIn: async () => { await generatePkce(); } };
+		const before = Date.now();
+		await manager.startOAuth(false);
+		assert.ok(session.data.get('rr:pkce_verifier'), 'the verifier is stored');
+		assert.ok(Number(session.data.get(AUTH_START_STAMP)) >= before, 'stamped by this redirect, not the abandoned one');
+	});
+});
+
+test('a start that does not redirect releases the guard, so the retry raises auth:start again', async () => {
+	const session = recordingSession();
+	await withGlobals({ window: topLevelWindow({ location: { search: '', pathname: '/' } }), sessionStorage: session.storage }, async () => {
+		const { manager, emitted } = createTestManager();
+		// no auth provider and no Zitadel configuration: the start reports an error and does not navigate
+		manager.authProvider = null;
+		const originalError = console.error;
+		console.error = () => {};
+		try {
+			await manager.startOAuth(false);
+			await manager.startOAuth(false);
+		} finally {
+			console.error = originalError;
+		}
+		assert.equal(emitted.filter((e) => e.event === 'shell:error').length, 2, 'each attempt failed without a redirect');
+		assert.deepEqual(manager.drainTelemetry().map((f) => f.event), ['auth:start', 'auth:start'], 'each attempt is reported');
+	});
+});
+
+test('a callback that completes the sign-in raises auth:complete once, with is_new null when the provider does not know', async () => {
+	for (const [isNewUser, expected] of [[undefined, null], [true, true]] as const) {
+		const page = callbackPage();
+		await withGlobals(page.globals, async () => {
+			let result = authenticatedResult;
+			if (isNewUser !== undefined) {
+				result = { ...authenticatedResult, isNewUser };
+			}
+			const { manager, exchanged } = callbackManager(result);
+
+			const completed = await manager.bootstrap();
+
+			assert.equal(completed?.result, result);
+			assert.deepEqual(exchanged, [{ code: 'abc', verifier: 'verifier-1', redirectUri: 'https://shell.example.test' }]);
+			assert.deepEqual(
+				manager.drainTelemetry().map((f) => [f.event, f.props]),
+				[['auth:complete', { is_new: expected, waitlisted: false, source: 'shell', duration_ms: null }]],
+				isNewUser === undefined ? 'unknown is reported as null, never as an existing user' : 'a known new account is reported as new',
+			);
+		});
+	}
+});
+
+test('auth:complete carries the round trip since startOAuth as duration_ms, and the stamp is gone once read', async () => {
+	const page = callbackPage([[AUTH_START_STAMP, String(Date.now() - 41_000)]]);
+	await withGlobals(page.globals, async () => {
+		const { manager } = callbackManager();
+		await manager.bootstrap();
+		const [complete] = manager.drainTelemetry();
+		const duration = complete.props.duration_ms;
+		assert.equal(typeof duration, 'number');
+		assert.ok(Number(duration) >= 41_000 && Number(duration) < 51_000, `about 41 s, got ${String(duration)}`);
+		assert.equal(page.session.data.has(AUTH_START_STAMP), false, 'read once and removed, so a later completion cannot reuse it');
+	});
+});
+
+test('a consented signup completion keeps attribution only in the credential and preserves round-trip duration', async () => {
+	const signup = signupContext();
+	const page = callbackPage([[AUTH_START_STAMP, String(Date.now() - 41_000)], ['rr:auth:signup', JSON.stringify(signup)]]);
+	const local = recordingSession([['rr_consent_v1', JSON.stringify({ v: 1, choice: 'accepted', at: Date.now() })]]);
+	await withGlobals({ ...page.globals, localStorage: local.storage, navigator: {} }, async () => {
+		const { manager, exchanged } = callbackManager({ ...authenticatedResult, isNewUser: true });
+		await manager.bootstrap();
+		const credential = exchanged[0];
+		assert.ok(typeof credential === 'object');
+		const resolveSignup = credential.signupProperties;
+		assert.ok(typeof resolveSignup === 'function');
+		assert.deepEqual(resolveSignup(), signup, 'the native send boundary still resolves current context');
+		const [complete] = manager.drainTelemetry();
+		assert.equal(complete.event, 'auth:complete');
+		assert.equal(complete.props.is_new, true);
+		assert.equal(complete.props.signupProperties, undefined);
+		assert.equal(complete.props.signup_properties, undefined);
+		assert.equal(typeof complete.props.duration_ms, 'number');
+		assert.ok(Number(complete.props.duration_ms) >= 41_000 && Number(complete.props.duration_ms) < 51_000);
+		assert.equal(page.session.data.has(AUTH_START_STAMP), false);
+		assert.equal(page.session.data.has('rr:auth:signup'), false);
+	});
+});
+
+test('auth:complete reports no duration for a stamp that is not this round trip', async () => {
+	const cases: Array<[string, string]> = [
+		['from the future (another clock)', String(Date.now() + 60_000)],
+		['over an hour old (an abandoned start)', String(Date.now() - 60 * 60 * 1000 - 1000)],
+		['not a number', 'garbage'],
+		['empty', ''],
+	];
+	for (const [label, stamp] of cases) {
+		const page = callbackPage([[AUTH_START_STAMP, stamp]]);
+		await withGlobals(page.globals, async () => {
+			const { manager } = callbackManager();
+			await manager.bootstrap();
+			assert.equal(manager.drainTelemetry()[0].props.duration_ms, null, label);
+			assert.equal(page.session.data.has(AUTH_START_STAMP), false, `${label}: removed all the same`);
+		});
+	}
+});
+
+test("an embedded dev preview holds telemetry in memory only and never touches the host tab's mirror or stamp", async () => {
+	const hostFact = { event: 'auth:complete', props: { is_new: true, waitlisted: false, source: 'shell' }, ts: Date.now(), id: 'host-1' };
+	const hostEntries: Array<[string, string]> = [[TELEMETRY_STORAGE_KEY, JSON.stringify([hostFact])], [AUTH_START_STAMP, '123']];
+
+	// Control: a tab's manager inherits the facts its tab's earlier page load left.
+	const tab = recordingSession(hostEntries);
+	await withGlobals({ window: topLevelWindow({ location: { search: '', pathname: '/' } }), sessionStorage: tab.storage }, () => {
+		const { manager } = createTestManager();
+		assert.deepEqual(manager.drainTelemetry().map((f) => f.id), ['host-1'], "a tab inherits its own tab's held facts");
+	});
+
+	// A framed window carrying rrdev=1 is an embedded dev preview (see the token tests below).
+	const session = recordingSession(hostEntries);
+	await withGlobals({ window: { self: {}, top: {}, location: { search: '?rrdev=1', pathname: '/' } }, sessionStorage: session.storage }, async () => {
+		const { manager } = createTestManager();
+		manager.authProvider = { signIn: async () => {} };
+
+		await manager.startOAuth(false);
+		manager.reportTelemetry('auth:complete', { is_new: null, waitlisted: false, source: 'shell' });
+		assert.deepEqual(
+			manager.drainTelemetry().map((f) => f.event),
+			['auth:start', 'auth:complete'],
+			"the preview hands over its own facts, never the host tab's",
+		);
+		manager.reportTelemetry('auth:start', { register: false, auto: true });
+		manager.dropRejectedCredential();
+		assert.deepEqual(manager.drainTelemetry(), [], "the preview's own held facts are dropped");
+		assert.deepEqual(session.writes, [], 'nothing was written to or removed from the shared sessionStorage');
+		assert.equal(session.data.get(TELEMETRY_STORAGE_KEY), JSON.stringify([hostFact]), "the host tab's mirror is intact");
+		assert.equal(session.data.get(AUTH_START_STAMP), '123', "the host tab's round-trip stamp is intact");
+	});
+});
+
 test('clearToken removes the stored token from localStorage only', () => {
 	const removedLocalKeys: string[] = [];
 	const removedSessionKeys: string[] = [];
@@ -359,8 +800,6 @@ test('clearToken removes the stored token from localStorage only', () => {
 	try {
 		createTestManager().manager.clearToken();
 		assert.deepEqual(removedLocalKeys, ['rr:user_token']);
-		// The legacy sessionStorage slot is gone — clearing must not touch it.
-		assert.deepEqual(removedSessionKeys, []);
 	} finally {
 		if (originalLocalStorage) Object.defineProperty(globalThis, 'localStorage', originalLocalStorage);
 		else delete (globalThis as { localStorage?: Storage }).localStorage;
@@ -389,8 +828,6 @@ test('auth providers sign out by removing the stored token from localStorage onl
 			await provider.signOut();
 
 			assert.deepEqual(removedLocalKeys, [LS_TOKEN]);
-			// The legacy sessionStorage slot is gone — sign-out must not touch it.
-			assert.deepEqual(removedSessionKeys, []);
 		}
 	} finally {
 		if (originalLocalStorage) Object.defineProperty(globalThis, 'localStorage', originalLocalStorage);
@@ -413,12 +850,14 @@ test('token methods use frame-local memory in embedded dev shells', () => {
 	// embedded dev preview — its token must live in frame-local memory
 	// (sessionStorage is shared between same-origin sibling iframes in one
 	// top-level browsing context, so it cannot isolate panels either). The
-	// gate cache is reset so it recomputes from this staged environment (the
-	// test runner builds with NODE_ENV=production, so the URL flag is the
-	// live path).
+	// parent shares this page's origin — the web App Builder flavor — which
+	// is the case where the /apps cookie prime must be suppressed. The gate
+	// cache is reset so it recomputes from this staged environment (the test
+	// runner builds with NODE_ENV=production, so the URL flag is the live
+	// path).
 	Object.defineProperty(globalThis, 'window', {
 		configurable: true,
-		value: { self: {}, top: {}, location: { search: '?rrdev=1' } },
+		value: { self: {}, top: {}, parent: { location: { origin: 'https://cloud.test' } }, location: { search: '?rrdev=1', origin: 'https://cloud.test' } },
 	});
 	resetDevGateForTests();
 	Object.defineProperty(globalThis, 'localStorage', {
@@ -456,9 +895,9 @@ test('token methods use frame-local memory in embedded dev shells', () => {
 		// session through one.
 		assert.deepEqual(localTouches, []);
 		assert.deepEqual(sessionTouches, []);
-		// And the HOST-WIDE /apps cookie was never primed: the cookie jar is
-		// shared by every same-origin frame, so a panel's injected session
-		// must not replace the embedding user's bundle credentials.
+		// And the HOST-WIDE /apps cookie was never primed: a SAME-ORIGIN
+		// embed shares the embedding user's cookie jar, so a panel's
+		// injected session must not replace their bundle credentials.
 		assert.deepEqual(fetchCalls, []);
 	} finally {
 		resetDevGateForTests();
@@ -468,6 +907,45 @@ test('token methods use frame-local memory in embedded dev shells', () => {
 		else delete (globalThis as { localStorage?: Storage }).localStorage;
 		if (originalSessionStorage) Object.defineProperty(globalThis, 'sessionStorage', originalSessionStorage);
 		else delete (globalThis as { sessionStorage?: Storage }).sessionStorage;
+		if (originalFetch) Object.defineProperty(globalThis, 'fetch', originalFetch);
+		else delete (globalThis as { fetch?: typeof fetch }).fetch;
+	}
+});
+
+test('saveToken primes the /apps cookie in a CROSS-origin embedded preview', () => {
+	const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+	const originalFetch = Object.getOwnPropertyDescriptor(globalThis, 'fetch');
+	const fetchCalls: string[] = [];
+
+	// The VS Code flavor: the preview is framed by the webview (whose
+	// location is unreadable — cross-origin access throws), and the page is
+	// served from its app's dev-proxy origin with a PRIVATE cookie jar.
+	// Published app bundles load through that proxy's /apps routes, so the
+	// prime MUST fire here (the token itself stays frame-local).
+	const hostileParent = {};
+	Object.defineProperty(hostileParent, 'location', {
+		get() { throw new Error('cross-origin'); },
+	});
+	Object.defineProperty(globalThis, 'window', {
+		configurable: true,
+		value: { self: {}, top: {}, parent: hostileParent, location: { search: '?rrdev=1', origin: 'http://localhost:3013' } },
+	});
+	resetDevGateForTests();
+	Object.defineProperty(globalThis, 'fetch', {
+		configurable: true,
+		value: (url: string) => { fetchCalls.push(url); return Promise.resolve({}); },
+	});
+
+	try {
+		const { manager } = createTestManager();
+		manager.saveToken = ConnectionManager.prototype.saveToken;
+		manager.saveToken('rr_proxy-token');
+		assert.equal(manager.loadToken(), 'rr_proxy-token');
+		assert.deepEqual(fetchCalls, ['/apps/session']);
+	} finally {
+		resetDevGateForTests();
+		if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
+		else delete (globalThis as { window?: Window }).window;
 		if (originalFetch) Object.defineProperty(globalThis, 'fetch', originalFetch);
 		else delete (globalThis as { fetch?: typeof fetch }).fetch;
 	}
@@ -1140,3 +1618,797 @@ test('timeout cleanup leaves a replacement shell operation attached', async () =
 		globalThis.clearTimeout = realClearTimeout;
 	}
 });
+
+// =============================================================================
+// RETAINED TOPIC LANE — late joiners
+// =============================================================================
+
+/**
+ * A manager with ONLY the retained lane's fields installed. The suite's
+ * other adapter builds a connection-status manager; this one deliberately
+ * stays minimal so the test exercises subscribe/publish and nothing else.
+ *
+ * @returns The manager under test.
+ */
+function createTopicManager(): ConnectionManager {
+	const manager = Object.create(ConnectionManager.prototype) as ConnectionManager;
+	const fields = manager as unknown as { topicSubs: Map<string, unknown>; retainedPort: IRetainedPort };
+	fields.topicSubs = new Map();
+	fields.retainedPort = localRetainedPort(createRetainedRegistry());
+	return manager;
+}
+
+test('a retained topic replays to EVERY subscriber, not just the one that opened the port', async () => {
+	const cm = createTopicManager();
+	cm.publish('host:connection', { connected: true });
+
+	// First subscriber: replayed by the port subscription it opens.
+	const first: unknown[] = [];
+	cm.subscribe('host:connection', (s) => first.push(s));
+	await new Promise((r) => setTimeout(r, 0));
+	assert.deepEqual(first, [{ connected: true }]);
+
+	// Second subscriber on the SAME topic — a second tool frame mounting
+	// later. The port replay already fired, so this one has to replay off
+	// the realm's cache or it waits forever for an edge (the profiler's
+	// "Waiting for the server connection..." while demonstrably connected).
+	const second: unknown[] = [];
+	cm.subscribe('host:connection', (s) => second.push(s));
+	await new Promise((r) => setTimeout(r, 0));
+	assert.deepEqual(second, [{ connected: true }]);
+
+	// And the edge still reaches both exactly once more.
+	cm.publish('host:connection', { connected: false });
+	await new Promise((r) => setTimeout(r, 0));
+	assert.deepEqual(first, [{ connected: true }, { connected: false }]);
+	assert.deepEqual(second, [{ connected: true }, { connected: false }]);
+});
+
+test('a late subscriber that unsubscribes before the replay microtask gets nothing', async () => {
+	const cm = createTopicManager();
+	cm.publish('t', 1);
+	cm.subscribe('t', () => {});
+	await new Promise((r) => setTimeout(r, 0));
+
+	const seen: unknown[] = [];
+	const off = cm.subscribe('t', (s) => seen.push(s));
+	off();
+	await new Promise((r) => setTimeout(r, 0));
+	assert.deepEqual(seen, []);
+});
+
+test('a joiner arriving before the first replay is not served twice', async () => {
+	const cm = createTopicManager();
+	cm.publish('t', 1);
+	const a: unknown[] = [];
+	const b: unknown[] = [];
+	// Both subscribe in the same tick: the port replay has not run yet, so
+	// the second has no cache to read and is fanned by that one replay.
+	cm.subscribe('t', (s) => a.push(s));
+	cm.subscribe('t', (s) => b.push(s));
+	await new Promise((r) => setTimeout(r, 0));
+	assert.deepEqual(a, [1]);
+	assert.deepEqual(b, [1]);
+});
+
+// =============================================================================
+// REALM-OWNED CLIENT — the brokered client a mirrored realm builds for itself
+// =============================================================================
+
+/**
+ * A realm with NO socket and NO bridge: just the retained-topic machinery and
+ * the mirror subscriptions, which is exactly what a VS Code webview's
+ * ConnectionManager is once the host starts publishing.
+ */
+function createMirroredManager(): ConnectionManager {
+	const manager = Object.create(ConnectionManager.prototype) as ConnectionManager;
+	const fields = manager as unknown as {
+		topicSubs: Map<string, unknown>;
+		retainedPort: IRetainedPort;
+		opBus: ReturnType<typeof createOpBus>;
+		listeners: Map<string, Set<unknown>>;
+		wildcardListeners: Set<unknown>;
+		pendingEvents: Map<string, unknown>;
+		debugLog: unknown[];
+		installMirrorSubscriptions(): void;
+	};
+	fields.topicSubs = new Map();
+	fields.retainedPort = localRetainedPort(createRetainedRegistry());
+	// Seeding the realm client registers the engine-event handler on it.
+	fields.opBus = createOpBus();
+	fields.listeners = new Map();
+	fields.wildcardListeners = new Set();
+	fields.pendingEvents = new Map();
+	fields.debugLog = [];
+	fields.installMirrorSubscriptions();
+	return manager;
+}
+
+test('a mirrored realm has NO client until the root tells it something', async () => {
+	const cm = createMirroredManager();
+	// Not "disconnected" — UNKNOWN. A client here would answer
+	// isAuthenticated() with a confident false over a live session.
+	assert.equal(cm.getClient(), null);
+});
+
+test('the first mirror delivery seeds a real client whose accessors tell the truth', async () => {
+	const cm = createMirroredManager();
+	cm.publish('shell:status', { connected: true, status: { state: 'connected', hasCredentials: true }, engineHttpUrl: 'https://engine.example' });
+	cm.publish('shell:account', { user: { id: 'u1' }, organization: { id: 'org-7' } });
+	await new Promise((r) => setTimeout(r, 0));
+
+	const client = cm.getClient();
+	assert.ok(client, 'the realm now owns a client');
+	// Each of these is an accessor that reads private handshake state, and
+	// each is the SDK's own unmodified implementation.
+	assert.equal(client.isConnected(), true);
+	assert.equal(client.isAttached(), true);
+	assert.equal(client.isAuthenticated(), true);
+	assert.equal(client.getOrgId(), 'org-7');
+	assert.equal(client.getConnectionInfo().uri, 'https://engine.example');
+});
+
+test('a root disconnect moves the realm client with it', async () => {
+	const cm = createMirroredManager();
+	cm.publish('shell:status', { connected: true, status: { state: 'connected', hasCredentials: true } });
+	await new Promise((r) => setTimeout(r, 0));
+	const client = cm.getClient();
+	assert.equal(client?.isConnected(), true);
+
+	cm.publish('shell:status', { connected: false, status: { state: 'disconnected', hasCredentials: true } });
+	await new Promise((r) => setTimeout(r, 0));
+
+	// The SAME instance, re-seeded — a realm holding a reference must not be
+	// left with a confidently stale client.
+	assert.equal(cm.getClient(), client);
+	assert.equal(client?.isConnected(), false);
+	assert.equal(client?.isAuthenticated(), false);
+});
+
+test('a LATE-mounting realm replays the current state instead of waiting for an edge', async () => {
+	// The profiler bug's shape: the root published before this realm existed.
+	const cm = createMirroredManager();
+	cm.publish('shell:status', { connected: true, status: { state: 'connected', hasCredentials: true } });
+	await new Promise((r) => setTimeout(r, 0));
+
+	const late = Object.create(ConnectionManager.prototype) as ConnectionManager;
+	const lateFields = late as unknown as Record<string, unknown>;
+	lateFields.topicSubs = new Map();
+	// The same registry the first realm published into — one host, two realms.
+	lateFields.retainedPort = (cm as unknown as { retainedPort: IRetainedPort }).retainedPort;
+	lateFields.opBus = createOpBus();
+	lateFields.listeners = new Map();
+	lateFields.wildcardListeners = new Set();
+	lateFields.pendingEvents = new Map();
+	lateFields.debugLog = [];
+	(late as unknown as { installMirrorSubscriptions(): void }).installMirrorSubscriptions();
+	await new Promise((r) => setTimeout(r, 0));
+
+	assert.equal(late.getClient()?.isConnected(), true);
+});
+
+test('delayed callback rechecks consent, privacy and expiry before persisting signup context', async () => {
+	for (const change of ['withdraw', 'privacy', 'expire'] as const) {
+		const at = Date.now();
+		const signup = { schema_version: 1, experiment: 'homepage-roulette-r1', experiment_revision: 'r1', variant_id: 'mh-1', assignment_id: '11111111-1111-4111-8111-111111111111', exposure_id: '22222222-2222-4222-8222-222222222222', landing_message_revision: '0123456789abcdef', exposed_at: at, expires_at: at + 1800000, consent_version: 1 };
+		const session = recordingSession([
+			['rr:pkce_verifier', 'verifier-1'],
+			['rr:auth:signup', JSON.stringify(signup)],
+		]);
+		const local = recordingSession([['rr_consent_v1', JSON.stringify({ v: 1, choice: 'accepted', at })]]);
+		const nav = { globalPrivacyControl: false };
+		const win = topLevelWindow({ location: { search: '?code=abc', pathname: '/', origin: 'https://shell.example.test' }, history: { state: null, replaceState: () => {} } });
+		await withGlobals({ window: win, sessionStorage: session.storage, localStorage: local.storage, navigator: nav }, async () => {
+			const { manager } = createTestManager();
+			manager.client = testClient();
+			manager._attachPromise = Promise.resolve();
+			let release: () => void = () => {};
+			const wait = new Promise<void>((resolve) => {
+				release = resolve;
+			});
+			let exchanged: unknown;
+			manager.connectForBootstrap = async (credential) => {
+				exchanged = credential;
+				await wait;
+				return { result: { ...authenticatedResult, isNewUser: true, waitlisted: true }, appId: '' };
+			};
+			const pending = manager.bootstrap();
+			await Promise.resolve();
+			await Promise.resolve();
+			const resolveSignup = (exchanged as { signupProperties: () => unknown }).signupProperties;
+			assert.deepEqual(resolveSignup(), signup, 'valid context is available before the change');
+			session.storage.setItem('rr:pkce_verifier', 'verifier-2');
+			session.storage.setItem('rr:auth:signup', JSON.stringify(signup));
+			const providerSignup = CloudAuthProvider.getInstance().handleCallback('code-2')!.signupProperties;
+			assert.equal(typeof providerSignup, 'function', 'the public auth provider also defers its consent check');
+			const resolveProvider = providerSignup as () => unknown;
+			assert.deepEqual(resolveProvider(), signup);
+			const originalNow = Date.now;
+			if (change === 'withdraw') local.storage.setItem('rr_consent_v1', JSON.stringify({ v: 1, choice: 'rejected', at }));
+			if (change === 'privacy') nav.globalPrivacyControl = true;
+			if (change === 'expire') Date.now = () => at + 1800001;
+			try {
+				assert.equal(resolveSignup(), null, 'the native wire resolver rechecks the current consent and expiry');
+				assert.equal(resolveProvider(), null, 'the public auth provider rechecks at the same send boundary');
+				release();
+				const result = await pending;
+				assert.ok(result, 'authentication still succeeds');
+				const facts = manager.drainTelemetry();
+				assert.equal(facts.length, 1);
+				assert.equal(facts[0].props.signupProperties, undefined, change);
+				assert.equal(facts[0].props.is_new, true);
+				assert.equal(facts[0].props.waitlisted, true);
+			} finally {
+				Date.now = originalNow;
+			}
+		});
+	}
+});
+
+function signupContext(): SignupProperties {
+	const exposedAt = Date.now();
+	return {
+		schema_version: 1,
+		experiment: 'homepage-roulette-r1',
+		experiment_revision: 'r1',
+		variant_id: 'mh-1',
+		assignment_id: '11111111-1111-4111-8111-111111111111',
+		exposure_id: '22222222-2222-4222-8222-222222222222',
+		landing_message_revision: '0123456789abcdef',
+		exposed_at: exposedAt,
+		expires_at: exposedAt + 30 * 60 * 1000,
+		consent_version: 1,
+	};
+}
+
+for (const mode of ['provider', 'direct'] as const) {
+	for (const scenario of ['accepted', 'rejected', 'missing', 'private', 'signin'] as const) {
+		test(`${mode} OAuth ${scenario} stores context once and keeps it out of the IdP URL`, async () => {
+			const signup = signupContext();
+			const session = recordingSession([['rr:auth:signup', 'stale context']]);
+			const local = recordingSession();
+			if (scenario !== 'missing') local.storage.setItem('rr_consent_v1', JSON.stringify({ v: 1, choice: scenario === 'rejected' ? 'rejected' : 'accepted', at: Date.now() }));
+			const redirects: string[] = [];
+			const win = topLevelWindow({ location: { search: '', pathname: '/', origin: 'https://shell.example.test', assign: (url: string) => redirects.push(url) } });
+			await withGlobals({ window: win, sessionStorage: session.storage, localStorage: local.storage, navigator: { globalPrivacyControl: scenario === 'private' } }, async () => {
+				const provider = CloudAuthProvider.getInstance();
+				provider.initialize({ zitadelUrl: 'https://idp.example.test', clientId: 'test-client' });
+				const { manager } = createTestManager();
+				manager.authProvider = mode === 'provider' ? provider : null;
+				Object.assign(manager, { zitadelUrl: 'https://idp.example.test', zitadelClientId: 'test-client' });
+				const register = scenario !== 'signin';
+				if (mode === 'direct') await provider.signIn(undefined, register, signup);
+				else await manager.startOAuth(register, { signupProperties: signup });
+				const expected = scenario === 'accepted' ? signup : undefined;
+				assert.deepEqual(session.data.has('rr:auth:signup') ? JSON.parse(session.data.get('rr:auth:signup')!) : undefined, expected);
+				assert.deepEqual(
+					session.writes.filter((write) => write.endsWith('rr:auth:signup')),
+					expected ? ['remove:rr:auth:signup', 'set:rr:auth:signup'] : ['remove:rr:auth:signup']
+				);
+				assert.equal(redirects.length, 1);
+				assert.equal(redirects[0].includes('signup'), false);
+				assert.equal(redirects[0].includes(signup.assignment_id), false);
+				const facts = manager.drainTelemetry();
+				if (mode !== 'direct') {
+					assert.equal(facts[0].event, 'auth:start');
+					assert.equal(facts[0].props.signupProperties, undefined);
+				}
+				provider.dispose();
+			});
+		});
+	}
+}
+
+// The providerless legacy path was removed on develop (#2625): the provider is the one entry point.
+for (const mode of ['provider', 'direct'] as const) {
+	for (const scenario of ['undecided', 'expired', 'rejected', 'accepted', 'private', 'unreadable'] as const) {
+		test(`${mode} OAuth puts a cookieless context in the OAuth state only for an undecided visitor (${scenario}), never in site storage`, async () => {
+			const signup: SignupProperties = { ...signupContext(), consent_state: 'undecided' };
+			const session = recordingSession([['rr:auth:signup', 'stale context']]);
+			const records: Array<[string, string]> = [];
+			if (scenario === 'rejected' || scenario === 'accepted') records.push(['rr_consent_v1', JSON.stringify({ v: 1, choice: scenario, at: Date.now() })]);
+			// An expired record no longer counts as a choice.
+			if (scenario === 'expired') records.push(['rr_consent_v1', JSON.stringify({ v: 1, choice: 'rejected', at: Date.now() - 366 * 24 * 60 * 60 * 1000 })]);
+			const local = recordingSession(records);
+			let localStorage: object = local.storage;
+			if (scenario === 'unreadable') localStorage = { getItem: () => { throw new Error('storage denied'); } };
+			const redirects: string[] = [];
+			const win = topLevelWindow({ location: { search: '', pathname: '/', origin: 'https://shell.example.test', assign: (url: string) => redirects.push(url) } });
+			await withGlobals({ window: win, sessionStorage: session.storage, localStorage, navigator: { globalPrivacyControl: scenario === 'private' } }, async () => {
+				const provider = CloudAuthProvider.getInstance();
+				provider.initialize({ zitadelUrl: 'https://idp.example.test', clientId: 'test-client' });
+				const { manager } = createTestManager();
+				manager.authProvider = provider;
+				if (mode === 'direct') await provider.signIn(undefined, true, signup);
+				else await manager.startOAuth(true, { signupProperties: signup });
+				assert.deepEqual(session.writes.filter((write) => write.endsWith('rr:auth:signup')), ['remove:rr:auth:signup']);
+				assert.equal(local.writes.length, 0);
+				assert.equal(redirects.length, 1);
+				const state = new URL(redirects[0]).searchParams.get('state');
+				if (scenario === 'undecided' || scenario === 'expired') assert.deepEqual(JSON.parse(atob(state!)), { v: 1, signup });
+				else assert.equal(state, null);
+				provider.dispose();
+			});
+		});
+	}
+}
+
+test('a cookieless signup completion reads its context from the OAuth state envelope only', async () => {
+	const signup: SignupProperties = { ...signupContext(), consent_state: 'undecided' };
+	const consented = signupContext();
+	const accepted = { v: 1, choice: 'accepted', at: Date.now() };
+	const rejected = { v: 1, choice: 'rejected', at: Date.now() };
+	const envelope = (value: unknown) => btoa(JSON.stringify(value));
+	// [name, state, expected context, consent record in the browser at the callback]
+	const cases: Array<[string, string | null, SignupProperties | null, object | null]> = [
+		['undecided envelope', envelope({ v: 1, signup }), signup, null],
+		['undecided envelope after the visitor rejected', envelope({ v: 1, signup }), null, rejected],
+		['undecided envelope after the visitor accepted', envelope({ v: 1, signup }), null, accepted],
+		['undecided envelope with an expired record', envelope({ v: 1, signup }), signup, { ...rejected, at: Date.now() - 366 * 24 * 60 * 60 * 1000 }],
+		['bare context without the envelope', envelope(signup), null, null],
+		['envelope without a version', envelope({ signup }), null, null],
+		['envelope of another version', envelope({ v: 2, signup }), null, null],
+		['consented context in the envelope, even under consent', envelope({ v: 1, signup: consented }), null, accepted],
+		['rejected consent state', envelope({ v: 1, signup: { ...signup, consent_state: 'rejected' } }), null, null],
+		['unknown consent state', envelope({ v: 1, signup: { ...signup, consent_state: 'accepted' } }), null, null],
+		['malformed', '%%%not-base64', null, null],
+		['oversized', envelope({ v: 1, signup }).padEnd(4096, 'A'), null, null],
+		['absent', null, null, null],
+	];
+	for (const [name, state, expected, record] of cases) {
+		const page = callbackPage();
+		const location = (page.globals.window as { location: { search: string } }).location;
+		if (state !== null) location.search = `?code=abc&state=${encodeURIComponent(state)}`;
+		const local = recordingSession();
+		if (record) local.storage.setItem('rr_consent_v1', JSON.stringify(record));
+		await withGlobals({ ...page.globals, localStorage: local.storage, navigator: {} }, async () => {
+			const { manager, exchanged } = callbackManager({ ...authenticatedResult, isNewUser: true });
+			await manager.bootstrap();
+			assert.equal(exchanged.length, 1, `${name}: auth still proceeds`);
+			const credential = exchanged[0];
+			assert.ok(typeof credential === 'object');
+			const resolveSignup = credential.signupProperties;
+			if (expected) {
+				assert.ok(typeof resolveSignup === 'function', name);
+				assert.deepEqual(resolveSignup(), expected, name);
+			} else {
+				assert.equal(resolveSignup, undefined, name);
+			}
+			assert.equal(page.session.writes.some((write) => write.startsWith('set:rr:auth:signup')), false, `${name}: nothing stored`);
+		});
+	}
+});
+
+test('startOAuth in an embedded dev shell does not touch host signup storage', async () => {
+	const signup = signupContext();
+	const session = recordingSession([['rr:auth:signup', 'host context']]);
+	const local = recordingSession([['rr_consent_v1', JSON.stringify({ v: 1, choice: 'accepted', at: Date.now() })]]);
+	const win = { self: {}, top: {}, location: { search: '?rrdev=1', pathname: '/' } };
+	await withGlobals({ window: win, sessionStorage: session.storage, localStorage: local.storage, navigator: {} }, async () => {
+		const { manager } = createTestManager();
+		let passedContext: unknown;
+		manager.authProvider = {
+			signIn: async (_appId, _register, context) => {
+				passedContext = context;
+			},
+		};
+		await manager.startOAuth(true, { signupProperties: signup });
+		assert.equal(passedContext, null);
+		assert.deepEqual(session.writes, []);
+		assert.equal(session.data.get('rr:auth:signup'), 'host context');
+		assert.equal(manager.drainTelemetry()[0].props.signupProperties, undefined);
+	});
+});
+
+test('signup consent schema and privacy signals fail closed without blocking native auth', async () => {
+	const signup = signupContext();
+	const now = Date.now();
+	const valid = { v: 1, choice: 'accepted', at: now };
+	const invalidRecords: unknown[] = [null, {}, { ...valid, v: 2 }, { ...valid, choice: 'rejected' }, { ...valid, at: 'today' }, { ...valid, at: now - 366 * 24 * 60 * 60 * 1000 }, { ...valid, at: now + 61_000 }];
+	const local = recordingSession();
+	const session = recordingSession();
+	const browserNavigator: Record<string, unknown> = {};
+	const win = topLevelWindow({ location: { search: '' } });
+	await withGlobals({ window: win, localStorage: local.storage, sessionStorage: session.storage, navigator: browserNavigator }, () => {
+		for (const record of invalidRecords) {
+			local.storage.setItem('rr_consent_v1', JSON.stringify(record));
+			assert.equal(currentSignupProperties(signup), null);
+		}
+		local.storage.setItem('rr_consent_v1', '{');
+		assert.equal(currentSignupProperties(signup), null);
+		local.storage.setItem('rr_consent_v1', JSON.stringify(valid));
+		assert.deepEqual(currentSignupProperties(signup), signup);
+		assert.equal(currentSignupProperties(new Proxy(signup, { ownKeys: () => { throw new Error('unavailable context'); } })), null);
+		for (const signal of [true, 1, '1', 'yes']) {
+			for (const key of ['doNotTrack', 'msDoNotTrack', 'globalPrivacyControl']) {
+				browserNavigator[key] = signal;
+				assert.equal(currentSignupProperties(signup), null);
+				delete browserNavigator[key];
+			}
+			win.doNotTrack = signal;
+			assert.equal(currentSignupProperties(signup), null);
+			delete win.doNotTrack;
+		}
+		local.storage.getItem = () => {
+			throw new Error('storage blocked');
+		};
+		assert.equal(currentSignupProperties(signup), null);
+		assert.equal(stashSignupProperties(signup), null);
+		session.storage.setItem('rr:auth:signup', '{');
+		assert.equal(takeSignupProperties(), null);
+		assert.equal(session.data.has('rr:auth:signup'), false);
+	});
+});
+
+test('OAuth error discards pending signup context without reading it', async () => {
+	const session = recordingSession([['rr:auth:signup', 'untrusted context']]);
+	const getItem = session.storage.getItem;
+	session.storage.getItem = (key) => {
+		assert.notEqual(key, 'rr:auth:signup', 'discard does not read optional analytics');
+		return getItem(key);
+	};
+	const win = topLevelWindow({ location: { search: '?auth_error=access_denied', pathname: '/' }, history: { state: null, replaceState: () => {} } });
+	await withGlobals({ window: win, sessionStorage: session.storage }, async () => {
+		const { manager } = createTestManager();
+		manager.client = testClient();
+		manager._attachPromise = Promise.resolve();
+		assert.equal(await manager.bootstrap(), null);
+		assert.equal(session.data.has('rr:auth:signup'), false);
+		assert.equal(manager.connectionStatus.state, ConnectionState.AUTH_FAILED);
+	});
+});
+
+
+/** A page load at `search`/`hash`, recording every URL replaceState writes. */
+function errorReturnPage(search: string, hash = '') {
+	const urls: string[] = [];
+	const win = topLevelWindow({
+		location: { search, hash, pathname: '/' },
+		history: { state: null, replaceState: (_state: unknown, _title: string, url: string) => urls.push(url) },
+	});
+	return { urls, win };
+}
+
+const errorReturnState = encodeURIComponent(btoa(JSON.stringify({ v: 1, signup: { ...signupContext(), consent_state: 'undecided' } })));
+
+test('an identity provider error return strips its state from the URL without a sign-in failure', async () => {
+	const { urls, win } = errorReturnPage(`?error=access_denied&state=${errorReturnState}`);
+	const session = recordingSession([['rr:pkce_verifier', 'verifier-1']]);
+	await withGlobals({ window: win, sessionStorage: session.storage, localStorage: recordingSession().storage, navigator: {} }, async () => {
+		const { manager } = createTestManager();
+		manager.client = testClient();
+		manager._attachPromise = Promise.resolve();
+		await manager.bootstrap();
+		assert.deepEqual(urls, ['/']);
+		assert.notEqual(manager.connectionStatus.state, ConnectionState.AUTH_FAILED);
+	});
+});
+
+test('an identity provider error return is stripped even when the transport attach fails', async () => {
+	const { urls, win } = errorReturnPage(`?error=access_denied&state=${errorReturnState}`);
+	const session = recordingSession([['rr:pkce_verifier', 'verifier-1']]);
+	const fetch = async () => {
+		throw new Error('offline');
+	};
+	await withGlobals({ window: win, sessionStorage: session.storage, localStorage: recordingSession().storage, navigator: {}, fetch }, async () => {
+		const { manager } = createTestManager();
+		manager.client = testClient();
+		manager._attachPromise = Promise.reject(new Error('attach failed'));
+		assert.equal(await manager.bootstrap(), null);
+		assert.deepEqual(urls, ['/']);
+	});
+});
+
+test('an identity provider error return keeps the rest of the query and the fragment', async () => {
+	const { urls, win } = errorReturnPage(`?tab=2&error=access_denied&error_description=denied&state=${errorReturnState}`, '#section');
+	const session = recordingSession([['rr:pkce_verifier', 'verifier-1']]);
+	await withGlobals({ window: win, sessionStorage: session.storage, localStorage: recordingSession().storage, navigator: {} }, async () => {
+		const { manager } = createTestManager();
+		manager.client = testClient();
+		manager._attachPromise = Promise.resolve();
+		await manager.bootstrap();
+		assert.deepEqual(urls, ['/?tab=2#section']);
+	});
+});
+
+test('an error and state the shell did not start (no stored verifier) are left for the app', async () => {
+	const { urls, win } = errorReturnPage('?error=access_denied&state=app-owned');
+	await withGlobals({ window: win, sessionStorage: recordingSession().storage, localStorage: recordingSession().storage, navigator: {} }, async () => {
+		const { manager } = createTestManager();
+		manager.client = testClient();
+		manager._attachPromise = Promise.resolve();
+		await manager.bootstrap();
+		assert.deepEqual(urls, []);
+		assert.notEqual(manager.connectionStatus.state, ConnectionState.AUTH_FAILED);
+	});
+});
+
+test('startOAuth omits a throwing signup getter and allows retry after provider failure', async () => {
+	const session = recordingSession();
+	const local = recordingSession([['rr_consent_v1', JSON.stringify({ v: 1, choice: 'accepted', at: Date.now() })]]);
+	const win = topLevelWindow({ location: { search: '', pathname: '/' } });
+	await withGlobals({ window: win, sessionStorage: session.storage, localStorage: local.storage, navigator: {} }, async () => {
+		const { manager } = createTestManager();
+		let attempts = 0;
+		manager.authProvider = {
+			signIn: async (_appId, _register, signup) => {
+				assert.equal(signup, null, 'hostile optional context is omitted');
+				attempts++;
+				if (attempts === 1) throw new Error('provider unavailable');
+			},
+		};
+		const context = {
+			get signupProperties(): SignupProperties {
+				throw new Error('optional getter unavailable');
+			},
+		};
+		await assert.rejects(manager.startOAuth(true, context), /provider unavailable/);
+		await manager.startOAuth(true, context);
+		assert.equal(attempts, 2, 'failed navigation releases the one-shot guard');
+		assert.deepEqual(
+			manager.drainTelemetry().map((fact) => fact.props.signupProperties),
+			[undefined, undefined]
+		);
+	});
+});
+
+for (const delivery of ['live', 'held'] as const) {
+	test(`native auth facts ${delivery} contain no signup attribution in delivery, drain, debug log or session mirror`, async () => {
+		const signup = signupContext();
+		const page = callbackPage([['rr:auth:signup', JSON.stringify(signup)]]);
+		const local = recordingSession([['rr_consent_v1', JSON.stringify({ v: 1, choice: 'accepted', at: Date.now() })]]);
+		await withGlobals({ ...page.globals, localStorage: local.storage, navigator: {} }, async () => {
+			const { manager } = callbackManager({ ...authenticatedResult, isNewUser: true });
+			manager.authProvider = { signIn: async () => {} };
+			const delivered: TelemetryFact[] = [];
+			if (delivery === 'live') manager.on('shell:telemetry', (fact) => delivered.push(fact));
+			await manager.startOAuth(true, { signupProperties: signup });
+			await manager.bootstrap();
+			const expected = [
+				['auth:start', { register: true, from_path: '/', auto: false }],
+				['auth:complete', { is_new: true, waitlisted: false, source: 'shell', duration_ms: null }],
+			];
+			// auth:start is always held for the callback page, even with a live listener.
+			const expectedHeld = delivery === 'held' ? expected : expected.slice(0, 1);
+			const expectedLive = delivery === 'live' ? expected.slice(1) : [];
+			const mirror = JSON.parse(page.session.data.get(TELEMETRY_STORAGE_KEY) ?? '[]') as TelemetryFact[];
+			assert.deepEqual(mirror.map((fact) => [fact.event, fact.props]), expectedHeld);
+			local.storage.setItem('rr_consent_v1', JSON.stringify({ v: 1, choice: 'rejected', at: Date.now() }));
+			const drained = manager.drainTelemetry();
+			assert.deepEqual(drained.map((fact) => [fact.event, fact.props]), expectedHeld);
+			assert.deepEqual(delivered.map((fact) => [fact.event, fact.props]), expectedLive);
+			assert.deepEqual(manager.drainTelemetry(), [], 'facts still drain once');
+			assert.equal(page.session.data.has(TELEMETRY_STORAGE_KEY), false);
+			const debugFacts = manager.getDebugLog().filter((entry) => entry.event === 'shell:telemetry');
+			assert.deepEqual(debugFacts.map((entry) => {
+				const fact = entry.payload as TelemetryFact;
+				return [fact.event, fact.props];
+			}), expected);
+		});
+	});
+}
+
+// =============================================================================
+// DEV RELAY BOUNCE + TOKEN SEEDING (bootstrap)
+// =============================================================================
+
+test('bootstrap bounces a rrdev-state code to a loopback target via replace() and stops', async () => {
+	const replaced: string[] = [];
+	const win = topLevelWindow({
+		location: {
+			search: '?code=abc&state=rrdev%3Ahttp%3A%2F%2Flocalhost%3A3925',
+			pathname: '/',
+			origin: 'https://shell.example.test',
+			replace: (url: string) => { replaced.push(url); },
+		},
+		history: { state: null, replaceState: () => {} },
+	});
+	await withGlobals({ window: win, sessionStorage: recordingSession().storage }, async () => {
+		const { manager } = createTestManager();
+		manager.client = testClient();
+		// The bounce must fire BEFORE the transport attach — a rejecting
+		// attach here proves the order (a post-attach bounce would throw).
+		manager._attachPromise = Promise.reject(new Error('attach must not be awaited before the bounce'));
+		manager._attachPromise.catch(() => {});
+
+		assert.equal(await manager.bootstrap(), null);
+		assert.deepEqual(replaced, ['http://localhost:3925/?code=abc']);
+	});
+});
+
+test('bootstrap refuses to bounce to non-loopback or same-origin targets', async () => {
+	for (const [origin, state] of [
+		// A non-loopback target: the registered origin must never be an
+		// open redirector, whatever the state parameter claims.
+		['https://shell.example.test', 'rrdev:https://evil.example.test'],
+		// A loopback target that IS this origin: no bounce loops.
+		['http://localhost:3925', 'rrdev:http://localhost:3925'],
+	] as const) {
+		const replaced: string[] = [];
+		const win = topLevelWindow({
+			location: {
+				search: `?code=abc&state=${encodeURIComponent(state)}`,
+				pathname: '/',
+				origin,
+				replace: (url: string) => { replaced.push(url); },
+			},
+			history: { state: null, replaceState: () => {} },
+		});
+		await withGlobals({ window: win, sessionStorage: recordingSession().storage }, async () => {
+			const { manager } = createTestManager();
+			manager.client = testClient();
+			manager._attachPromise = Promise.resolve();
+			manager.loadToken = () => '';
+
+			// No verifier is stored, so the unexchangeable code falls through
+			// to the unauthenticated end state — the code dies unexchanged.
+			assert.equal(await manager.bootstrap(), null);
+			assert.deepEqual(replaced, [], `no bounce for state=${state}`);
+		});
+	}
+});
+
+test('bootstrap seeds a #rrtoken fragment through saveToken and strips it before anything else reads the URL', async () => {
+	const stripped: string[] = [];
+	const win = topLevelWindow({
+		location: {
+			search: '?appid=local.alarm&rrdev=1',
+			pathname: '/',
+			origin: 'http://localhost:3925',
+			hash: '#rrtoken=rr_seeded_key',
+		},
+		history: { state: null, replaceState: (_s: unknown, _t: string, url: string) => { stripped.push(url); } },
+	});
+	await withGlobals({ window: win, sessionStorage: recordingSession().storage }, async () => {
+		const { manager } = createTestManager();
+		manager.client = testClient();
+		manager._attachPromise = Promise.resolve();
+		const saved: string[] = [];
+		manager.saveToken = (token: string) => { saved.push(token); };
+		// The seeded credential is picked up by the normal stored-token path.
+		manager.loadToken = () => saved[0] ?? '';
+		manager.connectForBootstrap = async () => ({ result: authenticatedResult, appId: '' });
+
+		const outcome = await manager.bootstrap();
+		assert.deepEqual(saved, ['rr_seeded_key'], 'the fragment credential lands in saveToken');
+		assert.deepEqual(stripped, ['/?appid=local.alarm&rrdev=1'], 'the fragment is stripped, params kept');
+		assert.equal(outcome?.result.userToken, authenticatedResult.userToken);
+	});
+});
+
+test('the code exchange echoes the stashed authorize-time redirect_uri and clears the stash', async () => {
+	const page = callbackPage([['rocketride_pkce_redirect', 'https://relay.example.test']]);
+	await withGlobals(page.globals, async () => {
+		const { manager, exchanged } = callbackManager();
+		await manager.bootstrap();
+		assert.equal(exchanged.length, 1);
+		assert.equal((exchanged[0] as { redirectUri?: string }).redirectUri, 'https://relay.example.test');
+		assert.equal(page.session.data.has('rocketride_pkce_redirect'), false, 'the stash is single-use');
+	});
+});
+
+// =============================================================================
+// AUTH PHASE — the tab's one auth state machine
+// =============================================================================
+
+test('auth phase: AUTHORIZING carries the initiator, logout retires to SIGNED_OUT, status mirrors every transition', async () => {
+	const session = recordingSession();
+	await withGlobals({ window: topLevelWindow({ location: { search: '', pathname: '/' } }), sessionStorage: session.storage }, async () => {
+		const { manager } = createTestManager();
+		// createTestManager stubs getPendingAppId for the flows that are not
+		// about it — these tests ARE about it, so restore the real method.
+		delete (manager as { getPendingAppId?: unknown }).getPendingAppId;
+
+		// A fresh tab: no record, no pending initiator.
+		assert.equal(manager.getPendingAppId(), '');
+
+		// Launch intent: the initiator rides the AUTHORIZING record and the
+		// status mirror follows.
+		manager.setPendingAppId('acme.app');
+		assert.equal(manager.getPendingAppId(), 'acme.app');
+		assert.equal(manager.getConnectionStatus().authPhase, AuthPhase.AUTHORIZING);
+		assert.equal(JSON.parse(session.data.get('rr:auth_phase') ?? '{}').appId, 'acme.app');
+
+		// Dropping the initiator KEEPS the state (abandoned round trip: the
+		// surface must still show, but the stale target must not re-seed).
+		manager.clearPendingAppId();
+		assert.equal(manager.getPendingAppId(), '');
+		assert.equal(JSON.parse(session.data.get('rr:auth_phase') ?? '{}').state, AuthPhase.AUTHORIZING);
+
+		// Explicit sign-out replaces the record and the mirror.
+		manager.clearToken = () => {};
+		manager.disconnect = async () => {};
+		await manager.logout();
+		assert.equal(manager.getConnectionStatus().authPhase, AuthPhase.SIGNED_OUT);
+		assert.equal(JSON.parse(session.data.get('rr:auth_phase') ?? '{}').state, AuthPhase.SIGNED_OUT);
+		assert.equal(manager.getPendingAppId(), '', 'SIGNED_OUT carries no initiator');
+	});
+});
+
+test('logout keeps a locked tab\'s app lock and remembered identity — sign-out must not unpin a ?appId= deep link', async () => {
+	const session = recordingSession([['rr:tab', JSON.stringify({ dev: false, appId: 'mine.alarm', authOrigin: '', appName: 'Alarm Clock', appIcon: '/apps/mine.alarm/icon.png' })]]);
+	await withGlobals({ window: topLevelWindow({ location: { search: '', pathname: '/' } }), sessionStorage: session.storage }, async () => {
+		resetDevGateForTests();
+		const { manager } = createTestManager();
+		manager.clearToken = () => {};
+		manager.disconnect = async () => {};
+		await manager.logout();
+
+		// The lock survives: the tab exists FOR this app, and the next
+		// sign-in returns to the bare origin with only this record to go on.
+		const kept = JSON.parse(session.data.get('rr:tab') ?? '{}');
+		assert.equal(kept.appId, 'mine.alarm');
+		assert.equal(kept.appName, 'Alarm Clock', 'the signed-out screen brands from the remembered identity');
+		assert.equal(kept.appIcon, '/apps/mine.alarm/icon.png');
+		resetDevGateForTests();
+	});
+});
+
+test('auth phase: a completed sign-in lands AUTHENTICATED, the initiator wins the landing and is consumed', async () => {
+	const session = recordingSession([['rr:auth_phase', JSON.stringify({ state: 'authorizing', appId: 'acme.target' })]]);
+	await withGlobals({ window: topLevelWindow({ location: { search: '', pathname: '/' } }), sessionStorage: session.storage }, async () => {
+		const { manager } = createTestManager();
+		manager.saveToken = () => {};
+		// Restore the real pending read (createTestManager stubs it to '').
+		delete (manager as { getPendingAppId?: unknown }).getPendingAppId;
+		// The REAL finishConnect runs — it owns the AUTHENTICATED transition
+		// and the landing resolution (initiator over the tab's startup lock).
+		const finish = (manager as unknown as { finishConnect: (r: ConnectResult, a: string) => Promise<{ result: ConnectResult; appId: string }> }).finishConnect.bind(manager);
+		const outcome = await finish(authenticatedResult, 'tab.lock');
+
+		assert.equal(outcome.appId, 'acme.target', 'the initiator is the landing app');
+		assert.equal(manager.getConnectionStatus().authPhase, AuthPhase.AUTHENTICATED);
+		assert.equal(JSON.parse(session.data.get('rr:auth_phase') ?? '{}').state, AuthPhase.AUTHENTICATED);
+		assert.equal(manager.getPendingAppId(), '', 'completion consumed the initiator');
+	});
+});
+
+test('auth phase: an unreadable record reads as FRESH', async () => {
+	const session = recordingSession([['rr:auth_phase', '{broken json']]);
+	await withGlobals({ window: topLevelWindow({ location: { search: '', pathname: '/' } }), sessionStorage: session.storage }, async () => {
+		const { manager } = createTestManager();
+		assert.equal(manager.getPendingAppId(), '');
+	});
+});
+
+test('an EMPTY #rrtoken fragment (--no-auth) clears the remembered session, resets to FRESH, and strips the fragment', async () => {
+	const session = recordingSession();
+	const stripped: string[] = [];
+	const win = topLevelWindow({
+		location: { search: '?appid=local.alarm&rrdev=1', pathname: '/', origin: 'http://localhost:3926', hash: '#rrtoken=' },
+		history: { state: null, replaceState: (_s: unknown, _t: string, url: string) => { stripped.push(url); } },
+	});
+	await withGlobals({ window: win, sessionStorage: session.storage }, async () => {
+		const { manager } = createTestManager();
+		manager.client = testClient();
+		manager._attachPromise = Promise.resolve();
+		const cleared: boolean[] = [];
+		manager.clearToken = () => { cleared.push(true); };
+		// The remembered session this origin holds — must NOT be resumed.
+		manager.loadToken = () => '';
+
+		assert.equal(await manager.bootstrap(), null, 'no identity is resumed');
+		assert.deepEqual(cleared, [true], 'the remembered token is cleared');
+		// FRESH, not SIGNED_OUT: a fresh first run auto-starts the login
+		// flow; the signed-out page is for explicit logouts only.
+		assert.equal(manager.getConnectionStatus().authPhase, AuthPhase.FRESH);
+		assert.deepEqual(stripped, ['/?appid=local.alarm&rrdev=1'], 'the fragment is stripped, the query kept');
+	});
+});
+
+test('a dev relay owns the OAuth state, so an undecided visitor\'s cookieless context is not sent through it', async () => {
+	const signup: SignupProperties = { ...signupContext(), consent_state: 'undecided' };
+	const redirects: string[] = [];
+	const win = topLevelWindow({ location: { search: '', pathname: '/', origin: 'http://localhost:5173', assign: (url: string) => redirects.push(url) } });
+	await withGlobals({ window: win, sessionStorage: recordingSession().storage, localStorage: recordingSession().storage, navigator: {} }, async () => {
+		const provider = CloudAuthProvider.getInstance();
+		provider.initialize({ zitadelUrl: 'https://idp.example.test', clientId: 'test-client', relayOrigin: 'https://relay.example.test' });
+		await provider.signIn(undefined, true, signup);
+		assert.equal(redirects.length, 1);
+		const url = new URL(redirects[0]);
+		assert.equal(url.searchParams.get('redirect_uri'), 'https://relay.example.test');
+		assert.equal(url.searchParams.get('state'), 'rrdev:http://localhost:5173');
+		provider.dispose();
+	});
+});
+

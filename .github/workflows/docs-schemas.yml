@@ -5,7 +5,10 @@
 #  validators, plus docs:build and docs:check) on doc-path pull requests into
 #  develop (and direct pushes to it). ci.yml deliberately does not carry
 #  them — the paths filter below keeps doc-only machinery from spending the
-#  shared pipeline's minutes, and non-doc changes from spending these.
+#  shared pipeline's minutes, and non-doc changes from spending these. The
+#  client SDK paths are here because docs:validate checks the CLI docs against
+#  the commands both CLIs register (scripts/validate-cli-docs.py), and the CLIs
+#  import from the rest of each SDK and from client-common.
 # ---------------------------------------------------------------------------
 name: Doc schemas
 
@@ -19,7 +22,13 @@ on:
       - 'nodes/src/nodes/**/services*.json'
       - 'scripts/validate-node-readme.py'
       - 'scripts/validate-client-docs.py'
+      - 'scripts/validate-cli-docs.py'
+      - 'scripts/cli-command-tree.js'
+      - 'packages/client-python/src/rocketride/**'
+      - 'packages/client-typescript/src/**'
+      - 'packages/client-common/**'
       - 'tests/test_validate_node_readme.py'
+      - 'tests/test_validate_cli_docs.py'
       - 'pnpm-lock.yaml'
       - '.github/workflows/docs-schemas.yml'
   push:
@@ -30,7 +39,13 @@ on:
       - 'nodes/src/nodes/**/services*.json'
       - 'scripts/validate-node-readme.py'
       - 'scripts/validate-client-docs.py'
+      - 'scripts/validate-cli-docs.py'
+      - 'scripts/cli-command-tree.js'
+      - 'packages/client-python/src/rocketride/**'
+      - 'packages/client-typescript/src/**'
+      - 'packages/client-common/**'
       - 'tests/test_validate_node_readme.py'
+      - 'tests/test_validate_cli_docs.py'
       - 'pnpm-lock.yaml'
       - '.github/workflows/docs-schemas.yml'
 

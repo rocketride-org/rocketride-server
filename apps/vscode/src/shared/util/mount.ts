@@ -104,9 +104,14 @@ export function mountComponent<T = {}>(component: React.ComponentType<T>, compon
 				// component cast beside it)
 				createRoot(rootElement).render(React.createElement(component as React.ComponentType<Record<string, unknown>>, props as Record<string, unknown> | undefined));
 			} catch (error) {
+				// WEBVIEW REALM: console is correct here — getLogger() is the
+				// extension host's Output channel and imports 'vscode', which
+				// must never reach a webview bundle.
+				// eslint-disable-next-line no-console
 				console.error(`Error mounting ${componentName}:`, error);
 			}
 		} else {
+			// eslint-disable-next-line no-console
 			console.error(`Root element not found - ${componentName} cannot be mounted`);
 		}
 	}
