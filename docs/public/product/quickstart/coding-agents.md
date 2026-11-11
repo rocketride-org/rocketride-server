@@ -30,7 +30,7 @@ docker run -d --name rocketride-engine --platform linux/amd64 \
 
 - The image is amd64 only. `--platform linux/amd64` is required on Apple Silicon (Docker runs it under emulation, and the port answers after about 25 seconds there) and harmless elsewhere.
 - `ROCKETRIDE_APIKEY=rr_local` sets the key clients must send. The value can be any string that starts with `rr_`: the built-in MCP server refuses other values, and the CLI and SDK must send the same one.
-- `ROCKETRIDE_URI=ws://127.0.0.1:5565` tells the engine's MCP server to run tool calls against this engine. Without it (and without `MCP_RESOURCE_IDENTIFIER`), an engine that is not bound to localhost connects tool calls to RocketRide Cloud instead. Setting it is always safe (see [Use it over MCP locally](#use-it-over-mcp-locally)).
+- `ROCKETRIDE_URI=ws://127.0.0.1:5565` tells the engine's MCP server to run tool calls against this engine. Engine image 3.6.0 and earlier need it: without it (and without `MCP_RESOURCE_IDENTIFIER`), an engine that is not bound to localhost connects tool calls to RocketRide Cloud instead. Setting it is always safe (see [Use it over MCP locally](#use-it-over-mcp-locally)).
 
 More: [Run the Engine in Docker](/operate/self-hosting/docker).
 
@@ -101,7 +101,7 @@ Claude Code:
 claude mcp add --transport http rocketride-local http://localhost:5565/mcp --header "Authorization: Bearer rr_local"
 ```
 
-When neither `ROCKETRIDE_URI` nor `MCP_RESOURCE_IDENTIFIER` is set on a Docker engine (or any engine not bound to localhost), `initialize` and `tools/list` still work, but every tool call connects to RocketRide Cloud and fails with `Invalid or revoked API key`. Start the engine with the command above to avoid this. A local Docker engine offers 32 tools (`send_files` needs a loopback bind).
+On engine image 3.6.0 and earlier, when neither `ROCKETRIDE_URI` nor `MCP_RESOURCE_IDENTIFIER` is set on a Docker engine (or any engine not bound to localhost), `initialize` and `tools/list` still work, but every tool call connects to RocketRide Cloud and fails with `Invalid or revoked API key`. Start the engine with the command above to avoid this. A local Docker engine offers 32 tools (`send_files` needs a loopback bind).
 
 ## Use the hosted server
 
