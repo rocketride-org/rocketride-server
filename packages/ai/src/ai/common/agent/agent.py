@@ -315,15 +315,20 @@ class AgentBase(ABC):
                 )
                 answer_payload['stack'] = stack
 
+            # The whole turn's total (every model call the run made, across threads
+            # and sub-agents), read back from the turn collector. The envelope carries
+            # it too, so a caller of this agent as a tool sees what the run used:
+            # the record itself for one call, a total with calls and breakdown for more.
+            usage = read_usage()
+            if usage:
+                answer_payload['meta']['usage'] = usage
+
             if emit_answers_lane:
                 debug(
                     f'agent base emitting answer run_id={answer_payload.get("meta", {}).get("run_id")} framework={answer_payload.get("meta", {}).get("framework")}'
                 )
                 answer = Answer(expectJson=False)
                 answer.setAnswer(answer_payload.get('content', ''))
-                # The whole turn's total (every model call the run made, across threads
-                # and sub-agents), read back from the turn collector.
-                usage = read_usage()
                 if usage:
                     answer.tokens = usage  # shown in the Trace "Tokens" grid on the answers lane
                 iInstance.instance.writeAnswers(answer)

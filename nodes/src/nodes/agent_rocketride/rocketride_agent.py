@@ -25,17 +25,22 @@ Token efficiency is achieved by:
   - The LLM uses memory.peek to pull specific values on demand.
   - Scratch notes carry only what the LLM explicitly chooses to remember.
   - Completed result keys are evicted from memory and context via the remove field.
+  - With ``tool_catalog_budget`` set and a catalog larger than it, each planning
+    step lists every tool as one line, and the model loads the full schemas of
+    the tools it will call with a local ``tools.load`` step. The mode is decided
+    once per run; a connected tool named ``tools.load`` sends every schema instead.
 """
 
 from __future__ import annotations
 
 import dataclasses
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple
 
 from rocketlib import debug, error, warning
 
 from ai.common.agent import AgentBase, AgentContext
+from ai.common.agent.tool_catalog import DEFAULT_CATALOG_BUDGET, LOAD_TOOL, catalog_chars, named_descriptors, tool_view
 from ai.common.agent.types import AgentRunResult
 from ai.common.config import Config
 from ai.common.schema import Question
@@ -65,6 +70,16 @@ def _tool_timeout(value: Any) -> Optional[float]:
         return max(0.0, float(value))
     except (TypeError, ValueError):
         return None
+
+
+def _catalog_budget(value: Any) -> int:
+    """Read the tool_catalog_budget setting: characters, 0 for every schema in every prompt; the default when unset."""
+    if value is None or value == '':
+        return DEFAULT_CATALOG_BUDGET
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError, OverflowError):
+        return DEFAULT_CATALOG_BUDGET
 
 
 def _verify_args(value: Any) -> Optional[Dict[str, Any]]:
@@ -109,6 +124,7 @@ class RocketRideDriver(AgentBase):
     _verify_tool: str = ''
     _verify_args: Optional[Dict[str, Any]] = None
     _tool_timeout_s: Optional[float] = None
+    _tool_catalog_budget: int = DEFAULT_CATALOG_BUDGET
 
     def __init__(self, iGlobal) -> None:
         """Initialize the Wave driver and load host services."""
@@ -124,6 +140,9 @@ class RocketRideDriver(AgentBase):
         self._verify_args = _verify_args(config.get('verify_args'))
         # Seconds one tool call may take (0: no limit); unset uses the executor's default.
         self._tool_timeout_s = _tool_timeout(config.get('tool_timeout'))
+        # Characters of tool definitions above which the catalog is shown as one line
+        # per tool and schemas load on demand (0: every schema in every prompt).
+        self._tool_catalog_budget = _catalog_budget(config.get('tool_catalog_budget'))
 
     # ------------------------------------------------------------------
     # Main driver
@@ -154,7 +173,10 @@ class RocketRideDriver(AgentBase):
         run_context = dataclasses.replace(context, memory=memory)
         state = RunState()
         try:
-            return self._run_waves(context=run_context, question=question, state=state)
+            answer, trace = self._run_waves(context=run_context, question=question, state=state)
+            if isinstance(trace, dict):
+                trace['loaded_tools'] = sorted(state.loaded_tools) if state.loaded_tools is not None else None
+            return answer, trace
         finally:
             running = state.background.running()
             if running:
@@ -187,7 +209,14 @@ class RocketRideDriver(AgentBase):
              done=true and every call succeeded, returns its answer.
           6. Prunes memory keys the LLM has finished with (remove field) and loops.
 
-        The trace records why the run stopped: done, max_waves, empty_plan or error.
+        The trace records why the run stopped: done, max_waves, empty_plan or error,
+        and how the tool catalog was shown (``tool_catalog``) and how many planning
+        requests the run made (``planning_steps``).
+
+        In compact mode, before each planning request, one read of the catalog
+        decides what the prompt shows and which tools may run in that step. If that
+        read holds a connected tool named tools.load, the run sends every schema
+        from that step on (see _fall_back_to_eager).
 
         Returns:
             A ``(content, trace)`` tuple consumed by ``AgentBase.run_agent``.
@@ -195,6 +224,7 @@ class RocketRideDriver(AgentBase):
         run_id = context.run_id
         debug(f'rocketride wave _run start run_id={run_id}')
         self._require_check_tool(context)
+        state.loaded_tools, catalog_info = self._catalog_mode(context)
         self.sendSSE(context, 'thinking', message='Analyzing your request...')
 
         # waves accumulates the full history of every tool call and its result
@@ -210,7 +240,7 @@ class RocketRideDriver(AgentBase):
 
         # trace is returned to the caller and recorded for observability.
         # waves is shared by reference — appending to it here also updates trace.
-        trace: Dict[str, Any] = {'waves': waves, 'run_id': run_id}
+        trace: Dict[str, Any] = {'waves': waves, 'run_id': run_id, 'tool_catalog': catalog_info, 'planning_steps': 0}
 
         # Scratch persists the LLM's working notes across iterations.
         # The LLM emits it in each response and we re-inject it into the next
@@ -221,6 +251,19 @@ class RocketRideDriver(AgentBase):
         for wave_num in range(self._max_waves):
             debug(f'rocketride wave wave_num={wave_num} run_id={run_id}')
             self.sendSSE(context, 'thinking', message=f'Planning step {wave_num + 1}...')
+
+            trace['planning_steps'] += 1
+            view = None
+            if state.loaded_tools is not None:
+                # One read of the catalog for this step: the planner shows exactly these
+                # descriptors and the executor allows exactly these names, so a refresh
+                # between the read and the prompt cannot split them.
+                view = tool_view(getattr(context.tools, 'list', None) or [], state.loaded_tools)
+                if any(td['name'] == LOAD_TOOL for td in view.catalog):
+                    self._fall_back_to_eager(state, trace)
+                    view = None
+                else:
+                    state.shown_tools = view.shown
 
             # Run the planner — one LLM call with all tool descriptions, checked
             # by normalize_plan. Returns a plan with a bool "done" and a clean
@@ -234,6 +277,7 @@ class RocketRideDriver(AgentBase):
                     current_scratch=current_scratch,
                     verify_tool=self._verify_tool,
                     verify_args=self._verify_args,
+                    tool_view=view,
                 )
             except Exception as exc:
                 error(f'rocketride wave plan failed run_id={run_id}: {exc}')
@@ -367,10 +411,9 @@ class RocketRideDriver(AgentBase):
                 # The newest check decides: if any check in this step raised or
                 # reported a failure, the work is unchecked again, whatever passed before.
                 last_check = -1 if any(r.get('error') or r.get('failed') for r in checks) else wave_num
-            if any(
-                r.get('tool') not in ('memory.peek', 'reply-check') and not self._is_check(r, tool_calls, i)
-                for i, r in enumerate(results)
-            ):
+            # The tools this step's prompt showed in full (compact mode), or None.
+            shown = state.shown_tools if state.loaded_tools is not None else None
+            if any(self._is_change(r, tool_calls, i, shown) for i, r in enumerate(results)):
                 # Any other call counts as a change, even one that failed: a write
                 # may have landed before its result could be stored.
                 last_change = wave_num
@@ -479,6 +522,85 @@ class RocketRideDriver(AgentBase):
                 debug(f'rocketride wave verify_tool lookup failed: {type(exc).__name__}: {exc}')
         connected = ', '.join(sorted(names)) or 'none'
         raise ValueError(f'verify_tool {self._verify_tool!r} is not a connected tool (connected: {connected})')
+
+    def _catalog_mode(self, context: AgentContext) -> Tuple[Optional[Set[str]], Dict[str, Any]]:
+        """Decide once per run whether every schema goes in the prompt (None) or schemas load on demand.
+
+        On demand, the set of loaded tools starts with the check tool, which the run
+        calls after every change. The second value describes the decision for the trace.
+        """
+        descriptors = named_descriptors(getattr(context.tools, 'list', None) or [])
+        size = catalog_chars(descriptors)
+        info: Dict[str, Any] = {
+            'mode': 'full',
+            'tools': len(descriptors),
+            'chars': size,
+            'budget': self._tool_catalog_budget,
+        }
+        if self._tool_catalog_budget <= 0 or size <= self._tool_catalog_budget:
+            return None, info
+        if any(td['name'] == LOAD_TOOL for td in descriptors):
+            # A connected tool with the loading step's name must keep working as a tool.
+            warning(
+                f'rocketride wave: a connected tool is named {LOAD_TOOL!r}; every schema is sent instead of '
+                'loading on demand'
+            )
+            info['collision'] = LOAD_TOOL
+            return None, info
+        info['mode'] = 'compact'
+        debug(
+            f'rocketride wave: tool catalog is {size:,} characters, over the budget of '
+            f'{self._tool_catalog_budget:,}; schemas load on demand'
+        )
+        return ({self._verify_tool} if self._verify_tool else set()), info
+
+    def _fall_back_to_eager(self, state: RunState, trace: Dict[str, Any]) -> None:
+        """Send every schema from the next prompt on: a catalog refresh connected a tool named tools.load.
+
+        The host reserves no names (a node ``tools`` with a tool ``load`` publishes
+        ``tools.load``), and a refresh can add one at any step. The compact prompt
+        would show that tool while the executor answered its calls with the local
+        loader. Called before the prompt is built, so the step is planned, executed
+        and classified in one mode. One-way, at most once per run.
+        """
+        info = trace['tool_catalog']
+        step = trace['planning_steps']
+        info.update(
+            {
+                'mode': 'full',
+                'collision': LOAD_TOOL,
+                'fallback_step': step,
+                'loaded_before_fallback': sorted(state.loaded_tools or ()),
+            }
+        )
+        warning(
+            f'rocketride wave: a connected tool named {LOAD_TOOL!r} is in the catalog at planning step {step}; '
+            'every schema is sent from here on'
+        )
+        state.loaded_tools = None
+        state.shown_tools = frozenset()
+
+    def _is_change(
+        self,
+        result: Dict[str, Any],
+        tool_calls: List[Dict[str, Any]],
+        index: int,
+        shown: Optional[FrozenSet[str]],
+    ) -> bool:
+        """True when *result* came from a call that may have changed the work.
+
+        Not the check, not memory.peek, not a reply-check note. In compact mode
+        (*shown* is the set of tools whose schemas the planning prompt showed) also
+        not tools.load and not a call to a tool outside that set: the executor
+        answers those itself, and no tool node runs. With *shown* None this is the
+        rule as it always was.
+        """
+        tool = result.get('tool')
+        if tool in ('memory.peek', 'reply-check') or self._is_check(result, tool_calls, index):
+            return False
+        if shown is not None and (tool == LOAD_TOOL or tool not in shown):
+            return False
+        return True
 
     def _not_checked(self, last_check: int, last_change: int, running: int = 0) -> str:
         """Return why the run may not finish yet, or '' if it may.

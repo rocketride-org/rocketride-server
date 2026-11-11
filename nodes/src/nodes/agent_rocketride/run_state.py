@@ -22,7 +22,7 @@ from __future__ import annotations
 import threading
 from concurrent.futures import Future
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional, Set, Tuple
+from typing import Any, Dict, FrozenSet, Optional, Set, Tuple
 
 from rocketlib import error
 
@@ -34,6 +34,10 @@ class BackgroundCalls:
     engine's invoke, and returns into the pipeline's state. The engine tears a
     pipeline down only after every request in it has ended, so the run waits for
     every one of these calls before it ends (see ``RocketRideDriver._run``).
+
+    Some of them never reach a tool node: a schema load, or the lookup behind a
+    skipped call. The run still waits for them, but their return cannot have
+    changed the work, so :meth:`snapshot` leaves them out.
     """
 
     def __init__(self) -> None:
@@ -41,19 +45,26 @@ class BackgroundCalls:
         # Notified once a returned call is counted, which happens after the future's own
         # waiters wake, so wait() waits for the count rather than for the future.
         self._counted = threading.Condition(self._lock)
-        self._futures: Set[Future] = set()
+        # Each call, mapped to whether it may change the work.
+        self._futures: Dict[Future, bool] = {}
         self._returned = 0
 
-    def add(self, future: Future) -> None:
+    def add(self, future: Future, *, changes_work: bool = True) -> None:
+        """Track a call the wave gave up on.
+
+        *changes_work* is False for a call that never reaches a tool node (a schema
+        load or lookup): the run still waits for it, but its return cannot have
+        changed the work.
+        """
         with self._lock:
-            self._futures.add(future)
+            self._futures[future] = changes_work
         # Runs at once if the call has already returned.
         future.add_done_callback(self._discard)
 
     def _discard(self, future: Future) -> None:
         with self._counted:
-            self._futures.discard(future)
-            self._returned += 1
+            if self._futures.pop(future, True):
+                self._returned += 1
             self._counted.notify_all()
 
     def running(self) -> int:
@@ -62,14 +73,15 @@ class BackgroundCalls:
             return len(self._futures)
 
     def snapshot(self) -> Tuple[int, int]:
-        """How many of these calls are running, and how many have returned, read together.
+        """How many calls that may change the work are running, and how many have returned, read together.
 
         A call that has returned may have changed the work (a write that landed late)
         after a check that ran while it was out. Two separate reads could miss a call
         that returns between them: counted neither as running nor as returned.
+        Calls added with ``changes_work=False`` are not counted.
         """
         with self._lock:
-            return len(self._futures), self._returned
+            return sum(1 for changes in self._futures.values() if changes), self._returned
 
     def wait(self, timeout: Optional[float]) -> int:
         """Wait up to *timeout* seconds (None: as long as it takes) for every call to return.
@@ -94,12 +106,24 @@ class RunState:
         removed: Keys the model removed (once the removal is applied), so a repeat
             of a removed call says so.
         background: Calls the run gave up on that are still running.
+        loaded_tools: None when every tool's schema is in the planning prompt (a small
+            catalog, the budget off, or the run fell back to every schema because a
+            connected tool is named tools.load). A set when the catalog is shown
+            compactly: the tools whose schemas may be shown. It grows only when the
+            executor keeps a load's result, and becomes None only in the driver,
+            before a prompt is built.
+        shown_tools: The tools whose full schemas were in the most recent planning
+            prompt. Set by the driver before each planning request, read by the
+            executor, never written by a worker. Only these may be called in the
+            step that prompt plans.
     """
 
     seen_results: Dict[str, str] = field(default_factory=dict)
     seen_calls: Dict[str, str] = field(default_factory=dict)
     removed: Set[str] = field(default_factory=set)
     background: BackgroundCalls = field(default_factory=BackgroundCalls)
+    loaded_tools: Optional[Set[str]] = None
+    shown_tools: FrozenSet[str] = frozenset()
 
     def forget(self, keys) -> None:
         """Drop the result fingerprints that point at *keys*.

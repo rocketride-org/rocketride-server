@@ -31,11 +31,25 @@ above is served.
 page with a ``nextCursor``. The stub's cursor is the next offset as a string; a
 client must treat it as opaque. A cursor that is not an integer, or that is below
 0 or above the tool count, answers ``-32602``.
+
+Three more options, for agent tests that launch the server from a command line
+(the MCP client node passes it no environment):
+
+- ``--tools-file PATH`` does what ``STUB_MCP_TOOLS_FILE`` does; the variable wins.
+- ``--calls-log PATH`` appends one JSON line ``{"name", "arguments"}`` per
+  ``tools/call`` of a known tool, so a test can read exactly which tools ran.
+- A tool entry may carry ``"_stub_result": <any JSON>``. ``tools/list`` strips
+  every key that starts with ``_``, and ``tools/call`` returns that value as
+  ``structuredContent``, and as JSON text in ``content``, as the MCP spec asks
+  of a tool that returns structured content.
 """
 
+import argparse
 import json
 import os
 import sys
+
+_ARGS = argparse.Namespace(tools_file=None, calls_log=None)
 
 TOOLS = [
     {
@@ -62,7 +76,7 @@ TOOLS = [
 
 def _current_tools():
     """Return the live tool list: the JSON file if configured, else ``TOOLS``."""
-    path = os.environ.get('STUB_MCP_TOOLS_FILE')
+    path = os.environ.get('STUB_MCP_TOOLS_FILE') or _ARGS.tools_file
     if path:
         try:
             with open(path, 'r', encoding='utf-8') as f:
@@ -72,6 +86,19 @@ def _current_tools():
         except (OSError, ValueError):
             pass
     return TOOLS
+
+
+def _listed(tool):
+    """The tool as tools/list shows it: without the stub's own ``_`` keys."""
+    return {k: v for k, v in tool.items() if not k.startswith('_')} if isinstance(tool, dict) else tool
+
+
+def _log_call(name, arguments):
+    if not _ARGS.calls_log:
+        return
+    with open(_ARGS.calls_log, 'a', encoding='utf-8') as f:
+        f.write(json.dumps({'name': name, 'arguments': arguments}, ensure_ascii=False) + '\n')
+        f.flush()
 
 
 def _page_size():
@@ -117,7 +144,7 @@ def _handle(msg):
         }
 
     if method == 'tools/list':
-        tools = _current_tools()
+        tools = [_listed(t) for t in _current_tools()]
         page_size = _page_size()
         if not page_size:
             return {'jsonrpc': '2.0', 'id': msg_id, 'result': {'tools': tools}}
@@ -136,22 +163,24 @@ def _handle(msg):
     if method == 'tools/call':
         name = params.get('name')
         arguments = params.get('arguments', {})
-        known = {t['name'] for t in _current_tools()}
+        known = {t['name']: t for t in _current_tools()}
         if name not in known:
             return {
                 'jsonrpc': '2.0',
                 'id': msg_id,
                 'error': {'code': -32602, 'message': f'Tool {name} not found'},
             }
+        _log_call(name, arguments)
         # Echo back exactly what we received so tests can assert on it.
-        return {
-            'jsonrpc': '2.0',
-            'id': msg_id,
-            'result': {
-                'content': [{'type': 'text', 'text': f'called {name}'}],
-                'received_arguments': arguments,
-            },
+        result = {
+            'content': [{'type': 'text', 'text': f'called {name}'}],
+            'received_arguments': arguments,
         }
+        if '_stub_result' in known[name]:
+            canned = known[name]['_stub_result']
+            result['content'] = [{'type': 'text', 'text': json.dumps(canned, ensure_ascii=False)}]
+            result['structuredContent'] = canned
+        return {'jsonrpc': '2.0', 'id': msg_id, 'result': result}
 
     return {
         'jsonrpc': '2.0',
@@ -161,6 +190,11 @@ def _handle(msg):
 
 
 def main():
+    global _ARGS
+    parser = argparse.ArgumentParser(description='Minimal stdio MCP server for tests.')
+    parser.add_argument('--tools-file', default=None, help='JSON file with the tool list (STUB_MCP_TOOLS_FILE wins)')
+    parser.add_argument('--calls-log', default=None, help='append one JSON line per tools/call to this file')
+    _ARGS = parser.parse_args()
     for line in sys.stdin:
         line = line.strip()
         if not line:

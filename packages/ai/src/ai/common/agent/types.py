@@ -136,6 +136,13 @@ AGENT_TOOL_OUTPUT_SCHEMA: Dict[str, Any] = {
                     'type': 'string',
                     'description': 'Why the run stopped (e.g. done, max_waves, error), when the agent reports it',
                 },
+                'usage': {
+                    'type': 'object',
+                    'description': (
+                        'Model token usage for the run: input, output, cache_read, cache_creation and model; '
+                        'calls and breakdown when the run made more than one model call'
+                    ),
+                },
             },
             'required': ['framework', 'agent_id', 'run_id', 'started_at', 'ended_at'],
         },

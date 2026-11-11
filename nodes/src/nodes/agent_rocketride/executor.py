@@ -41,7 +41,9 @@ import jmespath
 from rocketlib import debug, error
 
 from ai.common.agent import AgentBase, AgentContext
+from ai.common.agent.tool_catalog import LOAD_LIMIT_DEFAULT, LOAD_LIMIT_MAX, LOAD_TOOL, PEEK_TOOL, select
 from ai.common.schema import Question
+from ai.common.utils import safe_str
 
 from .formatters import format_data
 from .run_state import RunState
@@ -1194,6 +1196,104 @@ class _Unstored:
         self.result = result
 
 
+class _Local:
+    """A result the executor produced itself: tools.load, or a call to a tool whose schema the model has not seen.
+
+    *loads* are the names that become loaded if the wave keeps this result.
+    """
+
+    __slots__ = ('entry', 'loads')
+
+    def __init__(self, entry: Dict[str, Any], loads: List[str]):
+        self.entry = entry
+        self.loads = loads
+
+
+def _bounded_int(value: Any, default: int, low: int, high: int) -> int:
+    """*value* as an int between *low* and *high*; *default* when it is not a number."""
+    if isinstance(value, bool):
+        return default
+    try:
+        return max(low, min(high, int(value)))
+    except (TypeError, ValueError, OverflowError):
+        return default
+
+
+def _catalog(context: AgentContext) -> List[Dict[str, Any]]:
+    return [td for td in (getattr(context.tools, 'list', None) or []) if isinstance(td, dict) and td.get('name')]
+
+
+def _load_tools(args: Dict[str, Any], key: str, *, context: AgentContext) -> _Local:
+    """Answer a tools.load call: choose the tools to load by exact names and by a query."""
+    names = args.get('names')
+    names = [names] if isinstance(names, str) else (names if isinstance(names, list) else [])
+    names = [safe_str(n).strip() for n in names if safe_str(n).strip()]
+    query = safe_str(args.get('query') or '').strip()
+    limit = _bounded_int(args.get('limit'), LOAD_LIMIT_DEFAULT, 1, LOAD_LIMIT_MAX)
+    if not names and not query:
+        return _Local(
+            {'tool': LOAD_TOOL, 'key': key, 'error': f'{LOAD_TOOL} needs names (exact tool names) or a query'}, []
+        )
+    lookup = getattr(context.tools, 'get', None)
+    found, unknown, ignored = select(
+        _catalog(context), names=names, query=query, limit=limit, lookup=lookup if callable(lookup) else None
+    )
+    loaded = [td['name'] for td in found]
+    if not loaded:
+        missed = (f' the names {unknown}' if unknown else '') + (f' the query {query!r}' if query else '')
+        return _Local(
+            {
+                'tool': LOAD_TOOL,
+                'key': key,
+                'error': f'No tool matched{missed}. Use the exact names listed in Available Tools.',
+            },
+            [],
+        )
+    summary = 'Loaded: ' + ', '.join(loaded)
+    if unknown:
+        summary += '. Unknown: ' + ', '.join(unknown)
+    if ignored:
+        summary += f'. Only the first {LOAD_LIMIT_MAX} names were loaded; load the rest when you need them.'
+    return _Local({'tool': LOAD_TOOL, 'key': key, 'summary': summary}, loaded)
+
+
+def _unshown_call(tool: str, key: str, *, context: AgentContext) -> _Local:
+    """Answer a call to a tool whose schema the model has not seen. It never runs.
+
+    Known (in the catalog, or found by the host's one re-query of the owning node):
+    skipped, and loaded for the next step. Unknown: reported as not connected, with
+    the host's own reason. No dispatch lookup follows.
+    """
+    known, reason = any(td['name'] == tool for td in _catalog(context)), 'not in the catalog'
+    if not known:
+        lookup = getattr(context.tools, 'get', None)
+        if callable(lookup):
+            try:
+                known = bool(lookup(tool))
+            except Exception as exc:
+                reason = f'{type(exc).__name__}: {exc}'
+    if known:
+        return _Local(
+            {
+                'tool': 'reply-check',
+                'key': key,
+                'error': (
+                    f'Skipped: {tool} was called before its schema was loaded. It is loaded now: read it under '
+                    f'"Loaded tool schemas" and call {tool} in your next step with the arguments it requires.'
+                ),
+            },
+            [tool],
+        )
+    return _Local(
+        {
+            'tool': 'reply-check',
+            'key': key,
+            'error': f'Skipped: {tool} is not a connected tool ({reason}). Use the exact names listed in Available Tools.',
+        },
+        [],
+    )
+
+
 def _store_and_preview(
     tool: str,
     key: str,
@@ -1312,6 +1412,17 @@ def _execute_wave_calls(
     seen_calls = state.seen_calls if state is not None else None
     removed = state.removed if state is not None else frozenset()
 
+    # Compact mode: the schemas the model saw in the prompt that produced this wave,
+    # decided by the driver before planning (RunState.shown_tools) and never changed
+    # here. A tool loaded during this wave is callable from the next prompt on, the
+    # first one that shows its schema.
+    compact = state is not None and state.loaded_tools is not None
+    shown = state.shown_tools if compact else frozenset()
+
+    def _is_local(tool: str) -> bool:
+        """A call this wave answers itself: tools.load, or a call to a tool whose schema the model has not seen."""
+        return compact and (tool == LOAD_TOOL or (tool != PEEK_TOOL and tool not in shown))
+
     # When each call started, set by the worker thread that runs it. A call that
     # is queued behind a full pool has not started, so its clock has not either.
     started: Dict[int, float] = {}
@@ -1348,12 +1459,15 @@ def _execute_wave_calls(
         asked = call.get('args') or {}
         if not isinstance(asked, dict):
             asked = {}
+        local = _is_local(tool)
 
         # Resolve any {{memory.ref:...}} template references in the args
         # before passing them to the tool.  This lets the LLM compose tool
         # inputs from previously stored results without extra peek calls.
+        # A call this wave answers itself never runs a tool, so its references
+        # are not resolved: a custom format would ask the model for nothing.
         try:
-            args = _resolve_refs(asked, agent_base=agent_base, context=context)
+            args = asked if local else _resolve_refs(asked, agent_base=agent_base, context=context)
         except _MissingRef as exc:
             # Reported like any failed call: the model sees why, and the tool never ran.
             with lock:
@@ -1373,7 +1487,7 @@ def _execute_wave_calls(
                 return _gave_up(idx, timed_out)
 
         debug(f'rocketride wave execute tool={tool!r} key={key!r}')
-        outcome = _call_one(tool, key, args)
+        outcome = _call_one(tool, key, args, local)
         with lock:
             if settled.get(idx) == 'abandoned':
                 return None
@@ -1408,9 +1522,15 @@ def _execute_wave_calls(
             published = settled[idx] == 'storing'
             if published:
                 settled[idx] = 'done'
+                if isinstance(outcome, _Local):
+                    # The settlement point: a load counts only when the wave keeps its
+                    # result. A worker the wave gave up on returned above and never gets here.
+                    if outcome.loads:
+                        state.loaded_tools.update(outcome.loads)
+                    outcome = outcome.entry
                 # Recorded only now: a result the wave gave up on must not be named
                 # as the earlier copy of a later result.
-                if fingerprint is not None:
+                elif fingerprint is not None:
                     outcome = _note_duplicate(outcome, fingerprint, seen_results)
         if not published:
             if stores:
@@ -1423,16 +1543,23 @@ def _execute_wave_calls(
         publish = getattr(context.memory, 'publish', None) if stores else None
         if publish is not None:
             publish(key)
-        # The model is shown the arguments as it wrote them, tags and all.
-        return _with_call(outcome, tool, asked, seen_calls, removed, check_tool, check_args)
+        # The model is shown the arguments as it wrote them, tags and all. A call
+        # answered here did not run, so it is never the first of a repeat.
+        return _with_call(outcome, tool, asked, None if local else seen_calls, removed, check_tool, check_args)
 
-    def _call_one(tool: str, key: str, args: Dict[str, Any]) -> Any:
+    def _call_one(tool: str, key: str, args: Dict[str, Any], local: bool = False) -> Any:
         """Run one call (memory.peek locally, anything else through the host).
 
-        Returns a result entry, or an _Unstored result for the caller to store once
-        it knows the wave still wants it.
+        Returns a result entry, an _Unstored result for the caller to store once it
+        knows the wave still wants it, or a _Local result for a call answered here
+        (*local*: tools.load, or a tool whose schema the model has not seen).
         """
         try:
+            if local:
+                if tool == LOAD_TOOL:
+                    return _load_tools(args, key, context=context)
+                return _unshown_call(tool, key, context=context)
+
             # memory.peek is handled entirely within the executor rather than
             # being routed through the tool pipeline.  Reasons:
             # 1. It reads from the host's memory store directly — there is no
@@ -1443,7 +1570,7 @@ def _execute_wave_calls(
             # 3. peek results are NOT stored back into memory — they are
             #    ephemeral "read" results shown in context and then evicted via
             #    the remove field once the LLM has captured their data in scratch.
-            if tool == 'memory.peek':
+            if tool == PEEK_TOOL:
                 mem_key = args.get('key', '')
                 path = args.get('path', '')
                 mem_result = context.memory.get(mem_key)
@@ -1521,9 +1648,15 @@ def _execute_wave_calls(
 
     def _gave_up(idx: int, why: str) -> Dict[str, Any]:
         call = tagged[idx]
+        tool = call.get('tool', '')
         args = call.get('args') if isinstance(call.get('args'), dict) else {}
-        entry = {'tool': call.get('tool', ''), 'key': call['_key'], 'error': why}
-        return _with_call(entry, call.get('tool', ''), args, seen_calls, removed, check_tool, check_args)
+        local = _is_local(tool)
+        if local and why == timed_out:
+            # A load or lookup ran out of time; no tool ran, and the model must not read that one did.
+            why = f'TimeoutError: looking up {tool} took longer than {limit:g} s; it did not run'
+        entry = {'tool': tool, 'key': call['_key'], 'error': why}
+        # A call that did not run is not the first of a repeat when the model makes it again.
+        return _with_call(entry, tool, args, None if local else seen_calls, removed, check_tool, check_args)
 
     def _abandon(idx: int) -> bool:
         """Claim a call as given up. False if its result was already published."""
@@ -1622,9 +1755,12 @@ def _execute_wave_calls(
             # A call given up on is still inside the engine's invoke. The run waits
             # for it before it ends, so the engine does not tear the pipeline down
             # under it.
+            # A load or lookup never reaches a tool node, so its return cannot change the work.
             if state is not None:
                 for future in abandoned:
-                    state.background.add(future)
+                    state.background.add(
+                        future, changes_work=not _is_local(tagged[future_to_idx[future]].get('tool', ''))
+                    )
         else:
             # The wave itself failed (a worker thread that could not start, say).
             # submit() queues a call before it starts a worker, so a call whose submit
@@ -1663,6 +1799,13 @@ def execute_wave(
         timeout: Seconds each call may take; None for the default, 0 for no limit.
         check_tool: The configured check tool; the repeat notes leave its check calls alone.
         check_args: The check's fixed arguments (verify_args), or None for any.
+
+    In compact mode (``state.loaded_tools`` is a set) only the tools in
+    ``state.shown_tools``, whose schemas the planning prompt showed, run through
+    the host. ``tools.load`` is answered here and loads schemas for the next step.
+    A call to any other tool does not run: it is answered with a ``reply-check``
+    entry that says it was skipped and loaded, or that no such tool is connected.
+    Loads take effect only when the wave keeps their result.
 
     Returns:
         List of result dicts (same order as wave).
