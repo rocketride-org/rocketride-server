@@ -136,3 +136,29 @@ describe('cleanTwin mdx: robustness', () => {
 		assert.equal(cleanTwin('---\ntitle: T\n---\nHello\n', { addTitle: false }), 'Hello\n');
 	});
 });
+
+describe('cleanTwin: code fences, escapes and brace links', () => {
+	it('keeps blank lines inside a fenced code block', () => {
+		const code = '```python\nimport x\n\n\nasync def main():\n    pass\n```';
+		const src = `Intro\n\n\n\n${code}\n\nOutro\n`;
+		assert.equal(cleanTwin(src), `Intro\n\n${code}\n\nOutro\n`);
+		assert.equal(mdx(src), `Intro\n\n${code}\n\nOutro\n`);
+	});
+
+	it('removes a tag whose brace expression holds an escaped quote', () => {
+		assert.equal(mdx("Before\n<Widget label={'it\\'s'} />\nAfter\n"), 'Before\nAfter\n');
+	});
+
+	it('skips an import whose string holds an escaped quote', () => {
+		assert.equal(mdx("import x from 'a\\'b';\n\nText\n"), 'Text\n');
+	});
+
+	it('reads a brace-wrapped string literal as the link target', () => {
+		assert.equal(mdx("<a href={'/quickstart'}>Start</a>\n"), '[Start](/quickstart)\n');
+		assert.equal(mdx('<a href={"/quickstart"}>Start</a>\n'), '[Start](/quickstart)\n');
+	});
+
+	it('leaves the text of a link whose href is not a literal, without a link target', () => {
+		assert.equal(mdx('<a href={url}>Start</a>\n'), 'Start\n');
+	});
+});

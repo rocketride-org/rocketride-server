@@ -50,6 +50,11 @@ describe('pageDescription', () => {
 		assert.equal(pageDescription(md), 'See the engine and run it.');
 	});
 
+	it('ignores an HTML comment, even over several lines, before the first paragraph', () => {
+		const md = '---\ntitle: T\n---\n\n<!-- note to editors\nstill the note -->\n\n# T\n\nThe real first paragraph.\n';
+		assert.equal(pageDescription(md), 'The real first paragraph.');
+	});
+
 	it('returns an empty string when the page has no leading prose', () => {
 		assert.equal(pageDescription('---\ntitle: T\n---\n\n# T\n\n```js\ncode();\n```\n'), '');
 	});

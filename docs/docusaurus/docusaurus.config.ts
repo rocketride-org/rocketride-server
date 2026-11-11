@@ -67,9 +67,12 @@ const config: Config = {
 		// Docusaurus takes the first source line of the first paragraph as the meta
 		// description, which cuts hard-wrapped paragraphs mid-sentence. Pages
 		// without a `description:` get one built from their whole first paragraph.
+		// Partials (a file or folder name starting with `_`) are left alone: front
+		// matter on a partial makes the MDX loader throw in CI.
 		parseFrontMatter: async (params) => {
 			const result = await params.defaultParseFrontMatter(params);
-			if (!result.frontMatter.description) {
+			const isPartial = typeof params.filePath === 'string' && path.relative(contentPath, params.filePath).split(/[\\/]/).some((part) => part.startsWith('_'));
+			if (!isPartial && !result.frontMatter.description) {
 				const description = describePage(result.content);
 				if (description) result.frontMatter.description = description;
 			}

@@ -52,13 +52,23 @@ function splitFences(text) {
 	return segments;
 }
 
+/** Index of the quote that closes the string opened at `j`, or -1. A backslash skips the character after it. */
+function stringEnd(src, j) {
+	const q = src[j];
+	for (let k = j + 1; k < src.length; k++) {
+		if (src[k] === '\\') k++;
+		else if (src[k] === q) return k;
+	}
+	return -1;
+}
+
 /** Index after the `}` that closes the `{` at `j`, or -1. Strings are skipped. */
 function skipBraces(src, j) {
 	let depth = 0;
 	for (; j < src.length; j++) {
 		const c = src[j];
 		if (c === '"' || c === "'" || c === '`') {
-			const k = src.indexOf(c, j + 1);
+			const k = stringEnd(src, j);
 			if (k < 0) return -1;
 			j = k;
 		} else if (c === '{') depth++;
@@ -105,8 +115,10 @@ function parseTag(src, i) {
 }
 
 function attr(attrs, name) {
-	const m = new RegExp(`(?:^|\\s)${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`).exec(attrs);
-	return m ? (m[1] ?? m[2]) : null;
+	const quoted = `"([^"]*)"|'([^']*)'`;
+	const braced = `\\{\\s*(?:"([^"\\\\]*)"|'([^'\\\\]*)')\\s*\\}`; // a plain string literal inside braces
+	const m = new RegExp(`(?:^|\\s)${name}\\s*=\\s*(?:${quoted}|${braced})`).exec(attrs);
+	return m ? (m[1] ?? m[2] ?? m[3] ?? m[4]) : null;
 }
 
 /** End index (the newline or end of text) of the import/export statement at `i`, or -1. */
@@ -115,7 +127,7 @@ function statementEnd(src, i) {
 	for (let j = i; j < src.length; j++) {
 		const c = src[j];
 		if (c === '"' || c === "'" || c === '`') {
-			const k = src.indexOf(c, j + 1);
+			const k = stringEnd(src, j);
 			if (k < 0) return -1;
 			j = k;
 		} else if ('({['.includes(c)) depth++;
@@ -322,7 +334,15 @@ function cleanTwin(raw, { mdx = false, indexUrl = '', addTitle = true } = {}) {
 	const segments = splitFences(fm ? raw.slice(fm[0].length) : raw);
 	const state = { depth: 0, base: null, baseDepth: 0 };
 	const parts = segments.map((s) => (mdx && !s.fence ? cleanMdx(s.text, state) : s.text));
-	let body = parts.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+	// Collapse blank-line runs only outside code fences, where blank lines are part of the code.
+	const fenced = [];
+	let joined = '';
+	parts.forEach((part, i) => {
+		if (i) joined += '\n';
+		if (segments[i].fence) fenced.push([joined.length, joined.length + part.length]);
+		joined += part;
+	});
+	let body = joined.replace(/\n{3,}/g, (run, at) => (fenced.some(([a, b]) => at >= a && at < b) ? run : '\n\n')).trim();
 	// A `# comment` inside a code fence is not a title.
 	const hasTitle = segments.some((s, i) => !s.fence && /^# /m.test(parts[i]));
 	if (addTitle && title && !hasTitle) body = `# ${title.replace(/^['"]|['"]$/g, '')}\n\n${body}`;

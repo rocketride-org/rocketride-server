@@ -19,15 +19,20 @@ const ENTITIES = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;
 function firstParagraph(body) {
 	const text = body.replace(/<!--[\s\S]*?-->/g, '').replace(/<head>[\s\S]*?<\/head>/gi, '');
 	const para = [];
-	let inFence = false;
+	let fence = null; // the open code fence: it closes on the same character, at least as long
 	for (const line of text.split(/\r?\n/)) {
 		const t = line.trim();
-		if (/^(```|~~~)/.test(t)) {
-			if (para.length) break;
-			inFence = !inFence;
+		if (fence) {
+			const close = /^(`{3,}|~{3,})$/.exec(t);
+			if (close && close[1][0] === fence.ch && close[1].length >= fence.len) fence = null;
 			continue;
 		}
-		if (inFence) continue;
+		const open = /^(`{3,}|~{3,})/.exec(t);
+		if (open) {
+			if (para.length) break;
+			fence = { ch: open[1][0], len: open[1].length };
+			continue;
+		}
 		if (!t || SKIP_LINE.test(t)) {
 			if (para.length) break;
 			continue;

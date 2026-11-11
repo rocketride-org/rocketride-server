@@ -76,4 +76,9 @@ describe('describePage', () => {
 	it('returns an empty string when there is no prose', () => {
 		assert.equal(describePage('# Title\n\n| a |\n'), '');
 	});
+
+	it('stays inside a four-backtick block that holds a three-backtick line', () => {
+		const body = '# T\n\n````md\n```js\ncode();\n```\nmore code\n````\n\nReal prose.\n';
+		assert.equal(describePage(body), 'Real prose.');
+	});
 });

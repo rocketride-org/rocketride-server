@@ -325,11 +325,15 @@ function frontMatterTitle(content) {
 }
 
 /**
- * Description for a markdown/MDX page, the same text the meta description tag
- * gets (see describeText in description.js). A front-matter `description:` wins
- * when the page declares one; otherwise the first prose paragraph is used,
- * skipping MDX imports, JSX, headings, code fences, tables and admonitions. Node pages get
- * their description from services*.json instead (see extractDescription).
+ * Description for a markdown/MDX page, as shown in llms.txt. A front-matter
+ * `description:` wins when the page declares one, as it does for the meta
+ * description tag. Otherwise the first prose paragraph is used, skipping HTML
+ * comments, MDX imports, JSX, headings, code fences, tables and admonitions, and
+ * it is shortened by describeText in description.js, the same function the meta
+ * description uses. The paragraph itself is found by this function's own loop,
+ * not by firstParagraph in description.js, so the two can differ on unusual
+ * pages. Node pages get their description from services*.json instead (see
+ * extractDescription).
  * @param {string} content - raw page content (md/mdx).
  * @return {string} description, or '' when the page has no leading prose.
  */
@@ -356,7 +360,7 @@ function pageDescription(content) {
 			}
 		}
 	}
-	const body = content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
+	const body = content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '').replace(/<!--[\s\S]*?-->/g, '');
 	const para = [];
 	let inFence = false;
 	for (const line of body.split(/\r?\n/)) {
