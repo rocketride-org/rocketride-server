@@ -8,7 +8,7 @@ Three categories:
   delegate to rocketlib + ``resolve_implied_source``. Mock those.
 - ``on_rrext_dashboard`` — large method that walks ``_task_control`` and
   ``_connections``. We cover the happy paths (caller filtering,
-  tk_ scoping) with seeded state and bypassed __init__.
+  owner scoping) with seeded state and bypassed __init__.
 """
 
 from __future__ import annotations
@@ -921,6 +921,7 @@ async def test_on_rrext_validate_engine_returns_submitted_config(monkeypatch):
     """The engine's own validator: the reply matches validating the submitted config directly."""
     if not cmd_misc.node_schema('llm_openai'):
         pytest.skip('llm_openai service definition is not loaded')
+    from rocketlib import resolveSecureParameters
 
     direct = cmd_misc.validatePipeline
     calls = _spy_validator(monkeypatch)
@@ -939,9 +940,16 @@ async def test_on_rrext_validate_engine_returns_submitted_config(monkeypatch):
     assert not _has_expanded_value(reply)
 
     llm_1, llm_2, llm_3 = reply['pipeline']['components']
-    # Every reference comes back as written: the key at the config root, the custom
+    # The key at the config root is a secret: it leaves its stored position and
+    # is registered in secureParameters by its path
+    assert 'apikey' not in llm_1['config']
+    assert llm_1['config']['secureParameters']['secure'] == ['apikey']
+
+    # Every reference comes back as written: the key (inside its token), the custom
     # model id inside its branch, the misspelled provider's fields untouched
-    assert llm_1['config']['apikey'] == SERVICE_TOKEN_REF
+    decoded = resolveSecureParameters(copy.deepcopy(reply['pipeline']))
+    assert decoded['components'][0]['config']['apikey'] == SERVICE_TOKEN_REF
+    assert not _has_expanded_value(decoded)
     assert llm_1['config']['custom']['customModel'] == CUSTOM_MODEL_REF
     assert llm_2['config']['openai-4o-mini']['apikey'] == SERVICE_TOKEN_REF
     assert llm_2['config']['note'] == f'served from {SERVICE_TOKEN_REF}'
@@ -953,6 +961,7 @@ async def test_on_rrext_validate_engine_single_component_returns_submitted_confi
     """The engine's single-component validator, stopped by an unknown model id before any node code runs."""
     if not cmd_misc.node_schema('llm_openai'):
         pytest.skip('llm_openai service definition is not loaded')
+    from rocketlib import resolveSecureParameters
 
     direct = cmd_misc.validatePipeline
     calls = _spy_validator(monkeypatch)
@@ -970,7 +979,13 @@ async def test_on_rrext_validate_engine_single_component_returns_submitted_confi
     assert _with_fixed_tokens(reply['component']) == _with_fixed_tokens(direct_component)
     assert reply['errors']
     assert all(entry['message'] == _template_message(ENV, 'error') for entry in reply['errors'])
-    assert reply['component']['config']['apikey'] == SERVICE_TOKEN_REF
+
+    # The key moved into secureParameters, and its token holds the reference as written
+    assert 'apikey' not in reply['component']['config']
+    assert reply['component']['config']['secureParameters']['secure'] == ['apikey']
+    decoded = resolveSecureParameters({'components': [copy.deepcopy(reply['component'])]})
+    assert decoded['components'][0]['config']['apikey'] == SERVICE_TOKEN_REF
+    assert not _has_expanded_value(decoded)
     assert not _has_expanded_value(reply)
 
 
@@ -1017,9 +1032,10 @@ async def test_on_rrext_dashboard_filters_to_caller_user_id(monkeypatch):
     )
     own_control = SimpleNamespace(
         id='task-1',
+        key='dev.user-1.acme.proj-1.reader',
+        address='acme.proj-1.reader',
         userId='user-1',
         teamId='team-1',
-        token='tk_1',
         source='reader',
         project_id='proj-1',
         run_kind='dev',
@@ -1031,9 +1047,10 @@ async def test_on_rrext_dashboard_filters_to_caller_user_id(monkeypatch):
     )
     other_control = SimpleNamespace(
         id='task-2',
+        key='dev.other-user.acme.proj-2.other-source',
+        address='acme.proj-2.other-source',
         userId='other-user',
         teamId='team-other',
-        token='tk_2',
         source='other-source',
         project_id='proj-2',
         run_kind='dev',
@@ -1044,7 +1061,7 @@ async def test_on_rrext_dashboard_filters_to_caller_user_id(monkeypatch):
     )
 
     server = MagicMock()
-    server._task_control = {'tk_1': own_control, 'tk_2': other_control}
+    server._task_control = {own_control.key: own_control, other_control.key: other_control}
     server._connections = {}
     server._server = SimpleNamespace(_startTime=900.0)
 
@@ -1100,13 +1117,17 @@ def _list_control(task_id, *, name=None, start=900.0, provider='node-x', team_id
         rateSize=0,
         metrics=None,
     )
+    # Controls are keyed runKind.ownerId.address; each task runs its own
+    # pipeline (the task id), so every control has its own address and key
+    address = f'acme.{task_id}.reader'
     return SimpleNamespace(
         id=task_id,
+        key=f'dev.user-1.{address}',
+        address=address,
         userId='user-1',
         teamId=team_id,
-        token=f'tk_{task_id}',
         source='reader',
-        project_id='proj-1',
+        project_id=task_id,
         run_kind='dev',
         provider=provider,
         task=SimpleNamespace(
@@ -1150,7 +1171,7 @@ def _list_ws_conn(
 def _make_server(controls=(), connections=None):
     """Build a server stand-in seeded with task controls and connections."""
     server = MagicMock()
-    server._task_control = {c.token: c for c in controls}
+    server._task_control = {c.key: c for c in controls}
     server._connections = connections or {}
     server._server = SimpleNamespace(_startTime=900.0)
     return server

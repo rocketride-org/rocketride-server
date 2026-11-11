@@ -1176,11 +1176,26 @@ def _launch_pipeline():
     }
 
 
-def _seed_running_task(ts, token, task_id):
-    """Register a live (not complete) task with display id ``task_id`` under ``token``."""
+# The identity of a dev launch: the authenticated user launching as itself,
+# its team, and the org's developer id (the address namespace). Every
+# refusal below is reached with a valid identity, so it is the pipeline that
+# is refused, never the caller.
+LAUNCH_IDENTITY = {'client_id': 'user-1', 'user_id': 'user-1', 'team_id': 'team-1', 'developer_id': 'acme'}
+
+# The address and registry key a dev launch of ``_launch_pipeline()`` builds.
+LAUNCH_ADDRESS = 'acme.project-1.src'
+LAUNCH_KEY = f'dev.user-1.{LAUNCH_ADDRESS}'
+
+
+def _seed_running_task(ts):
+    """Register a live (not complete) run of ``_launch_pipeline()`` at the key a dev launch of it builds."""
     task = MagicMock()
     task.is_task_complete.return_value = False
-    ts._task_control[token] = SimpleNamespace(id=task_id, token=token, pipeline=_launch_pipeline(), task=task)
+    control = SimpleNamespace(
+        id=LAUNCH_ADDRESS, key=LAUNCH_KEY, address=LAUNCH_ADDRESS, pipeline=_launch_pipeline(), task=task
+    )
+    ts._task_control[LAUNCH_KEY] = control
+    return control
 
 
 def _assert_says_how_to_run_or_attach(message: str, display_id: str) -> None:
@@ -1191,41 +1206,47 @@ def _assert_says_how_to_run_or_attach(message: str, display_id: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_start_task_already_running_with_a_derived_token_says_how_to_run_or_attach():
-    """No token from the caller: the second run of the same pipe hashes to the
-    first one's token, so the refusal must identify that existing run.
+async def test_start_task_already_running_at_the_same_address_says_how_to_run_or_attach():
+    """The second launch of the same pipe by the same owner derives the first
+    one's address and registry key, so the refusal must identify that existing
+    run, and the running control is left in place.
     """
     ts = _make_server()
-    ts._server.account.generate_token.side_effect = lambda content, prefix: f'{prefix}digest0123'
-    # A seeded id unlike the one this request builds ('digest01.src'), so the
-    # assertion tells the running task's id from the request's.
-    _seed_running_task(ts, 'tk_digest0123', 'running.src')
-
-    with pytest.raises(ValueError) as excinfo:
-        await ts.start_task({'command': 'launch', 'arguments': {'pipeline': _launch_pipeline()}}, conn=MagicMock())
-
-    _assert_says_how_to_run_or_attach(str(excinfo.value), 'running.src')
-
-
-@pytest.mark.asyncio
-async def test_start_task_already_running_with_a_caller_token_says_how_to_run_or_attach():
-    """A caller-supplied token that is already running is refused the same way.
-
-    A caller's token is not scoped by source: the running task started from
-    ``src`` (id ``mine.src``) while this request asks for ``llm``, so the id it
-    builds is ``mine.llm``. The refusal names the task that is running.
-    """
-    ts = _make_server()
-    ts._server.account.generate_token.return_value = 'pk_public'
-    _seed_running_task(ts, 'tk_mine', 'mine.src')
+    running = _seed_running_task(ts)
 
     with pytest.raises(ValueError) as excinfo:
         await ts.start_task(
-            {'command': 'launch', 'arguments': {'token': 'tk_mine', 'source': 'llm', 'pipeline': _launch_pipeline()}},
-            conn=MagicMock(),
+            {'command': 'launch', 'arguments': {'pipeline': _launch_pipeline()}}, conn=MagicMock(), **LAUNCH_IDENTITY
         )
 
-    _assert_says_how_to_run_or_attach(str(excinfo.value), 'mine.src')
+    _assert_says_how_to_run_or_attach(str(excinfo.value), LAUNCH_ADDRESS)
+    assert ts._task_control == {LAUNCH_KEY: running}
+
+
+@pytest.mark.asyncio
+async def test_start_task_refuses_a_caller_token():
+    """A caller-supplied token is refused, whatever is running (plan B1).
+
+    Only the server derives a run's address and registry key; a caller naming
+    one could alias another run. The refusal comes before anything is looked
+    up, so the running task is untouched.
+    """
+    ts = _make_server()
+    running = _seed_running_task(ts)
+
+    with pytest.raises(TaskError) as excinfo:
+        await ts.start_task(
+            {'command': 'launch', 'arguments': {'token': 'tk_mine', 'source': 'llm', 'pipeline': _launch_pipeline()}},
+            conn=MagicMock(),
+            **LAUNCH_IDENTITY,
+        )
+
+    assert excinfo.value.code == TaskError.INVALID_ARGUMENT
+    assert excinfo.value.field == 'token'
+    assert str(excinfo.value) == (
+        'token is not accepted on execute: tasks are addressed by name, which the server derives'
+    )
+    assert ts._task_control == {LAUNCH_KEY: running}
 
 
 @pytest.mark.parametrize(
@@ -1263,7 +1284,7 @@ async def test_start_task_without_a_pipeline_says_how_to_pass_one(arguments):
     ts = _make_server()
 
     with pytest.raises(RuntimeError) as excinfo:
-        await ts.start_task({'command': 'launch', 'arguments': arguments}, conn=MagicMock())
+        await ts.start_task({'command': 'launch', 'arguments': arguments}, conn=MagicMock(), **LAUNCH_IDENTITY)
 
     assert str(excinfo.value) == (
         'Pipeline configuration is missing or invalid. Pass the pipeline object itself; '
@@ -1281,7 +1302,9 @@ async def test_start_task_without_a_source_component_says_how_to_add_one():
     pipeline = {'project_id': 'project-1', 'components': [{'id': 'chat_1', 'provider': 'chat', 'config': {}}]}
 
     with pytest.raises(ValueError) as excinfo:
-        await ts.start_task({'command': 'launch', 'arguments': {'pipeline': pipeline}}, conn=MagicMock())
+        await ts.start_task(
+            {'command': 'launch', 'arguments': {'pipeline': pipeline}}, conn=MagicMock(), **LAUNCH_IDENTITY
+        )
 
     message = str(excinfo.value)
     assert message == 'Pipeline has no source. Select a source component or add a node configured as a source.'
