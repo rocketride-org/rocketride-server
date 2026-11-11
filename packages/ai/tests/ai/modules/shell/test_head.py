@@ -108,11 +108,11 @@ def test_headless_documents_only_lose_tags_before_body():
 
 
 def test_jsonld_cannot_break_out_of_its_script():
-    payload = {'name': '</script><script>alert(1)</script>', 'd': 'a & b   '}
+    payload = {'name': '</script><script>alert(1)</script>', 'd': 'a & b \u2028\u2029'}
     script = jsonld_script(payload)
     inner = re.match(r'^<script type="application/ld\+json">(.*)</script>$', script, re.S).group(1)
     assert '<' not in inner and '>' not in inner and '&' not in inner
-    assert ' ' not in inner and ' ' not in inner
+    assert '\u2028' not in inner and '\u2029' not in inner
     assert json.loads(inner) == payload
 
 

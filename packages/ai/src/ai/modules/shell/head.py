@@ -84,8 +84,8 @@ def jsonld_script(obj: Mapping[str, Any]) -> str:
         ('<', '\\u003c'),
         ('>', '\\u003e'),
         ('&', '\\u0026'),
-        (' ', '\\u2028'),
-        (' ', '\\u2029'),
+        ('\u2028', '\\u2028'),
+        ('\u2029', '\\u2029'),
     ):
         text = text.replace(raw, escaped)
     return f'<script type="application/ld+json">{text}</script>'
