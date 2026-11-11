@@ -38,6 +38,7 @@ is what replaces the ``pk_``.)
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -607,3 +608,198 @@ async def test_deauth_detaches_the_debugger_from_its_tasks():
 
     assert conn._authenticated is False
     run.task.detach_task.assert_awaited_once_with(conn)
+
+
+# =============================================================================
+# An auth that replaces the identity of a live connection ends the previous
+# session exactly as deauth does, and session transitions are serialised: the
+# transport dispatches requests concurrently, so an open or an auth racing the
+# cleanup must never see a half-ended session.
+# =============================================================================
+
+
+def _reauth_conn(identity):
+    """A session connection whose auth command hydrates any ``rr_`` key to its own user."""
+    conn = _session_conn(identity)
+    conn._server._server = _web_server_with_authenticator()
+    return conn
+
+
+async def _auth(conn, credential, seq=2):
+    """Send one auth request through the real TaskConn.on_receive."""
+    await TaskConn.on_receive(
+        conn, {'type': 'request', 'command': 'auth', 'seq': seq, 'arguments': {'auth': credential}}
+    )
+
+
+@pytest.mark.asyncio
+async def test_reauth_as_another_user_ends_the_first_session(store_backend):
+    """Handles, monitors and debugger attachments of the first identity do not pass to the second."""
+    conn = _reauth_conn(_make_account_info(auth=FULL_KEY, user_id='owner-1'))
+    run = _team_run(ADDRESS, 'task-in')
+    run.task.detach_task = AsyncMock()
+    conn._server._task_control = {run.key: run}
+    conn._monitors = {'*': object()}
+    opened = await conn._store_fs_open({}, {'path': 'notes.txt'})
+    handle = opened['body']['handle']
+    epoch = conn._session_epoch
+
+    await _auth(conn, 'rr_other')
+
+    # The second identity is installed on a fresh session
+    assert conn._authenticated is True
+    assert conn._account_info.auth == 'rr_other'
+    assert conn._session_epoch == epoch + 1
+    # ...and nothing of the first one survived
+    assert conn._monitors == {}
+    run.task.detach_task.assert_awaited_once_with(conn)
+    assert _open_handles() == []
+    store_backend.close_read.assert_awaited_once()
+    with pytest.raises(StorageError, match='Invalid handle'):
+        await conn._store_fs_read({}, {'handle': handle})
+    store_backend.read_chunk.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_first_auth_ends_no_session_and_releases_the_unauthed_slot():
+    """Only a replacement ends a session; a first auth gives up the IP's unauthenticated slot once."""
+    conn = _reauth_conn(None)
+    conn._authenticated = False
+    conn._server._unauthed_by_ip = {conn._client_ip: 2}
+    epoch = conn._session_epoch
+
+    await _auth(conn, FULL_KEY)
+    assert conn._session_epoch == epoch
+    assert conn._server._unauthed_by_ip == {conn._client_ip: 1}
+
+    # A replacement keeps the slot count: the connection holds no slot
+    await _auth(conn, 'rr_other', seq=3)
+    assert conn._session_epoch == epoch + 1
+    assert conn._server._unauthed_by_ip == {conn._client_ip: 1}
+
+
+@pytest.mark.asyncio
+async def test_an_open_in_flight_at_reauth_does_not_keep_its_handle(store_backend):
+    """An open begun by the first identity and finished after the replacement is closed and refused."""
+    conn = _reauth_conn(_make_account_info(auth=FULL_KEY, user_id='owner-1'))
+
+    async def open_across_reauth(path):
+        # The backend is still opening when another identity authenticates
+        await _auth(conn, 'rr_other')
+        return {'context': object(), 'size': 3}
+
+    store_backend.open_read.side_effect = open_across_reauth
+
+    with pytest.raises(PermissionError, match='session ended'):
+        await conn._store_fs_open({}, {'path': 'notes.txt'})
+
+    assert conn._account_info.auth == 'rr_other'
+    assert _open_handles() == []
+    store_backend.close_read.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_an_open_racing_the_cleanup_never_leaves_a_handle(store_backend):
+    """Opens issued while the session is being ended are refused or closed; none stays registered."""
+    conn = _reauth_conn(_make_account_info(auth=FULL_KEY, user_id='owner-1'))
+    run = _team_run(ADDRESS, 'task-in')
+    in_cleanup = asyncio.Event()
+    release = asyncio.Event()
+
+    async def slow_detach(_conn):
+        # Hold the cleanup open after the identity was cleared
+        in_cleanup.set()
+        await release.wait()
+
+    run.task.detach_task = slow_detach
+    conn._server._task_control = {run.key: run}
+
+    # An open already awaiting the backend when the deauth begins
+    backend_entered = asyncio.Event()
+    backend_release = asyncio.Event()
+
+    async def slow_open(path):
+        backend_entered.set()
+        await backend_release.wait()
+        return {'context': object(), 'size': 3}
+
+    store_backend.open_read.side_effect = slow_open
+    in_flight = asyncio.create_task(conn._store_fs_open({}, {'path': 'early.txt'}))
+    await backend_entered.wait()
+
+    deauth = asyncio.create_task(_dispatch(conn, 'deauth'))
+    await in_cleanup.wait()
+
+    # Mid-cleanup the identity is already gone: a direct open is refused
+    # before it reaches the store, and a dispatched one is refused at the gate
+    assert conn._authenticated is False
+    with pytest.raises(PermissionError, match='session ended'):
+        await conn._store_fs_open({}, {'path': 'late.txt'})
+    gate = _install_spies(conn, ['rrext_store'])
+    await _dispatch(conn, 'rrext_store', {'subcommand': 'fs_open', 'path': 'late.txt'})
+    gate['rrext_store'].assert_not_awaited()
+
+    # The in-flight open resumes during the cleanup and registers its handle
+    backend_release.set()
+    with pytest.raises(PermissionError, match='session ended'):
+        await in_flight
+
+    release.set()
+    await deauth
+
+    assert _open_handles() == []
+    assert store_backend.open_read.await_count == 1
+    store_backend.close_read.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_an_auth_during_cleanup_waits_and_starts_on_a_clean_session(store_backend):
+    """A new identity is installed only after the previous session's cleanup has finished."""
+    conn = _reauth_conn(_make_account_info(auth=FULL_KEY, user_id='owner-1'))
+    opened = await conn._store_fs_open({}, {'path': 'notes.txt'})
+    handle = opened['body']['handle']
+    conn._monitors = {'*': object()}
+
+    run = _team_run(ADDRESS, 'task-in')
+    in_cleanup = asyncio.Event()
+    release = asyncio.Event()
+    order = []
+
+    async def slow_detach(_conn):
+        in_cleanup.set()
+        await release.wait()
+        order.append('detached')
+
+    run.task.detach_task = slow_detach
+    conn._server._task_control = {run.key: run}
+
+    authenticate = conn._server._server.authenticate_credential
+
+    async def recording_authenticate(credential):
+        order.append('authenticate')
+        return await authenticate(credential)
+
+    conn._server._server.authenticate_credential = recording_authenticate
+
+    deauth = asyncio.create_task(_dispatch(conn, 'deauth'))
+    await in_cleanup.wait()
+    auth = asyncio.create_task(_auth(conn, 'rr_other', seq=3))
+
+    # The auth is parked on the session lock while the cleanup runs
+    for _ in range(5):
+        await asyncio.sleep(0)
+    assert order == []
+    assert conn._authenticated is False
+
+    release.set()
+    await deauth
+    await auth
+
+    # Cleanup finished (handles closed) before the new identity was validated
+    assert order == ['detached', 'authenticate']
+    assert conn._authenticated is True
+    assert conn._account_info.auth == 'rr_other'
+    assert conn._monitors == {}
+    assert _open_handles() == []
+    with pytest.raises(StorageError, match='Invalid handle'):
+        await conn._store_fs_read({}, {'handle': handle})

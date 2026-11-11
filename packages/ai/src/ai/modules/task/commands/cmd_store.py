@@ -163,12 +163,16 @@ class StoreCommands(DAPConn):
         Returns:
             DAP response with handle ID (and metadata for read mode).
         """
+        # Capture the session this open runs under together with the store
+        # bound to its identity, with no await in between: _end_session
+        # clears the identity and bumps the epoch before it awaits anything,
+        # so both belong to the same session or the open is refused here
+        if not self._authenticated:
+            raise PermissionError('The session ended before the file was opened')
+        epoch = self._session_epoch
         fs = self._get_file_store()
         path = args.get('path')
         mode = args.get('mode', 'r')
-
-        # The session this open runs under; on_deauth bumps it
-        epoch = self._session_epoch
 
         if mode == 'w':
             # Create a write handle tied to this connection for cleanup on disconnect
@@ -179,10 +183,11 @@ class StoreCommands(DAPConn):
             body = await fs.open_read(path)
             handle_id = body['handle']
 
-        # The session ended while the open was awaiting the backend. Deauth's
-        # handle cleanup may have run before this handle was registered, so
-        # close it here: it must not outlive the session that opened it
-        if self._session_epoch != epoch:
+        # The session ended (deauth, or an auth replacing the identity) while
+        # the open was awaiting the backend. The session's handle cleanup may
+        # have run before this handle was registered, so close it here: it
+        # must not outlive the session that opened it
+        if self._session_epoch != epoch or not self._authenticated:
             try:
                 if mode == 'w':
                     await fs.close_write(handle_id)

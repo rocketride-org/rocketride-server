@@ -59,6 +59,7 @@ This design provides a single connection point while maintaining separation
 of concerns through specialized command handler classes.
 """
 
+import asyncio
 import time
 from typing import TYPE_CHECKING, Dict, Any, Union, Optional
 from rocketride import EVENT_TYPE
@@ -276,10 +277,16 @@ class TaskConn(
         self._account_info: Optional[AccountInfo] = None
         self._authenticated = False
 
-        # Session generation: bumped by on_deauth so a handler that was
+        # Session generation: bumped by _end_session so a handler that was
         # awaiting when its session ended (a store open) can tell, once it
         # resumes, that what it acquired belongs to an ended session.
         self._session_epoch: int = 0
+
+        # Serialises session transitions (on_auth, on_deauth, _end_session).
+        # The transport dispatches requests concurrently, so without it an
+        # auth could install a new identity while the previous session's
+        # cleanup is still closing handles and detaching debuggers.
+        self._session_lock = asyncio.Lock()
 
         # Client IP — set by task_server.listen() immediately after construction,
         # used for per-IP unauthenticated connection tracking.
@@ -377,63 +384,77 @@ class TaskConn(
             self._transport.disconnect()
             return
 
-        credential = args.get('auth') or ''
+        # Session transitions run one at a time: an auth that arrives while a
+        # previous session is being ended waits for that cleanup to finish
+        async with self._session_lock:
+            credential = args.get('auth') or ''
 
-        result = await self._server._server.authenticate_credential(credential)
-        if isinstance(result, tuple):
-            error_code, error_message = result
+            result = await self._server._server.authenticate_credential(credential)
+            if isinstance(result, tuple):
+                error_code, error_message = result
+                await self._server.broadcast_server_event(
+                    EVENT_TYPE.DASHBOARD,
+                    {
+                        'event': 'apaevt_dashboard',
+                        'body': {
+                            'action': 'auth_failed',
+                            'timestamp': time.time(),
+                            'connectionId': self.get_connection_id(),
+                            'reason': error_message,
+                            'code': error_code,
+                        },
+                    },
+                )
+
+                # Send an error message
+                err = self.build_error(request, error_message)
+                await self.send(err)
+
+                # Schedules the disconnect after we return
+                self._transport.disconnect()
+                return
+
+            # A replacement identity on a live connection ends the previous
+            # session first: its handles, monitors and debugger attachments are
+            # owned by the connection, so they would otherwise pass to the new
+            # identity. The connection already gave up its unauthenticated slot
+            # when that session began, so the slot is released only on a first
+            # authentication.
+            replacing = self._authenticated
+            if replacing:
+                await self._end_session()
+
+            self._account_info = result
+            self._authenticated = True
+            if not replacing:
+                self._server.release_unauthed_slot(self._client_ip)
+
+            # Capture optional client identification from auth arguments
+            if args.get('clientName'):
+                self._client_info['name'] = str(args['clientName'])
+            if args.get('clientVersion'):
+                self._client_info['version'] = str(args['clientVersion'])
+
+            # Notify dashboard subscribers
             await self._server.broadcast_server_event(
                 EVENT_TYPE.DASHBOARD,
                 {
                     'event': 'apaevt_dashboard',
                     'body': {
-                        'action': 'auth_failed',
+                        'action': 'connection_added',
                         'timestamp': time.time(),
                         'connectionId': self.get_connection_id(),
-                        'reason': error_message,
-                        'code': error_code,
+                        'clientName': self._client_info.get('name'),
+                        'clientVersion': self._client_info.get('version'),
+                        'clientId': self._account_info.userId if self._account_info else None,
                     },
                 },
+                user_id=self._account_info.userId,
             )
 
-            # Send an error message
-            err = self.build_error(request, error_message)
-            await self.send(err)
-
-            # Schedules the disconnect after we return
-            self._transport.disconnect()
-            return
-
-        self._account_info = result
-        self._authenticated = True
-        self._server.release_unauthed_slot(self._client_ip)
-
-        # Capture optional client identification from auth arguments
-        if args.get('clientName'):
-            self._client_info['name'] = str(args['clientName'])
-        if args.get('clientVersion'):
-            self._client_info['version'] = str(args['clientVersion'])
-
-        # Notify dashboard subscribers
-        await self._server.broadcast_server_event(
-            EVENT_TYPE.DASHBOARD,
-            {
-                'event': 'apaevt_dashboard',
-                'body': {
-                    'action': 'connection_added',
-                    'timestamp': time.time(),
-                    'connectionId': self.get_connection_id(),
-                    'clientName': self._client_info.get('name'),
-                    'clientVersion': self._client_info.get('version'),
-                    'clientId': self._account_info.userId if self._account_info else None,
-                },
-            },
-            user_id=self._account_info.userId,
-        )
-
-        # Apps are already populated in AccountInfo by the account service
-        # (desktop apps with full manifest + subscription status).
-        return self.build_response(request, body=result.to_connect_result())
+            # Apps are already populated in AccountInfo by the account service
+            # (desktop apps with full manifest + subscription status).
+            return self.build_response(request, body=result.to_connect_result())
 
     async def on_deauth(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -442,48 +463,65 @@ class TaskConn(
         Reverts the connection to unauthenticated mode so only
         ``rrext_public_*`` commands are accepted. The WebSocket stays
         open — callers can re-authenticate later via ``auth``. The
-        session's subscriptions end with it: every monitor is dropped and
-        the connection is detached from any task it debugs, and its open
-        file-store handles are closed.
+        session's subscriptions, debugger attachments and open file-store
+        handles end with it (see ``_end_session``).
         """
-        # Nothing to do if not authenticated
-        if not self._authenticated:
-            return self.build_response(request, body={})
+        async with self._session_lock:
+            # Nothing to do if not authenticated
+            if not self._authenticated:
+                return self.build_response(request, body={})
 
-        # Mark the session ended before the first await below: a store open
-        # still in flight compares this when it resumes and closes the handle
-        # it acquired (see StoreCommands._store_fs_open)
+            # Re-acquire an unauthenticated slot for this IP
+            if self._client_ip:
+                self._server._unauthed_by_ip[self._client_ip] = self._server._unauthed_by_ip.get(self._client_ip, 0) + 1
+
+            # End the session: identity, subscriptions, attachments, handles
+            await self._end_session()
+
+        return self.build_response(request, body={})
+
+    async def _end_session(self) -> None:
+        """
+        End the connection's current session: on deauth, and on an auth that
+        replaces the identity of a live connection.
+
+        Everything the session acquired on the socket is owned by the
+        connection rather than the identity, so whatever is left behind would
+        be usable by whoever authenticates next: every monitor is dropped, the
+        connection is detached from any task it debugs, and its open
+        file-store handles are closed.
+
+        The caller holds ``_session_lock``, so no new session can start until
+        this cleanup has finished.
+        """
+        # Step 1: end the session before the first await. The transport
+        # dispatches requests concurrently: clearing the identity makes the
+        # dispatch gate refuse every request that arrives from here on, and
+        # bumping the epoch lets a store open still in flight see, when it
+        # resumes, that its session ended (see StoreCommands._store_fs_open)
+        self._authenticated = False
+        self._account_info = None
         self._session_epoch += 1
 
-        # Re-acquire an unauthenticated slot for this IP
-        if self._client_ip:
-            self._server._unauthed_by_ip[self._client_ip] = self._server._unauthed_by_ip.get(self._client_ip, 0) + 1
-
-        # Drop every subscription made under the ending session. Event
-        # delivery filters by the session's account, so one retained past
-        # it would keep receiving: a '*' monitor would get every server
-        # event (no account left to scope it), and an attached debugger
-        # would keep getting its task's debug events
+        # Step 2: drop every subscription made under the ending session.
+        # Event delivery filters by the session's account, so one retained
+        # past it would keep receiving: a '*' monitor would get every server
+        # event (no account left to scope it)
         self._monitors.clear()
+
+        # Step 3: detach from every task this connection debugs, so an
+        # attached debugger stops getting its task's debug events
         for control in list(self._server._task_control.values()):
             try:
                 await control.task.detach_task(self)
             except Exception as e:
-                self.debug_message(f'Error detaching from task "{control.id}" on deauth: {e}')
+                self.debug_message(f'Error detaching from task "{control.id}" on session end: {e}')
 
-        # Close the session's file-store handles, as disconnect does. Handles
-        # are owned by the connection id, not the identity, so one left open
-        # would stay usable by whoever authenticates next on this socket
+        # Step 4: close the session's file-store handles, as disconnect does
         try:
             await self._server.store.close_all_handles(self._connection_id)
         except Exception as e:
-            self.debug_message(f'Error closing file handles on deauth: {e}')
-
-        # Clear authentication state
-        self._authenticated = False
-        self._account_info = None
-
-        return self.build_response(request, body={})
+            self.debug_message(f'Error closing file handles on session end: {e}')
 
     def has_permission(self, perm: Union[list, str]) -> bool:
         """Check if the user holds the permission on ANY of their membership teams.

@@ -22,6 +22,7 @@ Focus areas:
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -48,7 +49,8 @@ def _make_conn(
 
     Attributes consumed by the methods under test are set explicitly:
     ``_server``, ``_transport``, ``_account_info``, ``_authenticated``,
-    ``_connection_id``, ``_client_ip``, ``_auth_attempts``, counters,
+    ``_connection_id``, ``_client_ip``, ``_auth_attempts``, the session
+    epoch and lock, counters,
     ``_messages_in/out``, ``_last_activity``, ``_monitors`` (empty).
 
     Real DAPConn helpers (``build_response``, ``build_error``,
@@ -72,6 +74,7 @@ def _make_conn(
     conn._account_info = account_info
     conn._auth_attempts = 0
     conn._session_epoch = 0
+    conn._session_lock = asyncio.Lock()
     conn._messages_in = 0
     conn._messages_out = 0
     conn._last_activity = 0.0
