@@ -58,7 +58,6 @@ and never affect the rebuild.
 
 import asyncio
 import hashlib
-import os
 import re
 from dataclasses import dataclass, replace
 from typing import Any, Dict, Iterable, Iterator, List, Optional, Set, Tuple
@@ -75,6 +74,7 @@ from . import public_pages
 from .contract import Page
 from .pages import snapshot_path
 from .public_pages import Aggregate
+from .settings import indexnow_key
 from .shell import app_url
 
 ENDPOINT = 'https://api.indexnow.org/indexnow'
@@ -109,8 +109,10 @@ _worker: Optional[asyncio.Task] = None
 
 def key() -> str:
     """The configured IndexNow key, or '' when absent or malformed."""
-    value = os.environ.get('RR_INDEXNOW_KEY', '').strip()
-    return value if _KEY.fullmatch(value) else ''
+    value = indexnow_key()
+    if not _KEY.fullmatch(value):
+        return ''
+    return value
 
 
 def enabled() -> bool:
