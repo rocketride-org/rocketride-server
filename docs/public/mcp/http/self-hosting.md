@@ -14,8 +14,29 @@ http://<host>:5565/mcp
 
 The engine binds `localhost` by default, so the endpoint is only reachable
 from the machine itself until you configure a wider bind host. The moment you
-do, OAuth requires `MCP_EXPECTED_AUDIENCE` (below); API-key auth
-(`Authorization: Bearer rr_...`) works in every configuration.
+do, OAuth requires `MCP_EXPECTED_AUDIENCE` (below). API-key auth
+(`Authorization: Bearer rr_...`) is the simplest sign-in for a self-hosted
+engine. On an engine not bound to localhost (this includes the Docker image, even
+with a `127.0.0.1` port mapping), the key must start with `rr_`; other bearer
+values are refused with 401.
+
+> **Warning:** when neither `ROCKETRIDE_URI` nor `MCP_RESOURCE_IDENTIFIER` is set
+> on such an engine, MCP tool calls connect to `wss://api.rocketride.ai`
+> (RocketRide Cloud), not to your engine. `initialize` and `tools/list` succeed, then every tool call fails
+> with `Invalid or revoked API key`. For a self-hosted engine, set `ROCKETRIDE_URI=ws://127.0.0.1:<port>`.
+
+A Docker command that works end to end (MCP calls then use
+`Authorization: Bearer rr_local`):
+
+```bash
+docker run -d --name rocketride-engine --platform linux/amd64 \
+  -p 127.0.0.1:5565:5565 \
+  -v rocketride-data:/opt/data \
+  --restart unless-stopped \
+  -e ROCKETRIDE_APIKEY=rr_local \
+  -e ROCKETRIDE_URI=ws://127.0.0.1:5565 \
+  ghcr.io/rocketride-org/rocketride-engine:latest
+```
 
 ## Configuration
 

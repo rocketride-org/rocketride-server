@@ -21,15 +21,22 @@ docker run -d --name rocketride-engine \
   ghcr.io/rocketride-org/rocketride-engine:latest
 ```
 
-Point any client at it and go:
+This command is enough for the CLI and SDK. For the built-in MCP server use the
+command in [MCP on this engine](#mcp-on-this-engine) instead, which adds two `-e`
+settings, and on Apple Silicon add `--platform linux/amd64` (see
+[The image](#the-image)).
+
+Point any client at it and go. A client needs a non-empty key, and an engine
+started without one accepts any value:
 
 ```bash
 export ROCKETRIDE_URI=ws://localhost:5565
+export ROCKETRIDE_APIKEY=local
 ```
 
 The `127.0.0.1:` prefix keeps the engine reachable only from the machine
-itself — the right default, since a fresh engine accepts unauthenticated
-connections. Widen it only behind TLS and authentication (see
+itself — the right default, since an engine started without a key accepts any
+non-empty one. Widen it only behind TLS and authentication (see
 [Security](/operate/security)).
 
 ## The image
@@ -64,6 +71,28 @@ The engine reads configuration from its environment — pass variables with
   engine: `MCP_EXPECTED_AUDIENCE` and friends — see
   [MCP self-hosting](/connect/mcp/http/self-hosting).
 
+## MCP on this engine
+
+The image binds all container interfaces, so the engine treats itself as a
+public bind. For the built-in MCP server at `http://localhost:5565/mcp` to work,
+start the container with an `rr_` key and with `ROCKETRIDE_URI`:
+
+```bash
+docker run -d --name rocketride-engine --platform linux/amd64 \
+  -p 127.0.0.1:5565:5565 \
+  -v rocketride-data:/opt/data \
+  --restart unless-stopped \
+  -e ROCKETRIDE_APIKEY=rr_local \
+  -e ROCKETRIDE_URI=ws://127.0.0.1:5565 \
+  ghcr.io/rocketride-org/rocketride-engine:latest
+```
+
+MCP clients then send `Authorization: Bearer rr_local`. The key must start with
+`rr_`. When neither `ROCKETRIDE_URI` nor `MCP_RESOURCE_IDENTIFIER` is set on an
+engine that is not bound to localhost, MCP tool calls connect to RocketRide Cloud
+and fail. The CLI and SDK must send the same `ROCKETRIDE_APIKEY` the engine was
+started with. See [MCP self-hosting](/connect/mcp/http/self-hosting).
+
 ## Persistence
 
 The engine writes runtime data to `/opt/data` (declared as a volume). Mount a
@@ -80,16 +109,16 @@ endpoint, so `docker ps` shows real health:
 curl http://localhost:5565/version
 ```
 
-(Use `/version`, not `/ping`: the engine entrypoint starts its web server
-without the standard endpoints, so `/ping` is never registered and returns
-404. `/version` is always registered and public.)
+(Use `/version`, not `/ping`: `/version` is the address that answers without
+a key. Every unknown path, including `/ping`, `/health` and `/healthz`,
+answers 401.)
 
 Upgrading is pull-and-replace; state lives in the volume:
 
 ```bash
 docker pull ghcr.io/rocketride-org/rocketride-engine:latest
 docker rm -f rocketride-engine
-# re-run the docker run command above
+# re-run the same docker run command you started it with
 ```
 
 Upgrading from an image that ran as a system user (uid 999): the existing volume

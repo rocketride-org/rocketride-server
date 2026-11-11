@@ -16,10 +16,12 @@ Save this as `chat.pipe`:
 ```json
 {
   "project_id": "webhook-example",
+  "source": "source_1",
   "components": [
     {
       "id": "source_1",
-      "provider": "webhook"
+      "provider": "webhook",
+      "config": {}
     },
     {
       "id": "llm_1",
@@ -34,7 +36,8 @@ Save this as `chat.pipe`:
     },
     {
       "id": "target_1",
-      "provider": "response",
+      "provider": "response_answers",
+      "config": {},
       "input": [
         { "lane": "answers", "from": "llm_1" }
       ]
@@ -44,12 +47,12 @@ Save this as `chat.pipe`:
 ```
 
 Three nodes, one connection each. The `webhook` source receives the request, the
-`llm_openai` node answers it, and the `response` target returns the result.
+`llm_openai` node answers it, and the `response_answers` target returns the result.
 
 ## Start the pipeline
 
 ```bash
-export OPENAI_API_KEY=sk-...
+export ROCKETRIDE_OPENAI_API_KEY=sk-...
 
 rocketride start --pipeline ./chat.pipe
 ```

@@ -11,7 +11,8 @@ streams files through them, manages the engine's file store, profiles running
 pipelines, and deploys pipelines and apps — the same operations the
 [SDKs](/clients/typescript) expose, from a terminal. It ships with both the
 [TypeScript](/clients/typescript) and [Python](/clients/python) clients, so
-installing either package puts `rocketride` on your path.
+installing the Python package puts `rocketride` on your path, and the Node
+package runs with `npx rocketride`.
 
 > Driving the engine from an AI assistant instead of a terminal? The
 > [MCP server](/connect/mcp/stdio) exposes the same pipeline operations as tools for
@@ -30,7 +31,9 @@ installing either package puts `rocketride` on your path.
 
 ## Install
 
-Install either SDK to get `rocketride` on your path:
+Install the Python package to get `rocketride` on your path (in a virtual
+environment, while it is active). For Node, run it with `npx rocketride`;
+`npm install rocketride` does not put it on your path:
 
 <div className="rr-card-grid">
 
@@ -41,7 +44,7 @@ Install either SDK to get `rocketride` on your path:
 
 <a className="rr-side-card" href="/clients/typescript">
   <span className="rr-side-card__head"><SiTypescript className="rr-card-icon" /><span className="rr-side-card__title">TypeScript SDK</span></span>
-  <span className="rr-side-card__body"><code>npm install rocketride</code> — installs the CLI alongside the Node.js client.</span>
+  <span className="rr-side-card__body"><code>npm install rocketride</code> — installs the CLI alongside the Node.js client; run it with <code>npx rocketride</code>.</span>
 </a>
 
 </div>
