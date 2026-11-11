@@ -614,6 +614,21 @@ def test_a_render_a_swap_overtakes_is_served_not_cached(shell_root, monkeypatch)
     assert len(pages_mod._render_cache) == 0
 
 
+async def test_register_public_pages_installs_the_swap_listener_once(monkeypatch):
+    # Startup wiring, not an import-time side effect.
+    registered = []
+    monkeypatch.setattr(pp, 'on_swap', registered.append)
+
+    async def built():
+        return True
+
+    monkeypatch.setattr(pp, 'build_at_startup', built)
+    routes = []
+    await pages_mod.register_public_pages(SimpleNamespace(add_catch_all=routes.append))
+    assert registered == [pages_mod._clear_rendered]
+    assert [route.path for route in routes] == [FALLBACK_PATH]
+
+
 def _serve_numbered_pages(count):
     """``count`` pages, /p0 to /p<count-1>, whose renders are all the same size."""
     _use(*(Page(f'/p{i}', 'rocketride.home', f'Page {i}') for i in range(count)))

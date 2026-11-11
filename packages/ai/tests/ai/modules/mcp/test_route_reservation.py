@@ -74,9 +74,9 @@ def _web_server(monkeypatch, tmp_path, built):
     # Loading the shell wires the page map to this server: restore it after
     # the test, and keep the refresh backstop away from the real store.
     monkeypatch.setattr(pages, '_web_server', None)
+    # register_public_pages installs a swap listener: the fresh page map drops it with the test.
     fresh = public_pages.PageMap()
     fresh._built_at = float('inf')
-    fresh.listeners.extend(public_pages.page_map.listeners)
     monkeypatch.setattr(public_pages, 'page_map', fresh)
     monkeypatch.setattr(mcp_module, 'make_engine_client', _recording_factory(built))
 
