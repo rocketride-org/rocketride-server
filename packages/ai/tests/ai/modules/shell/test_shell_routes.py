@@ -332,7 +332,7 @@ def test_robots_allows_all_and_points_at_sitemap(app_url):
 
 def test_robots_named_groups_come_from_the_roster(app_url):
     text = _client().get('/robots.txt').text
-    for token, _ in CRAWLERS:
+    for token in CRAWLERS:
         assert f'User-agent: {token}\nAllow: /\n' in text
     assert text.endswith(f'User-agent: *\nAllow: /\n\nSitemap: {BASE}/sitemap.xml\n')
 

@@ -35,39 +35,39 @@ from typing import Set, Tuple
 
 from rocketlib import debug
 
-# (user-agent token, category). Matching is a case-insensitive substring
+# User-agent tokens, grouped by kind. Matching is a case-insensitive substring
 # test: real UAs embed the token (Bing sends 'bingbot/2.0', lowercase).
 # Robots-only tokens (Google-Extended) never appear in a UA; listing them
 # here is harmless for detection and states policy in robots.txt.
-CRAWLERS: Tuple[Tuple[str, str], ...] = (
+CRAWLERS: Tuple[str, ...] = (
     # Search
-    ('Googlebot', 'search'),
-    ('Bingbot', 'search'),
-    ('DuckDuckBot', 'search'),
+    'Googlebot',
+    'Bingbot',
+    'DuckDuckBot',
     # AI
-    ('GPTBot', 'ai'),
-    ('OAI-SearchBot', 'ai'),
-    ('ChatGPT-User', 'ai'),
-    ('ClaudeBot', 'ai'),
-    ('Claude-User', 'ai'),
-    ('PerplexityBot', 'ai'),
-    ('Perplexity-User', 'ai'),
-    ('CCBot', 'ai'),
-    ('Google-Extended', 'ai'),
+    'GPTBot',
+    'OAI-SearchBot',
+    'ChatGPT-User',
+    'ClaudeBot',
+    'Claude-User',
+    'PerplexityBot',
+    'Perplexity-User',
+    'CCBot',
+    'Google-Extended',
     # Unfurlers
-    ('facebookexternalhit', 'unfurl'),
-    ('Twitterbot', 'unfurl'),
-    ('LinkedInBot', 'unfurl'),
-    ('Slackbot', 'unfurl'),
-    ('Discordbot', 'unfurl'),
-    ('WhatsApp', 'unfurl'),
-    ('Applebot', 'unfurl'),
+    'facebookexternalhit',
+    'Twitterbot',
+    'LinkedInBot',
+    'Slackbot',
+    'Discordbot',
+    'WhatsApp',
+    'Applebot',
 )
 
 CRAWLER = 'crawler'
 HUMAN = 'human'
 
-_TOKENS = tuple(token.lower() for token, _ in CRAWLERS)
+_TOKENS = tuple(token.lower() for token in CRAWLERS)
 _NON_BROWSER_HINTS = ('bot', 'crawl', 'spider', 'fetch', 'preview')
 _seen_unknown: Set[str] = set()
 _MAX_SEEN = 256
@@ -122,5 +122,5 @@ def robots_groups(rule: str) -> str:
     Returns:
         The groups, each ``User-agent: <token>``, the rule and a blank line.
     """
-    tokens = list(dict.fromkeys(token for token, _ in CRAWLERS))
+    tokens = list(dict.fromkeys(CRAWLERS))
     return ''.join(f'User-agent: {token}\n{rule}\n\n' for token in tokens + ['*'])

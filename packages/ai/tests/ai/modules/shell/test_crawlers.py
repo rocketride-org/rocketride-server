@@ -75,15 +75,14 @@ def test_unknown_non_browser_uas_are_logged_once_and_bounded(monkeypatch):
     assert len(logged) == 1
 
 
-def test_roster_tokens_are_unique_and_categorised():
-    tokens = [t.lower() for t, _ in CRAWLERS]
+def test_roster_tokens_are_unique():
+    tokens = [t.lower() for t in CRAWLERS]
     assert len(tokens) == len(set(tokens))
-    assert {c for _, c in CRAWLERS} <= {'search', 'ai', 'unfurl'}
 
 
 def test_robots_groups_render_every_roster_token_then_star_with_the_rule():
     body = robots_groups('Allow: /')
-    for token, _ in CRAWLERS:
+    for token in CRAWLERS:
         assert f'User-agent: {token}\nAllow: /\n\n' in body
     assert body.endswith('User-agent: *\nAllow: /\n\n')
     # RFC 9309: the rule is repeated in every group, never only in '*'.

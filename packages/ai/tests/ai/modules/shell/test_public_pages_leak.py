@@ -53,7 +53,7 @@ from .hostile_fixtures import LEAK_MARKERS, assert_no_leak, hostile_account, ins
 BASE = 'https://rocketride.example'
 GOOGLEBOT = 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)'
 BROWSER = 'Mozilla/5.0 (Macintosh) AppleWebKit/537.36 Chrome/131.0 Safari/537.36'
-UAS = [GOOGLEBOT, BROWSER] + [f'Mozilla/5.0 (compatible; {token}/1.0)' for token, _ in CRAWLERS]
+UAS = [GOOGLEBOT, BROWSER] + [f'Mozilla/5.0 (compatible; {token}/1.0)' for token in CRAWLERS]
 
 
 @pytest.fixture
