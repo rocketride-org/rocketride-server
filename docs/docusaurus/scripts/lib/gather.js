@@ -18,7 +18,6 @@ const { glob } = require('glob');
 const { exists, mkdir, rm, copyFile, writeFileEnsure, readFile, readDir, symlink } = require('../../../../scripts/lib');
 const { allDocIds, docTitles, isValidMount, mountSlots, NODES_DIR } = require('./spine');
 const { describeText } = require('./description');
-const { splitFences } = require('./twin');
 
 // A node's co-located doc is README.md when it carries the generated
 // markers (GitHub-standard naming); legacy READMEs without markers are ignored.
@@ -392,11 +391,79 @@ function pageDescription(content) {
 /**
  * Remove HTML comments from page text, but not from fenced code blocks or inline
  * code, where `<!--` is literal text and must not swallow what follows it.
+ *
+ * One pass, so the three constructs cannot confuse each other: a fence marker
+ * inside a comment does not open a fence, a comment opener inside code is kept,
+ * and an escaped backtick does not open a code span.
  */
 function stripComments(text) {
-	return splitFences(text)
-		.map((seg) => (seg.fence ? seg.text : seg.text.replace(/(`+)[\s\S]*?\1|<!--[\s\S]*?-->/g, (m) => (m.startsWith('<!--') ? '' : m))))
-		.join('\n');
+	const fenceOpen = /^ {0,3}(`{3,}|~{3,})([^\n]*)/;
+	let out = '';
+	let i = 0;
+	let lineStart = true;
+	while (i < text.length) {
+		if (lineStart) {
+			const end = text.indexOf('\n', i);
+			const line = text.slice(i, end < 0 ? text.length : end);
+			const open = fenceOpen.exec(line);
+			if (open && !(open[1][0] === '`' && open[2].includes('`'))) {
+				// Copy the whole fenced block, up to its closing line or the end of the text.
+				const close = new RegExp(`^ {0,3}${open[1][0]}{${open[1].length},}[ \\t]*$`);
+				let stop = end < 0 ? text.length : end + 1;
+				while (stop < text.length) {
+					const next = text.indexOf('\n', stop);
+					const nextLine = text.slice(stop, next < 0 ? text.length : next);
+					stop = next < 0 ? text.length : next + 1;
+					if (close.test(nextLine)) break;
+				}
+				out += text.slice(i, stop);
+				i = stop;
+				continue;
+			}
+		}
+		const ch = text[i];
+		if (ch === '\\' && i + 1 < text.length) {
+			out += text.slice(i, i + 2);
+			i += 2;
+			lineStart = false;
+			continue;
+		}
+		if (text.startsWith('<!--', i)) {
+			const end = text.indexOf('-->', i + 4);
+			if (end >= 0) {
+				i = end + 3;
+				lineStart = false;
+				continue;
+			}
+		}
+		if (ch === '`') {
+			let run = 1;
+			while (text[i + run] === '`') run++;
+			// A code span ends at the next run of exactly the same number of backticks.
+			let from = i + run;
+			let close = -1;
+			while (from < text.length) {
+				const at = text.indexOf('`', from);
+				if (at < 0) break;
+				let len = 1;
+				while (text[at + len] === '`') len++;
+				if (len === run) {
+					close = at;
+					break;
+				}
+				from = at + len;
+			}
+			const stop = close < 0 ? i + run : close + run;
+			out += text.slice(i, stop);
+			i = stop;
+			lineStart = false;
+			continue;
+		}
+		out += ch;
+		lineStart = ch === '\n';
+		i++;
+	}
+	return out;
 }
 
 /** First markdown heading, as a title fallback. */

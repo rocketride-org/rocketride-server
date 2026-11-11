@@ -65,6 +65,16 @@ describe('pageDescription', () => {
 		assert.equal(pageDescription(md), 'Write <!-- to open a comment.');
 	});
 
+	it('does not let a fence marker inside a comment open a code block', () => {
+		const md = '# T\n\n<!--\n```\n-->\n\nThe real first paragraph.\n';
+		assert.equal(pageDescription(md), 'The real first paragraph.');
+	});
+
+	it('does not treat an escaped backtick as the start of inline code', () => {
+		const md = '# T\n\nWhat is \\`? <!-- note --> Use the `client`.\n';
+		assert.equal(pageDescription(md).includes('note'), false);
+	});
+
 	it('removes a real multi-line comment before the first paragraph and keeps a later fenced opener', () => {
 		const md = '# T\n\n<!-- first line\nsecond line -->\n\nThe real first paragraph.\n\n```html\n<!-- example\n```\n';
 		assert.equal(pageDescription(md), 'The real first paragraph.');
