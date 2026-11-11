@@ -842,9 +842,10 @@ function generateConformance(maxN) {
 const PUBLISHED_REFS = ['origin/develop', 'origin/main'];
 
 /**
- * Find the published refs that already carry versions/v<n>.d.ts. Fails closed:
- * a ref that cannot be resolved locally is reported as `missing`, and the
- * caller refuses rather than assume the version is unreleased.
+ * Find the published refs that already carry versions/v<n>.d.ts. The refs are
+ * fetched first, so the answer reflects the remote, not the last fetch. Fails
+ * closed: a ref that cannot be fetched or resolved is reported as `missing`,
+ * and the caller refuses rather than assume the version is unreleased.
  *
  * @param {number} n - The version number about to be re-minted.
  * @returns {{ publishedOn: string[], missing: string[] }}
@@ -856,6 +857,17 @@ function publishedRefsFor(n) {
 		.join('/');
 	const publishedOn = [];
 	const missing = [];
+	// Step 0 — refresh the published refs first: a stale remote-tracking ref
+	// would let a version released since the last fetch pass as unreleased.
+	// A fetch that fails is a missing ref: the caller refuses rather than guess.
+	try {
+		execFileSync('git', ['fetch', '--quiet', 'origin', ...PUBLISHED_REFS.map((ref) => ref.replace(/^origin\//, ''))], {
+			cwd: REPO_ROOT,
+			stdio: 'ignore',
+		});
+	} catch {
+		return { publishedOn, missing: [...PUBLISHED_REFS] };
+	}
 	for (const ref of PUBLISHED_REFS) {
 		// Step 1 — the ref itself must resolve, or nothing can be proven.
 		try {
