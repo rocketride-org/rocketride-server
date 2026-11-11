@@ -56,7 +56,7 @@ started this way when you are done with it.
 `getTaskToken({ projectId, source })` returns the address of your running task
 for that pipe and source (pass `teamId` for the team's deployed run). After an
 override the run's pipeline id is the `token` value, so look it up with
-`projectId: 'runB'`; the config's original `projectId` finds the run started
+`projectId: 'runB'`; the config's original `project_id` finds the run started
 without an override, if any.
 
 **Check `reused` before trusting the result.** `useExisting` returns the task
