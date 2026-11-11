@@ -45,7 +45,7 @@ An agent flow: `load_data` the rows, `build_index` on the text column, then `get
 
 ## Configuration
 
-Set an API key and workspace ID on the node, or export `HOTDATA_API_KEY` and `HOTDATA_WORKSPACE`. The default endpoint is `https://api.hotdata.dev`.
+Set an API key and workspace ID on the node (the key can come from the `ROCKETRIDE_DB_HOTDATA_APIKEY` account variable). The default endpoint is `https://api.hotdata.dev`.
 
 For natural-language querying, wire an LLM to the node's `llm` control connection (see `examples/db_hotdata.pipe`). Raw SQL through the `execute` tool works without one.
 
@@ -86,7 +86,7 @@ tolerated. Anything with no JSON in it raises rather than leaving an empty table
 
 ### Sharing a database between runs
 
-Create the database **outside any pipeline** — over the REST API, by whoever owns the demo — then pass its ID to every run through `database_id` (or `HOTDATA_DATABASE_ID`). Those runs attach to it instead of creating their own, so their agents can share tables and query results.
+Create the database **outside any pipeline** — over the REST API, by whoever owns the demo — then pass its ID to every run through `database_id`. Those runs attach to it instead of creating their own, so their agents can share tables and query results.
 
 Do not let a pipeline run create the database and then hand its ID to later runs. A database this node created is owned by that run and is deleted at its teardown, so the ID goes stale the moment the creating run ends — and a consumer still attached to it loses the database underneath itself. Sharing only works reliably when the database outlives every run that uses it, which means nothing that deletes it can be one of them.
 
@@ -124,7 +124,7 @@ Hotdata runs **Apache DataFusion 54 behind the PostgreSQL parser dialect**. Trea
 
 | Symptom                                           | Cause                                                                                                   |
 | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `apikey is required` / `workspace_id is required` | Neither the config field nor the env var is set                                                         |
+| `"apikey" is required` / `"workspace_id" is required` (a `ConfigError`, raised when the config is resolved) | The required field is blank: set it on the node, or for the key, through the `ROCKETRIDE_DB_HOTDATA_APIKEY` account variable the field references |
 | `HTTP 401` / `HTTP 404` from `get_data`           | Wrong API key, workspace or database ID. Raised at once: only a rejected SQL statement is retried       |
 | `raw SQL execution is disabled`                   | Turn on `allow_execute`, or use `get_data` instead                                                      |
 | `only one statement per call`                     | Hotdata rejects semicolon-separated batches                                                             |

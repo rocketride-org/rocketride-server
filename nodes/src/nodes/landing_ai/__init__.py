@@ -20,20 +20,3 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-
-"""
-Landing.ai Agentic Document Extraction (ADE) node package for RocketRide Engine.
-
-This package does not directly export `IInstance` / `IGlobal` — each ADE
-capability lives in its own sub-package and the engine loads it via the `path`
-field in the matching services.json:
-
-- `nodes.landing_ai.parse`    — `landing_ai_parse` (document -> markdown + tables)
-- `nodes.landing_ai.extract`  — `landing_ai_extract` (parsed markdown + JSON Schema -> fields)
-
-Shared code that the sub-packages import lives at this package level:
-`landing_ai_base.py` and the shared `requirements.txt`. Future ADE capabilities
-(Split, Section, Classify) drop in as new sub-packages + services.<name>.json.
-"""
-
-__all__: list[str] = []

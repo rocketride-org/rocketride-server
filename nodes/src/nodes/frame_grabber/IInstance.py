@@ -69,7 +69,7 @@ class IInstance(IInstanceBase):
         from ai.common.avi.frame import VideoFrameExtractor
 
         # Watermark options (see services.json); absent -> disabled.
-        cfg = self.IGlobal.config
+        cfg = self.IGlobal.grab_config
         self._watermark = cfg.get('watermark', 'no') == 'yes'
         self._wm_location = cfg.get('watermark_location', 'bottom_right')
         self._wm_filename = cfg.get('watermark_filename', 'yes') == 'yes'
@@ -81,7 +81,7 @@ class IInstance(IInstanceBase):
 
         # Create the reader
         self._reader = VideoFrameExtractor(
-            frame_callback=self._frame_callback, name='FrameGrabber', config=self.IGlobal.config
+            frame_callback=self._frame_callback, name='FrameGrabber', config=self.IGlobal.grab_config
         )
 
     def endInstance(self):  # pylint: disable=C0103

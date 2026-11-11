@@ -28,6 +28,14 @@ _NODE_DIR = os.path.join(os.path.dirname(__file__), '../../src/nodes/discord')
 _SERVICES_JSON = os.path.join(_NODE_DIR, 'services.json')
 
 
+def _parameters_group(schema):
+    """The "parameters" group of the converted definition: the ordered property references it shows."""
+    for prop in schema['properties']:
+        if isinstance(prop, dict) and prop.get('name') == 'parameters':
+            return prop['properties']
+    raise AssertionError('services.json has no "parameters" group')
+
+
 def _load_services_json():
     """Parse services.json, which is JSONC: its whole-line ``//`` comments are dropped first."""
     with open(_SERVICES_JSON, 'r', encoding='utf-8') as handle:
@@ -1130,7 +1138,7 @@ class TestServicesJsonSchema:
             assert lines[index - 1] == '\t//', f'{key} has no // comment block above it'
 
     def test_top_level_keys(self, schema):
-        for key in ('title', 'protocol', 'classType', 'fields', 'lanes'):
+        for key in ('title', 'protocol', 'classType', 'propertyDefinitions', 'properties', 'lanes'):
             assert key in schema, f'missing top-level key: {key}'
         assert schema['protocol'] == 'discord://'
         assert schema['classType'] == ['source']
@@ -1174,11 +1182,11 @@ class TestServicesJsonSchema:
             'discord.numberChunks',
         ]
         for field in required:
-            assert field in schema['fields'], f'missing field: {field}'
+            assert field in schema['propertyDefinitions'], f'missing field: {field}'
 
     def test_parity_fields_are_registered_and_off_by_default(self, schema):
         """The new behaviors must be reachable in the UI and default to off."""
-        properties = schema['fields']['Pipe.source.parameters']['properties']
+        properties = _parameters_group(schema)
         defaults = {
             'discord.threadHistoryLimit': 0,
             'discord.threadHistoryMaxChars': 6000,
@@ -1194,38 +1202,38 @@ class TestServicesJsonSchema:
         }
         for field, default in defaults.items():
             assert field in properties, f'{field} not registered in Pipe.source.parameters'
-            assert schema['fields'][field]['default'] == default, f'{field} default drift'
+            assert schema['propertyDefinitions'][field]['default'] == default, f'{field} default drift'
 
     def test_new_opt_in_fields_are_typed_and_optional(self, schema):
         """A field the UI cannot leave alone is not opt-in."""
         for field, kind in (('discord.teamMentionAlias', 'string'), ('discord.numberChunks', 'boolean')):
-            declared = schema['fields'][field]
+            declared = schema['propertyDefinitions'][field]
             assert declared['type'] == kind
-            assert declared['optional'] is True
+            assert 'required' not in declared and 'default' in declared
             assert declared['title'] and declared['description']
 
     def test_merge_attachments_is_registered_and_off_by_default(self, schema):
         """Attachment merging is opt-in; off keeps one object per attachment."""
-        properties = schema['fields']['Pipe.source.parameters']['properties']
+        properties = _parameters_group(schema)
         assert 'discord.mergeAttachments' in properties
-        assert schema['fields']['discord.mergeAttachments']['default'] is False
+        assert schema['propertyDefinitions']['discord.mergeAttachments']['default'] is False
 
     def test_attachment_routing_defaults_keep_the_original_behaviour(self, schema):
         """No text decoding and the channel's own archive duration unless configured."""
-        fields = schema['fields']
+        fields = schema['propertyDefinitions']
         assert fields['discord.textAttachmentExtensions']['default'] == []
         assert fields['discord.threadAutoArchiveMinutes']['default'] == 0
 
     def test_thread_name_length_is_bounded_by_what_discord_accepts(self, schema):
         """Discord rejects a thread name longer than 100 characters."""
-        field = schema['fields']['discord.threadNameMaxLength']
+        field = schema['propertyDefinitions']['discord.threadNameMaxLength']
         assert field['minimum'] == 1
         assert field['maximum'] == 100
         assert field['minimum'] <= field['default'] <= field['maximum']
 
     def test_thread_archive_minutes_offers_only_the_durations_discord_accepts(self, schema):
         """Any other duration is a 400 from Discord, so the UI offers only these."""
-        field = schema['fields']['discord.threadAutoArchiveMinutes']
+        field = schema['propertyDefinitions']['discord.threadAutoArchiveMinutes']
         values = [option[0] for option in field['enum']]
         assert values == [0, 60, 1440, 4320, 10080]
         assert all(isinstance(option[1], str) and option[1] for option in field['enum'])
@@ -1233,10 +1241,13 @@ class TestServicesJsonSchema:
 
     def test_text_attachment_max_chars_cannot_be_negative(self, schema):
         """0 means no limit; a negative cap has no meaning."""
-        assert schema['fields']['discord.textAttachmentMaxChars']['minimum'] == 0
+        assert schema['propertyDefinitions']['discord.textAttachmentMaxChars']['minimum'] == 0
 
-    def test_bot_token_is_secure(self, schema):
-        assert schema['fields']['discord.botToken'].get('secure') is True
+    def test_bot_token_is_a_required_secret_from_an_account_variable(self, schema):
+        token = schema['propertyDefinitions']['discord.botToken']
+        assert token['secret'] is True
+        assert token['required'] is True
+        assert token['env'] == 'ROCKETRIDE_DISCORD_BOTTOKEN'
 
     def test_source_lanes(self, schema):
         lanes = schema['lanes']['_source']
@@ -1244,7 +1255,8 @@ class TestServicesJsonSchema:
             assert lane in lanes, f'missing lane: {lane}'
 
     def test_reply_mode_enum(self, schema):
-        assert schema['fields']['discord.replyMode']['enum'] == ['channel', 'reply', 'thread']
+        enum = schema['propertyDefinitions']['discord.replyMode']['enum']
+        assert [option[0] for option in enum] == ['channel', 'reply', 'thread']
 
 
 if __name__ == '__main__':

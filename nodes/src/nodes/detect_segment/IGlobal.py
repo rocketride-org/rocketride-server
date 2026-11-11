@@ -22,8 +22,15 @@
 # SOFTWARE.
 # =============================================================================
 
-from rocketlib import IGlobalBase, OPEN_MODE, warning
-from ai.common.config import Config
+from depends import load_depends
+
+# pycocotools is needed client-side for RLE restore + overlay rendering,
+# even when inference is proxied to the model server.
+load_depends(__file__)
+
+from rocketlib import IGlobalBase, warning
+from ai.common.models.base import make_device_lock
+from ai.common.models.vision.segmentation import Segmenter
 
 
 class IGlobal(IGlobalBase):
@@ -31,55 +38,23 @@ class IGlobal(IGlobalBase):
     device_lock = None
 
     def beginGlobal(self):
-        """Build the shared Segmenter facade from node config (mode/model/threshold/maxEdge)."""
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
+        """Build the shared Segmenter facade from the resolved config.
 
-        # pycocotools is needed client-side for RLE restore + overlay rendering,
-        # even when inference is proxied to the model server.
-        from depends import load_depends
-
-        load_depends(__file__)
-
-        from ai.common.models.vision.segmentation import (
-            Segmenter,
-            DEFAULT_MODE,
-            MODES,
-            DEFAULT_THRESHOLD,
-            DEFAULT_MAX_EDGE,
-        )
-
-        config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-
-        mode = str(config.get('mode', DEFAULT_MODE)).lower().strip()
-        if mode not in MODES:
-            warning(f'detect_segment: unknown mode "{mode}", falling back to {DEFAULT_MODE}.')
-            mode = DEFAULT_MODE
-
-        model_name = (config.get('model') or '').strip() or None
-        raw_threshold = config.get('threshold', DEFAULT_THRESHOLD)
-        try:
-            threshold = float(raw_threshold)
-        except (TypeError, ValueError):
-            threshold = None
-        if threshold is None or not (0.0 <= threshold <= 1.0):
-            warning(f'detect_segment: invalid threshold {raw_threshold!r}, using default {DEFAULT_THRESHOLD}')
-            threshold = DEFAULT_THRESHOLD
-        try:
-            max_edge = int(config.get('maxEdge', DEFAULT_MAX_EDGE))
-        except (TypeError, ValueError):
-            max_edge = DEFAULT_MAX_EDGE
-        max_edge = min(4096, max(256, max_edge))
-
-        revision = (config.get('revision') or '').strip() or None
+        The selected preset pins its mode, model and revision; the resolver has
+        already bounded threshold and maxEdge to the schema's ranges.
+        """
+        config = self.config
 
         self.segmenter = Segmenter(
-            mode=mode, model_name=model_name, device=None, threshold=threshold, max_edge=max_edge, revision=revision
+            mode=config.mode,
+            model_name=config.model,
+            device=None,
+            threshold=config.threshold,
+            max_edge=config.maxEdge,
+            revision=config.revision,
         )
 
         # Local inference must serialize GPU access
-        from ai.common.models.base import make_device_lock
-
         self.device_lock = make_device_lock()
 
     def endGlobal(self):

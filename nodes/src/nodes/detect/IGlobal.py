@@ -22,8 +22,9 @@
 # SOFTWARE.
 # =============================================================================
 
-from rocketlib import IGlobalBase, OPEN_MODE, warning
-from ai.common.config import Config
+from rocketlib import IGlobalBase
+from ai.common.models.base import make_device_lock
+from ai.common.models.vision.detection import OPEN_VOCAB_BACKENDS, Detector
 
 
 class IGlobal(IGlobalBase):
@@ -31,53 +32,27 @@ class IGlobal(IGlobalBase):
     device_lock = None
 
     def beginGlobal(self):
-        """Build the shared Detector facade from node config; validate the open-vocab prompt."""
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
+        """Build the shared Detector facade from the resolved config.
 
-        from ai.common.models.vision.detection import (
-            Detector,
-            DEFAULT_BACKEND,
-            BACKENDS,
-            OPEN_VOCAB_BACKENDS,
-            DEFAULT_THRESHOLD,
-        )
+        The selected profile pins the backend engine; the threshold is bounded
+        by the schema and the prompt exists only on the open-vocabulary branch,
+        where the schema requires it. The class split still guards against a
+        prompt made of separators only.
+        """
+        config = self.config
 
-        config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-        conn = self.glb.connConfig
-
-        backend = str(config.get('engine', DEFAULT_BACKEND)).lower().strip()
-        if backend not in BACKENDS:
-            warning(f'detect: unknown engine "{backend}", defaulting to {DEFAULT_BACKEND}')
-            backend = DEFAULT_BACKEND
-
-        prompt = (config.get('prompt') or conn.get('detect.prompt') or conn.get('prompt') or '').strip()
-        # Check threshold
-        raw_threshold = conn.get('detect.threshold', config.get('threshold', DEFAULT_THRESHOLD))
-        try:
-            threshold = float(raw_threshold)
-        except (TypeError, ValueError):
-            threshold = None
-        if threshold is None or not (0.0 <= threshold <= 1.0):
-            warning(f'detect: invalid threshold {raw_threshold!r}, using default {DEFAULT_THRESHOLD}')
-            threshold = DEFAULT_THRESHOLD
-
+        backend = config.engine
+        prompt = (config.get('prompt') or '').strip()
         classes = [c.strip() for c in prompt.replace('.', ',').split(',') if c.strip()]
         if backend in OPEN_VOCAB_BACKENDS and not classes:
             raise ValueError(
-                f'detect: engine "{backend}" requires a non-empty prompt (detect.prompt). '
+                f'detect: engine "{backend}" requires a non-empty prompt. '
                 'Set a prompt in the UI (e.g. "person . car . dog") and restart the pipeline.'
             )
 
-        revision = (config.get('revision') or '').strip() or None
-
-        self.detector = Detector(
-            backend=backend, device=None, threshold=threshold, prompt=prompt or None, revision=revision
-        )
+        self.detector = Detector(backend=backend, device=None, threshold=config.threshold, prompt=prompt or None)
 
         # Local inference must serialize GPU access
-        from ai.common.models.base import make_device_lock
-
         self.device_lock = make_device_lock()
 
     def endGlobal(self):

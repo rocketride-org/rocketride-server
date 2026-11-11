@@ -99,15 +99,21 @@ def test_global_process_annotation_matches_runtime_tuple(monkeypatch):
     """The callable exposed to instances carries the same two-value contract."""
     rocketlib = ModuleType('rocketlib')
     rocketlib.IGlobalBase = type('IGlobalBase', (), {})
-    config_module = ModuleType('ai.common.config')
-    config_module.Config = type('Config', (), {})
+    depends = ModuleType('depends')
+    depends.depends = lambda *_a, **_k: None
 
     monkeypatch.setitem(sys.modules, 'rocketlib', rocketlib)
-    monkeypatch.setitem(sys.modules, 'ai', ModuleType('ai'))
-    monkeypatch.setitem(sys.modules, 'ai.common', ModuleType('ai.common'))
-    monkeypatch.setitem(sys.modules, 'ai.common.config', config_module)
+    monkeypatch.setitem(sys.modules, 'depends', depends)
 
-    module = _load_module(monkeypatch, '_image_cleanup_global_test.IGlobal', 'IGlobal.py')
+    def process_image(mime_type: str, data: bytes) -> tuple[str, bytes]:
+        return mime_type, data
+
+    module = _load_module(
+        monkeypatch,
+        '_image_cleanup_global_test.IGlobal',
+        'IGlobal.py',
+        dependencies={'process': {'process_image': process_image}},
+    )
 
     assert module.IGlobal.__annotations__['process'] == Callable[[str, bytes], tuple[str, bytes]]
 

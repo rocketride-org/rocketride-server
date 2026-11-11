@@ -25,8 +25,18 @@
 
 from __future__ import annotations
 
-from ai.common.config import Config
-from rocketlib import IGlobalBase, OPEN_MODE, debug, warning
+import os
+from rocketlib import IGlobalBase, debug, warning
+
+from nodes.core.gcp_auth import get_gcp_credentials
+
+from depends import depends
+
+# google.cloud.firestore is imported at module scope, so the requirements are
+# installed before that happens. This module is only imported on the run path
+# (config mode imports the validator alone), so the install never runs while a
+# user is merely opening the node's settings panel.
+depends(os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt')
 
 try:
     from google.cloud import firestore
@@ -44,19 +54,19 @@ class IGlobal(IGlobalBase):
     collection: str = ''
 
     def beginGlobal(self) -> None:
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
+        """Open the Firestore client from the resolved config.
 
+        The resolver applied the database default and flattened the selected
+        authentication branch, so ``cfg`` carries ``authType`` and, for a
+        service account, ``serviceAccountKey``.
+        """
         if firestore is None:
             raise ImportError('google-cloud-firestore is not installed.')
 
-        # deferred: engine-path import
-        from nodes.core.gcp_auth import get_gcp_credentials
+        cfg = self.config
 
-        cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-
-        self.database = str((cfg.get('database') or '(default)')).strip() or '(default)'
-        self.collection = str((cfg.get('collection') or '')).strip()
+        self.database = cfg.database.strip()
+        self.collection = cfg.collection.strip()
 
         # Auth
         try:
@@ -76,20 +86,6 @@ class IGlobal(IGlobalBase):
             warning(
                 f'Firestore connection probe failed (list collections); continuing — document tools may still work: {e}'
             )
-
-    def validateConfig(self) -> None:
-        # deferred: engine-path import
-        from nodes.core.gcp_auth import get_gcp_credentials, GCPAuthError
-
-        try:
-            cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-            get_gcp_credentials(cfg, scopes=_FIRESTORE_SCOPES)
-            if not str(cfg.get('collection') or '').strip():
-                warning('collection is recommended')
-        except GCPAuthError as e:
-            warning(f'Auth configuration error: {e}')
-        except Exception as e:
-            warning(str(e))
 
     def endGlobal(self) -> None:
         if self.client is not None:

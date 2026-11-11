@@ -62,7 +62,6 @@ The node declares GPU capability. It loads a `SentenceTransformer` through the m
 |---|---|---|---|
 | `embedding.document_prefix` | `string` | **Document prefix**<br/>Prefix prepended to document text before encoding (e.g. 'search_document: ', 'passage: ') |  |
 | `embedding.model` | `string` | **Model name**<br/>Hugging face model to use for embedding |  |
-| `embedding.preprocessor` |  |  | `"preprocessor_langchain"` |
 | `embedding.profile` | `string` | **Model**<br/>Embedding model | `"miniLM"` |
 | `embedding.query_prefix` | `string` | **Query prefix**<br/>Prefix prepended to query text before encoding (e.g. 'search_query: ', 'query: ') |  |
 | `embedding.truncate_dim` | `number` | **Truncate dimensions**<br/>Truncate embeddings to this dimensionality (0 = use model default) |  |

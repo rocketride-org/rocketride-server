@@ -75,52 +75,26 @@
 		"questions": ["table", "text", "answers"]
 	},
 	//
-	//	Optional:
-	//		Profile section are configuration options used by the driver
-	//		itself
-	//
-	"preconfig": {
-		// Define the values that will be merged into any profile configuration
-		// specified, unless the profile is 'absolute'
-		"default": "default",
-		// Defines profiles used with the "profile": key
-		"profiles": {
-			"default": {
-				"database": "neo4j"
-			}
-		}
-	},
-	//
 	// Optional:
-	//		Local fields definitions - these define fields only for the
-	//		current service. You may specify them here, or directly
-	//		in the shape
+	//		Local property definitions. Everything is stored flat except the
+	//		credentials: the authentication method is a selector whose
+	//		branches carry the password or the bearer token, both secrets an
+	//		account variable can supply.
 	//
-	"fields": {
+	"propertyDefinitions": {
+		"graph_neo4j.db_description": {
+			"type": "string",
+			"format": "textarea",
+			"title": "Graph description",
+			"default": "",
+			"description": "What is this graph used for? Describe its content and domain, this helps the LLM generate more accurate Cypher queries."
+		},
 		"graph_neo4j.uri": {
 			"type": "string",
 			"title": "Connection URI",
 			"default": "neo4j://localhost:7687",
+			"minLength": 1,
 			"description": "Bolt URI for the Neo4J instance. Use neo4j:// or bolt:// for plaintext, neo4j+s:// or bolt+s:// for TLS (e.g. Neo4J Aura cloud)"
-		},
-		"graph_neo4j.auth_method": {
-			"type": "string",
-			"title": "Authentication",
-			"default": "userpass",
-			"enum": [
-				["userpass", "Username & Password"],
-				["token", "Bearer Token"]
-			],
-			"conditional": [
-				{
-					"value": "userpass",
-					"properties": ["graph_neo4j.user", "graph_neo4j.password"]
-				},
-				{
-					"value": "token",
-					"properties": ["graph_neo4j.token"]
-				}
-			]
 		},
 		"graph_neo4j.user": {
 			"type": "string",
@@ -132,47 +106,30 @@
 			"type": "string",
 			"title": "Password",
 			"description": "Password to authenticate with the Neo4J instance.",
-			"secure": true,
-			"ui": {
-				"ui:widget": "password"
-			}
+			"secret": true,
+			"env": "ROCKETRIDE_GRAPH_NEO4J_PASSWORD"
 		},
 		"graph_neo4j.token": {
 			"type": "string",
 			"title": "Bearer token",
 			"description": "Bearer token for token-based authentication (e.g. Neo4J Aura cloud).",
-			"secure": true,
-			"ui": {
-				"ui:widget": "password"
-			}
+			"secret": true,
+			"env": "ROCKETRIDE_GRAPH_NEO4J_TOKEN",
+			"required": true
 		},
 		"graph_neo4j.database": {
 			"type": "string",
 			"title": "Database name",
 			"default": "neo4j",
+			"minLength": 1,
 			"description": "Name of the Neo4J database to connect to. Use 'neo4j' for the default database."
-		},
-		// "graph_neo4j.label": {
-		// 	"type": "string",
-		// 	"title": "Node label",
-		// 	"default": "Row",
-		// 	"description": "Label applied to graph nodes created when inserting data from the pipeline (e.g. Person, Event, Row)."
-		// },
-		"graph_neo4j.db_description": {
-			"type": "string",
-			"title": "Graph description",
-			"default": "",
-			"description": "What is this graph used for? Describe its content and domain, this helps the LLM generate more accurate Cypher queries.",
-			"ui": {
-				"ui:widget": "textarea"
-			}
 		},
 		"graph_neo4j.max_attempts": {
 			"type": "integer",
 			"title": "Max validation attempts",
 			"default": 5,
 			"minimum": 1,
-			"maximum": 20,
+			"maximum": 10,
 			"description": "Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated Cypher query"
 		},
 		"graph_neo4j.allow_execute": {
@@ -180,42 +137,33 @@
 			"title": "Allow direct query execution",
 			"default": false,
 			"description": "Permit QuestionType.EXECUTE callers to run raw Cypher without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue Cypher directly."
-		},
-		"graph_neo4j.default": {
-			"object": "default",
-			"properties": [
-				"graph_neo4j.db_description",
-				"graph_neo4j.uri",
-				"graph_neo4j.auth_method",
-				"graph_neo4j.database",
-				// "graph_neo4j.label",
-				"graph_neo4j.max_attempts",
-				"graph_neo4j.allow_execute"
-			]
-		},
-		"graph_neo4j.profile": {
-			"hidden": true,
-			"type": "string",
-			"default": "default",
-			"enum": [["default", "Default"]],
-			"conditional": [
-				{
-					"value": "default",
-					"properties": ["graph_neo4j.default"]
-				}
-			]
 		}
 	},
 	//
 	// Required:
-	//		Defines the fields (shape) of the service. Either source or target
-	//		may be specified, or both, but at least one is required
+	//		Defines the properties shown in the pipeline builder side panel, in order
 	//
-	"shape": [
+	"properties": [
+		"graph_neo4j.db_description",
+		"graph_neo4j.uri",
 		{
-			"section": "Pipe",
-			"title": "Neo4J",
-			"properties": ["graph_neo4j.profile"]
-		}
+			"name": "auth_method",
+			"type": "string",
+			"title": "Authentication",
+			"default": "userpass",
+			"enum": {
+				"userpass": {
+					"title": "Username & Password",
+					"properties": ["graph_neo4j.user", "graph_neo4j.password"]
+				},
+				"token": {
+					"title": "Bearer Token",
+					"properties": ["graph_neo4j.token"]
+				}
+			}
+		},
+		"graph_neo4j.database",
+		"graph_neo4j.max_attempts",
+		"graph_neo4j.allow_execute"
 	]
 }

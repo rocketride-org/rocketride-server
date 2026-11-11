@@ -21,8 +21,10 @@
 # SOFTWARE.
 # =============================================================================
 
-from rocketlib import IGlobalBase, OPEN_MODE
-from ai.common.config import Config
+from rocketlib import IGlobalBase
+from ai.common.models.base import make_device_lock
+
+from nodes.embedding_image.embedding import Embedding
 
 
 class IGlobal(IGlobalBase):
@@ -39,8 +41,10 @@ class IGlobal(IGlobalBase):
         Initialize resources needed for the video embedding node.
 
         This includes:
-        - Importing and loading the embedding model for frame embedding.
-        - Loading frame extraction configuration (interval, max frames, etc.).
+        - Loading the embedding model the selected profile pins (or the custom
+          profile names) for frame embedding.
+        - Reading the frame extraction settings (interval, max frames, etc.)
+          from the resolved config, which already applied the defaults.
         - Creating the device guard for frame embedding: a lock in-process, a no-op
           with --modelserver.
 
@@ -48,35 +52,22 @@ class IGlobal(IGlobalBase):
             Nothing here loads or installs torch -- see
             embedding_image.IGlobal.beginGlobal.
         """
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
-
-        # Import Embedding class locally to avoid circular imports.
-        from nodes.embedding_image.embedding import Embedding
-
-        # Access the 'bag' from the current endpoint.
-        bag = self.IEndpoint.endpoint.bag
-
-        # Retrieve node-specific configuration.
-        config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
+        config = self.config
 
         # Instantiate the Embedding object for generating frame embeddings.
-        # Pass raw connConfig since Embedding calls getNodeConfig internally.
-        self.embedding = Embedding(self.glb.logicalType, self.glb.connConfig, bag)
+        self.embedding = Embedding(config.model)
 
         # Store frame extraction settings from the config.
-        self.frame_interval = config.get('interval', 5)
-        self.max_frames = config.get('max_frames', 50)
-        self.start_time = config.get('start_time', 0)
-        self.duration = config.get('duration', 0)
-        self.max_video_size_bytes = config.get('maxVideoSizeMB', 500) * 1024 * 1024
+        self.frame_interval = config.interval
+        self.max_frames = config.max_frames
+        self.start_time = config.start_time
+        self.duration = config.duration
+        self.max_video_size_bytes = config.maxVideoSizeMB * 1024 * 1024
 
         # Local inference must serialize GPU access; with --modelserver this is a
         # no-op so concurrent videos' frame requests reach the model server's
         # workers instead of queueing here one frame at a time (the frames of one
         # video are embedded in order either way).
-        from ai.common.models.base import make_device_lock
-
         self.device_lock = make_device_lock()
 
     def endGlobal(self):

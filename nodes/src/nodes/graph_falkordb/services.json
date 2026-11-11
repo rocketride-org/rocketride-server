@@ -57,10 +57,11 @@
 	"icon": "falkordb.svg",
 	"documentation": "https://docs.rocketride.org/nodes/graph_falkordb",
 	// Surfaces the active graph on the canvas tile (see #2155): an unopened
-	// node silently resolves to preconfig.default's "graph": "agent", and
-	// nothing on the canvas showed which graph -- or that it was a fallback
-	// -- until a query failed at runtime.
-	"tile": ["Graph: ${parameters.graph_falkordb.${profile}.graph}"],
+	// node silently resolves to the default "graph": "agent", and nothing on
+	// the canvas showed which graph -- or that it was a fallback -- until a
+	// query failed at runtime. The graph is shared by both connection
+	// profiles, so it is stored flat.
+	"tile": ["Graph: ${parameters.graph}"],
 	//
 	// Optional:
 	//		Defines the invoke connections that may/must be connected
@@ -81,40 +82,21 @@
 		"questions": ["table", "text", "answers"]
 	},
 	//
-	//	Optional:
-	//		Profile section are configuration options used by the driver
-	//		itself
-	//
-	"preconfig": {
-		// Define the values that will be merged into any profile configuration
-		// specified, unless the profile is 'absolute'
-		"default": "default",
-		// Defines profiles used with the "profile": key. "default" keeps its name
-		// so pipelines saved before the URL profile existed still resolve.
-		"profiles": {
-			"default": {
-				"title": "Manual configuration (host and port)",
-				"mode": "manual",
-				"graph": "agent"
-			},
-			"url": {
-				"title": "FalkorDB URL (connection string)",
-				"mode": "url",
-				"graph": "agent"
-			}
-		}
-	},
-	//
 	// Optional:
-	//		Local fields definitions - these define fields only for the
-	//		current service. You may specify them here, or directly
-	//		in the shape
+	//		Local property definitions. The connection method is the
+	//		selector: "default" (host and port, kept under that name so
+	//		pipelines saved before the URL profile existed still resolve) and
+	//		"url". Each branch pins its mode as a constant. The password and
+	//		every query setting are referenced by the identical definition in
+	//		both branches, so they hoist beside the selector; host, port,
+	//		username, tls and url stay with their branch.
 	//
-	"fields": {
+	"propertyDefinitions": {
 		"graph_falkordb.host": {
 			"type": "string",
 			"title": "Host",
 			"default": "localhost",
+			"minLength": 1,
 			"description": "FalkorDB host, e.g. localhost or your-instance.falkordb.cloud."
 		},
 		"graph_falkordb.port": {
@@ -129,29 +111,23 @@
 			"type": "string",
 			"title": "Username",
 			"default": "",
-			"optional": true,
 			"description": "Username, e.g. \"default\" for FalkorDB Cloud. Leave empty for no auth."
 		},
 		"graph_falkordb.password": {
 			"type": "string",
 			"title": "Password",
 			"default": "",
-			"secure": true,
-			"optional": true,
-			"description": "Password for the FalkorDB instance. Stored encrypted. When set it is the one used, replacing any password embedded in the FalkorDB URL. Leave empty for no auth, or to use the one the URL already carries.",
-			"ui": {
-				"ui:widget": "password"
-			}
+			"secret": true,
+			"env": "ROCKETRIDE_GRAPH_FALKORDB_PASSWORD",
+			"description": "Password for the FalkorDB instance. Stored encrypted. When set it is the one used, replacing any password embedded in the FalkorDB URL. Leave empty for no auth, or to use the one the URL already carries."
 		},
 		"graph_falkordb.url": {
 			"type": "string",
 			"title": "FalkorDB URL",
-			"default": "",
-			"secure": true,
-			"description": "Connection string as shown in the FalkorDB Cloud console, e.g. falkor://falkordb@r-xxxx.instance-yyyy.cloud:53939. Use falkors:// for TLS. The URL may carry credentials, so it is stored encrypted; the password can also be left out of it and typed in the Password field below, which then replaces whatever the URL embeds.",
-			"ui": {
-				"ui:widget": "password"
-			}
+			"secret": true,
+			"env": "ROCKETRIDE_GRAPH_FALKORDB_URL",
+			"required": true,
+			"description": "Connection string as shown in the FalkorDB Cloud console, e.g. falkor://falkordb@r-xxxx.instance-yyyy.cloud:53939. Use falkors:// for TLS. The URL may carry credentials, so it is stored encrypted; the password can also be left out of it and typed in the Password field below, which then replaces whatever the URL embeds."
 		},
 		"graph_falkordb.tls": {
 			"type": "boolean",
@@ -163,17 +139,15 @@
 			"type": "string",
 			"title": "Default Graph",
 			"default": "agent",
+			"minLength": 1,
 			"description": "A FalkorDB server hosts many graphs. This is the one queried when the caller does not name another."
 		},
 		"graph_falkordb.db_description": {
 			"type": "string",
+			"format": "textarea",
 			"title": "Graph Description",
 			"default": "",
-			"optional": true,
-			"description": "What is this graph used for? Describe its content and domain, this helps the LLM generate more accurate Cypher queries.",
-			"ui": {
-				"ui:widget": "textarea"
-			}
+			"description": "What is this graph used for? Describe its content and domain, this helps the LLM generate more accurate Cypher queries."
 		},
 		"graph_falkordb.allow_writes": {
 			"type": "boolean",
@@ -218,52 +192,62 @@
 			"minimum": 100,
 			"maximum": 600000,
 			"description": "Server-side timeout for a single query."
-		},
-		//
-		// The two connection profiles. Everything the driver reads must be listed
-		// inside the profile object: the resolved config is the profile section
-		// merged with connConfig[profile], so top-level keys are not seen.
-		//
-		"graph_falkordb.default": {
-			"object": "default",
-			"properties": ["graph_falkordb.host", "graph_falkordb.port", "graph_falkordb.username", "graph_falkordb.password", "graph_falkordb.tls", "graph_falkordb.graph", "graph_falkordb.db_description", "graph_falkordb.allow_writes", "graph_falkordb.allow_execute", "graph_falkordb.max_attempts", "graph_falkordb.max_rows", "graph_falkordb.max_execute_rows", "graph_falkordb.query_timeout_ms"]
-		},
-		"graph_falkordb.urlProfile": {
-			"object": "url",
-			"properties": ["graph_falkordb.url", "graph_falkordb.password", "graph_falkordb.graph", "graph_falkordb.db_description", "graph_falkordb.allow_writes", "graph_falkordb.allow_execute", "graph_falkordb.max_attempts", "graph_falkordb.max_rows", "graph_falkordb.max_execute_rows", "graph_falkordb.query_timeout_ms"]
-		},
-		"graph_falkordb.profile": {
-			"type": "string",
-			"title": "Connection",
-			"description": "How this node connects to FalkorDB",
-			"default": "default",
-			"enum": ["*>preconfig.profiles.*.title"],
-			"conditional": [
-				{
-					"value": "default",
-					"properties": ["graph_falkordb.default"]
-				},
-				{
-					"value": "url",
-					"properties": ["graph_falkordb.urlProfile"]
-				}
-			]
 		}
 	},
 	//
-	// No "test" block: like every other database node (db_neo4j, db_postgres,
-	// db_arango), answering on the questions lane needs a live server and a
+	// No "test" block: like every other database node (graph_neo4j, db_postgres,
+	// graph_arango), answering on the questions lane needs a live server and a
 	// connected LLM, which the dynamic node runner has neither of. The node is
 	// covered by nodes/test/test_graph_falkordb.py instead.
 	//
 	// Required:
-	//		The shape defines how the fields are laid out in the UI
+	//		Defines the properties shown in the pipeline builder side panel, in order
 	//
-	"shape": [
+	"properties": [
+		"type",
 		{
-			"section": "Pipe",
-			"title": "FalkorDB",
-			"properties": ["type", "graph_falkordb.profile"]
+			"name": "profile",
+			"type": "string",
+			"title": "Connection",
+			"description": "How this node connects to FalkorDB",
+			"default": "default",
+			"enum": {
+				"default": {
+					"title": "Manual configuration (host and port)",
+					"properties": [
+						{ "name": "mode", "type": "constant", "default": "manual" },
+						"graph_falkordb.host",
+						"graph_falkordb.port",
+						"graph_falkordb.username",
+						"graph_falkordb.password",
+						"graph_falkordb.tls",
+						"graph_falkordb.graph",
+						"graph_falkordb.db_description",
+						"graph_falkordb.allow_writes",
+						"graph_falkordb.allow_execute",
+						"graph_falkordb.max_attempts",
+						"graph_falkordb.max_rows",
+						"graph_falkordb.max_execute_rows",
+						"graph_falkordb.query_timeout_ms"
+					]
+				},
+				"url": {
+					"title": "FalkorDB URL (connection string)",
+					"properties": [
+						{ "name": "mode", "type": "constant", "default": "url" },
+						"graph_falkordb.url",
+						"graph_falkordb.password",
+						"graph_falkordb.graph",
+						"graph_falkordb.db_description",
+						"graph_falkordb.allow_writes",
+						"graph_falkordb.allow_execute",
+						"graph_falkordb.max_attempts",
+						"graph_falkordb.max_rows",
+						"graph_falkordb.max_execute_rows",
+						"graph_falkordb.query_timeout_ms"
+					]
+				}
+			}
 		}
 	]
 }

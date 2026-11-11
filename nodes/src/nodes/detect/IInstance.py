@@ -48,6 +48,15 @@ class IInstance(IInstanceBase):
         self._image_data = None
         self._source_descriptor = None  # stream descriptor parsed on the image BEGIN
 
+    def open(self, object):
+        """Reset the per-object buffers and counters so nothing from a previous object carries over.
+
+        Args:
+            object: The entry being opened (unused; the reset is the point).
+        """
+        self._image_data = None
+        self._source_descriptor = None
+
     def _annotate(self, image, detections):
         """Draw boxes + labels onto a copy of the image.
 
