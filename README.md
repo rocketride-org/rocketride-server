@@ -5,15 +5,14 @@
 </a>
 
 <p>
-  <strong>RocketRide is the leading AI meta-harness with the only enterprise-grade runtime built on C++.</strong><br/>
-  Designed for professional developers and technical builders to build, stage, test, publish and maintain agents and AI-enabled applications that scale in production. Use it from VS Code, from the terminal with the SDK, or through the MCP server.
+  <strong>RocketRide is the open source AIDE: the AI Development Environment.</strong><br/>
+  Build, deploy and harness production-ready AI solutions at light speed, all within your IDE or using the CLI in your terminal.
 </p>
 
 <p>
   <a href="https://trendshift.io/repositories/37651?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-37651" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/37651/daily" alt="rocketride-org/rocketride-server: Repository Of The Day on Trendshift" width="250" height="55"/></a>&nbsp;&nbsp;
   <a href="https://trendshift.io/repositories/37651?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-37651" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/37651/daily?language=C%2B%2B" alt="rocketride-org/rocketride-server: C++ Repository Of The Day on Trendshift" width="250" height="55"/></a>
 </p>
-
 
 <p>
 <img src="docs/public/assets/icon-cpp.png" alt="C++" />&nbsp;&nbsp;
