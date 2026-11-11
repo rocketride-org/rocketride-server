@@ -802,6 +802,8 @@ class Task(DAPBase):
         self._is_restarting = False
         # One restart at a time: two would share _restart_env and _is_restarting
         self._restart_in_progress = False
+        # True while _terminated() runs, final broadcasts and run-log close included
+        self._teardown_running = False
         self._is_terminating = False
         self._termination_lock = asyncio.Lock()
 
@@ -1616,6 +1618,18 @@ class Task(DAPBase):
             return
         self._terminated_called = True
 
+        # restart_task waits on this, not only on the terminal state: the state
+        # turns terminal before the last broadcasts and the run-log close, and a
+        # replacement run started in that gap would have its run log ended by
+        # this teardown.
+        self._teardown_running = True
+        try:
+            await self._tear_down()
+        finally:
+            self._teardown_running = False
+
+    async def _tear_down(self) -> None:
+        """Run _terminated()'s cleanup, once per run (see _terminated)."""
         # Read the restart flag once. restart_task moves on as soon as the
         # state below turns terminal, and a new start can clear the flag
         # while this teardown still has broadcasts to make; reading it again
@@ -2760,8 +2774,9 @@ class Task(DAPBase):
             # Stop the task (triggers full cleanup via _terminated)
             await self.stop_task()
 
-            # Wait for termination to complete
-            while not self.is_task_complete():
+            # Wait for the old run's teardown to finish, not only for its
+            # terminal state (see _terminated)
+            while not self.is_task_complete() or self._teardown_running:
                 await asyncio.sleep(0.1)
 
             self._server.debug_message(f'Task "{self.id}" stopped, resetting state for restart...')
@@ -2986,6 +3001,14 @@ class Task(DAPBase):
                 self._debug_stdio = None
                 self.debug_message(f'Failed to initialize stdio interface: {e}')
 
+            # The engine may have exited during connect(), and _terminated()
+            # has then cleaned up without a run log or metrics: creating them
+            # now would leave both open. Each is created with no await before
+            # it is assigned, so a teardown that starts later finds it.
+            if self._terminated_called:
+                self.debug_message('The engine exited while the task was starting')
+                return
+
             # Open the run-log continuum for this run. Logging is best-effort
             # observability: any failure here is logged and the task runs
             # unlogged rather than failing execution.
@@ -3043,6 +3066,11 @@ class Task(DAPBase):
             except Exception as e:
                 self._run_log = None
                 self.debug_message(f'Run-log setup failed (task continues unlogged): {e}')
+
+            # The same check: the engine may have exited while the run log opened
+            if self._terminated_called:
+                self.debug_message('The engine exited while the task was starting')
+                return
 
             # Initialize metrics tracking (uses default sample_interval from constants)
             try:
