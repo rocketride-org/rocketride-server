@@ -23,13 +23,13 @@
 """
 Unit tests for `rocketride --version`.
 
-The flag must print the installed package's own version (the one
-rocketride.__version__ reads from the package metadata), not a hardcoded
-number, and exit 0 without needing a server or credentials.
+The flag must print the package's own version (rocketride.__version__, which
+is read from the installed package metadata), not a hardcoded number, and exit
+0 without needing a server or credentials. When the package runs from source
+with no installed metadata, __version__ is empty and the flag prints "unknown".
 """
 
 import importlib
-import importlib.metadata
 import sys
 
 import pytest
@@ -42,7 +42,7 @@ cli_main = importlib.import_module('rocketride.cli.main')
 
 
 def test_version_flag_prints_package_version(monkeypatch, tmp_path, capsys):
-    """`rocketride --version` prints the installed package version and exits 0."""
+    """`rocketride --version` prints the package version and exits 0."""
     monkeypatch.chdir(tmp_path)  # keep any workspace .env out of the test
     monkeypatch.setattr(sys, 'argv', ['rocketride', '--version'])
 
@@ -50,7 +50,7 @@ def test_version_flag_prints_package_version(monkeypatch, tmp_path, capsys):
         cli_main.main()
 
     assert exc.value.code == 0
-    assert capsys.readouterr().out.strip() == f'rocketride {importlib.metadata.version("rocketride")}'
+    assert capsys.readouterr().out.strip() == f'rocketride {rocketride.__version__ or "unknown"}'
 
 
 def test_version_flag_follows_package_version(monkeypatch, capsys):
