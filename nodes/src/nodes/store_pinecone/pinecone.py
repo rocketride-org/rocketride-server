@@ -310,6 +310,11 @@ class Store(DocumentStoreBase):
         if docFilter.offset:
             raise BaseException('Non-zero offset is not supported in semantic searching')
 
+        # Resolve the index metric before the query, so a failed lookup
+        # surfaces as the search error instead of discarding fetched results;
+        # it is cached after the first success
+        metric = self._indexMetric()
+
         # Perform the search
         points = index.query(
             vector=query.embedding,
@@ -322,7 +327,6 @@ class Store(DocumentStoreBase):
         # Convert each raw score to a higher-is-closer similarity in the
         # index's own metric, so the threshold and the returned score mean
         # the same thing on a legacy euclidean index as on a cosine one
-        metric = self._indexMetric()
         points = [
             {'score': self._similarity(point['score'], metric), 'metadata': point['metadata']} for point in points
         ]
