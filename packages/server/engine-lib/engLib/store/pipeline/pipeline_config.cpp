@@ -474,8 +474,9 @@ Error PipelineConfig::decryptSection(json::Value &section,
  * @brief Replaces the secure parameter tokens in the pipeline with the values
  * they hold.
  *
- * Decrypts every component the way decrypt() does, keeping parameter values
- * that are already set, then removes the "secureParameters" sections. The
+ * Decrypts every component the way decrypt() does, restoring each value at
+ * its dotted path under the component config and keeping values that are
+ * already set, then removes the config's "secureParameters" section. The
  * pipeline then carries plain parameter values, so a process that runs it
  * does not need the key the tokens were encrypted with.
  *
@@ -497,12 +498,9 @@ Error PipelineConfig::resolveSecureParameters() noexcept {
         if (auto ccode = validateComponent(component)) return ccode;
         if (auto ccode = decryptComponent(component)) return ccode;
 
-        auto &config = component["config"];
-        Text profileName = config.lookup<Text>("profile");
-        if (profileName && config.isMember(profileName))
-            config[profileName].removeMember("secureParameters");
-        if (config.isMember("parameters"))
-            config["parameters"].removeMember("secureParameters");
+        // The encrypted section lives at the config root, the root of the
+        // path-addressed stored tree, so that is the one section to drop
+        component["config"].removeMember("secureParameters");
     }
 
     return {};
