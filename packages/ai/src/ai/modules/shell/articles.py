@@ -60,7 +60,12 @@ def blogposting(page: Page, site: Mapping[str, Any], *, canonical: str, image: s
     ``published``.
     """
     organization = publisher(site)
-    authors = [{'@type': 'Person', 'name': name, **({'url': url} if url else {})} for name, url in page.authors]
+    authors = []
+    for name, url in page.authors:
+        author = {'@type': 'Person', 'name': name}
+        if url:
+            author['url'] = url
+        authors.append(author)
     out: Dict[str, Any] = {
         '@context': 'https://schema.org',
         '@type': 'BlogPosting',

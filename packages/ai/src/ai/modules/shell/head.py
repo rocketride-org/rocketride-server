@@ -111,12 +111,18 @@ def social_tags(*, site_name: str = '', image: str = '', published: str = '', mo
     the latter defaulting to the former), else ``website``. An ``image``
     (an absolute URL) asks for the large Twitter card.
     """
-    tags = [f'<meta property="og:type" content="{"article" if published else "website"}">']
+    og_type = 'website'
+    if published:
+        og_type = 'article'
+    tags = [f'<meta property="og:type" content="{og_type}">']
     if site_name:
         tags.append(f'<meta property="og:site_name" content="{_attr(site_name)}">')
     if image:
         tags.append(f'<meta property="og:image" content="{_attr(image)}">')
-    tags.append(f'<meta name="twitter:card" content="{"summary_large_image" if image else "summary"}">')
+    card = 'summary'
+    if image:
+        card = 'summary_large_image'
+    tags.append(f'<meta name="twitter:card" content="{card}">')
     if published:
         tags.append(f'<meta property="article:published_time" content="{_attr(published)}">')
         tags.append(f'<meta property="article:modified_time" content="{_attr(modified or published)}">')
