@@ -23,7 +23,6 @@
 
 #include "test.h"
 
-#if ROCKETRIDE_PLAT_UNX
 #include <time.h>
 
 using namespace async;
@@ -39,7 +38,7 @@ double threadCpuMs() noexcept {
 
 }  // namespace
 
-TEST_CASE("async::sleepCheck") {
+TEST_CASE("async::api") {
     SECTION("An idle wait sleeps instead of spinning") {
         // Waiters poll an idle queue with sleepCheck(.5s) in a loop, so the
         // CPU one call uses is paid for as long as the queue stays idle. A
@@ -55,4 +54,3 @@ TEST_CASE("async::sleepCheck") {
         REQUIRE(cpuMs < 50);
     }
 }
-#endif
