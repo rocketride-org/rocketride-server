@@ -188,6 +188,14 @@ def test_a_feed_is_as_new_as_its_latest_change(shell_root, monkeypatch):
     assert feed.findtext(f'{A}updated') == '2026-12-01T10:00:00+01:00'
 
 
+def test_a_feed_links_its_section_page_only_when_that_page_exists(shell_root, monkeypatch):
+    monkeypatch.setenv('RR_APP_URL', APP_URL)
+    posts = [Page('/blog/new', 'rocketride.home', 'New', published='2026-11-09')]
+    pp.swap(Aggregate(exact={p.path: p for p in posts}, feeds={FEED['path']: FEED}))
+    feed = _feed(_client())
+    assert [link.get('rel') for link in feed.findall(f'{A}link')] == ['self']
+
+
 def test_a_feed_of_every_page_leaves_out_the_home_page(shell_root, monkeypatch):
     monkeypatch.setenv('RR_APP_URL', APP_URL)
     everything = {'path': '/feed.xml', 'prefix': '/', 'title': 'All'}

@@ -83,7 +83,7 @@ import time
 from functools import partial
 from pathlib import Path
 from time import monotonic
-from typing import Any, Awaitable, Callable, Dict, Iterable, List, NamedTuple, Optional, Tuple, TypeVar
+from typing import Any, Awaitable, Callable, Dict, Iterable, List, Mapping, NamedTuple, Optional, Tuple, TypeVar
 
 from fastapi import HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -723,7 +723,7 @@ def _storage_warning_due(path: str, kind: str) -> bool:
     return True
 
 
-def _feed(aggregate: Any, feed: Any) -> Response:
+def _feed(aggregate: public_pages.Aggregate, feed: Mapping[str, str]) -> Response:
     """The Atom document of ``feed``, built once per page map; 404 without ``RR_APP_URL``.
 
     ``RR_APP_URL`` is the only source of the feed's absolute URLs.
@@ -745,7 +745,7 @@ def _feed(aggregate: Any, feed: Any) -> Response:
     )
 
 
-def _feeds_of(aggregate: Any, path: str) -> List[Tuple[str, str]]:
+def _feeds_of(aggregate: public_pages.Aggregate, path: str) -> List[Tuple[str, str]]:
     """``(title, absolute URL)`` of every feed whose prefix page ``path`` is or is under ([] without RR_APP_URL)."""
     base = app_url()
     if not base:

@@ -40,11 +40,12 @@ description or author holds.
 
 import re
 from datetime import datetime, timezone
-from typing import Any, List, Mapping
+from typing import List, Mapping
 from urllib.parse import urlsplit
 from xml.sax.saxutils import escape, quoteattr
 
 from .contract import Page, own_title, page_instant
+from .public_pages import Aggregate
 
 MAX_ENTRIES = 50
 
@@ -73,7 +74,7 @@ def entries(feed: Mapping[str, str], pages: List[Page]) -> List[Page]:
     return dated[:MAX_ENTRIES]
 
 
-def atom(feed: Mapping[str, str], aggregate: Any, base: str) -> str:
+def atom(feed: Mapping[str, str], aggregate: Aggregate, base: str) -> str:
     """The Atom document of ``feed`` over ``aggregate``'s pages, with absolute URLs on ``base`` (RR_APP_URL)."""
     items = entries(feed, aggregate.pages())
     site_title = aggregate.site.get('title', '')
@@ -90,9 +91,11 @@ def atom(feed: Mapping[str, str], aggregate: Any, base: str) -> str:
         f'<title>{_text(feed["title"])}</title>',
         f'<updated>{_text(updated)}</updated>',
         f'<link rel="self" type="application/atom+xml" href={_attr(self_url)}/>',
-        f'<link rel="alternate" type="text/html" href={_attr(base + (feed["prefix"][:-1] or "/"))}/>',
-        f'<author><name>{_text(site_title or urlsplit(base).netloc)}</name></author>',
     ]
+    section = feed['prefix'][:-1] or '/'
+    if section in aggregate.exact:
+        lines.append(f'<link rel="alternate" type="text/html" href={_attr(base + section)}/>')
+    lines.append(f'<author><name>{_text(site_title or urlsplit(base).netloc)}</name></author>')
     for page in items:
         url = base + page.path
         lines += [
