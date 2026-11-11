@@ -126,7 +126,8 @@ async def app(app_id: str, acct: Any = None) -> Optional[Dict[str, str]]:
         Exception: the bindings or the winning artifact could not be read (the
             caller serves the page without its data).
     """
-    acct, org, winners = await public_winners(acct)
+    acct = _account(acct)
+    org, winners = await public_winners(acct)
     row = winners.get(app_id)
     if row is None:
         return None

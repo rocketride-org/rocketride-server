@@ -244,7 +244,9 @@ async def load_published(
         RuntimeError: with ``strict``, a root claimant that cannot be read
             (the message names it).
     """
-    acct, org, winners = await public_winners(acct)
+    if acct is None:
+        from ai.account import account as acct
+    org, winners = await public_winners(acct)
     out: List[Published] = []
     for app_id, row in sorted(winners.items()):
         if app_id == exclude or not is_privileged(app_id):

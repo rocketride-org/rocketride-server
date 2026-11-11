@@ -111,7 +111,7 @@ def holds_required_permissions(row: Dict[str, Any], sys_perms: Any) -> bool:
     return not required or 'sys.admin' in sys_perms or all(p in sys_perms for p in required)
 
 
-async def public_winners(acct: Any = None) -> Tuple[Any, str, Dict[str, Dict[str, Any]]]:
+async def public_winners(acct: Any) -> Tuple[str, Dict[str, Dict[str, Any]]]:
     """
     Each app's winning public binding, as the store walk resolves it for an anonymous caller.
 
@@ -123,18 +123,15 @@ async def public_winners(acct: Any = None) -> Tuple[Any, str, Dict[str, Dict[str
     through here, so they can never disagree about which version serves.
 
     Args:
-        acct: The account layer (the ``ai.account.account`` singleton when None).
+        acct: The account layer to read.
 
     Returns:
-        ``(acct, org, winners)``: the account layer read; the org the rung was
-        listed under, which is also the org of a winning row that names none;
-        and each app id's winning row.
+        ``(org, winners)``: the org the rung was listed under, which is also
+        the org of a winning row that names none; and each app id's winning row.
 
     Raises:
         Exception: the account layer could not list the public bindings.
     """
-    if acct is None:
-        from . import account as acct
     org = 'local'
     if 'saas' in getattr(acct, 'capabilities', ()):
         org = ''
@@ -148,4 +145,4 @@ async def public_winners(acct: Any = None) -> Tuple[Any, str, Dict[str, Dict[str
         if serving_block_of(row, review_ladder) or not holds_required_permissions(row, set()):
             continue
         winners[str(row.get('appId') or '')] = row
-    return acct, org, winners
+    return org, winners
