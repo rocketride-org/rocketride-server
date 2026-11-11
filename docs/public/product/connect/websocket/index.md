@@ -24,7 +24,8 @@ send so you can debug, trace, or build your own client.
   `ROCKETRIDE_URI`). If `auth` fails the request errors. Once authenticated, each
   task request carries the task `token` returned by `execute` (the SDK's `use()`)
   in its `arguments`.
-  Cloud requires a key; a local engine typically does not.
+  Cloud requires a key. The SDKs and the CLI also need one for a local engine;
+  an engine started without a key accepts any non-empty value.
 
 The default port is applied only when the URI omits one, point the client at a
 different host or port to reach a remote or self-hosted engine.
