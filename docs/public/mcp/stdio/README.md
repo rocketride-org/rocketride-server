@@ -35,7 +35,9 @@
 > Self-hosted engines serve the same endpoint automatically at
 > `http://<host>:5565/mcp` — nothing extra to install. See the
 > [HTTP MCP Server documentation](https://docs.rocketride.org/connect/mcp/http)
-> for Claude, Cursor, and ChatGPT setup.
+> for Claude, Cursor, and ChatGPT setup, and
+> [MCP self-hosting](https://docs.rocketride.org/connect/mcp/http/self-hosting)
+> for a self-hosted engine.
 >
 > `rocketride-mcp` 1.5.0 is the final release. It continues to work against
 > existing engines, but receives no new features or fixes.
@@ -43,7 +45,8 @@
 ## Connect with the built-in server
 
 The built-in HTTP MCP server needs nothing to install. Use the endpoint below
-for every client. Self-hosted engines serve it at `http://<host>:5565/mcp`.
+for every client. Self-hosted engines serve it at `http://<host>:5565/mcp`; see
+[MCP self-hosting](https://docs.rocketride.org/connect/mcp/http/self-hosting).
 
 ```text
 https://api.rocketride.ai/mcp
@@ -362,21 +365,41 @@ rocketride-mcp
 
 ```json
 {
-  "nodes": [
-    { "id": "source_1", "provider": "webhook" },
+  "project_id": "webhook-example",
+  "source": "source_1",
+  "components": [
     {
-      "id": "llm_1", "provider": "llm_openai",
-      "config": { "profile": "openai-4o-mini", "apikey": "${OPENAI_API_KEY}" },
-      "input": [{ "lane": "questions", "from": "source_1" }]
+      "id": "source_1",
+      "provider": "webhook",
+      "config": {}
     },
-    { "id": "target_1", "provider": "response",
-      "input": [{ "lane": "answers", "from": "llm_1" }] }
+    {
+      "id": "llm_1",
+      "provider": "llm_openai",
+      "config": {
+        "profile": "openai-4o-mini",
+        "apikey": "${ROCKETRIDE_OPENAI_API_KEY}"
+      },
+      "input": [
+        { "lane": "questions", "from": "source_1" }
+      ]
+    },
+    {
+      "id": "target_1",
+      "provider": "response_answers",
+      "config": {},
+      "input": [
+        { "lane": "answers", "from": "llm_1" }
+      ]
+    }
   ]
 }
 ```
 
 ```bash
-rocketride start ./chat.pipe
+export ROCKETRIDE_OPENAI_API_KEY=sk-...
+
+rocketride start --pipeline ./chat.pipe
 ```
 
 **3. Ask Claude to use it.** Open Claude Desktop (configured with the
