@@ -64,15 +64,19 @@ export ROCKETRIDE_URI=ws://localhost:5565
 export ROCKETRIDE_APIKEY=rr_local
 ```
 
-Save this pipeline as `code.pipe`. It splits source code into its parts and needs no model provider key and no account:
+Save this pipeline as `code.pipe`. It reads a source file, splits it into its functions and classes, and fingerprints it, all in two branches from one input. It needs no model provider key and no account:
 
 ```bash
 cat > code.pipe <<'EOF'
 {
   "components": [
     { "id": "in", "provider": "webhook", "config": {} },
-    { "id": "code", "provider": "preprocessor_code", "config": {}, "input": [{ "lane": "text", "from": "in" }] },
-    { "id": "out", "provider": "response_documents", "config": {}, "input": [{ "lane": "documents", "from": "code" }] }
+    { "id": "parse", "provider": "parse", "config": {}, "input": [{ "lane": "tags", "from": "in" }] },
+    { "id": "code", "provider": "preprocessor_code", "config": {}, "input": [{ "lane": "text", "from": "parse" }] },
+    { "id": "parts", "provider": "response_documents", "config": {}, "input": [{ "lane": "documents", "from": "code" }] },
+    { "id": "text", "provider": "response_text", "config": {}, "input": [{ "lane": "text", "from": "parse" }] },
+    { "id": "hash", "provider": "hash", "config": {}, "input": [{ "lane": "tags", "from": "in" }] },
+    { "id": "sum", "provider": "response_hash", "config": {}, "input": [{ "lane": "tags", "from": "hash" }] }
   ],
   "source": "in"
 }
@@ -90,13 +94,14 @@ rocketride start --pipeline ./code.pipe
 
 ### Send code and read the reply
 
-This script starts `code.pipe`, sends a short Python file, prints each part the pipeline found, checks the result and stops the task. It reads `ROCKETRIDE_URI` and `ROCKETRIDE_APIKEY` from the environment, so run it in the same shell and folder:
+This script starts `code.pipe`, sends a short Python file, prints each result, checks all three and stops the task. It reads `ROCKETRIDE_URI` and `ROCKETRIDE_APIKEY` from the environment, so run it in the same shell and folder:
 
 ```python
 import asyncio
+import hashlib
 from rocketride import RocketRideClient
 
-SOURCE = """import os
+SOURCE = b"""import os
 
 
 class Greeter:
@@ -113,21 +118,24 @@ async def main():
     async with RocketRideClient() as client:
         result = await client.use(filepath='code.pipe')
         token = result['token']
-        out = await client.send(token, SOURCE, mimetype='text/plain')
+        out = await client.send(token, SOURCE, objinfo={'name': 'greeter.py'})
         await client.terminate(token)
 
     parts = [doc['page_content'] for doc in out['documents']]
     for part in parts:
         print(repr(part))
+    print(repr(out['text'][0]))
+    print(out['hash'][0][:16] + '...')
+
     assert len(parts) == 4
     assert any(part.startswith('def add') for part in parts)
+    assert SOURCE.decode() in out['text'][0]
+    assert out['hash'][0] == hashlib.sha512(SOURCE).hexdigest()
     print('ok')
 
 
 asyncio.run(main())
 ```
-
-`mimetype='text/plain'` is required. Without it the reply has no documents and no error.
 
 It prints:
 
@@ -136,12 +144,20 @@ It prints:
 'class Greeter:\n    def hello(self, name):\n        return "hi " + name'
 'def hello(self, name):\n        return "hi " + name'
 'def add(a, b):\n    return a + b'
+'import os\n\n\nclass Greeter:\n    def hello(self, name):\n        return "hi " + name\n\n\ndef add(a, b):\n    return a + b\n\n\n\n'
+9b3ea02fd87ae7bd...
 ok
 ```
 
-There is one document for the import, one for the class, one for the method and one for the function. The method shows up twice, once inside the class and once on its own. Two checks keep a failure loud: the reply has 4 documents, and one of them starts with `def add`.
+The reply has three results, each from its own node:
 
-The pipeline needs no model provider key and no account. A first run on a fresh engine took about 10 seconds on a laptop, and later runs took 2 to 5 seconds. Starting the engine is separate and not counted.
+- `documents` (`response_documents`, after `preprocessor_code`): one document for the import, the class, the method and the function. The method shows up twice, once inside the class and once on its own. The check is 4 documents and one starts with `def add`.
+- `text` (`response_text`, after `parse`): the text the parser read from the file, which holds the source you sent (with a few extra newlines at the end). The check is that the source is inside it.
+- `hash` (`response_hash`, after `hash`): the SHA-512 fingerprint of the bytes you sent. The check recomputes it with `hashlib` and compares.
+
+Both branches start from the `tags` lane of the webhook. A branch that reads another lane of the same source can return nothing for the other branch, with no error.
+
+The pipeline needs no model provider key and no account. A first run on a fresh engine took about 13 seconds on a laptop, and later runs took 5 to 9 seconds. Starting the engine is separate and not counted.
 
 More: [Run from the CLI](/quickstart/cli), [CLI Reference](/connect/cli), [Python SDK](/clients/python), [TypeScript SDK](/clients/typescript).
 
