@@ -26,7 +26,10 @@ def route_path(scope: Scope) -> str:
         return path
     if path == root_path:
         return ''
-    return path[len(root_path) :] if path[len(root_path)] == '/' else path
+    # '/api/x' is under root_path '/api'; '/apix' only shares its prefix.
+    if path[len(root_path)] == '/':
+        return path[len(root_path) :]
+    return path
 
 
 class AuthMiddleware(BaseHTTPMiddleware):

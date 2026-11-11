@@ -152,9 +152,18 @@ def live_route_conflict(path: str) -> Optional[str]:
 
 
 def canonical_url(path: str) -> str:
-    """Absolute canonical URL, from RR_APP_URL only, never request headers ('' when unset)."""
+    """Absolute canonical URL, from RR_APP_URL only, never request headers.
+
+    Args:
+        path: The page path.
+
+    Returns:
+        ``RR_APP_URL`` followed by ``path``, or '' when ``RR_APP_URL`` is unset.
+    """
     base = app_url()
-    return f'{base}{path}' if base else ''
+    if not base:
+        return ''
+    return f'{base}{path}'
 
 
 def _relative_location(request: Request, path: str) -> str:
@@ -231,7 +240,9 @@ class _FifoCache:
     def get(self, key: Any) -> Any:
         """The value stored under ``key``, or None."""
         hit = self._entries.get(key)
-        return None if hit is None else hit[0]
+        if hit is None:
+            return None
+        return hit[0]
 
     def put(self, key: Any, value: Any, size: int) -> None:
         """Store ``value`` (``size`` bytes), evicting the oldest entries until it fits."""
