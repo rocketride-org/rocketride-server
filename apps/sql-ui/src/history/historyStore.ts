@@ -54,7 +54,7 @@
 import React, { useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import { usePrefs } from 'shell';
 import type { IPrefsApi } from 'shell';
-import type { IHistoryEntry } from './types';
+import type { HistoryEntry } from './types';
 import type { HistoryBag } from './trim';
 import { trimBag, trimHistory } from './trim';
 import { subscribeRuns } from './runEvents';
@@ -73,7 +73,7 @@ const PREF_RECORDING = 'sql.historyRecording';
 const PERSIST_DELAY_MS = 300;
 
 /** Shared empty list, so an unknown connection keeps a stable snapshot. */
-const NO_ENTRIES: IHistoryEntry[] = [];
+const NO_ENTRIES: HistoryEntry[] = [];
 
 /**
  * How many pre-hydration runs are held while the recording switch is unknown.
@@ -108,7 +108,7 @@ let unsavedRecording: Record<string, boolean> = {};
  * OFF from having their SQL persisted: until hydrate, a stored `false` is
  * indistinguishable from "never set", and the default is on.
  */
-let pendingRuns: { key: string; entry: IHistoryEntry }[] = [];
+let pendingRuns: { key: string; entry: HistoryEntry }[] = [];
 
 let prefs: IPrefsApi | null = null;
 let bridgeCount = 0;
@@ -133,9 +133,9 @@ function notify(): void {
  * @param value - A candidate entry from the preferences bag.
  * @returns The entry, or null when it cannot be used.
  */
-function readEntry(value: unknown): IHistoryEntry | null {
+function readEntry(value: unknown): HistoryEntry | null {
 	if (!value || typeof value !== 'object') return null;
-	const raw = value as Partial<IHistoryEntry>;
+	const raw = value as Partial<HistoryEntry>;
 	if (typeof raw.id !== 'string' || typeof raw.sql !== 'string') return null;
 	return {
 		id: raw.id,
@@ -172,7 +172,7 @@ function hydrate(): void {
 	if (rawBag && typeof rawBag === 'object') {
 		for (const [key, value] of Object.entries(rawBag as Record<string, unknown>)) {
 			if (!Array.isArray(value)) continue;
-			const entries = value.map(readEntry).filter((entry): entry is IHistoryEntry => entry !== null);
+			const entries = value.map(readEntry).filter((entry): entry is HistoryEntry => entry !== null);
 			if (entries.length > 0) next[key] = trimHistory(entries);
 		}
 	}
@@ -300,7 +300,7 @@ export function attachPrefs(api: IPrefsApi): () => void {
  * @param key - The connection's endpoint key.
  * @param entries - The connection's new entries, newest first.
  */
-function setEntries(key: string, entries: IHistoryEntry[]): void {
+function setEntries(key: string, entries: HistoryEntry[]): void {
 	if (entries.length === 0) {
 		if (!(key in bag)) return;
 		const next = { ...bag };
@@ -325,7 +325,7 @@ function setEntries(key: string, entries: IHistoryEntry[]): void {
  * @param key - The connection's endpoint key.
  * @param entry - The finished statement's record.
  */
-function recordRun(key: string, entry: IHistoryEntry): void {
+function recordRun(key: string, entry: HistoryEntry): void {
 	if (!hydrated) {
 		pendingRuns.push({ key, entry });
 		if (pendingRuns.length > MAX_PENDING_RUNS) pendingRuns.shift();
@@ -433,7 +433,7 @@ function subscribe(callback: () => void): () => void {
  * @param key - The connection's endpoint key.
  * @returns The entries, newest first (empty for an unknown connection).
  */
-export function useHistory(key: string): IHistoryEntry[] {
+export function useHistory(key: string): HistoryEntry[] {
 	return useSyncExternalStore(subscribe, () => bag[key] ?? NO_ENTRIES);
 }
 

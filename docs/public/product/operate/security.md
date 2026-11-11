@@ -81,6 +81,15 @@ The engine binds to `localhost` by default:
 - **Source-node HTTP endpoints** (Webhook, Chat, Dropper) — the port is set
   per node in the pipeline config; 5567 is the conventional choice used in
   examples and integrations, not a fixed engine bind.
+- **Task data ports** — each running pipeline listens on `localhost`, on a port
+  from a pool that starts at `--base_port` (20000 by default), for the engine
+  only. It accepts a connection only with that pipeline run's own token, which
+  the engine keeps and replaces on every start; the pipeline's process is given
+  only a hash of it. The engine connects as soon as the process reports its
+  listener, and over that connection the process may ask the engine only for
+  the commands the engine registered for it — today one, `spend.check`, which
+  asks whether the run's own organization may open a pipe. Its `/status`
+  endpoint accepts only that token.
 
 Only the source-node HTTP port needs to be accessible to external callers when
 you're using a webhook-based source. Port 5565 is a management interface;
@@ -97,6 +106,8 @@ credentials and writes them to the Project Log:
 
 - **Public authorization key** - presented by external callers in the
   `Authorization: Bearer <key>` header. Safe to share with trusted API clients.
+  It is accepted only while the run's source is a Webhook, Chat, Dropper,
+  Discord or Telegram node: on any other run it authenticates nothing.
 - **Private token** - the internal credential for the endpoint. Used by the SDK
   to connect to a running task via `--token`. Do not share this publicly.
 
@@ -105,9 +116,17 @@ shared or exportable log), so the private token is only visible to that
 operator. Retrieve it from your own Project Log when you need to connect a client
 with `--token`.
 
-Both are generated fresh each time the pipeline starts. There is no persistent
-credential to rotate — stopping and restarting the pipeline issues new
-credentials automatically.
+The private token is an HMAC of the run's identity under the engine's
+`RR_TASK_TOKEN_KEY`, so it cannot be worked out from the project, source or
+owner. A relaunch of the same run gets the same private token while the key
+stays the same. Without `RR_TASK_TOKEN_KEY` the engine uses a random key of its
+own process, and the private token changes whenever the engine restarts. Set
+the key (at least 32 characters, the same value on every replica) to keep it.
+The engine never passes the key to pipeline code, even when `RR_SUBPROCESS_ENV`
+names it. Tasks run as the engine's OS user, so on Linux set `RR_PROC_PRIVATE=1`
+(hosted engines do this already) or a task can read the engine's
+`/proc/<pid>/environ`; and keep the key out of any file the task can read, such
+as the engine's `.env`, on an engine shared by several users.
 
 ## MCP authentication
 

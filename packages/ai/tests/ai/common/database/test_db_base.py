@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import time
 from datetime import datetime
+from contextlib import contextmanager
 from types import SimpleNamespace
 
 import pytest
@@ -875,6 +876,368 @@ def test_write_questions_emits_error_for_unsafe_sql_not_as_data():
     assert fake_instance.text_written == 'Generated query contains unsafe SQL'
     assert fake_instance.answer_written.getJson() == {'error': 'Generated query contains unsafe SQL'}
     assert fake_instance.table_written is None
+
+
+def _executing_instance(rows, lanes):
+    """Build an instance whose query passes EXPLAIN and whose execution returns ``rows``.
+
+    Args:
+        rows: What ``_executeSQLQuery`` returns: a row list, or None for a failed execution.
+        lanes: The lanes wired to the node.
+
+    Returns:
+        The instance and its lane recorder.
+    """
+    fake_global = _FakeGlobal()
+    fake_global._validateQuery = lambda sql: (True, None)
+    inst = _sql_instance(fake_global)
+    inst._buildSQLQueryOnce = lambda question_text, *, limit, previous_sql, error: {
+        'isValid': True,
+        'query': 'SELECT 1',
+    }
+    inst._executeSQLQuery = lambda sql: rows
+    fake_instance = _FakeInstance(lanes=lanes)
+    inst.instance = fake_instance
+    return inst, fake_instance
+
+
+def test_write_questions_reports_a_failed_execution_not_the_string_none():
+    """A query that passes EXPLAIN but fails to run reports the failure, not the text 'None' (#1925).
+
+    ``_executeSQLQuery`` returns None when the database rejects the statement at
+    execution time; writeQuestions passed it to ``_emit``, which wrote ``str(None)``
+    to the text and answers lanes.
+    """
+    inst, fake_instance = _executing_instance(None, ['text', 'table', 'answers'])
+    question = Question()
+    question.addQuestion('the answer')
+
+    inst.writeQuestions(question)
+
+    assert fake_instance.text_written == 'Query execution failed'
+    assert fake_instance.answer_written.getJson() == {'error': 'Query execution failed'}
+    assert fake_instance.table_written is None
+
+
+def test_write_questions_reports_an_empty_result_as_rows_not_as_a_failure():
+    """A query that ran and matched nothing is a result: no error on the lanes."""
+    inst, fake_instance = _executing_instance([], ['text', 'answers'])
+    question = Question()
+    question.addQuestion('nobody')
+
+    inst.writeQuestions(question)
+
+    assert fake_instance.text_written == '[]'
+    assert fake_instance.answer_written.getText() == '[]'
+
+
+def test_write_questions_raises_a_failed_execution_when_no_lane_carries_errors():
+    """A table-only pipeline has no lane for an error, so a failed query fails the question instead of looking like zero rows."""
+    inst, fake_instance = _executing_instance(None, ['table'])
+    question = Question()
+    question.addQuestion('the answer')
+
+    with pytest.raises(RuntimeError, match='Query execution failed'):
+        inst.writeQuestions(question)
+    assert fake_instance.table_written is None
+
+
+def _question_instance(reply, lanes, *, explain_ok=True, rows=None):
+    """Build an instance whose LLM step returns ``reply``, with the given lanes wired.
+
+    Args:
+        reply: What ``_buildSQLQueryOnce`` returns, or an exception to raise from it.
+        lanes: The lanes wired to the node.
+        explain_ok: Whether the EXPLAIN check accepts the query (otherwise every attempt is rejected).
+        rows: What ``_executeSQLQuery`` returns.
+
+    Returns:
+        The instance and its lane recorder.
+    """
+    fake_global = _FakeGlobal()
+    if explain_ok:
+        fake_global._validateQuery = lambda sql: (True, None)
+    inst = _sql_instance(fake_global)
+
+    def build(question_text, *, limit, previous_sql, error):
+        """Return ``reply``, or raise it when it is an exception."""
+        if isinstance(reply, BaseException):
+            raise reply
+        return dict(reply)
+
+    inst._buildSQLQueryOnce = build
+    inst._executeSQLQuery = lambda sql: rows
+    fake_instance = _FakeInstance(lanes=lanes)
+    inst.instance = fake_instance
+    return inst, fake_instance
+
+
+def _ask(inst, text='the question'):
+    """Send one question to ``inst``."""
+    question = Question()
+    question.addQuestion(text)
+    inst.writeQuestions(question)
+
+
+@pytest.mark.parametrize(
+    ('reply', 'explain_ok', 'rows', 'message'),
+    [
+        ({'isValid': True, 'query': 'SELECT * FROM'}, False, None, 'syntax error near FROM'),
+        ({'isValid': True, 'query': 'DELETE FROM users'}, True, None, 'Generated query contains unsafe SQL'),
+        ({'isValid': False}, True, None, 'The LLM returned neither a query nor an answer'),
+        ({'isValid': True, 'query': 'SELECT 1'}, True, None, 'Query execution failed'),
+    ],
+    ids=['explain-exhausted', 'unsafe-sql', 'no-query', 'execution-failed'],
+)
+def test_every_failure_fails_a_table_only_question(reply, explain_ok, rows, message):
+    """With no lane that carries an error, each failure point fails the question instead of reporting nothing."""
+    inst, fake_instance = _question_instance(reply, ['table'], explain_ok=explain_ok, rows=rows)
+
+    with pytest.raises(RuntimeError, match=message):
+        _ask(inst)
+    assert fake_instance.table_written is None
+
+
+def test_an_unexpected_failure_reaches_the_lanes_as_a_fixed_message():
+    """Exception text we did not write (here an LLM error quoting the rejected SQL) stays in the log."""
+    leak = ValueError('Cause: bad JSON. Last response: SELECT secret FROM users WHERE token = 1...')
+    inst, fake_instance = _question_instance(leak, ['text', 'answers'])
+
+    _ask(inst)
+
+    assert fake_instance.text_written == 'Failed to answer the question'
+    assert fake_instance.answer_written.getJson() == {'error': 'Failed to answer the question'}
+
+
+def test_an_unexpected_failure_of_a_table_only_question_raises_the_fixed_message():
+    """The engine hands a raised exception's text to the client, so a table-only question raises our text, not the cause."""
+    leak = ValueError('Cause: bad JSON. Last response: SELECT secret FROM users WHERE token = 1...')
+    inst, _ = _question_instance(leak, ['table'])
+
+    with pytest.raises(RuntimeError) as raised:
+        _ask(inst)
+
+    assert str(raised.value) == 'Failed to answer the question'
+    assert raised.value.__suppress_context__
+
+
+# An error key the prompt never asked for: the LLM's own text, here echoing a statement
+_LLM_ERROR_REPLY = {'isValid': False, 'error': 'I would run SELECT token FROM users but the table is missing'}
+
+
+def test_an_error_the_llm_reports_reaches_the_lanes_as_a_fixed_message():
+    """The LLM wrote the error key, not the node, so its text stays in the log."""
+    inst, fake_instance = _question_instance(_LLM_ERROR_REPLY, ['text', 'answers'])
+
+    _ask(inst)
+
+    assert fake_instance.text_written == 'Failed to answer the question'
+    assert fake_instance.answer_written.getJson() == {'error': 'Failed to answer the question'}
+
+
+def test_an_error_the_llm_reports_fails_a_table_only_question_with_the_fixed_message():
+    """The raised text reaches the client, so it is the fixed message, not the LLM's."""
+    inst, fake_instance = _question_instance(_LLM_ERROR_REPLY, ['table'])
+
+    with pytest.raises(RuntimeError) as raised:
+        _ask(inst)
+
+    assert str(raised.value) == 'Failed to answer the question'
+    assert fake_instance.table_written is None
+
+
+@pytest.mark.parametrize('tool', ['get_sql', 'get_data'])
+def test_the_tools_report_an_error_the_llm_reports_as_the_fixed_message(tool):
+    """The tools share the query builder, so their error field carries only text the node wrote too."""
+    inst = _sql_instance(_FakeGlobal())
+    inst._buildSQLQueryOnce = lambda question_text, *, limit, previous_sql, error: dict(_LLM_ERROR_REPLY)
+
+    assert getattr(inst, tool)({'question': 'all users'}) == {'error': 'Failed to answer the question', 'valid': False}
+
+
+def test_build_sql_query_keeps_the_explain_error_over_an_error_the_llm_reports():
+    """When EXPLAIN rejects every attempt, the caller gets the database's message as the node formatted it."""
+    inst = _sql_instance(_FakeGlobal(explain_error='column "userz" does not exist'))
+    inst._buildSQLQueryOnce = lambda question_text, *, limit, previous_sql, error: {
+        'isValid': True,
+        'query': 'SELECT * FROM userz',
+        'error': 'the LLM had doubts',
+    }
+
+    assert inst._buildSQLQuery('all users')['error'] == 'column "userz" does not exist'
+
+
+class _FailingAnswersInstance(_FakeInstance):
+    """A lane recorder whose answers lane fails to write."""
+
+    def writeAnswers(self, answer):
+        """Fail the write."""
+        raise RuntimeError('answers sink is down')
+
+
+def test_a_failing_lane_write_fails_the_question():
+    """A lane that cannot be written fails the question; the error is not sent to the other lanes on top of the rows."""
+    inst, _ = _question_instance({'isValid': True, 'query': 'SELECT 1'}, ['text', 'answers'], rows=[{'answer': 42}])
+    fake_instance = _FailingAnswersInstance(lanes=['text', 'answers'])
+    inst.instance = fake_instance
+
+    with pytest.raises(RuntimeError, match='answers sink is down'):
+        _ask(inst)
+    assert fake_instance.text_written == str([{'answer': 42}])
+
+
+def test_a_failing_lane_write_while_reporting_a_failure_passes_the_downstream_error_on():
+    """Writing the error runs the downstream nodes too; their failure reaches the caller as they reported it."""
+    inst, _ = _question_instance({'isValid': True, 'query': 'SELECT 1'}, ['text', 'answers'], rows=None)
+    fake_instance = _FailingAnswersInstance(lanes=['text', 'answers'])
+    inst.instance = fake_instance
+
+    with pytest.raises(RuntimeError, match='answers sink is down'):
+        _ask(inst)
+    assert fake_instance.text_written == 'Query execution failed'
+
+
+class _RaisingDatabase:
+    """A database whose every statement fails with one exception."""
+
+    def __init__(self, exc):
+        """Fail every statement with ``exc``.
+
+        Args:
+            exc: The exception each statement raises.
+        """
+        self.exc = exc
+
+    @contextmanager
+    def read_only_connection(self):
+        """Stand in for ``DatabaseGlobalBase.read_only_connection``, where generated SQL runs.
+
+        Yields:
+            A connection whose ``execute`` raises.
+        """
+        yield SimpleNamespace(execute=self._fail)
+
+    def _fail(self, *_args, **_kwargs):
+        """Raise the configured exception."""
+        raise self.exc
+
+
+def test_execute_sql_query_reports_a_clickhouse_failure_as_none():
+    """clickhouse+native:// raises a DatabaseException that is not a SQLAlchemyError; it is still a failed query."""
+    inst = _sql_instance(
+        _RaisingDatabase(
+            _StandInClickHouseDatabaseException(
+                _StandInClickHouseServerException(60, "Table default.widgets doesn't exist")
+            )
+        )
+    )
+
+    assert inst._executeSQLQuery('SELECT * FROM widgets') is None
+
+
+def test_execute_sql_query_lets_a_non_database_error_through():
+    """Only database failures become None; anything else is a bug and propagates."""
+    inst = _sql_instance(_RaisingDatabase(RuntimeError('boom')))
+
+    with pytest.raises(RuntimeError, match='boom'):
+        inst._executeSQLQuery('SELECT 1')
+
+
+def test_write_questions_reports_a_clickhouse_failure_on_the_lanes():
+    """Through the real _executeSQLQuery, a ClickHouse runtime failure reaches the lanes as the failure message."""
+    fake_global = _FakeGlobal()
+    fake_global._validateQuery = lambda sql: (True, None)
+    fake_global.read_only_connection = _RaisingDatabase(
+        _StandInClickHouseDatabaseException(
+            _StandInClickHouseServerException(60, "Table default.widgets doesn't exist")
+        )
+    ).read_only_connection
+    inst = _sql_instance(fake_global)
+    inst._buildSQLQueryOnce = lambda question_text, *, limit, previous_sql, error: {
+        'isValid': True,
+        'query': 'SELECT 1',
+    }
+    fake_instance = _FakeInstance(lanes=['text', 'answers'])
+    inst.instance = fake_instance
+    question = Question()
+    question.addQuestion('widgets')
+
+    inst.writeQuestions(question)
+
+    assert fake_instance.text_written == 'Query execution failed'
+    assert fake_instance.answer_written.getJson() == {'error': 'Query execution failed'}
+
+
+def _empty_widgets_global(base):
+    """Return a stub IGlobal whose generated SQL runs read-only on ``base``, where table ``widgets`` has no row.
+
+    Args:
+        base: The SQLite-backed DatabaseGlobalBase fixture.
+
+    Returns:
+        The stub, with EXPLAIN accepting every query.
+    """
+    with base.engine.begin() as conn:
+        conn.exec_driver_sql('CREATE TABLE widgets (id INTEGER)')
+    fake_global = _FakeGlobal()
+    fake_global._validateQuery = lambda sql: (True, None)
+    fake_global.read_only_connection = base.read_only_connection
+    return fake_global
+
+
+def _ask_for_widgets(fake_global):
+    """Return an instance on ``fake_global`` whose LLM translates every question into ``SELECT id FROM widgets``.
+
+    Args:
+        fake_global: The stub IGlobal the instance queries.
+
+    Returns:
+        The instance.
+    """
+    inst = _sql_instance(fake_global)
+    inst._buildSQLQueryOnce = lambda question_text, *, limit, previous_sql, error: {
+        'isValid': True,
+        'query': 'SELECT id FROM widgets',
+    }
+    return inst
+
+
+def test_execute_sql_query_returns_an_empty_list_when_no_row_matches(base):
+    """A query that matches no row ran: [] is its result, and only None means the query failed.
+
+    Args:
+        base: A ``DatabaseGlobalBase`` on an in-memory SQLite engine, from the ``base`` fixture.
+    """
+    assert _sql_instance(_empty_widgets_global(base))._executeSQLQuery('SELECT id FROM widgets') == []
+
+
+def test_get_data_returns_no_rows_as_a_valid_result(base):
+    """get_data answers a generated query that matches no row with zero rows, not with the failure message.
+
+    Args:
+        base: A ``DatabaseGlobalBase`` on an in-memory SQLite engine, from the ``base`` fixture.
+    """
+    result = _ask_for_widgets(_empty_widgets_global(base)).get_data({'question': 'widgets'})
+
+    assert result == {'valid': True, 'rows': [], 'sql': 'SELECT id FROM widgets', 'row_limit': 250}
+
+
+@pytest.mark.parametrize('reply', [{'isValid': False}, {'isValid': True, 'query': None}])
+def test_write_questions_reports_a_reply_without_query_or_answer(reply):
+    """An LLM reply with neither SQL nor a prose answer is reported, not written as the text 'None'."""
+    fake_global = _FakeGlobal()
+    fake_global._validateQuery = lambda sql: (True, None)
+    inst = _sql_instance(fake_global)
+    inst._buildSQLQueryOnce = lambda question_text, *, limit, previous_sql, error: dict(reply)
+    fake_instance = _FakeInstance(lanes=['text', 'answers'])
+    inst.instance = fake_instance
+    question = Question()
+    question.addQuestion('anything')
+
+    inst.writeQuestions(question)
+
+    assert fake_instance.text_written == 'The LLM returned neither a query nor an answer'
+    assert fake_instance.answer_written.getJson() == {'error': 'The LLM returned neither a query nor an answer'}
 
 
 # ---------------------------------------------------------------------------

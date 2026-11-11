@@ -246,29 +246,6 @@ class OutputLogger {
 		// This allows callers to catch and handle the error if needed
 		throw new Error(message);
 	}
-
-	/**
-	 * Makes the output channel visible to the user.
-	 * 
-	 * This method programmatically opens the Output panel and switches to the
-	 * "RocketRide" channel, bringing it into focus for the user. This is useful
-	 * for drawing attention to important log messages or errors.
-	 * 
-	 * The `preserveFocus` parameter (true) ensures that keyboard focus remains
-	 * on the current editor or panel, preventing disruption to the user's
-	 * workflow while still making the logs visible.
-	 * 
-	 * Use Cases:
-	 * - After critical errors to show diagnostic information
-	 * - When starting debug sessions to provide real-time feedback
-	 * - During long operations to show progress updates
-	 */
-	public show(): void {
-		// Show the output channel with preserve focus enabled
-		// preserveFocus: true means the current editor/panel keeps keyboard focus
-		// while the Output panel becomes visible in the background
-		this.outputChannel.show(true);
-	}
 }
 
 /**

@@ -53,6 +53,8 @@ export interface IChatViewProps {
 	emptyTitle?: string;
 	/** Description for the EmptyState shown when the conversation has no messages. */
 	emptyDescription?: string;
+	/** Rich replacement for the stock EmptyState (e.g. example-prompt cards). */
+	emptySlot?: ReactNode;
 	/** Optional node rendered before the input field (reserved for future attachments). */
 	leadingInputSlot?: ReactNode;
 }
@@ -67,6 +69,12 @@ export interface UseChatMessagesOptions {
 	welcomeMessage?: string;
 	/** Seed messages to restore a previous conversation (preserves sender, timestamp, etc.). */
 	initialMessages?: ChatMessage[];
+	/**
+	 * Injected transport: when provided, sendMessage awaits this instead of the
+	 * built-in chat API (the `client`/`authToken` arguments are then unused).
+	 * Each returned TextResult renders as one bot message.
+	 */
+	request?: (text: string) => Promise<TextResult[]>;
 }
 
 // =============================================================================

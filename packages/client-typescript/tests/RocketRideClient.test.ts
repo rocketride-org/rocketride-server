@@ -1496,8 +1496,11 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 					await new Promise((resolve) => setTimeout(resolve, 100));
 				}
 
-				// Wait for events to be received
-				await new Promise((resolve) => setTimeout(resolve, 500));
+				// Wait for the status events to arrive
+				const eventsDeadline = Date.now() + 10_000;
+				while (Date.now() < eventsDeadline && !receivedEvents.some((e) => e.event === 'apaevt_status_update' || e.event === 'apaevt_task')) {
+					await new Promise((resolve) => setTimeout(resolve, 50));
+				}
 
 				// Validate results
 				expect(results).toHaveLength(3);
@@ -1839,8 +1842,9 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 				const PIPELINE_COUNT = 4;
 				const SENDS_PER_PIPELINE = 3;
 				// A use plus a send must fit inside the jest timeout, so a request
-				// that gets no response fails under its own name.
-				const OPERATION_TIMEOUT = 45000;
+				// that gets no response fails under its own name. Task startup on a
+				// loaded runner can take two minutes.
+				const OPERATION_TIMEOUT = 120000;
 
 				// Clean up any leftover pipelines from previous runs
 				for (let i = 0; i < PIPELINE_COUNT; i++) {
@@ -1931,7 +1935,8 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 				const uniqueResponseTexts = new Set(allResponseTexts);
 				expect(uniqueResponseTexts.size).toBe(totalExpectedSends);
 			},
-			TEST_CONFIG.timeout
+			// the use guard plus the send guard, plus the checks
+			300000
 		);
 
 		it(

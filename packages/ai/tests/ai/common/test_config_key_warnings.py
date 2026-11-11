@@ -12,6 +12,10 @@ deliberately narrow: several nodes read keys their services.json never declares,
 and warning about every unrecognised key would make the message worthless.
 """
 
+import json5
+import pytest
+from pathlib import Path
+
 from ai.common.config import Config
 
 
@@ -150,3 +154,80 @@ class TestAgainstTheRealCatalogue:
                 assert Config._suggestKey('outputTokens', Config._knownConfigKeys(service)) == 'modelOutputTokens'
                 return
         raise AssertionError('llm_openai/services.json not found')
+
+    @pytest.mark.parametrize('key', ['name', 'type'])
+    def test_common_editor_fields_do_not_trigger_a_typo_warning(self, monkeypatch, key):
+        said = []
+        monkeypatch.setattr('ai.common.config.warning', said.append)
+        for node, service in self._services():
+            Config._warnMisnamedKeys(node, service, {key: node})
+        assert said == []
+
+
+@pytest.mark.parametrize('expose_tools, allow_write', [(False, False), (True, False), (True, True), (False, True)])
+@pytest.mark.parametrize('nested', [False, True])
+def test_vector_display_name_and_tool_settings_remain_independent(monkeypatch, expose_tools, allow_write, nested):
+    """The editor's display label must not invalidate any tool-toggle combination."""
+    repo_root = Path(__file__).resolve().parents[5]
+    service = json5.loads((repo_root / 'nodes/src/nodes/rocketride_vector/services.json').read_text(encoding='utf-8'))
+    said = []
+    monkeypatch.setattr('ai.common.config.getServiceDefinition', lambda _node: service)
+    monkeypatch.setattr('ai.common.config.warning', said.append)
+    settings = {'serverName': 'custom_vector', 'expose_tools': expose_tools, 'allow_write': allow_write}
+    config = {'profile': 'cloud', 'name': 'My display label'}
+    config.update({'cloud': settings} if nested else settings)
+
+    resolved = Config.getNodeConfig('rocketride_vector', config)
+
+    assert said == []
+    assert resolved['name'] == 'My display label'
+    assert resolved['serverName'] == 'custom_vector'
+    assert resolved['expose_tools'] is expose_tools
+    assert resolved['allow_write'] is allow_write
+
+
+def test_node_name_does_not_suppress_real_tool_name_typo(monkeypatch):
+    said = []
+    monkeypatch.setattr('ai.common.config.warning', said.append)
+    Config._warnMisnamedKeys(
+        'rocketride_vector',
+        {'fields': {'rrvector.serverName': {'type': 'string'}}},
+        {'name': 'My display label', 'serverNam': 'custom_vector'},
+    )
+    assert len(said) == 1
+    assert '"serverNam"' in said[0]
+    assert '"serverName"' in said[0]
+
+
+@pytest.mark.parametrize('token', ['test-pat', '${ROCKETRIDE_CANVAS_GITHUB_TOKEN}'])
+@pytest.mark.parametrize('nested', [False, True])
+def test_github_editor_type_preserves_auth_settings_without_warning(monkeypatch, token, nested):
+    """The canvas node type must not be mistaken for a truncated authType."""
+    repo_root = Path(__file__).resolve().parents[5]
+    service = json5.loads((repo_root / 'nodes/src/nodes/tool_github/services.json').read_text(encoding='utf-8'))
+    said = []
+    monkeypatch.setattr('ai.common.config.getServiceDefinition', lambda _node: service)
+    monkeypatch.setattr('ai.common.config.warning', said.append)
+    settings = {'type': 'tool_github', 'authType': 'pat', 'token': token, 'readOnly': True}
+    config = {'profile': 'default', 'default': settings} if nested else settings
+
+    resolved = Config.getNodeConfig('tool_github', config)
+
+    assert said == []
+    assert resolved['type'] == 'tool_github'
+    assert resolved['authType'] == 'pat'
+    assert resolved['token'] == token
+    assert resolved['readOnly'] is True
+
+
+def test_editor_type_does_not_suppress_real_auth_type_typo(monkeypatch):
+    said = []
+    monkeypatch.setattr('ai.common.config.warning', said.append)
+    Config._warnMisnamedKeys(
+        'tool_github',
+        {'fields': {'github.authType': {'type': 'string'}}},
+        {'type': 'tool_github', 'authTyp': 'pat'},
+    )
+    assert len(said) == 1
+    assert '"authTyp"' in said[0]
+    assert '"authType"' in said[0]

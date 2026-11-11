@@ -30,7 +30,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import type { IStatementRun, RunOutcome } from '../src/sql/batch';
+import type { StatementRun, RunOutcome } from '../src/sql/batch';
 import type { StatementKind } from '../src/sql/classify';
 import { formatBatchOutcome, formatElapsed, formatPriorStatements, formatRunLabel, hasStatementInFlight, leadingVerb } from '../src/sql/batch';
 
@@ -41,7 +41,7 @@ import { formatBatchOutcome, formatElapsed, formatPriorStatements, formatRunLabe
  * @param kinds - Statement kind per position; defaults to read throughout.
  * @returns The statement runs.
  */
-function batch(outcomes: RunOutcome[], kinds: StatementKind[] = []): IStatementRun[] {
+function batch(outcomes: RunOutcome[], kinds: StatementKind[] = []): StatementRun[] {
 	return outcomes.map((outcome, index) => ({
 		index,
 		sql: 'SELECT 1',

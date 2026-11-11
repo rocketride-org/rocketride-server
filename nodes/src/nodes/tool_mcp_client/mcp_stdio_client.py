@@ -28,7 +28,7 @@ Minimal MCP stdio client (no external SDK dependency).
 
 Implements the MCP JSON-RPC lifecycle and the two server tool methods we need:
 - initialize + notifications/initialized
-- tools/list
+- tools/list (all pages)
 - tools/call
 
 Transport is line-delimited JSON-RPC over stdin/stdout of a child process.
@@ -48,8 +48,10 @@ from hosting import is_shared_host
 
 try:
     from .mcp_schema import input_schema_needs_noop_placeholder, normalize_tool_input_schema
+    from .mcp_tools_list import fetch_all_tool_entries
 except ImportError:  # pragma: no cover - standalone import (e.g. unit tests)
     from mcp_schema import input_schema_needs_noop_placeholder, normalize_tool_input_schema
+    from mcp_tools_list import fetch_all_tool_entries
 
 
 class McpProtocolError(RuntimeError):
@@ -184,12 +186,7 @@ class McpStdioClient:
                 pass
 
     def list_tools(self) -> List[McpToolDef]:
-        result = self._request('tools/list', {})
-        if not isinstance(result, dict):
-            raise McpProtocolError(f'tools/list result expected object, got {type(result)}')
-        tools = result.get('tools', [])
-        if not isinstance(tools, list):
-            raise McpProtocolError(f'tools/list result.tools expected list, got {type(tools)}')
+        tools = fetch_all_tool_entries(self._request, error_cls=McpProtocolError)
 
         out: List[McpToolDef] = []
         for t in tools:

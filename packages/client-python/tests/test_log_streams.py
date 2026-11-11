@@ -3,7 +3,7 @@ client.log.streams() against a live server.
 
 A dev run and a team deploy run of the same source log into two different
 places; one streams() call must name both, and chapters() alone must not.
-Needs a running server (ROCKETRIDE_URI, default localhost:5565) like test_deploy.
+Needs a running server (ROCKETRIDE_URI, default 127.0.0.1:5565) like test_deploy.
 """
 
 import asyncio
@@ -17,13 +17,19 @@ SOURCE = 'webhook_1'
 
 
 async def _streams_of(client, project, *, want):
-    """Poll until ``want`` streams are listed: a terminated run closes its chapter asynchronously."""
+    """Poll until exactly ``want`` streams are listed and all are complete; fail if that never happens.
+
+    A terminated run closes its chapter asynchronously. Until its log writer is deregistered, the
+    writer is also visible to the own-deploy reader (user id and team id are both ``local`` in the
+    OSS build), so a transient extra stream can be listed; it disappears once the writer closes.
+    """
+    streams = []
     for _ in range(50):
         streams = (await client.log.streams(project, SOURCE))['streams']
-        if len(streams) >= want:
+        if len(streams) == want and all(s['completed'] for s in streams):
             return streams
         await asyncio.sleep(0.2)
-    return streams
+    raise AssertionError(f'expected {want} completed streams for {project}/{SOURCE}, last listing: {streams}')
 
 
 class TestLogStreams:

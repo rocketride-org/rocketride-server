@@ -110,6 +110,7 @@
 			"ui": { "position": { "x": 1120, "y": 500 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
 		}
 	],
+	"source": "chat_1",
 	"project_id": "1327e7c0-8479-4ab7-a319-c4dc944daeb5",
 	"viewport": { "x": 0, "y": 0, "zoom": 1 },
 	"version": 1

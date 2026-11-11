@@ -32,34 +32,29 @@
 #      search uses the index instead of a sequential scan (the generic node
 #      creates no index at all). The operator class is derived from the
 #      configured ``similarity`` metric, else Postgres ignores the index.
-# Everything else (schema, upsert, keyword/semantic search, render) is identical.
+# Search also handles HNSW filtering and uses transaction-local scan settings.
 # ------------------------------------------------------------------------------
 import os
-import threading
-from contextlib import contextmanager
 from depends import depends
 
 requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
 depends(requirements)
 
-from typing import List, Callable, Dict, Any, Iterator, cast
-import numpy as np
+from typing import List, Callable, Dict, Any, cast
 
 import psycopg2
 from pgvector.psycopg2 import register_vector
 
 from rocketlib import warning
 from ai.common.schema import Doc, DocFilter, DocMetadata, QuestionText
-from ai.common.store import CONTROL_OBJECT_ID, DocumentStoreBase
+from ai.common.store import CONTROL_OBJECT_ID
+from ai.common.store.pgvector_store import MIN_SIMILARITY_SCORE, PgVectorStoreBase
 from ai.common.config import Config
 from ai.common.rocketride_db import db_target, parse_dsn_fields, resolve_rocketride_dsn
 from .IGlobal import VALID_TABLE
 
 # Default PostgreSQL port
 DEFAULT_POSTGRES_PORT = 5432
-
-# Minimum similarity score threshold for document filtering
-MIN_SIMILARITY_SCORE = 0.20
 
 # pgvector HNSW cannot index vectors wider than this many dimensions.
 HNSW_MAX_DIMS = 2000
@@ -85,7 +80,6 @@ SQL_QUERIES = {
     'mark_deleted': 'UPDATE {collection} SET isDeleted = TRUE WHERE objectId = ANY(%s)',
     'mark_active': 'UPDATE {collection} SET isDeleted = FALSE WHERE objectId = ANY(%s)',
     'render_document': 'SELECT content, chunkId FROM {collection} WHERE objectId = %s AND chunkId >= %s AND chunkId < %s ORDER BY chunkId',
-    'semantic_search': 'SELECT *, embedding {similarity_operator} %s AS distance FROM {collection} {where_clause} ORDER BY distance LIMIT %s',
     # fmt: off
     'create_hnsw_index': (
         'CREATE INDEX IF NOT EXISTS {index_name} ON {collection} USING hnsw (embedding {opclass}) WITH (m = {m}, ef_construction = {ef_construction});'
@@ -113,7 +107,7 @@ CHUNK_COLUMNS = (
 )
 
 
-class Store(DocumentStoreBase):
+class Store(PgVectorStoreBase):
     # listDocuments and countDocuments below implement the optional listing
     # of DocumentStoreBase, so the list_documents tool is offered on this store.
     supports_document_listing = True
@@ -161,11 +155,13 @@ class Store(DocumentStoreBase):
 
         # check if the similarity matches the pgvector configuration options
         similarity = config.get('similarity', 'cosine')
-        if similarity in ['cosine', 'l2', 'inner_product']:
+        supported = tuple(self.similarityDict)
+        if similarity in supported:
             self.similarity = self.similarityDict[similarity]
         else:
             raise Exception(
-                'The metric you provided in the config.json does not match required postgres configurations'
+                f'RocketRide Vector: unsupported similarity {similarity!r}. '
+                f'Set "similarity" to: {", ".join(supported)}.'
             )
 
         # HNSW index build parameters (overridable via config), clamped to
@@ -200,13 +196,8 @@ class Store(DocumentStoreBase):
         # pins a server connection to a client for as long as it is inside a
         # transaction: a node left "idle in transaction" between calls holds
         # one of the database's few pooler slots for its whole lifetime.
-        # Writes that must be atomic use _transaction().
+        # Atomic writes and searches with local settings use _transaction().
         self.client.autocommit = True
-
-        # Serialises use of the shared connection across the task's threads:
-        # _transaction() switches autocommit off for its duration, and another
-        # thread's statement must not slip into (or open) a transaction then.
-        self._lock = threading.RLock()
 
         register_vector(self.client)
 
@@ -227,46 +218,6 @@ class Store(DocumentStoreBase):
         self.client = None
 
         self.vectorSize = 0
-
-    @contextmanager
-    def _cursor(self) -> Iterator[Any]:
-        """
-        Yield a cursor for autocommitted statements (one implicit transaction each).
-        """
-        with self._lock, self.client.cursor() as cur:
-            yield cur
-
-    @contextmanager
-    def _transaction(self) -> Iterator[Any]:
-        """
-        Yield a cursor whose statements commit together, or not at all.
-
-        Rolls back on any error, so the connection is never left inside a
-        transaction (open or aborted), then returns to autocommit.
-        """
-        with self._lock:
-            self.client.autocommit = False
-            try:
-                with self.client.cursor() as cur:
-                    yield cur
-                self.client.commit()
-            except BaseException:
-                # A rollback that fails itself (a broken connection) must not
-                # replace the write error.
-                try:
-                    self.client.rollback()
-                except Exception as rollback_error:  # noqa: BLE001
-                    warning(f'{self.collection}: rollback after a failed write also failed: {rollback_error}')
-                raise
-            finally:
-                # Fails only if the rollback failed too. Close rather than keep
-                # a connection that may still sit in a transaction (pinning a
-                # pooler slot); the next call surfaces the closed connection.
-                try:
-                    self.client.autocommit = True
-                except Exception as restore_error:  # noqa: BLE001
-                    warning(f'{self.collection}: closing the connection, autocommit restore failed: {restore_error}')
-                    self.client.close()
 
     def _doesCollectionExist(self) -> bool:
         """
@@ -634,11 +585,12 @@ class Store(DocumentStoreBase):
         if checkCollection and not self.createCollection(chunks):
             return
 
-        objectIds = {chunk.metadata.objectId for chunk in chunks}
+        objectIds = self.objectIdsToReplace(chunks)
         # Replace in one transaction: an invalid new chunk must leave the
         # previously stored document intact.
         with self._transaction() as cur:
-            cur.execute(SQL_QUERIES['delete_by_object_ids'].format(collection=self.collection), (list(objectIds),))
+            if objectIds:
+                cur.execute(SQL_QUERIES['delete_by_object_ids'].format(collection=self.collection), (objectIds,))
             for chunk in chunks:
                 data = {'content': chunk.page_content, **chunk.metadata.model_dump(), 'embedding': chunk.embedding}
                 if 'vectorSize' not in data or data['vectorSize'] is None:
@@ -745,33 +697,3 @@ class Store(DocumentStoreBase):
                 break
 
             offset += self.renderChunkSize
-
-    def searchSemantic(self, query: QuestionText, docFilter: DocFilter) -> List[Doc]:
-        """
-        Perform a semantic search.
-
-        @param query: The query to search for.
-        @param docFilter: The document filter.
-        @returns: A list of documents that match the query.
-        """
-        if not self._doesCollectionExist():
-            return []
-
-        if query.embedding is None:
-            raise Exception('To use semantic search, you must bind to an embedding module')
-
-        where_sql, params = self._convertFilter(docFilter)
-        embedding_arr = np.array(query.embedding)
-
-        with self._cursor() as cur:
-            cur.execute(
-                SQL_QUERIES['semantic_search'].format(
-                    collection=self.collection, similarity_operator=self.similarity, where_clause=where_sql
-                ),
-                (embedding_arr, *params, docFilter.limit),
-            )
-            results = cur.fetchall()
-
-        # Convert results to dictionary
-        points = [dict(zip([desc[0] for desc in cur.description], row)) for row in results]
-        return self._convertToDocs(points)

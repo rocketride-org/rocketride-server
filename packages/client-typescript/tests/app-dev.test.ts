@@ -26,7 +26,7 @@
  * The app dev loop (`rocketride/app-dev`) and `rocketride app dev`.
  *
  * The session tests run the REAL loop — embedded guard, guarded spawn,
- * output classification, overlay register/unregister, tree stop — against
+ * output classification, the proxy wrapper, tree stop — against
  * a stand-in `node_modules/@rsbuild/core/bin/rsbuild.js` that prints
  * rsbuild's banner and a build line, then idles.
  */
@@ -35,8 +35,8 @@ import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { spawn } from 'child_process';
-import { classifyDevOutput, DEV_SERVER_GUARD_SOURCE, DEV_SESSION_NONCE, DevSession, devPreviewUrl, materializeDevServerGuard, registerDevOverlay, resolveRsbuildInvocation, splitCompleteLines, stopDevServer, unregisterDevOverlay } from '../src/app-dev/index';
+import { spawn, spawnSync } from 'child_process';
+import { classifyDevOutput, DEV_SERVER_GUARD_SOURCE, DevSession, devPreviewUrl, materializeDevServerGuard, resolveRsbuildInvocation, splitCompleteLines, stopDevServer, writeProxyConfig } from '../src/app-dev/index';
 import * as vendor from '../src/app-pack/vendor';
 import * as common from '../src/cli/common';
 import { executeAppDev } from '../src/cli/commands/app';
@@ -48,15 +48,39 @@ beforeEach(() => {
 	ws = fs.mkdtempSync(path.join(os.tmpdir(), 'rr-app-dev-'));
 });
 
-afterEach(() => {
-	jest.restoreAllMocks();
-	fs.rmSync(ws, { recursive: true, force: true });
-});
+/**
+ * Removes the workspace, retrying while the OS reports it in use.
+ *
+ * Windows refuses to remove a folder a just-stopped dev server still holds until that
+ * process tree is fully gone, which takes longer on a busy machine than a fixed retry
+ * count of `rmSync` covers. Any other error is thrown at once.
+ *
+ * @param folder - The folder to remove.
+ * @param deadlineMs - How long to keep retrying a busy folder.
+ */
+async function removeWorkspace(folder: string, deadlineMs = 30000): Promise<void> {
+	const busy = new Set(['EBUSY', 'EPERM', 'ENOTEMPTY']);
+	const deadline = Date.now() + deadlineMs;
+	for (;;) {
+		try {
+			fs.rmSync(folder, { recursive: true, force: true });
+			return;
+		} catch (error) {
+			if (!busy.has((error as NodeJS.ErrnoException).code ?? '') || Date.now() >= deadline) throw error;
+			await new Promise((resolve) => setTimeout(resolve, 200));
+		}
+	}
+}
 
-/** A client stand-in recording every overlay call. */
+afterEach(async () => {
+	jest.restoreAllMocks();
+	await removeWorkspace(ws);
+}, 60000);
+
+/** A connectClient stand-in for executeAppDev (validated once, then dropped). */
 function fakeClient() {
 	const calls: Array<Record<string, unknown>> = [];
-	return { calls, call: async (_command: string, args: Record<string, unknown>) => { calls.push(args); return {}; } };
+	return { calls, call: async (_command: string, args: Record<string, unknown>) => { calls.push(args); return {}; }, disconnect: async () => undefined };
 }
 
 /** Writes an app at apps/clock-ui whose "rsbuild" prints a dev banner and a build. */
@@ -70,6 +94,13 @@ function writeServedApp(port = 3999): { folder: string; app: { id: string; name:
 	return { folder, app: { id: 'acme.clock', name: 'Clock', moduleId: 'acme_clock', folder } };
 }
 
+/** The folder's 8.3 short path on Windows; undefined elsewhere or when it cannot be read. */
+function shortPath(folder: string): string | undefined {
+	if (process.platform !== 'win32') return undefined;
+	const result = spawnSync('cmd.exe', ['/d', '/s', '/c', `"for %I in ("${folder}") do @echo %~sI"`], { encoding: 'utf8', windowsVerbatimArguments: true });
+	return result.status === 0 ? result.stdout.trim() : undefined;
+}
+
 /** Polls until the condition holds (fails the test after ~5 s). */
 async function waitFor(condition: () => boolean): Promise<void> {
 	for (let i = 0; i < 100 && !condition(); i++) await new Promise((resolve) => setTimeout(resolve, 50));
@@ -77,9 +108,11 @@ async function waitFor(condition: () => boolean): Promise<void> {
 }
 
 describe('primitives', () => {
-	it('devPreviewUrl locks the app, turns dev hooks on, and routes to this host', () => {
-		expect(devPreviewUrl('https://api.rocketride.ai/', 'acme.clock', 'nonce-1')).toBe('https://api.rocketride.ai/?appid=acme.clock&rrdev=1&rrsession=nonce-1');
-		expect(devPreviewUrl('http://localhost:5565', 'acme.clock')).toContain(`rrsession=${DEV_SESSION_NONCE}`);
+	it('devPreviewUrl locks the app and turns dev hooks on, on the dev origin', () => {
+		// Local-first: the DEV SERVER's own origin is the session identity —
+		// no nonce rides the URL; the page self-registers by convention.
+		expect(devPreviewUrl('http://localhost:3013/', 'acme.clock')).toMatch(/^http:\/\/localhost:3013\/\?appid=acme\.clock&rrdev=1&_ts=\d+$/);
+		expect(devPreviewUrl('http://localhost:3013', 'acme.clock')).not.toContain('rrsession');
 	});
 
 	it('splitCompleteLines carries a torn line to the next chunk', () => {
@@ -108,15 +141,27 @@ describe('primitives', () => {
 		expect(resolveRsbuildInvocation(app).cmd).toBe('pnpm');
 	});
 
-	it('registerDevOverlay sends a cache-busted entry under this host session; unregister drops it', async () => {
-		const client = fakeClient();
+	it('writeProxyConfig renders the front-door wrapper: dev prefix carved out, engine proxied, manifest copied', async () => {
+		const folder = path.join(ws, 'apps', 'clock-ui');
+		fs.mkdirSync(folder, { recursive: true });
+		fs.writeFileSync(path.join(folder, 'package.json'), JSON.stringify({ name: 'clock-ui', appManifest: { id: 'acme.clock', icon: 'assets/icon.png' } }));
+		fs.writeFileSync(path.join(folder, 'rsbuild.config.mts'), 'export default {};');
 
-		await registerDevOverlay(client, { moduleId: 'acme_clock', appId: 'acme.clock', origin: 'http://localhost:3013', name: 'Clock' });
-		await unregisterDevOverlay(client, 'acme_clock');
+		const wrapperPath = await writeProxyConfig(folder, 'acme.clock', 'http://localhost:5565');
+		const wrapper = fs.readFileSync(wrapperPath, 'utf8');
 
-		expect(client.calls[0]).toMatchObject({ subcommand: 'register_dev', moduleId: 'acme_clock', appId: 'acme.clock', session: DEV_SESSION_NONCE, name: 'Clock' });
-		expect(String(client.calls[0].url)).toMatch(/^http:\/\/localhost:3013\/remoteEntry\.js\?t=\d+$/);
-		expect(client.calls[1]).toEqual({ subcommand: 'register_dev', moduleId: 'acme_clock', unregister: true });
+		// session-unique name: owner pid + token, so concurrent sessions for
+		// the same folder never overwrite each other's wrapper
+		expect(path.dirname(wrapperPath)).toBe(path.join(folder, '.rocketride'));
+		expect(path.basename(wrapperPath)).toMatch(/^dev-proxy\.\d+-[0-9a-f]+\.rsbuild\.config\.mts$/);
+		expect(wrapper).toContain('"/apps/acme.clock/dev"');
+		expect(wrapper).toContain('"http://localhost:5565"');
+		// the catch-all proxy must carve out the locally served prefixes
+		expect(wrapper).toContain('pathFilter');
+		expect(wrapper).toContain('!/rsbuild-hmr');
+		// manifest + declared icon ride the compiled output for self-registration
+		expect(wrapper).toContain('"package.json"');
+		expect(wrapper).toContain('"assets/icon.png"');
 	});
 
 	it('materializeDevServerGuard writes the guard once, owner-only', () => {
@@ -144,19 +189,32 @@ describe('primitives', () => {
 });
 
 describe('DevSession', () => {
-	it('serves, registers the overlay on build, and unregisters on stop', async () => {
+	it('serves through the generated proxy wrapper and stops clean (nothing to unregister)', async () => {
 		const { app } = writeServedApp(3999);
-		const client = fakeClient();
 		const states: string[] = [];
-		const session = new DevSession({ app, workspaceRoot: ws, client, install: false, watchPackageJson: false, onState: (s) => states.push(s) });
+		const session = new DevSession({ app, workspaceRoot: ws, engineOrigin: 'http://localhost:5565', install: false, watchPackageJson: false, onState: (s) => states.push(s) });
 
 		const origin = await session.start();
-		await new Promise((resolve) => setTimeout(resolve, 200));
-		await session.stop();
+		const rocketrideDir = path.join(app.folder, '.rocketride');
+		let wrapperName = '';
+		let wrapper = '';
+		try {
+			await waitFor(() => states.includes('ok'));
+
+			// the per-session wrapper is the preview's front door
+			const wrapperNames = fs.readdirSync(rocketrideDir).filter((name) => name.startsWith('dev-proxy.'));
+			expect(wrapperNames).toHaveLength(1);
+			wrapperName = wrapperNames[0];
+			wrapper = fs.readFileSync(path.join(rocketrideDir, wrapperName), 'utf8');
+		} finally {
+			await session.stop();
+		}
 
 		expect(origin).toBe('http://localhost:3999');
-		expect(client.calls.filter((c) => c.subcommand === 'register_dev' && !c.unregister).length).toBeGreaterThanOrEqual(1);
-		expect(client.calls[client.calls.length - 1]).toEqual({ subcommand: 'register_dev', moduleId: 'acme_clock', unregister: true });
+		expect(wrapper).toContain('"http://localhost:5565"');
+		expect(wrapper).toContain('"/apps/acme.clock/dev"');
+		// stop() removes the session's own wrapper
+		expect(fs.existsSync(path.join(rocketrideDir, wrapperName))).toBe(false);
 		expect(states).toContain('ok');
 		expect(states[states.length - 1]).toBe('stopped');
 	});
@@ -166,7 +224,7 @@ describe('DevSession', () => {
 		const installs: Array<() => void> = [];
 		jest.spyOn(vendor, 'runRootInstall').mockImplementation(() => new Promise<void>((resolve) => installs.push(resolve)));
 		const states: string[] = [];
-		const session = new DevSession({ app, workspaceRoot: ws, client: fakeClient(), watchPackageJson: false, onState: (s) => states.push(s) });
+		const session = new DevSession({ app, workspaceRoot: ws, engineOrigin: 'http://localhost:5565', watchPackageJson: false, onState: (s) => states.push(s) });
 		const restart = () => (session as unknown as { requestRestart(): void }).requestRestart();
 
 		const started = session.start();
@@ -198,7 +256,7 @@ describe('DevSession', () => {
 	it('keeps restarting after successive atomic saves of package.json', async () => {
 		const { folder, app } = writeServedApp(3996);
 		const lines: string[] = [];
-		const session = new DevSession({ app, workspaceRoot: ws, client: fakeClient(), install: false, onLine: (line) => lines.push(line) });
+		const session = new DevSession({ app, workspaceRoot: ws, engineOrigin: 'http://localhost:5565', install: false, onLine: (line) => lines.push(line) });
 		const restarts = () => lines.filter((l) => l.startsWith('package.json changed')).length;
 		const atomicSave = (version: string) => {
 			const pkg = path.join(folder, 'package.json');
@@ -212,11 +270,30 @@ describe('DevSession', () => {
 		atomicSave('0.1.2');
 		await waitFor(() => restarts() === 2);
 		await session.stop();
-	}, 15000);
+		// two restarts, each a stop, a debounced file event and a respawn: real work a loaded runner stretches
+	}, 60000);
+
+	it('restarts on a package.json change when the app folder is named through its 8.3 short path', async () => {
+		const { folder, app } = writeServedApp(3995);
+		const short = shortPath(folder);
+		// Other platforms, and Windows volumes without 8.3 names, have no short path to watch through.
+		if (!short || short.toLowerCase() === folder.toLowerCase()) return;
+		const lines: string[] = [];
+		const session = new DevSession({ app: { ...app, folder: short }, workspaceRoot: ws, engineOrigin: 'http://localhost:5565', install: false, onLine: (line) => lines.push(line) });
+
+		await session.start();
+		try {
+			fs.writeFileSync(path.join(folder, 'package.json'), JSON.stringify({ name: 'clock-ui', version: '0.1.1', appManifest: { id: 'acme.clock', name: 'Clock' } }));
+			// the replacement server prints a second banner
+			await waitFor(() => lines.filter((l) => l.includes('http://localhost:3995')).length >= 2);
+		} finally {
+			await session.stop();
+		}
+	}, 60000);
 });
 
 describe('executeAppDev', () => {
-	it('prints the preview URL, runs until interrupted, then stops and unregisters', async () => {
+	it('prints the dev-origin preview URL, runs until interrupted, then stops', async () => {
 		writeServedApp(3998);
 		const client = fakeClient();
 		jest.spyOn(common, 'connectClient').mockImplementation(async () => client as unknown as Awaited<ReturnType<typeof common.connectClient>>);
@@ -234,7 +311,8 @@ describe('executeAppDev', () => {
 
 		expect(await running).toBe(0);
 		expect(logs.join('\n')).toContain('Dev server: http://localhost:3998');
-		expect(logs.join('\n')).toContain(`Preview:    https://api.rocketride.ai/?appid=acme.clock&rrdev=1&rrsession=${DEV_SESSION_NONCE}`);
-		expect(client.calls[client.calls.length - 1]).toEqual({ subcommand: 'register_dev', moduleId: 'acme_clock', unregister: true });
+		// local-first: the preview rides the DEV SERVER's origin, not the engine's
+		expect(logs.join('\n')).toContain('Preview:    http://localhost:3998/?appid=acme.clock&rrdev=1');
+		expect(client.calls.length).toBe(0);
 	});
 });

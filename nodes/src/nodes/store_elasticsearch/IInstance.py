@@ -33,6 +33,7 @@ from typing import Any, Dict, List, Optional
 
 from rocketlib import Entry, debug
 from ai.common.schema import Answer, Doc, Question
+from ai.common.store.store_instance_base import NO_STORE_MESSAGE
 from ai.common.transform import IInstanceTransform
 
 from .constants import (
@@ -125,6 +126,8 @@ class IInstance(IInstanceTransform):
             self._handle_text_search(question)
             return
         if backend == BACKEND_ELASTICSEARCH:
+            if self.IGlobal.store is None:
+                raise Exception(NO_STORE_MESSAGE)
             self.IGlobal.store.dispatchSearch(self, question)
         elif backend == BACKEND_OPENSEARCH:
             self._handle_opensearch_vector_search(question)
@@ -285,6 +288,8 @@ class IInstance(IInstanceTransform):
             debug('Documents lane is only supported in vector store mode (vstore); use text lane for index mode.')
             return
         if backend == BACKEND_ELASTICSEARCH:
+            if self.IGlobal.store is None:
+                raise Exception(NO_STORE_MESSAGE)
             self.IGlobal.store.addChunks(documents)
         elif backend == BACKEND_OPENSEARCH:
             self._os_write_documents_vector(documents)
@@ -375,7 +380,7 @@ class IInstance(IInstanceTransform):
         if self.IGlobal.backend != BACKEND_ELASTICSEARCH:
             return
         if self.IGlobal.store is None:
-            raise Exception('No document store')
+            raise Exception(NO_STORE_MESSAGE)
         if not object.hasVectorBatchId or not object.vectorBatchId:
             return
         self.IGlobal.store.render(objectId=object.objectId, callback=callback)

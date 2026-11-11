@@ -83,6 +83,10 @@ CONST_WS_PING_INTERVAL = 15
 # the connection is considered dead and will be closed
 CONST_WS_PING_TIMEOUT = 300
 
+# What get_env answers in place of each stored value; sending it back to
+# update_env / set_env keeps that value
+CONST_ENV_MASK = '••••••••'
+
 # Default store directory for project pipeline files.
 # Use this constant instead of hardcoding '.projects'.
 PROJECT_DIR = '.projects'

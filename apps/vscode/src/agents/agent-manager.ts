@@ -41,6 +41,7 @@ import * as path from 'path';
 import { getLogger } from '../shared/util/output';
 import { icons } from '../shared/util/icons';
 import { ConnectionManager } from '../connection/connection';
+import { getIntegrationSetting } from '../workspaceSettingsBridge';
 import { installDocsBundle, toHttpBase } from '../../../../packages/client-common/typescript/src/provision';
 import { BaseAgentInstaller } from './base-installer';
 import { CursorInstaller } from './cursor-installer';
@@ -49,7 +50,7 @@ import { WindsurfInstaller } from './windsurf-installer';
 import { CopilotInstaller } from './copilot-installer';
 import { ClaudeMdInstaller } from './claude-md-installer';
 import { AgentsMdInstaller } from './agents-md-installer';
-import { appendGitignoreEntries } from '../shared/util/gitignoreEntries';
+import { appendGitignoreEntries } from 'shared/utils/gitignoreEntries';
 
 const DOCS_DIR = '.rocketride/docs';
 /**
@@ -62,7 +63,9 @@ const DOCS_DIR = '.rocketride/docs';
  */
 const GITIGNORE_ENTRIES = ['.rocketride/', '.env'] as const;
 
-/** Map from installer name to the VS Code config key under rocketride.integrations.* */
+/** Map from installer name to the integration setting key (workspace
+ *  settings — read through the workspace-settings bridge, NOT VS Code
+ *  configuration; the values roam with the server-side workspace). */
 const INTEGRATION_CONFIG_KEYS: Record<string, string> = {
 	Cursor: 'integrations.cursor',
 	'Claude Code': 'integrations.claudeCode',
@@ -110,8 +113,7 @@ export class AgentManager {
 	 */
 	private async runAutoInstall(workspaceRoot: vscode.Uri): Promise<void> {
 		const logger = getLogger();
-		const workspaceConfig = vscode.workspace.getConfiguration('rocketride');
-		const autoDetect = workspaceConfig.get<boolean>('integrations.autoAgentIntegration', true);
+		const autoDetect = getIntegrationSetting('integrations.autoAgentIntegration');
 
 		// Track which installers have already been run so we don't double-install
 		const installed = new Set<string>();
@@ -142,7 +144,7 @@ export class AgentManager {
 			if (installed.has(installer.name)) continue;
 
 			const configKey = INTEGRATION_CONFIG_KEYS[installer.name];
-			if (configKey && workspaceConfig.get<boolean>(configKey, false)) {
+			if (configKey && getIntegrationSetting(configKey)) {
 				await prepareWorkspace();
 				const ok = await this.runInstaller(installer, workspaceRoot);
 				if (ok) installed.add(installer.name);
@@ -222,12 +224,11 @@ export class AgentManager {
 	 * integration that is currently checked in settings.
 	 */
 	async installFromSettings(workspaceRoot: vscode.Uri): Promise<void> {
-		const workspaceConfig = vscode.workspace.getConfiguration('rocketride');
 		let anyInstalled = false;
 
 		for (const installer of this.installers) {
 			const configKey = INTEGRATION_CONFIG_KEYS[installer.name];
-			if (configKey && workspaceConfig.get<boolean>(configKey, false)) {
+			if (configKey && getIntegrationSetting(configKey)) {
 				if (!anyInstalled) {
 					// Only sync docs + gitignore if we actually have something to install
 					await this.installDocs(workspaceRoot);
@@ -337,17 +338,6 @@ export class AgentManager {
 		}
 
 		await vscode.workspace.fs.writeFile(gitignoreUri, Buffer.from(newContent, 'utf8'));
-	}
-
-	/**
-	 * Detect which coding agents have configuration directories in the workspace.
-	 * Returns the matching installers.
-	 */
-	/**
-	 * Get the list of all supported agent names.
-	 */
-	get supportedAgents(): string[] {
-		return this.installers.map((i) => i.name);
 	}
 
 	private async runInstaller(installer: BaseAgentInstaller, workspaceRoot: vscode.Uri): Promise<boolean> {

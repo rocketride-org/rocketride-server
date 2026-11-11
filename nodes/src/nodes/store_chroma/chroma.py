@@ -32,6 +32,7 @@ import chromadb
 from ai.common.schema import Doc, DocFilter, DocMetadata, QuestionText
 from ai.common.store import DocumentStoreBase
 from ai.common.config import Config
+from nodes.store_chroma.mode import is_local
 from rocketlib import debug
 import uuid
 import numpy as np
@@ -136,26 +137,26 @@ class Store(DocumentStoreBase):
         self.renderChunkSize = config.get('renderChunkSize', self.renderChunkSize)
         self.payload_limit = config.get('payloadLimit', self.payload_limit)
 
-        # The merged node config carries the profile selection in 'mode':
-        # getNodeConfig consumes the 'profile' key while merging the selected
-        # profile's contents, so 'profile' is absent when configured through
-        # a service/autopipe config and the cloud branch was never taken.
-        # Keep 'profile' as a fallback for direct configurations.
-        profile = config.get('mode') or config.get('profile') or 'local'
+        # Read the same way as the key check (IGlobal._credentials), so the key is
+        # checked exactly when it is sent.
+        local = is_local(config)
 
         # check if the similarity matches qdrant configuration options
         similarity = config.get('similarity', 'cosine')
-        if similarity in ['cosine', 'l2', 'ip']:
+        supported = ('cosine', 'l2', 'ip')
+        if similarity in supported:
             self.similarity = similarity
         else:
-            raise Exception('The metric you provided in the config.json does not match required chroma configurations')
+            raise Exception(
+                f'Chroma: unsupported similarity {similarity!r}. Set "similarity" to: {", ".join(supported)}.'
+            )
 
         # The Chroma client connects eagerly (identity/tenant validation on construction),
         # so an incompatible/old server surfaces here as a cryptic error (e.g.
         # KeyError('_type')). Wrap it so the user gets an actionable message instead of a
         # silent failure.
         try:
-            if profile == 'local':
+            if local:
                 self.client = chromadb.HttpClient(host=self.host, port=self.port)
             else:
                 # Cloud / remote server. Chroma Cloud only serves HTTPS, and a
@@ -621,13 +622,15 @@ class Store(DocumentStoreBase):
         if checkCollection and not self.createCollection(chunks):
             return
 
-        object_ids_to_delete: Dict[str, bool] = {}
+        # The objects this batch starts over
+        object_ids_to_delete = self.objectIdsToReplace(chunks)
         ids: List[str] = []
         embeddings: List[List[float]] = []
         metadatas: List[Dict] = []
         documents: List[str] = []
 
         def flush():
+            """Delete the replaced objects on the first call, then upsert the queued chunks."""
             nonlocal ids, embeddings, metadatas, documents
             # Defense in depth: never index against a missing collection. Surface a clear,
             # actionable error instead of a cryptic "'NoneType' object has no attribute
@@ -642,7 +645,7 @@ class Store(DocumentStoreBase):
                     filter_condition = {'$or': [{'objectId': object_id} for object_id in object_ids_to_delete]}
                     self.collectionObj.delete(where=filter_condition)
                 else:
-                    filter_condition = {'objectId': list(object_ids_to_delete.keys())[0]}
+                    filter_condition = {'objectId': object_ids_to_delete[0]}
                     self.collectionObj.delete(where=filter_condition)
                 object_ids_to_delete.clear()
 
@@ -652,10 +655,6 @@ class Store(DocumentStoreBase):
                 embeddings.clear()
                 metadatas.clear()
                 documents.clear()
-
-        for chunk in chunks:
-            if chunk.metadata.chunkId == 0:
-                object_ids_to_delete[chunk.metadata.objectId] = True
 
         sum_size = 0
         cur_size = 0

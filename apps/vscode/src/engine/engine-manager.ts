@@ -95,9 +95,6 @@ export class EngineManager extends EventEmitter {
 	get configChecksum(): number { return this._configChecksum; }
 
 
-	/** The active backend (if any). Useful for mode-specific operations. */
-	getBackend(): EngineBackend | null { return this.backend; }
-
 	/** Returns info about the installed engine, or null. */
 	getInfo(): EngineInfo | null {
 		return this.backend?.getInfo() ?? null;

@@ -9,6 +9,7 @@ this test file focuses on the pure-logic and small-state methods:
 - ``_begin`` / ``_end`` — per-lane framing dispatchers
 - ``_reset_pipe_activity`` — timestamp setter
 - ``_cleanup_pipe`` — pipe lifecycle finaliser (with monitoring side effects)
+- ``_write`` / ``_close`` on the text lane — UTF-8 decoding across writes
 """
 
 from __future__ import annotations
@@ -594,3 +595,125 @@ def test_cleanup_pipe_handles_missing_pipe_object():
     )
     conn._cleanup_pipe(pipe_conn)
     conn._target.putPipe.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# _write / _close — the text lane decodes UTF-8 across writes
+# ---------------------------------------------------------------------------
+
+
+def _make_text_conn(monkeypatch):
+    """Build a DataConn holding one open text-lane pipe (id 1).
+
+    Args:
+        monkeypatch: pytest fixture, used to silence the monitoring hooks.
+
+    Returns:
+        The DataConn and its DataConnPipe.
+    """
+    from ai.modules.data import data_conn as data_conn_mod
+    from ai.modules.data.data_conn import DataConnPipe
+
+    monkeypatch.setattr(data_conn_mod, 'monitorCompleted', lambda s: None)
+    monkeypatch.setattr(data_conn_mod, 'monitorFailed', lambda s: None)
+
+    conn = _make_conn()
+    conn.build_response = MagicMock(side_effect=lambda request, body=None: body)
+    entry = MagicMock(objectId='obj-1', objectFailed=False)
+    entry.response.toDict = MagicMock(return_value={})
+    conn_pipe = DataConnPipe(
+        pipe_id=1, pipe=MagicMock(), mime_type='text/plain', lane='text', is_open=True, entry=entry
+    )
+    conn._pipe_map = {1: conn_pipe}
+    return conn, conn_pipe
+
+
+def _written_text(conn_pipe):
+    """Join every string the pipe received through writeText.
+
+    Args:
+        conn_pipe: The DataConnPipe whose pipe mock recorded the calls.
+
+    Returns:
+        The concatenated text.
+    """
+    return ''.join(call.args[0] for call in conn_pipe.pipe.writeText.call_args_list)
+
+
+@pytest.mark.asyncio
+async def test_write_text_joins_a_character_split_across_two_writes(monkeypatch):
+    """An HTTP body stream cuts at any byte; a character cut in half still arrives whole."""
+    conn, conn_pipe = _make_text_conn(monkeypatch)
+    data = 'Привет, мир'.encode('utf-8')
+
+    # 'П' is two bytes; the first write ends after its first byte
+    await conn._write({}, {'pipe_id': 1, 'data': data[:1]})
+    await conn._write({}, {'pipe_id': 1, 'data': data[1:]})
+    await conn._close({}, {'pipe_id': 1})
+
+    assert _written_text(conn_pipe) == 'Привет, мир'
+    assert not conn_pipe.has_failed
+
+
+@pytest.mark.asyncio
+async def test_write_text_one_byte_at_a_time_sends_no_empty_text(monkeypatch):
+    """A write that holds only part of a character sends nothing downstream."""
+    conn, conn_pipe = _make_text_conn(monkeypatch)
+
+    for byte in 'あいう'.encode('utf-8'):
+        await conn._write({}, {'pipe_id': 1, 'data': bytes([byte])})
+    await conn._close({}, {'pipe_id': 1})
+
+    assert _written_text(conn_pipe) == 'あいう'
+    assert all(call.args[0] for call in conn_pipe.pipe.writeText.call_args_list)
+
+
+@pytest.mark.asyncio
+async def test_write_text_still_rejects_bytes_that_are_not_utf8(monkeypatch):
+    """A byte that can never start a character fails the write at once."""
+    conn, conn_pipe = _make_text_conn(monkeypatch)
+
+    with pytest.raises(UnicodeDecodeError):
+        await conn._write({}, {'pipe_id': 1, 'data': b'ok \xff'})
+
+    assert conn_pipe.has_failed
+
+
+@pytest.mark.asyncio
+async def test_close_after_whole_text_closes_the_pipe(monkeypatch):
+    """A text that ends on a character boundary closes normally."""
+    conn, conn_pipe = _make_text_conn(monkeypatch)
+    await conn._write({}, {'pipe_id': 1, 'data': 'Привет'.encode('utf-8')})
+
+    result = await conn._close({}, {'pipe_id': 1})
+
+    assert result['objectId'] == 'obj-1'
+    conn_pipe.pipe.close.assert_called_once_with()
+    assert not conn_pipe.has_failed
+
+
+@pytest.mark.asyncio
+async def test_close_fails_text_that_ends_inside_a_character(monkeypatch):
+    """A body cut inside its last character fails the close; the pipe still goes back."""
+    conn, conn_pipe = _make_text_conn(monkeypatch)
+    await conn._write({}, {'pipe_id': 1, 'data': 'ok П'.encode('utf-8')[:-1]})
+
+    with pytest.raises(UnicodeDecodeError):
+        await conn._close({}, {'pipe_id': 1})
+
+    assert conn_pipe.has_failed
+    conn._target.putPipe.assert_called_once_with(conn_pipe.pipe)
+
+
+@pytest.mark.asyncio
+async def test_close_after_a_failed_write_does_not_raise_a_second_error(monkeypatch):
+    """A pipe whose write already failed closes as before, without a new decode error."""
+    conn, conn_pipe = _make_text_conn(monkeypatch)
+    await conn._write({}, {'pipe_id': 1, 'data': 'П'.encode('utf-8')[:1]})
+    with pytest.raises(UnicodeDecodeError):
+        await conn._write({}, {'pipe_id': 1, 'data': b'\xff'})
+
+    result = await conn._close({}, {'pipe_id': 1})
+
+    assert result['objectId'] == 'obj-1'
+    conn_pipe.pipe.close.assert_called_once_with()

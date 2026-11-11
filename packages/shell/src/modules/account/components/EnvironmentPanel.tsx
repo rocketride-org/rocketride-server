@@ -7,9 +7,9 @@
  * EnvironmentPanel — ROCKETRIDE_* environment variable editor.
  *
  * Renders a card per scope (Organization, Team, User) with a key-value
- * editor for encrypted pipeline secrets. Values are masked by default
- * with a reveal toggle. The full dict is read and written as a set —
- * no per-key server calls.
+ * editor for encrypted pipeline secrets. Values are write-only: the server
+ * returns a mask per stored name, a typed value replaces it, and a deleted
+ * row is sent as null. One save call per card.
  *
  * Permission gating is handled server-side; the UI shows/hides scope
  * cards based on the `isOrgAdmin` / `isTeamAdmin` props.
@@ -18,6 +18,8 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import type { CSSProperties } from 'react';
 import { commonStyles } from '../../../themes/styles';
+import { CONST_ENV_MASK } from 'rocketride';
+import { envChanges } from './envChanges';
 
 // =============================================================================
 // STYLES
@@ -77,11 +79,11 @@ export interface EnvironmentPanelProps {
 	/** User env dict (null while loading). */
 	userEnv: Record<string, string>;
 	/** Saves the full org env dict. */
-	onSaveOrgEnv: (env: Record<string, string>) => Promise<void>;
+	onSaveOrgEnv: (env: Record<string, string | null>) => Promise<void>;
 	/** Saves the full team env dict. */
-	onSaveTeamEnv: (env: Record<string, string>) => Promise<void>;
+	onSaveTeamEnv: (env: Record<string, string | null>) => Promise<void>;
 	/** Saves the full user env dict. */
-	onSaveUserEnv: (env: Record<string, string>) => Promise<void>;
+	onSaveUserEnv: (env: Record<string, string | null>) => Promise<void>;
 }
 
 // =============================================================================
@@ -103,8 +105,8 @@ export const EnvScopeCard: React.FC<{
 	 * a re-render with the loaded values.
 	 */
 	onRequestLoad?: () => void;
-	/** Saves the full dict. */
-	onSave: (env: Record<string, string>) => Promise<void>;
+	/** Saves the changes: typed or kept values, and null for each deleted name. */
+	onSave: (env: Record<string, string | null>) => Promise<void>;
 	/** Keys that must have non-empty values before save is allowed. */
 	requiredKeys?: string[];
 }> = ({ label, env, onRequestLoad, onSave, requiredKeys }) => {
@@ -167,18 +169,12 @@ export const EnvScopeCard: React.FC<{
 		return requiredKeys.some((key) => (draftMap.get(key) ?? '').length === 0);
 	}, [requiredKeys, draft]);
 
-	/** Saves the draft as a dict. */
+	/** Saves the draft as a dict; a stored name missing from the draft is sent as null. */
 	const handleSave = useCallback(async () => {
 		setSaving(true);
 		setError(null);
 		try {
-			// Build dict, skip empty keys
-			const result: Record<string, string> = {};
-			for (const [k, v] of draft) {
-				const key = k.trim();
-				if (key) result[key] = v;
-			}
-			await onSave(result);
+			await onSave(envChanges(draft, env));
 			setDirty(false);
 			setSaved(true);
 			setTimeout(() => setSaved(false), 5000);
@@ -187,7 +183,7 @@ export const EnvScopeCard: React.FC<{
 		} finally {
 			setSaving(false);
 		}
-	}, [draft, onSave]);
+	}, [draft, env, onSave]);
 
 	return (
 		<div style={{ ...commonStyles.card, marginBottom: 14 }}>
@@ -237,10 +233,17 @@ export const EnvScopeCard: React.FC<{
 						{draft.map(([key, value], idx) => (
 							<div key={idx} style={styles.row}>
 								<input value={key} onChange={(e) => updateEntry(idx, 'key', e.target.value)} placeholder="ROCKETRIDE_KEY_NAME" style={styles.keyInput as CSSProperties} />
-								<input type={revealedKeys.has(key) ? 'text' : 'password'} value={value} onChange={(e) => updateEntry(idx, 'value', e.target.value)} placeholder="••••••••" style={styles.valueInput as CSSProperties} />
-								<button onClick={() => toggleReveal(key)} style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardBodyButton } as CSSProperties}>
-									{revealedKeys.has(key) ? 'Hide' : 'Show'}
-								</button>
+								{/* A stored value is write-only: its field holds the mask, read-only, until Replace empties it */}
+								<input type={revealedKeys.has(key) && value !== CONST_ENV_MASK ? 'text' : 'password'} value={value} readOnly={value === CONST_ENV_MASK} onChange={(e) => updateEntry(idx, 'value', e.target.value)} placeholder="••••••••" style={styles.valueInput as CSSProperties} />
+								{value === CONST_ENV_MASK ? (
+									<button onClick={() => updateEntry(idx, 'value', '')} style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardBodyButton } as CSSProperties}>
+										Replace
+									</button>
+								) : (
+									<button onClick={() => toggleReveal(key)} style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardBodyButton } as CSSProperties}>
+										{revealedKeys.has(key) ? 'Hide' : 'Show'}
+									</button>
+								)}
 								<button onClick={() => removeEntry(idx)} style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardBodyButton } as CSSProperties}>
 									Delete
 								</button>
@@ -273,8 +276,8 @@ export const EnvScopeCard: React.FC<{
  */
 export const EnvironmentPanel: React.FC<EnvironmentPanelProps> = ({ isOrgAdmin, isTeamAdmin, orgEnv, teamEnv, userEnv, onSaveOrgEnv, onSaveTeamEnv, onSaveUserEnv }) => (
 	<section>
-		{/* Organization scope — only visible to org admins */}
-		{isOrgAdmin && <EnvScopeCard label="Organization" env={orgEnv} onSave={onSaveOrgEnv} />}
+		{/* Workspace scope — only visible to workspace admins */}
+		{isOrgAdmin && <EnvScopeCard label="Workspace" env={orgEnv} onSave={onSaveOrgEnv} />}
 
 		{/* Team scope — only visible to team admins */}
 		{isTeamAdmin && <EnvScopeCard label="Team" env={teamEnv} onSave={onSaveTeamEnv} />}
