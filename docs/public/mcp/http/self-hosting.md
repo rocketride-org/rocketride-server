@@ -20,10 +20,13 @@ engine. On an engine not bound to localhost (this includes the Docker image, eve
 with a `127.0.0.1` port mapping), the key must start with `rr_`; other bearer
 values are refused with 401.
 
-> **Warning:** when neither `ROCKETRIDE_URI` nor `MCP_RESOURCE_IDENTIFIER` is set
-> on such an engine, MCP tool calls connect to `wss://api.rocketride.ai`
-> (RocketRide Cloud), not to your engine. `initialize` and `tools/list` succeed, then every tool call fails
-> with `Invalid or revoked API key`. For a self-hosted engine, set `ROCKETRIDE_URI=ws://127.0.0.1:<port>`.
+> **Note:** when neither `ROCKETRIDE_URI` nor `MCP_RESOURCE_IDENTIFIER` is set,
+> the engine runs MCP tool calls against itself (`ws://127.0.0.1:<port>`; `ws://[::1]:<port>`
+> for a `::` bind, and `ws://<bind host>:<port>` for a specific bind address).
+> Engine image 3.6.0 and earlier instead connect them to `wss://api.rocketride.ai`
+> (RocketRide Cloud), not to your engine: `initialize` and `tools/list` succeed,
+> then every tool call fails with `Invalid or revoked API key`. On those versions,
+> set `ROCKETRIDE_URI=ws://127.0.0.1:<port>`. Setting it is always safe.
 
 A Docker command that works end to end (MCP calls then use
 `Authorization: Bearer rr_local`):

@@ -88,10 +88,12 @@ docker run -d --name rocketride-engine --platform linux/amd64 \
 ```
 
 MCP clients then send `Authorization: Bearer rr_local`. The key must start with
-`rr_`. When neither `ROCKETRIDE_URI` nor `MCP_RESOURCE_IDENTIFIER` is set on an
-engine that is not bound to localhost, MCP tool calls connect to RocketRide Cloud
-and fail. The CLI and SDK must send the same `ROCKETRIDE_APIKEY` the engine was
-started with. See [MCP self-hosting](/connect/mcp/http/self-hosting).
+`rr_`. When neither `ROCKETRIDE_URI` nor `MCP_RESOURCE_IDENTIFIER` is set, the
+engine runs MCP tool calls against itself (`ws://127.0.0.1:<port>`). Engine image 3.6.0
+and earlier instead connect them to RocketRide Cloud, where they fail with
+`Invalid or revoked API key`; on those versions set `ROCKETRIDE_URI` as in the
+command above (setting it is always safe). The CLI and SDK must send the same
+`ROCKETRIDE_APIKEY` the engine was started with. See [MCP self-hosting](/connect/mcp/http/self-hosting).
 
 ## Persistence
 
