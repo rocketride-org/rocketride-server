@@ -58,6 +58,7 @@ from ai.constants import (
     CONST_ANALYTICS_SLOWEST_DOCS,
     CONST_TASK_DATA_PATH,
     CONST_BILLING_UNAVAILABLE,
+    CONST_TASK_TOKEN_KEY_ENV,
     CONST_CHANNEL_DATA_WAIT,
     CONST_CHANNEL_DIAL_LIMIT,
     CONST_CHANNEL_DIAL_WINDOW,
@@ -316,19 +317,25 @@ def _subprocess_env_opt_in(environ: Mapping[str, str]) -> Tuple[frozenset, Tuple
     return frozenset(names), tuple(prefixes)
 
 
+# Engine secrets no task subprocess ever gets, whatever RR_SUBPROCESS_ENV opts
+# in (a prefix such as 'RR_' or a bare '*' would otherwise pass them). The task
+# token key would let pipeline code mint any run's private token.
+CONST_SUBPROCESS_ENV_NEVER = frozenset({CONST_TASK_TOKEN_KEY_ENV})
+
+
 def filter_subprocess_env(environ: Mapping[str, str]) -> Dict[str, str]:
     """Return the subset of ``environ`` a task subprocess may inherit.
 
     Names are matched case-insensitively: Windows treats them that way, and the
     POSIX proxy variables are conventionally lowercase. Original spelling is
-    kept in the result.
+    kept in the result. Names in CONST_SUBPROCESS_ENV_NEVER are never passed.
     """
     opt_names, opt_prefixes = _subprocess_env_opt_in(environ)
     prefixes = CONST_SUBPROCESS_ENV_PREFIXES + opt_prefixes
     allowed: Dict[str, str] = {}
     for name, value in environ.items():
         key = name.upper()
-        if key == 'RR_PARAM_TOKEN_SECRET':
+        if key == 'RR_PARAM_TOKEN_SECRET' or key in CONST_SUBPROCESS_ENV_NEVER:
             continue
         if key in CONST_SUBPROCESS_ENV_NAMES or key in opt_names or key.startswith(prefixes):
             allowed[name] = value
