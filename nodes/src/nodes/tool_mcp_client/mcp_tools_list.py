@@ -31,9 +31,9 @@ page size and a client must not assume one. Each transport hands its
 ``_request`` method to ``fetch_all_tool_entries``, which follows the cursor
 until the server omits it, and returns the raw entries of every page in order.
 
-Cursors are opaque strings and are forwarded byte for byte, the empty string
-included. Only a missing ``nextCursor`` (or JSON ``null``, which cannot be
-forwarded) ends the traversal.
+Cursors are opaque strings and are forwarded byte for byte. A missing, JSON
+``null`` or empty ``nextCursor`` ends the traversal: some servers end their list
+with ``nextCursor: ""``, and asking them for ``''`` returns page one again.
 
 The traversal is complete-or-raise: a malformed page, a non-string or repeated
 cursor, a tool name already listed on an earlier page, more than
@@ -77,7 +77,7 @@ def fetch_all_tool_entries(
 
     ``request(method, params)`` is the transport's JSON-RPC call. The first page is
     requested with ``{}`` exactly as before; later pages send ``{'cursor': <value>}``
-    with the cursor forwarded untouched (``''`` included). A missing or ``null``
+    with the cursor forwarded untouched. A missing, ``null`` or ``''``
     ``nextCursor`` ends the traversal. A non-string cursor, a cursor seen before, a
     tool name listed on an earlier page, a malformed page or an exceeded limit raises
     ``error_cls`` with the page number in the message (cursor values are opaque and
@@ -114,7 +114,7 @@ def fetch_all_tool_entries(
         seen_names |= page_names
         entries.extend(tools)
         next_cursor = result.get('nextCursor')
-        if next_cursor is None:
+        if next_cursor is None or next_cursor == '':
             return entries
         if not isinstance(next_cursor, str):
             raise error_cls(f'tools/list page {page} nextCursor expected string, got {type(next_cursor)}')
