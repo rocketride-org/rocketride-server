@@ -422,7 +422,7 @@ class TaskConn(
             # authentication.
             replacing = self._authenticated
             if replacing:
-                await self._end_session()
+                await self._end_session(replacing=True)
 
             self._account_info = result
             self._authenticated = True
@@ -480,10 +480,18 @@ class TaskConn(
 
         return self.build_response(request, body={})
 
-    async def _end_session(self) -> None:
+    async def _end_session(self, replacing: bool = False) -> None:
         """
         End the connection's current session: on deauth, and on an auth that
         replaces the identity of a live connection.
+
+        Args:
+            replacing: True when a new identity is about to be installed on
+                this same connection. The previous identity then stays on the
+                socket until the caller replaces it, so a request that lands
+                during the cleanup is answered as that identity instead of
+                being refused and disconnected; the epoch bump still ends the
+                session's handles. On deauth the identity is cleared first.
 
         Everything the session acquired on the socket is owned by the
         connection rather than the identity, so whatever is left behind would
@@ -495,12 +503,15 @@ class TaskConn(
         this cleanup has finished.
         """
         # Step 1: end the session before the first await. The transport
-        # dispatches requests concurrently: clearing the identity makes the
-        # dispatch gate refuse every request that arrives from here on, and
-        # bumping the epoch lets a store open still in flight see, when it
-        # resumes, that its session ended (see StoreCommands._store_fs_open)
-        self._authenticated = False
-        self._account_info = None
+        # dispatches requests concurrently: on deauth, clearing the identity
+        # makes the dispatch gate refuse every request that arrives from here
+        # on; on a replacing auth the old identity stays until the new one is
+        # installed, so an in-window request is served rather than dropped.
+        # Either way the epoch bump lets a store open still in flight see,
+        # when it resumes, that its session ended (StoreCommands._store_fs_open)
+        if not replacing:
+            self._authenticated = False
+            self._account_info = None
         self._session_epoch += 1
 
         # Step 2: drop every subscription made under the ending session.
