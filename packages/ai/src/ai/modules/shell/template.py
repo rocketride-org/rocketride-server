@@ -126,8 +126,11 @@ def parse(template: str, on_issue: Callable[[str], None] = _log) -> List[Node]:
         if match.group(1) or match.group(3):
             on_issue(f'unsupported raw tag {{{{{{{raw}}}}}}} dropped')
             continue
-        sigil = raw[:1] if raw[:1] in '#/' else ''
-        name = raw[1:].strip() if sigil else raw
+        sigil = ''
+        name = raw
+        if raw[:1] in ('#', '/'):
+            sigil = raw[:1]
+            name = raw[1:].strip()
         if not _NAME.match(name):
             on_issue(f'unsupported tag {{{{{raw}}}}} dropped')
             continue
@@ -153,7 +156,12 @@ def parse(template: str, on_issue: Callable[[str], None] = _log) -> List[Node]:
 
 def _lookup(contexts: List[Any], name: str) -> Any:
     head, *rest = name.split('.')
-    for context in reversed(contexts[:1] if head in ROOT_NAMES else contexts):
+    # A server-provided name resolves from the root context only, so no
+    # record bound inside a section can shadow it.
+    scopes = contexts
+    if head in ROOT_NAMES:
+        scopes = contexts[:1]
+    for context in reversed(scopes):
         if isinstance(context, Mapping) and head in context:
             value = context[head]
             for part in rest:
@@ -168,7 +176,9 @@ def _scalar(value: Any) -> Optional[str]:
     if value is None:
         return ''
     if isinstance(value, bool):
-        return 'true' if value else 'false'
+        if value:
+            return 'true'
+        return 'false'
     if isinstance(value, (str, int, float)):
         return str(value)
     return None
