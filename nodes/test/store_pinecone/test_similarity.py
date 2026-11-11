@@ -99,6 +99,7 @@ def test_a_euclidean_index_with_a_zero_score_keeps_every_match_closest_first():
 
     kept = _search(store, client, [0.0, 0.5, 4.0], metric='euclidean')
 
+    assert len(kept) == 3
     assert kept == sorted(kept, reverse=True)
     assert abs(kept[0] - 1.0) < 1e-9
 
