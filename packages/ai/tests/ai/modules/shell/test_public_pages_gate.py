@@ -115,6 +115,40 @@ async def test_missing_snapshot_rejected_present_snapshot_allowed():
     assert await gate_errors('rocketride.other', manifest, DIST, hostile_account()) == []
 
 
+async def test_a_page_at_a_feed_path_the_root_owner_declares_is_refused():
+    home = copy.deepcopy(HOME_MANIFEST)
+    home['site']['feeds'] = [{'path': '/blog/feed.xml', 'title': 'Blog', 'prefix': '/blog/'}]
+    acct = hostile_account(home)
+    manifest = {'publicPages': [{'path': '/blog/feed.xml', 'title': 'F'}, {'path': '/fine', 'title': 'Fine'}]}
+    errors = await gate_errors('rocketride.other', manifest, DIST, acct)
+    assert len(errors) == 1
+    assert "publicPages path '/blog/feed.xml' is a feed of the published app rocketride.home" in errors[0]
+
+
+async def test_a_relative_image_must_exist_in_the_build_output():
+    manifest = {
+        'publicPages': [{'path': '/', 'title': 'H', 'image': 'og/home.png'}],
+        'site': {'title': 'R', 'image': 'og/site.png'},
+    }
+    errors = await gate_errors('rocketride.home', manifest, DIST, hostile_account())
+    assert len(errors) == 2
+    assert "publicPages path '/': image 'og/home.png' is not in the built version" in errors[0]
+    assert "site.image 'og/site.png' is not in the built version" in errors[1]
+    FILES[f'{DIST}/og/home.png'] = b'png'
+    FILES[f'{DIST}/og/site.png'] = b'png'
+    assert await gate_errors('rocketride.home', manifest, DIST, hostile_account()) == []
+
+
+async def test_https_and_root_path_images_are_not_checked_against_the_build():
+    manifest = {
+        'publicPages': [
+            {'path': '/a', 'title': 'A', 'image': 'https://cdn.example.com/a.png'},
+            {'path': '/b', 'title': 'B', 'image': '/static/b.png'},
+        ]
+    }
+    assert await gate_errors('rocketride.other', manifest, DIST, hostile_account()) == []
+
+
 async def test_a_snapshot_over_the_size_cap_is_refused_by_its_stat():
     manifest = {'publicPages': [{'path': '/fresh', 'title': 'F', 'snapshot': 'pages/fresh.html'}]}
     FILES[f'{DIST}/pages/fresh.html'] = b'x' * MAX_SNAPSHOT_BYTES
