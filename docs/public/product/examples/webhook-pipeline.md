@@ -119,13 +119,17 @@ HTTP endpoint, no `curl` required:
 ```
 
 Restart the pipeline. The chat page is on the engine port, at
-`http://localhost:5565/chat/webhook-example/source_1?auth=<ROCKETRIDE_APIKEY>`.
-`start` does not print this address.
+`http://localhost:5565/chat/webhook-example/source_1?auth=<task token>`. Use the
+task token that `rocketride start` prints. `start` does not print the address
+itself.
 
 Open that URL in a browser and start typing. The `?auth=` query parameter is a
 convenience for supplying the credential to the browser; the Chat UI stores it
-in session storage for subsequent page loads. Webhook requests use the same key
-in an `Authorization: Bearer <ROCKETRIDE_APIKEY>` header.
+in session storage for subsequent page loads. The page opens with any
+credential, but sending a question needs the task token. Your engine key
+(`ROCKETRIDE_APIKEY`) opens the page, then fails with "Your pipeline is not
+running". Webhook requests use the engine key in an
+`Authorization: Bearer <ROCKETRIDE_APIKEY>` header.
 
 The URL includes the project and source identifiers, so it is
 specific to this pipeline. The legacy `/webhook`, `/task/data`, `/chat`, and
