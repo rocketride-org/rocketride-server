@@ -80,6 +80,13 @@ const PLATFORM_PACKAGES = new Set(RESERVED_SHARES.map((specifier) => specifier.s
 /** The package in a jsDelivr URL: .../npm/<name>[@<version>][/<file>]. */
 const JSDELIVR_PACKAGE = /\/npm\/((?:@[^/@]+\/)?[^/@]+)/;
 
+/**
+ * Most fetches one session gives ATA. ATA starts every download at once and
+ * Chromium refuses requests past about 1,350 in flight on a page. Cache hits
+ * count too, because each one still registers an editor lib.
+ */
+const ATA_MAX_REQUESTS = 1000;
+
 // =============================================================================
 // FETCH (IndexedDB-cached)
 // =============================================================================
@@ -132,6 +139,14 @@ export function createAtaEngine(tsHandle: TypescriptSetupHandle, onProblem: (mes
 	const pending = new Map<string, () => string>();
 	/** The lazily built acquisition function (null until first use). */
 	let acquirePromise: Promise<AcquireFn | null> | null = null;
+	let requests = 0;
+
+	const cappedFetch = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+		requests += 1;
+		if (requests <= ATA_MAX_REQUESTS) return cachedFetch(input, init);
+		if (requests === ATA_MAX_REQUESTS + 1) onProblem(`[types] stopped downloading types after ${ATA_MAX_REQUESTS} requests; some imports will have no types`);
+		return Promise.resolve(new Response(null, { status: 404 }));
+	};
 
 	// step: build the acquisition function — dynamic imports keep typescript
 	// and the ATA engine out of the main bundle
@@ -141,7 +156,7 @@ export function createAtaEngine(tsHandle: TypescriptSetupHandle, onProblem: (mes
 			return ataModule.setupTypeAcquisition({
 				projectName: 'rr-appdev',
 				typescript: tsModule.default ?? (tsModule as unknown as typeof import('typescript')),
-				fetcher: cachedFetch,
+				fetcher: cappedFetch,
 				delegate: {
 					// step: every downloaded .d.ts registers at its real
 					// node_modules path, through the session handle so the libs
