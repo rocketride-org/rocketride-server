@@ -46,6 +46,7 @@
 
 import { RocketRideClient } from 'rocketride';
 
+import { PROVIDER_IDS } from '../model';
 import { catalog } from './catalog';
 import { staticErrors } from './score';
 
@@ -90,6 +91,9 @@ function placeholders(value: unknown, out = new Set<string>()): Set<string> {
 	else if (value && typeof value === 'object') for (const v of Object.values(value)) placeholders(v, out);
 	return out;
 }
+
+/** The model pipeline's project id. A pipeline the agent writes has a bare GUID, so it never matches. */
+const MODEL_PROJECT_ID = new RegExp(`^[0-9a-f-]{36}-(${PROVIDER_IDS.join('|')})-`, 'i');
 
 /** A store path without leading or trailing slashes. */
 function norm(path: string): string {
@@ -214,10 +218,10 @@ class FakeEngine {
 		return { answers: [answer.text], name: t.source, path: '', result_types: { answers: 'answers' }, objectId: `eval-${this.next++}`, ...(answer.usage ? { usage: answer.usage } : {}) };
 	}
 
-	/** The stand-in model pipeline (standin.ts): webhook, one LLM, answers, and the conversation id as project. */
+	/** The model pipeline (modelEngine.ts modelPipeline): webhook, one LLM, answers, and `<conversation id>-<provider>-<model>` as project. */
 	private isStandin(pipeline: Record<string, unknown>): boolean {
 		const comps = Array.isArray(pipeline.components) ? (pipeline.components as Array<{ provider?: string }>) : [];
-		return comps.length === 3 && comps[0]?.provider === 'webhook' && String(comps[1]?.provider).startsWith('llm_') && comps[2]?.provider === 'response_answers' && /^[0-9a-f-]{36}$/i.test(String(pipeline.project_id));
+		return comps.length === 3 && comps[0]?.provider === 'webhook' && String(comps[1]?.provider).startsWith('llm_') && comps[2]?.provider === 'response_answers' && MODEL_PROJECT_ID.test(String(pipeline.project_id));
 	}
 
 	// ---- the store ----

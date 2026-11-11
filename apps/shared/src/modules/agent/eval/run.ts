@@ -58,6 +58,7 @@ import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { DEFAULT_MODEL } from '../model';
 import { fingerprint, type Fingerprint } from './canary';
 import { EVAL_DIR, REPO_ROOT } from './catalog';
 import { fromTrial, loadRecordings, RECORDINGS_DIR, validateRecording, type Recording } from './recordings';
@@ -284,7 +285,7 @@ function runOptions(a: Record<string, string>): RunOptions {
 		jobs: Number(a.jobs ?? (layer === 'L1' ? 4 : 1)),
 		set: a.set,
 		provider,
-		model: a.model ?? (provider === 'anthropic' ? standinModel() : 'gpt-5-5'),
+		model: a.model ?? (provider === 'anthropic' ? defaultModel() : 'gpt-5-5'),
 		maxTokens: Number(a['max-tokens'] ?? 64000),
 		maxWaves: Number(a['max-waves'] ?? 60),
 		maxMinutes: Number(a['max-minutes'] ?? 15),
@@ -300,10 +301,9 @@ function limitsOption(given: string | undefined, layer: Layer): RunOptions['limi
 	return limits;
 }
 
-/** The model id behind the product's stand-in profile (standin.ts STANDIN_PROFILE), read from the branch. */
-function standinModel(): string {
-	const src = fs.readFileSync(path.join(REPO_ROOT, 'apps/shared/src/modules/agent/standin.ts'), 'utf8');
-	const profile = /STANDIN_PROFILE = '([^']+)'/.exec(src)?.[1] ?? 'claude-sonnet-5';
+/** The model id behind the product's default profile (model.ts DEFAULT_MODEL), read from the branch. */
+function defaultModel(): string {
+	const profile = DEFAULT_MODEL.model;
 	const services = fs.readFileSync(path.join(REPO_ROOT, 'nodes/src/nodes/llm_anthropic/services.json'), 'utf8');
 	return new RegExp(`"${profile}":\\s*\\{[^}]*?"model":\\s*"([^"]+)"`).exec(services)?.[1] ?? profile;
 }

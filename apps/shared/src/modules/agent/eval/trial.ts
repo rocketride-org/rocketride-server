@@ -327,7 +327,7 @@ async function main(cfg: TrialConfig, record: TrialRecord): Promise<void> {
 	// step: the turn limits the host serves; without them every turn gets the product's defaults
 	const limits = cfg.limits;
 	record.settings.limits = limits ?? { ...DEFAULT_LIMITS, source: 'product default' };
-	const host = { vfs: view, scaffoldApp: notHere('scaffoldApp'), packApp: notHere('packApp'), devSession: () => null, ...(limits ? { limits: { read: () => limits } } : {}) };
+	const host = { vfs: view, scaffoldApp: notHere('scaffoldApp'), packApp: notHere('packApp'), devSession: () => null, leasePreview: notHere('leasePreview'), ...(limits ? { limits: { read: () => limits } } : {}) };
 	setAgentHost(host);
 	AgentSession.configure(SESSIONS_APP_ID);
 	const session = AgentSession.newSession();
@@ -658,15 +658,15 @@ async function wipeStore(client: RocketRideClient, scope: { kind: string; teamId
 
 /**
  * Wraps the client's chat and use: every model question is measured and
- * scanned; the stand-in is found by its project id (the session id); every
- * run a `use` started is kept in `owned`, so the trial ends it.
+ * scanned; the model pipeline is found by its project id, which starts with
+ * the session id; every run a `use` started is kept in `owned`, so the trial ends it.
  */
 function wrapClient(client: RocketRideClient, cfg: TrialConfig, record: TrialRecord, owned: OwnedRun[], turnOf: () => TurnRecord, waveOf: () => number, scan: (surface: string, text: string) => void, conversationId: string): void {
 	const c = client as unknown as Record<string, (o: Record<string, unknown>) => Promise<Record<string, unknown>>>;
 	const use = c.use.bind(client);
 	c.use = async (o) => {
 		const pipeline = o?.pipeline as Record<string, unknown> | undefined;
-		const isStandin = !!pipeline && pipeline.project_id === conversationId;
+		const isStandin = !!pipeline && String(pipeline.project_id).startsWith(`${conversationId}-`);
 		if (isStandin) {
 			const llm = (pipeline.components as Array<{ provider: string; config: { profile: string } }>).find((x) => String(x.provider).startsWith('llm_'));
 			if (llm) record.settings.standin = `${llm.provider}:${llm.config.profile}`;
