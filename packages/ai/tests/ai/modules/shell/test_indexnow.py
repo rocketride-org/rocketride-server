@@ -83,6 +83,7 @@ def _fresh(monkeypatch):
     monkeypatch.setattr(indexnow, '_last', None)
     monkeypatch.setattr(indexnow, '_pending', None)
     monkeypatch.setattr(indexnow, '_worker', None)
+    monkeypatch.setattr(indexnow, '_failed', set())
 
 
 @pytest.fixture
@@ -383,6 +384,31 @@ async def test_failures_and_refusals_are_warnings_never_raised(sent, warnings, m
     monkeypatch.setattr(indexnow, 'TIMEOUT_SECONDS', 0.01)
     await _build(*_version(2), _page('/blog', 2))
     assert len(warnings) == 1 and expected in warnings[0] and '1 URL' in warnings[0]
+
+
+@pytest.mark.parametrize('failure', [{'error': OSError('connection refused')}, {'status': 429}])
+async def test_a_failed_or_refused_batch_goes_out_with_the_next_submission(sent, warnings, monkeypatch, failure):
+    await _build(*_version(1))
+    monkeypatch.setattr(indexnow, '_client', lambda: FakeClient([], **failure))
+    await _build(*_version(2), _page('/blog', 2))
+    assert sent == [] and indexnow._failed == {'/blog'}
+    # Healthy again: the next swap submits the lost path with its own change.
+    monkeypatch.setattr(indexnow, '_client', lambda: FakeClient(sent))
+    await _build(*_version(3), _page('/blog', 2), _page('/news', 3))
+    assert _urls(sent) == [[f'{BASE}/blog', f'{BASE}/news']]
+    assert indexnow._failed == set()
+    # A success clears them: nothing is submitted again.
+    await _build(*_version(4), _page('/blog', 2), _page('/news', 3))
+    assert len(sent) == 1
+
+
+async def test_the_failed_paths_are_bounded(sent, warnings, monkeypatch):
+    monkeypatch.setattr(indexnow, '_MAX_FAILED', 2)
+    await _build(*_version(1))
+    monkeypatch.setattr(indexnow, '_client', lambda: FakeClient([], status=500))
+    await _build(*_version(2), *(_page(p, 2) for p in ('/a', '/b', '/c')))
+    assert indexnow._failed == {'/a', '/b'}
+    assert any('dropped' in w for w in warnings)
 
 
 async def test_an_accepted_submission_is_no_warning(sent, warnings):
