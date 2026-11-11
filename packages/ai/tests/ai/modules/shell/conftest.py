@@ -51,6 +51,7 @@ def _public_pages_state(monkeypatch):
     monkeypatch.setattr(
         pages, '_render_cache', pages._FifoCache(pages._RENDER_CACHE_MAX_BYTES, pages._RENDER_CACHE_MAX)
     )
+    monkeypatch.setattr(pages, '_documents', {})
     FILES.clear()
     monkeypatch.setattr(pp, 'read_artifact_file', read_file)
     monkeypatch.setattr(pp, 'artifact_file_info', file_info)

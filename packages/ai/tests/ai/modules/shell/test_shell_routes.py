@@ -545,6 +545,75 @@ def test_the_shell_document_is_read_once_per_page_and_build(shell_root, monkeypa
     assert reads == ['index.html'] * 3
 
 
+def test_the_shell_document_is_resolved_once_per_page_and_build(shell_root, monkeypatch):
+    # Finding the route's capture walks the disk (resolve, is_file): not per request.
+    resolved = []
+    real = pages_mod.shell_document_path
+
+    def counting(request):
+        resolved.append(request.url.path)
+        return real(request)
+
+    monkeypatch.setattr(pages_mod, 'shell_document_path', counting)
+    _use(Page('/pricing', 'rocketride.home', 'Pricing'))
+    client = _client()
+    for _ in range(3):
+        assert client.get('/pricing', headers={'User-Agent': BROWSER}).status_code == 200
+    assert resolved == ['/pricing']
+    # A query string never boots from a capture: its own resolution.
+    client.get('/pricing?ref=x', headers={'User-Agent': BROWSER})
+    assert resolved == ['/pricing'] * 2
+    index = shell_root / 'index.html'
+    stat = index.stat()
+    os.utime(index, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))  # a new shell build
+    client.get('/pricing', headers={'User-Agent': BROWSER})
+    assert resolved == ['/pricing'] * 3
+
+
+def test_a_swap_drops_the_resolved_shell_documents(shell_root):
+    _use(Page('/pricing', 'rocketride.home', 'Pricing'))
+    client = _client()
+    assert SHELL_BODY in client.get('/pricing', headers={'User-Agent': BROWSER}).text
+    capture = shell_root / '_prerender' / 'pricing' / 'index.html'
+    capture.parent.mkdir(parents=True)
+    capture.write_text('<html><head><title>x</title></head><body>captured pricing</body></html>')
+    _use(Page('/pricing', 'rocketride.home', 'Pricing'))  # a swap
+    assert 'captured pricing' in client.get('/pricing', headers={'User-Agent': BROWSER}).text
+
+
+def test_a_render_cache_miss_renders_off_the_event_loop(shell_root, monkeypatch):
+    # Reading the shell file inside the async handler would block every other request.
+    on_loop = []
+    real = pages_mod._render
+
+    def recording(*args):
+        try:
+            asyncio.get_running_loop()
+            on_loop.append(True)
+        except RuntimeError:
+            on_loop.append(False)
+        return real(*args)
+
+    monkeypatch.setattr(pages_mod, '_render', recording)
+    _use(Page('/pricing', 'rocketride.home', 'Pricing'))
+    assert _client().get('/pricing', headers={'User-Agent': BROWSER}).status_code == 200
+    assert on_loop == [False]
+
+
+def test_a_render_a_swap_overtakes_is_served_not_cached(shell_root, monkeypatch):
+    real = pages_mod._render
+
+    def swapping(*args):
+        _use(Page('/pricing', 'rocketride.home', 'Pricing v2'))
+        return real(*args)
+
+    monkeypatch.setattr(pages_mod, '_render', swapping)
+    _use(Page('/pricing', 'rocketride.home', 'Pricing'))
+    resp = _client().get('/pricing', headers={'User-Agent': BROWSER})
+    assert '<title>Pricing</title>' in resp.text  # the page map the request read
+    assert len(pages_mod._render_cache) == 0
+
+
 def _serve_numbered_pages(count):
     """``count`` pages, /p0 to /p<count-1>, whose renders are all the same size."""
     _use(*(Page(f'/p{i}', 'rocketride.home', f'Page {i}') for i in range(count)))
