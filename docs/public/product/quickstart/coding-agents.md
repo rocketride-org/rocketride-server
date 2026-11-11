@@ -62,14 +62,15 @@ export ROCKETRIDE_URI=ws://localhost:5565
 export ROCKETRIDE_APIKEY=rr_local
 ```
 
-Save this pipeline as `hello.pipe`. It needs no other credentials:
+Save this pipeline as `code.pipe`. It splits source code into its parts and needs no model provider key and no account:
 
 ```bash
-cat > hello.pipe <<'EOF'
+cat > code.pipe <<'EOF'
 {
   "components": [
     { "id": "in", "provider": "webhook", "config": {} },
-    { "id": "out", "provider": "response_text", "config": {}, "input": [{ "lane": "text", "from": "in" }] }
+    { "id": "code", "provider": "preprocessor_code", "config": {}, "input": [{ "lane": "text", "from": "in" }] },
+    { "id": "out", "provider": "response_documents", "config": {}, "input": [{ "lane": "documents", "from": "code" }] }
   ],
   "source": "in"
 }
@@ -79,40 +80,66 @@ EOF
 Validate it and start it:
 
 ```bash
-rocketride validate hello.pipe
-rocketride start --pipeline ./hello.pipe
+rocketride validate code.pipe
+rocketride start --pipeline ./code.pipe
 ```
 
-`start` prints a task token and exits; the pipeline keeps running on the engine. It does not print an address. The token is what you pass to `rocketride stop --token <token>`, `rocketride upload --token <token>`, and `client.send(token, ...)` in the SDK. Keep `"source": "in"`: this example's webhook has an empty config, so the engine cannot work out the source by itself. Without it, `start` fails with `Pipeline has no source.` even though `validate` passes.
+`start` prints a task token and exits; the pipeline keeps running on the engine. It does not print an address. The token is what you pass to `rocketride stop --token <token>`, `rocketride upload --token <token>`, and `client.send(token, ...)` in the SDK. Keep `"source": "in"`: this example's webhook has an empty config, so the engine cannot work out the source by itself. Without it, `start` fails with `Pipeline does not have a source component defined.` even though `validate` passes.
 
-### Send text and read the reply
+### Send code and read the reply
 
-This script starts `hello.pipe`, sends the text `hello`, prints the reply and stops the task. It reads `ROCKETRIDE_URI` and `ROCKETRIDE_APIKEY` from the environment, so run it in the same shell and folder:
+This script starts `code.pipe`, sends a short Python file, prints each part the pipeline found, checks the result and stops the task. It reads `ROCKETRIDE_URI` and `ROCKETRIDE_APIKEY` from the environment, so run it in the same shell and folder:
 
 ```python
 import asyncio
 from rocketride import RocketRideClient
 
+SOURCE = '''import os
+
+
+class Greeter:
+    def hello(self, name):
+        return "hi " + name
+
+
+def add(a, b):
+    return a + b
+'''
+
 
 async def main():
     async with RocketRideClient() as client:
-        result = await client.use(filepath='hello.pipe')
+        result = await client.use(filepath='code.pipe')
         token = result['token']
-        out = await client.send(token, 'hello', mimetype='text/plain')
-        print(out['text'])
+        out = await client.send(token, SOURCE, mimetype='text/plain')
         await client.terminate(token)
+
+    parts = [doc['page_content'] for doc in out['documents']]
+    for part in parts:
+        print(repr(part))
+    assert len(parts) == 4
+    assert any(part.startswith('def add') for part in parts)
+    print('ok')
 
 
 asyncio.run(main())
 ```
 
+`mimetype='text/plain'` is required. Without it the reply has no documents and no error.
+
 It prints:
 
 ```text
-['hello\n\n']
+'import os'
+'class Greeter:\n    def hello(self, name):\n        return "hi " + name'
+'def hello(self, name):\n        return "hi " + name'
+'def add(a, b):\n    return a + b'
+ok
 ```
 
-The reply has a trailing blank line (`hello` followed by two newlines), so an exact-match check should trim it.
+There is one document for the import, one for the class, one for the method and one for the function. The method shows up twice, once inside the class and once on its own. Two checks keep a failure loud: the reply has 4 documents, and one of them starts with `def add`.
+
+The pipeline needs no model provider key and no account. A first run on a fresh engine took about 10 seconds on a laptop, and later runs took 2 to 5 seconds. Starting the engine is separate and not counted.
 
 More: [Run from the CLI](/quickstart/cli), [CLI Reference](/connect/cli), [Python SDK](/clients/python), [TypeScript SDK](/clients/typescript).
 
