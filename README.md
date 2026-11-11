@@ -14,10 +14,6 @@
   <a href="https://trendshift.io/repositories/37651?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-37651" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/37651/daily?language=C%2B%2B" alt="rocketride-org/rocketride-server: C++ Repository Of The Day on Trendshift" width="250" height="55"/></a>
 </p>
 
-<p>
-  RocketRide is the leading AI meta-harness with the only enterprise-grade runtime built on C++.<br/>
-  Open source, MIT licensed. 150+ nodes, 15+ LLM providers, 10+ vector stores.
-</p>
 
 <p>
 <img src="docs/public/assets/icon-cpp.png" alt="C++" />&nbsp;&nbsp;
