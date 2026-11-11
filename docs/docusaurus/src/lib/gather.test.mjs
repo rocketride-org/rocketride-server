@@ -80,6 +80,24 @@ describe('pageDescription', () => {
 		assert.equal(pageDescription(md), 'The real first paragraph.');
 	});
 
+	it('closes a fence on a CRLF line ending so a later comment is still removed', () => {
+		const md = '# T\r\n\r\n```js\r\ncode();\r\n```\r\n\r\nAfter <!-- hidden --> the block.\r\n';
+		const out = pageDescription(md);
+		assert.equal(out.includes('hidden'), false);
+		assert.equal(out, 'After the block.');
+	});
+
+	it('does not let a backtick in a heading pair with one in a later paragraph', () => {
+		const md = '# Heading `\n\nThe <!-- hidden note --> real paragraph.\n\nUse `client`.\n';
+		const out = pageDescription(md);
+		assert.equal(out.includes('hidden note'), false);
+		assert.ok(out.includes('The ') && out.includes(' real paragraph.'));
+	});
+
+	it('keeps a code span that crosses a line break inside one paragraph', () => {
+		assert.equal(pageDescription('# T\n\na `x <!--\ny` b\n'), 'a x <!-- y b');
+	});
+
 	it('returns an empty string when the page has no leading prose', () => {
 		assert.equal(pageDescription('---\ntitle: T\n---\n\n# T\n\n```js\ncode();\n```\n'), '');
 	});

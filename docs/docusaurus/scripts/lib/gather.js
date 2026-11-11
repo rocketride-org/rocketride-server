@@ -408,7 +408,7 @@ function stripComments(text) {
 			const open = fenceOpen.exec(line);
 			if (open && !(open[1][0] === '`' && open[2].includes('`'))) {
 				// Copy the whole fenced block, up to its closing line or the end of the text.
-				const close = new RegExp(`^ {0,3}${open[1][0]}{${open[1].length},}[ \\t]*$`);
+				const close = new RegExp(`^ {0,3}${open[1][0]}{${open[1].length},}[ \\t]*\\r?$`);
 				let stop = end < 0 ? text.length : end + 1;
 				while (stop < text.length) {
 					const next = text.indexOf('\n', stop);
@@ -439,12 +439,24 @@ function stripComments(text) {
 		if (ch === '`') {
 			let run = 1;
 			while (text[i + run] === '`') run++;
-			// A code span ends at the next run of exactly the same number of backticks.
+			// A code span ends at the next run of exactly the same number of backticks,
+			// and cannot cross a block boundary: a blank line ends the search, and so
+			// does the end of an ATX heading line.
 			let from = i + run;
+			let limit = text.length;
+			const blank = /\n[ \t\r]*(?:\n|$)/g;
+			blank.lastIndex = from;
+			const gap = blank.exec(text);
+			if (gap) limit = gap.index;
+			const lineBegin = text.lastIndexOf('\n', i - 1) + 1;
+			if (/^ {0,3}#{1,6}[ \t]/.test(text.slice(lineBegin, i))) {
+				const eol = text.indexOf('\n', from);
+				if (eol >= 0 && eol < limit) limit = eol;
+			}
 			let close = -1;
-			while (from < text.length) {
+			while (from < limit) {
 				const at = text.indexOf('`', from);
-				if (at < 0) break;
+				if (at < 0 || at >= limit) break;
 				let len = 1;
 				while (text[at + len] === '`') len++;
 				if (len === run) {
