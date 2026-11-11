@@ -144,6 +144,8 @@ const config: Config = {
 
 	themeConfig: {
 		...(algolia ? { algolia } : {}),
+		// Site-wide social card (1200x630): docs title on the paper background.
+		image: 'img/rocketride-social-card.png',
 		// Follow the visitor's OS theme: respectPrefersColorScheme makes the
 		// system `prefers-color-scheme` win on first visit. defaultMode is only the
 		// fallback when the browser reports no preference; the manual toggle still
@@ -157,8 +159,8 @@ const config: Config = {
 			hideOnScroll: false,
 			logo: {
 				alt: 'RocketRide',
-				src: 'img/rocketride-wordmark-positive.png',
-				srcDark: 'img/rocketride-wordmark-negative.png',
+				src: 'img/rocketride-logo-color.png',
+				srcDark: 'img/rocketride-logo-white.png',
 				href: 'https://rocketride.ai',
 				target: '_self',
 				className: 'navbar__logo--wordmark',
