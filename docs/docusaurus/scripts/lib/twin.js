@@ -349,4 +349,4 @@ function cleanTwin(raw, { mdx = false, indexUrl = '', addTitle = true } = {}) {
 	return `${indexUrl ? `> Documentation index for agents: ${indexUrl}\n\n` : ''}${body}\n`;
 }
 
-module.exports = { cleanTwin };
+module.exports = { cleanTwin, splitFences };

@@ -55,6 +55,21 @@ describe('pageDescription', () => {
 		assert.equal(pageDescription(md), 'The real first paragraph.');
 	});
 
+	it('keeps a fenced code block that contains an HTML comment opener from swallowing the prose', () => {
+		const md = '# T\n\n```html\n<!-- example\n```\n\nThe real first paragraph.\n\n<!-- later note -->\n';
+		assert.equal(pageDescription(md), 'The real first paragraph.');
+	});
+
+	it('keeps inline code that contains an HTML comment opener from swallowing the prose', () => {
+		const md = '# T\n\nWrite `<!--` to open a comment.\n\nMore text.\n\n<!-- later note -->\n';
+		assert.equal(pageDescription(md), 'Write <!-- to open a comment.');
+	});
+
+	it('removes a real multi-line comment before the first paragraph and keeps a later fenced opener', () => {
+		const md = '# T\n\n<!-- first line\nsecond line -->\n\nThe real first paragraph.\n\n```html\n<!-- example\n```\n';
+		assert.equal(pageDescription(md), 'The real first paragraph.');
+	});
+
 	it('returns an empty string when the page has no leading prose', () => {
 		assert.equal(pageDescription('---\ntitle: T\n---\n\n# T\n\n```js\ncode();\n```\n'), '');
 	});

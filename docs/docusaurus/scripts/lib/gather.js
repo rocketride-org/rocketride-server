@@ -18,6 +18,7 @@ const { glob } = require('glob');
 const { exists, mkdir, rm, copyFile, writeFileEnsure, readFile, readDir, symlink } = require('../../../../scripts/lib');
 const { allDocIds, docTitles, isValidMount, mountSlots, NODES_DIR } = require('./spine');
 const { describeText } = require('./description');
+const { splitFences } = require('./twin');
 
 // A node's co-located doc is README.md when it carries the generated
 // markers (GitHub-standard naming); legacy READMEs without markers are ignored.
@@ -360,7 +361,8 @@ function pageDescription(content) {
 			}
 		}
 	}
-	const body = content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '').replace(/<!--[\s\S]*?-->/g, '');
+	let body = content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
+	body = stripComments(body);
 	const para = [];
 	let inFence = false;
 	for (const line of body.split(/\r?\n/)) {
@@ -385,6 +387,16 @@ function pageDescription(content) {
 		para.push(t);
 	}
 	return describeText(para.join(' '));
+}
+
+/**
+ * Remove HTML comments from page text, but not from fenced code blocks or inline
+ * code, where `<!--` is literal text and must not swallow what follows it.
+ */
+function stripComments(text) {
+	return splitFences(text)
+		.map((seg) => (seg.fence ? seg.text : seg.text.replace(/(`+)[\s\S]*?\1|<!--[\s\S]*?-->/g, (m) => (m.startsWith('<!--') ? '' : m))))
+		.join('\n');
 }
 
 /** First markdown heading, as a title fallback. */
