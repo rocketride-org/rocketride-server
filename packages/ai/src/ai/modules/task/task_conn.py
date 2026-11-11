@@ -276,6 +276,11 @@ class TaskConn(
         self._account_info: Optional[AccountInfo] = None
         self._authenticated = False
 
+        # Session generation: bumped by on_deauth so a handler that was
+        # awaiting when its session ended (a store open) can tell, once it
+        # resumes, that what it acquired belongs to an ended session.
+        self._session_epoch: int = 0
+
         # Client IP — set by task_server.listen() immediately after construction,
         # used for per-IP unauthenticated connection tracking.
         self._client_ip: str = ''
@@ -438,11 +443,17 @@ class TaskConn(
         ``rrext_public_*`` commands are accepted. The WebSocket stays
         open — callers can re-authenticate later via ``auth``. The
         session's subscriptions end with it: every monitor is dropped and
-        the connection is detached from any task it debugs.
+        the connection is detached from any task it debugs, and its open
+        file-store handles are closed.
         """
         # Nothing to do if not authenticated
         if not self._authenticated:
             return self.build_response(request, body={})
+
+        # Mark the session ended before the first await below: a store open
+        # still in flight compares this when it resumes and closes the handle
+        # it acquired (see StoreCommands._store_fs_open)
+        self._session_epoch += 1
 
         # Re-acquire an unauthenticated slot for this IP
         if self._client_ip:
@@ -459,6 +470,14 @@ class TaskConn(
                 await control.task.detach_task(self)
             except Exception as e:
                 self.debug_message(f'Error detaching from task "{control.id}" on deauth: {e}')
+
+        # Close the session's file-store handles, as disconnect does. Handles
+        # are owned by the connection id, not the identity, so one left open
+        # would stay usable by whoever authenticates next on this socket
+        try:
+            await self._server.store.close_all_handles(self._connection_id)
+        except Exception as e:
+            self.debug_message(f'Error closing file handles on deauth: {e}')
 
         # Clear authentication state
         self._authenticated = False

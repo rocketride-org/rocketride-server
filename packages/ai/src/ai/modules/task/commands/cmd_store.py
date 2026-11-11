@@ -167,14 +167,32 @@ class StoreCommands(DAPConn):
         path = args.get('path')
         mode = args.get('mode', 'r')
 
+        # The session this open runs under; on_deauth bumps it
+        epoch = self._session_epoch
+
         if mode == 'w':
             # Create a write handle tied to this connection for cleanup on disconnect
             handle_id = await fs.open_write(path)
-            return self.build_response(request, body={'handle': handle_id})
+            body = {'handle': handle_id}
         else:
             # Open for reading; returns handle ID plus file metadata
-            result = await fs.open_read(path)
-            return self.build_response(request, body=result)
+            body = await fs.open_read(path)
+            handle_id = body['handle']
+
+        # The session ended while the open was awaiting the backend. Deauth's
+        # handle cleanup may have run before this handle was registered, so
+        # close it here: it must not outlive the session that opened it
+        if self._session_epoch != epoch:
+            try:
+                if mode == 'w':
+                    await fs.close_write(handle_id)
+                else:
+                    await fs.close_read(handle_id)
+            except Exception as e:
+                self.debug_message(f'Error closing a handle opened across deauth: {e}')
+            raise PermissionError('The session ended while the file was being opened')
+
+        return self.build_response(request, body=body)
 
     async def _store_fs_read(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
         """

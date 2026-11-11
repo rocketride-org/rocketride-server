@@ -47,6 +47,7 @@ def _make_conn(*, account_info=None, server=None, connection_id=1):
     conn._account_info = account_info
     conn._server = server or MagicMock()
     conn._connection_id = connection_id
+    conn._session_epoch = 0
     conn.build_response = MagicMock(side_effect=lambda req, body=None: {'type': 'response', 'body': body})
     conn.debug_message = MagicMock()
     conn.verify_permission = MagicMock()  # granted by default

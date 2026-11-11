@@ -39,12 +39,14 @@ is what replaces the ``pk_``.)
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from rocketride import EVENT_TYPE, TASK_STATE
+from ai.account.file_store import StorageError
 from ai.account.models import AccountInfo
+from ai.account.store import Store
 from ai.modules.task.task_conn import SCOPED_KEY_COMMANDS, TaskConn
 from ai.modules.task.task_server import TaskServer
 
@@ -113,6 +115,23 @@ DENIED = [
 # =============================================================================
 # Helpers
 # =============================================================================
+
+
+@pytest.fixture(autouse=True)
+def store_backend(monkeypatch):
+    """Install a fresh process Store over a stub backend for every test.
+
+    Deauth closes the session's file handles through the server's Store, so
+    each test gets its own empty handle registry instead of the real
+    singleton. Returns the backend so a test can drive or inspect it.
+    """
+    backend = MagicMock()
+    backend.open_read = AsyncMock(return_value={'context': object(), 'size': 3})
+    backend.read_chunk = AsyncMock(return_value=b'abc')
+    backend.close_read = AsyncMock()
+    store = Store(backend)
+    monkeypatch.setattr(Store, 'instance', staticmethod(lambda: store))
+    return backend
 
 
 def _scoped_identity(permissions=('task.data',), endpoints=(ADDRESS,)):
@@ -510,3 +529,81 @@ async def test_wildcard_subscription_ends_with_the_session():
     await TaskServer.broadcast_server_event(conn._server, EVENT_TYPE.DASHBOARD, _dashboard_event('auth_failed'))
 
     assert [m for m in _sent(conn) if m['type'] == 'event'] == []
+
+
+# =============================================================================
+# Deauth ends everything the session held on the socket: its open file-store
+# handles and its debugger attachments. Handles are owned by the connection
+# id, so one left open would serve whoever authenticates next on the socket.
+# These run the REAL fs_open/fs_read handlers over a real Store registry.
+# =============================================================================
+
+
+def _session_conn(identity):
+    """An authenticated TaskConn on a TaskServer with no runs, ready to deauth."""
+    server = TaskServer.__new__(TaskServer)
+    server._task_control = {}
+    server._unauthed_by_ip = {}
+    server.broadcast_server_event = AsyncMock()
+    return _make_conn(account_info=identity, server=server)
+
+
+def _open_handles():
+    """The handles the process Store currently holds open."""
+    return list(Store.instance()._shared_handles.values())
+
+
+@pytest.mark.asyncio
+async def test_deauth_closes_the_sessions_file_handles(store_backend):
+    """A handle opened before deauth is closed by it and refused to the next identity on the socket."""
+    conn = _session_conn(_make_account_info(auth=FULL_KEY, user_id='owner-1'))
+    opened = await conn._store_fs_open({}, {'path': 'notes.txt'})
+    handle = opened['body']['handle']
+    assert [h.handle_id for h in _open_handles()] == [handle]
+
+    await _dispatch(conn, 'deauth')
+
+    assert conn._authenticated is False
+    assert _open_handles() == []
+    store_backend.close_read.assert_awaited_once()
+
+    # Another user authenticates on the same socket and presents the handle
+    conn._account_info = _make_account_info(auth='rr_other', user_id='other-1')
+    conn._authenticated = True
+    with pytest.raises(StorageError, match='Invalid handle'):
+        await conn._store_fs_read({}, {'handle': handle})
+    store_backend.read_chunk.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_an_open_in_flight_at_deauth_does_not_keep_its_handle(store_backend):
+    """An open that registers its handle after deauth's cleanup closes it and fails."""
+    conn = _session_conn(_make_account_info(auth=FULL_KEY, user_id='owner-1'))
+
+    async def open_across_deauth(path):
+        # The backend is still opening when the client deauthenticates
+        await _dispatch(conn, 'deauth')
+        return {'context': object(), 'size': 3}
+
+    store_backend.open_read.side_effect = open_across_deauth
+
+    with pytest.raises(PermissionError, match='session ended'):
+        await conn._store_fs_open({}, {'path': 'notes.txt'})
+
+    assert conn._authenticated is False
+    assert _open_handles() == []
+    store_backend.close_read.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_deauth_detaches_the_debugger_from_its_tasks():
+    """Every task the connection debugs is told to detach it on deauth."""
+    conn = _session_conn(_scoped_identity(permissions=('task.data', 'task.monitor')))
+    run = _team_run(ADDRESS, 'task-in')
+    run.task.detach_task = AsyncMock()
+    conn._server._task_control = {run.key: run}
+
+    await _dispatch(conn, 'deauth')
+
+    assert conn._authenticated is False
+    run.task.detach_task.assert_awaited_once_with(conn)

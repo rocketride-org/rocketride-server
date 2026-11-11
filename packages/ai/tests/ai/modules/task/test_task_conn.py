@@ -71,6 +71,7 @@ def _make_conn(
     conn._authenticated = authenticated
     conn._account_info = account_info
     conn._auth_attempts = 0
+    conn._session_epoch = 0
     conn._messages_in = 0
     conn._messages_out = 0
     conn._last_activity = 0.0
