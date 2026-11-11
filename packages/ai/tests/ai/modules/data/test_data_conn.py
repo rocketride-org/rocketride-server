@@ -299,7 +299,9 @@ def test_warn_on_unconsumed_lane_is_symmetric_for_text_on_a_json_pipeline(monkey
 def _make_pipe_conn(lane, mime_type='text/plain'):
     """Build a DataConnPipe stand-in with the bare attributes _begin/_end use."""
     pipe = MagicMock()
-    return SimpleNamespace(pipe=pipe, lane=lane, mime_type=mime_type)
+    return SimpleNamespace(
+        pipe=pipe, lane=lane, mime_type=mime_type, text_decoder=None, text_parts=None, has_failed=False
+    )
 
 
 def test_begin_audio_calls_writeAudio_with_begin_action():
@@ -381,7 +383,7 @@ def test_end_raw_writes_tag_end_stream_and_object():
 def test_write_text_keeps_a_character_split_between_chunks():
     """A multi-byte character cut by the chunk boundary arrives whole."""
     conn = _make_conn()
-    pipe_conn = SimpleNamespace(pipe=MagicMock(), text_decoder=None, text_parts=None)
+    pipe_conn = SimpleNamespace(pipe=MagicMock(), text_decoder=None, text_parts=None, has_failed=False)
     body = '{"name": "Zoë"}'.encode('utf-8')
     cut = body.index('ë'.encode('utf-8')) + 1  # inside the two-byte ë
     conn._write_text(pipe_conn, body[:cut])
@@ -393,7 +395,7 @@ def test_write_text_keeps_a_character_split_between_chunks():
 def test_a_chunked_text_body_is_written_once_when_complete():
     """Two chunks make one writeText, so a `question` node asks one question, not two halves."""
     conn = _make_conn()
-    pipe_conn = SimpleNamespace(pipe=MagicMock(), text_decoder=None, text_parts=None)
+    pipe_conn = SimpleNamespace(pipe=MagicMock(), text_decoder=None, text_parts=None, has_failed=False)
     conn._write_text(pipe_conn, b'{"action": "opened", ')
     conn._write_text(pipe_conn, b'"number": 7}')
     pipe_conn.pipe.writeText.assert_not_called()
@@ -406,7 +408,7 @@ def test_a_text_body_over_the_hold_limit_streams_instead_of_growing(monkeypatch)
     """Past the limit the held text is written and later chunks go straight through, as before buffering."""
     monkeypatch.setattr(data_conn, 'TEXT_LANE_HOLD_BYTES', 4)
     conn = _make_conn()
-    pipe_conn = SimpleNamespace(pipe=MagicMock(), text_decoder=None, text_parts=None)
+    pipe_conn = SimpleNamespace(pipe=MagicMock(), text_decoder=None, text_parts=None, has_failed=False)
     conn._write_text(pipe_conn, b'ab')
     conn._write_text(pipe_conn, b'cd')
     pipe_conn.pipe.writeText.assert_not_called()  # at the limit, still one text
@@ -422,7 +424,7 @@ def test_end_text_flushes_and_rejects_a_truncated_character():
     """A body that ends inside a character is invalid UTF-8 and raises at the end."""
     conn = _make_conn()
     pipe_conn = SimpleNamespace(
-        pipe=MagicMock(), lane='text', mime_type='text/plain', text_decoder=None, text_parts=None
+        pipe=MagicMock(), lane='text', mime_type='text/plain', text_decoder=None, text_parts=None, has_failed=False
     )
     conn._write_text(pipe_conn, 'ë'.encode('utf-8')[:1])
     with pytest.raises(ValueError, match='ends inside a character'):

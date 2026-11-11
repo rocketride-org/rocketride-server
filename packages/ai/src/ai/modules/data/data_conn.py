@@ -636,13 +636,13 @@ class DataConn(DAPConn):
         Raises:
             UnicodeDecodeError: The body ends inside a UTF-8 character.
         """
-        decoder = getattr(conn_pipe, 'text_decoder', None)
+        decoder = conn_pipe.text_decoder
         if decoder is None:
             return
         parts = conn_pipe.text_parts or []
         conn_pipe.text_decoder = None
         conn_pipe.text_parts = None
-        if getattr(conn_pipe, 'has_failed', False):
+        if conn_pipe.has_failed:
             return
         try:
             parts.append(decoder.decode(b'', final=True))
