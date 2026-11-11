@@ -21,7 +21,7 @@ import pytest
 # core/ is a flat dir of engine-loaded modules (no __init__.py) and nodes/src is
 # not on pytest's pythonpath, so import the module by adding its dir to sys.path.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'src' / 'nodes' / 'core'))
-from gcp_auth import GCPAuthError, _DEFAULT_SCOPES, get_gcp_credentials  # noqa: E402
+from gcp_auth import GCPAuthError, _DEFAULT_SCOPES, check_credentials_at_save_time, get_gcp_credentials  # noqa: E402
 
 _MISSING = object()
 
@@ -306,3 +306,22 @@ def test_config_errors_do_not_require_google_auth():
             get_gcp_credentials({'authType': 'service_account'})
         with pytest.raises(GCPAuthError, match='Failed to parse Service Account JSON key'):
             get_gcp_credentials({'authType': 'service_account', 'serviceAccountKey': 'not-a-json'})
+
+
+def test_save_time_check_reports_config_errors_without_google_auth():
+    """With google-auth absent, a config error is reported, not a skipped check."""
+    reports: list[str] = []
+    with patch('gcp_auth.google_auth_available', return_value=False):
+        check_credentials_at_save_time({'authType': 'service_account'}, _DEFAULT_SCOPES, reports.append)
+    assert len(reports) == 1
+    assert reports[0].startswith('Auth configuration error: Service Account JSON key is required')
+
+
+def test_save_time_check_skips_only_the_credential_build_without_google_auth():
+    """With google-auth absent and a well-formed config, only the skip is reported."""
+    reports: list[str] = []
+    config = {'authType': 'service_account', 'serviceAccountKey': '{"project_id": "test-project"}'}
+    with patch('gcp_auth.google_auth_available', return_value=False):
+        check_credentials_at_save_time(config, _DEFAULT_SCOPES, reports.append)
+    assert len(reports) == 1
+    assert reports[0].startswith('Credential check skipped')

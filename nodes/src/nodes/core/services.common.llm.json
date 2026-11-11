@@ -1,5 +1,9 @@
+//
+// Common property definitions for LLM services - these will be merged into the
+// service definition as required by the service
+//
 {
-	"fields": {
+	"propertyDefinitions": {
 		"llm.local.serverbase": {
 			"type": "string",
 			"title": "LLM URL",
@@ -10,28 +14,21 @@
 			"type": "string",
 			"title": "API key (Token)",
 			"description": "Enter your API key or token",
-			"optional": false,
-			"secure": true,
-			"ui": {
-				"ui:widget": "ApiKeyWidget"
-			}
+			"secret": true
 		},
 		"llm.cloud.project": {
 			"type": "string",
 			"title": "Project (Organization)",
-			"optional": false,
 			"description": "LLM project or organization name"
 		},
 		"llm.cloud.location": {
 			"type": "string",
 			"title": "Location",
-			"optional": false,
 			"description": "LLM server location"
 		},
 		"llm.cloud.modelSource": {
 			"type": "string",
 			"title": "Model source",
-			"optional": true,
 			"hidden": true
 		}
 	}

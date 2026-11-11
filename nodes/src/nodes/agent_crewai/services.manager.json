@@ -27,39 +27,24 @@
 	"lanes": {
 		"questions": ["answers"]
 	},
-	"preconfig": {
-		"default": "default",
-		"profiles": {
-			"default": {
-				"agent_description": "",
-				"instructions": [],
-				"advanced_mode": false,
-				"goal": "",
-				"backstory": "",
-				"planning": false,
-				"require_tool_call": false
-			}
-		}
-	},
-	"fields": {
+	//
+	// Optional:
+	//		Local property definitions. Every field is stored flat; the manager
+	//		Agent fields are always declared.
+	//
+	"propertyDefinitions": {
 		"agent_description": {
 			"type": "string",
+			"format": "textarea",
 			"title": "Agent description",
 			"default": "",
-			"optional": true,
-			"description": "What this manager + its sub-agent crew does. Used by parent agents that call this manager as a tool via `<nodeId>.run_agent` to decide when to invoke it.",
-			"ui": {
-				"ui:widget": "textarea"
-			}
+			"description": "What this manager + its sub-agent crew does. Used by parent agents that call this manager as a tool via `<nodeId>.run_agent` to decide when to invoke it."
 		},
 		"instructions": {
 			"type": "array",
 			"title": "Instructions",
 			"description": "Additional instructions to guide the manager's delegation strategy.",
-			"items": {
-				"type": "string",
-				"format": "textarea"
-			}
+			"item": { "name": "instruction", "type": "string", "format": "textarea" }
 		},
 		"require_tool_call": {
 			"type": "boolean",
@@ -67,50 +52,30 @@
 			"default": false,
 			"description": "Require at least one tool call (including calls delegated to sub-agents) before answering. When on, a run that answers without any tool invocation fails with a guard error. Use for determinism-critical pipelines where an ungrounded or narrated answer must never be delivered. Off by default."
 		},
-		"advanced_mode": {
-			"type": "boolean",
-			"title": "Advanced Mode",
-			"description": "Expose CrewAI manager Agent configuration directly.",
-			"default": false,
-			"enum": [
-				[false, "Off"],
-				[true, "On"]
-			],
-			"conditional": [
-				{
-					"value": true,
-					"properties": ["goal", "backstory", "planning"]
-				}
-			]
-		},
 		"goal": {
 			"type": "string",
 			"format": "textarea",
 			"title": "Manager Goal",
-			"description": "What the manager is trying to achieve. Maps to CrewAI Agent(goal=...)."
+			"description": "What the manager is trying to achieve. Maps to CrewAI Agent(goal=...).",
+			"default": ""
 		},
 		"backstory": {
 			"type": "string",
 			"format": "textarea",
 			"title": "Manager Backstory",
-			"description": "Background context for the manager's persona. Maps to CrewAI Agent(backstory=...)."
+			"description": "Background context for the manager's persona. Maps to CrewAI Agent(backstory=...).",
+			"default": ""
 		},
 		"planning": {
 			"type": "boolean",
 			"title": "Crew Planning",
 			"description": "Run CrewAI's planner before the crew executes, adding a step-by-step plan to each task. Off by default: the planner requires the LLM to return JSON matching CrewAI's plan schema, and a model that answers in prose instead fails the whole run with <b>Failed to get the Planning output</b>. It also costs one extra LLM call per kickoff. Enable only with a model that reliably emits well-formed JSON.",
-			"default": false,
-			"enum": [
-				[false, "Off"],
-				[true, "On"]
-			]
+			"default": false
 		}
 	},
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "CrewAI Manager",
-			"properties": ["agent_description", "instructions", "require_tool_call", "advanced_mode"]
-		}
-	]
+	//
+	// Required:
+	//		Defines the properties shown in the pipeline builder side panel, in order
+	//
+	"properties": ["type", "agent_description", "instructions", "require_tool_call", "goal", "backstory", "planning"]
 }

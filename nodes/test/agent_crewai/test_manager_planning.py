@@ -25,7 +25,6 @@ panel renders from, and ``IGlobal``'s parsing of the field.
 
 from __future__ import annotations
 
-import json
 import sys
 import types
 from collections.abc import Iterator
@@ -33,46 +32,43 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
+from rocketlib.config import ConfigError
+
+# Imported package-relative: putting nodes/test on sys.path would let its node-named
+# subpackages shadow the real node packages under src/nodes (see #1687).
+from ..test_contracts import parse_service_json
 
 _NODE_DIR = Path(__file__).resolve().parents[2] / 'src' / 'nodes' / 'agent_crewai'
-_MANIFEST = json.loads((_NODE_DIR / 'services.manager.json').read_text(encoding='utf-8'))
+_MANIFEST = parse_service_json(_NODE_DIR / 'services.manager.json')
 
 
 class TestManifest:
     """The field the operator actually sees in the config panel."""
 
     def test_planning_field_exists(self):
-        assert 'planning' in _MANIFEST['fields']
+        assert 'planning' in _MANIFEST['propertyDefinitions']
 
     def test_planning_defaults_to_off(self):
-        assert _MANIFEST['fields']['planning']['default'] is False
-        assert _MANIFEST['preconfig']['profiles']['default']['planning'] is False
+        assert _MANIFEST['propertyDefinitions']['planning']['default'] is False
 
     def test_planning_is_a_boolean_toggle(self):
-        field = _MANIFEST['fields']['planning']
-        assert field['type'] == 'boolean'
-        assert field['enum'] == [[False, 'Off'], [True, 'On']]
+        assert _MANIFEST['propertyDefinitions']['planning']['type'] == 'boolean'
 
-    def test_planning_is_gated_behind_advanced_mode(self):
-        conditional = _MANIFEST['fields']['advanced_mode']['conditional']
-        advanced = next(c for c in conditional if c['value'] is True)
-        assert 'planning' in advanced['properties']
+    def test_planning_is_shown_in_the_config_panel(self):
+        assert 'planning' in _MANIFEST['properties']
 
     def test_description_warns_about_the_json_requirement(self):
-        description = _MANIFEST['fields']['planning']['description']
+        description = _MANIFEST['propertyDefinitions']['planning']['description']
         assert 'JSON' in description
 
 
 # ---------------------------------------------------------------------------
-# IGlobal wiring — stub the engine-only seams so the real module can be imported
+# IGlobal wiring — stub the CrewAI seams so the real module can be imported;
+# rocketlib is the real one, so the config goes through the real resolver
 # ---------------------------------------------------------------------------
 
 _STUB_MODULE_NAMES = (
     'depends',
-    'rocketlib',
-    'ai',
-    'ai.common',
-    'ai.common.config',
     'agent_crewai',
     'agent_crewai.crewai_runner',
     'agent_crewai.crewai_manager',
@@ -80,36 +76,9 @@ _STUB_MODULE_NAMES = (
 )
 
 
-class _StubConfig:
-    """Stands in for ai.common.config.Config; returns whatever a test queued."""
-
-    node_config: dict = {}
-
-    @staticmethod
-    def getNodeConfig(logical_type, conn_config):  # noqa: ARG004 — signature parity
-        return _StubConfig.node_config
-
-
 def _build_stubs() -> dict:
     mod_depends = types.ModuleType('depends')
     mod_depends.depends = lambda *args, **kwargs: None
-
-    mod_rocketlib = types.ModuleType('rocketlib')
-
-    class IGlobalBase:
-        pass
-
-    class _OpenMode:
-        CONFIG = 'CONFIG'
-        SOURCE = 'SOURCE'
-
-    mod_rocketlib.IGlobalBase = IGlobalBase
-    mod_rocketlib.OPEN_MODE = _OpenMode
-
-    mod_ai = types.ModuleType('ai')
-    mod_ai_common = types.ModuleType('ai.common')
-    mod_config = types.ModuleType('ai.common.config')
-    mod_config.Config = _StubConfig
 
     # Synthetic package parents so IGlobal's relative imports resolve without
     # dragging in crewai_runner / manager / crewai_base, none of which this test
@@ -132,10 +101,6 @@ def _build_stubs() -> dict:
 
     return {
         'depends': mod_depends,
-        'rocketlib': mod_rocketlib,
-        'ai': mod_ai,
-        'ai.common': mod_ai_common,
-        'ai.common.config': mod_config,
         'agent_crewai': pkg,
         'agent_crewai.crewai_runner': mod_runner,
         'agent_crewai.crewai_manager': sub_pkg,
@@ -173,15 +138,12 @@ def _load_iglobal():
 
 
 def _begin(config: dict):
-    """Run beginGlobal against a stubbed engine and return the populated IGlobal."""
+    """Run beginGlobal on the real resolver (stored config ``config``) and return the populated IGlobal."""
     with _scoped_stubs():
         iglobal_mod = _load_iglobal()
-        _StubConfig.node_config = config
 
         instance = iglobal_mod.IGlobal()
-        endpoint = types.SimpleNamespace(endpoint=types.SimpleNamespace(openMode='SOURCE'))
-        instance.IEndpoint = endpoint
-        instance.glb = types.SimpleNamespace(logicalType='agent_crewai_manager', connConfig={})
+        instance.glb = types.SimpleNamespace(logicalType='agent_crewai_manager', connConfig=config)
 
         instance.beginGlobal()
         return instance
@@ -191,13 +153,19 @@ class TestIGlobalWiring:
     def test_planning_defaults_to_false_when_absent(self):
         assert _begin({'goal': '', 'backstory': ''}).planning is False
 
-    @pytest.mark.parametrize('value', [True, 1, 'yes'])
-    def test_truthy_config_enables_planning(self, value):
-        assert _begin({'planning': value}).planning is True
+    def test_true_enables_planning(self):
+        assert _begin({'planning': True}).planning is True
 
-    @pytest.mark.parametrize('value', [False, 0, '', None])
-    def test_falsy_config_keeps_planning_off(self, value):
+    @pytest.mark.parametrize('value', [False, None])
+    def test_false_or_unset_keeps_planning_off(self, value):
+        """None is "unset" to the resolver, so the schema default (off) applies."""
         assert _begin({'planning': value}).planning is False
+
+    @pytest.mark.parametrize('value', [1, 'yes', 0])
+    def test_a_non_boolean_is_refused_by_the_schema(self, value):
+        """The field is a boolean: a stringified or numeric flag is a config error, never a guess."""
+        with pytest.raises(ConfigError, match='"planning" expects boolean'):
+            _begin({'planning': value})
 
     def test_endglobal_resets_planning(self):
         instance = _begin({'planning': True})

@@ -57,10 +57,13 @@ _mod = _load_recognizer_module()
 GliNERRecognizer = _mod.GliNERRecognizer
 
 
-class _Config:
-    @staticmethod
-    def getNodeConfig(*_a: object, **_kw: object) -> dict:
-        return {'model': 'stub/gliner', 'entityTypes': ['person', 'email']}
+# The resolved node config the recognizer reads (defaults applied, flat).
+_CONFIG = {
+    'model': 'stub/gliner',
+    'anonymizeChar': '█',
+    'redactionStyle': 'mask',
+    'entityTypes': ['person', 'email'],
+}
 
 
 class _StubGLiNER:
@@ -83,11 +86,10 @@ def make_recognizer(monkeypatch, tmp_path):
     def _make(model_server: bool) -> GliNERRecognizer:
         argv = ['node.py'] + (['--modelserver=5590'] if model_server else [])
         monkeypatch.setattr(sys, 'argv', argv)
-        monkeypatch.setattr(_mod, 'Config', _Config)
         monkeypatch.setattr(_mod, 'GLiNER', _StubGLiNER)
         monkeypatch.setattr(_mod, 'RuleParser', lambda _path: None)
         monkeypatch.setattr(_mod, 'expand', lambda _spec: str(tmp_path))
-        return GliNERRecognizer('anonymize', {}, {})
+        return GliNERRecognizer(_CONFIG, {})
 
     return _make
 

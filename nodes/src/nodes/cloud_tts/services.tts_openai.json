@@ -48,7 +48,7 @@
 	// Optional:
 	//		Description of this driver
 	//
-	"description": ["Converts incoming text into speech using the OpenAI text-to-speech API.", "Calls the vendor API directly from the engine host over HTTPS and emits MP3 bytes on the audio lane.", "Model and voice lists are maintained manually; the API key falls back to the OPENAI_API_KEY environment variable when blank."],
+	"description": ["Converts incoming text into speech using the OpenAI text-to-speech API.", "Calls the vendor API directly from the engine host over HTTPS and emits MP3 bytes on the audio lane.", "Model and voice lists are maintained manually; the API key is read from the node config, a ${ROCKETRIDE_TTS_OPENAI_APIKEY} reference resolved per call."],
 	//
 	// Optional:
 	//	  The icon to display in the UI for this node
@@ -67,60 +67,18 @@
 		"answers": ["audio"]
 	},
 	//
-	//	Optional:
-	//		Profile section are configuration options used by the driver
-	//		itself. One profile per model (maintained manually).
-	//
-	"preconfig": {
-		// Define the values that will be merged into any profile configuration
-		// specified, unless the profile is 'absolute'
-		"default": "gpt-4o-mini-tts",
-		// Defines profiles used with the "profile": key. model + voice live here so
-		// Config.getNodeConfig merges them under the selected profile.
-		"profiles": {
-			"gpt-4o-mini-tts": {
-				"title": "GPT-4o mini TTS - Fast, steerable, multilingual",
-				"model": "gpt-4o-mini-tts",
-				"voice": "alloy",
-				"apikey": ""
-			},
-			"tts-1": {
-				"title": "TTS-1          - Low latency, standard quality",
-				"model": "tts-1",
-				"voice": "alloy",
-				"apikey": ""
-			},
-			"tts-1-hd": {
-				"title": "TTS-1 HD       - Higher quality, slower",
-				"model": "tts-1-hd",
-				"voice": "alloy",
-				"apikey": ""
-			}
-		}
-	},
-	//
 	// Optional:
-	//		Local field definitions - these define fields only for the
-	//		current service. You may specify them here, or directly
-	//		in the shape
+	//		Local property definitions. The model is the selector (one value per
+	//		model, maintained manually); the API key and the voice are shared by
+	//		every model and stored flat.
 	//
-	"fields": {
-		// ── Form objects (one per model profile; api key + voice per profile) ──
-		// voice MUST live inside the form-object so it is merged under the selected
-		// profile; in the top-level shape it would be silently dropped by getNodeConfig.
-		"tts_openai.gpt-4o-mini-tts": {
-			"object": "gpt-4o-mini-tts",
-			"properties": ["llm.cloud.apikey", "tts_openai.voice"]
+	"propertyDefinitions": {
+		"tts_openai.apikey": {
+			"base": "llm.cloud.apikey",
+			"description": "OpenAI API key",
+			"env": "ROCKETRIDE_TTS_OPENAI_APIKEY",
+			"required": true
 		},
-		"tts_openai.tts-1": {
-			"object": "tts-1",
-			"properties": ["llm.cloud.apikey", "tts_openai.voice"]
-		},
-		"tts_openai.tts-1-hd": {
-			"object": "tts-1-hd",
-			"properties": ["llm.cloud.apikey", "tts_openai.voice"]
-		},
-		// ── Voice (static; not model-derived, so not synced) ───────────────────
 		"tts_openai.voice": {
 			"type": "string",
 			"title": "Voice",
@@ -141,45 +99,32 @@
 				["marin", "Marin"],
 				["cedar", "Cedar"]
 			]
-		},
-		// ── Profile selector (drives conditional form rendering) ───────────────
-		"tts_openai.profile": {
-			"title": "Model",
-			"description": "OpenAI TTS model",
-			"type": "string",
-			"default": "gpt-4o-mini-tts",
-			"enum": ["*>preconfig.profiles.*.title"],
-			"conditional": [
-				{
-					"value": "gpt-4o-mini-tts",
-					"properties": ["tts_openai.gpt-4o-mini-tts"]
-				},
-				{
-					"value": "tts-1",
-					"properties": ["tts_openai.tts-1"]
-				},
-				{
-					"value": "tts-1-hd",
-					"properties": ["tts_openai.tts-1-hd"]
-				}
-			]
 		}
 	},
 	//
 	// Required:
-	//		Defines the fields (shape) of the service. Either source or target
-	//		may be specified, or both, but at least one is required
+	//		Defines the properties shown in the pipeline builder side panel, in order
 	//
-	"shape": [
+	"properties": [
 		{
-			"section": "Pipe",
-			"title": "OpenAI Text To Speech",
-			"properties": ["tts_openai.profile"]
-		}
+			"name": "model",
+			"type": "string",
+			"title": "Model",
+			"description": "OpenAI TTS model",
+			"default": "gpt-4o-mini-tts",
+			"enum": {
+				"gpt-4o-mini-tts": { "title": "GPT-4o mini TTS - Fast, steerable, multilingual" },
+				"tts-1": { "title": "TTS-1          - Low latency, standard quality" },
+				"tts-1-hd": { "title": "TTS-1 HD       - Higher quality, slower" }
+			}
+		},
+		"tts_openai.apikey",
+		"tts_openai.voice"
 	],
 	//
 	// Optional:
-	//		Test configuration for automated node testing
+	//		Test configuration for automated node testing. "profiles" lists
+	//		values of the "model" selector.
 	//
 	"test": [
 		{

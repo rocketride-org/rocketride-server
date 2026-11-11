@@ -1,6 +1,5 @@
 # =============================================================================
 # MIT License
-#
 # Copyright (c) 2026 Aparavi Software AG
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -22,49 +21,29 @@
 # SOFTWARE.
 # =============================================================================
 
-from rocketlib import IGlobalBase, OPEN_MODE, warning
-from ai.common.config import Config
-
-# Bounds for the source long-edge cap (composite resolution).
-DEFAULT_MAX_EDGE = 1024
-MIN_MAX_EDGE = 256
-MAX_MAX_EDGE = 4096
+from rocketlib import IGlobalBase
+from ai.common.models.base import make_device_lock
+from ai.common.models.vision.background import BackgroundRemover
 
 
 class IGlobal(IGlobalBase):
     remover = None
     device_lock = None
-    max_edge = DEFAULT_MAX_EDGE
+    max_edge = 1024
 
     def beginGlobal(self):
-        """Build the shared BackgroundRemover facade and parse the clamped maxEdge config."""
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
+        """Build the shared BackgroundRemover facade from the resolved config.
 
-        from ai.common.models.vision.background import BackgroundRemover, DEFAULT_MODEL
-
-        node_cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-
-        model_name = (node_cfg.get('model') or '').strip()
-        if not model_name:
-            warning(f'background_removal: no model configured, using default {DEFAULT_MODEL}')
-            model_name = DEFAULT_MODEL
-
-        # max_edge: bound composite/source resolution so memory stays predictable.
-        try:
-            self.max_edge = int(node_cfg.get('maxEdge', DEFAULT_MAX_EDGE))
-        except (TypeError, ValueError):
-            self.max_edge = DEFAULT_MAX_EDGE
-        self.max_edge = min(MAX_MAX_EDGE, max(MIN_MAX_EDGE, self.max_edge))
-
-        revision = (node_cfg.get('revision') or '').strip() or None
+        The selected profile pins the model and its revision; the resolver has
+        already bounded maxEdge to the schema's range.
+        """
+        config = self.config
+        self.max_edge = config.maxEdge
 
         # device=None -> model server when --modelserver is set, else local.
-        self.remover = BackgroundRemover(model_name=model_name, device=None, revision=revision)
+        self.remover = BackgroundRemover(model_name=config.model, device=None, revision=config.revision)
 
         # Local inference must serialize GPU access
-        from ai.common.models.base import make_device_lock
-
         self.device_lock = make_device_lock()
 
     def endGlobal(self):

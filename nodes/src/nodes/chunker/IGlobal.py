@@ -25,8 +25,8 @@
 # This class controls the data shared between all threads for the task
 # ------------------------------------------------------------------------------
 import os
-from rocketlib import IGlobalBase, OPEN_MODE, warning
-from ai.common.config import Config
+
+from rocketlib import IGlobalBase
 
 from .chunker_strategies import ChunkingStrategy, SentenceChunker, TokenChunker
 
@@ -34,72 +34,39 @@ from .chunker_strategies import ChunkingStrategy, SentenceChunker, TokenChunker
 class IGlobal(IGlobalBase):
     strategy: ChunkingStrategy | None = None
 
-    def validateConfig(self):
-        """Validate that tiktoken dependency is available (only needed for token strategy)."""
-        try:
-            config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-            strategy_name = config.get('strategy', 'sentence')
-        except Exception:  # noqa: BLE001
-            # If config isn't available yet, install proactively
-            strategy_name = 'token'
-
-        if strategy_name == 'token':
-            try:
-                from depends import depends
-
-                requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
-                depends(requirements)
-            except Exception as e:  # noqa: BLE001 - intentional broad catch for dependency probing
-                warning(str(e))
-
     def beginGlobal(self):
-        """Initialize the configured chunking strategy for runtime execution."""
-        # Are we in config mode or some other mode?
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            # We are going to get a call to configureService but
-            # we don't actually need to load the strategy for that
-            pass
+        """Build the configured chunking strategy from the resolved config.
+
+        The resolver has applied the selected strategy's defaults and bounded
+        the sizes; the one cross-field rule (overlap below size) is checked here.
+
+        Raises:
+            ValueError: The overlap is not smaller than the chunk size.
+        """
+        config = self.config
+        chunk_size = config.chunk_size
+        chunk_overlap = config.chunk_overlap
+
+        if chunk_overlap >= chunk_size:
+            raise ValueError(f'chunk_overlap ({chunk_overlap}) must be less than chunk_size ({chunk_size})')
+
+        if config.strategy == 'token':
+            # The tokenizer is a run-path dependency: install it where it is used
+            from depends import depends  # type: ignore
+
+            requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
+            depends(requirements)
+
+            self.strategy = TokenChunker(
+                chunk_size=chunk_size,
+                chunk_overlap=chunk_overlap,
+                encoding_name=config.encoding_name,
+            )
         else:
-            # Get this node's config
-            config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-
-            # Read strategy parameters from config
-            strategy_name = config.get('strategy', 'sentence')
-            chunk_size = int(config.get('chunk_size', 1000))
-            chunk_overlap = int(config.get('chunk_overlap', 200))
-            encoding_name = config.get('encoding_name', 'cl100k_base')
-
-            if chunk_size <= 0:
-                raise ValueError(f'chunk_size must be positive, got {chunk_size}')
-            if chunk_overlap < 0:
-                raise ValueError(f'chunk_overlap must be non-negative, got {chunk_overlap}')
-            if chunk_overlap >= chunk_size:
-                raise ValueError(f'chunk_overlap ({chunk_overlap}) must be less than chunk_size ({chunk_size})')
-
-            # Build the appropriate strategy
-            if strategy_name == 'token':
-                self.strategy = TokenChunker(
-                    chunk_size=chunk_size,
-                    chunk_overlap=chunk_overlap,
-                    encoding_name=encoding_name,
-                )
-            elif strategy_name == 'sentence':
-                self.strategy = SentenceChunker(
-                    chunk_size=chunk_size,
-                    chunk_overlap=chunk_overlap,
-                )
-            else:
-                # 'recursive' is intentionally absent: use the
-                # preprocessor_langchain node, which already exposes
-                # RecursiveCharacterTextSplitter. Name it explicitly so a stale
-                # config gets a pointer instead of a bare "unknown strategy".
-                if strategy_name == 'recursive':
-                    raise ValueError(
-                        "Chunker strategy 'recursive' was removed: use the preprocessor_langchain "
-                        "node (its 'default' or 'recursive' profile) for recursive character "
-                        'splitting. This node provides: sentence, token.'
-                    )
-                raise ValueError(f"Unknown chunker strategy '{strategy_name}'. Expected one of: sentence, token.")
+            self.strategy = SentenceChunker(
+                chunk_size=chunk_size,
+                chunk_overlap=chunk_overlap,
+            )
 
     def endGlobal(self):
         """Release the configured chunking strategy."""

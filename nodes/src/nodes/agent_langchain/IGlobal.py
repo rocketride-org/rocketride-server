@@ -26,16 +26,13 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from rocketlib import IGlobalBase, OPEN_MODE
+from rocketlib import IGlobalBase
 
 
 class IGlobal(IGlobalBase):
     agent: Any = None
 
     def beginGlobal(self) -> None:
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
-
         from depends import depends
 
         requirements = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'requirements.txt')

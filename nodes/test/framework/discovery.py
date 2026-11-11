@@ -101,10 +101,12 @@ class NodeTestConfig:
     config: Dict[str, Any] = field(default_factory=dict)
 
     # Node metadata
-    preconfig: Dict[str, Any] = field(default_factory=dict)
     lanes: Dict[str, Any] = field(default_factory=dict)
     capabilities: List[str] = field(default_factory=list)
     config_id: Optional[str] = None
+    # The config schema (``propertyDefinitions`` / ``properties``, plan section 5.6)
+    property_definitions: Dict[str, Any] = field(default_factory=dict)
+    properties: List[Any] = field(default_factory=list)
 
     def get_test_id(self) -> str:
         """Generate a unique test ID for this node config."""
@@ -378,10 +380,11 @@ def _parse_test_config(
                 timeout=group.get('timeout', 60),
                 cases=cases,
                 config=group.get('config') if isinstance(group.get('config'), dict) else {},
-                preconfig=data.get('preconfig', {}),
                 lanes=data.get('lanes', {}),
                 capabilities=_ensure_list_field(data.get('capabilities'), 'capabilities', service_file),
                 config_id=config_id,
+                property_definitions=data.get('propertyDefinitions') or {},
+                properties=data.get('properties') or [],
             )
         )
 

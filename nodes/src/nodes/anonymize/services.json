@@ -64,7 +64,9 @@
 		"text": ["text"]
 	},
 	//
-	//	Test configuration for automated node testing
+	//	Test configuration for automated node testing. "profiles" lists
+	//	values of the "profile" selector; the framework writes the selected
+	//	one at "profile".
 	//
 	"test": {
 		"profiles": ["glinerSmall"],
@@ -101,142 +103,26 @@
 		}
 	],
 	//
-	//	Optional:
-	//		Profile section are configuration optoins used by the driver
-	//		itself
-	//
-	"preconfig": {
-		"default": "glinerSmall",
-		"profiles": {
-			"custom": {
-				"title": "Custom model",
-				"model": "",
-				"anonymizeChar": "\u2588",
-				"anonymizeAll": false
-			},
-			"glinerMultiPII": {
-				"title": "GLiNER Multi PII - Multilingual PII model",
-				"model": "urchade/gliner_multi_pii-v1",
-				"anonymizeChar": "\u2588",
-				"anonymizeAll": false
-			},
-			"glinerPIILarge": {
-				"title": "GLiNER PII Large - High-accuracy English PII",
-				"model": "knowledgator/gliner-pii-large-v1.0",
-				"anonymizeChar": "\u2588",
-				"anonymizeAll": false
-			},
-			"glinerMergedLarge": {
-				"title": "GLiNER Merged Large - Combined model from multiple datasets",
-				"model": "xomad/gliner-model-merge-large-v1.0",
-				"anonymizeChar": "\u2588",
-				"anonymizeAll": false
-			},
-			"glinerSmall": {
-				"title": "GLiNER Small - Lightweight general-purpose model",
-				"model": "urchade/gliner_small-v2.1",
-				"anonymizeChar": "\u2588",
-				"anonymizeAll": false
-			},
-			"glinerMedium": {
-				"title": "GLiNER Medium - Balanced performance",
-				"model": "urchade/gliner_medium-v2.1",
-				"anonymizeChar": "\u2588",
-				"anonymizeAll": false
-			},
-			"glinerLarge": {
-				"title": "GLiNER Large - Best accuracy, more resources",
-				"model": "urchade/gliner_large-v2.1",
-				"anonymizeChar": "\u2588",
-				"anonymizeAll": false
-			},
-			"glinerMulti": {
-				"title": "GLiNER Multi - Multilingual support",
-				"model": "urchade/gliner_multi",
-				"anonymizeChar": "\u2588",
-				"anonymizeAll": false
-			},
-			"gretelSmall": {
-				"title": "Gretel GLiNER Bi-Small - Business-oriented NER",
-				"model": "gretelai/gretel-gliner-bi-small-v1.0",
-				"anonymizeChar": "\u2588",
-				"anonymizeAll": false
-			},
-			"gretelLarge": {
-				"title": "Gretel GLiNER Bi-Large - For large-scale anonymization",
-				"model": "gretelai/gretel-gliner-bi-large-v1.0",
-				"anonymizeChar": "\u2588",
-				"anonymizeAll": false
-			},
-			"glinerKo": {
-				"title": "GLiNER Korean - Korean language support",
-				"model": "taeminlee/gliner_ko",
-				"anonymizeChar": "\u2588",
-				"anonymizeAll": false
-			},
-			"glinerIt": {
-				"title": "GLiNER Italian - For Italian entity extraction",
-				"model": "DeepMount00/GLiNER_PII_ITA",
-				"anonymizeChar": "\u2588",
-				"anonymizeAll": false
-			},
-			"glinerAr": {
-				"title": "GLiNER Arabic - Arabic language support",
-				"model": "NAMAA-Space/gliner_arabic-v2.1",
-				"anonymizeChar": "\u2588",
-				"anonymizeAll": false
-			},
-			"glinerCommunitySmall": {
-				"title": "GLiNER Small v2.5 - Community edition",
-				"model": "gliner-community/gliner_small-v2.5",
-				"anonymizeChar": "\u2588",
-				"anonymizeAll": false
-			},
-			"glinerCommunityMedium": {
-				"title": "GLiNER Medium v2.5 - Community edition",
-				"model": "gliner-community/gliner_medium-v2.5",
-				"anonymizeChar": "\u2588",
-				"anonymizeAll": false
-			},
-			"glinerCommunityLarge": {
-				"title": "GLiNER Large v2.5 - Community edition",
-				"model": "gliner-community/gliner_large-v2.5",
-				"anonymizeChar": "\u2588",
-				"anonymizeAll": false
-			},
-			"glinerBiomedSmall": {
-				"title": "GLiNER Biomed Small - Compact biomedical model",
-				"model": "Ihor/gliner-biomed-small-v1.0",
-				"anonymizeChar": "\u2588",
-				"anonymizeAll": false
-			},
-			"glinerBiomedLarge": {
-				"title": "GLiNER Biomed Large - High accuracy biomedical model",
-				"model": "Ihor/gliner-biomed-large-v1.0",
-				"anonymizeChar": "\u2588",
-				"anonymizeAll": false
-			}
-		}
-	},
-	//
 	// Optional:
-	//		Local fields definitions - these define fields only for the
-	//		current service. You may specify them here, or directly
-	//		in the shape
+	//		Local property definitions. The model profile is the selector:
+	//		every shipped profile pins its GLiNER model as a constant, the
+	//		"custom" profile takes the model name as a field. anonymizeChar is
+	//		the shared definition from services.common.anonymize.json.
 	//
-	"fields": {
-		"anonymizeChar": {
+	"propertyDefinitions": {
+		"anonymize.custom.model": {
 			"type": "string",
-			"title": "Character to use for anonymization",
-			"description": "Character"
+			"title": "Model name",
+			"description": "GLiNER model to use for anonymization (a Hugging Face model id)",
+			"minLength": 2,
+			"maxLength": 128,
+			"required": true
 		},
-		"entityTypes": {
+		"anonymize.entityTypes": {
 			"type": "array",
 			"title": "Entity types to anonymize",
 			"description": "PII / entity types to detect and mask. Pre-filled with common types; remove any you don't want, or add your own (the model is zero-shot, so any label works).",
-			"items": {
-				"type": "string"
-			},
+			"item": { "name": "entityType", "type": "string" },
 			"default": [
 				"person",
 				"name",
@@ -255,184 +141,105 @@
 				"driver license"
 			]
 		},
-		"redactionStyle": {
+		"anonymize.redactionStyle": {
 			"type": "string",
 			"title": "Redaction style",
 			"description": "How detected entities are replaced. 'mask' overwrites each entity with the anonymization character (████). 'token' replaces each entity with a labelled tag like [PERSON] or [EMAIL].",
 			"default": "mask",
-			"enum": ["mask", "token"]
-		},
-		"anonymize.model": {
-			"type": "string",
-			"title": "Model name",
-			"minLength": 2,
-			"maxLength": 128,
-			"description": "Gliner model to use for anonymization"
-		},
-		"anonymize.custom": {
-			"object": "custom",
-			"properties": ["anonymize.model", "anonymizeChar", "entityTypes", "redactionStyle"]
-		},
-		"anonymize.glinerMergedLarge": {
-			"object": "glinerMergedLarge",
-			"properties": ["anonymizeChar", "entityTypes", "redactionStyle"]
-		},
-		"anonymize.glinerMultiPII": {
-			"object": "glinerMultiPII",
-			"properties": ["anonymizeChar", "entityTypes", "redactionStyle"]
-		},
-		"anonymize.glinerPIILarge": {
-			"object": "glinerPIILarge",
-			"properties": ["anonymizeChar", "entityTypes", "redactionStyle"]
-		},
-		"anonymize.glinerSmall": {
-			"object": "glinerSmall",
-			"properties": ["anonymizeChar", "entityTypes", "redactionStyle"]
-		},
-		"anonymize.glinerMedium": {
-			"object": "glinerMedium",
-			"properties": ["anonymizeChar", "entityTypes", "redactionStyle"]
-		},
-		"anonymize.glinerLarge": {
-			"object": "glinerLarge",
-			"properties": ["anonymizeChar", "entityTypes", "redactionStyle"]
-		},
-		"anonymize.glinerMulti": {
-			"object": "glinerMulti",
-			"properties": ["anonymizeChar", "entityTypes", "redactionStyle"]
-		},
-		"anonymize.gretelSmall": {
-			"object": "gretelSmall",
-			"properties": ["anonymizeChar", "entityTypes", "redactionStyle"]
-		},
-		"anonymize.gretelLarge": {
-			"object": "gretelLarge",
-			"properties": ["anonymizeChar", "entityTypes", "redactionStyle"]
-		},
-		"anonymize.glinerKo": {
-			"object": "glinerKo",
-			"properties": ["anonymizeChar", "entityTypes", "redactionStyle"]
-		},
-		"anonymize.glinerIt": {
-			"object": "glinerIt",
-			"properties": ["anonymizeChar", "entityTypes", "redactionStyle"]
-		},
-		"anonymize.glinerAr": {
-			"object": "glinerAr",
-			"properties": ["anonymizeChar", "entityTypes", "redactionStyle"]
-		},
-		"anonymize.glinerCommunitySmall": {
-			"object": "glinerCommunitySmall",
-			"properties": ["anonymizeChar", "entityTypes", "redactionStyle"]
-		},
-		"anonymize.glinerCommunityMedium": {
-			"object": "glinerCommunityMedium",
-			"properties": ["anonymizeChar", "entityTypes", "redactionStyle"]
-		},
-		"anonymize.glinerCommunityLarge": {
-			"object": "glinerCommunityLarge",
-			"properties": ["anonymizeChar", "entityTypes", "redactionStyle"]
-		},
-		"anonymize.glinerBiomedSmall": {
-			"object": "glinerBiomedSmall",
-			"properties": ["anonymizeChar", "entityTypes", "redactionStyle"]
-		},
-		"anonymize.glinerBiomedLarge": {
-			"object": "glinerBiomedLarge",
-			"properties": ["anonymizeChar", "entityTypes", "redactionStyle"]
-		},
-		"anonymize.profile": {
-			"title": "Model",
-			"description": "Anonymize model",
-			"type": "string",
-			"default": "glinerMergedLarge",
-			"enum": ["*>preconfig.profiles.*.title"],
-			"conditional": [
-				{
-					"value": "custom",
-					"properties": ["anonymize.custom"]
-				},
-				{
-					"value": "glinerMergedLarge",
-					"properties": ["anonymize.glinerMergedLarge"]
-				},
-				{
-					"value": "glinerMultiPII",
-					"properties": ["anonymize.glinerMultiPII"]
-				},
-				{
-					"value": "glinerPIILarge",
-					"properties": ["anonymize.glinerPIILarge"]
-				},
-				{
-					"value": "glinerSmall",
-					"properties": ["anonymize.glinerSmall"]
-				},
-				{
-					"value": "glinerMedium",
-					"properties": ["anonymize.glinerMedium"]
-				},
-				{
-					"value": "glinerLarge",
-					"properties": ["anonymize.glinerLarge"]
-				},
-				{
-					"value": "glinerMulti",
-					"properties": ["anonymize.glinerMulti"]
-				},
-				{
-					"value": "gretelSmall",
-					"properties": ["anonymize.gretelSmall"]
-				},
-				{
-					"value": "gretelLarge",
-					"properties": ["anonymize.gretelLarge"]
-				},
-				{
-					"value": "glinerKo",
-					"properties": ["anonymize.glinerKo"]
-				},
-				{
-					"value": "glinerIt",
-					"properties": ["anonymize.glinerIt"]
-				},
-				{
-					"value": "glinerAr",
-					"properties": ["anonymize.glinerAr"]
-				},
-				{
-					"value": "glinerCommunitySmall",
-					"properties": ["anonymize.glinerCommunitySmall"]
-				},
-				{
-					"value": "glinerCommunityMedium",
-					"properties": ["anonymize.glinerCommunityMedium"]
-				},
-				{
-					"value": "glinerCommunityLarge",
-					"properties": ["anonymize.glinerCommunityLarge"]
-				},
-				{
-					"value": "glinerBiomedSmall",
-					"properties": ["anonymize.glinerBiomedSmall"]
-				},
-				{
-					"value": "glinerBiomedLarge",
-					"properties": ["anonymize.glinerBiomedLarge"]
-				}
+			"enum": [
+				["mask", "Mask with the anonymization character"],
+				["token", "Replace with a labelled tag"]
 			]
 		}
 	},
 	//
 	// Required:
-	//		Defines the fields (shape) of the service. Either source or target
-	//		map be specified, or both, but at least one is required
+	//		Defines the properties shown in the pipeline builder side panel, in order
 	//
-	"shape": [
+	"properties": [
 		{
-			"section": "Pipe",
-			"title": "Anonymize",
-			"properties": ["anonymize.profile"]
-		}
+			"name": "profile",
+			"type": "string",
+			"title": "Model",
+			"description": "Anonymize model",
+			"default": "glinerMergedLarge",
+			"enum": {
+				"custom": {
+					"title": "Custom model",
+					"properties": ["anonymize.custom.model"]
+				},
+				"glinerMergedLarge": {
+					"title": "GLiNER Merged Large - Combined model from multiple datasets",
+					"properties": [{ "name": "model", "type": "constant", "default": "xomad/gliner-model-merge-large-v1.0" }]
+				},
+				"glinerMultiPII": {
+					"title": "GLiNER Multi PII - Multilingual PII model",
+					"properties": [{ "name": "model", "type": "constant", "default": "urchade/gliner_multi_pii-v1" }]
+				},
+				"glinerPIILarge": {
+					"title": "GLiNER PII Large - High-accuracy English PII",
+					"properties": [{ "name": "model", "type": "constant", "default": "knowledgator/gliner-pii-large-v1.0" }]
+				},
+				"glinerSmall": {
+					"title": "GLiNER Small - Lightweight general-purpose model",
+					"properties": [{ "name": "model", "type": "constant", "default": "urchade/gliner_small-v2.1" }]
+				},
+				"glinerMedium": {
+					"title": "GLiNER Medium - Balanced performance",
+					"properties": [{ "name": "model", "type": "constant", "default": "urchade/gliner_medium-v2.1" }]
+				},
+				"glinerLarge": {
+					"title": "GLiNER Large - Best accuracy, more resources",
+					"properties": [{ "name": "model", "type": "constant", "default": "urchade/gliner_large-v2.1" }]
+				},
+				"glinerMulti": {
+					"title": "GLiNER Multi - Multilingual support",
+					"properties": [{ "name": "model", "type": "constant", "default": "urchade/gliner_multi" }]
+				},
+				"gretelSmall": {
+					"title": "Gretel GLiNER Bi-Small - Business-oriented NER",
+					"properties": [{ "name": "model", "type": "constant", "default": "gretelai/gretel-gliner-bi-small-v1.0" }]
+				},
+				"gretelLarge": {
+					"title": "Gretel GLiNER Bi-Large - For large-scale anonymization",
+					"properties": [{ "name": "model", "type": "constant", "default": "gretelai/gretel-gliner-bi-large-v1.0" }]
+				},
+				"glinerKo": {
+					"title": "GLiNER Korean - Korean language support",
+					"properties": [{ "name": "model", "type": "constant", "default": "taeminlee/gliner_ko" }]
+				},
+				"glinerIt": {
+					"title": "GLiNER Italian - For Italian entity extraction",
+					"properties": [{ "name": "model", "type": "constant", "default": "DeepMount00/GLiNER_PII_ITA" }]
+				},
+				"glinerAr": {
+					"title": "GLiNER Arabic - Arabic language support",
+					"properties": [{ "name": "model", "type": "constant", "default": "NAMAA-Space/gliner_arabic-v2.1" }]
+				},
+				"glinerCommunitySmall": {
+					"title": "GLiNER Small v2.5 - Community edition",
+					"properties": [{ "name": "model", "type": "constant", "default": "gliner-community/gliner_small-v2.5" }]
+				},
+				"glinerCommunityMedium": {
+					"title": "GLiNER Medium v2.5 - Community edition",
+					"properties": [{ "name": "model", "type": "constant", "default": "gliner-community/gliner_medium-v2.5" }]
+				},
+				"glinerCommunityLarge": {
+					"title": "GLiNER Large v2.5 - Community edition",
+					"properties": [{ "name": "model", "type": "constant", "default": "gliner-community/gliner_large-v2.5" }]
+				},
+				"glinerBiomedSmall": {
+					"title": "GLiNER Biomed Small - Compact biomedical model",
+					"properties": [{ "name": "model", "type": "constant", "default": "Ihor/gliner-biomed-small-v1.0" }]
+				},
+				"glinerBiomedLarge": {
+					"title": "GLiNER Biomed Large - High accuracy biomedical model",
+					"properties": [{ "name": "model", "type": "constant", "default": "Ihor/gliner-biomed-large-v1.0" }]
+				}
+			}
+		},
+		"anonymizeChar",
+		"anonymize.entityTypes",
+		"anonymize.redactionStyle"
 	]
 }

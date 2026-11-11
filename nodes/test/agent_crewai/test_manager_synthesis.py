@@ -64,7 +64,6 @@ _STUB_MODULE_NAMES = (
     'ai.common.agent.types',
     'ai.common.schema',
     'ai.common.utils',
-    'ai.common.config',
 )
 
 
@@ -79,7 +78,6 @@ def _build_stubs() -> dict:
     # need these additional rocketlib/ai.common seams to import.
     mod_rocketlib.IInstanceBase = object
     mod_rocketlib.IGlobalBase = object
-    mod_rocketlib.OPEN_MODE = types.SimpleNamespace(CONFIG='CONFIG')
     mod_rocketlib.tool_function = lambda **kwargs: lambda fn: fn
 
     # No `crewai.crew` / `crewai.tools` submodules: the import-time compatibility
@@ -116,9 +114,6 @@ def _build_stubs() -> dict:
     mod_utils = types.ModuleType('ai.common.utils')
     mod_utils.safe_str = lambda v: '' if v is None else str(v)
 
-    mod_config = types.ModuleType('ai.common.config')
-    mod_config.Config = type('Config', (), {'getNodeConfig': staticmethod(lambda *a, **k: {})})
-
     return {
         'rocketlib': mod_rocketlib,
         'crewai': mod_crewai,
@@ -130,7 +125,6 @@ def _build_stubs() -> dict:
         'ai.common.agent.types': mod_agent_types,
         'ai.common.schema': mod_schema,
         'ai.common.utils': mod_utils,
-        'ai.common.config': mod_config,
     }
 
 

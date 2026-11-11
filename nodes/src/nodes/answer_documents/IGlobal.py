@@ -26,21 +26,16 @@
 # The answer_documents node is pure and has no runtime requirements of its own.
 # ------------------------------------------------------------------------------
 
-from rocketlib import IGlobalBase, OPEN_MODE
+import os
+
+from rocketlib import IGlobalBase
 
 
 class IGlobal(IGlobalBase):
     def beginGlobal(self) -> None:
-        # Are we in config mode or some other mode?
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            # We are going to get a call to configureService but
-            # we don't actually need to load the driver for that
-            pass
-        else:
-            # Install what we need
-            import os
-            from depends import depends  # type: ignore
+        # Install what we need
+        from depends import depends  # type: ignore
 
-            # Load the requirements
-            requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
-            depends(requirements)
+        # Load the requirements
+        requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
+        depends(requirements)

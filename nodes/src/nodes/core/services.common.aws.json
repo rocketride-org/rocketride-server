@@ -1,23 +1,20 @@
 //
-// Common field definitions for accessing AWS - these will be merged into the
+// Common property definitions for accessing AWS - these will be merged into the
 // service definition as required by the service
 //
 {
-	"fields": {
+	"propertyDefinitions": {
 		"aws.accessKey": {
 			"type": "string",
 			"title": "Access key",
-			"secure": true,
-			"optional": true,
-			"description": "This is a key which gives access to your AWS resources. It is provided by the service provider. It is used to sign the requests you send to Amazon S3."
+			"description": "This is a key which gives access to your AWS resources. It is provided by the service provider. It is used to sign the requests you send to Amazon S3.",
+			"secret": true
 		},
 		"aws.secretKey": {
 			"type": "string",
 			"title": "Secret key",
 			"description": "This is a key used to access the AWS services.",
-			"secure": true,
-			"optional": true,
-			"ui:widget": "password"
+			"secret": true
 		},
 		"aws.region": {
 			"type": "string",

@@ -12,21 +12,18 @@ The node counts the tokens of the prompt the engine will actually render with `t
 | --- | --- | --- |
 | `questions` | `questions` | Questions with optimized context fitting within model token limits |
 
-## Profiles
-
-Default: **Auto - Use default model limits** (`auto`). Both user-facing profiles ship the same budget split; they differ only in where the context window comes from.
-
-| Profile | Budget split (system / query / documents / history) | When to pick it |
-| --- | --- | --- |
-| `auto` **(default)** | 10 / 15 / 50 / 25 | The usual choice: name the model and let the node resolve its window. |
-| `manual` | 10 / 15 / 50 / 25 | A deployment whose real window neither the live catalog nor the fallback table knows; set **Max context tokens** yourself (ships at 128 000). |
-| `ci_tiny` | 10 / 20 / 35 / 35 | Automated node tests only. It pins a 112-token window so every case is forced over budget; it is deliberately absent from the **Mode** dropdown. |
-
 ## Configuration
 
 Pick a **Mode** and, in `auto`, name the model. The four budget percentages have workable defaults (10 / 15 / 50 / 25) and most pipelines never touch them — reach for them only when one component of your prompt is systematically starved.
 
 ### Mode
+
+The **Mode** selector has two values; both ship the same budget split (10 / 15 / 50 / 25) and differ only in where the context window comes from.
+
+| Mode | When to pick it |
+| --- | --- |
+| `auto` **(default)** | The usual choice: name the model and let the node resolve its window. |
+| `manual` | A deployment whose real window neither the live catalog nor the fallback table knows; set **Max context tokens** yourself (ships at 128 000). |
 
 `auto` resolves the context window for the model named in **Model name**; `manual` ignores the model entirely and uses **Max context tokens**. `auto` is right whenever the model is one an `llm_*` node in this deployment publishes, which is the common case; `manual` is the escape hatch for a gateway, a fine-tune, or a self-hosted deployment whose window this build cannot know. How `auto` resolves the window — and what it does when it cannot — is described under [Where the context-window size comes from](#where-the-context-window-size-comes-from).
 
@@ -43,6 +40,10 @@ The explicit window, in tokens, used by `manual` mode; `0` falls back to the mod
 These four fields divide whatever window is left after the un-budgeted sections are counted (see [What is budgeted, and what is only counted](#what-is-budgeted-and-what-is-only-counted)). They are percentages of that remainder, and the node never lets them over-commit it: a set summing to more than 100 is scaled proportionally back to 100, and a set summing to less than 90 is honoured but logs a warning that the window is being under-used. The system prompt, query and document allowances are taken from their percentages in that order and history absorbs whatever is left, so history is the component that gives way first. Raise **Document budget %** for retrieval-heavy pipelines where history is short; raise **History budget %** for long chat sessions with few documents. A component given `0` is emptied whenever the request is over budget, which is a legitimate way to say "drop history before you touch my documents".
 
 ## Notes
+
+### How the node tests run
+
+The automated node tests force every case over budget by running `manual` mode with a 112-token window and a 10 / 20 / 35 / 35 split, configured in the `test` block of `services.json`; there is no separate test profile.
 
 ### What is budgeted, and what is only counted
 
@@ -62,7 +63,7 @@ If the un-budgeted fields alone fill the window, nothing is left to allocate: ev
 
 `auto` mode resolves the window for the configured model in this order:
 
-1. **The live model catalog** — the `modelTotalTokens` value on the matching `preconfig` profile of any LLM node, read through the engine's own service registry (`rocketlib.getServiceDefinitions()` to enumerate the registered types, then `getServiceDefinition()` for each raw definition; whichever definitions publish `modelTotalTokens` contribute — the chat `llm_*` nodes, the `image_vision_*` nodes, and the embedding/search nodes alike). Because the registry is the same path the engine used to load the nodes, the catalog is found whether this node runs from the source tree, from an installed node store, or from a `--node_path` materialisation with no sibling directories; it is re-read at every pipeline start, so a reloaded registry is never masked by a stale cache. Those values are kept current by the [`sync-models`](https://github.com/rocketride-org/rocketride-server/tree/develop/tools/sync_models) tool, so `gpt-5.4`, `claude-sonnet-4-6`, `models/gemini-3.1-pro-preview` and every other id the LLM nodes publish resolve without this node hard-coding them. Provider-scoped ids also resolve under their bare name (`openai/gpt-5` → `gpt-5`), but only when that name is unambiguous: an unscoped profile always wins, and a bare name that two gateways disagree about is dropped so it falls through to the table below rather than silently picking one. Where the same full id appears in two services files with different windows, the smaller is used.
+1. **The live model catalog** — the `modelTotalTokens` an LLM node's resolved schema declares beside its `model` selector (per model branch, or once for every model), read through the engine's own service registry (`rocketlib.getServiceDefinitions()` to enumerate the registered types, then `getServiceSchema()` for each resolved schema; whichever schemas publish `modelTotalTokens` contribute — the chat `llm_*` nodes, the `image_vision_*` nodes, and the embedding/search nodes alike). Because the registry is the same path the engine used to load the nodes, the catalog is found whether this node runs from the source tree, from an installed node store, or from a `--node_path` materialisation with no sibling directories; it is re-read at every pipeline start, so a reloaded registry is never masked by a stale cache. Those values are kept current by the [`sync-models`](https://github.com/rocketride-org/rocketride-server/tree/develop/tools/sync_models) tool, so `gpt-5.4`, `claude-sonnet-4-6`, `models/gemini-3.1-pro-preview` and every other id the LLM nodes publish resolve without this node hard-coding them. Provider-scoped ids also resolve under their bare name (`openai/gpt-5` → `gpt-5`), but only when that name is unambiguous: an unscoped profile always wins, and a bare name that two gateways disagree about is dropped so it falls through to the table below rather than silently picking one. Where the same full id appears in two services files with different windows, the smaller is used.
 2. **A built-in fallback table** (`ContextOptimizer.MODEL_LIMITS`), refreshed against that catalog on 2026-09-04. It covers deployments where no LLM node is registered with the engine, and it is where the abbreviated family aliases that no provider actually publishes — `claude-sonnet`, `claude-opus`, `gemini-pro`, `gemini-flash` — are defined.
 3. **The conservative fallback** — the *smallest* context window published by any registered chat-LLM profile (`llm_*` nodes / `classType: ["llm"]`) or by the fallback table — 8 191 tokens on develop today, the smallest published chat windows (`gpt-4`, `codestral-latest`, `mistral-medium-2505`) — with a one-time warning naming the unresolved model id. Embedding input limits and vision models are catalogued for lookup but never lower this floor. An unknown id is usually a typo or a model this build predates; budgeting it low costs some unused context, whereas the previous optimistic 128 000 default made the provider reject the request outright for any smaller-window model. Set **Max context tokens** for the real window.
 

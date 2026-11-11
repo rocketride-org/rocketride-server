@@ -10,59 +10,55 @@
 	"description": ["An accessibility-focused image analysis node that generates scene descriptions ", "optimized for blind and visually impaired users. Powered by Google Gemini Vision, ", "it provides structured descriptions including spatial layout (clock positions), ", "hazard detection, text reading (OCR), people detection, and navigation guidance. ", "Designed for real-time assistive technology applications like smart glasses."],
 	"icon": "accessibility-describe.svg",
 	"documentation": "https://docs.rocketride.org/nodes/accessibility_describe",
-	"tile": ["Model: ${parameters.accessibility_describe.profile}"],
+	"tile": ["Model: ${parameters.accessibility_describe.model}"],
 	"lanes": {
 		"image": ["text"]
 	},
-	"preconfig": {
-		"default": "gemini-2.5-flash",
-		"profiles": {
-			"gemini-2.5-flash": {
-				"title": "Gemini 2.5 Flash - Fast & Efficient (1M tokens)",
-				"model": "gemini-2.5-flash",
-				"modelTotalTokens": 1048576,
-				"apikey": ""
-			},
-			"gemini-2.5-pro": {
-				"title": "Gemini 2.5 Pro - High Quality (1M tokens)",
-				"model": "gemini-2.5-pro",
-				"modelTotalTokens": 1048576,
-				"apikey": ""
-			},
-			"gemini-2.0-flash": {
-				"title": "Gemini 2.0 Flash - Balanced (1M tokens)",
-				"model": "gemini-2.0-flash",
-				"modelTotalTokens": 1048576,
-				"apikey": ""
-			}
-		}
-	},
-	"fields": {
+	//
+	// Optional:
+	//		Local property definitions. The model is the selector; every other
+	//		field is shared by all models and stored flat.
+	//
+	"propertyDefinitions": {
 		"model": {
 			"type": "string",
-			"title": "Model",
-			"description": "Google Gemini vision model"
+			"title": "Vision Model",
+			"description": "Select the Gemini vision model for accessibility descriptions",
+			"default": "gemini-2.5-flash",
+			"enum": {
+				"gemini-2.5-flash": { "title": "Gemini 2.5 Flash - Fast & Efficient (1M tokens)" },
+				"gemini-2.5-pro": { "title": "Gemini 2.5 Pro - High Quality (1M tokens)" },
+				"gemini-2.0-flash": { "title": "Gemini 2.0 Flash - Balanced (1M tokens)" }
+			}
 		},
 		"modelTotalTokens": {
 			"type": "number",
 			"title": "Tokens",
-			"description": "Maximum context length in tokens"
+			"description": "Maximum context length in tokens",
+			"default": 1048576,
+			"minimum": 1
 		},
-		"accessibility.systemPrompt": {
+		"apikey": {
+			"base": "llm.cloud.apikey",
+			"description": "Google AI API key (from https://aistudio.google.com/apikey)",
+			"env": "ROCKETRIDE_ACCESSIBILITY_DESCRIBE_APIKEY",
+			"required": true
+		},
+		"systemPrompt": {
 			"type": "string",
 			"format": "textarea",
 			"title": "System Instructions",
 			"description": "Define the accessibility description behavior and priorities",
-			"default": "You are an accessibility-focused scene analyzer designed to help blind and visually impaired users understand their surroundings through image descriptions."
+			"default": "You are an accessibility-focused scene analyzer designed to help blind and visually impaired users understand their surroundings through image descriptions.\n\nYour descriptions must be:\n1. SAFETY-FIRST: Always lead with potential hazards (stairs, obstacles, vehicles, uneven ground, wet floors, construction)\n2. SPATIALLY ORIENTED: Use clock positions (12 o'clock = straight ahead) and relative distances (within arm's reach, a few steps away, across the room)\n3. TEXT-AWARE: Read ALL visible text (signs, labels, screens, menus, buttons) exactly as written\n4. CONCISE BUT COMPLETE: Prioritize actionable information over aesthetic details\n5. CONTEXTUALLY RICH: Identify the type of environment (indoor/outdoor, store, street, office) and notable landmarks for orientation"
 		},
-		"accessibility.prompt": {
+		"prompt": {
 			"type": "string",
 			"format": "textarea",
 			"title": "Analysis Prompt",
 			"description": "Prompt template for generating accessibility descriptions from images",
-			"default": "Describe this image for a blind person. Include: environment type, hazards with positions, key objects with clock positions, visible text, people, and navigation guidance. Keep under 150 words."
+			"default": "Describe this image for a blind person. Structure your response as:\n\n1. ENVIRONMENT: What type of place is this? (one sentence)\n2. HAZARDS: Any obstacles, stairs, vehicles, or dangers? (list with positions)\n3. KEY OBJECTS: What's notable in the scene? (list with clock positions and distances)\n4. TEXT: Any visible text, signs, or labels? (read them verbatim)\n5. PEOPLE: Anyone present? (approximate count, positions, and relevant actions)\n6. NAVIGATION: Clear path forward? Any turns or barriers?\n\nKeep the total description under 150 words. Prioritize safety-relevant details."
 		},
-		"accessibility.prioritizeHazards": {
+		"prioritizeHazards": {
 			"type": "string",
 			"title": "Hazard Priority",
 			"description": "How aggressively to prioritize hazard detection",
@@ -73,7 +69,7 @@
 				["low", "Low - Standard description order"]
 			]
 		},
-		"accessibility.spatialFormat": {
+		"spatialFormat": {
 			"type": "string",
 			"title": "Spatial Format",
 			"description": "How to describe spatial positions",
@@ -83,48 +79,17 @@
 				["relative", "Relative (left, right, ahead, behind)"],
 				["both", "Both clock and relative"]
 			]
-		},
-		"accessibility_describe.gemini-2.5-flash": {
-			"object": "gemini-2.5-flash",
-			"properties": ["llm.cloud.apikey", "accessibility.systemPrompt", "accessibility.prompt", "accessibility.prioritizeHazards", "accessibility.spatialFormat"]
-		},
-		"accessibility_describe.gemini-2.5-pro": {
-			"object": "gemini-2.5-pro",
-			"properties": ["llm.cloud.apikey", "accessibility.systemPrompt", "accessibility.prompt", "accessibility.prioritizeHazards", "accessibility.spatialFormat"]
-		},
-		"accessibility_describe.gemini-2.0-flash": {
-			"object": "gemini-2.0-flash",
-			"properties": ["llm.cloud.apikey", "accessibility.systemPrompt", "accessibility.prompt", "accessibility.prioritizeHazards", "accessibility.spatialFormat"]
-		},
-		"accessibility_describe.profile": {
-			"title": "Vision Model",
-			"description": "Select the Gemini vision model for accessibility descriptions",
-			"type": "string",
-			"default": "gemini-2.5-flash",
-			"enum": ["*>preconfig.profiles.*.title"],
-			"conditional": [
-				{
-					"value": "gemini-2.5-flash",
-					"properties": ["accessibility_describe.gemini-2.5-flash"]
-				},
-				{
-					"value": "gemini-2.5-pro",
-					"properties": ["accessibility_describe.gemini-2.5-pro"]
-				},
-				{
-					"value": "gemini-2.0-flash",
-					"properties": ["accessibility_describe.gemini-2.0-flash"]
-				}
-			]
 		}
 	},
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "Accessibility Describe",
-			"properties": ["accessibility_describe.profile"]
-		}
-	],
+	//
+	// Required:
+	//		Defines the properties shown in the pipeline builder side panel, in order.
+	//
+	"properties": ["type", "model", "modelTotalTokens", "apikey", "systemPrompt", "prompt", "prioritizeHazards", "spatialFormat"],
+	//
+	//	Test configuration for automated node testing. "profiles" lists model
+	//	selector values; the framework writes the selected one at "model".
+	//
 	"test": {
 		"profiles": ["gemini-2.5-flash"],
 		"outputs": ["text"],

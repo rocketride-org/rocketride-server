@@ -29,39 +29,23 @@
 	"lanes": {
 		"questions": ["answers"]
 	},
-	"preconfig": {
-		"default": "default",
-		"profiles": {
-			"default": {
-				"agent_description": "",
-				"instructions": [],
-				"max_waves": 10,
-				"require_tool_call": false,
-				"tool_timeout": 300,
-				"verify_tool": "",
-				"verify_args": ""
-			}
-		}
-	},
-	"fields": {
+	//
+	// Optional:
+	//		Local property definitions. Every field is stored flat.
+	//
+	"propertyDefinitions": {
 		"agent_description": {
 			"type": "string",
+			"format": "textarea",
 			"title": "Agent description",
 			"default": "",
-			"optional": true,
-			"description": "What does this agent do? Describe its purpose and capabilities, this helps parent agents select and invoke it correctly.",
-			"ui": {
-				"ui:widget": "textarea"
-			}
+			"description": "What does this agent do? Describe its purpose and capabilities, this helps parent agents select and invoke it correctly."
 		},
 		"instructions": {
 			"type": "array",
 			"title": "Instructions",
 			"description": "Additional instructions to guide the agent's planning and responses.",
-			"items": {
-				"type": "string",
-				"format": "textarea"
-			}
+			"item": { "name": "instruction", "type": "string", "format": "textarea" }
 		},
 		"max_waves": {
 			"type": "integer",
@@ -89,30 +73,18 @@
 			"type": "string",
 			"title": "Check tool",
 			"default": "",
-			"optional": true,
 			"description": "Name of a connected tool that checks the work, such as a compiler or test runner (e.g. workspace.compile). When set, the agent must call it after its last change and fix what it reports before it may finish. Leave empty when no such tool is connected."
 		},
 		"verify_args": {
 			"type": "string",
 			"title": "Check arguments",
 			"default": "",
-			"optional": true,
 			"description": "The exact arguments of the check, as a JSON object (e.g. {\"command\": \"npm test\"}). Set this when the check tool can also change things, such as a command runner: then only this exact call counts as a check, and any other call to that tool counts as a change. Leave empty when the check tool only checks."
-		},
-		"agent_rocketride.default": { "object": "default", "properties": ["agent_description", "instructions", "max_waves", "require_tool_call", "tool_timeout", "verify_tool", "verify_args"] },
-		"agent_rocketride.profile": {
-			"title": "Profile",
-			"type": "string",
-			"default": "default",
-			"enum": [["default", "Default"]],
-			"conditional": [{ "value": "default", "properties": ["agent_rocketride.default"] }]
 		}
 	},
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "RocketRide Wave",
-			"properties": ["agent_description", "instructions", "max_waves", "require_tool_call", "tool_timeout", "verify_tool", "verify_args"]
-		}
-	]
+	//
+	// Required:
+	//		Defines the properties shown in the pipeline builder side panel, in order
+	//
+	"properties": ["type", "agent_description", "instructions", "max_waves", "require_tool_call", "tool_timeout", "verify_tool", "verify_args"]
 }

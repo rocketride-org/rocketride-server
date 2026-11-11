@@ -1,32 +1,28 @@
 //
-// Common field definitions for Microsoft 365 - these will be merged into the
+// Common property definitions for Microsoft 365 - these will be merged into the
 // service definition as required by the service
 //
 {
-	"fields": {
+	"propertyDefinitions": {
 		"microsoft.authType": {
 			"type": "string",
 			"title": "Authentication Type",
 			"default": "service",
 			"readonly": true,
-			"enum": ["service", "user"],
-			"enumNames": ["App (client credentials)", "User"],
-			"conditional": [
-				{
-					"value": "service",
+			"enum": {
+				"service": {
+					"title": "App (client credentials)",
 					"properties": ["microsoft.tenantId", "microsoft.clientId", "microsoft.clientSecret", "microsoft.userPrincipalName"]
 				},
-				{
-					"value": "user",
-					"properties": ["microsoft.oAuthButton", "microsoft.userToken"]
+				"user": {
+					"title": "User",
+					"properties": ["microsoft.userAuth"]
 				}
-			]
+			}
 		},
-		"microsoft.oAuthButton": {
+		"microsoft.userAuth": {
 			"title": "Login with Microsoft",
-			"type": "string",
-			"ui:widget": "MicrosoftButtonWidget",
-			"optional": true
+			"type": "oauth2"
 		},
 		"microsoft.tenantId": {
 			"type": "string",
@@ -42,19 +38,12 @@
 			"type": "string",
 			"title": "Client Secret",
 			"description": "Client secret of your Entra app registration. The app needs Microsoft Graph application permissions for this service, with admin consent granted.",
-			"ui:widget": "password"
+			"secret": true
 		},
 		"microsoft.userPrincipalName": {
 			"type": "string",
 			"title": "Acting User (UPN)",
 			"description": "User principal name (e-mail) the app acts as. App-only Graph calls target /users/{upn}; this is required for App authentication."
-		},
-		"microsoft.userToken": {
-			"type": "string",
-			"title": "Access Token",
-			"description": "It is a long-term token that allows you to get new access tokens to access the Microsoft Graph API.",
-			"ui:widget": "password",
-			"ui:disabled": true
 		}
 	}
 }

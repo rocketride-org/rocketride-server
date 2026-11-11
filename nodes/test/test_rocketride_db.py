@@ -41,7 +41,6 @@ import json
 import sys
 import types
 
-from ._store_base_stubs import store_base_stubs
 
 from pathlib import Path
 
@@ -294,57 +293,40 @@ class TestAccountStub:
 
 
 # ---------------------------------------------------------------------------
+# The three cloud nodes on the resolver: stored config -> resolved view
+# ---------------------------------------------------------------------------
+
+
+def _resolved(logical_type: str, conn_config: dict):
+    """Resolve a stored node config exactly as the node's IGlobal does."""
+    import rocketlib
+    from rocketlib.config import resolveConfig
+
+    return resolveConfig(rocketlib.getServiceSchema(logical_type), conn_config)
+
+
+def _deliver(monkeypatch, **dsns):
+    """Deliver DSNs the way the task engine does."""
+    monkeypatch.setenv('ROCKETRIDE_DB_DSNS', json.dumps(dsns or {'org': TEST_DSN}))
+
+
+# ---------------------------------------------------------------------------
 # rocketride_sql: connection resolution override
 # ---------------------------------------------------------------------------
 
 
-def _sql_iglobal_cls(monkeypatch):
-    """Load rocketride_sql/IGlobal with the database base loaded from disk."""
+def _sql_iglobal():
     pytest.importorskip('sqlalchemy')
+    from nodes.rocketride_sql.IGlobal import IGlobal
 
-    rocketlib = types.ModuleType('rocketlib')
-    rocketlib.IGlobalBase = type('IGlobalBase', (), {})
-    rocketlib.error = lambda *a, **kw: None
-    rocketlib.warning = lambda *a, **kw: None
-    monkeypatch.setitem(sys.modules, 'rocketlib', rocketlib)
-
-    ai_pkg = types.ModuleType('ai')
-    ai_pkg.__path__ = []
-    common_pkg = types.ModuleType('ai.common')
-    common_pkg.__path__ = []
-    config = types.ModuleType('ai.common.config')
-    config.Config = types.SimpleNamespace(getNodeConfig=lambda *a, **kw: {})
-    monkeypatch.setitem(sys.modules, 'ai', ai_pkg)
-    monkeypatch.setitem(sys.modules, 'ai.common', common_pkg)
-    monkeypatch.setitem(sys.modules, 'ai.common.config', config)
-
-    rrdb_mod = _load_from_path('ai.common.rocketride_db', _RRDB_PATH)
-    monkeypatch.setitem(sys.modules, 'ai.common.rocketride_db', rrdb_mod)
-
-    db_global = _load_from_path(
-        'ai.common.database.db_global_base',
-        _AI_SRC / 'ai' / 'common' / 'database' / 'db_global_base.py',
-    )
-    database_pkg = types.ModuleType('ai.common.database')
-    database_pkg.__path__ = []
-    database_pkg.DatabaseGlobalBase = db_global.DatabaseGlobalBase
-    monkeypatch.setitem(sys.modules, 'ai.common.database', database_pkg)
-    monkeypatch.setitem(sys.modules, 'ai.common.database.db_global_base', db_global)
-
-    iglobal = _load_from_path('nodes.rocketride_sql.IGlobal', _SQL_NODE_DIR / 'IGlobal.py')
-    return iglobal.IGlobal, rrdb_mod
+    return IGlobal()
 
 
 class TestRocketrideSqlConnection:
-    def _deliver_org_dsn(self, monkeypatch):
-        """Deliver the org DSN the way the task engine does."""
-        monkeypatch.setenv('ROCKETRIDE_DB_DSNS', json.dumps({'org': TEST_DSN}))
-
     def test_connection_params_come_from_resolved_dsn(self, monkeypatch):
-        cls, _ = _sql_iglobal_cls(monkeypatch)
-        self._deliver_org_dsn(monkeypatch)
-        glb = cls()
-        params = glb._connection_params({'table': ' widgets '})
+        _deliver(monkeypatch)
+        glb = _sql_iglobal()
+        params = glb._connection_params(_resolved('rocketride_sql', {'table': ' widgets '}))
         assert params['host'] == 'localhost'
         assert params['user'] == 'rruser'
         assert params['password'] == 'rrpass'
@@ -352,31 +334,25 @@ class TestRocketrideSqlConnection:
         assert params['table'] == 'widgets'
 
     def test_build_connection_url_uses_cached_dsn(self, monkeypatch):
-        cls, _ = _sql_iglobal_cls(monkeypatch)
-        self._deliver_org_dsn(monkeypatch)
-        glb = cls()
-        params = glb._connection_params({})
+        _deliver(monkeypatch)
+        glb = _sql_iglobal()
+        params = glb._connection_params(_resolved('rocketride_sql', {}))
         url = glb._build_connection_url(params)
         assert url == 'postgresql+psycopg2://rruser:rrpass@localhost:55432/rrtenant'
 
-    def test_no_connection_fields_read_from_config(self, monkeypatch):
-        """host/user/password in config must be ignored — the DSN wins."""
-        cls, _ = _sql_iglobal_cls(monkeypatch)
-        self._deliver_org_dsn(monkeypatch)
-        glb = cls()
-        params = glb._connection_params({'host': 'evil', 'user': 'evil', 'password': 'evil'})
-        assert params['host'] == 'localhost'
-        assert params['user'] == 'rruser'
-        url = glb._build_connection_url(params)
-        assert 'evil' not in url
+    def test_no_connection_fields_exist_in_the_schema(self):
+        """host/user/password are not node settings: the resolver refuses them, the DSN wins."""
+        from rocketlib.config import ConfigError
+
+        with pytest.raises(ConfigError, match='host'):
+            _resolved('rocketride_sql', {'host': 'evil', 'user': 'evil', 'password': 'evil'})
 
     def test_connection_params_read_the_nodes_scope(self, monkeypatch):
         """A team-scoped node gets the team entry of the map, not the org's."""
-        cls, _ = _sql_iglobal_cls(monkeypatch)
         team_dsn = 'postgresql://team_rw:pw@pooler:5432/t_team'
-        monkeypatch.setenv('ROCKETRIDE_DB_DSNS', json.dumps({'org': TEST_DSN, 'team': team_dsn}))
-        glb = cls()
-        params = glb._connection_params({'scope': 'team', 'table': 'widgets'})
+        _deliver(monkeypatch, org=TEST_DSN, team=team_dsn)
+        glb = _sql_iglobal()
+        params = glb._connection_params(_resolved('rocketride_sql', {'scope': 'team', 'table': 'widgets'}))
         assert params['database'] == 't_team'
         assert glb._build_connection_url(params) == 'postgresql+psycopg2://team_rw:pw@pooler:5432/t_team'
 
@@ -384,73 +360,60 @@ class TestRocketrideSqlConnection:
         """No DSN in the server process: static checks only, no warning (any
         warning keeps the node config panel open), no connection attempt.
         """
-        cls, rrdb_mod = _sql_iglobal_cls(monkeypatch)
+        import nodes.rocketride_sql.IValidator as validator
+
         monkeypatch.delenv('ROCKETRIDE_DB_DSNS', raising=False)
         monkeypatch.delenv('ROCKETRIDE_DB_RESOLVE_ERROR', raising=False)
         warnings = []
-        iglobal_mod = sys.modules['nodes.rocketride_sql.IGlobal']
-        monkeypatch.setattr(iglobal_mod, 'warning', warnings.append)
-        monkeypatch.setattr(iglobal_mod.DatabaseGlobalBase, 'validateConfig', lambda self: warnings.append('probed'))
-        glb = cls()
-        glb.glb = types.SimpleNamespace(logicalType='rocketride_sql', connConfig={'scope': 'team'})
-        glb.validateConfig()
-        assert warnings == []
+        monkeypatch.setattr(validator, 'warning', warnings.append)
+        connects = []
+        monkeypatch.setitem(sys.modules, 'psycopg2', types.SimpleNamespace(connect=lambda *a, **kw: connects.append(a)))
+        v = validator.IValidator()
+        v.glb = types.SimpleNamespace(logicalType='rocketride_sql', connConfig={'scope': 'team'})
+        v.validateConfig()
+        assert warnings == [] and connects == []
 
-    def test_save_time_probe_reports_a_bad_scope(self, monkeypatch):
-        cls, _ = _sql_iglobal_cls(monkeypatch)
+    def test_save_time_probe_reports_a_bad_scope(self):
+        """A scope the schema does not list never reaches the probe: the resolver names it."""
+        from rocketlib.config import ConfigError
+
+        import nodes.rocketride_sql.IValidator as validator
+
+        v = validator.IValidator()
+        v.glb = types.SimpleNamespace(logicalType='rocketride_sql', connConfig={'scope': 'everyone'})
+        with pytest.raises(ConfigError, match='scope'):
+            v.validateConfig()
+
+    def test_save_time_probe_reports_a_target_on_the_org_scope(self, monkeypatch):
+        import nodes.rocketride_sql.IValidator as validator
+
         warnings = []
-        iglobal_mod = sys.modules['nodes.rocketride_sql.IGlobal']
-        monkeypatch.setattr(iglobal_mod, 'warning', warnings.append)
-        monkeypatch.setattr(iglobal_mod.Config, 'getNodeConfig', lambda provider, cfg: dict(cfg))
-        glb = cls()
-        glb.glb = types.SimpleNamespace(logicalType='rocketride_sql', connConfig={'scope': 'everyone'})
-        glb.validateConfig()
-        assert len(warnings) == 1 and 'scope must be one of org, team, user' in warnings[0]
-
-
-def _engine_pool_kwargs(monkeypatch, cls, logical_type, conn_config):
-    """Run ``beginGlobal`` with ``create_engine`` patched; return its kwargs.
-
-    Nothing connects: the engine, the transaction registry and both schema
-    reflections are stand-ins, so only the pool sizing reaches the assertion.
-    """
-    db_global = sys.modules['ai.common.database.db_global_base']
-    calls = []
-    monkeypatch.setattr(db_global, 'create_engine', lambda url, **kw: calls.append(kw) or types.SimpleNamespace())
-    tx_registry = types.ModuleType('ai.common.database.tx_registry')
-    tx_registry.TransactionRegistry = lambda *a, **kw: None
-    monkeypatch.setitem(sys.modules, 'ai.common.database.tx_registry', tx_registry)
-    monkeypatch.setattr(sys.modules['ai.common.config'].Config, 'getNodeConfig', lambda provider, cfg: dict(cfg))
-    monkeypatch.setattr(cls, '_getDatabaseSchema', lambda self: {})
-    monkeypatch.setattr(cls, '_getTableSchema', lambda self, table: {})
-    glb = cls()
-    glb.glb = types.SimpleNamespace(logicalType=logical_type, connConfig=conn_config)
-    glb.beginGlobal()
-    assert len(calls) == 1
-    return calls[0]
+        monkeypatch.setattr(validator, 'warning', warnings.append)
+        v = validator.IValidator()
+        v.glb = types.SimpleNamespace(logicalType='rocketride_sql', connConfig={'scope': 'org', 'target': 't-1'})
+        v.validateConfig()
+        assert len(warnings) == 1 and 'the org scope takes no target' in warnings[0]
 
 
 class TestSqlEnginePoolSize:
-    """PgBouncer pools the cloud node's connections, so its engine stays small;
-    every other SQL node keeps the base's larger pool.
-    """
+    """PgBouncer pools the cloud node's connections, so its engine stays small."""
 
     def test_rocketride_sql_keeps_a_two_plus_two_pool(self, monkeypatch):
-        cls, _ = _sql_iglobal_cls(monkeypatch)
-        monkeypatch.setenv('ROCKETRIDE_DB_DSNS', json.dumps({'org': TEST_DSN}))
-        kwargs = _engine_pool_kwargs(monkeypatch, cls, 'rocketride_sql', {'table': 'widgets'})
-        assert kwargs['pool_size'] == 2
-        assert kwargs['max_overflow'] == 2
-
-    @pytest.mark.parametrize('node', ['db_postgres', 'db_mysql'])
-    def test_other_sql_nodes_keep_the_default_pool(self, monkeypatch, node):
-        _sql_iglobal_cls(monkeypatch)
-        node_dir = _REPO / 'nodes' / 'src' / 'nodes' / node
-        cls = _load_from_path(f'nodes.{node}.IGlobal', node_dir / 'IGlobal.py').IGlobal
-        config = {'host': 'h', 'user': 'u', 'password': 'p', 'database': 'd', 'table': 'widgets'}
-        kwargs = _engine_pool_kwargs(monkeypatch, cls, node, config)
-        assert kwargs['pool_size'] == 10
-        assert kwargs['max_overflow'] == 20
+        glb = _sql_iglobal()
+        _deliver(monkeypatch)
+        db_global = sys.modules['ai.common.database.db_global_base']
+        calls = []
+        monkeypatch.setattr(db_global, 'create_engine', lambda url, **kw: calls.append(kw) or types.SimpleNamespace())
+        tx_registry = types.ModuleType('ai.common.database.tx_registry')
+        tx_registry.TransactionRegistry = lambda *a, **kw: None
+        monkeypatch.setitem(sys.modules, 'ai.common.database.tx_registry', tx_registry)
+        monkeypatch.setattr(type(glb), '_getDatabaseSchema', lambda self: {})
+        monkeypatch.setattr(type(glb), '_getTableSchema', lambda self, table: {})
+        glb.glb = types.SimpleNamespace(logicalType='rocketride_sql', connConfig={'table': 'widgets'})
+        glb.beginGlobal()
+        assert len(calls) == 1
+        assert calls[0]['pool_size'] == 2
+        assert calls[0]['max_overflow'] == 2
 
 
 # ---------------------------------------------------------------------------
@@ -502,90 +465,19 @@ class _FakeClient:
 
 
 def _vector_store_cls(monkeypatch):
-    """Load the rocketride_vector Store with heavy deps stubbed."""
+    """The rocketride_vector Store on a fake psycopg2 connection; returns the class and the warnings."""
+    import nodes.rocketride_vector.rocketride_vector as driver
+
     warnings: list[str] = []
-
-    depends_mod = types.ModuleType('depends')
-    depends_mod.depends = lambda *a, **kw: None
-    monkeypatch.setitem(sys.modules, 'depends', depends_mod)
-
-    rocketlib = types.ModuleType('rocketlib')
-    rocketlib.warning = warnings.append
-    rocketlib.OPEN_MODE = types.SimpleNamespace(CONFIG=object())
-    rocketlib.Entry = type('Entry', (), {})
-    monkeypatch.setitem(sys.modules, 'rocketlib', rocketlib)
-
-    numpy_mod = types.ModuleType('numpy')
-    numpy_mod.array = lambda x: x
-    monkeypatch.setitem(sys.modules, 'numpy', numpy_mod)
-
-    psycopg2_mod = types.ModuleType('psycopg2')
-    psycopg2_mod.connect = lambda *a, **kw: _FakeClient()
-    monkeypatch.setitem(sys.modules, 'psycopg2', psycopg2_mod)
-    pgvector_mod = types.ModuleType('pgvector')
-    pgvector_psycopg2 = types.ModuleType('pgvector.psycopg2')
-    pgvector_psycopg2.register_vector = lambda client: None
-    pgvector_mod.psycopg2 = pgvector_psycopg2
-    monkeypatch.setitem(sys.modules, 'pgvector', pgvector_mod)
-    monkeypatch.setitem(sys.modules, 'pgvector.psycopg2', pgvector_psycopg2)
-
-    ai_pkg = types.ModuleType('ai')
-    ai_pkg.__path__ = []
-    common_pkg = types.ModuleType('ai.common')
-    common_pkg.__path__ = []
-    schema = types.ModuleType('ai.common.schema')
-    for name in ('Doc', 'DocFilter', 'DocMetadata', 'QuestionText'):
-        setattr(schema, name, type(name, (), {}))
-    store_mod = types.ModuleType('ai.common.store')
-
-    class _StubDocumentStoreBase:
-        def __init__(self, provider, connConfig, bag):
-            self.vectorSize = 0
-            self.modelName = ''
-            self.threshold_search = 0.5
-
-    store_mod.DocumentStoreBase = _StubDocumentStoreBase
-    # rocketride_vector's IGlobal / IInstance sit on the store base since #2587;
-    # these tests drive the driver Store directly, so only the names matter.
-    bases = store_base_stubs()
-    store_mod.StoreGlobalBase = bases.StoreGlobalBase
-    store_mod.StoreInstanceBase = bases.StoreInstanceBase
-    store_mod.CONTROL_OBJECT_ID = bases.CONTROL_OBJECT_ID
-    config = types.ModuleType('ai.common.config')
-    config.Config = types.SimpleNamespace(getNodeConfig=lambda provider, connConfig: dict(connConfig))
-    transform = types.ModuleType('ai.common.transform')
-    for name in ('IGlobalTransform', 'IInstanceTransform', 'IEndpointTransform'):
-        setattr(transform, name, type(name, (), {}))
-    monkeypatch.setitem(sys.modules, 'ai', ai_pkg)
-    monkeypatch.setitem(sys.modules, 'ai.common', common_pkg)
-    monkeypatch.setitem(sys.modules, 'ai.common.schema', schema)
-    monkeypatch.setitem(sys.modules, 'ai.common.store', store_mod)
-    monkeypatch.setitem(sys.modules, 'ai.common.config', config)
-    monkeypatch.setitem(sys.modules, 'ai.common.transform', transform)
-
-    rrdb_mod = _load_from_path('ai.common.rocketride_db', _RRDB_PATH)
-    monkeypatch.setitem(sys.modules, 'ai.common.rocketride_db', rrdb_mod)
-
-    # Deliver the org DSN the way the task engine does.
-    monkeypatch.setenv('ROCKETRIDE_DB_DSNS', json.dumps({'org': TEST_DSN}))
-
-    search_module = _load_from_path(
-        'ai.common.store.pgvector_store', _AI_SRC / 'ai/common/store/pgvector_store.py', register=False
-    )
-    monkeypatch.setitem(sys.modules, 'ai.common.store.pgvector_store', search_module)
-
-    iglobal = _load_from_path('nodes.rocketride_vector.IGlobal', _VEC_NODE_DIR / 'IGlobal.py')
-    pkg = types.ModuleType('nodes.rocketride_vector')
-    pkg.__path__ = [str(_VEC_NODE_DIR)]
-    pkg.IGlobal = iglobal
-    monkeypatch.setitem(sys.modules, 'nodes.rocketride_vector', pkg)
-    monkeypatch.setitem(sys.modules, 'nodes.rocketride_vector.IGlobal', iglobal)
-    store = _load_from_path('nodes.rocketride_vector.rocketride_vector', _VEC_NODE_DIR / 'rocketride_vector.py')
-    return store.Store, warnings
+    monkeypatch.setattr(driver, 'warning', warnings.append)
+    monkeypatch.setattr(driver.psycopg2, 'connect', lambda *a, **kw: _FakeClient())
+    monkeypatch.setattr(driver, 'register_vector', lambda client: None)
+    _deliver(monkeypatch)
+    return driver.Store, warnings
 
 
 def _make_store(cls, config):
-    return cls('rocketride_vector', config, {})
+    return cls('rocketride_vector', _resolved('rocketride_vector', config), {})
 
 
 class TestRocketrideVectorStore:
@@ -599,7 +491,7 @@ class TestRocketrideVectorStore:
             'fetchone',
             lambda cur: (version,) if cur._executed[-1].startswith('SELECT extversion') else (True,),
         )
-        store = _make_store(cls, {'collection': 'rr_vec', 'similarity': 'cosine', 'score': 0.5})
+        store = _make_store(cls, {'collection': 'rr_vec'})
         monkeypatch.setattr(store, '_convertFilter', lambda doc_filter: ('WHERE isDeleted = %s', [False]))
         for _ in range(2):
             store.client.fetch_batches = [[('eligible', 'present', 0.05)]] * 2
@@ -621,7 +513,7 @@ class TestRocketrideVectorStore:
         module = sys.modules[cls.__module__]
         monkeypatch.setattr(module, 'Doc', types.SimpleNamespace)
         monkeypatch.setattr(_FakeCursor, 'description', [('content',), ('objectid',), ('distance',)], raising=False)
-        store = _make_store(cls, {'collection': 'rr_vec', 'similarity': 'cosine', 'score': 0.5})
+        store = _make_store(cls, {'collection': 'rr_vec'})
         store._iterative_scan = iterative
         monkeypatch.setattr(store, '_convertFilter', lambda doc_filter: ('WHERE isDeleted = %s', [False]))
         store.client.fetch_batches = [
@@ -638,47 +530,19 @@ class TestRocketrideVectorStore:
         cls, _ = _vector_store_cls(monkeypatch)
         user_dsn = 'postgresql://u_rw:pw@pooler:5432/t_user_u1'
         monkeypatch.setenv('ROCKETRIDE_DB_DSNS', json.dumps({'org': TEST_DSN, 'user:u-1': user_dsn}))
-        store = _make_store(cls, {'collection': 'rr_vec', 'similarity': 'cosine', 'scope': 'user', 'target': 'u-1'})
+        store = _make_store(cls, {'collection': 'rr_vec', 'scope': 'user', 'target': 'u-1'})
         assert store.database == 't_user_u1'
 
     def test_store_refuses_a_scope_the_task_was_not_given(self, monkeypatch):
         cls, _ = _vector_store_cls(monkeypatch)
         with pytest.raises(ValueError, match="was not given the team database 't-9'"):
-            _make_store(cls, {'collection': 'rr_vec', 'similarity': 'cosine', 'scope': 'team', 'target': 't-9'})
-
-    def test_save_time_probe_outside_a_task_is_silent(self, monkeypatch):
-        _vector_store_cls(monkeypatch)
-        monkeypatch.delenv('ROCKETRIDE_DB_DSNS', raising=False)
-        iglobal_mod = sys.modules['nodes.rocketride_vector.IGlobal']
-        warnings = []
-        monkeypatch.setattr(iglobal_mod, 'warning', warnings.append)
-        connects = []
-        monkeypatch.setattr(sys.modules['psycopg2'], 'connect', lambda *a, **kw: connects.append(a))
-        glb = iglobal_mod.IGlobal()
-        glb.glb = types.SimpleNamespace(
-            logicalType='rocketride_vector', connConfig={'collection': 'rr_vec', 'scope': 'team'}
-        )
-        glb._probe_connection(glb.glb.connConfig)
-        assert warnings == [] and connects == []
-
-    def test_save_time_probe_still_checks_the_scope(self, monkeypatch):
-        _vector_store_cls(monkeypatch)
-        monkeypatch.delenv('ROCKETRIDE_DB_DSNS', raising=False)
-        iglobal_mod = sys.modules['nodes.rocketride_vector.IGlobal']
-        warnings = []
-        monkeypatch.setattr(iglobal_mod, 'warning', warnings.append)
-        glb = iglobal_mod.IGlobal()
-        glb.glb = types.SimpleNamespace(
-            logicalType='rocketride_vector', connConfig={'collection': 'rr_vec', 'scope': 'org', 'target': 't-1'}
-        )
-        glb._probe_connection(glb.glb.connConfig)
-        assert len(warnings) == 1 and 'the org scope takes no target' in warnings[0]
+            _make_store(cls, {'collection': 'rr_vec', 'scope': 'team', 'target': 't-9'})
 
     def test_connects_via_resolved_dsn(self, monkeypatch):
         cls, _ = _vector_store_cls(monkeypatch)
-        store = _make_store(cls, {'collection': 'rr_vec', 'similarity': 'cosine'})
+        store = _make_store(cls, {'collection': 'rr_vec'})
         # No client_id on the store: identity rides the task file (#1686);
-        # tenant scoping keys on the DSN's database (see IGlobal's subKey).
+        # tenant scoping keys on the DSN's database.
         assert store.host == 'localhost'
         assert store.port == 55432
         assert store.database == 'rrtenant'
@@ -687,7 +551,7 @@ class TestRocketrideVectorStore:
     def test_invalid_collection_rejected(self, monkeypatch):
         cls, _ = _vector_store_cls(monkeypatch)
         with pytest.raises(ValueError, match='Invalid collection name'):
-            _make_store(cls, {'collection': 'bad-name;drop', 'similarity': 'cosine'})
+            _make_store(cls, {'collection': 'bad-name;drop'})
 
     @pytest.mark.parametrize(
         ('similarity', 'opclass'),
@@ -712,10 +576,7 @@ class TestRocketrideVectorStore:
 
     def test_hnsw_params_overridable(self, monkeypatch):
         cls, _ = _vector_store_cls(monkeypatch)
-        store = _make_store(
-            cls,
-            {'collection': 'rr_vec', 'similarity': 'cosine', 'hnsw_m': 32, 'hnsw_ef_construction': 128},
-        )
+        store = _make_store(cls, {'collection': 'rr_vec', 'hnsw_m': 32, 'hnsw_ef_construction': 128})
         store._createCollection(vectorSize=5)
         index_sql = [sql for sql in store.client.executed if 'USING hnsw' in sql]
         assert 'm = 32' in index_sql[0]
@@ -724,7 +585,7 @@ class TestRocketrideVectorStore:
     def test_render_orders_chunks_and_bridges_gaps(self, monkeypatch):
         """Chunks at 0, 1 and 3 (gap at 2): index order preserved, gap skipped."""
         cls, _ = _vector_store_cls(monkeypatch)
-        store = _make_store(cls, {'collection': 'rr_vec', 'similarity': 'cosine'})
+        store = _make_store(cls, {'collection': 'rr_vec'})
         store.client.fetch_batches = [[('A', 0), ('D', 3), ('B', 1)]]
         out: list[str] = []
         store.render('obj-1', out.append)
@@ -732,44 +593,41 @@ class TestRocketrideVectorStore:
 
     def test_render_empty_batch_emits_nothing(self, monkeypatch):
         cls, _ = _vector_store_cls(monkeypatch)
-        store = _make_store(cls, {'collection': 'rr_vec', 'similarity': 'cosine'})
+        store = _make_store(cls, {'collection': 'rr_vec'})
         store.client.fetch_batches = [[]]
         out: list[str] = []
         store.render('obj-1', out.append)
         assert out == []
 
     def test_render_single_high_chunk_id(self, monkeypatch):
-        """One row with a high chunkId renders that row — allocation is bounded
+        """One row with a high chunkId renders that row; allocation is bounded
         by rows fetched, never by the chunkId value.
         """
         cls, _ = _vector_store_cls(monkeypatch)
-        store = _make_store(cls, {'collection': 'rr_vec', 'similarity': 'cosine'})
+        store = _make_store(cls, {'collection': 'rr_vec'})
         store.client.fetch_batches = [[('X', 999_999)]]
         out: list[str] = []
         store.render('obj-1', out.append)
         assert out == ['X']
 
-    def test_hnsw_params_clamped_to_pgvector_bounds(self, monkeypatch):
+    def test_hnsw_params_outside_pgvector_bounds_are_config_errors(self, monkeypatch):
+        """The schema refuses what pgvector refuses: m outside [2, 100], ef_construction outside [4, 1000]."""
+        from rocketlib.config import ConfigError
+
         cls, _ = _vector_store_cls(monkeypatch)
-        store = _make_store(
-            cls,
-            {'collection': 'rr_vec', 'similarity': 'cosine', 'hnsw_m': 1, 'hnsw_ef_construction': 1},
-        )
-        # pgvector requires m >= 2, ef_construction >= 4 and >= 2 * m.
-        assert store.hnsw_m == 2
-        assert store.hnsw_ef_construction == 4
+        with pytest.raises(ConfigError, match='hnsw_m'):
+            _make_store(cls, {'collection': 'rr_vec', 'hnsw_m': 1})
+        with pytest.raises(ConfigError, match='hnsw_ef_construction'):
+            _make_store(cls, {'collection': 'rr_vec', 'hnsw_ef_construction': 1})
 
     def test_hnsw_ef_construction_raised_to_twice_m(self, monkeypatch):
         cls, _ = _vector_store_cls(monkeypatch)
-        store = _make_store(
-            cls,
-            {'collection': 'rr_vec', 'similarity': 'cosine', 'hnsw_m': 64, 'hnsw_ef_construction': 64},
-        )
+        store = _make_store(cls, {'collection': 'rr_vec', 'hnsw_m': 64, 'hnsw_ef_construction': 64})
         assert store.hnsw_ef_construction == 128
 
     def test_hnsw_skipped_above_dimension_ceiling(self, monkeypatch):
         cls, warnings = _vector_store_cls(monkeypatch)
-        store = _make_store(cls, {'collection': 'rr_vec', 'similarity': 'cosine'})
+        store = _make_store(cls, {'collection': 'rr_vec'})
         store._createCollection(vectorSize=2001)
         ddl = store.client.executed
         assert any('CREATE TABLE IF NOT EXISTS rr_vec' in sql for sql in ddl)
@@ -778,7 +636,7 @@ class TestRocketrideVectorStore:
 
     def test_hnsw_created_at_dimension_ceiling(self, monkeypatch):
         cls, warnings = _vector_store_cls(monkeypatch)
-        store = _make_store(cls, {'collection': 'rr_vec', 'similarity': 'cosine'})
+        store = _make_store(cls, {'collection': 'rr_vec'})
         store._createCollection(vectorSize=2000)
         assert any('USING hnsw' in sql for sql in store.client.executed)
         assert not warnings
@@ -788,21 +646,17 @@ class TestRocketrideVectorStore:
 # rocketride_vector and store_postgres: trash row counts
 # ---------------------------------------------------------------------------
 
-_PG_NODE_DIR = _REPO / 'nodes' / 'src' / 'nodes' / 'store_postgres'
-
 
 def _trash_store(monkeypatch, node):
-    """One of the two Postgres drivers on a fake client, with the stubs of _vector_store_cls."""
+    """One of the two Postgres drivers on a fake client."""
     cls, _ = _vector_store_cls(monkeypatch)
     if node == 'rocketride_vector':
-        return _make_store(cls, {'collection': 'rr_vec', 'similarity': 'cosine'})
-    pkg = types.ModuleType('nodes.store_postgres')
-    pkg.__path__ = [str(_PG_NODE_DIR)]
-    monkeypatch.setitem(sys.modules, 'nodes.store_postgres', pkg)
-    iglobal = _load_from_path('nodes.store_postgres.IGlobal', _PG_NODE_DIR / 'IGlobal.py')
-    monkeypatch.setitem(sys.modules, 'nodes.store_postgres.IGlobal', iglobal)
-    driver = _load_from_path('nodes.store_postgres.postgres', _PG_NODE_DIR / 'postgres.py')
-    return driver.Store('postgres', {'collection': 'pg_vec', 'host': 'localhost', 'similarity': 'cosine'}, {})
+        return _make_store(cls, {'collection': 'rr_vec'})
+    import nodes.store_postgres.postgres as driver
+
+    monkeypatch.setattr(driver.psycopg2, 'connect', lambda *a, **kw: _FakeClient())
+    monkeypatch.setattr(driver, 'register_vector', lambda client: None)
+    return driver.Store('postgres', _resolved('postgres', {'collection': 'pg_vec'}), {})
 
 
 @pytest.mark.parametrize('node', ['rocketride_vector', 'store_postgres'])
@@ -821,8 +675,6 @@ def test_trash_reports_the_row_count_and_none_when_it_is_unknown(monkeypatch, no
 # rocketride_graph: scope-aware connection and the save-time probe
 # ---------------------------------------------------------------------------
 
-_GRAPH_NODE_DIR = _REPO / 'nodes' / 'src' / 'nodes' / 'rocketride_graph'
-
 
 class _GraphCursor(_FakeCursor):
     def fetchone(self):
@@ -835,73 +687,47 @@ class _GraphClient(_FakeClient):
 
 
 def _graph_iglobal(monkeypatch):
-    """Load rocketride_graph/IGlobal with its graph base and driver stubbed."""
+    """The rocketride_graph IGlobal and validator with psycopg2 stood in; returns (IGlobal, warnings, connects)."""
+    import nodes.rocketride_graph.IGlobal as iglobal
+    import nodes.rocketride_graph.IValidator as validator
+
     warnings: list[str] = []
     connects: list[str] = []
-
-    rocketlib = types.ModuleType('rocketlib')
-    rocketlib.warning = warnings.append
-    monkeypatch.setitem(sys.modules, 'rocketlib', rocketlib)
-
-    psycopg2_mod = types.ModuleType('psycopg2')
 
     def connect(dsn, **kw):
         connects.append(dsn)
         return _GraphClient()
 
-    psycopg2_mod.connect = connect
-    psycopg2_mod.sql = types.ModuleType('psycopg2.sql')
-    monkeypatch.setitem(sys.modules, 'psycopg2', psycopg2_mod)
-    monkeypatch.setitem(sys.modules, 'psycopg2.sql', psycopg2_mod.sql)
-
-    ai_pkg = types.ModuleType('ai')
-    ai_pkg.__path__ = []
-    common_pkg = types.ModuleType('ai.common')
-    common_pkg.__path__ = []
-    graph_pkg = types.ModuleType('ai.common.graph')
-    graph_pkg.__path__ = []
-    graph_pkg.GraphGlobalBase = type(
-        'GraphGlobalBase', (), {'_config_int': staticmethod(lambda cfg, key, default: default)}
-    )
-    age = types.ModuleType('ai.common.graph.age')
-    for name in ('AgeTranslationError', 'FirewallConfig', 'TranslatedQuery'):
-        setattr(age, name, type(name, (), {}))
-    age.TranslateMode = types.SimpleNamespace(SAFE='safe')
-    age.CAPABILITY_TABLES = {'1.5.0': {}, '1.6.0': {}}
-    age.DEFAULT_AGE_VERSION = '1.5.0'
-    for name in ('decode_agtype', 'decode_row', 'translate'):
-        setattr(age, name, lambda *a, **kw: None)
-    for name, mod in (
-        ('ai', ai_pkg),
-        ('ai.common', common_pkg),
-        ('ai.common.graph', graph_pkg),
-        ('ai.common.graph.age', age),
-    ):
-        monkeypatch.setitem(sys.modules, name, mod)
-
-    rrdb_mod = _load_from_path('ai.common.rocketride_db', _RRDB_PATH)
-    monkeypatch.setitem(sys.modules, 'ai.common.rocketride_db', rrdb_mod)
+    monkeypatch.setattr(iglobal.psycopg2, 'connect', connect)
+    monkeypatch.setattr(validator, 'warning', warnings.append)
+    psycopg2 = types.ModuleType('psycopg2')
+    psycopg2.connect = connect
+    monkeypatch.setitem(sys.modules, 'psycopg2', psycopg2)
     for name in ('ROCKETRIDE_DB_DSNS', 'ROCKETRIDE_DB_RESOLVE_ERROR'):
         monkeypatch.delenv(name, raising=False)
 
-    iglobal = _load_from_path('nodes.rocketride_graph.IGlobal', _GRAPH_NODE_DIR / 'IGlobal.py')
-    return iglobal.IGlobal(), warnings, connects
+    return iglobal.IGlobal(), validator, warnings, connects
 
 
 class TestRocketrideGraphConnection:
     def test_open_driver_connects_to_its_scopes_database(self, monkeypatch):
-        glb, _, connects = _graph_iglobal(monkeypatch)
-        monkeypatch.setenv('ROCKETRIDE_DB_DSNS', json.dumps({'org': TEST_DSN, 'team:t-1': 'postgresql://t1'}))
-        glb._open_driver({'scope': 'team', 'target': 't-1'})
+        glb, _, _, connects = _graph_iglobal(monkeypatch)
+        _deliver(monkeypatch, org=TEST_DSN, **{'team:t-1': 'postgresql://t1'})
+        glb._open_driver(_resolved('rocketride_graph', {'scope': 'team', 'target': 't-1'}))
         assert connects == ['postgresql://t1']
+        assert (glb.graph_name, glb.max_rows, glb.query_timeout_ms) == ('rocketride', 1000, 30000)
 
     def test_save_time_probe_outside_a_task_is_silent(self, monkeypatch):
-        glb, warnings, connects = _graph_iglobal(monkeypatch)
-        glb._probe_connection({'scope': 'user'})
+        _, validator, warnings, connects = _graph_iglobal(monkeypatch)
+        v = validator.IValidator()
+        v.glb = types.SimpleNamespace(logicalType='rocketride_graph', connConfig={'scope': 'user'})
+        v.validateConfig()
         assert warnings == [] and connects == []
 
     def test_save_time_probe_still_checks_the_scope(self, monkeypatch):
-        glb, warnings, connects = _graph_iglobal(monkeypatch)
-        glb._probe_connection({'scope': 'team', 'target': 'team:x'})
+        _, validator, warnings, connects = _graph_iglobal(monkeypatch)
+        v = validator.IValidator()
+        v.glb = types.SimpleNamespace(logicalType='rocketride_graph', connConfig={'scope': 'team', 'target': 'team:x'})
+        v.validateConfig()
         assert connects == []
         assert len(warnings) == 1 and 'not a valid team or user id' in warnings[0]
