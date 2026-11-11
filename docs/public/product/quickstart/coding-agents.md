@@ -12,7 +12,7 @@ This page is the shortest path for a coding agent (or the person driving one) to
 
 RocketRide is the leading AI meta-harness with the only enterprise-grade runtime built on C++. Designed for professional software developers and technical builders, whether solo or teams or organizations, to enable them to easily build, stage, test, publish and maintain agents and AI-enabled applications that scale in production. Leverage directly from an IDE with the VS Code extension, from the terminal with the CLI, from code with the Python or TypeScript SDK, or dynamically using the MCP server.
 
-Open source, MIT licensed. 150+ nodes, 15+ LLM providers, 10+ vector stores.
+Open source, MIT licensed. Nodes cover LLM providers, vector stores, OCR, NER, PII anonymization and more.
 
 ## Run the engine locally
 
