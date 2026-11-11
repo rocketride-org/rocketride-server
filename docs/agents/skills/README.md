@@ -24,10 +24,48 @@ proof) and from hard process gates, not model intelligence.
 
 `MCP_TOOL_CONTRACT.md` (this directory) freezes the tool-name/result-shape
 contract between the skills and the HTTP MCP server
-(`packages/ai/src/ai/modules/mcp/`): the 27 tool names, `{ok, ...}` result
+(`packages/ai/src/ai/modules/mcp/`): the 33 tool names registered by `register_all` (32 on an engine that is not
+bound to localhost, where `send_files` is not offered), `{ok, ...}` result
 envelopes, run-log keying, and the server gaps the skills compensate for. The
 skills reference only names in that file. When the MCP surface changes, update
 the contract and the skills together.
+
+## Install in Claude Code
+
+This repository is a Claude Code plugin marketplace (`.claude-plugin/marketplace.json`).
+The plugin root is `docs/agents/`, so the skills install in place. The plugin also
+registers the hosted MCP server (`https://api.rocketride.ai/mcp`) as `rocketride`.
+
+```bash
+claude plugin marketplace add rocketride-org/rocketride-server
+claude plugin install rocketride@rocketride
+```
+
+Self-hosted engines serve the same MCP at `http://<host>:5565/mcp`.
+
+## Install in Codex
+
+The same plugin is listed for Codex (`.agents/plugins/marketplace.json`, plugin
+manifest at `docs/agents/.codex-plugin/plugin.json`):
+
+```bash
+codex plugin marketplace add rocketride-org/rocketride-server
+codex plugin add rocketride@rocketride
+```
+
+## Install in other coding agents
+
+Any agent that reads the open `SKILL.md` format (Cursor, GitHub Copilot, Codex,
+Claude Code, and others) can take just the five skills with the `skills` installer.
+It finds them under `docs/agents/skills/` from the repository root:
+
+```bash
+npx skills add rocketride-org/rocketride-server
+```
+
+Add `-a <agent>` to choose agents (for example `-a cursor github-copilot`) and
+`-y` to skip prompts. This installs the skills only; add the MCP server
+(`https://api.rocketride.ai/mcp`) in your agent's own MCP settings.
 
 Each skill directory is self-contained: `SKILL.md` plus its reference files,
 worked examples, and offline shims under `tools/`. The bundled

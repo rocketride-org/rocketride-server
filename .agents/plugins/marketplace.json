@@ -1,0 +1,20 @@
+{
+  "name": "rocketride",
+  "interface": {
+    "displayName": "RocketRide"
+  },
+  "plugins": [
+    {
+      "name": "rocketride",
+      "source": {
+        "source": "local",
+        "path": "./docs/agents"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

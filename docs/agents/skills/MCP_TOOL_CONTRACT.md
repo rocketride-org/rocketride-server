@@ -2,12 +2,12 @@
 
 The tool-name/result-shape contract between these skills and the RocketRide HTTP MCP server.
 Derived from the registrations in `rocketride-server`'s `packages/ai/src/ai/modules/mcp/tools/*.py`
-on branch `fix/mcp-auth` (PR #2315, not yet merged), where `register_all` wires **33 tools** — every
+on `develop` (merged in PR #2315), where `register_all` wires **33 tools** — every
 one of them listed below. Deploy tools are on the deploy-2 SDK API.
 **Maintainer note:** this file is regenerated from the registrations, not pinned to a commit. The
-previous `origin/develop @ eb67ddea` pin predated this branch and was already inaccurate; once
-PR #2315 lands on `develop`, replace the branch reference above with the merge commit if a pin is
-wanted. The check that actually matters is `register_all` still registering exactly these 33 names.
+previous `origin/develop @ eb67ddea` pin was already inaccurate; if a pin is wanted, use the
+PR #2315 merge commit or a later one. The check that actually matters is `register_all` still
+registering exactly these 33 names.
 The skills reference **only** names and shapes in this file; anything not listed here does not
 exist — never invent a tool.
 
