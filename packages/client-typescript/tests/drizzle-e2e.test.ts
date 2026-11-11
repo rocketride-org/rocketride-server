@@ -83,9 +83,6 @@ const TEST_TABLE = 'rr_drizzle_e2e_tx_smoke';
 /** Node ID for the db_postgres node in the pipeline below. */
 const DB_NODE_ID = 'db_postgres_1';
 
-/** Pipeline token used throughout this suite. */
-const E2E_TOKEN = 'TS-DZ-E2E';
-
 /** Drizzle schema for the isolation table. */
 const rows = pgTable(TEST_TABLE, {
 	id: serial('id').primaryKey(),
@@ -168,11 +165,9 @@ async function ensureCleanPipeline(client: RocketRideClient, token: string): Pro
 		});
 
 		await client.connect();
-		await ensureCleanPipeline(client, E2E_TOKEN);
 
 		const result = await client.use({
 			pipeline: getPostgresPipeline(),
-			token: E2E_TOKEN,
 		});
 		pipelineToken = result.token;
 
@@ -200,7 +195,9 @@ async function ensureCleanPipeline(client: RocketRideClient, token: string): Pro
 		} catch {
 			// Best-effort cleanup
 		}
-		await ensureCleanPipeline(client, E2E_TOKEN);
+		if (pipelineToken) {
+			await ensureCleanPipeline(client, pipelineToken);
+		}
 		if (client.isConnected()) {
 			await Promise.race([client.disconnect(), new Promise<void>((resolve) => setTimeout(resolve, 10000))]);
 		}

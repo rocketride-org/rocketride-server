@@ -40,15 +40,11 @@ from tool_pipeline import get_tool_pipeline
 # FIXTURES
 # =========================================================================
 
-TOOL_TOKEN = 'PY-TOOL'
-
 
 @pytest_asyncio.fixture
 async def tool_pipeline(client: RocketRideClient):
     """Start a tool_python pipeline, yield its token, terminate on teardown."""
-    await ensure_clean_pipeline(client, TOOL_TOKEN)
-
-    result = await client.use(pipeline=get_tool_pipeline(), token=TOOL_TOKEN)
+    result = await client.use(pipeline=get_tool_pipeline())
     pipeline_token = result['token']
     try:
         yield pipeline_token

@@ -40,16 +40,6 @@ const TEST_CONFIG = {
 	timeout: 120000,
 };
 
-const TOOL_TOKEN = 'TS-TOOL';
-
-async function ensureCleanPipeline(client: RocketRideClient, token: string): Promise<void> {
-	try {
-		await client.terminate(token);
-	} catch {
-		// Ignore errors - pipeline might not be running
-	}
-}
-
 describe('Tool Operations', () => {
 	let client: RocketRideClient;
 	let pipelineToken: string;
@@ -60,11 +50,9 @@ describe('Tool Operations', () => {
 			uri: TEST_CONFIG.uri,
 		});
 		await client.connect();
-		await ensureCleanPipeline(client, TOOL_TOKEN);
 
 		const result = await client.use({
 			pipeline: getToolPipeline(),
-			token: TOOL_TOKEN,
 		});
 		pipelineToken = result.token;
 	});
@@ -77,7 +65,6 @@ describe('Tool Operations', () => {
 				// Ignore cleanup errors
 			}
 		}
-		await ensureCleanPipeline(client, TOOL_TOKEN);
 		if (client.isConnected()) {
 			await Promise.race([
 				client.disconnect(),
