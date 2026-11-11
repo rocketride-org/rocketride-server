@@ -25,65 +25,32 @@
 
 > [!WARNING]
 > **This package is deprecated.** The RocketRide engine now ships a built-in
-> **HTTP MCP server** with a far larger tool surface — create, validate, run,
-> and trace pipelines directly from your AI assistant. Use it instead:
->
-> ```bash
-> claude mcp add --transport http rocketride https://api.rocketride.ai/mcp
-> ```
->
-> Self-hosted engines serve the same endpoint automatically at
-> `http://<host>:5565/mcp` — nothing extra to install. See the
-> [HTTP MCP Server documentation](https://docs.rocketride.org/connect/mcp/http)
-> for Claude, Cursor, and ChatGPT setup, and
-> [MCP self-hosting](https://docs.rocketride.org/connect/mcp/http/self-hosting)
-> for a self-hosted engine.
+> **HTTP MCP server** with a far larger tool surface: create, validate, run,
+> and trace pipelines directly from your AI assistant. Use it instead; the
+> setup is in the next section.
 >
 > `rocketride-mcp` 1.5.0 is the final release. It continues to work against
 > existing engines, but receives no new features or fixes.
 
 ## Connect with the built-in server
 
-The built-in HTTP MCP server needs nothing to install. Use the endpoint below
-for every client. Self-hosted engines serve it at `http://<host>:5565/mcp`; see
+The RocketRide engine has a built-in MCP server, so there is nothing to
+install. The hosted server is at `https://api.rocketride.ai/mcp`. A
+self-hosted engine serves it on its own port at `http://<host>:5565/mcp`; see
 [MCP self-hosting](https://docs.rocketride.org/connect/mcp/http/self-hosting).
 
-```text
-https://api.rocketride.ai/mcp
-```
-
-### Claude Desktop
-
-Go to **Settings → Connectors → Add custom connector** and enter the endpoint
-URL. Complete the OAuth flow on first use.
-
-### Claude Code
+The quickest example, with Claude Code:
 
 ```bash
 claude mcp add --transport http rocketride https://api.rocketride.ai/mcp
 ```
 
-### Cursor
-
-Add to `.cursor/mcp.json` in your workspace:
-
-```json
-{
-	"mcpServers": {
-		"rocketride": {
-			"url": "https://api.rocketride.ai/mcp",
-			"headers": { "Authorization": "Bearer rr_..." }
-		}
-	}
-}
-```
-
-Setup for other clients and the authentication details are on
+For every other client and for sign-in details, see
 [Connect a client](https://docs.rocketride.org/connect/mcp/http/connect).
 
-The sections below describe the deprecated stdio package. If you must stay on
-it, the install and config commands are in the last section, "Only if you must
-stay on stdio".
+The rest of this page is about the deprecated stdio package. If you must stay
+on it, the install and config commands are in the last section, "Only if you
+must stay on stdio".
 
 ## How It Works
 
