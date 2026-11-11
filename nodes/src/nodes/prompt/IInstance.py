@@ -78,6 +78,11 @@ class IInstance(IInstanceBase):
         if not self.question.history:
             for item in question.history or []:
                 self.question.addHistory(item)
+        # A turn-mode question carries its conversation and tools instead, under the same
+        # rule. The configured instructions added in closing become its system prompt.
+        if question.messages and not self.question.messages:
+            self.question.messages = list(question.messages)
+            self.question.tools = list(question.tools)
         return self.preventDefault()
 
     def writeDocuments(self, documents):
@@ -107,7 +112,7 @@ class IInstance(IInstanceBase):
 
     def _received_input(self):
         """Whether anything at all was written to this node during the turn."""
-        return any(getattr(self.question, lane, None) for lane in ('context', 'questions', 'documents'))
+        return any(getattr(self.question, lane, None) for lane in ('context', 'questions', 'documents', 'messages'))
 
     def closing(self):
         """

@@ -26,6 +26,21 @@ from ai.common.schema import Question, Answer
 from .IGlobal import IGlobal
 
 
+def _turn_input(question: Question) -> list:
+    """Return the text a turn-mode Question adds: its last user message's text and tool results.
+
+    The rest of `messages` is history, which the legacy path does not check either: the
+    input-length and topic rules would trip on a long conversation, and each earlier user
+    message was the last one on the turn that sent it.
+    """
+    if not question.messages:
+        return []
+    content = question.messages[-1].content
+    if isinstance(content, str):
+        return [content]
+    return [block.text if block.type == 'text' else block.content for block in content]
+
+
 class IInstance(IInstanceBase):
     IGlobal: IGlobal
 
@@ -53,8 +68,8 @@ class IInstance(IInstanceBase):
             self._forward_question(question)
             return
 
-        # Collect question text for evaluation
-        text_parts = []
+        # Collect question text for evaluation: the turn's new input, not the whole history
+        text_parts = _turn_input(question)
         if question.questions:
             text_parts.extend(q.text for q in question.questions)
         if question.context:
