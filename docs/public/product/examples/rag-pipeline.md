@@ -120,6 +120,9 @@ Save this as `rag.pipe`:
 ## Start the pipeline
 
 ```bash
+# The engine's key. Replace rr_local with the key your engine was started with.
+# For a local engine started without a key, any non-empty value works.
+export ROCKETRIDE_APIKEY=rr_local
 export ROCKETRIDE_OPENAI_API_KEY=sk-...
 
 rocketride start --pipeline ./rag.pipe
@@ -144,11 +147,10 @@ API key (`ROCKETRIDE_APIKEY`) as a bearer token. See the
 ## Ingest documents
 
 POST a document to the webhook URL. The pipeline embeds and stores it. curl
-reads the key from your shell, not from `.env`, so set it first:
+reads the key from your shell, not from `.env`. It is the `ROCKETRIDE_APIKEY` you
+exported before `start`:
 
 ```bash
-# Use the key your engine was started with. If it was started without one, any non-empty value works.
-export ROCKETRIDE_APIKEY=rr_local
 curl -X POST http://localhost:5565/webhook/rag-example/source_1 \
   -H "Authorization: Bearer $ROCKETRIDE_APIKEY" \
   -F "file=@./my-document.pdf"
