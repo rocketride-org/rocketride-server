@@ -223,6 +223,8 @@ def test_a_page_without_a_snapshot_serves_crawlers_the_shell_document(shell_root
     resp = _crawl(_client())
     assert resp.status_code == 200 and SHELL_BODY in resp.text
     assert '<title>Pricing | RocketRide</title>' in resp.text
+    # The shell document names the current build's bundles: no shared cache may keep it.
+    assert resp.headers['cache-control'] == 'private, no-cache'
     assert reads == []
 
 
@@ -304,7 +306,7 @@ def test_a_snapshot_the_engine_refuses_falls_back_cacheably_and_warns_once(shell
     for _ in range(2):
         resp = _crawl(client)
         assert resp.status_code == 200 and SHELL_BODY in resp.text
-        assert resp.headers['cache-control'] == 'public, max-age=3600'
+        assert resp.headers['cache-control'] == 'private, no-cache'
     assert len(pages._render_cache) == 1 and len(reads) == 1
     assert len(warned) == 1 and 'nest deeper' in warned[0]
     # A swap drops the cached response, not the memory of the bad version.
@@ -320,7 +322,7 @@ def test_a_snapshot_over_the_size_cap_is_never_read_and_falls_back_cacheably(she
     for _ in range(2):
         resp = _crawl(client)
         assert resp.status_code == 200 and SHELL_BODY in resp.text
-        assert resp.headers['cache-control'] == 'public, max-age=3600'
+        assert resp.headers['cache-control'] == 'private, no-cache'
     assert reads == [] and stats == [f'{DIST}/pages/pricing.html']
     assert len(pages._render_cache) == 1 and len(pages._snapshot_cache) == 0
     assert len(warned) == 1 and f'over the {MAX_SNAPSHOT_BYTES}-byte limit' in warned[0]
@@ -359,7 +361,7 @@ def test_a_malformed_snapshot_path_never_reads_and_falls_back_cacheably(shell_ro
     for _ in range(2):
         resp = _crawl(client)
         assert resp.status_code == 200 and SHELL_BODY in resp.text
-        assert resp.headers['cache-control'] == 'public, max-age=3600'
+        assert resp.headers['cache-control'] == 'private, no-cache'
     assert reads == [] and len(pages._render_cache) == 1 and len(warned) == 1
 
 
