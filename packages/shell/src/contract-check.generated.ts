@@ -25,6 +25,7 @@ import type { ShellApiV7 } from '../contract/versions/v7';
 import type { ShellApiV8 } from '../contract/versions/v8';
 import type { ShellApiV9 } from '../contract/versions/v9';
 import type { ShellApiV10 } from '../contract/versions/v10';
+import type { ShellApiV11 } from '../contract/versions/v11';
 import type { DAPException as Frozen_DAPException } from '../contract/versions/v0';
 import type { DAPException as Current_DAPException } from './api';
 import type { RocketRideException as Frozen_RocketRideException } from '../contract/versions/v0';
@@ -825,6 +826,14 @@ import type { DesktopViewProps as Frozen_DesktopViewProps } from '../contract/ve
 import type { DesktopViewProps as Current_DesktopViewProps } from './api';
 import type { InvitedMember as Frozen_InvitedMember } from '../contract/versions/v10';
 import type { InvitedMember as Current_InvitedMember } from './api';
+import type { ServiceProperty as Frozen_ServiceProperty } from '../contract/versions/v11';
+import type { ServiceProperty as Current_ServiceProperty } from './api';
+import type { ServiceParamValue as Frozen_ServiceParamValue } from '../contract/versions/v11';
+import type { ServiceParamValue as Current_ServiceParamValue } from './api';
+import type { ServiceParamDescriptor as Frozen_ServiceParamDescriptor } from '../contract/versions/v11';
+import type { ServiceParamDescriptor as Current_ServiceParamDescriptor } from './api';
+import type { ServiceDefinitionsResponse as Frozen_ServiceDefinitionsResponse } from '../contract/versions/v11';
+import type { ServiceDefinitionsResponse as Current_ServiceDefinitionsResponse } from './api';
 
 // VALUE floors — the live surface must still satisfy every frozen version.
 const _floor_v0: ShellApiV0 = {} as ShellApiShape;
@@ -849,6 +858,8 @@ const _floor_v9: ShellApiV9 = {} as ShellApiShape;
 void _floor_v9;
 const _floor_v10: ShellApiV10 = {} as ShellApiShape;
 void _floor_v10;
+const _floor_v11: ShellApiV11 = {} as ShellApiShape;
+void _floor_v11;
 
 // TYPE floors — each frozen exported type must still be satisfied.
 // Generic floors are emitted APPLIED (<any, …> at the frozen arity):
@@ -1653,3 +1664,11 @@ const _t_DesktopViewProps: Frozen_DesktopViewProps = {} as Current_DesktopViewPr
 void _t_DesktopViewProps;
 const _t_InvitedMember: Frozen_InvitedMember = {} as Current_InvitedMember;
 void _t_InvitedMember;
+const _t_ServiceProperty: Frozen_ServiceProperty = {} as Current_ServiceProperty;
+void _t_ServiceProperty;
+const _t_ServiceParamValue: Frozen_ServiceParamValue = {} as Current_ServiceParamValue;
+void _t_ServiceParamValue;
+const _t_ServiceParamDescriptor: Frozen_ServiceParamDescriptor = {} as Current_ServiceParamDescriptor;
+void _t_ServiceParamDescriptor;
+const _t_ServiceDefinitionsResponse: Frozen_ServiceDefinitionsResponse = {} as Current_ServiceDefinitionsResponse;
+void _t_ServiceDefinitionsResponse;
