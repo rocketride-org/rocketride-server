@@ -199,7 +199,8 @@ def test_a_published_manifests_dropped_pages_are_warnings(warnings):
     )
     build_aggregate([home, other])
     assert len(warnings) == 2
-    assert any('/x already claimed by rocketride.home' in w for w in warnings)
+    # Both apps are named: the one whose page was dropped, and the first claim that kept it.
+    assert any('rocketride.secret: /x already claimed by rocketride.home (page skipped)' in w for w in warnings)
     assert any("'/API'" in w for w in warnings)
 
 
