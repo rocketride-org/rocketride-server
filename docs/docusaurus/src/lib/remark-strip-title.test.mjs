@@ -4,6 +4,8 @@ import remarkStripTitle from './remark-strip-title.mjs';
 
 const h = (depth, text) => ({ type: 'heading', depth, children: [{ type: 'text', value: text }] });
 const p = (text) => ({ type: 'paragraph', children: [{ type: 'text', value: text }] });
+// The trees are plain data, so a JSON round trip is a full copy.
+const clone = (value) => JSON.parse(JSON.stringify(value));
 const run = (children, data = {}, value) => {
 	const tree = { type: 'root', children };
 	remarkStripTitle()(tree, { data, value });
@@ -22,14 +24,14 @@ describe('remarkStripTitle', () => {
 
 	it('keeps an h1 that comes after another heading', () => {
 		const tree = [h(2, 'Intro'), p('Body'), h(1, 'Appendix')];
-		const before = structuredClone(tree);
-		assert.deepEqual(run(structuredClone(tree)), before);
+		const before = clone(tree);
+		assert.deepEqual(run(clone(tree)), before);
 	});
 
 	it('keeps an h1 that comes after a thematic break', () => {
 		const tree = [p('Lead'), { type: 'thematicBreak' }, h(1, 'Later')];
-		const before = structuredClone(tree);
-		assert.deepEqual(run(structuredClone(tree)), before);
+		const before = clone(tree);
+		assert.deepEqual(run(clone(tree)), before);
 	});
 
 	it('removes only the first of two h1 headings', () => {
@@ -41,16 +43,21 @@ describe('remarkStripTitle', () => {
 		assert.deepEqual(run([wrapper], { frontMatter: { title: 'T' } })[0].children, [p('x')]);
 	});
 
-	it('leaves hide_title pages alone', () => {
-		const tree = [h(1, 'Title'), p('Body')];
-		const before = structuredClone(tree);
-		assert.deepEqual(run(structuredClone(tree), { frontMatter: { hide_title: true } }), before);
+	it('keeps a nested h1 as an h2 when text comes before its wrapper and the front matter has a title', () => {
+		const inner = { type: 'mdxJsxFlowElement', name: 'div', children: [h(1, 'Deep')] };
+		const outer = { type: 'mdxJsxFlowElement', name: 'section', children: [p('Lead text'), inner] };
+		const out = run([outer], { frontMatter: { title: 'T' } });
+		assert.deepEqual(out[0].children[1].children, [h(2, 'Deep')]);
 	});
 
-	it('keeps the h1 when text comes before it and the page has no title', () => {
-		const tree = [p('Lead text'), h(1, 'Heading')];
-		const before = structuredClone(tree);
-		assert.deepEqual(run(structuredClone(tree), {}, 'Lead text\n\n# Heading'), before);
+	it('leaves hide_title pages alone', () => {
+		const tree = [h(1, 'Title'), p('Body')];
+		const before = clone(tree);
+		assert.deepEqual(run(clone(tree), { frontMatter: { hide_title: true } }), before);
+	});
+
+	it('keeps the heading as an h2 when text comes before it and the page has no title', () => {
+		assert.deepEqual(run([p('Lead text'), h(1, 'Heading')], {}, 'Lead text\n\n# Heading'), [p('Lead text'), h(2, 'Heading')]);
 	});
 
 	it('keeps an h1 after text and demotes it to h2 when the front matter has a title', () => {
@@ -81,14 +88,12 @@ describe('remarkStripTitle', () => {
 		assert.deepEqual(run([h(1, 'Title'), p('Body')], {}, '---\nsidebar_position: 1\n---\n\n# Title\n\nBody'), [p('Body')]);
 	});
 
-	it('keeps the h1 when a comment, export or expression comes first and there is no title', () => {
+	it('keeps the heading as an h2 when a comment, export or expression comes first and there is no title', () => {
 		const note = { type: 'html', value: '<!-- note -->' };
 		const exp = { type: 'mdxjsEsm', value: 'export const a = 1;' };
 		const expr = { type: 'mdxFlowExpression', value: '/* c */' };
 		for (const [node, value] of [[note, '<!-- note -->\n\n# Install'], [exp, 'export const a = 1;\n\n# Install'], [expr, '{/* c */}\n\n# Install']]) {
-			const tree = [node, h(1, 'Install'), p('Body')];
-			const before = structuredClone(tree);
-			assert.deepEqual(run(structuredClone(tree), {}, value), before);
+			assert.deepEqual(run([node, h(1, 'Install'), p('Body')], {}, value), [node, h(2, 'Install'), p('Body')]);
 		}
 	});
 
@@ -99,8 +104,8 @@ describe('remarkStripTitle', () => {
 
 	it('does not need a value string to leave a page alone', () => {
 		const tree = [h(1, 'Title')];
-		const before = structuredClone(tree);
-		assert.deepEqual(run(structuredClone(tree)), before);
+		const before = clone(tree);
+		assert.deepEqual(run(clone(tree)), before);
 	});
 
 	it('skips a front matter node before the title (md pages keep it in the tree)', () => {

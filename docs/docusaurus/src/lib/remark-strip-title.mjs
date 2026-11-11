@@ -21,9 +21,11 @@ const { parseMarkdownContentTitle } = createRequire(require.resolve('@docusaurus
  * `title`, or else from the content title that Docusaurus itself finds
  * (`parseMarkdownContentTitle`: the text, after front matter and imports, must
  * start with an h1). Without a front matter title, the heading is removed only
- * when Docusaurus took it as the title. With a front matter title, the heading is
- * removed only when it is the first content block; otherwise it is a real section
- * heading, so it stays and is demoted to an h2 to keep one <h1> on the page.
+ * when Docusaurus took it as the title; when it did not (a comment, an export or
+ * text comes first), the header shows another title, so the heading stays and is
+ * demoted to an h2. With a front matter title, the heading is removed only when
+ * it is the first content block; otherwise it is a real section heading, so it
+ * stays and is demoted to an h2. Either way the page keeps one <h1>.
  *
  * @return A remark transformer.
  */
@@ -33,11 +35,13 @@ export default function remarkStripTitle() {
 		const first = findFirst(tree);
 		if (!first || first.node.type !== 'heading' || first.node.depth !== 1) return;
 		if (hasTitle(file)) {
-			if (isFirstBlock(tree, first)) first.parent.children.splice(first.index, 1);
+			if (isFirstBlock(tree, first.node)) first.parent.children.splice(first.index, 1);
 			else first.node.depth = 2;
-		} else if (hasContentTitle(file)) {
-			first.parent.children.splice(first.index, 1);
+			return;
 		}
+		const contentTitle = hasContentTitle(file);
+		if (contentTitle === true) first.parent.children.splice(first.index, 1);
+		else if (contentTitle === false) first.node.depth = 2;
 	};
 }
 
@@ -57,9 +61,12 @@ function hasTitle(file) {
 	return Boolean(file.data?.frontMatter?.title);
 }
 
-/** True when Docusaurus finds a content title (a leading h1) in the file text, which is what it uses as the page title. */
+/**
+ * True when Docusaurus finds a content title (a leading h1) in the file text, which is what it uses as the page title;
+ * false when it does not; null when the file text is not available, so nothing can be decided.
+ */
 function hasContentTitle(file) {
-	if (typeof file.value !== 'string') return false;
+	if (typeof file.value !== 'string') return null;
 	const text = file.value.replace(/^---\r?\n[\s\S]*?\r?\n---[^\S\r\n]*(?:\r?\n|$)/, '');
 	return Boolean(parseMarkdownContentTitle(text, { removeContentTitle: false }).contentTitle);
 }
@@ -69,12 +76,14 @@ function isSilent(node) {
 	return node.type === 'yaml' || node.type === 'mdxjsEsm' || node.type === 'mdxFlowExpression' || (node.type === 'html' && /^\s*<!--/.test(node.value));
 }
 
-/** True when nothing but silent nodes come before the heading, also inside a wrapper element that holds it. */
-function isFirstBlock(tree, { parent, index }) {
-	if (!parent.children.slice(0, index).every(isSilent)) return false;
-	if (parent === tree) return true;
-	const top = tree.children.findIndex((node) => containsNode(node, parent));
-	return top >= 0 && tree.children.slice(0, top).every(isSilent);
+/** True when nothing but silent nodes come before the heading, at every level of the wrappers that hold it. */
+function isFirstBlock(parent, target) {
+	for (const child of parent.children || []) {
+		if (child === target) return true;
+		if (containsNode(child, target)) return isFirstBlock(child, target);
+		if (!isSilent(child)) return false;
+	}
+	return false;
 }
 
 function containsNode(node, target) {
