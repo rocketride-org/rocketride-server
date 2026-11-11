@@ -21,7 +21,7 @@
 // SOFTWARE.
 
 // =============================================================================
-// WAVE LOOP TESTS — the done rule, running calls (order, approval, timeouts, user time), stop and steering, remove, no key past a tool
+// WAVE LOOP TESTS — the done rule, running calls (order, approval, timeouts, user time), stop and steering, remove, peek, no key past a tool
 // =============================================================================
 
 import assert from 'node:assert/strict';
@@ -32,6 +32,7 @@ import { CheckRecord, createChatModel } from '../run';
 import type { CheckStatus } from '../toolkits/appCheck';
 import { AgentTool, UserTime } from '../tools';
 import { runLoop, type FinishRule, type LoopOptions, type RanCall } from './loop';
+import { peek, RunMemory } from './memory';
 import type { ModelCall, PromptPrefix, QuestionSpec } from './plan';
 
 // =============================================================================
@@ -356,6 +357,43 @@ test('a result read again after the model removed it stays, until a newer read o
 	const last = resultsIn(model.questions[7]).map((entry) => entry.key);
 	assert.ok(!last.includes('wave-2.r0'), 'an older read of the call can go once a newer one stays');
 	assert.ok(last.includes('wave-4.r0'), 'the newest read of the call stays');
+});
+
+// =============================================================================
+// PEEK AND ANSWER REFERENCES — one peek, or one reference in the answer, puts at most 32,000 characters in front of the model or user
+// =============================================================================
+
+test('a chunk peek returns at most 32,000 characters, and a path peek past that is cut and says by how much', () => {
+	const memory = new RunMemory();
+	memory.put('text', 'x'.repeat(100_000));
+	memory.put('json', JSON.stringify({ note: 'y'.repeat(40_000), rows: Array.from({ length: 60 }, () => 'z'.repeat(1_000)) }));
+
+	const chunk = JSON.parse(peek(memory, { key: 'text', length: 50_000 }));
+	assert.deepEqual({ ...chunk, preview: chunk.preview.length }, { preview: 32_000, offset: 0, length: 32_000, total_chars: 100_000 });
+
+	const note = JSON.parse(peek(memory, { key: 'json', path: 'note' }));
+	assert.deepEqual({ ...note, preview: note.preview.length }, { path: 'note', preview: 32_000, truncated: true, returned_chars: 32_000, total_chars: 40_000 });
+
+	// the array cap leaves 50 rows, still over 32,000 characters, so both counts come back
+	const rows = JSON.parse(peek(memory, { key: 'json', path: 'rows' }));
+	assert.deepEqual({ ...rows, preview: rows.preview.length }, { path: 'rows', preview: 32_000, truncated: true, returned_items: 50, total_items: 60, returned_chars: 32_000, total_chars: 50 * 1_003 + 1 });
+});
+
+test('a reference in the final answer pastes at most 32,000 characters and says how many it cut, while one in a tool argument arrives whole', async () => {
+	const big = 'x'.repeat(40_000);
+	const take = stub('take');
+	const model = scriptedModel([plan(['big']), plan(['take', { data: '{{memory.ref:wave-0.r0}}' }]), done('Here: {{memory.ref:wave-0.r0}}')]);
+	const result = await loop(model, [stub('big', () => big), take]);
+	assert.equal(take.seen[0].data, big);
+	assert.equal(result.answer, `Here: ${'x'.repeat(32_000)} ... (cut at 32,000 of 40,000 characters)`);
+});
+
+test('the best-effort answer shows a path peek cut by characters with its real counts', async () => {
+	const model = scriptedModel([plan(['big']), plan(['memory.peek', { key: 'wave-0.r0', path: 'note' }]), 'best effort']);
+	await loop(model, [stub('big', () => JSON.stringify({ note: 'y'.repeat(40_000) }))], { maxWaves: 2 });
+	const gathered = model.questions[2].context[0];
+	assert.match(gathered, /note = y{2000} \.\.\. \(cut at 2,000 of 32,000 characters\) \(characters 0 to 32,000 of 40,000\)$/m);
+	assert.doesNotMatch(gathered, /undefined/);
 });
 
 // =============================================================================

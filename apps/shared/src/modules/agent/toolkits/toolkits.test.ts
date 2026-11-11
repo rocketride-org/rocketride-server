@@ -500,6 +500,15 @@ test('rocketride_client results hide secrets but keep the run token', async () =
 	assert.doesNotMatch(await tool.execute({ method: 'getTasks' }), /tk-other-0003/, 'a token anywhere else stays hidden');
 });
 
+test('rocketride_client returns a large result whole, as JSON, and cuts only a runaway one past 1,000,000 characters', async () => {
+	const tasks = (n: number) => Array.from({ length: n }, (_, i) => ({ name: `task ${i}`, note: 'a scheduled summary of the morning mail' }));
+	const large = await clientTool(scriptedClient({ getTasks: tasks(2_000) }).client).execute({ method: 'getTasks' });
+	assert.ok(large.length > 32_000, `${large.length} chars`);
+	assert.deepEqual(JSON.parse(large), tasks(2_000), 'nothing is cut, so a path peek can still parse it');
+	const runaway = await clientTool(scriptedClient({ getTasks: tasks(20_000) }).client).execute({ method: 'getTasks' });
+	assert.match(runaway, /\n\[TRUNCATED: showing first 1000000 of \d+ chars — ask for less, such as one item or a smaller page\]$/);
+});
+
 // =============================================================================
 // SECRETS — markers in files, redaction at every boundary, pasted keys held back
 // =============================================================================
@@ -887,6 +896,19 @@ test("check_app leaves the template build config's browser-only type errors out,
 		assert.match(step?.output ?? '', /Not type-checked in the editor: rsbuild\.config\.mts, a build config .* \(3 errors left out\)/);
 		assert.doesNotMatch(step?.output ?? '', /Cannot find module/);
 	}
+});
+
+test('check_app cuts a long error list at 32,000 characters', async () => {
+	const markers = Array.from({ length: 600 }, (_, i): MarkerInfo => ({ uri: 'file:///daybook/src/App.tsx', line: i + 1, message: `Type 'string' is not assignable to type 'number' in field ${i}.`, severity: 8, owner: 'typescript' }));
+	const source = { modelUris: () => ['file:///daybook/src/App.tsx'], markers: () => markers, onChange: () => () => undefined };
+	const toolkit = new AppCheckToolkit(
+		hostFor(new MemoryWorkspace(DAYBOOK), { leasePreview: async () => lent(devSession()) }),
+		async () => source,
+		() => undefined,
+		{ build: { buildWaitMs: 1000, settleMs: 20, runtimeGraceMs: 20 }, types: { quietMs: 10, maxMs: 200 } }
+	);
+	const result = await toolOf(toolkit, 'check_app').execute({ app: 'daybook-ui' });
+	assert.match(result, /\n {2}\[TRUNCATED: showing first 32000 of \d+ chars — fix the first errors and check again to see the rest\]/);
 });
 
 test('a check whose types or build step did not run is not checked, and a failed step still fails it', () => {

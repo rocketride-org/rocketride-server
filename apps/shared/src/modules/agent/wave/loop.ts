@@ -232,7 +232,7 @@ interface Entry extends ResultEntry {
 	path?: string;
 	/** What the peek read. */
 	preview?: string;
-	/** Whether a path peek's array was capped. */
+	/** Whether a path peek's array was capped or its preview cut. */
 	truncated?: boolean;
 	/** How many array items a capped peek returned. */
 	returned_items?: number;
@@ -242,6 +242,8 @@ interface Entry extends ResultEntry {
 	offset?: number;
 	/** How many characters a chunk peek returned. */
 	length?: number;
+	/** How many characters a path peek returned when its preview was cut. */
+	returned_chars?: number;
 	total_chars?: number;
 }
 
@@ -311,10 +313,10 @@ function peekLine(entry: Entry): string {
 		text = `${text.slice(0, FALLBACK_PREVIEW_CHARS)} ... (cut at ${withCommas(FALLBACK_PREVIEW_CHARS)} of ${withCommas(text.length)} characters)`;
 	}
 	const notes: string[] = [];
-	if (entry.truncated) notes.push(`showing ${entry.returned_items} of ${entry.total_items} items`);
+	if (entry.truncated && entry.returned_items !== undefined) notes.push(`showing ${entry.returned_items} of ${entry.total_items} items`);
 	if (typeof entry.total_chars === 'number') {
 		const start = entry.offset ?? 0;
-		notes.push(`characters ${withCommas(start)} to ${withCommas(start + (entry.length ?? 0))} of ${withCommas(entry.total_chars)}`);
+		notes.push(`characters ${withCommas(start)} to ${withCommas(start + (entry.length ?? entry.returned_chars ?? 0))} of ${withCommas(entry.total_chars)}`);
 	}
 	const where = entry.path ? `${entry.path} = ` : '';
 	return where + text + (notes.length ? ` (${notes.join('; ')})` : '');

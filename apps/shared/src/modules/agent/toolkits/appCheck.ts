@@ -154,6 +154,9 @@ const NOT_OPEN_SUMMARY = "types not checked: the app's files could not be loaded
 
 const NOT_OPEN_OUTPUT = "The app's files could not be loaded into the type checker, so its types were not checked.";
 
+/** The most characters of an error list or build failure a check returns: the first errors are the ones to fix, and checking again shows the rest. */
+const ERRORS_MAX_CHARS = 32_000;
+
 // =============================================================================
 // TYPES
 // =============================================================================
@@ -366,7 +369,7 @@ async function appTypeEvidence(src: MarkerSource, app: AppEntry, tsFiles: string
 	const ignored = gone.length > 0 ? `\nIgnored ${gone.length} ${gone.length === 1 ? 'marker' : 'markers'} for ${goneFiles.length === 1 ? 'a file that no longer exists' : 'files that no longer exist'}: ${goneFiles.join(', ')}.` : '';
 	const configFiles = [...new Set(config.map((e) => e.relPath))];
 	const configNote = configFiles.length > 0 ? `\nNot type-checked in the editor: ${configFiles.join(', ')}, a build config whose Node and rsbuild types the browser does not have (${config.length} ${config.length === 1 ? 'error' : 'errors'} left out).` : '';
-	const output = `${clip(hide(errorText), 'fix the first errors and check again to see the rest')}${note}${ignored}${configNote}`;
+	const output = `${clip(hide(errorText), 'fix the first errors and check again to see the rest', ERRORS_MAX_CHARS)}${note}${ignored}${configNote}`;
 
 	if (errors.length > 0) return { step: TYPES_STEP, ran: TYPES_RAN, output, status: 'fail', summary: `types: ${errors.length} errors` };
 	const notChecked = [...(unchecked.length > 0 ? [`${unchecked.length} files`] : []), ...configFiles];
@@ -421,7 +424,7 @@ export async function typesNote(vfs: IWorkspaceFileSystem, markers: () => Promis
 		const total = appTypeErrors(src, app.id).length;
 		if (errors.length === 0) return `\n\nType errors in this file: none. App total: ${total}.`;
 		const lines = errors.map((e) => `- line ${e.line}: ${e.message.replace(/\s*\n\s*/g, ' ')}`).join('\n');
-		return `\n\nType errors in this file (${errors.length}):\n${clip(hide(lines), SAVE_CLIP_HINT)}\nApp total: ${total}.`;
+		return `\n\nType errors in this file (${errors.length}):\n${clip(hide(lines), SAVE_CLIP_HINT, ERRORS_MAX_CHARS)}\nApp total: ${total}.`;
 	} catch (err) {
 		return `\n\nTypes not checked: ${messageOf(err)}.`;
 	}
@@ -545,7 +548,7 @@ export function validateNote(validation: SaveValidation, hide: (text: string) =>
 	const { errors } = validation;
 	if (errors.length === 0) return '\n\nvalidate: OK';
 	const lines = errors.map((e) => `- ${e}`).join('\n');
-	return `\n\nvalidate: ${errors.length} ${errors.length === 1 ? 'error' : 'errors'}:\n${clip(hide(lines), SAVE_CLIP_HINT)}`;
+	return `\n\nvalidate: ${errors.length} ${errors.length === 1 ? 'error' : 'errors'}:\n${clip(hide(lines), SAVE_CLIP_HINT, ERRORS_MAX_CHARS)}`;
 }
 
 // =============================================================================
@@ -750,7 +753,7 @@ function errorLines(rows: AppErrorRow[]): string[] {
 
 /** Joins lines into text, hides the run's hidden values, then cuts it with a note on how to see less. */
 function listText(lines: string[], hide: (text: string) => string): string {
-	return clip(hide(lines.join('\n')), 'fix the first errors and check again to see the rest');
+	return clip(hide(lines.join('\n')), 'fix the first errors and check again to see the rest', ERRORS_MAX_CHARS);
 }
 
 // =============================================================================
@@ -832,7 +835,7 @@ async function appBuildEvidence(session: AgentDevSession, opts: AppBuildOptions,
 		if (outcome.status.state === 'error') {
 			const reason = hide(outcome.status.reason?.trim() || 'no reason reported');
 			const raised = errorRows.length > 0 ? `\nErrors the build raised:\n${listText(errorLines(errorRows), hide)}` : '';
-			const output = `${clip(`Build failed: ${reason}`, 'the reason is long; fix the first problem and check again')}${raised}\nRuntime and console were not checked because the build failed.`;
+			const output = `${clip(`Build failed: ${reason}`, 'the reason is long; fix the first problem and check again', ERRORS_MAX_CHARS)}${raised}\nRuntime and console were not checked because the build failed.`;
 			return [{ step: 'build', ran: BUILD_RAN, output, status: 'fail', summary: `build failed: ${brief(reason)}` }];
 		}
 

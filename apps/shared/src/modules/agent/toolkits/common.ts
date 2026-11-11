@@ -76,8 +76,12 @@ export function shellChoice(): ChoiceFn {
 // CONSTANTS
 // =============================================================================
 
-/** The most characters a tool returns before its text is cut. */
-export const RESULT_MAX_CHARS = 32_000;
+/**
+ * The most characters a tool returns before its text is cut. The model reads a stored result only
+ * through its summary and memory.peek, so this ceiling catches runaway results, not ordinary large
+ * ones: the largest result seen across 54 eval traces is the 148,151-character node catalog.
+ */
+export const RESULT_MAX_CHARS = 1_000_000;
 
 const REDACTED = '[redacted]';
 

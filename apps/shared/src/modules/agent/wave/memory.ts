@@ -31,7 +31,7 @@
  * `[a:b]`, `[*]`) with JMESPath semantics, so there is no library to load.
  */
 
-import { pyRepr } from './summary';
+import { pyRepr, withCommas } from './summary';
 
 // =============================================================================
 // MEMORY — the run's stored results
@@ -42,6 +42,12 @@ const PEEK_MAX_ARRAY_ITEMS = 50;
 
 /** Characters a chunk peek returns by default: most single-record API responses in one read. */
 const PEEK_DEFAULT_LENGTH = 8000;
+
+/**
+ * Most characters one peek returns, by chunk or by path, and one reference pastes into the final answer:
+ * never more in the prompt than a whole result could put there under the old 32,000-character result cap.
+ */
+const PEEK_MAX_CHARS = 32_000;
 
 /** The memory key of a tool result, e.g. `wave-0.r2` for wave 0, call 2 (both counted from 0). */
 export function resultKey(wave: number, index: number): string {
@@ -210,14 +216,17 @@ function wholeNumber(args: Record<string, unknown>, name: string, fallback: numb
 
 /**
  * Runs a memory.peek call. With a path, it parses the stored text as JSON and
- * returns what the path selects, an array capped at 50 items. Without one, it
- * returns a chunk of the stored text, as stored, from `offset` (default 0)
- * for `length` characters (default 8000).
+ * returns what the path selects, an array capped at 50 items and the preview
+ * cut at 32,000 characters. Without one, it returns a chunk of the stored
+ * text, as stored, from `offset` (default 0) for `length` characters
+ * (default 8000, at most 32,000).
  *
  * @param args - The call's arguments: `key`, and `path` or `offset`/`length`.
  * @returns JSON text of Wave's peek result, without its tool and key: `{path, preview}`,
  *   `{path, preview, truncated, returned_items, total_items}` when an array was capped,
- *   or `{preview, offset, length, total_chars}` in chunk mode.
+ *   `{path, preview, truncated, returned_chars, total_chars}` when the preview was cut (with
+ *   `returned_items` and `total_items` too when an array was also capped),
+ *   or `{preview, offset, length, total_chars}` in chunk mode, `length` being the characters returned.
  * @throws Error when the key holds nothing, a path is given for text that is not JSON,
  *   or offset/length is not a number; PathError for an unsupported path.
  */
@@ -232,22 +241,20 @@ export function peek(memory: RunMemory, args: Record<string, unknown>): string {
 		const parsed = tryParse(stored);
 		if (!parsed.ok) throw new Error(`key ${named} holds text, not JSON. Peek it without a path to read it in chunks.`);
 		const value = evalPath(parsed.value, path);
-		// Cap large arrays so one peek cannot flood the prompt; the counts tell the
-		// model to index past the cap or reference the key in its answer instead.
-		if (Array.isArray(value) && value.length > PEEK_MAX_ARRAY_ITEMS) {
-			return JSON.stringify({
-				path,
-				preview: JSON.stringify(value.slice(0, PEEK_MAX_ARRAY_ITEMS)),
-				truncated: true,
-				returned_items: PEEK_MAX_ARRAY_ITEMS,
-				total_items: value.length,
-			});
+		// Cap large arrays, then long previews, so one peek cannot flood the prompt; the counts tell the
+		// model to index past the cap, read a narrower path, or reference the key in its answer instead.
+		const capped = Array.isArray(value) && value.length > PEEK_MAX_ARRAY_ITEMS;
+		const items = capped ? { returned_items: PEEK_MAX_ARRAY_ITEMS, total_items: value.length } : {};
+		const shown = capped ? value.slice(0, PEEK_MAX_ARRAY_ITEMS) : value;
+		const preview = typeof shown === 'string' ? shown : JSON.stringify(shown);
+		if (preview.length > PEEK_MAX_CHARS) {
+			return JSON.stringify({ path, preview: preview.slice(0, PEEK_MAX_CHARS), truncated: true, ...items, returned_chars: PEEK_MAX_CHARS, total_chars: preview.length });
 		}
-		return JSON.stringify({ path, preview: typeof value === 'string' ? value : JSON.stringify(value) });
+		return JSON.stringify(capped ? { path, preview, truncated: true, ...items } : { path, preview });
 	}
 
 	const offset = wholeNumber(args, 'offset', 0);
-	const length = wholeNumber(args, 'length', PEEK_DEFAULT_LENGTH);
+	const length = Math.min(wholeNumber(args, 'length', PEEK_DEFAULT_LENGTH), PEEK_MAX_CHARS);
 	const chunk = stored.slice(offset, offset + length);
 	return JSON.stringify({ preview: chunk, offset, length: chunk.length, total_chars: stored.length });
 }
@@ -270,7 +277,7 @@ export const MEMORY_PEEK_TOOL: { name: 'memory.peek'; description: string; param
 				description: `Path (field names, [n], [a:b], [*]) to extract a specific field or slice (e.g. "results[0].name", "rows[0:5].city", "postcodes[2]"). Arrays are capped at ${PEEK_MAX_ARRAY_ITEMS} items — use indexed paths for specific elements.`,
 			},
 			offset: { type: 'integer', description: 'Character offset for chunk reading (default 0). Only when path is omitted.' },
-			length: { type: 'integer', description: `Characters to return for chunk reading (default ${PEEK_DEFAULT_LENGTH}). Only when path is omitted.` },
+			length: { type: 'integer', description: `Characters to return for chunk reading (default ${PEEK_DEFAULT_LENGTH}, at most ${PEEK_MAX_CHARS}). Only when path is omitted.` },
 		},
 	},
 };
@@ -332,11 +339,16 @@ function render(stored: string, format: string | undefined, path: string | undef
 	return format ? formatValue(data, format) : embedded(data);
 }
 
-/** Replaces each tag in a string with its text; a tag whose key is not stored reads as `[missing data: key]`. */
-function substitute(text: string, memory: RunMemory): string {
+/**
+ * Replaces each tag in a string with its text; a tag whose key is not stored reads as `[missing data: key]`.
+ * A tag's text past `max` characters is cut there and says how much was cut; with no `max`, it stays whole.
+ */
+function substitute(text: string, memory: RunMemory, max = Infinity): string {
 	return text.replace(REF_PATTERN, (_tag, key: string, format: string | undefined, path: string | undefined) => {
 		const stored = memory.get(key);
-		return stored === undefined ? `[missing data: ${key}]` : render(stored, format, path);
+		if (stored === undefined) return `[missing data: ${key}]`;
+		const rendered = render(stored, format, path);
+		return rendered.length > max ? `${rendered.slice(0, max)} ... (cut at ${withCommas(max)} of ${withCommas(rendered.length)} characters)` : rendered;
 	});
 }
 
@@ -378,13 +390,15 @@ export function resolveArgRefs(args: Record<string, unknown>, memory: RunMemory)
 
 /**
  * Resolves the memory tags in the final answer. Each tag becomes the stored
- * text, narrowed by its path and rendered in its format; a tag whose key is
- * not stored reads `[missing data: key]`, so the user sees what is absent.
+ * text, narrowed by its path and rendered in its format, and cut at 32,000
+ * characters: the answer goes into the chat, the saved session and every
+ * later turn's history. A tag whose key is not stored reads
+ * `[missing data: key]`, so the user sees what is absent.
  *
  * @returns The answer text with no tags left.
  */
 export function resolveAnswerRefs(answer: string, memory: RunMemory): string {
-	return substitute(answer, memory);
+	return substitute(answer, memory, PEEK_MAX_CHARS);
 }
 
 // =============================================================================

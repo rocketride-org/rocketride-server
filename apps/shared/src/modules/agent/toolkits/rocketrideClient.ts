@@ -40,7 +40,7 @@ import type { RocketRideClient } from 'rocketride';
 import type { IWorkspaceFileSystem } from '../../vfs/vfsTypes';
 import { AgentTool, AgentToolkit, type ToolStep } from '../tools';
 import type { RunRecord } from '../turn';
-import { clip, isJsonObject, isWalkable, messageOf, pipelineArg, redactSecrets, requireClient, RESULT_MAX_CHARS, toolText, type ClientGetter, type JsonObject } from './common';
+import { clip, isJsonObject, isWalkable, messageOf, pipelineArg, redactSecrets, requireClient, toolText, type ClientGetter, type JsonObject } from './common';
 
 // =============================================================================
 // CONSTANTS
@@ -74,6 +74,12 @@ const RERUN_GUIDANCE = 'Your edits are not in the running task. To run them, ter
 
 /** The longest a service's summary runs in a trimmed catalog, in characters. */
 const SUMMARY_MAX_CHARS = 100;
+
+/**
+ * The longest the catalog runs before each service is cut to one line. It stays at the old result
+ * limit: the catalog's view is decided separately from RESULT_MAX_CHARS.
+ */
+const CATALOG_MAX_CHARS = 32_000;
 
 /** The guide that documents every client method. */
 const GUIDE = '.rocketride/docs/ROCKETRIDE_typescript_API.md';
@@ -236,14 +242,14 @@ function serviceLine(service: JsonObject): string {
 }
 
 /**
- * The engine's catalog made fit to read: the SVG icon table goes (it alone is far over the result
- * limit), and when the rest still does not fit, each service is cut to its category and summary so
- * no service drops off the end.
+ * The engine's catalog made fit to read: the SVG icon table goes (it alone is far over
+ * CATALOG_MAX_CHARS), and when the rest still does not fit, each service is cut to its category and
+ * summary so no service drops off the end.
  */
 function catalogOf(result: unknown): unknown {
 	if (!isJsonObject(result)) return result;
 	const { icons: _icons, ...catalog } = result;
-	if (JSON.stringify(catalog, null, 1).length <= RESULT_MAX_CHARS) return catalog;
+	if (JSON.stringify(catalog, null, 1).length <= CATALOG_MAX_CHARS) return catalog;
 
 	const services = Object.entries(isJsonObject(catalog.services) ? catalog.services : {})
 		.filter((entry): entry is [string, JsonObject] => isJsonObject(entry[1]))
