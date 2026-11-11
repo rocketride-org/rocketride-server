@@ -118,6 +118,33 @@ def html_escape(value: str) -> str:
     return html.escape(value, quote=True)
 
 
+def render(
+    template: str,
+    context: Mapping[str, Any],
+    escape: Callable[[str], str] = html_escape,
+    on_issue: Callable[[str], None] = _log,
+) -> str:
+    """Render ``template`` against ``context``, escaping every substituted value with ``escape``.
+
+    Args:
+        template: The template text (a snapshot, decoded).
+        context: The root context: the names the server provides
+            (``ROOT_NAMES``) and the page's bound data.
+        escape: Applied to every substituted value (default: ``html_escape``).
+        on_issue: Called with a description of each dropped tag and each
+            unknown or non-scalar field (default: a debug log line).
+
+    Returns:
+        The rendered text.
+
+    Raises:
+        TemplateError: sections nest deeper than ``MAX_SECTION_DEPTH``.
+    """
+    renderer = _Renderer(escape, on_issue)
+    renderer.render_nodes(parse(template, on_issue), [context])
+    return ''.join(renderer.out)
+
+
 def parse(template: str, on_issue: Callable[[str], None] = _log) -> List[Node]:
     """Parse a template into nodes; unsupported tags are dropped and reported.
 
@@ -172,7 +199,58 @@ def parse(template: str, on_issue: Callable[[str], None] = _log) -> List[Node]:
     return root.children
 
 
+class _Renderer:
+    """One render: appends to ``out``, escaping every substituted value with ``escape``.
+
+    Every method takes ``contexts``, the lookup stack, innermost last.
+    """
+
+    def __init__(self, escape: Callable[[str], str], on_issue: Callable[[str], None]) -> None:
+        self.escape = escape
+        self.on_issue = on_issue
+        self.out: List[str] = []
+
+    def render_nodes(self, nodes: List[Node], contexts: List[Any]) -> None:
+        """Append the rendering of ``nodes``."""
+        for node in nodes:
+            if isinstance(node, Text):
+                self.out.append(node.text)
+            elif isinstance(node, Var):
+                self.render_var(node, contexts)
+            else:
+                self.render_section(node, contexts)
+
+    def render_var(self, var: Var, contexts: List[Any]) -> None:
+        """Append the escaped scalar the tag names; an unknown or non-scalar field renders empty (reported)."""
+        # _MISSING is not a scalar either.
+        text = _scalar(_lookup(contexts, var.name))
+        if text is None:
+            self.on_issue(f'{{{{{var.name}}}}} names an unknown or non-scalar field (rendered empty)')
+            return
+        self.out.append(self.escape(text))
+
+    def render_section(self, section: Section, contexts: List[Any]) -> None:
+        """Append the children once per list item, once inside a non-empty mapping, or once for any other truthy value.
+
+        An unknown field renders nothing (reported). Each list item is pushed
+        as a context; one that is not a mapping adds no names (see the module
+        docstring).
+        """
+        value = _lookup(contexts, section.name)
+        if value is _MISSING:
+            self.on_issue(f'section {{{{#{section.name}}}}} names an unknown field (rendered empty)')
+            return
+        if isinstance(value, list):
+            for item in value:
+                self.render_nodes(section.children, contexts + [item])
+        elif isinstance(value, Mapping) and value:
+            self.render_nodes(section.children, contexts + [value])
+        elif value:
+            self.render_nodes(section.children, contexts)
+
+
 def _lookup(contexts: List[Any], name: str) -> Any:
+    """The value the dotted ``name`` resolves to, innermost context first, else ``_MISSING``."""
     head, *rest = name.split('.')
     # A server-provided name resolves from the root context only, so no
     # record bound inside a section can shadow it.
@@ -191,6 +269,7 @@ def _lookup(contexts: List[Any], name: str) -> Any:
 
 
 def _scalar(value: Any) -> Optional[str]:
+    """``value`` as text when it is a scalar (None renders empty), else None."""
     if value is None:
         return ''
     if isinstance(value, bool):
@@ -200,90 +279,3 @@ def _scalar(value: Any) -> Optional[str]:
     if isinstance(value, (str, int, float)):
         return str(value)
     return None
-
-
-def _render(
-    nodes: List[Node],
-    contexts: List[Any],
-    escape: Callable[[str], str],
-    on_issue: Callable[[str], None],
-    out: List[str],
-) -> None:
-    """Append the rendering of ``nodes`` to ``out``; ``contexts`` is the lookup stack, innermost last."""
-    for node in nodes:
-        if isinstance(node, Text):
-            out.append(node.text)
-        elif isinstance(node, Var):
-            _render_var(node.name, contexts, escape, on_issue, out)
-        else:
-            _render_section(node.name, node.children, contexts, escape, on_issue, out)
-
-
-def _render_var(
-    name: str,
-    contexts: List[Any],
-    escape: Callable[[str], str],
-    on_issue: Callable[[str], None],
-    out: List[str],
-) -> None:
-    """Append the escaped scalar ``name`` resolves to; an unknown or non-scalar field renders empty (reported)."""
-    # _MISSING is not a scalar either.
-    text = _scalar(_lookup(contexts, name))
-    if text is None:
-        on_issue(f'{{{{{name}}}}} names an unknown or non-scalar field (rendered empty)')
-        return
-    out.append(escape(text))
-
-
-def _render_section(
-    name: str,
-    children: List[Node],
-    contexts: List[Any],
-    escape: Callable[[str], str],
-    on_issue: Callable[[str], None],
-    out: List[str],
-) -> None:
-    """Append ``children`` once per list item, once inside a non-empty mapping, or once for any other truthy value.
-
-    An unknown field renders nothing (reported). Each list item is pushed as
-    a context; one that is not a mapping adds no names (see the module
-    docstring).
-    """
-    value = _lookup(contexts, name)
-    if value is _MISSING:
-        on_issue(f'section {{{{#{name}}}}} names an unknown field (rendered empty)')
-        return
-    if isinstance(value, list):
-        for item in value:
-            _render(children, contexts + [item], escape, on_issue, out)
-    elif isinstance(value, Mapping) and value:
-        _render(children, contexts + [value], escape, on_issue, out)
-    elif value:
-        _render(children, contexts, escape, on_issue, out)
-
-
-def render(
-    template: str,
-    context: Mapping[str, Any],
-    escape: Callable[[str], str] = html_escape,
-    on_issue: Callable[[str], None] = _log,
-) -> str:
-    """Render ``template`` against ``context``, escaping every substituted value with ``escape``.
-
-    Args:
-        template: The template text (a snapshot, decoded).
-        context: The root context: the names the server provides
-            (``ROOT_NAMES``) and the page's bound data.
-        escape: Applied to every substituted value (default: ``html_escape``).
-        on_issue: Called with a description of each dropped tag and each
-            unknown or non-scalar field (default: a debug log line).
-
-    Returns:
-        The rendered text.
-
-    Raises:
-        TemplateError: sections nest deeper than ``MAX_SECTION_DEPTH``.
-    """
-    out: List[str] = []
-    _render(parse(template, on_issue), [context], escape, on_issue, out)
-    return ''.join(out)
