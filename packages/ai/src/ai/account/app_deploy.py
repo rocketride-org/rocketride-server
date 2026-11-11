@@ -827,16 +827,22 @@ async def handle_deploy_app(conn: Any, request: Dict[str, Any]) -> Dict[str, Any
         # the public rung is the only one the page aggregate reads, so a
         # manifest declaring publicPages/site is validated here, before the
         # binding exists: privilege, path grammar, reserved prefixes,
-        # cross-app claims, data entries, snapshot files. A manifest without
-        # either section costs nothing.
+        # cross-app claims, data entries, snapshot files. For a platform app
+        # the gate always reads the build's dist/app-manifest.json, so it
+        # refuses the publish on a storage error or a missing artifact path
+        # even when the app declares no pages. A third-party app is never
+        # read: its metadata.manifest alone decides.
         if audience['type'] == 'public':
             from ai.modules.shell.public_pages import gate_errors
 
             manifest = manifest_of(entry)
             # No artifact path, no build output: an empty path would name the store's root dist/.
             artifact_path = str(entry.get('artifactPath') or '')
+            dist_dir = ''
+            if artifact_path:
+                dist_dir = dist_dir_of(artifact_path)
             try:
-                page_errors = await gate_errors(app_id, manifest, dist_dir_of(artifact_path) if artifact_path else '')
+                page_errors = await gate_errors(app_id, manifest, dist_dir)
             except Exception as exc:
                 return conn.build_error(request, f'Could not verify the publicPages claims of {app_id}: {exc}')
             if page_errors:
