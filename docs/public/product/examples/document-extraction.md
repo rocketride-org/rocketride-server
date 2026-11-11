@@ -137,8 +137,10 @@ Or via the Drag & Drop UI by using the `dropper` provider:
 ```
 
 `start` does not print an address. The page is on the engine port, at
-`http://localhost:5565/dropper/<project_id>/<source>?auth=<ROCKETRIDE_APIKEY>`.
-Drop files there and see results in JSON, text, and table tabs.
+`http://localhost:5565/dropper?auth=<task token>`, where the task token is the
+one `start` prints. The engine key does not work for uploads: the page opens
+with it, but dropped files fail because it does not identify the task. Drop
+files there and see results in JSON, text, and table tabs.
 
 ## Next steps
 

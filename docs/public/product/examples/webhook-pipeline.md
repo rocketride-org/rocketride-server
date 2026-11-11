@@ -81,7 +81,10 @@ The LLM in this pipeline listens on the `questions` lane, so send the question
 as `application/rocketride-question` with this JSON body. Plain text goes to the
 `text` lane and gets no answer from this pipeline.
 
+curl reads the key from your shell, not from `.env`, so set it first:
+
 ```bash
+export ROCKETRIDE_APIKEY=<the key your engine was started with>
 curl -X POST "http://localhost:5565/webhook/webhook-example/source_1" \
   -H "Authorization: Bearer $ROCKETRIDE_APIKEY" \
   -H "Content-Type: application/rocketride-question" \
