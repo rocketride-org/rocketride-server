@@ -307,7 +307,7 @@ async def _the_first_build_outlasts_the_startup_bound(monkeypatch):
     monkeypatch.setattr(pp, 'STARTUP_BUILD_SECONDS', 0.01)
     assert await pp.build_at_startup() is False
     release.set()
-    await pp._rebuild_task
+    await pp.page_map._rebuild_task
 
 
 @pytest.mark.parametrize(
@@ -457,20 +457,20 @@ async def test_schedule_rebuild_coalesces_events(monkeypatch):
         await gate.wait()
         return True
 
-    monkeypatch.setattr(pp, 'rebuild', slow_rebuild)
+    monkeypatch.setattr(pp.page_map, 'rebuild', slow_rebuild)
     pp.app_changed('rocketride.home')
     await asyncio.sleep(0)  # the first rebuild is now running
     for _ in range(4):
         pp.app_changed('rocketride.home')
     gate.set()
-    await pp._rebuild_task
+    await pp.page_map._rebuild_task
     # One running rebuild + exactly one follow-up for the events it missed.
     assert len(calls) == 2
 
 
 def test_schedule_rebuild_outside_a_loop_is_a_no_op():
     pp.schedule_rebuild()
-    assert pp._rebuild_task is None
+    assert pp.page_map._rebuild_task is None
 
 
 async def test_only_platform_app_changes_schedule_a_rebuild(monkeypatch):
@@ -480,11 +480,11 @@ async def test_only_platform_app_changes_schedule_a_rebuild(monkeypatch):
         rebuilds.append(acct)
         return True
 
-    monkeypatch.setattr(pp, 'rebuild', rebuild)
+    monkeypatch.setattr(pp.page_map, 'rebuild', rebuild)
     pp.app_changed('acme.brandy')
-    assert pp._rebuild_task is None and not pp._rebuild_pending
+    assert pp.page_map._rebuild_task is None and not pp.page_map._rebuild_pending
     pp.app_changed('rocketride.home')
-    await pp._rebuild_task
+    await pp.page_map._rebuild_task
     assert rebuilds == [None]
 
 
@@ -625,7 +625,7 @@ async def test_a_slow_first_build_starts_on_the_legacy_list_and_lands_later(monk
     assert await pp.build_at_startup() is False
     assert pp.current().legacy  # the engine starts here
     release.set()
-    await pp._rebuild_task
+    await pp.page_map._rebuild_task
     assert not pp.current().legacy and pp.current().exact['/'].title == 'Home'
 
 

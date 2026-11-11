@@ -27,26 +27,22 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _public_pages_state(monkeypatch):
-    """Every test starts on the legacy aggregate, with no background rebuilds and an empty store.
+    """Every test starts on a fresh page map and an empty store.
 
-    Tests that exercise rebuilds drive them explicitly, each on a fresh
-    rebuild lock (a lock binds to the event loop that first waits on it).
-    Swap listeners a test adds are dropped with it. The artifact store is the
-    hostile fixture's in-memory ``FILES`` (empty unless a test seeds it), so
-    unit tests never touch a real store.
+    The fresh ``PageMap`` holds the legacy aggregate, runs no rebuild and has
+    its own rebuild lock (a lock binds to the event loop that first waits on
+    it). It keeps the swap listeners registered at import; the ones a test
+    adds are dropped with it. The artifact store is the hostile fixture's
+    in-memory ``FILES`` (empty unless a test seeds it), so unit tests never
+    touch a real store.
     """
-    import asyncio
-
     import ai.modules.shell.public_pages as pp
 
     from .hostile_fixtures import FILES, file_info, read_file
 
-    monkeypatch.setattr(pp, '_current', None)
-    monkeypatch.setattr(pp, '_live_conflict', None)
-    monkeypatch.setattr(pp, '_on_swap', list(pp._on_swap))
-    monkeypatch.setattr(pp, '_rebuild_lock', asyncio.Lock())
-    monkeypatch.setattr(pp, '_rebuild_task', None)
-    monkeypatch.setattr(pp, '_rebuild_pending', False)
+    fresh = pp.PageMap()
+    fresh.listeners.extend(pp.page_map.listeners)
+    monkeypatch.setattr(pp, 'page_map', fresh)
     FILES.clear()
     monkeypatch.setattr(pp, 'read_artifact_file', read_file)
     monkeypatch.setattr(pp, 'artifact_file_info', file_info)

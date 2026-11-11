@@ -381,14 +381,14 @@ async def gate_errors(app_id: str, manifest: Mapping[str, Any], dist_dir: str, a
             return [f'{exc}; emit {{"publicPages": [...], "site": {{...}}}} or drop the file']
     if 'publicPages' not in manifest and 'site' not in manifest:
         return []
-    pages, _, errors = check_manifest(app_id, manifest, _live_conflict)
+    pages, _, errors = check_manifest(app_id, manifest, page_map.live_conflict)
     if not pages:
         # Nothing to collide or snapshot (a third party, or every page invalid):
         # never read, or echo a failure of, the other platform apps' storage.
         return errors
     # The publishing app's own current version is being replaced: never read it.
     others = await load_published(acct, strict=True, exclude=app_id)
-    exact, _ = _claims(others, _live_conflict)
+    exact, _ = _claims(others, page_map.live_conflict)
     for page in pages:
         owner = exact.get(page.path)
         if owner is not None:
@@ -426,125 +426,201 @@ STARTUP_BUILD_SECONDS = 10.0
 # and the next platform app deploy event retries.
 BUILD_SECONDS = 60.0
 
-_current: Optional[Aggregate] = None
-_live_conflict: Optional[Callable[[str], Optional[str]]] = None
-_on_swap: List[Callable[[Aggregate, Aggregate], None]] = []
-_rebuild_lock = asyncio.Lock()
-_rebuild_task: Optional[asyncio.Task] = None
-_rebuild_pending = False
+
+class PageMap:
+    """The page map in effect: the current aggregate, its swap listeners and the one-at-a-time rebuild.
+
+    The engine runs one, ``page_map``; the module functions below delegate to
+    it. A fresh instance holds the legacy aggregate until its first swap, has
+    no listeners and runs no rebuild.
+    """
+
+    def __init__(self) -> None:
+        """Start with no aggregate built, no live-route check, no listeners and no rebuild running."""
+        self.live_conflict: Optional[Callable[[str], Optional[str]]] = None
+        self.listeners: List[Callable[[Aggregate, Aggregate], None]] = []
+        self._current: Optional[Aggregate] = None
+        # One per instance: a lock binds to the event loop that first waits on it.
+        self._rebuild_lock = asyncio.Lock()
+        self._rebuild_task: Optional[asyncio.Task] = None
+        self._rebuild_pending = False
+
+    async def build_at_startup(self) -> bool:
+        """Build the first aggregate before the engine serves, waiting at most ``STARTUP_BUILD_SECONDS``.
+
+        Returns:
+            True when the build finished in time. Otherwise the engine starts
+            on the legacy page list and the build carries on in the background.
+        """
+        self.schedule_rebuild()
+        done, _ = await asyncio.wait({self._rebuild_task}, timeout=STARTUP_BUILD_SECONDS)
+        if not done:
+            warning(
+                f'[public_pages] the first build is still running after {STARTUP_BUILD_SECONDS:g}s; '
+                'starting on the legacy page list'
+            )
+        return bool(done)
+
+    def schedule_rebuild(self) -> None:
+        """Coalesced background rebuild: the publish/unpublish/rung-repoint hook.
+
+        Never blocks the caller. Events arriving while a rebuild runs fold into
+        exactly one more rebuild. A no-op outside a running event loop.
+        """
+        self._rebuild_pending = True
+        if self._rebuild_task is not None and not self._rebuild_task.done():
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        self._rebuild_task = loop.create_task(self._rebuild_loop())
+
+    async def _rebuild_loop(self) -> None:
+        """Run rebuilds until no more were requested while one ran (``schedule_rebuild`` coalesces into this)."""
+        while self._rebuild_pending:
+            self._rebuild_pending = False
+            await self.rebuild()
+
+    async def rebuild(self, acct: Any = None) -> bool:
+        """Rebuild from the published manifests; swap only when the map changed.
+
+        One rebuild at a time, so a slower, older build never lands after a newer
+        one, each bounded by ``BUILD_SECONDS``. Any failure (reading the store,
+        a timeout, or building) keeps the previous aggregate. An app the store
+        still publishes but cannot read keeps its pages: its manifest in the
+        current aggregate is built again and claims against the fresh ones, so a
+        transient read error drops nothing. An app no longer published drops its
+        pages.
+
+        Args:
+            acct: The account layer (the singleton when None).
+
+        Returns:
+            True when the aggregate now reflects the published manifests, False
+            when the build failed and the previous aggregate stays.
+        """
+        async with self._rebuild_lock:
+            try:
+                unreadable: Set[str] = set()
+                published = list(await asyncio.wait_for(load_published(acct, unreadable=unreadable), BUILD_SECONDS))
+                for app_id in sorted(unreadable):
+                    kept = self.current().published.get(app_id)
+                    if kept is not None:
+                        warning(f'[public_pages] {app_id}: unreadable this build, keeping its current pages')
+                        published.append(kept)
+                aggregate = build_aggregate(published, self.live_conflict)
+            except asyncio.TimeoutError:
+                warning(f'[public_pages] rebuild timed out after {BUILD_SECONDS:g}s, keeping the previous aggregate')
+                return False
+            except Exception as exc:
+                warning(f'[public_pages] rebuild failed, keeping the previous aggregate: {exc}')
+                return False
+            if aggregate != self.current():
+                self.swap(aggregate)
+            return True
+
+    def swap(self, aggregate: Aggregate) -> None:
+        """Atomically replace the current aggregate, then notify listeners.
+
+        Args:
+            aggregate: The new aggregate. A listener that raises is logged and
+                never stops the swap or the other listeners.
+        """
+        old = self.current()
+        self._current = aggregate
+        for callback in list(self.listeners):
+            try:
+                callback(old, aggregate)
+            except Exception as exc:
+                warning(f'[public_pages] swap listener failed: {exc}')
+
+    def current(self) -> Aggregate:
+        """The aggregate in effect right now (the legacy one until the first build).
+
+        Returns:
+            The current aggregate.
+        """
+        if self._current is None:
+            self._current = legacy_aggregate()
+        return self._current
+
+
+page_map = PageMap()
 
 
 def current() -> Aggregate:
-    """The aggregate in effect right now (the legacy one until the first build)."""
-    global _current
-    if _current is None:
-        _current = legacy_aggregate()
-    return _current
+    """The aggregate in effect right now (the legacy one until the first build).
+
+    Returns:
+        ``page_map.current()``.
+    """
+    return page_map.current()
 
 
 def set_live_conflict(fn: Optional[Callable[[str], Optional[str]]]) -> None:
-    """Install the live-route collision check (the shell module installs ``pages.live_route_conflict``)."""
-    global _live_conflict
-    _live_conflict = fn
+    """Install the live-route collision check (the shell module installs ``pages.live_route_conflict``).
+
+    Args:
+        fn: Maps a path to the live route it collides with, or None; None
+            removes the check.
+    """
+    page_map.live_conflict = fn
 
 
 def live_conflict() -> Optional[Callable[[str], Optional[str]]]:
-    """The installed live-route collision check, or None."""
-    return _live_conflict
+    """The installed live-route collision check.
+
+    Returns:
+        The check, or None when none is installed.
+    """
+    return page_map.live_conflict
 
 
 def on_swap(callback: Callable[[Aggregate, Aggregate], None]) -> None:
-    """Register ``callback(old, new)``, run after every aggregate swap."""
-    _on_swap.append(callback)
+    """Register ``callback(old, new)``, run after every aggregate swap.
+
+    Args:
+        callback: Called with the old and the new aggregate.
+    """
+    page_map.listeners.append(callback)
 
 
 def swap(aggregate: Aggregate) -> None:
-    """Atomically replace the current aggregate, then notify listeners."""
-    global _current
-    old = current()
-    _current = aggregate
-    for callback in list(_on_swap):
-        try:
-            callback(old, aggregate)
-        except Exception as exc:
-            warning(f'[public_pages] swap listener failed: {exc}')
+    """Atomically replace the current aggregate, then notify listeners (``PageMap.swap``).
+
+    Args:
+        aggregate: The new aggregate.
+    """
+    page_map.swap(aggregate)
 
 
 async def rebuild(acct: Any = None) -> bool:
-    """Rebuild from the published manifests; swap only when the map changed.
+    """Rebuild from the published manifests; swap only when the map changed (``PageMap.rebuild``).
 
-    One rebuild at a time, so a slower, older build never lands after a newer
-    one, each bounded by ``BUILD_SECONDS``. Any failure (reading the store,
-    a timeout, or building) keeps the previous aggregate. An app the store
-    still publishes but cannot read keeps its pages: its manifest in the
-    current aggregate is built again and claims against the fresh ones, so a
-    transient read error drops nothing. An app no longer published drops its
-    pages.
+    Args:
+        acct: The account layer (the singleton when None).
 
     Returns:
         True when the aggregate now reflects the published manifests, False
         when the build failed and the previous aggregate stays.
     """
-    async with _rebuild_lock:
-        try:
-            unreadable: Set[str] = set()
-            published = list(await asyncio.wait_for(load_published(acct, unreadable=unreadable), BUILD_SECONDS))
-            for app_id in sorted(unreadable):
-                kept = current().published.get(app_id)
-                if kept is not None:
-                    warning(f'[public_pages] {app_id}: unreadable this build, keeping its current pages')
-                    published.append(kept)
-            aggregate = build_aggregate(published, _live_conflict)
-        except asyncio.TimeoutError:
-            warning(f'[public_pages] rebuild timed out after {BUILD_SECONDS:g}s, keeping the previous aggregate')
-            return False
-        except Exception as exc:
-            warning(f'[public_pages] rebuild failed, keeping the previous aggregate: {exc}')
-            return False
-        if aggregate != current():
-            swap(aggregate)
-        return True
+    return await page_map.rebuild(acct)
 
 
 def schedule_rebuild() -> None:
-    """Coalesced background rebuild: the publish/unpublish/rung-repoint hook.
-
-    Never blocks the caller. Events arriving while a rebuild runs fold into
-    exactly one more rebuild. A no-op outside a running event loop.
-    """
-    global _rebuild_task, _rebuild_pending
-    _rebuild_pending = True
-    if _rebuild_task is not None and not _rebuild_task.done():
-        return
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        return
-    _rebuild_task = loop.create_task(_rebuild_loop())
-
-
-async def _rebuild_loop() -> None:
-    """Run rebuilds until no more were requested while one ran (``schedule_rebuild`` coalesces into this)."""
-    global _rebuild_pending
-    while _rebuild_pending:
-        _rebuild_pending = False
-        await rebuild()
+    """Coalesced background rebuild (``PageMap.schedule_rebuild``); never blocks the caller."""
+    page_map.schedule_rebuild()
 
 
 async def build_at_startup() -> bool:
-    """Build the first aggregate before the engine serves, waiting at most ``STARTUP_BUILD_SECONDS``.
+    """Build the first aggregate before the engine serves (``PageMap.build_at_startup``).
 
     Returns:
-        True when the build finished in time. Otherwise the engine starts on
+        True when the build finished in time; otherwise the engine starts on
         the legacy page list and the build carries on in the background.
     """
-    schedule_rebuild()
-    done, _ = await asyncio.wait({_rebuild_task}, timeout=STARTUP_BUILD_SECONDS)
-    if not done:
-        warning(
-            f'[public_pages] the first build is still running after {STARTUP_BUILD_SECONDS:g}s; starting on the legacy page list'
-        )
-    return bool(done)
+    return await page_map.build_at_startup()
 
 
 def app_changed(app_id: str) -> None:

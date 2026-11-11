@@ -1821,9 +1821,8 @@ def no_published_pages(monkeypatch):
     monkeypatch.setattr(pp, 'load_published', load_published)
     monkeypatch.setattr(pp, 'read_artifact_file', no_files)
     monkeypatch.setattr(pp, 'artifact_file_info', no_files)
-    monkeypatch.setattr(pp, 'rebuild', no_rebuild)
-    monkeypatch.setattr(pp, '_rebuild_task', None)
-    monkeypatch.setattr(pp, '_rebuild_pending', False)
+    monkeypatch.setattr(pp, 'page_map', pp.PageMap())
+    monkeypatch.setattr(pp.page_map, 'rebuild', no_rebuild)
 
 
 @pytest.mark.asyncio
