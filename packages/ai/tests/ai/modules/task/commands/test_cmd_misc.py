@@ -282,6 +282,78 @@ async def test_on_rrext_validate_no_source_anywhere_omits_field(monkeypatch):
     assert 'source' not in captured['pipeline']
 
 
+_NO_SOURCE = 'Pipeline has no source component'
+
+
+async def _validate_body(monkeypatch, arguments, *, validator=None):
+    """The body on_rrext_validate returns, with the engine validator faked."""
+    monkeypatch.setattr(cmd_misc, 'validatePipeline', validator or (lambda payload: {'errors': [], 'warnings': []}))
+    return (await MiscCommands.on_rrext_validate(_make_conn(), {'arguments': arguments}))['body']
+
+
+def _no_source_warnings(body):
+    """The no-source warnings in a validate reply."""
+    return [w for w in body.get('warnings', []) if w['message'].startswith(_NO_SOURCE)]
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_validate_warns_when_no_source_resolves(monkeypatch):
+    """No explicit source, no pipeline.source and no Source-mode component: one warning, no error."""
+    pipeline = {'components': [{'id': 'webhook_1', 'provider': 'webhook', 'config': {}}]}
+    body = await _validate_body(monkeypatch, {'pipeline': pipeline})
+
+    assert [w['message'] for w in body['warnings']] == [
+        'Pipeline has no source component: add "source": "<component id>" at the top level, or pass a source when starting; without one it will not start.'
+    ]
+    assert body['errors'] == []
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_validate_keeps_engine_warnings_when_no_source(monkeypatch):
+    """The no-source warning is appended to what the engine reported, not substituted for it."""
+    engine = {'errors': [], 'warnings': [{'message': 'engine says hi'}]}
+    body = await _validate_body(monkeypatch, {'pipeline': {'components': []}}, validator=lambda payload: dict(engine))
+
+    assert body['warnings'][0] == {'message': 'engine says hi'}
+    assert len(_no_source_warnings(body)) == 1
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_validate_no_warning_with_pipeline_source_field(monkeypatch):
+    """A top-level source field means start has a source: no warning."""
+    pipeline = {'source': 'webhook_1', 'components': [{'id': 'webhook_1', 'provider': 'webhook', 'config': {}}]}
+    body = await _validate_body(monkeypatch, {'pipeline': pipeline})
+
+    assert _no_source_warnings(body) == []
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_validate_no_warning_when_source_is_implied(monkeypatch):
+    """One Source-mode component is the implied source start uses: no warning (real resolver)."""
+    pipeline = {'components': [{'id': 'webhook_1', 'provider': 'webhook', 'config': {'mode': 'Source'}}]}
+    body = await _validate_body(monkeypatch, {'pipeline': pipeline})
+
+    assert _no_source_warnings(body) == []
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_validate_no_warning_with_explicit_source_argument(monkeypatch):
+    """A source passed with the request is what start would use: no warning."""
+    pipeline = {'components': [{'id': 'webhook_1', 'provider': 'webhook', 'config': {}}]}
+    body = await _validate_body(monkeypatch, {'pipeline': pipeline, 'source': 'webhook_1'})
+
+    assert _no_source_warnings(body) == []
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_validate_single_component_form_gets_no_source_warning(monkeypatch):
+    """A single component is validated alone and never needs a source."""
+    component = {'id': 'webhook_1', 'provider': 'webhook', 'config': {}}
+    body = await _validate_body(monkeypatch, {'pipeline': {'version': 1, 'component': component}})
+
+    assert _no_source_warnings(body) == []
+
+
 @pytest.mark.asyncio
 async def test_on_rrext_validate_wraps_config_in_pipeline_envelope(monkeypatch):
     """The C++ payload is {'pipeline': <config>} — the same envelope pipe_Validate
@@ -636,7 +708,7 @@ async def test_on_rrext_validate_without_substitution_validates_once(monkeypatch
     calls = []
     monkeypatch.setattr(cmd_misc, 'validatePipeline', lambda payload: calls.append(payload) or {'ok': True})
     conn = _validate_conn(monkeypatch, env={})
-    request = {'arguments': {'pipeline': {'components': [_llm('llm_1', 'llm_opnai')]}}}
+    request = {'arguments': {'pipeline': {'source': 'llm_1', 'components': [_llm('llm_1', 'llm_opnai')]}}}
 
     result = await MiscCommands.on_rrext_validate(conn, request)
 
@@ -725,7 +797,7 @@ async def test_on_rrext_validate_transformed_messages_use_template_references(
 
     monkeypatch.setattr(cmd_misc, 'validatePipeline', validator)
     component = {'id': 'node-1', 'provider': 'tool_git', 'config': {'authType': CUSTOM_MODEL_REF}}
-    pipeline = {'version': 1, 'component': component} if single else {'components': [component]}
+    pipeline = {'version': 1, 'component': component} if single else {'source': 'node-1', 'components': [component]}
     request = {'seq': 7, 'command': 'rrext_validate', 'arguments': {'pipeline': pipeline}}
     handled, response = await MiscCommands._call_method(conn, request, 'on_rrext_validate', None)
 
@@ -740,6 +812,36 @@ async def test_on_rrext_validate_transformed_messages_use_template_references(
     for candidate in (value, formatted):
         assert json.dumps(candidate)[1:-1] not in json.dumps(response)
         assert repr(candidate)[1:-1] not in str(conn.debug_message.call_args_list)
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_validate_no_source_warning_follows_templated_diagnostics(monkeypatch):
+    """With a substituted reference and no source, the warning is appended as is, after the templated ones."""
+    env = {'ROCKETRIDE_CUSTOM_MODEL': 'configured-value-xyz'}
+    conn = _validate_conn(monkeypatch, env=env)
+    calls = 0
+
+    def validator(payload):
+        nonlocal calls
+        calls += 1
+        result = copy.deepcopy(payload)
+        if calls == 1:
+            result['warnings'] = [{'id': 'node-1', 'ccode': 75, 'message': 'invalid setting configured-value-xyz'}]
+        return result
+
+    monkeypatch.setattr(cmd_misc, 'validatePipeline', validator)
+    component = {'id': 'node-1', 'provider': 'tool_git', 'config': {'authType': CUSTOM_MODEL_REF}}
+    request = {
+        'seq': 7,
+        'command': 'rrext_validate',
+        'arguments': {'pipeline': {'components': [component]}},
+    }
+    handled, response = await MiscCommands._call_method(conn, request, 'on_rrext_validate', None)
+
+    assert handled
+    messages = [w['message'] for w in response['body']['warnings']]
+    assert messages == [_template_message(env, 'warning'), cmd_misc._NO_SOURCE_WARNING]
+    assert 'configured-value-xyz' not in json.dumps(response)
 
 
 @pytest.mark.asyncio
