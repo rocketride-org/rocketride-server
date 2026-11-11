@@ -30,7 +30,6 @@ depends(requirements)
 
 from typing import Any, Dict, Optional
 from ai.common.reader import ReaderBase
-from ai.common.config import Config
 from ai.web.metrics import metrics
 from rocketlib import debug
 
@@ -58,28 +57,12 @@ class Parser(ReaderBase):
         debug(f'LlamaParse Parser: Provider: {provider}')
         debug(f'LlamaParse Parser: Raw connConfig: {connConfig}')
 
-        # Get the nodes configuration
-        config = Config.getNodeConfig(provider, connConfig)
-        debug(f'LlamaParse Parser: Processed config: {config}')
-
-        # Check if config has nested structure
-        if 'default' in config:
-            debug('LlamaParse Parser: Found nested config structure, extracting from default profile')
-            config = config.get('default', {})
-            debug(f'LlamaParse Parser: Extracted config: {config}')
-
-        # Get the other configuration values
-        self._parse_mode = config.get('parse_mode', None)
-        self._lvm_model = config.get('lvm_model', None)
-
-        # Handle system prompt append with checkbox logic
-        use_system_prompt_append = config.get('use_system_prompt_append', False)
-        if use_system_prompt_append:
-            self._system_prompt_append = config.get('system_prompt_append', None)
-        else:
-            self._system_prompt_append = None
-
-        self._spreadsheet_extract_sub_tables = config.get('spreadsheet_extract_sub_tables', False)
+        # The resolved node configuration; the simple-mode leaves are absent in advanced mode
+        config = connConfig
+        self._parse_mode = config.get('parse_mode')
+        self._lvm_model = config.get('lvm_model')
+        self._system_prompt_append = (config.get('system_prompt_append') or '').strip() or None
+        self._spreadsheet_extract_sub_tables = bool(config.get('spreadsheet_extract_sub_tables'))
 
         debug('LlamaParse Parser initialized with:')
         debug(f'    parse_mode:                     {self._parse_mode}')

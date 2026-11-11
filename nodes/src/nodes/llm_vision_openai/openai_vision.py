@@ -28,7 +28,6 @@ from depends import depends  # type: ignore
 from typing import Any, Dict
 from ai.common.schema import Answer, Question
 from ai.common.chat import ChatBase
-from ai.common.config import Config
 from rocketlib import warning
 
 # Load requirements
@@ -49,13 +48,12 @@ class Chat(ChatBase):
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
         """Initialize the OpenAI Vision chat instance."""
         super().__init__(provider, connConfig, bag)
-        config = Config.getNodeConfig(provider, connConfig)
+        config = self._config
 
-        self._model = config.get('model', 'gpt-4o')
         api_key = config.get('apikey')
 
-        self._system_prompt = config.get('vision.systemPrompt') or config.get('systemPrompt') or ''
-        self._prompt = config.get('vision.prompt') or config.get('prompt') or 'Describe this image in detail.'
+        self._system_prompt = config['systemPrompt'] or ''
+        self._prompt = config['prompt']
 
         if not api_key:
             raise ValueError('Missing OpenAI API key. Get one at https://platform.openai.com/api-keys')

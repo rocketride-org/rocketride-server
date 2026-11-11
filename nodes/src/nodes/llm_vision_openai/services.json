@@ -1,164 +1,182 @@
 {
+	//
+	// Required:
+	//		The displayable name of this node
+	//
 	"title": "OpenAI Vision",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
 	"protocol": "image_vision_openai://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
 	"classType": ["image"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
 	"capabilities": ["invoke"],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the
+	//		type is specified, a factory is registered of that given type
+	//
 	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate - if
+	//		not specified, the protocol will be used
+	//
 	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	//		and is optional for most node
+	//
 	"path": "nodes.llm_vision_openai",
+	//
+	// Required:
+	//		The prefix map when added/removed when converting URLs <=> paths
+	//
 	"prefix": "image_vision_openai",
-	"description": ["A component that connects to OpenAI's vision-capable models for image analysis, ", "OCR, visual understanding, and scene description. Supports GPT-4.1 and GPT-4o model families ", "with multimodal capabilities. Features robust error handling, automatic image processing, ", "and flexible prompt configuration for a wide range of vision use cases."],
+	//
+	// Optional:
+	//		Description of this driver
+	//
+	"description": [
+		"A component that connects to OpenAI's vision-capable models for image analysis, ",
+		"OCR, visual understanding, and scene description. Supports GPT-4.1 and GPT-4o model families ",
+		"with multimodal capabilities. Features robust error handling, automatic image processing, ",
+		"and flexible prompt configuration for a wide range of vision use cases."
+	],
+	//
+	// Optional:
+	//		The icon is the icon to display in the UI for this node
+	//
 	"icon": "openai.svg",
 	"documentation": "https://docs.rocketride.org/nodes/llm_vision_openai",
-	"tile": ["Model: ${parameters.image_vision_openai.profile}"],
+	//
+	// Optional:
+	//		Rendering hints to the UI which indicate which fields of
+	//		the configuration should be used to display information
+	//
+	"tile": ["Model: ${parameters.llm_vision_openai.model}"],
+	//
+	// Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
 	"lanes": {
 		"image": ["text"],
 		"documents": ["documents"]
 	},
-	"input": [
-		{
-			"lane": "image",
-			"description": "Image to analyze with OpenAI Vision models",
-			"output": [
-				{
-					"lane": "text",
-					"description": "Text analysis of the image content"
-				}
-			]
+	//
+	// Optional:
+	//		Local property definitions. The model is the selector (one branch per
+	//		model, the branch value is the model id); each branch pins its context
+	//		window and capabilities as constants, and the leaves every model shares
+	//		(credentials, generation settings) sit at the root and are stored flat.
+	//		The "custom" branch takes a model id the catalog does not list.
+	//
+	"propertyDefinitions": {
+		"llm_vision_openai.apikey": {
+			"base": "llm.cloud.apikey",
+			"description": "OpenAI API key",
+			"env": "ROCKETRIDE_LLM_VISION_OPENAI_APIKEY",
+			"required": true
 		},
-		{
-			"lane": "documents",
-			"description": "Image documents to analyze with OpenAI Vision models",
-			"output": [
-				{
-					"lane": "documents",
-					"description": "Text analysis of each image document with original metadata (frame number, timestamp) preserved"
-				}
-			]
-		}
-	],
-	"preconfig": {
-		"default": "openai-4-1",
-		"profiles": {
-			"openai-4-1": {
-				"title": "GPT-4.1",
-				"model": "gpt-4.1",
-				"modelTotalTokens": 1047576,
-				"apikey": ""
-			},
-			"openai-4-1-mini": {
-				"title": "GPT-4.1-mini",
-				"model": "gpt-4.1-mini",
-				"modelTotalTokens": 1047576,
-				"apikey": ""
-			},
-			"openai-4-1-nano": {
-				"title": "GPT-4.1-nano",
-				"model": "gpt-4.1-nano",
-				"modelTotalTokens": 1047576,
-				"apikey": ""
-			},
-			"openai-4o": {
-				"title": "GPT-4o",
-				"model": "gpt-4o",
-				"modelTotalTokens": 128000,
-				"apikey": ""
-			},
-			"openai-4o-mini": {
-				"title": "GPT-4o-mini",
-				"model": "gpt-4o-mini",
-				"modelTotalTokens": 128000,
-				"apikey": ""
-			}
-		}
-	},
-	"fields": {
-		"image_vision_openai.apikey": {
+		"llm_vision_openai.systemPrompt": {
 			"type": "string",
-			"title": "API Key",
-			"description": "OpenAI API key. Get one at https://platform.openai.com/api-keys",
-			"secure": true,
-			"ui": {
-				"ui:widget": "ApiKeyWidget"
-			}
+			"format": "textarea",
+			"title": "System prompt",
+			"description": "Instructions that frame how the model describes images.",
+			"default": ""
 		},
-		"model": {
+		"llm_vision_openai.prompt": {
 			"type": "string",
-			"title": "Model",
-			"description": "OpenAI Vision model"
+			"format": "textarea",
+			"title": "Prompt",
+			"description": "The question asked about every image.",
+			"default": "Describe this image in detail."
 		},
-		"modelTotalTokens": {
+		"llm_vision_openai.customModel": {
+			"type": "string",
+			"title": "Model id",
+			"description": "Model id exactly as the provider names it",
+			"required": true
+		},
+		"llm_vision_openai.custom.modelTotalTokens": {
 			"type": "number",
 			"title": "Tokens",
-			"description": "Maximum context length in tokens"
+			"description": "Total context length of the model in tokens",
+			"minimum": 1,
+			"default": 1047576
 		},
-		"vision.systemPrompt": {
-			"type": "string",
-			"format": "textarea",
-			"title": "System Instructions",
-			"description": "Define the model's role and behavior for image analysis"
-		},
-		"vision.prompt": {
-			"type": "string",
-			"format": "textarea",
-			"title": "Analysis Prompt",
-			"description": "Describe what you want to analyze or extract from the image"
-		},
-		"image_vision_openai.openai-4-1": {
-			"object": "openai-4-1",
-			"properties": ["image_vision_openai.apikey", "vision.systemPrompt", "vision.prompt"]
-		},
-		"image_vision_openai.openai-4-1-mini": {
-			"object": "openai-4-1-mini",
-			"properties": ["image_vision_openai.apikey", "vision.systemPrompt", "vision.prompt"]
-		},
-		"image_vision_openai.openai-4-1-nano": {
-			"object": "openai-4-1-nano",
-			"properties": ["image_vision_openai.apikey", "vision.systemPrompt", "vision.prompt"]
-		},
-		"image_vision_openai.openai-4o": {
-			"object": "openai-4o",
-			"properties": ["image_vision_openai.apikey", "vision.systemPrompt", "vision.prompt"]
-		},
-		"image_vision_openai.openai-4o-mini": {
-			"object": "openai-4o-mini",
-			"properties": ["image_vision_openai.apikey", "vision.systemPrompt", "vision.prompt"]
-		},
-		"image_vision_openai.profile": {
-			"title": "Vision Model",
-			"description": "Select the OpenAI vision model to use",
-			"type": "string",
-			"default": "openai-4-1",
-			"enum": ["*>preconfig.profiles.*.title"],
-			"conditional": [
-				{
-					"value": "openai-4-1",
-					"properties": ["image_vision_openai.openai-4-1"]
-				},
-				{
-					"value": "openai-4-1-mini",
-					"properties": ["image_vision_openai.openai-4-1-mini"]
-				},
-				{
-					"value": "openai-4-1-nano",
-					"properties": ["image_vision_openai.openai-4-1-nano"]
-				},
-				{
-					"value": "openai-4o",
-					"properties": ["image_vision_openai.openai-4o"]
-				},
-				{
-					"value": "openai-4o-mini",
-					"properties": ["image_vision_openai.openai-4o-mini"]
-				}
-			]
+		"llm_vision_openai.custom.modelOutputTokens": {
+			"type": "integer",
+			"title": "Output Tokens",
+			"description": "Most tokens the model may write in one reply (at least 1,024). Leave it empty to keep the node's default. Reasoning models count their thinking against this limit: set it well above the reply you expect, or they can spend it all thinking and return nothing. It cannot exceed Tokens; a larger value is lowered to it.",
+			"minimum": 1024
 		}
 	},
-	"shape": [
+	//
+	// Required:
+	//		Defines the properties shown in the pipeline builder side panel, in order
+	//
+	"properties": [
 		{
-			"section": "Pipe",
-			"title": "OpenAI Vision",
-			"properties": ["image_vision_openai.profile"]
-		}
+			"name": "model",
+			"type": "string",
+			"title": "Model",
+			"description": "Select the OpenAI vision model to use",
+			"default": "gpt-4.1",
+			"enum": {
+				"gpt-4.1": {
+					"title": "GPT-4.1",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 1047576 }
+					]
+				},
+				"gpt-4.1-mini": {
+					"title": "GPT-4.1-mini",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 1047576 }
+					]
+				},
+				"gpt-4.1-nano": {
+					"title": "GPT-4.1-nano",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 1047576 }
+					]
+				},
+				"gpt-4o": {
+					"title": "GPT-4o",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 128000 }
+					]
+				},
+				"gpt-4o-mini": {
+					"title": "GPT-4o-mini",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 128000 }
+					]
+				},
+				"custom": {
+					"title": "Custom model",
+					"properties": [
+						"llm_vision_openai.customModel",
+						"llm_vision_openai.custom.modelTotalTokens",
+						"llm_vision_openai.custom.modelOutputTokens"
+					]
+				}
+			}
+		},
+		"llm_vision_openai.apikey",
+		"llm_vision_openai.systemPrompt",
+		"llm_vision_openai.prompt"
 	]
 }

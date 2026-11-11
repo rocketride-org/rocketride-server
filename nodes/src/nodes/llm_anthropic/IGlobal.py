@@ -22,162 +22,12 @@
 # =============================================================================
 
 import os
-import re
-import json
-import ast
-from rocketlib import IGlobalBase, warning
-from ai.common.config import Config, warn_if_credential_unresolved
+from rocketlib import IGlobalBase
 from ai.common.chat import ChatBase
 
 
 class IGlobal(IGlobalBase):
     chat: ChatBase | None = None
-
-    def validateConfig(self):
-        """Save-time validation for Anthropic.
-
-        - Parameterless; UI handles required fields
-        - Only explicit check: token limit must be > 0
-        - Prefer provider-driven exceptions for concise messages
-        - Fallback sanitizes JSON/plain text to a short warning.
-        """
-        # Load dependencies first (once per call is fine; small file)
-        from depends import depends  # type: ignore
-
-        requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
-        depends(requirements)
-
-        try:
-            # Direct Anthropic client and structured exceptions (SDK-dependent)
-            from anthropic import Anthropic
-
-            try:
-                from anthropic import (
-                    APIStatusError,
-                    APIConnectionError,
-                    APITimeoutError,
-                    RateLimitError,
-                    AuthenticationError,
-                    BadRequestError,
-                    PermissionDeniedError,
-                    NotFoundError,
-                    InternalServerError,
-                    APIError,
-                )
-            except Exception:  # SDK variations across versions
-                APIStatusError = Exception  # type: ignore
-                APIConnectionError = Exception  # type: ignore
-                APITimeoutError = Exception  # type: ignore
-                RateLimitError = Exception  # type: ignore
-                AuthenticationError = Exception  # type: ignore
-                BadRequestError = Exception  # type: ignore
-                PermissionDeniedError = Exception  # type: ignore
-                NotFoundError = Exception  # type: ignore
-                InternalServerError = Exception  # type: ignore
-                APIError = Exception  # type: ignore
-
-            # Read config
-            config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-            apikey = config.get('apikey')
-
-            # Do not send a ${...} the engine left unfilled to the provider as the key:
-            # its reply would say the key is wrong, not which variable is missing.
-            if warn_if_credential_unresolved(self.glb.logicalType, 'apikey', apikey, self.glb.connConfig):
-                return
-
-            model = config.get('model')
-
-            # Lower-bound token check (custom models)
-            modelTotalTokens = config.get('modelTotalTokens')
-            if modelTotalTokens is not None and modelTotalTokens <= 0:
-                warning('Token limit must be greater than 0')
-                return
-
-            # Minimal probe
-            try:
-                client = Anthropic(api_key=apikey)
-                client.messages.create(model=model, max_tokens=1, messages=[{'role': 'user', 'content': 'Hi'}])
-            except APIStatusError as e:  # HTTP error with structured payload
-                status = getattr(e, 'status_code', None) or getattr(e, 'status', None)
-                message = str(e).strip()
-                # Prefer structured JSON body
-                try:
-                    data = e.response.json()
-                    if isinstance(data, dict):
-                        err = data.get('error')
-                        etype = err.get('type') if isinstance(err, dict) else None
-                        emsg = (err.get('message') if isinstance(err, dict) else None) or data.get('message')
-                        message = self._format_error(status, etype, emsg, message)
-                except Exception:
-                    message = self._format_error(status, None, None, message)
-                warning(message)
-                return
-            except (
-                APIConnectionError,
-                APITimeoutError,
-                RateLimitError,
-                AuthenticationError,
-                BadRequestError,
-                PermissionDeniedError,
-                NotFoundError,
-                InternalServerError,
-                APIError,
-            ) as e:
-                message = self._format_error(None, None, None, str(e))
-                warning(message)
-                return
-            except Exception as e:
-                # Fallback: try response.json() → embedded dict → raw
-                status = getattr(e, 'status_code', None) or getattr(e, 'status', None)
-                raw = str(e).strip()
-                message = raw
-
-                # 1) response.json()
-                try:
-                    data = e.response.json()
-                    if isinstance(data, dict):
-                        err = data.get('error')
-                        etype = err.get('type') if isinstance(err, dict) else None
-                        emsg = (err.get('message') if isinstance(err, dict) else None) or data.get('message')
-                        message = self._format_error(status, etype, emsg, message)
-                except Exception:
-                    pass
-
-                # 2) Embedded dict-like payload in exception string
-                if message == raw:
-                    try:
-                        m = re.search(r'\{.*\}', raw, re.DOTALL)
-                        blob = m.group(0) if m else None
-                        if blob:
-                            payload = None
-                            try:
-                                payload = json.loads(blob)
-                            except Exception:
-                                try:
-                                    payload = ast.literal_eval(blob)
-                                except Exception:
-                                    payload = None
-                            if isinstance(payload, dict):
-                                emsg = None
-                                etype = None
-                                if isinstance(payload.get('error'), dict):
-                                    etype = payload['error'].get('type')
-                                    emsg = payload['error'].get('message')
-                                if not emsg:
-                                    emsg = payload.get('message')
-                                message = self._format_error(status, etype, emsg, message)
-                    except Exception:
-                        pass
-
-                message = self._format_error(status, None, None, message)
-                warning(message)
-                return
-
-        except Exception as e:
-            # Dependency/setup issues
-            msg = self._format_error(None, None, None, str(e))
-            warning(msg)
-            return
 
     def beginGlobal(self):
         """Initialize the global filter state by loading dependencies and creating a Chat instance.
@@ -196,7 +46,7 @@ class IGlobal(IGlobalBase):
         bag = self.IEndpoint.endpoint.bag
 
         # Get this nodes config
-        config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
+        config = self.config
 
         # Get a chat to interface
         self._chat = Chat(self.glb.logicalType, config, bag)
@@ -207,32 +57,3 @@ class IGlobal(IGlobalBase):
         Called when the filter is being destroyed or reset.
         """
         self._chat = None
-
-    def _format_error(self, status, etype, emsg, fallback: str) -> str:
-        """
-        Build a concise, consistent error string.
-
-        - If structured fields are present, formats as: "Error <status>: <type> - <message>"
-        - Otherwise returns the sanitized fallback text.
-        - Always collapses whitespace for readability.
-
-        Args:
-            status: Optional HTTP status code
-            etype: Optional provider error type string
-            emsg: Optional provider human-readable message
-            fallback: Raw message to use when structured fields are not available
-
-        Returns:
-            A single-line, human-readable error string.
-        """
-        parts: list[str] = []
-        if status:
-            parts.append(f'Error {status}:')
-        if etype:
-            parts.append(etype)
-        if emsg:
-            if etype:
-                parts.append('-')
-            parts.append(str(emsg))
-        message = ' '.join(parts) if parts else fallback
-        return re.sub(r'\s+', ' ', message).strip()

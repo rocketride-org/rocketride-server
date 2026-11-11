@@ -35,33 +35,38 @@
 	//
 	// Optional:
 	//		The path is the executable/script code - it is node dependent
-	// 		and is optional for most node
+	//		and is optional for most node
 	//
 	"path": "nodes.llm_openai_api",
 	//
 	// Required:
-	//		The prefix map when added/removed when convertting URLs <=> paths
+	//		The prefix map when added/removed when converting URLs <=> paths
 	//
 	"prefix": "llm",
 	//
 	// Optional:
-	//		Description to of this driver
+	//		Description of this driver
 	//
-	"description": ["A component that connects to any OpenAI-compatible API endpoint for language model ", "inference. Supports custom base URLs for providers like Featherless, Together, Groq, ", "Ollama, LM Studio, and any other OpenAI SDK-compatible service. Configure with your ", "provider's base URL, API key, and model name."],
+	"description": [
+		"A component that connects to any OpenAI-compatible API endpoint for language model ",
+		"inference. Supports custom base URLs for providers like Featherless, Together, Groq, ",
+		"Ollama, LM Studio, and any other OpenAI SDK-compatible service. Configure with your ",
+		"provider's base URL, API key, and model name."
+	],
 	//
 	// Optional:
-	//	  The icon is the icon to display in the UI for this node
+	//		The icon is the icon to display in the UI for this node
 	//
 	"icon": "openai.svg",
 	"documentation": "https://docs.rocketride.org/nodes/llm_openai_api",
 	//
-	//  Optional:
-	//      Rendering hints to the UI which indicate which fields of
+	// Optional:
+	//		Rendering hints to the UI which indicate which fields of
 	//		the configuration should be used to display information
 	//
-	"tile": ["Model: ${parameters.llm_openai_api.profile}"],
+	"tile": ["Model: ${parameters.llm_openai_api.model}"],
 	//
-	//	Optional:
+	// Optional:
 	//		As a pipe component, define what this pipe component takes
 	//		and what it produces
 	//
@@ -69,85 +74,54 @@
 		"questions": ["answers"]
 	},
 	//
-	//	Optional:
-	//		Profile section are configuration optoins used by the driver
-	//		itself
-	//
-	"preconfig": {
-		"default": "custom",
-		"profiles": {
-			"custom": {
-				"model": "",
-				"base_url": "",
-				"modelTotalTokens": 32768,
-				"apikey": ""
-			}
-		}
-	},
-	//
 	// Optional:
-	//		Local fields definitions - these define fields only for the
-	//		current service. You may specify them here, or directly
-	//		in the shape
+	//		Local property definitions. The model is a free-text id: this node
+	//		reaches any OpenAI-compatible endpoint, so there is no catalog to
+	//		select from. Every leaf is stored flat.
 	//
-	"fields": {
-		"model": {
-			"type": "string",
-			"title": "Model",
-			"description": "Model name (e.g. zai-org/GLM-5, meta-llama/Llama-3-70b)"
+	"propertyDefinitions": {
+		"llm_openai_api.apikey": {
+			"base": "llm.cloud.apikey",
+			"description": "API key of the OpenAI-compatible provider",
+			"env": "ROCKETRIDE_LLM_OPENAI_API_APIKEY",
+			"required": false
 		},
-		"base_url": {
+		"llm_openai_api.base_url": {
 			"type": "string",
 			"title": "Base URL",
-			"description": "API base URL (e.g. https://api.featherless.ai/v1)"
+			"description": "API base URL (e.g. https://api.featherless.ai/v1)",
+			"default": ""
 		},
-		"modelTotalTokens": {
-			"type": "number",
-			"title": "Tokens",
-			"description": "Total Tokens"
+		"llm_openai_api.model": {
+			"type": "string",
+			"title": "Model",
+			"description": "Model name (e.g. zai-org/GLM-5, meta-llama/Llama-3-70b)",
+			"required": true
 		},
-		"modelOutputTokens": {
+		"llm_openai_api.modelTotalTokens": { "type": "number", "title": "Tokens", "description": "Total Tokens", "minimum": 1, "default": 32768 },
+		"llm_openai_api.modelOutputTokens": {
 			"type": "integer",
 			"title": "Output Tokens",
 			"description": "Most tokens the model may write in one reply (at least 1,024). Leave it empty to keep the node's default. Reasoning models count their thinking against this limit: set it well above the reply you expect, or they can spend it all thinking and return nothing. It cannot exceed Tokens; a larger value is lowered to it.",
-			"minimum": 1024,
-			"optional": true
-		},
-		"openai_api.custom": {
-			"object": "custom",
-			"properties": ["model", "base_url", "modelTotalTokens", "modelOutputTokens", "llm.cloud.apikey", "llm.cloud.modelSource"]
-		},
-		"openai_api.profile": {
-			"title": "Model",
-			"description": "Profile selection",
-			"type": "string",
-			"default": "custom",
-			"enum": ["*>preconfig.profiles.*.title"],
-			"conditional": [
-				{
-					"value": "custom",
-					"properties": ["openai_api.custom"]
-				}
-			]
+			"minimum": 1024
 		}
 	},
 	//
 	// Required:
-	//		Defines the fields (shape) of the service. Either source or target
-	//		map be specified, or both, but at least one is required
+	//		Defines the properties shown in the pipeline builder side panel, in order
 	//
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "OpenAI-Compatible API",
-			"properties": ["openai_api.profile"]
-		}
+	"properties": [
+		"llm_openai_api.model",
+		"llm_openai_api.modelTotalTokens",
+		"llm_openai_api.modelOutputTokens",
+		"llm_openai_api.apikey",
+		"llm_openai_api.base_url"
 	],
 	//
 	// Optional:
-	//		Test configuration for automated node testing.
-	//		Runs against a local test server with mocked langchain_openai so no
-	//		real API key is required. ROCKETRIDE_MOCK must point to nodes/test/mocks.
+	//		Test configuration for automated node testing. "profiles" lists
+	//		values of the "model" selector; the framework writes the selected one
+	//		at "model" and the mock credentials at their paths.
 	//
 	"test": {
 		"profiles": ["custom"],
@@ -157,9 +131,7 @@
 				"name": "LLM returns mock response",
 				"text": "What is 2+2?",
 				"expect": {
-					"answers": {
-						"contains": "Mock LLM response"
-					}
+					"answers": { "contains": "Mock LLM response" }
 				}
 			}
 		]

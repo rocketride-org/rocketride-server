@@ -39,7 +39,6 @@ depends(requirements)
 from typing import Any, Dict
 from ai.common.schema import Answer, Question
 from ai.common.chat import ChatBase
-from ai.common.config import Config
 from ai.common.llm_adapter import report_usage_metadata
 from ai.common.validation import validate_prompt
 from langchain_openai import ChatOpenAI
@@ -61,10 +60,9 @@ class Chat(ChatBase):
         super().__init__(provider, connConfig, bag)
 
         # Get the node configuration
-        config = Config.getNodeConfig(provider, connConfig)
+        config = self._config
 
         # Get the model and API key
-        self._model = config.get('model')
         apikey = config.get('apikey')
 
         # Get model-specific timeout

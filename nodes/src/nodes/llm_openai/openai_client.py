@@ -27,7 +27,6 @@ OpenAI binding for the ChatLLM.
 
 from typing import Any, Dict
 from ai.common.chat import ChatBase
-from ai.common.config import Config
 from langchain_openai import ChatOpenAI
 from openai import OpenAI, APIError, AuthenticationError, RateLimitError, APIConnectionError
 
@@ -51,7 +50,7 @@ class Chat(ChatBase):
         super().__init__(provider, connConfig, bag)
 
         # Get the nodes configuration
-        config = Config.getNodeConfig(provider, connConfig)
+        config = self._config
 
         # Get the api key, don't save it
         apikey = config.get('apikey')
@@ -71,7 +70,7 @@ class Chat(ChatBase):
             self._llm = ChatOpenAI(
                 model=self._model,
                 api_key=apikey,
-                temperature=config['temperature'] if 'temperature' in config else 0,
+                temperature=config['temperature'],
                 max_tokens=self._modelOutputTokens,
             )
 

@@ -27,7 +27,6 @@ XAI binding for the ChatLLM.
 
 from typing import Any, Dict
 from ai.common.chat import ChatBase
-from ai.common.config import Config
 from langchain_xai import ChatXAI
 
 
@@ -46,7 +45,7 @@ class Chat(ChatBase):
         super().__init__(provider, connConfig, bag)
 
         # Get the nodes configuration
-        config = Config.getNodeConfig(provider, connConfig)
+        config = self._config
 
         # Get the api key, don't save it
         apikey = config.get('apikey')

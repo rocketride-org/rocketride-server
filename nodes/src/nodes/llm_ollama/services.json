@@ -35,34 +35,40 @@
 	//
 	// Optional:
 	//		The path is the executable/script code - it is node dependent
-	// 		and is optional for most node
+	//		and is optional for most node
 	//
 	"path": "nodes.llm_ollama",
 	//
 	// Required:
-	//		The prefix map when added/removed when convertting URLs <=> paths
+	//		The prefix map when added/removed when converting URLs <=> paths
 	//
 	"prefix": "llm",
 	//
 	// Optional:
-	//		Description to of this driver
+	//		Description of this driver
 	//
-	"description": ["A component that integrates with locally-hosted language models through Ollama. ", "It enables on-premise text generation, summarization, and question answering ", "without relying on external APIs. Ideal for privacy-sensitive applications, the ", "component offers low-latency inference and supports various open-source models. It ", "allows organizations to leverage LLM capabilities while maintaining full control ", "over data and infrastructure."],
+	"description": [
+		"A component that integrates with locally-hosted language models through Ollama. ",
+		"It enables on-premise text generation, summarization, and question answering ",
+		"without relying on external APIs. Ideal for privacy-sensitive applications, the ",
+		"component offers low-latency inference and supports various open-source models. It ",
+		"allows organizations to leverage LLM capabilities while maintaining full control ",
+		"over data and infrastructure."
+	],
 	//
 	// Optional:
-	//	  The icon is the icon to display in the UI for this node
+	//		The icon is the icon to display in the UI for this node
 	//
 	"icon": "ollama.svg",
 	"documentation": "https://docs.rocketride.org/nodes/llm_ollama",
 	//
+	// Optional:
+	//		Rendering hints to the UI which indicate which fields of
+	//		the configuration should be used to display information
 	//
-	//  Optional:
-	//      Rendering hints to the UI which indicate which fields of
-	//      the configuration should be used to display information
+	"tile": ["Model: ${parameters.llm_ollama.model}"],
 	//
-	"tile": ["Model: ${parameters.llm_ollama.profile}"],
-	//
-	//	Optional:
+	// Optional:
 	//		As a pipe component, define what this pipe component takes
 	//		and what it produces
 	//
@@ -70,409 +76,210 @@
 		"questions": ["answers"]
 	},
 	//
-	//	Optional:
-	//		Profile section are configuration optoins used by the driver
-	//		itself
-	//
-	"preconfig": {
-		// Define the values that will be merged into any profile configuration
-		// specified, unless the profile is 'absolute'
-		"default": "llama3_3",
-		// Defines profiles used with the "profile": key
-		"profiles": {
-			"custom": {
-				"title": "Custom",
-				"model": "",
-				"serverbase": "http://localhost:11434/v1",
-				"modelTotalTokens": 16385
-			},
-			"llama3_3": {
-				"title": "Llama 3.3",
-				"model": "llama3.3:latest",
-				"serverbase": "http://localhost:11434/v1",
-				"modelTotalTokens": 128000
-			},
-			"llama3_1-8b": {
-				"title": "Llama 3.1 8B",
-				"model": "llama3.1:8b",
-				"serverbase": "http://localhost:11434/v1",
-				"modelTotalTokens": 128000
-			},
-			"llama3_1-70b": {
-				"title": "Llama 3.1 70B",
-				"model": "llama3.1:70b",
-				"serverbase": "http://localhost:11434/v1",
-				"modelTotalTokens": 128000
-			},
-			"llama3_1-405b": {
-				"title": "Llama 3.1 405B",
-				"model": "llama3.1:405b",
-				"serverbase": "http://localhost:11434/v1",
-				"modelTotalTokens": 128000
-			},
-			"phi4-14b": {
-				"title": "Phi 4 14B",
-				"model": "phi4",
-				"serverbase": "http://localhost:11434/v1",
-				"modelTotalTokens": 16000
-			},
-			"llama3_2-3b": {
-				"title": "Llama 3.2 3B",
-				"model": "llama3.2",
-				"serverbase": "http://localhost:11434/v1",
-				"modelTotalTokens": 128000
-			},
-			"llama3_2-1b": {
-				"title": "Llama 3.2 1B",
-				"model": "llama3.2:1b",
-				"serverbase": "http://localhost:11434/v1",
-				"modelTotalTokens": 128000
-			},
-			"llama4-latest": {
-				"title": "Llama 4 Latest",
-				"model": "llama4:latest",
-				"serverbase": "http://localhost:11434/v1",
-				"modelTotalTokens": 10000000
-			},
-			"mistral-7b": {
-				"title": "Mistral 7B",
-				"model": "mistral",
-				"serverbase": "http://localhost:11434/v1",
-				"modelTotalTokens": 32000
-			},
-			"qwen2_5-7b": {
-				"title": "Qwen 2.5 7B",
-				"model": "qwen2.5",
-				"serverbase": "http://localhost:11434/v1",
-				"modelTotalTokens": 128000
-			},
-			"qwen2_5-0_5b": {
-				"title": "Qwen 2.5 0.5B",
-				"model": "qwen2.5:0.5b",
-				"serverbase": "http://localhost:11434/v1",
-				"modelTotalTokens": 128000
-			},
-			"qwen2_5-1_5b": {
-				"title": "Qwen 2.5 1.5B",
-				"model": "qwen2.5:1.5b",
-				"serverbase": "http://localhost:11434/v1",
-				"modelTotalTokens": 128000
-			},
-			"qwen2_5-3b": {
-				"title": "Qwen 2.5 3B",
-				"model": "qwen2.5:3b",
-				"serverbase": "http://localhost:11434/v1",
-				"modelTotalTokens": 128000
-			},
-			"qwen2_5-14b": {
-				"title": "Qwen 2.5 14B",
-				"model": "qwen2.5:14b",
-				"serverbase": "http://localhost:11434/v1",
-				"modelTotalTokens": 128000
-			},
-			"qwen2_5-32b": {
-				"title": "Qwen 2.5 32B",
-				"model": "qwen2.5:32b",
-				"serverbase": "http://localhost:11434/v1",
-				"modelTotalTokens": 128000
-			},
-			"qwen2_5-72b": {
-				"title": "Qwen 2.5 72B",
-				"model": "qwen2.5:72b",
-				"serverbase": "http://localhost:11434/v1",
-				"modelTotalTokens": 128000
-			},
-			"qwen3-latest": {
-				"title": "Qwen 3 Latest",
-				"model": "qwen3:latest",
-				"serverbase": "http://localhost:11434/v1",
-				"modelTotalTokens": 128000
-			},
-			"deepseek-r1-1_5b": {
-				"title": "DeepSeek R1 1.5B",
-				"model": "deepseek-r1:1.5b",
-				"serverbase": "http://localhost:11434/v1",
-				"modelTotalTokens": 128000
-			},
-			"deepseek-r1-7b": {
-				"title": "DeepSeek R1 7B",
-				"model": "deepseek-r1:7b",
-				"serverbase": "http://localhost:11434/v1",
-				"modelTotalTokens": 128000
-			},
-			"deepseek-r1-14b": {
-				"title": "DeepSeek R1 14B",
-				"model": "deepseek-r1:14b",
-				"serverbase": "http://localhost:11434/v1",
-				"modelTotalTokens": 128000
-			},
-			"deepseek-r1-32b": {
-				"title": "DeepSeek R1 32B",
-				"model": "deepseek-r1:32b",
-				"serverbase": "http://localhost:11434/v1",
-				"modelTotalTokens": 128000
-			},
-			"deepseek-r1-671b": {
-				"title": "DeepSeek R1 671B",
-				"model": "deepseek-r1:671b",
-				"serverbase": "http://localhost:11434/v1",
-				"modelTotalTokens": 128000
-			}
-		}
-	},
-	//
 	// Optional:
-	//		Local fields definitions - these define fields only for the
-	//		current service. You may specify them here, or directly
-	//		in the shape
+	//		Local property definitions. The model is the selector (one branch per
+	//		model, the branch value is the model id); each branch pins its context
+	//		window and capabilities as constants, and the leaves every model shares
+	//		(credentials, generation settings) sit at the root and are stored flat.
+	//		The "custom" branch takes a model id the catalog does not list.
 	//
-	"fields": {
-		"model": {
-			"type": "string",
-			"title": "Model",
-			"description": "Ollama model"
-		},
-		"modelTotalTokens": {
-			"type": "number",
-			"title": "Tokens",
-			"description": "Total Tokens"
-		},
-		"modelOutputTokens": {
-			"type": "integer",
-			"title": "Output Tokens",
-			"description": "Most tokens the model may write in one reply (at least 1,024). Leave it empty to keep the node's default. Reasoning models count their thinking against this limit: set it well above the reply you expect, or they can spend it all thinking and return nothing. It cannot exceed Tokens; a larger value is lowered to it.",
-			"minimum": 1024,
-			"optional": true
-		},
-		"temperature": {
+	"propertyDefinitions": {
+		"llm_ollama.serverbase": { "base": "llm.local.serverbase", "default": "http://localhost:11434/v1" },
+		"llm_ollama.temperature": {
 			"type": "number",
 			"title": "Temperature",
 			"description": "Sampling temperature. Left unset by default so ollama.py can choose: 0 for standard models, and 1.0 for reasoning models (gpt-oss, deepseek-r1, qwen3, qwq, ...) so they emit a final answer instead of looping on empty output. Set an explicit value here to override the auto behavior."
 		},
-		"reasoning_effort": {
+		"llm_ollama.reasoning_effort": {
 			"type": "string",
 			"title": "Reasoning Effort",
 			"description": "Optional reasoning budget for reasoning models: low, medium, or high. Leave unset to let reasoning models auto-use 'low'; a value set here always wins. Ignored by non-reasoning models.",
 			"enum": ["low", "medium", "high"]
 		},
-		"ollama.custom": {
-			"object": "custom",
-			"properties": ["model", "modelTotalTokens", "modelOutputTokens", "temperature", "reasoning_effort", "llm.local.serverbase"]
-		},
-		"ollama.llama3_3": {
-			"object": "llama3_3",
-			"properties": ["llm.local.serverbase"]
-		},
-		"ollama.llama3_1-8b": {
-			"object": "llama3_1-8b",
-			"properties": ["llm.local.serverbase"]
-		},
-		"ollama.llama3_1-70b": {
-			"object": "llama3_1-70b",
-			"properties": ["llm.local.serverbase"]
-		},
-		"ollama.llama3_1-405b": {
-			"object": "llama3_1-405b",
-			"properties": ["llm.local.serverbase"]
-		},
-		"ollama.phi4-14b": {
-			"object": "phi4-14b",
-			"properties": ["llm.local.serverbase"]
-		},
-		"ollama.llama3_2-3b": {
-			"object": "llama3_2-3b",
-			"properties": ["llm.local.serverbase"]
-		},
-		"ollama.llama3_2-1b": {
-			"object": "llama3_2-1b",
-			"properties": ["llm.local.serverbase"]
-		},
-		"ollama.llama4-latest": {
-			"object": "llama4-latest",
-			"properties": ["llm.local.serverbase"]
-		},
-		"ollama.mistral-7b": {
-			"object": "mistral-7b",
-			"properties": ["llm.local.serverbase"]
-		},
-		"ollama.qwen2_5-7b": {
-			"object": "qwen2_5-7b",
-			"properties": ["llm.local.serverbase"]
-		},
-		"ollama.qwen2_5-0_5b": {
-			"object": "qwen2_5-0_5b",
-			"properties": ["llm.local.serverbase"]
-		},
-		"ollama.qwen2_5-1_5b": {
-			"object": "qwen2_5-1_5b",
-			"properties": ["llm.local.serverbase"]
-		},
-		"ollama.qwen2_5-3b": {
-			"object": "qwen2_5-3b",
-			"properties": ["llm.local.serverbase"]
-		},
-		"ollama.qwen2_5-14b": {
-			"object": "qwen2_5-14b",
-			"properties": ["llm.local.serverbase"]
-		},
-		"ollama.qwen2_5-32b": {
-			"object": "qwen2_5-32b",
-			"properties": ["llm.local.serverbase"]
-		},
-		"ollama.qwen2_5-72b": {
-			"object": "qwen2_5-72b",
-			"properties": ["llm.local.serverbase"]
-		},
-		"ollama.qwen3-latest": {
-			"object": "qwen3-latest",
-			"properties": ["llm.local.serverbase"]
-		},
-		"ollama.deepseek-r1-1_5b": {
-			"object": "deepseek-r1-1_5b",
-			"properties": ["llm.local.serverbase"]
-		},
-		"ollama.deepseek-r1-7b": {
-			"object": "deepseek-r1-7b",
-			"properties": ["llm.local.serverbase"]
-		},
-		"ollama.deepseek-r1-14b": {
-			"object": "deepseek-r1-14b",
-			"properties": ["llm.local.serverbase"]
-		},
-		"ollama.deepseek-r1-32b": {
-			"object": "deepseek-r1-32b",
-			"properties": ["llm.local.serverbase"]
-		},
-		"ollama.deepseek-r1-671b": {
-			"object": "deepseek-r1-671b",
-			"properties": ["llm.local.serverbase"]
-		},
-		"ollama.profile": {
-			"title": "Model",
-			"description": "LLM model",
+		"llm_ollama.customModel": {
 			"type": "string",
-			"default": "llama3_3",
-			"enum": ["*>preconfig.profiles.*.title"],
-			"conditional": [
-				{
-					"value": "custom",
-					"properties": ["ollama.custom"]
-				},
-				{
-					"value": "llama3_3",
-					"properties": ["ollama.llama3_3"]
-				},
-				{
-					"value": "llama3_1-8b",
-					"properties": ["ollama.llama3_1-8b"]
-				},
-				{
-					"value": "llama3_1-70b",
-					"properties": ["ollama.llama3_1-70b"]
-				},
-				{
-					"value": "llama3_1-405b",
-					"properties": ["ollama.llama3_1-405b"]
-				},
-				{
-					"value": "llama4-latest",
-					"properties": ["ollama.llama4-latest"]
-				},
-				{
-					"value": "phi4-14b",
-					"properties": ["ollama.phi4-14b"]
-				},
-				{
-					"value": "llama3_2-3b",
-					"properties": ["ollama.llama3_2-3b"]
-				},
-				{
-					"value": "llama3_2-1b",
-					"properties": ["ollama.llama3_2-1b"]
-				},
-				{
-					"value": "mistral-7b",
-					"properties": ["ollama.mistral-7b"]
-				},
-				{
-					"value": "qwen2_5-7b",
-					"properties": ["ollama.qwen2_5-7b"]
-				},
-				{
-					"value": "qwen2_5-0_5b",
-					"properties": ["ollama.qwen2_5-0_5b"]
-				},
-				{
-					"value": "qwen2_5-1_5b",
-					"properties": ["ollama.qwen2_5-1_5b"]
-				},
-				{
-					"value": "qwen2_5-3b",
-					"properties": ["ollama.qwen2_5-3b"]
-				},
-				{
-					"value": "qwen2_5-14b",
-					"properties": ["ollama.qwen2_5-14b"]
-				},
-				{
-					"value": "qwen2_5-32b",
-					"properties": ["ollama.qwen2_5-32b"]
-				},
-				{
-					"value": "qwen2_5-72b",
-					"properties": ["ollama.qwen2_5-72b"]
-				},
-				{
-					"value": "qwen3-latest",
-					"properties": ["ollama.qwen3-latest"]
-				},
-				{
-					"value": "deepseek-r1-1_5b",
-					"properties": ["ollama.deepseek-r1-1_5b"]
-				},
-				{
-					"value": "deepseek-r1-7b",
-					"properties": ["ollama.deepseek-r1-7b"]
-				},
-				{
-					"value": "deepseek-r1-14b",
-					"properties": ["ollama.deepseek-r1-14b"]
-				},
-				{
-					"value": "deepseek-r1-32b",
-					"properties": ["ollama.deepseek-r1-32b"]
-				},
-				{
-					"value": "deepseek-r1-671b",
-					"properties": ["ollama.deepseek-r1-671b"]
-				}
-			]
+			"title": "Model id",
+			"description": "Model id exactly as the provider names it",
+			"required": true
+		},
+		"llm_ollama.custom.modelTotalTokens": { "type": "number", "title": "Tokens", "description": "Total Tokens", "minimum": 1, "default": 16385 },
+		"llm_ollama.custom.modelOutputTokens": {
+			"type": "integer",
+			"title": "Output Tokens",
+			"description": "Most tokens the model may write in one reply (at least 1,024). Leave it empty to keep the node's default. Reasoning models count their thinking against this limit: set it well above the reply you expect, or they can spend it all thinking and return nothing. It cannot exceed Tokens; a larger value is lowered to it.",
+			"minimum": 1024
 		}
 	},
 	//
 	// Required:
-	//		Defines the fields (shape) of the service. Either source or target
-	//		map be specified, or both, but at least one is required
+	//		Defines the properties shown in the pipeline builder side panel, in order
 	//
-	"shape": [
+	"properties": [
 		{
-			"section": "Pipe",
-			"title": "Ollama",
-			"properties": ["ollama.profile"]
-		}
+			"name": "model",
+			"type": "string",
+			"title": "Model",
+			"description": "LLM model",
+			"default": "llama3.3:latest",
+			"enum": {
+				"llama3.3:latest": {
+					"title": "Llama 3.3",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 128000 }
+					]
+				},
+				"llama3.1:8b": {
+					"title": "Llama 3.1 8B",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 128000 }
+					]
+				},
+				"llama3.1:70b": {
+					"title": "Llama 3.1 70B",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 128000 }
+					]
+				},
+				"llama3.1:405b": {
+					"title": "Llama 3.1 405B",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 128000 }
+					]
+				},
+				"phi4": {
+					"title": "Phi 4 14B",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 16000 }
+					]
+				},
+				"llama3.2": {
+					"title": "Llama 3.2 3B",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 128000 }
+					]
+				},
+				"llama3.2:1b": {
+					"title": "Llama 3.2 1B",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 128000 }
+					]
+				},
+				"llama4:latest": {
+					"title": "Llama 4 Latest",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 10000000 }
+					]
+				},
+				"mistral": {
+					"title": "Mistral 7B",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 32000 }
+					]
+				},
+				"qwen2.5": {
+					"title": "Qwen 2.5 7B",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 128000 }
+					]
+				},
+				"qwen2.5:0.5b": {
+					"title": "Qwen 2.5 0.5B",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 128000 }
+					]
+				},
+				"qwen2.5:1.5b": {
+					"title": "Qwen 2.5 1.5B",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 128000 }
+					]
+				},
+				"qwen2.5:3b": {
+					"title": "Qwen 2.5 3B",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 128000 }
+					]
+				},
+				"qwen2.5:14b": {
+					"title": "Qwen 2.5 14B",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 128000 }
+					]
+				},
+				"qwen2.5:32b": {
+					"title": "Qwen 2.5 32B",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 128000 }
+					]
+				},
+				"qwen2.5:72b": {
+					"title": "Qwen 2.5 72B",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 128000 }
+					]
+				},
+				"qwen3:latest": {
+					"title": "Qwen 3 Latest",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 128000 }
+					]
+				},
+				"deepseek-r1:1.5b": {
+					"title": "DeepSeek R1 1.5B",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 128000 }
+					]
+				},
+				"deepseek-r1:7b": {
+					"title": "DeepSeek R1 7B",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 128000 }
+					]
+				},
+				"deepseek-r1:14b": {
+					"title": "DeepSeek R1 14B",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 128000 }
+					]
+				},
+				"deepseek-r1:32b": {
+					"title": "DeepSeek R1 32B",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 128000 }
+					]
+				},
+				"deepseek-r1:671b": {
+					"title": "DeepSeek R1 671B",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 128000 }
+					]
+				},
+				"custom": {
+					"title": "Custom model",
+					"properties": ["llm_ollama.customModel", "llm_ollama.custom.modelTotalTokens", "llm_ollama.custom.modelOutputTokens"]
+				}
+			}
+		},
+		"llm_ollama.serverbase",
+		"llm_ollama.temperature",
+		"llm_ollama.reasoning_effort"
 	],
+	//
+	// Optional:
+	//		Test configuration for automated node testing. "profiles" lists
+	//		values of the "model" selector; the framework writes the selected one
+	//		at "model" and the mock credentials at their paths.
+	//
 	"test": [
 		{
-			"profiles": ["llama4-latest"],
+			"profiles": ["llama4:latest"],
 			"outputs": ["answers"],
 			"cases": [
 				{
 					"name": "LLM returns mock response",
 					"text": "What is 2+2?",
 					"expect": {
-						"answers": {
-							"contains": "Mock LLM response"
-						}
+						"answers": { "contains": "Mock LLM response" }
 					}
 				}
 			]
@@ -480,16 +287,14 @@
 		{
 			"requires": ["ROCKETRIDE_OLLAMA_SERVERBASE", "ROCKETRIDE_OLLAMA_MODEL_QWEN2_5_0_5B"],
 			"avoidMocks": true,
-			"profiles": ["qwen2_5-0_5b"],
+			"profiles": ["qwen2.5:0.5b"],
 			"outputs": ["answers"],
 			"cases": [
 				{
 					"name": "LLM returns real response",
 					"text": "What is 4*9?",
 					"expect": {
-						"answers": {
-							"contains": "36"
-						}
+						"answers": { "contains": "36" }
 					}
 				}
 			]

@@ -1,0 +1,148 @@
+# =============================================================================
+# MIT License
+# Copyright (c) 2026 Aparavi Software AG
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+# =============================================================================
+
+"""
+qwen save-time validation.
+
+The engine imports this module alone in CONFIG mode: the schema check is the
+resolver (``self.config``), and the semantic check is a short probe request
+against the provider with the configured model and key. The provider SDK is
+imported inside the probe so this module stays import-light.
+"""
+
+import os
+import re
+
+from rocketlib import IValidatorBase, warning
+from ai.common.config import warn_if_credential_unresolved
+
+DASHSCOPE_REGIONS = {
+    'us': 'https://dashscope-us.aliyuncs.com/compatible-mode/v1',
+    'intl': 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
+    'cn': 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+}
+
+
+class IValidator(IValidatorBase):
+    """Schema check through the resolver, then the provider probe."""
+
+    def validateConfig(self, syntaxOnly: bool = False):
+        """
+        Validate the configuration for Qwen LLM node.
+        """
+        # The schema check: a config that does not fit raises ConfigError here,
+        # before any probe. syntaxOnly asks for that check alone.
+        config = self.config
+        if syntaxOnly:
+            return
+
+        try:
+            # Load dependencies
+            from depends import depends
+
+            requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
+            depends(requirements)
+
+            # Prefer provider-driven exceptions vs string parsing
+            from openai import (
+                OpenAI,
+                APIStatusError,
+                OpenAIError,
+                AuthenticationError,
+                RateLimitError,
+                APIConnectionError,
+            )
+
+            apikey = config.get('apikey')
+
+            # Do not send a ${...} the engine left unfilled to the provider as the key:
+            # its reply would say the key is wrong, not which variable is missing.
+            if warn_if_credential_unresolved(self.glb.logicalType, 'apikey', apikey):
+                return
+
+            model = config.get('customModel') or config.model
+            modelTotalTokens = config.get('modelTotalTokens')
+
+            # Validate API key format
+            if not apikey or not apikey.startswith('sk-'):
+                warning('Invalid DashScope API key. Key must start with "sk-".')
+                return
+
+            # Only validate tokens > 0 if provided
+            if modelTotalTokens is not None:
+                if modelTotalTokens <= 0:
+                    warning('Token limit must be greater than 0')
+                    return
+
+            # Resolve the endpoint the way the runtime does: an explicit base_url
+            # wins over the regional map
+            base_url = (config.get('base_url') or '').strip()
+            if not base_url:
+                base_url = DASHSCOPE_REGIONS.get(config.region, DASHSCOPE_REGIONS['us'])
+
+            # Simple API validation using provider-driven exceptions
+            try:
+                client = OpenAI(api_key=apikey, base_url=base_url)
+                client.chat.completions.create(model=model, messages=[{'role': 'user', 'content': 'Hi'}], max_tokens=1)
+            except APIStatusError as e:
+                # HTTP error with structured body; pull status/type/message
+                status = getattr(e, 'status_code', None) or getattr(e, 'status', None)
+                message = str(e)
+                try:
+                    resp = getattr(e, 'response', None)
+                    data = resp.json() if resp is not None else None
+                    if isinstance(data, dict):
+                        err = data.get('error')
+                        etype = err.get('type') if isinstance(err, dict) else None
+                        emsg = (err.get('message') if isinstance(err, dict) else None) or data.get('message')
+                        parts = []
+                        if status:
+                            parts.append(f'Error {status}:')
+                        if etype:
+                            parts.append(etype)
+                        if emsg:
+                            if etype:
+                                parts.append('-')
+                            parts.append(emsg)
+                        if parts:
+                            message = ' '.join(parts)
+                except Exception:
+                    pass
+                warning(self._format_error(message))
+                return
+            except (AuthenticationError, RateLimitError, APIConnectionError, OpenAIError) as e:
+                warning(self._format_error(str(e)))
+                return
+
+        except Exception as e:
+            warning(str(e))
+            return
+
+    def _format_error(self, message: str) -> str:
+        """
+        Format an error message for user-facing display.
+        """
+        message = re.sub(r'\s+', ' ', message).strip()
+        if len(message) > 500:
+            message = message[:500].rstrip() + '\u2026'
+        return message
