@@ -1365,6 +1365,27 @@ def test_only_an_ungated_engine_registers_the_noindex_middleware(
     _start_engine(web_server, monkeypatch)
     dispatches = [m.kwargs.get('dispatch') for m in web_server.app.user_middleware]
     assert (shell_mod.ungated_noindex in dispatches) is registered
-    # Registering it is a startup warning: a production pod without RR_APP_URL deindexes itself.
-    noindex_warnings = [line for line in lines if 'RR_APP_URL is not set' in line and 'noindex, nofollow' in line]
-    assert len(noindex_warnings) == (1 if registered else 0), lines
+    # Startup stays quiet: OSS and desktop engines have nothing published to deindex.
+    assert [line for line in lines if 'RR_APP_URL is not set' in line] == []
+
+
+@pytest.mark.parametrize('fixture,warns', [('no_app_url', True), ('app_url', False)])
+def test_a_published_page_without_rr_app_url_warns_once_at_the_swap(
+    web_server, shell_root, monkeypatch, request, fixture, warns
+):
+    # A production pod without RR_APP_URL deindexes its published pages: say so, once, when it has some.
+    import ai.modules.shell as shell_pkg
+
+    request.getfixturevalue(fixture)
+    lines = []
+    monkeypatch.setattr(shell_pkg, 'warning', lines.append)
+    monkeypatch.setattr(shell_pkg, '_warned_noindex', False)
+    _start_engine(web_server, monkeypatch)
+    published = pp.Aggregate(exact={'/': pp.Page('/', 'rocketride.home', title='Home')})
+    pp.swap(pp.Aggregate(exact={}))
+    pp.swap(pp.legacy_aggregate())
+    assert lines == []
+    pp.swap(published)
+    pp.swap(pp.Aggregate(exact={'/a': pp.Page('/a', 'rocketride.home', title='A')}))
+    matching = [line for line in lines if 'RR_APP_URL is not set' in line and 'noindex, nofollow' in line]
+    assert len(matching) == (1 if warns else 0), lines
