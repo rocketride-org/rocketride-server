@@ -89,6 +89,9 @@ Save this as `extract.pipe`:
 Put some PDF invoices in `/data/invoices`, then:
 
 ```bash
+# The engine's key. Replace rr_local with the key your engine was started with.
+# For a local engine started without a key, any non-empty value works.
+export ROCKETRIDE_APIKEY=rr_local
 export ROCKETRIDE_OPENAI_API_KEY=sk-...
 
 rocketride start --pipeline ./extract.pipe

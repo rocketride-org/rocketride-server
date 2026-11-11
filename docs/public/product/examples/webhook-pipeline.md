@@ -52,6 +52,9 @@ Three nodes, one connection each. The `webhook` source receives the request, the
 ## Start the pipeline
 
 ```bash
+# The engine's key. Replace rr_local with the key your engine was started with.
+# For a local engine started without a key, any non-empty value works.
+export ROCKETRIDE_APIKEY=rr_local
 export ROCKETRIDE_OPENAI_API_KEY=sk-...
 
 rocketride start --pipeline ./chat.pipe
@@ -81,11 +84,10 @@ The LLM in this pipeline listens on the `questions` lane, so send the question
 as `application/rocketride-question` with this JSON body. Plain text goes to the
 `text` lane and gets no answer from this pipeline.
 
-curl reads the key from your shell, not from `.env`, so set it first:
+curl reads the key from your shell, not from `.env`. It is the `ROCKETRIDE_APIKEY`
+you exported before `start`:
 
 ```bash
-# Use the key your engine was started with. If it was started without one, any non-empty value works.
-export ROCKETRIDE_APIKEY=rr_local
 curl -X POST "http://localhost:5565/webhook/webhook-example/source_1" \
   -H "Authorization: Bearer $ROCKETRIDE_APIKEY" \
   -H "Content-Type: application/rocketride-question" \
