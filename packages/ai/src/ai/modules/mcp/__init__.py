@@ -345,6 +345,10 @@ def _refuse_cleartext_engine_uri(uri: str, source_value: str, source_name: str) 
     )
 
 
+# Bind hosts that listen on every interface of a family; see _resolve_engine_uri.
+_WILDCARD_HOSTS = ('', '0.0.0.0', '::')
+
+
 def _resolve_engine_uri(config: Dict[str, Any], bind_host: str, bind_port: int) -> Tuple[str, str]:
     """Resolve the engine URI the MCP tools connect back to.
 
@@ -359,9 +363,25 @@ def _resolve_engine_uri(config: Dict[str, Any], bind_host: str, bind_port: int) 
        silently drives RocketRide's cloud. ``localhost`` maps to
        ``127.0.0.1`` (uvicorn binds a non-literal host as IPv4); ``::1`` is
        bracketed.
-    3. ``public default`` -- any other bind (including bind-all / unset) uses
-       the public origin of the MCP resource identifier: path dropped,
-       ``https`` -> ``wss``, ``http`` -> ``ws``.
+    3. ``public default`` -- any other bind (including bind-all / unset) with
+       ``MCP_RESOURCE_IDENTIFIER`` set uses the public origin of that
+       identifier: path dropped, ``https`` -> ``wss``, ``http`` -> ``ws``.
+    4. ``self default`` -- a bind-all host (``''``, unset, ``0.0.0.0`` or ``::``)
+       with ``MCP_RESOURCE_IDENTIFIER`` NOT set connects back to this engine on
+       the loopback address that reaches that socket: ``ws://127.0.0.1:<port>``,
+       or ``ws://[::1]:<port>`` for ``::`` (an IPv6 wildcard socket is
+       IPv6-only, so 127.0.0.1 is refused). The built-in identifier default is
+       RocketRide Cloud's address; deriving from it on a self-hosted engine
+       (for example the Docker image, which binds ``0.0.0.0``) sent every tool
+       call, and the caller's key, to the cloud.
+    5. ``bind address`` -- a specific non-loopback host (an IP or a name) with
+       neither variable set listens only on that address, so loopback would be
+       refused; the engine connects to ``ws://<bind_host>:<port>`` instead. The
+       cleartext check does not apply: the target is this engine's own bind
+       address, so the credential is delivered locally. Failing at boot is not
+       used because ``server.use('mcp')`` runs inside engine start-up, and an
+       exception there stops the whole engine, including deployments that never
+       use MCP. ``initModule`` logs a warning naming ``ROCKETRIDE_URI``.
 
     Whatever rule wins, the resolved URI requires ENCRYPTED transport whenever
     it addresses a REMOTE engine: the caller's own credential is handed to the
@@ -372,7 +392,7 @@ def _resolve_engine_uri(config: Dict[str, Any], bind_host: str, bind_port: int) 
     somewhere else. Cleartext to a loopback target stays allowed, since that
     credential never reaches a wire. See ``_refuse_cleartext_engine_uri``.
 
-    ``bind_host`` therefore only selects the DEFAULT URI (rules 2 and 3); it
+    ``bind_host`` therefore only selects the DEFAULT URI (rules 2 to 5); it
     has no say in whether a value is encrypted enough.
 
     Args:
@@ -395,6 +415,17 @@ def _resolve_engine_uri(config: Dict[str, Any], bind_host: str, bind_port: int) 
     if auth.is_loopback_bind(bind_host):
         host = '[::1]' if bind_host == '::1' else '127.0.0.1'
         return f'ws://{host}:{bind_port}', 'loopback default'
+    if not os.environ.get(oauth_resource.ENV_RESOURCE):
+        # Only the built-in default would apply; it names RocketRide Cloud, not
+        # this engine. A deployment that wants the derivation sets the variable.
+        if bind_host in _WILDCARD_HOSTS:
+            # asyncio binds '' to IPv4 and IPv6, '0.0.0.0' to IPv4 only and '::'
+            # to IPv6 only (IPV6_V6ONLY), so each needs the loopback it serves.
+            host = '[::1]' if bind_host == '::' else '127.0.0.1'
+            return f'ws://{host}:{bind_port}', 'self default'
+        # A specific address is listened on only there; loopback is refused.
+        host = f'[{bind_host}]' if ':' in bind_host else bind_host
+        return f'ws://{host}:{bind_port}', 'bind address'
     resource = oauth_resource.resource_identifier()
     parts = urlsplit(resource)
     scheme = {'https': 'wss', 'http': 'ws'}.get(parts.scheme, parts.scheme)
@@ -498,6 +529,14 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
     _log_bind_mode(bind_host, local_engine, _host_is_configured(server, config))
     engine_uri, engine_uri_rule = _resolve_engine_uri(config, bind_host, _bind_port(server, config))
     logger.info('MCP engine URI: %s (%s)', _redacted_uri(engine_uri), engine_uri_rule)
+    if engine_uri_rule in ('self default', 'bind address'):
+        logger.warning(
+            'MCP engine address defaulted to %s because neither ROCKETRIDE_URI nor MCP_RESOURCE_IDENTIFIER is set. '
+            'Upload links, the file-drop page and widget addresses use that address, so they only work on this '
+            'machine. Set MCP_RESOURCE_IDENTIFIER (or ROCKETRIDE_URI) to the engine address clients on other '
+            'machines can reach.',
+            _redacted_uri(engine_uri),
+        )
     config = {**config, 'rocketride_uri': engine_uri, 'local_engine': local_engine}
     engine_factory = _make_engine_factory(config)
 
