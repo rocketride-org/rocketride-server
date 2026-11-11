@@ -80,7 +80,12 @@ def main() -> int:
     # refuses torch / tensorflow / onnxruntime / cupy at import
     sys.meta_path.insert(0, _GPUImportBlocker(_BLOCKED_MODULES))
     report = {package: _probe(package) for package in packages}
+    # The engine may print its own status lines (its requirement check waits
+    # on an install lock when several probes start together); the report is
+    # the last line, so the gate reads only that
+    print()
     json.dump(report, sys.stdout)
+    print()
     return 0
 
 
