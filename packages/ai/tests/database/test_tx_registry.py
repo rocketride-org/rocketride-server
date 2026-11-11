@@ -586,13 +586,74 @@ def test_close_all_waits_for_an_in_flight_sweep_to_finish_its_rollback():
         held = reg._sessions[sid]
         held.trans = _SlowRollback(held.trans)
 
-        # The sweeper has taken the session out of the registry and is inside
-        # its rollback: exactly the window close_all() must wait out.
+        # The sweeper is inside its rollback: the session stays registered
+        # until conn.close() completes so close_all() waits on held.lock.
         assert rollback_started.wait(timeout=5.0), 'sweeper did not reap the idle session'
-        assert sid not in reg._sessions
+        assert sid in reg._sessions
 
         reg.close_all()
         assert rolled_back == [True]
+        assert sid not in reg._sessions
+    finally:
+        reg.close_all()
+
+
+@pytest.mark.parametrize('action', ['rollback', 'commit'])
+def test_close_all_waits_for_an_in_flight_caller_finalize(action):
+    """close_all() must wait for a request thread's in-flight commit/rollback to finish (#2639)."""
+    finalize_started = threading.Event()
+    events = []
+
+    class _SlowTrans:
+        """Transaction wrapper that pauses inside commit/rollback to widen the race window."""
+
+        def __init__(self, trans):
+            """Wrap the underlying SQLAlchemy transaction."""
+            self._trans = trans
+
+        def commit(self):
+            """Pause after signalling start, then commit and record completion."""
+            finalize_started.set()
+            time.sleep(0.25)
+            self._trans.commit()
+            events.append('trans_done')
+
+        def rollback(self):
+            """Pause after signalling start, then roll back and record completion."""
+            finalize_started.set()
+            time.sleep(0.25)
+            self._trans.rollback()
+            events.append('trans_done')
+
+        def __getattr__(self, name):
+            """Delegate all other attributes to the wrapped transaction."""
+            return getattr(self._trans, name)
+
+    reg = TransactionRegistry(_engine_shared(), max_rows=1000)
+    try:
+        sid = reg.begin()
+        reg.execute(sid, 'INSERT INTO t (v) VALUES ($1)', ['row'])
+        held = reg._sessions[sid]
+        held.trans = _SlowTrans(held.trans)
+        orig_close = held.conn.close
+
+        def _tracked_close():
+            """Close the connection and record that conn.close() completed."""
+            orig_close()
+            events.append('conn_closed')
+
+        held.conn.close = _tracked_close
+
+        caller = threading.Thread(target=getattr(reg, action), args=(sid,))
+        caller.start()
+        assert finalize_started.wait(timeout=5.0), f'{action} did not start'
+        assert sid in reg._sessions
+
+        reg.close_all()
+        caller.join(timeout=5.0)
+        assert not caller.is_alive()
+        assert events == ['trans_done', 'conn_closed']
+        assert sid not in reg._sessions
     finally:
         reg.close_all()
 
