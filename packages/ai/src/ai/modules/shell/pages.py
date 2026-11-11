@@ -62,6 +62,7 @@ from fastapi import HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from starlette.routing import Route, WebSocketRoute
 
+from ai.account.store import StorageError
 from ai.web import Request, WebServer
 from ai.web.middleware import route_path
 
@@ -371,7 +372,7 @@ async def _snapshot_bytes(path: str) -> bytes:
 
     Raises:
         _SnapshotTooLarge: the stored file is over ``MAX_SNAPSHOT_BYTES``.
-        Exception: a storage failure (``StorageNotFoundError`` included).
+        StorageError: a storage failure (``StorageNotFoundError`` included).
     """
     raw = _snapshot_cache.get(path)
     if raw is None:
@@ -397,7 +398,8 @@ async def _crawler_document(page: Page, document: Path) -> Tuple[str, bool]:
     ``MAX_SNAPSHOT_BYTES``, or a template the engine refuses (the last two
     are remembered by store path and warned about once). Any other failure
     falls back uncached and warned, so the next request tries again: a
-    storage error, or a snapshot the store does not have (yet).
+    storage error, or a snapshot the store does not have (yet). Anything
+    else is a bug and propagates.
     """
     if not page.snapshot:
         return document.read_text(encoding='utf-8'), True
@@ -413,7 +415,7 @@ async def _crawler_document(page: Page, document: Path) -> Tuple[str, bool]:
     except (_SnapshotTooLarge, TemplateError) as exc:
         _unusable_snapshots.put(path, True, 1)
         return _fallback(page, document, exc), True
-    except Exception as exc:
+    except StorageError as exc:
         return _fallback(page, document, exc), False
 
 

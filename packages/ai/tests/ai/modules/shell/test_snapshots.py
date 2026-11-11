@@ -52,7 +52,7 @@ from ai.modules.shell.pages import FALLBACK_PATH, public_page, snapshot_path
 from ai.modules.shell.public_pages import Aggregate, Page
 from ai.modules.shell.template import MAX_SECTION_DEPTH, render
 
-from ai.account.store import StorageNotFoundError
+from ai.account.store import StorageError, StorageNotFoundError
 
 from .hostile_fixtures import (
     FILES,
@@ -228,12 +228,12 @@ def test_a_page_without_a_snapshot_serves_crawlers_the_shell_document(shell_root
 
 @pytest.mark.parametrize(
     'failure',
-    [StorageNotFoundError('File not found'), RuntimeError('store down'), ValueError('garbled store answer')],
-    ids=['not-in-the-store', 'store-down', 'store-value-error'],
+    [StorageNotFoundError('File not found'), StorageError('store down')],
+    ids=['not-in-the-store', 'store-down'],
 )
 def test_a_failed_snapshot_read_is_served_uncached_and_warned(shell_root, monkeypatch, warned, failure):
-    # No outcome is final: a gated version's files may not be readable yet,
-    # and a store recovers, whatever it raised. Nothing downstream may keep the fallback.
+    # No storage failure is final: a gated version's files may not be readable
+    # yet, and a store recovers. Nothing downstream may keep the fallback.
     _seed()
     _serve(_page())
 
@@ -252,6 +252,20 @@ def test_a_failed_snapshot_read_is_served_uncached_and_warned(shell_root, monkey
     monkeypatch.setattr(pp, 'read_artifact_file', read_file)
     resp = _crawl(client)
     assert 'Pricing plans' in resp.text and resp.headers['cache-control'] == 'public, max-age=3600'
+
+
+def test_a_programming_error_reading_a_snapshot_is_raised_not_served(shell_root, monkeypatch, warned):
+    # Only storage failures fall back: a bug must surface, not be served as the shell document.
+    _seed()
+    _serve(_page())
+
+    async def sizeless(path):
+        return {'modified': 0.0}
+
+    monkeypatch.setattr(pp, 'artifact_file_info', sizeless)
+    with pytest.raises(KeyError):
+        _crawl(_client())
+    assert len(pages._render_cache) == 0 and warned == []
 
 
 def test_a_snapshot_the_engine_refuses_falls_back_cacheably_and_warns_once(shell_root, reads, warned):
