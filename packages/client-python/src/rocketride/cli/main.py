@@ -184,8 +184,10 @@ def setup_parser() -> argparse.ArgumentParser:
     )
     start_parser.add_argument(
         '--token',
-        default=os.getenv('ROCKETRIDE_TOKEN'),
-        help='Optional existing task token (can use ROCKETRIDE_TOKEN in .env or env var)',
+        help=(
+            "Override the pipeline-id segment of the run's address (the pipeline's project_id): "
+            'the run is addressed developerId.<token>.source; not a credential'
+        ),
     )
     start_parser.add_argument('--threads', type=int, default=4, help='Number of threads (default: %(default)s)')
     start_parser.add_argument(

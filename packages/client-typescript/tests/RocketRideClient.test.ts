@@ -22,6 +22,7 @@
  * SOFTWARE.
  */
 
+import { randomUUID } from 'crypto';
 import { RocketRideClient, Question, TASK_STATE, UPLOAD_RESULT, PIPELINE_RESULT, DAPMessage, TraceType } from '../src/client';
 import * as ClientExceptions from '../src/client/exceptions';
 import type { LoginAttemptCancellationReason } from '../src/client/exceptions';
@@ -59,6 +60,16 @@ async function ensureCleanPipeline(client: RocketRideClient, token: string): Pro
 	} catch {
 		// Ignore errors - pipeline might not be running
 	}
+}
+
+/**
+ * A unique use() token so the run gets an address of its own: the token
+ * overrides the pipeline-id segment of the task address, so a unique value
+ * keeps the run apart from every other test, worker and client on the same
+ * server. The test then works with the address use() returns.
+ */
+function privateToken(base: string): string {
+	return `${base}-${randomUUID().slice(0, 8)}`;
 }
 
 describe('RocketRideClient Integration Tests', () => {
@@ -125,15 +136,17 @@ describe('RocketRideClient Integration Tests', () => {
 	});
 
 	describe('Pipeline Operations', () => {
-		const PIPELINE_TOKEN = 'TS-PL';
+		let pipelineToken: string | undefined;
 
 		beforeEach(async () => {
 			await client.connect();
-			await ensureCleanPipeline(client, PIPELINE_TOKEN);
+			pipelineToken = undefined;
 		});
 
 		afterEach(async () => {
-			await ensureCleanPipeline(client, PIPELINE_TOKEN);
+			if (pipelineToken) {
+				await ensureCleanPipeline(client, pipelineToken);
+			}
 		});
 
 		it(
@@ -141,8 +154,9 @@ describe('RocketRideClient Integration Tests', () => {
 			async () => {
 				const result = await client.use({
 					pipeline: getEchoPipeline(),
-					token: PIPELINE_TOKEN,
+					token: privateToken('ts-echo'),
 				});
+				pipelineToken = result.token;
 
 				expect(result).toHaveProperty('token');
 				expect(typeof result.token).toBe('string');
@@ -156,8 +170,9 @@ describe('RocketRideClient Integration Tests', () => {
 		it('should get pipeline status', async () => {
 			const result = await client.use({
 				pipeline: getEchoPipeline(),
-				token: PIPELINE_TOKEN,
+				token: privateToken('ts-echo'),
 			});
+			pipelineToken = result.token;
 
 			// Retry a few times in case server is busy (tests may run in parallel)
 			const maxAttempts = 10;
@@ -184,8 +199,9 @@ describe('RocketRideClient Integration Tests', () => {
 			async () => {
 				const result = await client.use({
 					pipeline: getEchoPipeline(),
-					token: PIPELINE_TOKEN,
+					token: privateToken('ts-echo'),
 				});
+				pipelineToken = result.token;
 
 				await expect(client.terminate(result.token)).resolves.not.toThrow();
 			},
@@ -194,16 +210,14 @@ describe('RocketRideClient Integration Tests', () => {
 	});
 
 	describe('Data Operations', () => {
-		const DATA_TOKEN = 'TS-DA';
 		let pipelineToken: string;
 
 		beforeEach(async () => {
 			await client.connect();
-			await ensureCleanPipeline(client, DATA_TOKEN);
 
 			const result = await client.use({
 				pipeline: getEchoPipeline(),
-				token: DATA_TOKEN,
+				token: privateToken('ts-echo'),
 			});
 
 			pipelineToken = result.token;
@@ -475,16 +489,14 @@ describe('RocketRideClient Integration Tests', () => {
 	});
 
 	describeIfLLM('Chat Operations', () => {
-		const CHAT_TOKEN = 'TS-CH';
 		let chatToken: string;
 
 		beforeEach(async () => {
 			await client.connect();
-			await ensureCleanPipeline(client, CHAT_TOKEN);
 
 			const result = await client.use({
 				pipeline: getChatPipeline(),
-				token: CHAT_TOKEN,
+				token: privateToken('ts-chat'),
 			});
 
 			chatToken = result.token;
@@ -747,7 +759,6 @@ describe('RocketRideClient Integration Tests', () => {
 	});
 
 	describe('Event Handling', () => {
-		const EVENT_TOKEN = 'TS-EV';
 		let eventToken: string;
 		let receivedEvents: any[] = [];
 
@@ -763,11 +774,10 @@ describe('RocketRideClient Integration Tests', () => {
 			});
 
 			await client.connect();
-			await ensureCleanPipeline(client, EVENT_TOKEN);
 
 			const result = await client.use({
 				pipeline: getEchoPipeline(),
-				token: EVENT_TOKEN,
+				token: privateToken('ts-echo'),
 			});
 
 			eventToken = result.token;
@@ -1169,15 +1179,17 @@ describe('RocketRideClient Integration Tests', () => {
 	});
 
 	describe('Error Handling', () => {
-		const ERROR_TOKEN = 'TS-ER';
+		let pipelineToken: string | undefined;
 
 		beforeEach(async () => {
 			await client.connect();
-			await ensureCleanPipeline(client, ERROR_TOKEN);
+			pipelineToken = undefined;
 		});
 
 		afterEach(async () => {
-			await ensureCleanPipeline(client, ERROR_TOKEN);
+			if (pipelineToken) {
+				await ensureCleanPipeline(client, pipelineToken);
+			}
 		});
 
 		it(
@@ -1195,7 +1207,7 @@ describe('RocketRideClient Integration Tests', () => {
 					project_id: 'e612b741-748c-4b35-a8b7-186797a8ea42',
 				};
 
-				await expect(client.use({ pipeline: invalidPipeline, token: ERROR_TOKEN })).rejects.toThrow();
+				await expect(client.use({ pipeline: invalidPipeline })).rejects.toThrow();
 			},
 			TEST_CONFIG.timeout
 		);
@@ -1205,8 +1217,9 @@ describe('RocketRideClient Integration Tests', () => {
 			async () => {
 				const result = await client.use({
 					pipeline: getEchoPipeline(),
-					token: ERROR_TOKEN,
+					token: privateToken('ts-echo'),
 				});
+				pipelineToken = result.token;
 
 				await client.terminate(result.token);
 
@@ -1227,29 +1240,18 @@ describe('RocketRideClient Integration Tests', () => {
 	});
 
 	describe('End-to-End Workflow', () => {
-		const E2E_TOKEN = 'TS-E2';
+		let pipelineToken: string | undefined;
 
 		beforeEach(async () => {
 			await client.connect();
-			// Clean up any existing tokens from previous test runs
-			await ensureCleanPipeline(client, E2E_TOKEN);
-			await ensureCleanPipeline(client, `${E2E_TOKEN}-file`);
-			await ensureCleanPipeline(client, `${E2E_TOKEN}-multi`);
-			await ensureCleanPipeline(client, `${E2E_TOKEN}-chat`);
-			await ensureCleanPipeline(client, `${E2E_TOKEN}-mixed`);
-			await ensureCleanPipeline(client, `${E2E_TOKEN}-error`);
-			await ensureCleanPipeline(client, `${E2E_TOKEN}-large`);
+			pipelineToken = undefined;
 		});
 
 		afterEach(async () => {
-			// Clean up all tokens used in tests
-			await ensureCleanPipeline(client, E2E_TOKEN);
-			await ensureCleanPipeline(client, `${E2E_TOKEN}-file`);
-			await ensureCleanPipeline(client, `${E2E_TOKEN}-multi`);
-			await ensureCleanPipeline(client, `${E2E_TOKEN}-chat`);
-			await ensureCleanPipeline(client, `${E2E_TOKEN}-mixed`);
-			await ensureCleanPipeline(client, `${E2E_TOKEN}-error`);
-			await ensureCleanPipeline(client, `${E2E_TOKEN}-large`);
+			// Clean up the task the test started, by the address use() returned
+			if (pipelineToken) {
+				await ensureCleanPipeline(client, pipelineToken);
+			}
 		});
 
 		it(
@@ -1257,9 +1259,10 @@ describe('RocketRideClient Integration Tests', () => {
 			async () => {
 				const result = await client.use({
 					pipeline: getEchoPipeline(),
-					token: E2E_TOKEN,
+					token: privateToken('ts-echo'),
 				});
 				const token = result.token;
+				pipelineToken = token;
 
 				await client.setEvents(token, ['summary', 'task']);
 
@@ -1292,9 +1295,10 @@ describe('RocketRideClient Integration Tests', () => {
 			async () => {
 				const result = await client.use({
 					pipeline: getEchoPipeline(),
-					token: `${E2E_TOKEN}-file`,
+					token: privateToken('ts-echo'),
 				});
 				const token = result.token;
+				pipelineToken = token;
 
 				// Set up event monitoring
 				await client.setEvents(token, ['summary', 'task']);
@@ -1338,9 +1342,10 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 			async () => {
 				const result = await client.use({
 					pipeline: getEchoPipeline(),
-					token: `${E2E_TOKEN}-multi`,
+					token: privateToken('ts-echo'),
 				});
 				const token = result.token;
+				pipelineToken = token;
 
 				await client.setEvents(token, ['summary']);
 
@@ -1394,9 +1399,10 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 			async () => {
 				const result = await client.use({
 					pipeline: getChatPipeline(),
-					token: `${E2E_TOKEN}-chat`,
+					token: privateToken('ts-chat'),
 				});
 				const token = result.token;
+				pipelineToken = token;
 
 				await client.setEvents(token, ['summary', 'task']);
 
@@ -1444,9 +1450,10 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 			async () => {
 				const result = await client.use({
 					pipeline: getEchoPipeline(),
-					token: `${E2E_TOKEN}-mixed`,
+					token: privateToken('ts-echo'),
 				});
 				const token = result.token;
+				pipelineToken = token;
 
 				// Set up comprehensive event monitoring
 				const receivedEvents: any[] = [];
@@ -1537,9 +1544,10 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 			async () => {
 				const result = await client.use({
 					pipeline: getEchoPipeline(),
-					token: `${E2E_TOKEN}-error`,
+					token: privateToken('ts-echo'),
 				});
 				const token = result.token;
+				pipelineToken = token;
 
 				// Send valid data first
 				const validResult: PIPELINE_RESULT | undefined = await client.send(token, 'Valid data before error', {}, 'text/plain');
@@ -1568,9 +1576,10 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 			async () => {
 				const result = await client.use({
 					pipeline: getEchoPipeline(),
-					token: `${E2E_TOKEN}-large`,
+					token: privateToken('ts-echo'),
 				});
 				const token = result.token;
+				pipelineToken = token;
 
 				// Generate large text content (10KB)
 				const largeText = Array.from({ length: 1000 }, (_, i) => `Line ${i + 1}: This is a test line with some content to make it longer. Random: ${Math.random()}`).join('\n');
@@ -1661,16 +1670,12 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 	});
 
 	describe('Concurrent Pipeline Operations', () => {
-		const CONCURRENT_TOKEN = 'TS-CC';
 		const PIPELINE_COUNT = 16;
 		let pipelineTokens: string[] = [];
 
 		beforeEach(async () => {
 			await client.connect();
 			pipelineTokens = [];
-
-			// Clean up any existing pipeline
-			await ensureCleanPipeline(client, CONCURRENT_TOKEN);
 		});
 
 		afterEach(async () => {
@@ -1694,18 +1699,22 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 		it(
 			'should handle 16 concurrent pipelines with unique data',
 			async () => {
-				// Create all pipelines concurrently
+				// Create all pipelines concurrently — all share one subprocess via
+				// useExisting on one private token
+				const sharedToken = privateToken('ts-cc');
 				const pipelines = await Promise.all(
 					Array.from({ length: PIPELINE_COUNT }, async (_, index) => {
 						const result = await client.use({
 							pipeline: getEchoPipeline(),
-							token: CONCURRENT_TOKEN,
+							token: sharedToken,
 							useExisting: true,
 						});
 						return { index, token: result.token };
 					})
 				);
-				pipelineTokens = pipelines.map((p) => p.token);
+				// Every call attached to the same run, so one address came back
+				pipelineTokens = [...new Set(pipelines.map((p) => p.token))];
+				expect(pipelineTokens).toHaveLength(1);
 
 				// Generate unique test data for each pipeline
 				const testData = pipelines.map((pipeline, index) => ({
@@ -1780,7 +1789,7 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 			// Create a single pipeline
 			const result = await client.use({
 				pipeline: getEchoPipeline(),
-				token: `${CONCURRENT_TOKEN}-1p`,
+				token: privateToken('ts-echo'),
 			});
 			pipelineTokens = [result.token];
 
@@ -1845,25 +1854,15 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 				// loaded runner can take two minutes.
 				const OPERATION_TIMEOUT = 120000;
 
-				// Clean up any leftover pipelines from previous runs
-				for (let i = 0; i < PIPELINE_COUNT; i++) {
-					await ensureCleanPipeline(client, `${CONCURRENT_TOKEN}-m${i}`);
-				}
-
-				// Create all pipelines concurrently — each needs a unique project_id
-				// to avoid server-side contention during concurrent startup.
-				const MIXED_PROJECT_IDS = [
-					'a1b2c3d4-1111-4000-a000-000000000001',
-					'a1b2c3d4-1111-4000-a000-000000000002',
-					'a1b2c3d4-1111-4000-a000-000000000003',
-					'a1b2c3d4-1111-4000-a000-000000000004',
-				];
+				// Create all pipelines concurrently — each gets a private token, so
+				// each run has an address of its own.
+				const mixedTokens = Array.from({ length: PIPELINE_COUNT }, (_, index) => privateToken(`ts-mixed-${index}`));
 				const pipelines = await Promise.all(
 					Array.from({ length: PIPELINE_COUNT }, async (_, index) => {
-						const token = `${CONCURRENT_TOKEN}-m${index}`;
+						const token = mixedTokens[index];
 						const result = await withTimeoutGuard(
 							client.use({
-								pipeline: getEchoPipeline(MIXED_PROJECT_IDS[index]),
+								pipeline: getEchoPipeline(),
 								token,
 							}),
 							OPERATION_TIMEOUT,
@@ -1873,6 +1872,9 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 					})
 				);
 				pipelineTokens = pipelines.map((p) => p.token);
+
+				// Distinct tokens produced distinct runs
+				expect(new Set(pipelineTokens).size).toBe(PIPELINE_COUNT);
 
 				// Generate test data for multiple sends per pipeline
 				const allSendPromises = pipelines.flatMap((pipeline) =>
@@ -1944,24 +1946,16 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 				const SUBPROCESS_COUNT = 4;
 				const CYCLES_PER_PIPELINE = 32;
 
-				// Clean up any leftover pipelines from previous runs
-				for (let i = 0; i < SUBPROCESS_COUNT; i++) {
-					await ensureCleanPipeline(client, `${CONCURRENT_TOKEN}-s${i}`);
-				}
-
-				// Create 4 independent subprocesses concurrently — each needs a
-				// unique project_id to avoid server-side contention during startup.
-				const CYCLE_PROJECT_IDS = [
-					'b2c3d4e5-2222-4000-b000-000000000001',
-					'b2c3d4e5-2222-4000-b000-000000000002',
-					'b2c3d4e5-2222-4000-b000-000000000003',
-					'b2c3d4e5-2222-4000-b000-000000000004',
-				];
-				const tokens = Array.from({ length: SUBPROCESS_COUNT }, (_, i) => `${CONCURRENT_TOKEN}-s${i}`);
-				await Promise.all(tokens.map((token, i) =>
-					client.use({ pipeline: getEchoPipeline(CYCLE_PROJECT_IDS[i]), token })
+				// Create 4 independent subprocesses concurrently — each gets a
+				// private token; keep the returned addresses for the sends and
+				// the cleanup.
+				const cycleTokens = Array.from({ length: SUBPROCESS_COUNT }, (_, index) => privateToken(`ts-cycle-${index}`));
+				const results = await Promise.all(cycleTokens.map((token) =>
+					client.use({ pipeline: getEchoPipeline(), token })
 				));
+				const tokens = results.map((result) => result.token);
 				pipelineTokens.push(...tokens);
+				expect(new Set(tokens).size).toBe(SUBPROCESS_COUNT);
 
 				// Each pipeline independently cycles send/recv — all 4 run in parallel
 				async function runPipeline(token: string, pipelineIndex: number) {
@@ -2010,7 +2004,6 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 				// path because one client has one monotonic seq counter — it never
 				// collides with itself.  Two independent clients fanning into one task
 				// are the necessary precondition.
-				const SHARED_TOKEN = `${CONCURRENT_TOKEN}-cs`;
 				const SENDS_PER_CLIENT = 12;
 
 				// Spin up a SECOND independent client.  The first client is the outer
@@ -2026,15 +2019,18 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 					// Both clients use the SAME task via useExisting so the second
 					// client.use() attaches to the existing task instead of starting a
 					// fresh one.  This is what makes both clients fan into ONE shared
-					// eaas->subprocess _data_client.
+					// eaas->subprocess _data_client. One private token gives both
+					// calls the same address, so the second use() names the first
+					// one's task.
+					const twoClientToken = privateToken('ts-2c');
 					const resA = await client.use({
-						pipeline: getEchoPipeline('c3d4e5f6-3333-4000-c000-000000000001'),
-						token: SHARED_TOKEN,
+						pipeline: getEchoPipeline(),
+						token: twoClientToken,
 						useExisting: true,
 					});
 					const resB = await clientB.use({
-						pipeline: getEchoPipeline('c3d4e5f6-3333-4000-c000-000000000001'),
-						token: SHARED_TOKEN,
+						pipeline: getEchoPipeline(),
+						token: twoClientToken,
 						useExisting: true,
 					});
 					expect(resB.token).toBe(resA.token);

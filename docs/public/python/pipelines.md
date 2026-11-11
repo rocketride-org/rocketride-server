@@ -12,67 +12,62 @@ workflow.
 ## Start with `use()`
 
 `use()` starts a pipeline from a file or an in-memory config and returns a dict whose
-`'token'` identifies the running task — every data and control call takes it.
+`'token'` carries the task's **address** — every data and control call takes it.
 
 ```python
 result = await client.use(filepath='pipeline.pipe')
 token = result['token']
+# token == 'acme.docBrain.chat_1'
 ```
 
-Beyond `filepath`/`pipeline`, `use()` accepts `token` (a custom task token; the
-server generates one when omitted), `source`, `threads`, `use_existing`,
-`args`, `ttl`, `pipelineTraceLevel` (trace verbosity for the
-[run log](/clients/python/logs)), `name` (a display name for the task), and `env`
-(per-run variable overrides). Pass the pipeline config **as-is** — the client sends it
-to the server, which resolves `${ROCKETRIDE_*}` variables from its merged
-environment.
+The address is `developerId.pipelineId[.source]`: your organization's developer
+id, the pipe's `project_id`, and the source component, each a single dot-free
+segment. The server derives it; it is a name, not a secret, so it is safe to log
+or share. Treat it as opaque. Authority comes from the account on the request:
+every call carries your `rr_` API key (or your session), and the server checks on
+every call that this account may control, send to, or monitor the task.
 
-**Running the same pipeline more than once at a time.** Without a custom `token`,
-the server names the task after its owner, `project_id` and source, so a second
-`use()` of the same pipe fails with an error that starts
-`Pipeline is already running`. Give each instance its own `token` and they run
-side by side:
+Beyond `filepath`/`pipeline`, `use()` accepts `source`, `threads`, `use_existing`,
+`args`, `ttl`, `pipelineTraceLevel` (trace verbosity for the
+[run log](/clients/python/logs)), `name` (a display name for the task), `env`
+(per-run variable overrides), and `token`, which overrides the pipeline-id segment
+of the address (the pipeline's `project_id`). Pass the pipeline config **as-is** —
+the client sends it to the server, which resolves `${ROCKETRIDE_*}` variables from
+its merged environment.
+
+**One run per address.** The server keys a task by its owner and address, so a
+second `use()` of the same pipe and source while the first is running fails with
+an error that starts `Pipeline is already running`. Stop the running one, reuse
+it (below), or give the copy its own pipeline id so it gets its own address:
+either a different `project_id` in the config, or `token`, which does the same
+without editing the config:
 
 ```python
-result = await client.use(filepath='pipeline.pipe', token=f'tk_{uuid.uuid4().hex}')
+result = await client.use(filepath='pipeline.pipe', token='runB')
+# result['token'] == 'acme.runB.chat_1'
 ```
 
-The value you choose is the run's
-[private token](/operate/security#endpoint-authentication): full control of
-the run for anyone who presents it. So make it unguessable, and keep the `tk_`
-prefix (without it the token cannot authenticate on webhook or dropper
-endpoints). Tokens share one namespace across every user of the server: a
-predictable value collides with other people's tasks, and with `use_existing` a
-token that matches a running task attaches to it, whoever started it.
+The value is one address segment (letters, digits, `_` and `-`); anything else
+is refused the way an invalid `project_id` is. It is a name inside your own
+namespace, not a credential: the developer id and the owner still come from your
+account, and the returned `token` is the full address. Terminate a run you
+started this way when you are done with it. `get_task_token()` returns the
+address of your running task for a pipe and source (pass `team_id` for the
+team's deployed run). After an override the run's pipeline id is the `token`
+value, so look it up with `project_id='runB'`; the config's original
+`project_id` finds the run started without an override, if any.
 
-What two instances still share:
+**Check `reused` before trusting the result.** `use_existing` returns the task
+that is already running at that address rather than starting the one you
+submitted, and the result's `reused` flag is `True` when that happened. A reused
+task keeps the configuration it was created with — the pipeline in this call is
+ignored, edits included — along with whatever state it has accumulated.
+Benchmarks and A/B comparisons are where an unnoticed reuse costs the most. Call
+`restart()` to apply new configuration to a running task.
 
-- **The `pk_` public authorization key.** Both get the same one, and a webhook
-  call or dropper upload that uses it always reaches the instance that started
-  first. To send data to one specific instance, use that instance's `tk_` token.
-- **`get_task_token()`**, keyed by the pipe's `project_id` and source, returns only
-  one of them.
-- **The monitor subscription.** Both instances' events arrive in one
-  subscription. Each event carries the emitting run's id in `body.__id` (the
-  first eight characters of the token after `tk_`, plus the source id); it is
-  truncated and can collide, so treat it as a best-effort way to tell them
-  apart. A few minutes after one instance ends, when the server removes it
-  from its registry, the shared subscription is dropped and the surviving
-  instance's events stop arriving; resubscribe.
-- **The run log**, written per identity and not built for two instances at
-  once; treat a forked run's log as unreliable.
-
-**Check `reused` before trusting the result.** `use_existing` returns the
-instance that is already running under that token rather than starting the one
-you submitted, and the result's `reused` flag is `True` when that happened. A
-reused instance keeps the configuration it was created with — the pipeline in
-this call is ignored, edits included — along with whatever state it has
-accumulated. Benchmarks and A/B comparisons are where an unnoticed reuse costs
-the most. Call `restart()` to apply new configuration to a live token.
-
-**Why a token:** the server runs each pipeline as a separate task. The token targets
-`send()`, `send_files()`, `pipe()`, `chat()`, `get_task_status()`, and `terminate()`
-at the correct pipeline.
+**Why an address:** the server runs each pipeline as a separate task. The address
+targets `send()`, `send_files()`, `pipe()`, `chat()`, `get_task_status()`, and
+`terminate()` at the correct pipeline.
 
 ## Watch progress
 

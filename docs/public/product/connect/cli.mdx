@@ -62,8 +62,9 @@ which also read from the environment so you can set them once:
 
 Two task options read the environment the same way, on the commands that take
 them: `--pipeline <path>` (`start` and `upload`) defaults to
-`ROCKETRIDE_PIPELINE`, and `--token <token>` (`start`, `stop`, and `upload`)
-defaults to `ROCKETRIDE_TOKEN`. A variable exported in your shell takes
+`ROCKETRIDE_PIPELINE`, and `--token <token>` (`stop` and `upload`, where it
+names a running task) defaults to `ROCKETRIDE_TOKEN`. On `start`, `--token`
+overrides the pipeline id of the new run's address and reads no variable. A variable exported in your shell takes
 precedence over the same one in `.env`.
 
 Against a [Cloud](/operate/cloud) endpoint use an `https://`/`wss://` URI so the
@@ -156,13 +157,13 @@ Key flags:
 | --- | --- |
 | `--pipeline <path>` | Path to the `.pipe` JSON file. |
 | `--threads <n>` | Number of worker threads. Default 4. |
-| `--token <token>` | Supply a custom task token for the new run (the server generates one if not provided). A pipeline file is still required; to find tasks that are already running, use `list`. |
+| `--token <id>` | Override the pipeline-id segment of the run's address (the pipeline's `project_id`): the run is addressed `developerId.<id>.source`. One segment of letters, digits, `_` and `-`; not a credential. A pipeline file is still required; to find tasks that are already running, use `list`. |
 
 ### upload
 
 Use `upload` when you need to push one or more files through a pipeline. The
-command starts a new pipeline task (or reuses one via `--token`), uploads each
-file, and streams results back.
+command starts a new private pipeline task under a fresh pipeline id (or uses
+a running one via `--token`), uploads each file, and streams results back.
 
 ```bash
 rocketride upload --pipeline ./extract.pipe ./invoice.pdf

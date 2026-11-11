@@ -25,12 +25,22 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import urllib.parse
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from rocketride import RocketRideClient
+
+logger = logging.getLogger(__name__)
+
+# Seconds the convenience tool waits for the server to acknowledge the
+# termination of its one-shot run. The server's stop of a @dev run can wait
+# up to 30 s for the teardown; the tool's answer does not depend on that
+# acknowledgement (the server finishes the teardown either way), so the wait
+# is bounded well below it.
+ONE_SHOT_TERMINATE_TIMEOUT = 10.0
 
 
 async def get_tools(client: RocketRideClient) -> List[Dict[str, Any]]:
@@ -124,26 +134,34 @@ async def execute_tool(
         binary_data = f.read()
 
     if convenience_tool:
+        # A private one-shot run: the bundled pipeline carries no project_id,
+        # so the server mints a fresh pipeline id and the run gets its own
+        # address. It is terminated once the file is processed.
         pipeline = await client.use(pipeline=pipeline_obj)
         convenience_token = (pipeline or {}).get('token')
         if not isinstance(convenience_token, str):
             return {'error': 'Failed to start pipeline', 'status': 502}
 
-        # Retry logic for new pipelines
-        for attempt in range(5):
-            try:
-                result = await client.send(
-                    convenience_token,
-                    binary_data,
-                    objinfo={'name': filename, 'filepath': resolved_path},
-                )
-                break
-            except RuntimeError as e:
-                # Re-raise if not a connection error or out of retries
-                is_conn_err = any(x in str(e) for x in ['Connect call failed', 'Connection refused'])
-                if not is_conn_err or attempt == 4:
-                    raise e
-                await asyncio.sleep(0.5 * (2**attempt))
+        try:
+            # Retry logic for new pipelines
+            for attempt in range(5):
+                try:
+                    result = await client.send(
+                        convenience_token,
+                        binary_data,
+                        objinfo={'name': filename, 'filepath': resolved_path},
+                    )
+                    break
+                except RuntimeError as e:
+                    # Re-raise if not a connection error or out of retries
+                    is_conn_err = any(x in str(e) for x in ['Connect call failed', 'Connection refused'])
+                    if not is_conn_err or attempt == 4:
+                        raise e
+                    await asyncio.sleep(0.5 * (2**attempt))
+        finally:
+            # Best-effort cleanup: it must never replace the send's result or
+            # its error, so it is bounded and its failures are only logged.
+            await _terminate_one_shot(client, convenience_token)
     else:
         if not isinstance(pipeline_token, str):
             return {'error': 'Pipeline token not available', 'status': 502}
@@ -154,6 +172,26 @@ async def execute_tool(
         )
 
     return {'status': 200, 'result': result, 'name': name, 'filepath': resolved_path}
+
+
+async def _terminate_one_shot(client: RocketRideClient, token: str) -> None:
+    """Terminate a convenience tool's one-shot run without raising.
+
+    Bounded by ONE_SHOT_TERMINATE_TIMEOUT. A timeout or an error from the
+    terminate call is logged and swallowed, so the caller's result or its own
+    exception is what the tool reports. Cancellation of the caller is not
+    swallowed.
+    """
+    try:
+        await asyncio.wait_for(client.terminate(token), timeout=ONE_SHOT_TERMINATE_TIMEOUT)
+    except asyncio.TimeoutError:
+        logger.warning(
+            'Terminating one-shot run %s was not acknowledged within %ss; the server finishes its teardown',
+            token,
+            ONE_SHOT_TERMINATE_TIMEOUT,
+        )
+    except Exception as e:
+        logger.warning('Terminating one-shot run %s failed: %s', token, e)
 
 
 _CONVENIENCE_TOOL_MAPPING = {

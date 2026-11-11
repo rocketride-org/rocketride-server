@@ -126,6 +126,7 @@ CONST_LOG_KF_OPEN_CEILING = 4096
 # Task Server Configuration
 # =============================================================================
 CONST_CLEANUP_DELAY_TIME = 5 * 60  # seconds grace period to keep completed tasks (5 minutes)
+CONST_TEARDOWN_WAIT_TIMEOUT = 30.0  # seconds stop_task waits for a @dev run's teardown before leaving it to cleanup
 CONST_CLEANUP_SLEEP_TIME = 1 * 60  # seconds between cleanup scans (1 minute)
 
 # =============================================================================
