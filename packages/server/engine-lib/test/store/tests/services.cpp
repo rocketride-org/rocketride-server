@@ -722,10 +722,24 @@ TEST_CASE("store::Services::custom") {
                 customList({customNode("custom_inner")}));
             REQUIRE_NO_ERROR(inner);
             CHECK(IServices::getServiceDefinition("custom_inner"));
+
+            // A list with services replaces the outer one's
+            CHECK_FALSE(IServices::getServiceDefinition("custom_outer"));
         }
 
         CHECK(IServices::getServiceDefinition("custom_outer"));
         CHECK_FALSE(IServices::getServiceDefinition("custom_inner"));
+
+        // An empty or null list brings no custom services, so the outer
+        // one's stay visible: a call made from inside another (a node's
+        // code during a validation) still resolves that call's nodes
+        for (const auto &none : {json::Value{json::arrayValue}, json::Value{}}) {
+            auto empty = IServices::withCustomServices(none);
+            REQUIRE_NO_ERROR(empty);
+            CHECK(IServices::getServiceDefinition("custom_outer"));
+            CHECK(IServices::isCustomService("custom_outer"));
+        }
+        CHECK(IServices::getServiceDefinition("custom_outer"));
     }
 
     // A caller's definition is walked recursively, so its nesting is

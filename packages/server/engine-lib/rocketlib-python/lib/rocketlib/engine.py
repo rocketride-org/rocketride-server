@@ -278,6 +278,12 @@ expand = engLib.expand  # noqa
 def validatePipeline(config: dict, custom: list = []) -> dict:
     """
     Validate the pipeline configuration, with the caller's custom service definitions if any.
+
+    ``custom`` is a list of service definitions in the services.json
+    format, seen by this call only. A non-empty list replaces the custom
+    services of any call this one runs inside; an empty list brings none,
+    so a call made from a node's code during a call with custom services
+    still sees those. A definition may nest at most 64 levels deep.
     """
     pass
 
@@ -320,6 +326,12 @@ getServiceSchema = engLib.getServiceSchema  # noqa
 def getServiceDefinitions(custom: list = []) -> Dict:
     """
     Return every service schema, plus the caller's custom service definitions if any.
+
+    ``custom`` is a list of service definitions in the services.json
+    format, seen by this call only. A non-empty list replaces the custom
+    services of any call this one runs inside; an empty list brings none,
+    so a call made from a node's code during a call with custom services
+    still sees those. A definition may nest at most 64 levels deep.
     """
     ...
 

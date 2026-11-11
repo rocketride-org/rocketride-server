@@ -159,8 +159,9 @@ public:
     ///		Holds a call's custom services in front of every lookup the
     ///		calling thread makes (getServiceDefinition,
     ///		getServiceSchemas, isCustomService) until it is destroyed.
-    ///		Scopes nest: the inner one hides the outer one's services
-    ///		while it lives. Made by withCustomServices
+    ///		Scopes nest: an inner one with services hides the outer
+    ///		one's while it lives; an empty one changes nothing. Made by
+    ///		withCustomServices
     //-----------------------------------------------------------------
     class CustomServicesScope {
     public:
@@ -227,7 +228,10 @@ public:
     ///		listed twice is refused, its icon must be inline (a data:
     ///		URL), its JSON and its property expansion nest at most 64
     ///		deep, and the expansion is bounded per definition and per
-    ///		call. An empty or null list yields an empty scope
+    ///		call. A non-empty list replaces the thread's active custom
+    ///		services while the scope lives; an empty or null list brings
+    ///		none and yields an empty scope, so the active ones stay
+    ///		visible
     //-----------------------------------------------------------------
     static ErrorOr<CustomServicesScope> withCustomServices(
         const json::Value &custom) noexcept;

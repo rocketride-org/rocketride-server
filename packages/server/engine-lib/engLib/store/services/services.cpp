@@ -324,7 +324,9 @@ static Error checkDepth(const json::Value &definition) noexcept {
 //	nor be listed twice, its icon must be inline (a data: URL), a
 //	property that contains itself is refused, its JSON and its property
 //	expansion nest at most MaxDepth deep, and its expansion is bounded
-//	per definition (MaxExpanded) and per call (MaxExpandedPerCall).
+//	per definition (MaxExpanded) and per call (MaxExpandedPerCall). A
+//	call with no custom services (an empty list) adds none: the lookups
+//	still see those of any call it runs inside on the same thread.
 //
 //-------------------------------------------------------------------------
 
@@ -1780,7 +1782,14 @@ Error IServices::init() noexcept {
 /// @details
 ///		Parses and resolves the caller's custom services and returns a
 ///		scope that puts them in front of every lookup this thread makes
-///		until the scope is destroyed
+///		until the scope is destroyed. A non-empty list replaces the
+///		custom services of any scope already active on the thread while
+///		it lives. A null or empty list means the call brings no custom
+///		services, not that it hides them: the scope is empty and the
+///		thread keeps seeing the active ones. The Python surface passes
+///		an empty list when its caller names none, so a call made from
+///		inside another one (a node's code during a validation) still
+///		resolves the nodes that call is processing
 ///	@param[in] custom
 ///		A JSON array of service definitions, as in services.json. Each
 ///		may nest at most MaxDepth deep
