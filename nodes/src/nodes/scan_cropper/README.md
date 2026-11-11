@@ -52,30 +52,29 @@ and why. There is deliberately no white / dark / album background setting: the n
 background from the scan, so the presets describe what you *scanned* instead, and change the
 things that genuinely differ between those cases.
 
-A scan type shows only **Straighten photos** and **JPEG quality**; everything else it decides
-for you. To go further, each one carries its own **Show advanced settings** switch, which opens
-the ten tunables filled in with *that* scan type's numbers — open it under *Textured page* and
-`texture` reads 9.0, open it under *Album page* and it reads 4.0. So you start from the preset
-nearest your scans and adjust one thing, rather than setting ten values from scratch.
+A scan type lists every value it uses, filled in with *that* scan type's numbers — under
+*Textured page* `texture` reads 9.0, under *Album page* it reads 4.0. So you start from the
+preset nearest your scans and adjust one thing, rather than setting ten values from scratch.
 
 There is deliberately no separate "Advanced" scan type. A scan type is what decides the values,
 so an Advanced entry would have nothing to show you but a fixed set of numbers unrelated to the
 preset you had selected a moment earlier.
 
-Writing the config by hand rather than through the form, the settings go **inside an object
-named after the Scan type**, not beside it:
+Writing the config by hand rather than through the form, the Scan type is the `profile` key, the
+settings shared by every scan type (straighten, quality, the area and shape limits) sit beside it,
+and the four values a scan type decides (`detectSize`, `texture`, `minRelative`, `maxDepth`) go
+**inside an object named after the Scan type**:
 
 ```json
-{ "profile": "textured", "textured": { "quality": "auto", "deskew": true } }
+{ "profile": "textured", "quality": "auto", "deskew": true, "textured": { "texture": 12.0 } }
 ```
 
-`Config.getNodeConfig` reads the user's settings from `connConfig[profile]` and ignores every
-top-level key, so a setting written beside `profile` is silently dropped.
+A key the schema does not declare, or a value outside its documented range, fails validation
+with the offending key named; a setting that is left out takes the scan type's default.
 
 ### Every setting
 
-Most are only visible behind **Show advanced settings**, and only worth touching if the symptom
-table below points at one.
+Most are only worth touching if the symptom table below points at one.
 
 | Setting | Default | What it does |
 | --- | --- | --- |

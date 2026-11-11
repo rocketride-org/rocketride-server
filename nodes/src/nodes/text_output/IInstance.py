@@ -31,7 +31,7 @@ from engLib import Entry
 from rocketlib import Ec, shorten_path_components
 
 
-class Instance:
+class IInstance:
     """Instance connection that performs anonymization of the text of the objects."""
 
     ANONYMIZE_ALL_LENGTH = 3

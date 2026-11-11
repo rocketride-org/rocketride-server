@@ -33,7 +33,7 @@ requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
 depends(requirements)
 
 # Load what we need
-from typing import List, Callable, Dict, Any
+from typing import List, Callable, Dict, Any, Mapping
 from uuid import uuid4
 import sys
 import numpy as np
@@ -57,7 +57,6 @@ from qdrant_client.conversions import common_types as types
 
 from ai.common.schema import Doc, DocFilter, DocMetadata, QuestionText
 from ai.common.store import CONTROL_OBJECT_ID, DocumentStoreBase
-from ai.common.config import Config
 
 
 # The most points one objdir scroll request asks for. A collection can cap the
@@ -101,46 +100,37 @@ class Store(DocumentStoreBase):
     threshold_search: float = 0.0
     client: QdrantClient | None = None
 
-    def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
+    def __init__(self, provider: str, config: Mapping, bag: Dict[str, Any]):
         """
         Initialize the qdrant vector store.
+
+        Args:
+            provider: The node's logical type.
+            config: The resolved node config (defaults applied, active branch flattened).
+            bag: The endpoint's shared bag.
         """
         # Init the base
-        super().__init__(provider, connConfig, bag)
-
-        # Get the nodes configuration
-        config = Config.getNodeConfig(provider, connConfig)
+        super().__init__(provider, config, bag)
 
         # Save our parameters
-        self.collection = config.get('collection')
+        self.collection = config['collection']
 
-        self.host = (config.get('host', '') or '').strip().rstrip('/')
-        self.port = config.get('port')
+        self.host = (config['host'] or '').strip().rstrip('/')
+        self.port = config['port']
 
-        self.apikey = config.get('apikey', None)
+        # The api key exists on the cloud branch only
+        self.apikey = config.get('apikey')
         if self.apikey is not None:
             self.apikey = self.apikey.strip()
 
-        self.renderChunkSize = config.get('renderChunkSize', self.renderChunkSize)
-        self.payload_limit = config.get('payloadLimit', self.payload_limit)
-        self.threshold_search = config.get('score', 0.5)
-
-        similarity = config.get('similarity', 'Cosine')
-        supported = ('Cosine', 'Euclid', 'Dot', 'Manhattan')
-        if similarity in supported:
-            self.similarity = similarity
-        else:
-            raise Exception(
-                f'Qdrant: unsupported similarity {similarity!r}. Set "similarity" to: {", ".join(supported)}.'
-            )
+        self.threshold_search = config['score']
 
         # If the host already includes a scheme, use it as-is.
         # Otherwise, infer from the profile: cloud -> https://, local -> http://.
         if '://' in self.host:
             url = f'{self.host}:{self.port}'
         else:
-            profile = (connConfig.get('profile', '') or '').lower()
-            scheme = 'https' if profile == 'cloud' else 'http'
+            scheme = 'https' if config['profile'] == 'cloud' else 'http'
             url = f'{scheme}://{self.host}:{self.port}'
 
         self.client = QdrantClient(url=url, api_key=self.apikey, prefer_grpc=False, timeout=60)

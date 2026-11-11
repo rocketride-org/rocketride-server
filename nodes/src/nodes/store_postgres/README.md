@@ -46,7 +46,7 @@ The configured tool-server name defaults to `postgres`.
 
 ## Configuration
 
-Enter the PostgreSQL connection details and choose the table that will hold the chunks. The local profile supplies the initial values, including a retrieval score of `0.5` and `cosine` similarity. Start by confirming that these credentials reach a database where the `vector` type is available; the save-time probe opens a short-lived connection, runs `SELECT 1`, and tests that type before this node is used in a pipeline.
+Enter the PostgreSQL connection details and choose the table that will hold the chunks. Every field has a schema default (host `localhost`, port `5432`, user and database `postgres`, table `rocketride`), the retrieval score defaults to `0.7`, and the similarity metric to `cosine`; the password has no default. Start by confirming that these credentials reach a database where the `vector` type is available; the save-time probe opens a short-lived connection, runs `SELECT 1`, and tests that type before this node is used in a pipeline.
 
 ### Connection and database
 
@@ -58,7 +58,7 @@ errors during the save-time probe point to these fields; an error about the
 
 ### Table
 
-The Table field names the table used for vectors; its default is `rocketride`. It must be a valid unquoted PostgreSQL identifier: at most 63 characters, starting with a letter or underscore, and thereafter containing only letters, digits, or underscores. The driver also accepts the legacy `collection` key, but the panel uses Table.
+The Table field names the table used for vectors; its default is `rocketride`. It must be a valid unquoted PostgreSQL identifier: at most 63 characters, starting with a letter or underscore, and thereafter containing only letters, digits, or underscores. It is stored under the `collection` key.
 
 Change the table when a corpus needs its own physical store. The runtime uses the
 name in its SQL statements and does not quote it, which is why punctuation,
@@ -70,7 +70,7 @@ old table.
 
 Choose `cosine`, `l2`, or `inner_product`; the runtime maps them to PostgreSQL's vector-distance operators and rejects any other value. Use the setting that matches how the vectors are meant to be compared, because it determines ranking for semantic searches. `cosine` maps to `<=>`, `l2` to `<->`, and `inner_product` to `<#>`.
 
-The retrieval score defaults to `0.5`, and the driver always removes results
+The retrieval score defaults to `0.7`, and the driver always removes results
 whose converted score is below its hard `0.20` floor. Raise the configured
 threshold to give downstream prompts fewer, more selective documents; lower it
 when relevant documents are missing. The conversion differs by metric—cosine

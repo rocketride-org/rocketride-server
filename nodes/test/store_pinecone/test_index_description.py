@@ -1,72 +1,40 @@
 # =============================================================================
 # MIT License
 # Copyright (c) 2026 Aparavi Software AG
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
 # =============================================================================
 
-"""Regression tests for reading `list_indexes()` entries.
+"""
+Reading Pinecone index descriptions in the save-time probe.
 
-Two shapes have to work. Older pinecone clients yielded plain dicts; from v7
-they yield IndexModel description objects, which expose attributes and no
-`.get()`. Calling `.get()` on one raises
-`'IndexModel' object has no attribute 'get'`, and requirements.txt pins no
-version, so which shape arrives depends on when the dependency was resolved.
-
-The serverless check is covered separately because `IndexSpec.to_dict()` emits
-every variant it knows about, unset ones included: a pod-based index describes
-itself as `{'serverless': None, 'pod': {...}}`. Testing key membership rather
-than the value reports pod-based indexes as serverless and emits the opposite
-compatibility warning to the one the user needs.
-
-IGlobal is imported directly with its two engine imports stubbed. The driver
-module is deliberately untouched -- it pulls in `depends` and the pinecone SDK
-at import time, and none of that is needed to exercise these helpers.
+``list_indexes()`` returns plain dicts on older clients and ``IndexModel``
+objects (attributes, no ``.get()``) from v7, and a pod-based ``IndexSpec``
+still carries a ``serverless`` key set to None. The validator reads both
+shapes and the value, not the key.
 """
 
 from __future__ import annotations
 
-import importlib.util
-import sys
-import types
-from collections.abc import Iterator
-from contextlib import contextmanager
-from pathlib import Path
-
 import pytest
 
-_IGLOBAL_PATH = Path(__file__).resolve().parents[3] / 'nodes' / 'src' / 'nodes' / 'store_pinecone' / 'IGlobal.py'
-
-
-@contextmanager
-def _stubbed_engine_imports() -> Iterator[types.ModuleType]:
-    """Import IGlobal.py with `ai.common.store` and `rocketlib` stubbed out."""
-    saved = {name: sys.modules.get(name) for name in ('ai', 'ai.common', 'ai.common.store', 'rocketlib')}
-
-    ai = types.ModuleType('ai')
-    common = types.ModuleType('ai.common')
-    store = types.ModuleType('ai.common.store')
-    store.StoreGlobalBase = type('StoreGlobalBase', (), {})
-    rocketlib = types.ModuleType('rocketlib')
-    rocketlib.warning = lambda *args, **kwargs: None
-
-    sys.modules.update({'ai': ai, 'ai.common': common, 'ai.common.store': store, 'rocketlib': rocketlib})
-    try:
-        spec = importlib.util.spec_from_file_location('store_pinecone_iglobal', _IGLOBAL_PATH)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        yield module
-    finally:
-        for name, original in saved.items():
-            if original is None:
-                sys.modules.pop(name, None)
-            else:
-                sys.modules[name] = original
-        sys.modules.pop('store_pinecone_iglobal', None)
-
-
-@pytest.fixture(name='iglobal')
-def _iglobal() -> Iterator[types.ModuleType]:
-    with _stubbed_engine_imports() as module:
-        yield module
+from nodes.store_pinecone.IValidator import _index_field, _is_serverless
 
 
 class _Spec:
@@ -98,24 +66,24 @@ def test_index_model_has_no_get_method():
         _IndexModel('idx', _Spec()).get('name')
 
 
-def test_reads_name_from_a_dict_entry(iglobal):
+def test_reads_name_from_a_dict_entry():
     entry = {'name': 'my-index', 'spec': {'serverless': _SERVERLESS_SPEC}}
-    assert iglobal._index_field(entry, 'name') == 'my-index'
+    assert _index_field(entry, 'name') == 'my-index'
 
 
-def test_reads_name_from_a_model_entry(iglobal):
+def test_reads_name_from_a_model_entry():
     entry = _IndexModel('my-index', _Spec(serverless=_SERVERLESS_SPEC))
-    assert iglobal._index_field(entry, 'name') == 'my-index'
+    assert _index_field(entry, 'name') == 'my-index'
 
 
-def test_missing_field_returns_the_default(iglobal):
-    assert iglobal._index_field(_IndexModel('my-index', _Spec()), 'absent', 'fallback') == 'fallback'
-    assert iglobal._index_field({'name': 'my-index'}, 'absent', 'fallback') == 'fallback'
+def test_missing_field_returns_the_default():
+    assert _index_field(_IndexModel('my-index', _Spec()), 'absent', 'fallback') == 'fallback'
+    assert _index_field({'name': 'my-index'}, 'absent', 'fallback') == 'fallback'
 
 
-def test_nested_spec_object_is_converted_to_a_mapping(iglobal):
+def test_nested_spec_object_is_converted_to_a_mapping():
     entry = _IndexModel('my-index', _Spec(serverless=_SERVERLESS_SPEC))
-    assert iglobal._index_field(entry, 'spec') == {'serverless': _SERVERLESS_SPEC, 'pod': None, 'byoc': None}
+    assert _index_field(entry, 'spec') == {'serverless': _SERVERLESS_SPEC, 'pod': None, 'byoc': None}
 
 
 @pytest.mark.parametrize(
@@ -131,5 +99,5 @@ def test_nested_spec_object_is_converted_to_a_mapping(iglobal):
     ],
     ids=['model-pod', 'model-serverless', 'dict-pod', 'dict-serverless', 'no-spec'],
 )
-def test_serverless_detection_reads_the_value_not_the_key(iglobal, entry_factory, expected):
-    assert iglobal._is_serverless(entry_factory()) is expected
+def test_serverless_detection_reads_the_value_not_the_key(entry_factory, expected):
+    assert _is_serverless(entry_factory()) is expected

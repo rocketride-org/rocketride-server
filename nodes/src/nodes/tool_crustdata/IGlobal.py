@@ -1,6 +1,4 @@
 # =============================================================================
-# RocketRide Engine
-# =============================================================================
 # MIT License
 # Copyright (c) 2026 Aparavi Software AG
 #
@@ -26,16 +24,13 @@
 """
 Crustdata tool node - global (shared) state.
 
-Reads the Crustdata API key and default page size from the node config.
-Tool logic lives on IInstance via @tool_function.
+Reads the Crustdata API key and default page size from the resolved node
+config. Tool logic lives on IInstance via @tool_function.
 """
 
 from __future__ import annotations
 
-import os
-
-from ai.common.config import Config
-from rocketlib import IGlobalBase, OPEN_MODE, error, warning
+from rocketlib import IGlobalBase, error
 
 
 class IGlobal(IGlobalBase):
@@ -45,52 +40,21 @@ class IGlobal(IGlobalBase):
     default_limit: int = 10
 
     def beginGlobal(self) -> None:
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
+        # The resolved config: defaultLimit arrives an integer within 1-1000,
+        # the key a required secret
+        cfg = self.config
 
-        cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-
-        apikey = str(cfg.get('apikey') or os.environ.get('CRUSTDATA_API_KEY', '')).strip()
-
+        # The key reaches the node through its config (a ${ROCKETRIDE_CRUSTDATA_APIKEY}
+        # reference resolved per call); there is no process-env fallback
+        apikey = str(cfg.apikey or '').strip()
         if not apikey:
-            error('tool_crustdata: apikey is required — set it in node config or CRUSTDATA_API_KEY env var')
+            error(
+                'tool_crustdata: apikey is required - set it in the node config (a ${ROCKETRIDE_CRUSTDATA_APIKEY} reference)'
+            )
             raise ValueError('tool_crustdata: apikey is required')
 
         self.apikey = apikey
-        self.default_limit = _coerce_limit(cfg.get('defaultLimit', 10))
-
-    def validateConfig(self) -> None:
-        try:
-            cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-            apikey = str(cfg.get('apikey') or os.environ.get('CRUSTDATA_API_KEY', '')).strip()
-            if not apikey:
-                warning('apikey is required')
-            raw_limit = cfg.get('defaultLimit')
-            if raw_limit is not None and not isinstance(raw_limit, bool):
-                try:
-                    int(raw_limit)
-                except (TypeError, ValueError):
-                    warning(f'defaultLimit {raw_limit!r} is not a valid integer; will fall back to 10')
-        except Exception as e:
-            warning(str(e))
+        self.default_limit = cfg.defaultLimit
 
     def endGlobal(self) -> None:
         self.apikey = ''
-
-
-def _coerce_limit(raw_limit: object, *, default: int = 10) -> int:
-    """Clamp a config value to [1, 1000], falling back to ``default`` on any bad input.
-
-    ``Config.getNodeConfig`` returns whatever is in the (user-editable) pipe
-    file verbatim -- the field's declared ``"type": "integer"`` in
-    services.json constrains the UI form, not a hand-edited file or an SDK
-    caller, so a non-numeric value here must degrade gracefully rather than
-    raise out of beginGlobal.
-    """
-    if raw_limit is None or isinstance(raw_limit, bool):
-        raw_limit = default
-    try:
-        value = int(raw_limit)
-    except (TypeError, ValueError):
-        value = default
-    return max(1, min(1000, value))

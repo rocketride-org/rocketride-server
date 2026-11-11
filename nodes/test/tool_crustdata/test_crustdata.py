@@ -38,7 +38,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 _HTTP_RETRY_PATH = _REPO_ROOT / 'packages' / 'ai' / 'src' / 'ai' / 'common' / 'utils' / 'http_retry.py'
 _TOOL_ARGS_PATH = _REPO_ROOT / 'packages' / 'ai' / 'src' / 'ai' / 'common' / 'utils' / 'tool_args.py'
 
-_STUB_MODULE_NAMES = ('rocketlib', 'ai', 'ai.common', 'ai.common.config', 'ai.common.utils')
+_STUB_MODULE_NAMES = ('rocketlib', 'ai', 'ai.common', 'ai.common.utils')
 
 
 def _load_real_post_with_retry():
@@ -91,14 +91,6 @@ def _install_stubs() -> None:
     sys.modules['ai'] = types.ModuleType('ai')
     sys.modules['ai.common'] = types.ModuleType('ai.common')
 
-    mod_config = types.ModuleType('ai.common.config')
-
-    class Config:
-        pass
-
-    mod_config.Config = Config
-    sys.modules['ai.common.config'] = mod_config
-
     mod_utils = types.ModuleType('ai.common.utils')
 
     def normalize_tool_input(value, **kwargs):
@@ -125,12 +117,12 @@ def _scoped_stubs() -> Iterator[None]:
 
 
 with _scoped_stubs():
-    from tool_crustdata.IGlobal import _coerce_limit
     from tool_crustdata.IInstance import (
         COMPANY_SEARCH_URL,
         CRUSTDATA_API_VERSION,
         PERSON_SEARCH_URL,
         IInstance,
+        _coerce_limit,
         _crustdata_headers,
         _extract_records,
     )
@@ -202,7 +194,7 @@ class TestExtractRecords:
 
 
 # ---------------------------------------------------------------------------
-# _coerce_limit — defaultLimit must degrade gracefully, not raise out of beginGlobal
+# _coerce_limit - the agent's per-call limit must degrade gracefully, not raise out of a tool call
 # ---------------------------------------------------------------------------
 
 
@@ -215,7 +207,6 @@ class TestCoerceLimit:
         assert _coerce_limit(None, default=25) == 25
 
     def test_empty_string_falls_back_to_the_default(self):
-        """A hand-edited .pipe or SDK caller can send '' where the UI would send an int."""
         assert _coerce_limit('') == 10
 
     def test_non_numeric_string_falls_back_to_the_default(self):

@@ -31,7 +31,7 @@ The three profiles differ only in `alpha`; they all return ten results and use a
 
 ## Configuration
 
-Pick the profile whose balance matches the corpus — `balanced` when both signals are worth the same, `semantic` when the questions are paraphrases of the content, `keyword` when they carry names, codes or other exact strings. The profile fills in all three fields, so most pipelines change nothing else. Values are validated when the node loads: an out-of-range alpha is clamped to `[0.0, 1.0]` with a warning, while `top_k` below 1 or a negative `rrf_k` raise an error rather than starting with a configuration that cannot produce sensible results.
+Pick the profile whose balance matches the corpus — `balanced` when both signals are worth the same, `semantic` when the questions are paraphrases of the content, `keyword` when they carry names, codes or other exact strings. The profile fills in all three fields, so most pipelines change nothing else. Values are validated against the schema bounds when the node loads: an `alpha` outside `[0.0, 1.0]`, a `top_k` below 1, or a negative `rrf_k` is a configuration error that names the key, and the node does not start with a configuration that cannot produce sensible results.
 
 ### Search mode
 

@@ -68,56 +68,19 @@
 		"questions": ["answers", "text"]
 	},
 	//
-	//	Optional:
-	//		Profile section are configuration options used by the driver
-	//		itself
-	//
-	"preconfig": {
-		"default": "default",
-		"profiles": {
-			"default": {
-				"model": "exa-search",
-				"modelTotalTokens": 16384,
-				"apikey": "",
-				"type": "auto",
-				"numResults": 5,
-				"includeHighlights": true,
-				"highlightChars": 600
-			}
-		}
-	},
-	//
 	// Optional:
-	//		Local fields defintions - these define fields only for the
-	//		current service. You may specify them here, or directly
-	//		in the shape
+	//		Local property definitions. One Exa account, stored flat; the key is
+	//		required because the node cannot run without it, and arrives through
+	//		the node config (a ${ROCKETRIDE_EXA_APIKEY} reference resolved per call).
 	//
-	"fields": {
-		"search_exa.default": {
-			"object": "default",
-			"properties": ["search_exa.type", "search_exa.numResults", "search_exa.includeHighlights", "search_exa.highlightChars"]
-		},
-		"search_exa.profile": {
-			"title": "Profile",
-			"type": "string",
-			"default": "default",
-			"enum": [["default", "Default"]],
-			"conditional": [
-				{
-					"value": "default",
-					"properties": ["search_exa.default"]
-				}
-			]
-		},
+	"propertyDefinitions": {
 		"search_exa.apikey": {
 			"type": "string",
 			"title": "API Key",
 			"description": "Exa API key",
-			"default": "",
-			"secure": true,
-			"ui": {
-				"ui:widget": "ApiKeyWidget"
-			}
+			"secret": true,
+			"env": "ROCKETRIDE_EXA_APIKEY",
+			"required": true
 		},
 		"search_exa.type": {
 			"type": "string",
@@ -150,14 +113,18 @@
 		}
 	},
 	//
-	// Optional:
-	//		Shape describes how the node config is grouped in the UI
+	// Required:
+	//		Defines the properties shown in the pipeline builder side panel, in
+	//		order. The model and its context size are pinned: the chat base the
+	//		search client is built on reads them, and Exa has one search model.
 	//
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "Exa Search",
-			"properties": ["search_exa.apikey", "search_exa.profile"]
-		}
+	"properties": [
+		"search_exa.apikey",
+		"search_exa.type",
+		"search_exa.numResults",
+		"search_exa.includeHighlights",
+		"search_exa.highlightChars",
+		{ "name": "model", "type": "constant", "default": "exa-search" },
+		{ "name": "modelTotalTokens", "type": "constant", "default": 16384 }
 	]
 }

@@ -59,7 +59,7 @@
 	//  Optional:
 	//      Rendering hints to the UI which indicate which fields of
 	//      the configuration should be used to display information
-	"tile": ["Mode : ${parameters.astra_db.profile}", "Collection: ${parameters.astra_db.${profile}.collection}"],
+	"tile": ["Mode: ${parameters.astra_db.profile}", "Collection: ${parameters.astra_db.collection}"],
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes
@@ -128,46 +128,40 @@
 			}
 		]
 	},
-	"preconfig": {
-		// Define the values that will be merged into any profile configuration
-		// specified, unless the profile is 'absolute'
-		"default": "cloud",
-		// Defines profiles used with the "profile": key
-		"profiles": {
-			"local": {
-				"mode": "local",
-				"title": "Local test server",
-				"api_endpoint": "http://localhost:8080",
-				"application_token": "test-token",
-				"collection": "ROCKETRIDE",
-				"serverName": "astra"
-			},
-			"cloud": {
-				"mode": "cloud",
-				"title": "Astra DB cloud server",
-				"api_endpoint": "",
-				"application_token": "",
-				"collection": "ROCKETRIDE",
-				"serverName": "astra"
-			}
-		}
-	},
 	//
 	// Optional:
-	//     Local fields definitions - these define fields only for the
-	//     current service. You may specify them here, or directly
-	//     in the shape
+	//     Local property definitions. The host type is the selector: the
+	//     endpoint and the token are branch-specific; the collection, the
+	//     score and the tool name are referenced by both branches, so they
+	//     are shared and stored flat.
 	//
-	"fields": {
+	"propertyDefinitions": {
 		"astra_db.api_endpoint": {
 			"type": "string",
 			"title": "API Endpoint",
-			"description": "Enter the server API endpoint e.g. <instance-name>.<region>.apps.astra.datastax.com"
+			"description": "Enter the server API endpoint e.g. https://<database-id>-<region>.apps.astra.datastax.com",
+			"required": true
+		},
+		"astra_db.local.api_endpoint": {
+			"type": "string",
+			"title": "API Endpoint",
+			"description": "Data API endpoint of your own server",
+			"default": "http://localhost:8080"
 		},
 		"astra_db.application_token": {
 			"type": "string",
 			"title": "Application Token",
-			"description": "Enter the server API application token"
+			"description": "Enter the server API application token",
+			"secret": true,
+			"env": "ROCKETRIDE_ASTRA_DB_APPLICATION_TOKEN",
+			"required": true
+		},
+		"astra_db.local.application_token": {
+			"type": "string",
+			"title": "Application Token",
+			"description": "Token your own Data API server expects",
+			"secret": true,
+			"default": "test-token"
 		},
 		"astra_db.serverName": {
 			"type": "string",
@@ -175,36 +169,29 @@
 			"description": "Label for this store in tool-response messages (for example, a refused write names astra.delete). Pipeline agents address the available functions as node-id.function; apps use the function name and node ID. Changing this label does not change those addresses. See the node README for the available functions and their tool-exposure and write-permission settings.",
 			"default": "astra",
 			"minLength": 1
-		},
-		"astra_db.provider": {
-			"type": "string",
-			"const": "astra_db",
-			"default": "astra_db"
-		},
-		"astra_db.target.autopipe": {
-			"object": "parameters",
-			"properties": ["remote", "astra_db.provider", "all.embedding"]
-		},
-		"astra_db.target.parameters": {
-			"object": "parameters",
-			"properties": ["astra_db.target.autopipe"]
 		}
 	},
 	//
 	// Required:
-	//     Defines the fields (shape) of the service. Either source or target
-	//     map be specified, or both, but at least one is required
+	//     Defines the properties shown in the node's config panel, in order
 	//
-	"shape": [
+	"properties": [
 		{
-			"section": "Pipe",
-			"title": "Astra DB Vector Store",
-			"properties": ["astra_db.api_endpoint", "astra_db.application_token", "vector.score", "vector.collection", "astra_db.serverName"]
-		},
-		{
-			"section": "Transform",
-			"title": "Astra DB",
-			"properties": ["type", "astra_db.target.parameters", "target.mode"]
+			"name": "profile",
+			"title": "Type of Astra DB host",
+			"description": "Connect to...",
+			"type": "string",
+			"default": "cloud",
+			"enum": {
+				"cloud": {
+					"title": "Astra DB cloud server",
+					"properties": ["astra_db.api_endpoint", "astra_db.application_token", "vector.score", "vector.collection", "astra_db.serverName"]
+				},
+				"local": {
+					"title": "Local test server",
+					"properties": ["astra_db.local.api_endpoint", "astra_db.local.application_token", "vector.score", "vector.collection", "astra_db.serverName"]
+				}
+			}
 		}
 	]
 }

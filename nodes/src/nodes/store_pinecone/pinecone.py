@@ -33,7 +33,7 @@ requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
 depends(requirements)
 
 # Load what we need
-from typing import List, Callable, Dict, Any
+from typing import List, Callable, Dict, Any, Mapping
 import sys
 from uuid import uuid4
 
@@ -42,7 +42,6 @@ from pinecone import ServerlessSpec, PodSpec
 
 from ai.common.schema import Doc, DocFilter, DocMetadata, QuestionText
 from ai.common.store import CONTROL_OBJECT_ID, DocumentStoreBase
-from ai.common.config import Config
 
 """
 Note: a 'collection' as we know it is referred to as an index in pinecone
@@ -64,40 +63,36 @@ class Store(DocumentStoreBase):
     vectorSize: int = 0
     renderChunkSize: int = 32 * 1024 * 1024
     payload_limit: int = 32 * 1024 * 1024
-    similarity: str = 'Cosine'
-    threshhold_search: float = 0.0
+    similarity: str = 'cosine'
+    metric: str | None = None
+    threshold_search: float = 0.0
     client = None
 
-    def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
+    def __init__(self, provider: str, config: Mapping, bag: Dict[str, Any]):
         """
         Initialize the pinecone vector store. We use our own custom DocumentStoreBase.
+
+        Args:
+            provider: The node's logical type.
+            config: The resolved node config (defaults applied, active branch flattened).
+            bag: The endpoint's shared bag.
         """
         # Init the base
-        super().__init__(provider, connConfig, bag)
-
-        # Get the nodes configuration
-        config = Config.getNodeConfig(provider, connConfig)
+        super().__init__(provider, config, bag)
 
         # Save our parameters
-        self.collection = config.get('collection')  # name of our pinecone index
+        self.collection = config['collection']  # name of our pinecone index
 
         # Strip API key also
-        self.apikey = config.get('apikey', None)
-        if self.apikey is not None:
-            self.apikey = self.apikey.strip()
+        self.apikey = (config['apikey'] or '').strip()
 
-        self.profile = config.get('mode')  # either pod-based or serverless-dense TODO: talk about sparse indexes
-        self.threshold_search = config.get('score', 0.5)
+        self.profile = config['profile']  # either pod-based or serverless-dense
+        self.threshold_search = config['score']
 
-        # check if the similarity matches pinecone configuration options
-        similarity = config.get('similarity', 'cosine')
-        supported = ('cosine', 'euclidean', 'dotproduct')
-        if similarity in supported:
-            self.similarity = similarity
-        else:
-            raise Exception(
-                f'Pinecone: unsupported similarity {similarity!r}. Set "similarity" to: {", ".join(supported)}.'
-            )
+        # The metric is pinned for new indexes: Pinecone accepts cosine,
+        # euclidean or dotproduct; an index created before the pin keeps its
+        # own metric, which _indexMetric reads back for the score conversion
+        self.similarity = 'cosine'
 
         # Init the store
         self.client = Pinecone(api_key=self.apikey)
@@ -112,6 +107,7 @@ class Store(DocumentStoreBase):
         self.collection = ''
         self.renderChunkSize = 0
         self.similarity = 'cosine'
+        self.metric = None
         self.client = None
 
     def _doesCollectionExist(self) -> bool:
@@ -153,6 +149,42 @@ class Store(DocumentStoreBase):
             self.client.create_index(name=self.collection, dimension=vectorSize, metric=self.similarity, spec=spec)
 
         return True
+
+    def _indexMetric(self) -> str:
+        """
+        Return the metric the index was created with, read once from Pinecone.
+
+        New indexes take the pinned cosine metric. An index created while the
+        metric was still a setting keeps the euclidean or dotproduct metric it
+        was built with, and Pinecone scores its matches in that metric, so the
+        score conversion must follow the index, not the pin.
+        """
+        # Ask Pinecone the first time only; the metric of an index never changes
+        if self.metric is None:
+            description = self.client.describe_index(self.collection)
+            metric = getattr(description, 'metric', None)
+
+            # Fall back to the pin when the description does not report one
+            self.metric = metric if isinstance(metric, str) else self.similarity
+
+        return self.metric
+
+    @staticmethod
+    def _similarity(score: float, metric: str) -> float:
+        """
+        Convert a raw Pinecone match score to a similarity where higher is closer.
+
+        cosine: Pinecone returns the cosine similarity, in [-1, 1]; kept as is.
+        dotproduct: Pinecone returns the raw dot product, already higher for a
+            closer match; kept as is. It equals the cosine similarity for
+            unit-length embeddings, which is what the threshold assumes.
+        euclidean: Pinecone returns the squared euclidean distance, lower for a
+            closer match; mapped to 1 / (1 + d), so an identical vector scores
+            1.0 and the score falls toward 0.0 as the distance grows.
+        """
+        if metric == 'euclidean':
+            return 1.0 / (1.0 + score)
+        return score
 
     def _convertFilter(self, docFilter: DocFilter) -> str:
         """
@@ -278,6 +310,11 @@ class Store(DocumentStoreBase):
         if docFilter.offset:
             raise BaseException('Non-zero offset is not supported in semantic searching')
 
+        # Resolve the index metric before the query, so a failed lookup
+        # surfaces as the search error instead of discarding fetched results;
+        # it is cached after the first success
+        metric = self._indexMetric()
+
         # Perform the search
         points = index.query(
             vector=query.embedding,
@@ -287,8 +324,21 @@ class Store(DocumentStoreBase):
             include_values=False,
         )['matches']
 
-        # Have to get similarity score threshold post query
-        points_satisfy_threshold = [point for point in points if point['score'] >= self.threshhold_search]
+        # Convert each raw score to a higher-is-closer similarity in the
+        # index's own metric, so the threshold and the returned score mean
+        # the same thing on a legacy euclidean index as on a cosine one
+        points = [
+            {'score': self._similarity(point['score'], metric), 'metadata': point['metadata']} for point in points
+        ]
+
+        # Apply the score threshold post query. A cosine match score can be
+        # negative, so 0.0 ("All results" in vector.score) skips the filter
+        # rather than dropping the negative matches
+        if self.threshold_search > 0.0:
+            points_satisfy_threshold = [point for point in points if point['score'] >= self.threshold_search]
+        else:
+            points_satisfy_threshold = points
+
         # Convert the points into groups
         docs = self._convertToDocs(points_satisfy_threshold)
 

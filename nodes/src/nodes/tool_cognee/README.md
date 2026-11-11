@@ -38,23 +38,23 @@ Set the server URL and dataset first. The remaining settings control which data 
 
 ### Server URL and API Key
 
-**Server URL** defaults to `http://localhost:8000`; trailing slashes are removed before requests. An absent or empty field uses that default, while a whitespace-only configured URL prevents startup. **API Key** is optional for a self-hosted server that accepts unauthenticated requests; when the field is blank, the node falls back to `COGNEE_API_KEY` and sends it as the `X-Api-Key` header. Set the URL to the reachable server from the engine environment and add a key when that server requires access control.
+**Server URL** defaults to `http://localhost:8000`; trailing slashes are removed before requests. An absent field uses that default, while a configured URL that is blank or only slashes prevents startup. **API Key** is optional for a self-hosted server that accepts unauthenticated requests; when set, it is sent as the `X-Api-Key` header. Enter the key, or reference the account variable as `${ROCKETRIDE_COGNEE_APIKEY}`, which is resolved from the org, team or user environment variables when the pipeline runs. There is no process-environment fallback. Set the URL to the reachable server from the engine environment and add a key when that server requires access control.
 
 ### Dataset and Allow dataset override
 
-**Dataset** defaults to `main` and is the scope used whenever a call omits `dataset`. Keep **Allow dataset override** disabled to stop agents from selecting a different dataset; it is enabled only by the boolean value `true`. Enable it only when the agent is intentionally allowed to work across separate memory scopes.
+**Dataset** defaults to `main` and is the scope used whenever a call omits `dataset`; a blank value prevents startup rather than widening the scope. Keep **Allow dataset override** disabled to stop agents from selecting a different dataset; it is enabled only by the boolean value `true`. Enable it only when the agent is intentionally allowed to work across separate memory scopes.
 
 ### Default recall strategy and Recall results (top_k)
 
-The default strategy is `GRAPH_COMPLETION_DECOMPOSITION`. Configuration is normalized to uppercase and falls back to that default if it is unsupported; a tool-call override must be a supported strategy or the call fails. **Recall results (top_k)** defaults to 15 and is clamped from 1 through 100 in configuration; a call override must be an integer and is then clamped to the same range. Raise it when broader recall is needed, while keeping it lower when an agent needs a focused result set.
+The default strategy is `GRAPH_COMPLETION_DECOMPOSITION`. The configured strategy must be one of the listed values or the node does not start; a tool-call override must be a supported strategy or the call fails. **Recall results (top_k)** defaults to 15 and must be from 1 through 100 in configuration, or the node does not start; a call override must be an integer and is then clamped to the same range. Raise it when broader recall is needed, while keeping it lower when an agent needs a focused result set.
 
 ### Request timeout (s)
 
-This is the timeout for every Cognee request and defaults to 120 seconds. Configuration is clamped from 5 through 600 seconds; increase it only for a server whose processing or retrieval normally takes longer, because every tool call waits up to this bound.
+This is the timeout for every Cognee request and defaults to 120 seconds. Configuration must be from 5 through 600 seconds, or the node does not start; increase it only for a server whose processing or retrieval normally takes longer, because every tool call waits up to this bound.
 
 ## Authentication
 
-For an access-controlled Cognee server, provide **API Key** or set `COGNEE_API_KEY`. The node does not send an `X-Api-Key` header when neither source supplies a key, which supports self-hosted servers configured for unauthenticated access.
+For an access-controlled Cognee server, provide **API Key**, directly or as `${ROCKETRIDE_COGNEE_APIKEY}`. The node does not send an `X-Api-Key` header when the key is blank, which supports self-hosted servers configured for unauthenticated access.
 
 ## Notes
 

@@ -21,49 +21,46 @@
 # SOFTWARE.
 # =============================================================================
 
-from rocketlib import IGlobalBase, warning
-from ai.common.config import Config
+from typing import Any, Dict
 
-from .validate import SEVERITY_RANK, default_config
+from rocketlib import IGlobalBase
 
 
 class IGlobal(IGlobalBase):
-    """Global lifecycle: read and normalise the node configuration once per run."""
+    """Global lifecycle: read the resolved configuration once per run and normalise it for the checks."""
+
+    # The validation settings the instances hand to validate_payload, built in beginGlobal
+    validation: Dict[str, Any] = {}
 
     def beginGlobal(self):
-        raw = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig) or {}
+        """Read the resolved config and lower-case the metric keywords, which match against lower-cased labels.
 
-        config = default_config()
+        The schema supplies the defaults, the field-name lengths and the
+        severity enums. What it cannot express is checked here and fails the
+        start: a field name that is blank once stripped, and a keyword map
+        whose values are not lists.
 
-        # String field names normalise empty/whitespace back to their default.
+        Raises:
+            ValueError: A field name is blank, or a category's keywords are not a list.
+        """
+        config = self.config
+        fields = {}
         for key in ('amount_field', 'currency_field', 'metric_field', 'category_field'):
-            config[key] = str(raw.get(key) or config[key]).strip() or config[key]
-
-        # Severity enums accept only off/warning/error; anything else warns and
-        # falls back so the node keeps validating rather than failing the run.
-        for key in ('sign', 'require_provenance'):
-            value = raw.get(key)
-            if value is None:
-                continue
-            # ``value in SEVERITY_RANK`` would raise TypeError on an unhashable
-            # value (a JSON list/object supplied via a .pipe), so gate on str.
-            if isinstance(value, str) and value in SEVERITY_RANK and value != 'ok':
-                config[key] = value
-            else:
-                warning(f"schema_validate: '{key}' must be off/warning/error; using default '{config[key]}'.")
-
-        # The metric→category map must be a dict of keyword lists; a malformed
-        # value warns and keeps the built-in default map rather than crashing.
-        cat_map = raw.get('category_metric_map')
-        if cat_map is not None:
-            if isinstance(cat_map, dict) and all(isinstance(v, list) for v in cat_map.values()):
-                config['category_metric_map'] = {
-                    str(k): [str(kw).strip().lower() for kw in v] for k, v in cat_map.items()
-                }
-            else:
-                warning('schema_validate: category_metric_map must be an object of keyword lists; using default map.')
-
-        self.config = config
+            fields[key] = config[key].strip()
+            if not fields[key]:
+                raise ValueError(f'schema_validate: {key} must name a fact field; it is blank')
+        for category, keywords in config.category_metric_map.items():
+            if not isinstance(keywords, list):
+                raise ValueError(f'schema_validate: category_metric_map[{category!r}] must be a list of keywords')
+        self.validation = {
+            **fields,
+            'category_metric_map': {
+                str(category): [str(keyword).strip().lower() for keyword in keywords]
+                for category, keywords in config.category_metric_map.items()
+            },
+            'sign': config.sign,
+            'require_provenance': config.require_provenance,
+        }
 
     def endGlobal(self):
-        self.config = None
+        self.validation = {}

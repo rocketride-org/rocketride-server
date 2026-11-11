@@ -1,91 +1,59 @@
 # =============================================================================
-# RocketRide Engine
-# =============================================================================
 # MIT License
 # Copyright (c) 2026 Aparavi Software AG
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
 # =============================================================================
+
+"""Exa search global state."""
 
 from __future__ import annotations
 
 import os
 
-from ai.common.config import Config
-from rocketlib import IGlobalBase, OPEN_MODE, warning
+from rocketlib import IGlobalBase
 
 from .exa_search import ExaSearch
 
 
 class IGlobal(IGlobalBase):
-    """Shared runtime state for ``search_exa``.
+    """Shared Exa backend for the node.
 
-    Lifecycle:
-        - ``validateConfig()`` runs during editor/config validation and should
-          emit warnings instead of raising for recoverable user input issues.
-        - ``beginGlobal()`` runs when the node is opened for execution and must
-          initialize any shared runtime dependencies needed by ``IInstance``.
-        - ``endGlobal()`` runs during teardown and must release shared state.
-
-    Failure modes:
-        - Missing credentials should raise during ``beginGlobal()`` so the
-          pipeline fails early with a node-specific message.
-        - Dependency installation or backend construction errors are allowed to
-          propagate after being logged as warnings.
+    Contract:
+        - ``beginGlobal()`` runs when the node is opened for execution and
+          creates the shared ``ExaSearch`` backend from the resolved config.
+          The schema marks the key required, so a node without one never
+          reaches here; the key arrives through the node config (a
+          ${ROCKETRIDE_EXA_APIKEY} reference resolved per call).
+        - ``endGlobal()`` runs during teardown and releases the shared state.
     """
 
     search: ExaSearch | None = None
 
-    @staticmethod
-    def _get_apikey(cfg: dict, conn_config: dict) -> str:
-        """Resolve the Exa API key from node config, connection config, or env."""
-        apikey = str((cfg.get('apikey') or '')).strip()
-        if apikey:
-            return apikey
-        apikey = str((conn_config.get('apikey') or '')).strip()
-        if apikey:
-            return apikey
-        return str((os.environ.get('ROCKETRIDE_EXA_KEY') or '')).strip()
-
     def beginGlobal(self) -> None:
-        """Initialize the shared Exa backend for runtime execution.
-
-        This hook is skipped in config-only open mode. In execution mode it:
-            1. installs any Python dependencies declared by the node,
-            2. validates that credentials are present,
-            3. creates the shared ``ExaSearch`` backend instance.
-
-        Raises:
-            Exception: If the API key is missing.
-            Exception: If dependency setup or backend initialization fails.
-        """
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
-
+        """Install the dependencies and create the shared Exa backend."""
         from depends import depends  # type: ignore
 
         requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
         depends(requirements)
 
-        cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-        apikey = self._get_apikey(cfg, self.glb.connConfig)
-
-        if not apikey:
-            raise Exception('search_exa: apikey is required')
-
-        self.search = ExaSearch(self.glb.logicalType, self.glb.connConfig, self.IEndpoint.endpoint.bag)
-
-    def validateConfig(self) -> None:
-        """Validate user-visible configuration without starting the backend.
-
-        This hook should warn about invalid or missing settings so the editor
-        can surface actionable feedback while keeping configuration responsive.
-        """
-        try:
-            cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-            apikey = self._get_apikey(cfg, self.glb.connConfig)
-            if not apikey:
-                warning('apikey is required')
-        except Exception as e:
-            warning(str(e))
+        self.search = ExaSearch(self.glb.logicalType, self.config, self.IEndpoint.endpoint.bag)
 
     def endGlobal(self) -> None:
         """Release shared runtime state for this node instance."""

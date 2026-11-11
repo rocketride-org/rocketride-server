@@ -15,44 +15,33 @@
 	],
 	"tile": ["Dataset: ${parameters.cognee.dataset}"],
 	"lanes": {},
-	"preconfig": {
-		"default": "default",
-		"profiles": {
-			"default": {
-				"title": "Cognee",
-				"base_url": "http://localhost:8000",
-				"api_key": "",
-				"dataset": "main",
-				"allow_dataset_override": false,
-				"search_type": "GRAPH_COMPLETION_DECOMPOSITION",
-				"top_k": 15,
-				"request_timeout": 120
-			}
-		}
-	},
-	"fields": {
+	//
+	// Optional:
+	//		Local property definitions. The API key is an optional secret the account
+	//		variable supplies (a self-hosted server with access control off needs none).
+	//
+	"propertyDefinitions": {
 		"cognee.base_url": {
 			"type": "string",
 			"title": "Server URL",
 			"description": "Base URL of the Cognee server. Self-hosted Cognee defaults to <b>http://localhost:8000</b>. For Cognee Cloud, use the instance URL from <a href='https://platform.cognee.ai' target='_blank'>platform.cognee.ai</a>.",
-			"default": "http://localhost:8000"
+			"default": "http://localhost:8000",
+			"minLength": 1
 		},
 		"cognee.api_key": {
 			"type": "string",
 			"optional": true,
 			"title": "API Key",
-			"description": "Cognee API key sent as the <code>X-Api-Key</code> header. Falls back to <code>COGNEE_API_KEY</code>. Self-hosted servers with access control disabled can leave this blank.",
-			"default": "",
-			"secure": true,
-			"ui": {
-				"ui:widget": "ApiKeyWidget"
-			}
+			"description": "Cognee API key sent as the <code>X-Api-Key</code> header. Self-hosted servers with access control disabled can leave this blank.",
+			"secret": true,
+			"env": "ROCKETRIDE_COGNEE_APIKEY"
 		},
 		"cognee.dataset": {
 			"type": "string",
 			"title": "Dataset",
 			"description": "Default Cognee dataset used by all agent tools. Tool calls stay in this operator-controlled scope unless per-call overrides are enabled.",
-			"default": "main"
+			"default": "main",
+			"minLength": 1
 		},
 		"cognee.allow_dataset_override": {
 			"type": "boolean",
@@ -92,6 +81,16 @@
 			"maximum": 600
 		}
 	},
+	"properties": [
+		"type",
+		"cognee.base_url",
+		"cognee.api_key",
+		"cognee.dataset",
+		"cognee.allow_dataset_override",
+		"cognee.search_type",
+		"cognee.top_k",
+		"cognee.request_timeout"
+	],
 	"test": {
 		"profiles": ["default"],
 		"outputs": [],
@@ -101,21 +100,5 @@
 				"text": "test"
 			}
 		]
-	},
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "Cognee",
-			"properties": [
-				"type",
-				"cognee.base_url",
-				"cognee.api_key",
-				"cognee.dataset",
-				"cognee.allow_dataset_override",
-				"cognee.search_type",
-				"cognee.top_k",
-				"cognee.request_timeout"
-			]
-		}
-	]
+	}
 }

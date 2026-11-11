@@ -12,45 +12,43 @@
 	"description": ["Exposes Apify Actors as agent tools.", "Provides run_actor (run an Actor and return its dataset) and get_dataset_items."],
 	"tile": [],
 	"lanes": {},
-	"preconfig": {
-		"default": "default",
-		"profiles": {
-			"default": {
-				"title": "Apify",
-				"apikey": ""
-			}
-		}
-	},
-	"fields": {
+	//
+	// Optional:
+	//		Local property definitions. The API token is a required secret the
+	//		account variable supplies; the caps bound every agent-driven run.
+	//
+	"propertyDefinitions": {
 		"tool_apify.apikey": {
 			"type": "string",
 			"title": "API Token",
 			"description": "Apify API token",
-			"default": "",
-			"secure": true,
-			"ui": {
-				"ui:widget": "ApiKeyWidget"
-			}
+			"secret": true,
+			"env": "ROCKETRIDE_APIFY_APIKEY",
+			"required": true
 		},
 		"tool_apify.max_items": {
 			"type": "integer",
 			"title": "Max Items",
 			"description": "Upper cap on items returned per call (agent requests are clamped to this).",
-			"default": 100
+			"default": 100,
+			"minimum": 1
 		},
 		"tool_apify.run_timeout_secs": {
 			"type": "integer",
 			"title": "Run Timeout (seconds)",
 			"description": "Max seconds an Actor run may take before it is stopped.",
-			"default": 120
+			"default": 120,
+			"minimum": 1
 		},
 		"tool_apify.max_cost_usd": {
 			"type": "number",
 			"title": "Max Cost (USD)",
 			"description": "Spend limit per run for pay-per-event Actors.",
-			"default": 1
+			"default": 1,
+			"minimum": 0
 		}
 	},
+	"properties": ["type", "tool_apify.apikey", "tool_apify.max_items", "tool_apify.run_timeout_secs", "tool_apify.max_cost_usd"],
 	"test": {
 		"profiles": ["default"],
 		"outputs": [],
@@ -60,12 +58,5 @@
 				"text": "test query"
 			}
 		]
-	},
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "Apify",
-			"properties": ["type", "tool_apify.apikey", "tool_apify.max_items", "tool_apify.run_timeout_secs", "tool_apify.max_cost_usd"]
-		}
-	]
+	}
 }
