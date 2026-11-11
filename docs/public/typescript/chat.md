@@ -126,9 +126,10 @@ not send and arguments that do not match the tool's `inputSchema`.
   conversation so far.
 - The Anthropic, OpenAI and OpenAI-Compatible API nodes support turn mode. Any
   other LLM node answers with `answer.error.code === 'tools_unsupported'` before
-  calling its model. A Question that breaks a turn rule, or two tool names that
-  become the same provider name, gets `invalid_request`: fix the Question rather
-  than retry it.
+  calling its model. Two tool names that become the same provider name get
+  `invalid_request`: rename one rather than retry. A Question that breaks a turn
+  rule is refused when the engine reads it, so `client.chat()` throws. Call
+  `question.checkTurn()` first to catch it before sending.
 - `toDict()` sends `messages` and `tools` only when set, so other questions go
   out exactly as before. An engine older than turn mode ignores `messages` and
   answers a near-empty prompt as text, so `fromResult` returns a text `Answer`

@@ -146,8 +146,9 @@ class AnswerError(BaseModel):
     Why a turn produced no message.
 
     `tools_unsupported` and `invalid_request` are decided before any provider call, so
-    they cost no tokens. `invalid_request` is a mistake in the Question (a broken turn
-    rule, or two tool names that become the same provider name): fix it, do not retry.
+    they cost no tokens. `invalid_request` means two tool names become the same provider
+    name, or a node changed the Question so it breaks a turn rule: fix it, do not retry.
+    A Question sent with a broken turn rule is refused when the engine reads it.
     `provider_error` gives only the exception type; the full text is in the engine log.
     """
 

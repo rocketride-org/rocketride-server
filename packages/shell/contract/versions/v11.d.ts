@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV11 — never edit by hand
 // =============================================================================
-// Generated:     2026-11-11T19:45:11.780Z
-// Source commit: 4117f461ecd6c6eca9ecbb8562be698ebc1f0d67
+// Generated:     2026-11-11T20:37:36.665Z
+// Source commit: 9a8588c8c4201e5890967c707eb2425e41b4c3c1
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -665,8 +665,9 @@ export type Message = UserMessage | AssistantMessage;
 export type StopReason = "end_turn" | "tool_use" | "max_tokens" | "stop_sequence" | "refusal";
 /**
  * Why a turn produced no message. `tools_unsupported` and `invalid_request` are decided
- * before any provider call. `invalid_request` is a mistake in the Question (a broken turn
- * rule, or two tool names that become the same provider name): fix it, do not retry.
+ * before any provider call. `invalid_request` means two tool names become the same provider
+ * name, or a node changed the Question so it breaks a turn rule: fix it, do not retry.
+ * A Question sent with a broken turn rule is refused when the engine reads it.
  * `provider_error` gives only the exception type; the full text is in the engine log.
  */
 export interface AnswerError {
