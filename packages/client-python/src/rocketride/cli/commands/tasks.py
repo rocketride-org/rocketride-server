@@ -187,7 +187,6 @@ async def run_upload(args) -> int:
             use_result = await client.use(
                 pipeline=pipeline_config,
                 threads=args.threads,
-                token='UPLOAD_TASK',
                 args=args.pipeline_args or [],
             )
             task_token = use_result.get('token', '')

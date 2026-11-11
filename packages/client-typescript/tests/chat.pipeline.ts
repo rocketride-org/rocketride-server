@@ -30,9 +30,9 @@
  * consistent behavior when multiple API keys are available.
  * 
  * Priority Order:
- * 1. OpenAI (ROCKETRIDE_OPENAI_KEY) - Uses GPT-4 with 128K context
- * 2. Anthropic (ROCKETRIDE_ANTHROPIC_KEY) - Uses Claude-3 Sonnet
- * 3. Gemini (ROCKETRIDE_GEMINI_KEY) - Uses Gemini Pro model
+ * 1. OpenAI (ROCKETRIDE_OPENAI_KEY) - Uses GPT-5.2
+ * 2. Anthropic (ROCKETRIDE_ANTHROPIC_KEY) - Uses Claude Sonnet 4.6
+ * 3. Gemini (ROCKETRIDE_GEMINI_KEY) - Uses Gemini 3.1 Pro (preview)
  * 4. Ollama (ROCKETRIDE_OLLAMA_HOST) - Uses local Ollama server
  * 
  * @returns {Object} LLM component configuration object with provider-specific settings
@@ -48,10 +48,7 @@ function createLLMComponent() {
 		return {
 			id: "llm_openai_1",
 			provider: "llm_openai",
-			config: {
-				profile: "openai-5",
-				"openai-5": { apikey: openaiKey }
-			},
+			config: { model: "gpt-5.2", apikey: openaiKey },
 			input: [{ lane: "questions", from: "chat_1" }]
 		};
 	}
@@ -59,10 +56,7 @@ function createLLMComponent() {
 		return {
 			id: "llm_anthropic_1",
 			provider: "llm_anthropic",
-			config: {
-				profile: "claude-3_7-sonnet",
-				"claude-3-sonnet": { apikey: anthropicKey }
-			},
+			config: { model: "claude-sonnet-4-6", apikey: anthropicKey },
 			input: [{ lane: "questions", from: "chat_1" }]
 		};
 	}
@@ -70,10 +64,7 @@ function createLLMComponent() {
 		return {
 			id: "llm_gemini_1",
 			provider: "llm_gemini",
-			config: {
-				profile: "gemini-1_5-pro",
-				"gemini-1_5-pro": { apikey: geminiKey }
-			},
+			config: { model: "models/gemini-3.1-pro-preview", apikey: geminiKey },
 			input: [{ lane: "questions", from: "chat_1" }]
 		};
 	}
@@ -81,10 +72,7 @@ function createLLMComponent() {
 		return {
 			id: "llm_ollama_1",
 			provider: "llm_ollama",
-			config: {
-				profile: "llama3_3",
-				llama3_3: { serverbase: ollamaHost }
-			},
+			config: { model: "llama3.3:latest", serverbase: ollamaHost },
 			input: [{ lane: "questions", from: "chat_1" }]
 		};
 	}

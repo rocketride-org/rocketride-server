@@ -236,6 +236,23 @@ async def list_task_tokens(client: RocketRideClient) -> List[str]:
     return [task.get('token', '') for task in tasks]
 
 
+async def list_pipe_tasks(client: RocketRideClient, project_id: str) -> List[str]:
+    """
+    Every task address the server reports for one pipeline.
+
+    An address is developerId.pipelineId[.source], so the pipeline is the
+    second segment whatever the developer id is.
+
+    Args:
+        client: Connected client
+        project_id: The pipeline's short project id
+
+    Returns:
+        The matching addresses
+    """
+    return [token for token in await list_task_tokens(client) if token.split('.')[1:2] == [project_id]]
+
+
 async def wait_until_gone(client: RocketRideClient, token: str, timeout: float = 30.0) -> bool:
     """Poll until the server stops reporting the token, or the timeout expires."""
     deadline = asyncio.get_event_loop().time() + timeout
@@ -406,9 +423,6 @@ class TestCliUpload:
 
     PROJECT_ID = '9fa16cdd-ab96-4e38-e577-da13f569f318'
 
-    # The token the upload command hardcodes when it starts its own task
-    MANAGED_TOKEN = 'UPLOAD_TASK'
-
     @staticmethod
     def write_files(tmp_path) -> List[str]:
         """Create two non-empty files to upload."""
@@ -447,7 +461,6 @@ class TestCliUpload:
         client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
         try:
             await client.connect()
-            await ensure_clean_pipeline(client, self.MANAGED_TOKEN)
 
             pipeline = write_pipeline(tmp_path, self.PROJECT_ID)
             files = self.write_files(tmp_path)
@@ -457,11 +470,16 @@ class TestCliUpload:
             assert code == 0, output
             assert 'Upload Error' not in output
 
-            # A task the CLI created is a task it has to clean up
-            assert await wait_until_gone(client, self.MANAGED_TOKEN), 'upload task still reported after exit'
+            # A task the CLI created is a task it has to clean up; the server
+            # derived its address, so look for any task of this pipeline
+            deadline = asyncio.get_event_loop().time() + 30.0
+            while await list_pipe_tasks(client, self.PROJECT_ID):
+                assert asyncio.get_event_loop().time() < deadline, 'upload task still reported after exit'
+                await asyncio.sleep(0.5)
         finally:
-            await ensure_clean_pipeline(client, self.MANAGED_TOKEN)
             if client.is_connected():
+                for token in await list_pipe_tasks(client, self.PROJECT_ID):
+                    await ensure_clean_pipeline(client, token)
                 await client.disconnect()
 
     @pytest.mark.asyncio

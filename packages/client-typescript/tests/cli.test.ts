@@ -115,6 +115,11 @@ async function listTaskTokens(client: RocketRideClient): Promise<string[]> {
 	return tasks.map((task) => task.token || '');
 }
 
+/** Every task address the server reports for one pipeline: developerId.pipelineId[.source]. */
+async function listPipeTasks(client: RocketRideClient, projectId: string): Promise<string[]> {
+	return (await listTaskTokens(client)).filter((token) => token.split('.')[1] === projectId);
+}
+
 /** Poll until the server stops reporting the token, or the timeout expires. */
 async function waitUntilGone(client: RocketRideClient, token: string, timeoutMs = 30000): Promise<boolean> {
 	const deadline = Date.now() + timeoutMs;
@@ -226,9 +231,6 @@ describe('CLI start Integration Tests', () => {
 describe('CLI upload Integration Tests', () => {
 	const PROJECT_ID = '2b5e8a33-4c76-4f2a-9d58-3e0c7f16a842';
 
-	// The token the upload command hardcodes when it starts its own task
-	const MANAGED_TOKEN = 'UPLOAD_TASK';
-
 	let client: RocketRideClient;
 	let pipelineToken: string | undefined;
 
@@ -236,13 +238,15 @@ describe('CLI upload Integration Tests', () => {
 		client = new RocketRideClient({ auth: TEST_CONFIG.auth, uri: TEST_CONFIG.uri });
 		await client.connect();
 		pipelineToken = undefined;
-		await ensureCleanPipeline(client, MANAGED_TOKEN);
 	});
 
 	afterEach(async () => {
 		if (pipelineToken) await ensureCleanPipeline(client, pipelineToken);
-		await ensureCleanPipeline(client, MANAGED_TOKEN);
-		if (client.isConnected()) await client.disconnect();
+		if (client.isConnected()) {
+			// A task the upload command started for itself, should it outlive the test
+			for (const token of await listPipeTasks(client, PROJECT_ID)) await ensureCleanPipeline(client, token);
+			await client.disconnect();
+		}
 	});
 
 	it('should upload files to an existing task and leave it running', async () => {
@@ -267,8 +271,13 @@ describe('CLI upload Integration Tests', () => {
 		expect(code).toBe(0);
 		expect(output).not.toContain('Upload Error');
 
-		// A task the CLI created is a task it has to clean up
-		expect(await waitUntilGone(client, MANAGED_TOKEN)).toBe(true);
+		// A task the CLI created is a task it has to clean up; the server
+		// derived its address, so look for any task of this pipeline
+		const deadline = Date.now() + 30000;
+		while ((await listPipeTasks(client, PROJECT_ID)).length > 0 && Date.now() < deadline) {
+			await new Promise((resolve) => setTimeout(resolve, 500));
+		}
+		expect(await listPipeTasks(client, PROJECT_ID)).toEqual([]);
 	});
 
 	it('should fail without a pipeline or a token', async () => {

@@ -243,7 +243,6 @@ export function registerTaskCommands(program: Command): void {
 					const useResult = await client.use({
 						pipeline: pipelineConfig,
 						threads: parseInt(options.threads, 10),
-						token: 'UPLOAD_TASK',
 						args: options.args || [],
 					});
 					taskToken = useResult.token;
