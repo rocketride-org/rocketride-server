@@ -81,6 +81,7 @@ def hint_for(err: Exception, uri: Optional[str] = None) -> str:
     """
     Derive the user-facing hint for a raised error.
 
+    An exception that carries its own ``hint`` (the SDK attaches one) wins.
     Auth rejections name the fix (``rocketride login``); connection
     failures point at the server address; everything else gets no hint.
 
@@ -91,6 +92,9 @@ def hint_for(err: Exception, uri: Optional[str] = None) -> str:
     Returns:
         A hint sentence, possibly empty.
     """
+    own_hint = getattr(err, 'hint', None)
+    if isinstance(own_hint, str) and own_hint:
+        return own_hint
     message = str(err)
     if re.search(
         r'invalid api key|not authenticated|unauthorized|authentication failed|account is waitlisted',

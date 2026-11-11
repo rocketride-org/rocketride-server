@@ -164,6 +164,7 @@ export function takeInterrupt(): boolean {
 /**
  * Derive the user-facing hint for a thrown error.
  *
+ * An error that carries its own `hint` (the SDK attaches one) wins.
  * Auth rejections name the fix (`rocketride login`); connection failures
  * point at the server address; everything else gets no hint.
  *
@@ -172,6 +173,10 @@ export function takeInterrupt(): boolean {
  * @returns A hint sentence, possibly empty.
  */
 export function hintFor(err: unknown, uri?: string): string {
+	const ownHint = (err as { hint?: unknown } | null | undefined)?.hint;
+	if (typeof ownHint === 'string' && ownHint) {
+		return ownHint;
+	}
 	const message = err instanceof Error ? err.message : String(err);
 	if (/invalid api key|not authenticated|unauthorized|authentication failed|account is waitlisted/i.test(message)) {
 		return `credentials for ${uri || 'the server'} were rejected — run 'rocketride login' to re-authenticate`;
