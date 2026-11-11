@@ -7,7 +7,13 @@ from rocketride import RocketRideClient
 async def task_Execute(
     request: Request,
     pipeline: Dict[str, Any],
-    token: str | None = Query(None, description='Optional token for the task'),
+    token: str | None = Query(
+        None,
+        description=(
+            "Optional override of the pipeline-id segment of the task address (the pipeline's project_id); "
+            'not a credential'
+        ),
+    ),
     threads: int = Query(4, ge=1, le=64, description='Optional number of threads to use (1–64)'),
     trace: str = Query(None, description='Optional trace flags for debugging'),
     authorization: str = Header(..., description='Bearer API key in the Authorization header'),
@@ -17,6 +23,10 @@ async def task_Execute(
 
     Args:
         pipeline (Dict[str, Any]): The configuration for the new pipeline.
+        token (str, optional): Overrides the pipeline-id segment of the task
+            address, exactly as ``use(token=)`` does. The run belongs to the
+            authenticated account; this names a pipeline id inside its own
+            namespace, which the body's ``project_id`` could name already.
         authorization (str): The API key for authentication, provided in the Authorization header.
 
     Returns:
@@ -90,19 +100,16 @@ async def task_Execute(
         if trace:
             args.append(f'--trace={trace}')
 
-        # For launch/execute the apikey and token are in the arguments
+        # Start the run as the caller; the address comes back in the token slot
         result = await client.use(
-            token=token,  #
+            token=token,
             pipeline=pipeline,
             threads=threads,
             args=args,
         )
 
-        # Get the token
-        token = result.get('token', '')
-
-        # Return a success response
-        return response({'token': token})
+        # Return the address
+        return response({'token': result.get('token', '')})
 
     except Exception as e:
         return exception(e)

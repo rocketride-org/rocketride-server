@@ -30,6 +30,7 @@
  * CLI.
  */
 
+import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as glob from 'glob';
@@ -109,7 +110,7 @@ export function registerTaskCommands(program: Command): void {
 		.command('start')
 		.description('Start a new pipeline')
 		.option('--pipeline <file>', 'Path to pipeline configuration file (can use ROCKETRIDE_PIPELINE in .env or env var)', process.env.ROCKETRIDE_PIPELINE)
-		.option('--token <token>', 'Optional existing task token for pipeline resume/control (can use ROCKETRIDE_TOKEN in .env or env var)', process.env.ROCKETRIDE_TOKEN)
+		.option('--token <token>', "Override the pipeline-id segment of the run's address (the pipeline's project_id): the run is addressed developerId.<token>.source; not a credential")
 		.option('--threads <num>', 'Number of threads to use for pipeline execution', '4')
 		.option('--args <args...>', 'Additional arguments to pass to pipeline execution')
 		.action(async (options) => {
@@ -240,10 +241,12 @@ export function registerTaskCommands(program: Command): void {
 				const managePipeline = Boolean(options.pipeline) && !options.token;
 				if (managePipeline) {
 					const pipelineConfig = loadPipelineConfig(options.pipeline);
+					// A private run: its own pipeline id, so it neither attaches to nor
+					// collides with another run of the same pipe; terminated below.
 					const useResult = await client.use({
 						pipeline: pipelineConfig,
 						threads: parseInt(options.threads, 10),
-						token: 'UPLOAD_TASK',
+						token: `upload-${randomUUID()}`,
 						args: options.args || [],
 					});
 					taskToken = useResult.token;

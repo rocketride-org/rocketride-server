@@ -124,26 +124,32 @@ async def execute_tool(
         binary_data = f.read()
 
     if convenience_tool:
+        # A private one-shot run: the bundled pipeline carries no project_id,
+        # so the server mints a fresh pipeline id and the run gets its own
+        # address. It is terminated once the file is processed.
         pipeline = await client.use(pipeline=pipeline_obj)
         convenience_token = (pipeline or {}).get('token')
         if not isinstance(convenience_token, str):
             return {'error': 'Failed to start pipeline', 'status': 502}
 
-        # Retry logic for new pipelines
-        for attempt in range(5):
-            try:
-                result = await client.send(
-                    convenience_token,
-                    binary_data,
-                    objinfo={'name': filename, 'filepath': resolved_path},
-                )
-                break
-            except RuntimeError as e:
-                # Re-raise if not a connection error or out of retries
-                is_conn_err = any(x in str(e) for x in ['Connect call failed', 'Connection refused'])
-                if not is_conn_err or attempt == 4:
-                    raise e
-                await asyncio.sleep(0.5 * (2**attempt))
+        try:
+            # Retry logic for new pipelines
+            for attempt in range(5):
+                try:
+                    result = await client.send(
+                        convenience_token,
+                        binary_data,
+                        objinfo={'name': filename, 'filepath': resolved_path},
+                    )
+                    break
+                except RuntimeError as e:
+                    # Re-raise if not a connection error or out of retries
+                    is_conn_err = any(x in str(e) for x in ['Connect call failed', 'Connection refused'])
+                    if not is_conn_err or attempt == 4:
+                        raise e
+                    await asyncio.sleep(0.5 * (2**attempt))
+        finally:
+            await client.terminate(convenience_token)
     else:
         if not isinstance(pipeline_token, str):
             return {'error': 'Pipeline token not available', 'status': 502}

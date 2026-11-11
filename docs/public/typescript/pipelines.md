@@ -31,15 +31,28 @@ every call that this account may control, send to, or monitor the task.
 Beyond `filepath`/`pipeline`, the options accept `source`, `threads`,
 `useExisting`, `args`, `ttl`, `pipelineTraceLevel` (trace verbosity for the
 [run log](/clients/typescript/logs)), `name` (a display name for the task), and
-`env` (per-run variable overrides). Do not pass `token`: the server names the task
-itself and refuses a caller-chosen name. Pass the pipeline config **as-is** — do
-not wrap it in `{ pipeline: ... }`; the client sends it to the server, which
-resolves `${ROCKETRIDE_*}` variables.
+`env` (per-run variable overrides), and `token`, which overrides the pipeline-id
+segment of the address (the pipeline's `project_id`). Pass the pipeline config
+**as-is** — do not wrap it in `{ pipeline: ... }`; the client sends it to the
+server, which resolves `${ROCKETRIDE_*}` variables.
 
 **One run per address.** The server keys a task by its owner and address, so a
 second `use()` of the same pipe and source while the first is running fails with
 an error that starts `Pipeline is already running`. Stop the running one, reuse
-it (below), or give the copy its own `project_id` so it gets its own address.
+it (below), or give the copy its own pipeline id so it gets its own address:
+either a different `project_id` in the config, or `token`, which does the same
+without editing the config:
+
+```typescript
+const { token } = await client.use({ filepath: './pipeline.pipe', token: 'runB' });
+// token === 'acme.runB.chat_1'
+```
+
+The value is one address segment (letters, digits, `_` and `-`); anything else
+is refused the way an invalid `project_id` is. It is a name inside your own
+namespace, not a credential: the developer id and the owner still come from your
+account, and the returned `token` is the full address. Terminate a run you
+started this way when you are done with it.
 `getTaskToken({ projectId, source })` returns the address of your running task
 for that pipe and source (pass `teamId` for the team's deployed run).
 

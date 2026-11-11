@@ -1224,28 +1224,48 @@ async def test_start_task_already_running_at_the_same_address_says_how_to_run_or
 
 
 @pytest.mark.asyncio
-async def test_start_task_refuses_a_caller_token():
-    """A caller-supplied token is refused, whatever is running (plan B1).
-
-    Only the server derives a run's address and registry key; a caller naming
-    one could alias another run. The refusal comes before anything is looked
-    up, so the running task is untouched.
+async def test_start_task_token_override_lands_on_the_address_it_names():
+    """A caller token overrides the spec's project_id (plan B1): it names the
+    address the run takes, so a token equal to a running run's pipeline id is
+    that run's address and gets the same already-running refusal, whatever the
+    spec's own project_id says.
     """
     ts = _make_server()
     running = _seed_running_task(ts)
+    pipeline = {**_launch_pipeline(), 'project_id': 'other'}
 
-    with pytest.raises(TaskError) as excinfo:
+    with pytest.raises(ValueError) as excinfo:
         await ts.start_task(
-            {'command': 'launch', 'arguments': {'token': 'tk_mine', 'source': 'llm', 'pipeline': _launch_pipeline()}},
+            {'command': 'launch', 'arguments': {'token': 'project-1', 'pipeline': pipeline}},
             conn=MagicMock(),
             **LAUNCH_IDENTITY,
         )
 
-    assert excinfo.value.code == TaskError.INVALID_ARGUMENT
-    assert excinfo.value.field == 'token'
-    assert str(excinfo.value) == (
-        'token is not accepted on execute: tasks are addressed by name, which the server derives'
-    )
+    _assert_says_how_to_run_or_attach(str(excinfo.value), LAUNCH_ADDRESS)
+    assert ts._task_control == {LAUNCH_KEY: running}
+
+
+@pytest.mark.asyncio
+async def test_start_task_refuses_a_token_that_is_not_an_address_segment():
+    """A token with a dot or a slash is the project_id grammar error, naming
+    token, raised before anything is looked up: the running task is untouched.
+    """
+    ts = _make_server()
+    running = _seed_running_task(ts)
+
+    for bad in ('acme.project-1', 'project/1'):
+        with pytest.raises(TaskError) as excinfo:
+            await ts.start_task(
+                {'command': 'launch', 'arguments': {'token': bad, 'pipeline': _launch_pipeline()}},
+                conn=MagicMock(),
+                **LAUNCH_IDENTITY,
+            )
+
+        assert excinfo.value.code == TaskError.INVALID_ARGUMENT
+        assert excinfo.value.field == 'token'
+        assert str(excinfo.value) == (
+            f'token {bad!r} is not a valid address segment: use only letters, digits, "_" and "-"'
+        )
     assert ts._task_control == {LAUNCH_KEY: running}
 
 

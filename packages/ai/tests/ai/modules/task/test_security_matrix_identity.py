@@ -510,21 +510,97 @@ async def test_s6_start_task_returns_the_address_in_the_token_slot():
     assert list(ts._task_control) == ['dev.user-a.acme.docBrain.parsePDF']
 
 
-@pytest.mark.asyncio
-async def test_s6_a_client_supplied_token_is_refused_at_execute():
-    """Nothing mints a token: a caller cannot name the registry key either."""
-    ts = _server()
-    with pytest.raises(TaskError) as err:
-        await ts.start_task(
-            _launch_request(_pipeline('parsePDF'), token='tk_mine'),
+async def _start(ts: TaskServer, request: dict, *, user_id='user-a', developer_id='acme') -> dict:
+    """Run start_task with a stubbed Task, as the authenticated dev user."""
+    with patch('ai.modules.task.task_server.Task') as task_cls:
+        task = task_cls.return_value
+        task.start_task = AsyncMock()
+        task.wait_for_running = AsyncMock()
+        task.is_task_complete.return_value = False
+        task._stop_requested = False
+        return await ts.start_task(
+            request,
             conn=MagicMock(),
-            client_id='user-a',
-            user_id='user-a',
+            client_id=user_id,
+            user_id=user_id,
             team_id='team-1',
             org_id='org-1',
-            developer_id='acme',
+            developer_id=developer_id,
         )
+
+
+@pytest.mark.asyncio
+async def test_s6_token_overrides_the_pipeline_id_of_the_address():
+    """use(spec, token=X) runs at developerId.X.source and returns that address."""
+    ts = _server()
+    pipeline = _pipeline('parsePDF')
+
+    result = await _start(ts, _launch_request(pipeline, token='runA'))
+
+    # Step 1: the token replaced the spec's project_id in the address
+    assert result['token'] == 'acme.runA.parsePDF'
+    assert result['id'] == 'acme.runA.parsePDF'
+    assert result['projectId'] == 'runA'
+    assert list(ts._task_control) == ['dev.user-a.acme.runA.parsePDF']
+
+    # Step 2: the control records the overridden spec; the caller's object is untouched
+    assert ts._task_control['dev.user-a.acme.runA.parsePDF'].pipeline['project_id'] == 'runA'
+    assert pipeline['project_id'] == 'docBrain'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('bad', ['run.A', 'run/A', 'run A', '', 'run\n'])
+async def test_s6_token_override_obeys_the_segment_grammar(bad):
+    """A token that is not one address segment is the project_id grammar error, naming token."""
+    ts = _server()
+    with pytest.raises(TaskError) as err:
+        await _start(ts, _launch_request(_pipeline('parsePDF'), token=bad))
     assert err.value.code == TaskError.INVALID_ARGUMENT
+    assert err.value.field == 'token'
+    assert 'is not a valid address segment' in str(err.value)
+    assert ts._task_control == {}
+
+
+@pytest.mark.asyncio
+async def test_s6_different_tokens_on_one_spec_are_two_controls():
+    """Two use() calls with different tokens on the same spec start two private runs."""
+    ts = _server()
+    first = await _start(ts, _launch_request(_pipeline('parsePDF'), token='runA'))
+    second = await _start(ts, _launch_request(_pipeline('parsePDF'), token='runB'))
+
+    assert first['token'] == 'acme.runA.parsePDF'
+    assert second['token'] == 'acme.runB.parsePDF'
+    assert sorted(ts._task_control) == ['dev.user-a.acme.runA.parsePDF', 'dev.user-a.acme.runB.parsePDF']
+
+
+@pytest.mark.asyncio
+async def test_s6_use_existing_with_the_same_token_attaches():
+    """A useExisting call with the same token attaches to the live control at that address."""
+    ts = _server()
+    await _start(ts, _launch_request(_pipeline('parsePDF'), token='runA'))
+    live = ts._task_control['dev.user-a.acme.runA.parsePDF']
+
+    again = await _start(ts, _launch_request(_pipeline('parsePDF'), token='runA', useExisting=True))
+
+    assert again['token'] == 'acme.runA.parsePDF'
+    assert again['reused'] is True
+    assert ts._task_control == {'dev.user-a.acme.runA.parsePDF': live}
+
+    # Without useExisting the same address is already running: refused
+    with pytest.raises(ValueError):
+        await _start(ts, _launch_request(_pipeline('parsePDF'), token='runA'))
+
+
+@pytest.mark.asyncio
+async def test_s6_token_override_stays_inside_the_callers_namespace():
+    """The override names a pipeline id only: developer id and owner still come from the account."""
+    ts = _server()
+    result = await _start(
+        ts, _launch_request(_pipeline('parsePDF'), token='runA'), user_id='user-b', developer_id='globex'
+    )
+
+    assert result['token'] == 'globex.runA.parsePDF'
+    assert list(ts._task_control) == ['dev.user-b.globex.runA.parsePDF']
 
 
 # =============================================================================

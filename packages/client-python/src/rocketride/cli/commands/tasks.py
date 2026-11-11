@@ -31,6 +31,7 @@ CLI. Kept in exact parity with the TypeScript CLI's
 
 import os
 import time
+import uuid
 from typing import Any, Dict
 
 from ..utils.common import connect_client, run_cli_command
@@ -184,10 +185,12 @@ async def run_upload(args) -> int:
         manage_pipeline = bool(args.pipeline) and not args.token
         if manage_pipeline:
             pipeline_config = load_pipeline_config(args.pipeline)
+            # A private run: its own pipeline id, so it neither attaches to nor
+            # collides with another run of the same pipe; terminated below.
             use_result = await client.use(
                 pipeline=pipeline_config,
                 threads=args.threads,
-                token='UPLOAD_TASK',
+                token=f'upload-{uuid.uuid4().hex}',
                 args=args.pipeline_args or [],
             )
             task_token = use_result.get('token', '')
