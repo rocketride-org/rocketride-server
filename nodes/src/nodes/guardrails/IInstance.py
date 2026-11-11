@@ -50,9 +50,11 @@ def _turn_output(answer: Answer) -> str:
     call a tool usually has no text, so the text check alone never sees them.
     """
     calls = answer.toolCalls() if answer is not None else []
-    return '\n'.join(
+    text = '\n'.join(
         call.args if isinstance(call.args, str) else json.dumps(call.args, ensure_ascii=False) for call in calls
     )
+    # JSON writes a line break as backslash-n, which hides the word boundary the patterns need
+    return text.replace('\\n', ' ').replace('\\r', ' ').replace('\\t', ' ')
 
 
 class IInstance(IInstanceBase):

@@ -844,6 +844,8 @@ class TestIInstanceLifecycle:
         [
             ({'to': 'ops@example.com', 'body': 'SSN 123-45-6789'}, True),
             ('{"body": "SSN 123-45-6789"', True),  # arguments the provider could not parse
+            ({'body': 'Records:\n123-45-6789'}, True),  # JSON writes the line break as backslash-n
+            ('{"body": "Card:\\n4111 1111 1111 1111"', True),
             ({'query': 'weather in Paris'}, False),
         ],
     )
