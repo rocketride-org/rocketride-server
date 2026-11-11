@@ -56,7 +56,7 @@ nested deeper than ``MAX_SECTION_DEPTH`` are the one template error
 
 import html
 import re
-from typing import Any, Callable, List, Mapping, Optional, Tuple
+from typing import Any, Callable, List, Mapping, NamedTuple, Optional, Union
 
 from rocketlib import debug
 
@@ -75,8 +75,26 @@ class TemplateError(Exception):
     """A template the engine refuses to render."""
 
 
-# Node = ('text', str) | ('var', name) | ('section', name, [Node])
-Node = Tuple[Any, ...]
+class Text(NamedTuple):
+    """Template text outside any tag, copied as is."""
+
+    text: str
+
+
+class Var(NamedTuple):
+    """A ``{{name}}`` tag: the escaped scalar ``name`` resolves to."""
+
+    name: str
+
+
+class Section(NamedTuple):
+    """A ``{{#name}} ... {{/name}}`` section and the nodes inside it."""
+
+    name: str
+    children: List['Node']
+
+
+Node = Union[Text, Var, Section]
 
 
 def _log(issue: str) -> None:
@@ -109,18 +127,18 @@ def parse(template: str, on_issue: Callable[[str], None] = _log) -> List[Node]:
             left open (default: a debug log line).
 
     Returns:
-        The top-level nodes: ``('text', str)``, ``('var', name)`` and
-        ``('section', name, children)``.
+        The top-level nodes (``Text``, ``Var`` and ``Section``).
 
     Raises:
         TemplateError: sections nest deeper than ``MAX_SECTION_DEPTH``.
     """
-    root: List[Node] = []
-    stack: List[Tuple[Optional[str], List[Node]]] = [(None, root)]
+    # The innermost open section last; the root is a nameless section that never closes.
+    root = Section('', [])
+    stack: List[Section] = [root]
     pos = 0
     for match in _TAG.finditer(template):
         if match.start() > pos:
-            stack[-1][1].append(('text', template[pos : match.start()]))
+            stack[-1].children.append(Text(template[pos : match.start()]))
         pos = match.end()
         raw = match.group(2).strip()
         if match.group(1) or match.group(3):
@@ -137,21 +155,21 @@ def parse(template: str, on_issue: Callable[[str], None] = _log) -> List[Node]:
         if sigil == '#':
             if len(stack) > MAX_SECTION_DEPTH:
                 raise TemplateError(f'sections nest deeper than {MAX_SECTION_DEPTH} levels')
-            children: List[Node] = []
-            stack[-1][1].append(('section', name, children))
-            stack.append((name, children))
+            section = Section(name, [])
+            stack[-1].children.append(section)
+            stack.append(section)
         elif sigil == '/':
-            if len(stack) > 1 and stack[-1][0] == name:
+            if len(stack) > 1 and stack[-1].name == name:
                 stack.pop()
             else:
                 on_issue(f'unmatched close tag {{{{/{name}}}}} dropped')
         else:
-            stack[-1][1].append(('var', name))
+            stack[-1].children.append(Var(name))
     if pos < len(template):
-        stack[-1][1].append(('text', template[pos:]))
-    for name, _ in stack[1:]:
-        on_issue(f'section {{{{#{name}}}}} never closed (closed at end of template)')
-    return root
+        stack[-1].children.append(Text(template[pos:]))
+    for section in stack[1:]:
+        on_issue(f'section {{{{#{section.name}}}}} never closed (closed at end of template)')
+    return root.children
 
 
 def _lookup(contexts: List[Any], name: str) -> Any:
@@ -193,12 +211,12 @@ def _render(
 ) -> None:
     """Append the rendering of ``nodes`` to ``out``; ``contexts`` is the lookup stack, innermost last."""
     for node in nodes:
-        if node[0] == 'text':
-            out.append(node[1])
-        elif node[0] == 'var':
-            _render_var(node[1], contexts, escape, on_issue, out)
+        if isinstance(node, Text):
+            out.append(node.text)
+        elif isinstance(node, Var):
+            _render_var(node.name, contexts, escape, on_issue, out)
         else:
-            _render_section(node[1], node[2], contexts, escape, on_issue, out)
+            _render_section(node.name, node.children, contexts, escape, on_issue, out)
 
 
 def _render_var(
