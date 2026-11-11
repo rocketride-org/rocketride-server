@@ -21,6 +21,8 @@
 # SOFTWARE.
 # =============================================================================
 
+import json
+
 from rocketlib import IInstanceBase, Entry, warning
 from ai.common.schema import Question, Answer
 from .IGlobal import IGlobal
@@ -39,6 +41,18 @@ def _turn_input(question: Question) -> list:
     if isinstance(content, str):
         return [content]
     return [block.text if block.type == 'text' else block.content for block in content]
+
+
+def _turn_output(answer: Answer) -> str:
+    """Return the arguments of a turn's tool calls as one text, or '' when it made none.
+
+    They leave through the client like answer text does, and a turn that stops to
+    call a tool usually has no text, so the text check alone never sees them.
+    """
+    calls = answer.toolCalls() if answer is not None else []
+    return '\n'.join(
+        call.args if isinstance(call.args, str) else json.dumps(call.args, ensure_ascii=False) for call in calls
+    )
 
 
 class IInstance(IInstanceBase):
@@ -115,9 +129,9 @@ class IInstance(IInstanceBase):
     def writeAnswers(self, answer: Answer):
         """Run output guardrails on the answer before forwarding.
 
-        Extracts the answer text, runs output-mode evaluation with
-        any collected source documents as context, then applies the
-        configured policy.
+        Runs output-mode evaluation on the answer text, with any collected
+        source documents as context, and tool-call evaluation on the
+        arguments of a turn's tool calls, then applies the configured policy.
 
         Args:
             answer: The incoming Answer object.
@@ -127,30 +141,26 @@ class IInstance(IInstanceBase):
             self._forward_answer(answer)
             return
 
-        # Extract answer text
+        results = []
         text = answer.getText() if answer else ''
+        if text.strip():
+            results.append(engine.evaluate(text, mode='output', context={'source_documents': self.source_documents}))
+        calls = _turn_output(answer)
+        if calls:
+            results.append(engine.evaluate(calls, mode='tool_call'))
 
-        if not text.strip():
-            # Nothing to check, forward as-is
-            self._forward_answer(answer)
-            return
+        # With nothing to check, both are empty and the answer goes on as-is
+        violations = [violation for result in results for violation in result['violations']]
+        actions = {result['action'] for result in results}
 
-        # Build context for output checks
-        context = {
-            'source_documents': self.source_documents,
-        }
-
-        # Run output guardrails
-        result = engine.evaluate(text, mode='output', context=context)
-
-        if result['action'] == 'block':
-            for violation in result['violations']:
+        if 'block' in actions:
+            for violation in violations:
                 warning(f'Guardrails output blocked: {violation["rule"]} \u2014 {violation["details"]}')
             self.preventDefault()
             return
 
-        if result['action'] == 'warn':
-            for violation in result['violations']:
+        if 'warn' in actions:
+            for violation in violations:
                 warning(f'Guardrails output warning: {violation["rule"]} \u2014 {violation["details"]}')
 
         # Forward the answer downstream

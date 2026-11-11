@@ -612,6 +612,9 @@ class TestIInstanceLifecycle:
             def getText(self):
                 return self._text
 
+            def toolCalls(self):
+                return []
+
         class FakeConfig:
             @staticmethod
             def getNodeConfig(logicalType, connConfig):
@@ -833,6 +836,32 @@ class TestIInstanceLifecycle:
         inst.instance = types.SimpleNamespace(writeQuestions=forwarded.append)
 
         inst.writeQuestions(Question(messages=messages))
+
+        assert len(forwarded) == (0 if blocked else 1)
+
+    @pytest.mark.parametrize(
+        'args, blocked',
+        [
+            ({'to': 'ops@example.com', 'body': 'SSN 123-45-6789'}, True),
+            ('{"body": "SSN 123-45-6789"', True),  # arguments the provider could not parse
+            ({'query': 'weather in Paris'}, False),
+        ],
+    )
+    def test_a_turn_answer_is_checked_on_its_tool_call_arguments(self, args, blocked):
+        """A turn that stops to call a tool has no text, so the arguments are what leaves."""
+        from ai.common.schema import Answer, AssistantMessage, ToolCallBlock
+
+        IInstance, EngineClass, _, _, _ = self._load_iinstance_class()
+        inst = IInstance()
+        inst.IGlobal = types.SimpleNamespace(
+            engine=EngineClass({'policy_mode': 'block', 'enable_pii_detection': True}), config={}
+        )
+        inst.source_documents = []
+        forwarded = []
+        inst.instance = types.SimpleNamespace(writeAnswers=forwarded.append)
+        call = ToolCallBlock(id='c1', name='send_email', args=args)
+
+        inst.writeAnswers(Answer(message=AssistantMessage(content=[call]), stopReason='tool_use'))
 
         assert len(forwarded) == (0 if blocked else 1)
 
