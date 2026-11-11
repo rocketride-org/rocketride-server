@@ -1558,7 +1558,8 @@ class TaskServer(DAPBase):
                 - arguments: Task configuration including:
                     - token: Task token to restart (required)
                     - pipeline: New pipeline configuration (required)
-            conn (TaskConn, optional): Connection requesting restart (must match launch_owner)
+            conn (TaskConn, optional): Connection requesting restart. When set, its
+                effective permissions are checked against `task.control`.
             wait_for_running (bool): If True, wait for task to reach running state
 
         Returns:
@@ -1571,25 +1572,25 @@ class TaskServer(DAPBase):
                 - provider: Provider name (may be updated)
 
         Raises:
-            ValueError: If pipeline invalid, source not found,
+            ValueError: If pipeline invalid or missing, source not found,
                     project_id/source don't match existing values, or token not provided
             TaskError: Code TASK_NOT_REGISTERED if the token names no live task
-            RuntimeError: If pipeline configuration is missing, a debugger is attached,
-                        or the connection is not the launch owner
+            PermissionError: If the caller lacks `task.control` for this task
+            RuntimeError: If a debugger is attached
 
         Restart Process:
         1. Parse and validate request parameters
         2. Validate task existence
-        3. Verify connection is the launch owner
+        3. Verify the caller has `task.control` for the task
         4. Check that no debugger is attached
         5. Extract and validate new pipeline configuration
         6. Verify project_id and source match existing (cannot change)
         7. Validate source component exists in new pipeline
         8. Update TASK_CONTROL with new configuration (pipeline, provider)
         9. Call task.restart_task() to restart engine process
-        11. Optionally wait for running state
-        12. Transfer launch ownership to the caller (only once 10-11 succeeded)
-        13. Return task information
+        10. Optionally wait for running state
+        11. Transfer launch ownership to the caller (only once 9-10 succeeded)
+        12. Return task information
 
         Note:
         - Task identity (token, public_auth, project_id, source) remains unchanged
@@ -1598,7 +1599,7 @@ class TaskServer(DAPBase):
         - Registry entry is updated but not recreated
         - Peak/total metrics are not modified (not a new task)
         - Debugger must be detached before restart
-        - Only the original launch owner can restart the task
+        - Only a caller with `task.control` for the task can restart it
         """
         try:
             # Parse request arguments

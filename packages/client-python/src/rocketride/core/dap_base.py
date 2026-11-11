@@ -108,7 +108,8 @@ class DAPBase:
         Args:
             module (str): Message type used for logging prefixes and component
                 identification. Defaults to 'UNKNOWN'.
-            **kwargs: Additional keyword arguments forwarded to the transport layer.
+            **kwargs: Keyword arguments; only `transport` is read. When set, it is
+                bound to this client's handlers through `_bind_transport`.
         """
         # Message type identifier for logging - helps distinguish different DAP instances
         # This should be set by concrete classes to provide meaningful log prefixes
