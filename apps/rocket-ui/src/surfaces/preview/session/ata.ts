@@ -46,6 +46,7 @@
 
 import type { TypescriptSetupHandle } from 'shared/components/monaco';
 import { cacheGet, cachePut } from './idbCache';
+import { RESERVED_SHARES } from './linker';
 
 // =============================================================================
 // TYPES
@@ -68,6 +69,17 @@ type AcquireFn = (sourceCode: string) => void;
 /** Keystroke settle time before a pass runs. */
 const ATA_DEBOUNCE_MS = 1000;
 
+/**
+ * Packages the platform already types in the editor (typesFeed registers
+ * shell and rocketride, typescriptSetup bundles React's). npm's copies are
+ * other versions at the same node_modules paths, and npm rocketride's types
+ * pull in thousands of database-driver files.
+ */
+const PLATFORM_PACKAGES = new Set(RESERVED_SHARES.map((specifier) => specifier.split('/')[0]));
+
+/** The package in a jsDelivr URL: .../npm/<name>[@<version>][/<file>]. */
+const JSDELIVR_PACKAGE = /\/npm\/((?:@[^/@]+\/)?[^/@]+)/;
+
 // =============================================================================
 // FETCH (IndexedDB-cached)
 // =============================================================================
@@ -75,7 +87,8 @@ const ATA_DEBOUNCE_MS = 1000;
 /**
  * A fetch for ATA whose successful text responses cache in IndexedDB —
  * jsDelivr metadata and .d.ts bodies are immutable enough that a cache hit
- * beats a revalidation every time.
+ * beats a revalidation every time. Platform packages answer 404 without a
+ * request, which makes ATA drop them.
  *
  * @param input - The request URL.
  * @param init - Request init (ATA passes none that matter for caching).
@@ -83,6 +96,9 @@ const ATA_DEBOUNCE_MS = 1000;
  */
 async function cachedFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
 	const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+	// ahead of the cache, which can hold platform files from older builds
+	const name = JSDELIVR_PACKAGE.exec(url)?.[1];
+	if (name !== undefined && PLATFORM_PACKAGES.has(name)) return new Response(null, { status: 404 });
 	const cacheKey = `ata:${url}`;
 	const cached = await cacheGet<string>('dts', cacheKey);
 	if (cached !== undefined) {
