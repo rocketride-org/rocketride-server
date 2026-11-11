@@ -348,7 +348,7 @@ class Store(DocumentStoreBase):
                 '_id': str(uuid4()),
                 'embedding': chunk.embedding,
                 'content': chunk.page_content,
-                'meta': chunk.metadata.__dict__,
+                'meta': chunk.metadata.model_dump(),
             }
 
             doc_size = sys.getsizeof(doc)

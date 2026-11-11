@@ -362,3 +362,50 @@ def test_pinecone_never_deletes_the_control_row(monkeypatch):
     store, log = _pinecone(monkeypatch)
     store.addChunks(_chunks(CONTROL_OBJECT_ID, [0]) + _chunks('a', [0]), checkCollection=False)
     assert log.deleted == [['a']]
+
+
+def _extra_meta_chunks() -> list[Doc]:
+    """One chunk whose metadata carries a field a node added beyond the schema (``extra='allow'``)."""
+    chunks = _chunks('a', [0])
+    chunks[0].metadata.anomaly_score = 0.5
+    return chunks
+
+
+def test_astra_rows_keep_extra_meta_fields(monkeypatch):
+    """Astra rows carry ``model_dump()``: ``__dict__`` silently dropped extra metadata fields."""
+    module = _load_driver(
+        monkeypatch,
+        'store_astra',
+        'astra_db',
+        ('astrapy', 'astrapy.data_types', 'astrapy.exceptions', 'astrapy.info', 'rocketlib'),
+    )
+    monkeypatch.setattr(module, 'DataAPIVector', list)  # the stubbed astrapy would yield a vector with no length
+    store = module.Store.__new__(module.Store)
+    store.collection_name = 'test'
+    store.database = MagicMock()
+    collection = store.database.get_collection.return_value
+    store.addChunks(_extra_meta_chunks(), checkCollection=False)
+    (rows,), _ = collection.insert_many.call_args
+    meta = rows[0]['meta']
+    assert type(meta) is dict
+    assert meta['anomaly_score'] == 0.5
+    assert json.loads(json.dumps(meta))['chunkId'] == 0
+
+
+def test_atlas_rows_keep_extra_meta_fields(monkeypatch):
+    """Atlas rows carry ``model_dump()``: ``__dict__`` silently dropped extra metadata fields."""
+    module = _load_driver(
+        monkeypatch,
+        'store_atlas',
+        'atlas',
+        ('pymongo', 'pymongo.collection', 'pymongo.errors', 'pymongo.database', 'pymongo.operations'),
+    )
+    store = module.Store.__new__(module.Store)
+    store.payload_limit = 1 << 30
+    store.collection = MagicMock()
+    store.addChunks(_extra_meta_chunks(), checkCollection=False)
+    (rows,), _ = store.collection.insert_many.call_args
+    meta = rows[0]['meta']
+    assert type(meta) is dict
+    assert meta['anomaly_score'] == 0.5
+    assert json.loads(json.dumps(meta))['chunkId'] == 0
