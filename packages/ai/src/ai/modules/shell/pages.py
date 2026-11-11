@@ -45,7 +45,9 @@ build output, rendered by the restricted template engine (``template.py``)
 with ``assets``, the version's URL base. A page without a snapshot, or with
 one that cannot be read or rendered, serves crawlers the shell document too.
 Either way the page's head metadata (title, description, canonical URL,
-robots) is injected.
+robots) is injected. Only a rendered snapshot may sit in shared caches; the
+shell document names the current build's bundles, so it is
+``private, no-cache`` for everyone.
 
 Rendered responses are cached per (path, UA class) under a byte budget and
 dropped on every aggregate swap; snapshot bytes, immutable per version, are
@@ -392,42 +394,50 @@ async def _snapshot_bytes(path: str) -> bytes:
     return raw
 
 
-def _fallback(page: Page, document: Path, reason: Any) -> str:
-    """The shell document, served to crawlers in place of a snapshot that cannot be used (logged)."""
+def _warn_fallback(page: Page, reason: Any) -> None:
+    """Log that crawlers get the shell document in place of the page's snapshot."""
     warning(f'[public_pages] {page.path}: snapshot {page.snapshot!r} unavailable, serving the shell document: {reason}')
-    return document.read_text(encoding='utf-8')
 
 
-async def _crawler_document(page: Page, document: Path) -> Tuple[str, bool]:
-    """The page's rendered snapshot for crawlers, else the shell document: ``(html, cacheable)``.
+async def _crawler_snapshot(page: Page) -> Tuple[Optional[str], bool]:
+    """The page's rendered snapshot for crawlers, or None for the shell document: ``(html, cacheable)``.
 
-    A fallback is cacheable when it is final for the page's version: a
-    malformed snapshot path or no production version, a snapshot over
-    ``MAX_SNAPSHOT_BYTES``, or a template the engine refuses (the last two
-    are remembered by store path and warned about once). A storage failure
-    (a snapshot the store does not have yet included) falls back uncached,
-    so the next request tries again, and is warned about at most once per
-    store path per ``_STORAGE_WARNING_INTERVAL``. Anything else is a bug and
-    propagates.
+    A fallback is cacheable when it is final for the page's version: no
+    snapshot, a malformed snapshot path or no production version, a snapshot
+    over ``MAX_SNAPSHOT_BYTES``, or a template the engine refuses (the last
+    two are remembered by store path and warned about once). A storage
+    failure (a snapshot the store does not have yet included) falls back
+    uncached, so the next request tries again, and is warned about at most
+    once per store path per ``_STORAGE_WARNING_INTERVAL``. Anything else is
+    a bug and propagates.
+
+    Args:
+        page: A page of the aggregate.
+
+    Returns:
+        ``(html, cacheable)``: the rendered snapshot, or None when crawlers
+        get the shell document, and whether the render cache may keep it.
     """
     if not page.snapshot:
-        return document.read_text(encoding='utf-8'), True
+        return None, True
     try:
         path = snapshot_path(page)
     except ValueError as exc:
-        return _fallback(page, document, exc), True
+        _warn_fallback(page, exc)
+        return None, True
     if path in _unusable_snapshots:
-        return document.read_text(encoding='utf-8'), True
+        return None, True
     try:
         raw = await _snapshot_bytes(path)
         return render(raw.decode('utf-8', errors='replace'), {'assets': assets_base(page)}), True
     except (_SnapshotTooLarge, TemplateError) as exc:
         _unusable_snapshots.put(path, True, 1)
-        return _fallback(page, document, exc), True
+        _warn_fallback(page, exc)
+        return None, True
     except StorageError as exc:
         if _storage_warning_due(path):
-            return _fallback(page, document, exc), False
-        return document.read_text(encoding='utf-8'), False
+            _warn_fallback(page, exc)
+        return None, False
 
 
 def _storage_warning_due(path: str) -> bool:
@@ -549,8 +559,9 @@ async def _render_page(request: Request, path: str, page: Page) -> Response:
 
     Keyed by (path, UA class, shell document, its mtime and size,
     ``RR_APP_URL``), so a new shell build or origin renders afresh. A
-    crawler's copy is the page's snapshot (``_crawler_document``). A render
-    that falls back uncacheably, or that a swap overtook, is served, not cached.
+    crawler's copy is the page's rendered snapshot (``_crawler_snapshot``). A
+    render that falls back uncacheably, or that a swap overtook, is served,
+    not cached.
 
     Returns:
         The page's response.
@@ -564,16 +575,11 @@ async def _render_page(request: Request, path: str, page: Page) -> Response:
     cached = _render_cache.get(key)
     if cached is None:
         generation = _generation
-        body = None
+        snapshot = None
         cacheable = True
         if crawler:
-            body, cacheable = await _crawler_document(page, document)
-        # A crawler's copy of a page with a snapshot may sit in shared caches;
-        # the shell document of a page without one never does (it names the
-        # current build's bundles), and neither does a fallback this server
-        # would not keep itself.
-        shared = crawler and cacheable and bool(page.snapshot)
-        cached = await asyncio.to_thread(_render, path, page, document, body, shared)
+            snapshot, cacheable = await _crawler_snapshot(page)
+        cached = await asyncio.to_thread(_render, path, page, document, snapshot)
         if cacheable and generation == _generation:
             _render_cache.put(key, cached, len(cached[0]))
     return HTMLResponse(cached[0], headers=dict(cached[1]))
@@ -611,15 +617,20 @@ def _unchanged(document: Path, mtime_ns: int, size: int) -> bool:
     return stat.st_mtime_ns == mtime_ns and stat.st_size == size
 
 
-def _render(path: str, page: Page, document: Path, body: Optional[str], shared: bool) -> Tuple[bytes, Dict[str, str]]:
+def _render(path: str, page: Page, document: Path, snapshot: Optional[str]) -> Tuple[bytes, Dict[str, str]]:
     """Render one page as the render cache holds it: ``(body, headers)``.
 
-    ``body`` is a crawler's copy (``_crawler_document``); people's (None) is
-    the shell document. Either way the page's head metadata is injected.
-    ``shared`` lets shared caches keep the response.
+    The body is a crawler's rendered ``snapshot`` (``_crawler_snapshot``), or
+    the shell document when it is None, people's always. Either way the
+    page's head metadata is injected.
     """
+    # Only a rendered snapshot may sit in shared caches: the shell document
+    # names the current build's bundles. Caches key on the UA.
+    body = snapshot
+    cache_control = CACHE_CONTROL
     if body is None:
         body = document.read_text(encoding='utf-8')
+        cache_control = 'private, no-cache'
     body = inject_head(
         body,
         title=page.head_title or page.title,
@@ -627,8 +638,7 @@ def _render(path: str, page: Page, document: Path, body: Optional[str], shared: 
         canonical=canonical_url(path),
         noindex=not page.listed,
     )
-    # Caches key on the UA.
-    headers = {'Vary': 'User-Agent', 'Cache-Control': CACHE_CONTROL if shared else 'private, no-cache'}
+    headers = {'Vary': 'User-Agent', 'Cache-Control': cache_control}
     if not page.listed:
         headers['X-Robots-Tag'] = 'noindex'
     return body.encode('utf-8'), headers
