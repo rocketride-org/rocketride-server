@@ -391,7 +391,9 @@ def _check_article(where: str, raw: Mapping[str, Any]) -> Tuple[Dict[str, Any], 
         err = _surrogate_error(name)
         if err:
             return {}, f'{where}.authors[{j}].name: {err}'
-        err = _https_url_error(url) if url != '' else None
+        err = None
+        if url != '':
+            err = _https_url_error(url)
         if err:
             return {}, f'{where}.authors[{j}].url: {err}'
         pairs.append((name, url))
