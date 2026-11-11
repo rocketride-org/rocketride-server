@@ -78,17 +78,33 @@ _CURRENCY = re.compile(r'[A-Z]{3}')
 
 
 def source_name(entry: str) -> str:
-    """The source a ``data`` entry binds: ``plans:x`` binds ``plans``."""
+    """The source a ``data`` entry binds: ``plans:x`` binds ``plans``.
+
+    Args:
+        entry: A page's ``data`` entry, ``name`` or ``name:app_id``.
+
+    Returns:
+        The source name, before the first colon.
+    """
     return entry.partition(':')[0]
 
 
 def on_invalidate(callback: Callable[[str], None]) -> None:
-    """Register ``callback(source_name)``, run when a source's data changes."""
+    """Register ``callback(source_name)``, run when a source's data changes.
+
+    Args:
+        callback: Called with the changed source's name. A raising callback is
+            logged and does not stop the others.
+    """
     _listeners.append(callback)
 
 
 def invalidate(name: str) -> None:
-    """Announce that a source's data changed; ``app`` also announces ``plans``."""
+    """Announce that a source's data changed; ``app`` also announces ``plans``.
+
+    Args:
+        name: The changed source, ``plans`` or ``app``.
+    """
     names = [name]
     if name == 'app':
         # A named app's plans show only while the app is visible.
@@ -103,6 +119,7 @@ def invalidate(name: str) -> None:
 
 
 def _account(acct: Any) -> Any:
+    """The account layer: ``acct``, or the ``ai.account.account`` singleton when None."""
     if acct is None:
         from ai.account import account as acct
     return acct
@@ -121,6 +138,13 @@ async def app(app_id: str, acct: Any = None) -> Optional[Dict[str, str]]:
     ``public: false`` in neither the binding snapshot nor the artifact's own
     manifest (the DB edition's snapshot columns drop ``public``, so the
     manifest is re-read, as ``public_pages.load_published`` does).
+
+    Args:
+        app_id: The app to look up.
+        acct: The account layer (the singleton when None).
+
+    Returns:
+        ``{name, description}`` when the app is visible, else None.
 
     Raises:
         Exception: the bindings or the winning artifact could not be read (the
@@ -153,6 +177,12 @@ def _price(value: Any) -> Optional[str]:
 
     Floats are refused: binary rounding (``0.1 + 0.2``) would publish
     ``0.30000000000000004``.
+
+    Args:
+        value: The raw ``price`` field.
+
+    Returns:
+        The price text, or None when the value is not a usable price.
     """
     if isinstance(value, str):
         return value
@@ -164,7 +194,14 @@ def _price(value: Any) -> Optional[str]:
 
 
 def _plan(raw: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
-    """One plan in the documented shape, or None when it has no name or usable price."""
+    """One plan in the documented shape, or None when it has no name or usable price.
+
+    Args:
+        raw: A plan as the account layer returned it.
+
+    Returns:
+        The normalized plan, or None.
+    """
     name = raw.get('name')
     price = _price(raw.get('price'))
     if not isinstance(name, str) or not name or price is None:
@@ -180,18 +217,32 @@ def _plan(raw: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
         # Only ASCII is upper-cased ('u\u017fd'.upper() is 'USD').
         'currency': currency.upper() if currency.isascii() else currency,
         'period': str(raw.get('period') or ''),
-        'features': [str(f) for f in features if isinstance(f, (str, int, float))],
+        'features': [str(f) for f in features if isinstance(f, (str, int, float)) and not isinstance(f, bool)],
     }
 
 
 async def plans(app_id: str, acct: Any = None) -> List[Dict[str, Any]]:
     """An app's public plans in the documented shape (``AccountBase.get_public_plans``; [] on OSS).
 
+    Args:
+        app_id: The app whose plans to list.
+        acct: The account layer (the singleton when None).
+
+    Returns:
+        The usable plans; entries without a name or usable price are dropped.
+
     Raises:
         Exception: the account layer could not list them.
     """
     raw = await _account(acct).get_public_plans(app_id)
-    return [p for p in (_plan(r) for r in raw or [] if isinstance(r, Mapping)) if p is not None]
+    out: List[Dict[str, Any]] = []
+    for item in raw or []:
+        if not isinstance(item, Mapping):
+            continue
+        plan = _plan(item)
+        if plan is not None:
+            out.append(plan)
+    return out
 
 
 async def bind(page: Page, url: str, acct: Any = None) -> Dict[str, Any]:
@@ -199,6 +250,14 @@ async def bind(page: Page, url: str, acct: Any = None) -> Dict[str, Any]:
 
     ``url`` is the page's canonical URL, exposed as ``app.url`` when it is
     ``https://``.
+
+    Args:
+        page: The page whose ``data`` entries to bind.
+        url: The page's canonical URL.
+        acct: The account layer (the singleton when None).
+
+    Returns:
+        ``{source name: value}`` for each source the page names.
 
     Raises:
         Exception: a source could not be read (the caller serves the page
@@ -248,7 +307,16 @@ def _product(plan: Mapping[str, Any], url: str) -> Dict[str, Any]:
 
 
 def jsonld(context: Mapping[str, Any], url: str) -> List[Dict[str, Any]]:
-    """JSON-LD objects for a bound context; ``url`` (the page's canonical URL) is used only when ``https://``."""
+    """JSON-LD objects for a bound context; ``url`` (the page's canonical URL) is used only when ``https://``.
+
+    Args:
+        context: The result of ``bind``.
+        url: The page's canonical URL.
+
+    Returns:
+        A ``SoftwareApplication`` for a bound app, and a ``Product`` for each
+        plan whose price and currency are valid Offer values.
+    """
     url = _https(url)
     out: List[Dict[str, Any]] = []
     item = context.get('app')

@@ -214,7 +214,14 @@ def test_private_named_apps_reach_no_crawler_response(acct, shell_root):
 
 async def test_plans_normalize_to_the_documented_shape(acct):
     acct.plans['rocketride.home'] = [
-        {'id': 'pro', 'name': 'Pro', 'price': 20, 'currency': 'usd', 'period': 'month', 'features': ['A', 3, None]},
+        {
+            'id': 'pro',
+            'name': 'Pro',
+            'price': 20,
+            'currency': 'usd',
+            'period': 'month',
+            'features': ['A', 3, None, True],
+        },
         {'name': 'Broken'},
         {'name': 'Flag', 'price': True},
         {'name': '', 'price': '1'},
