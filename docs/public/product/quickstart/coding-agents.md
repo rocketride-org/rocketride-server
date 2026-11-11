@@ -16,7 +16,7 @@ Open source, MIT licensed. 150+ nodes, 15+ LLM providers, 10+ vector stores.
 
 ## Run the engine locally
 
-The engine ships as a container image. If a container named `rocketride-engine` already exists (the VS Code extension and the other docs use the same name), remove it first with `docker rm -f rocketride-engine`; the `rocketride-data` volume is kept. Then run:
+The engine ships as a container image. If a container named `rocketride-engine` already exists (the VS Code extension creates one with this name), do not remove it. Either use that engine and skip this step, or give this one another name and host port. Then run:
 
 ```bash
 docker run -d --name rocketride-engine --platform linux/amd64 \
@@ -27,6 +27,8 @@ docker run -d --name rocketride-engine --platform linux/amd64 \
   -e ROCKETRIDE_URI=ws://127.0.0.1:5565 \
   ghcr.io/rocketride-org/rocketride-engine:latest
 ```
+
+To run it next to an existing engine, change `--name` and the host side of `-p` (for example `127.0.0.1:5566:5565`), and use that port in `ROCKETRIDE_URI` and the MCP address below.
 
 - The image is amd64 only. `--platform linux/amd64` is required on Apple Silicon (Docker runs it under emulation, and the port answers after about 25 seconds there) and harmless elsewhere.
 - `ROCKETRIDE_APIKEY=rr_local` sets the key clients must send. The value can be any string that starts with `rr_`: the built-in MCP server refuses other values, and the CLI and SDK must send the same one.
@@ -84,7 +86,7 @@ rocketride validate code.pipe
 rocketride start --pipeline ./code.pipe
 ```
 
-`start` prints a task token and exits; the pipeline keeps running on the engine. It does not print an address. The token is what you pass to `rocketride stop --token <token>`, `rocketride upload --token <token>`, and `client.send(token, ...)` in the SDK. Keep `"source": "in"`: this example's webhook has an empty config, so the engine cannot work out the source by itself. Without it, `start` fails with `Pipeline does not have a source component defined.` even though `validate` passes.
+`start` prints a task token and exits; the pipeline keeps running on the engine. Stop it before the next step with `rocketride stop --token <token>`. It does not print an address. The token is what you pass to `rocketride stop --token <token>`, `rocketride upload --token <token>`, and `client.send(token, ...)` in the SDK. Keep `"source": "in"`: this example's webhook has an empty config, so the engine cannot work out the source by itself. Without it, `start` fails with `Pipeline does not have a source component defined.` even though `validate` passes.
 
 ### Send code and read the reply
 
@@ -94,7 +96,7 @@ This script starts `code.pipe`, sends a short Python file, prints each part the 
 import asyncio
 from rocketride import RocketRideClient
 
-SOURCE = '''import os
+SOURCE = """import os
 
 
 class Greeter:
@@ -104,7 +106,7 @@ class Greeter:
 
 def add(a, b):
     return a + b
-'''
+"""
 
 
 async def main():
