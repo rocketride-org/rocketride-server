@@ -12,7 +12,7 @@ This page is the shortest path for a coding agent (or the person driving one) to
 
 RocketRide is the leading AI meta-harness with the only enterprise-grade runtime built on C++. Designed for professional software developers and technical builders, whether solo or teams or organizations, to enable them to easily build, stage, test, publish and maintain agents and AI-enabled applications that scale in production. Leverage directly from an IDE with the VS Code extension, from the terminal with the CLI, from code with the Python or TypeScript SDK, or dynamically using the MCP server.
 
-Open source, MIT licensed. 150+ nodes, 15+ LLM providers, 10+ vector stores.
+Open source, MIT licensed. Nodes cover LLM providers, vector stores, OCR, NER, PII anonymization and more.
 
 ## Run the engine locally
 
@@ -21,7 +21,7 @@ There are four ways to run the engine. Pick one:
 - [VS Code extension](/clients/vscode): for people working in an editor. It downloads and manages a local engine for you. See [Build in your IDE](/quickstart/ide-walkthrough).
 - [Native download](/operate/self-hosting): for machines without Docker. Download the engine archive for Linux, macOS or Windows and run it directly.
 - [RocketRide Cloud](#use-the-hosted-server): for when you do not want to run anything locally. Skip to the hosted section below.
-- Docker: for any machine that runs Docker. The rest of this page uses it, because the command is the same everywhere.
+- [Docker](/operate/self-hosting/docker): for any machine that runs Docker. The rest of this page uses it, because the command is the same everywhere.
 
 The engine ships as a container image. If a container named `rocketride-engine` already exists (the VS Code extension creates one with this name), do not remove it. Either use that engine and skip this step, or give this one another name and host port. Then run:
 
