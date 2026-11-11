@@ -33,8 +33,8 @@ import type { PIPELINE_RESULT } from '../types/data.js';
 export interface Tool {
 	name: string;
 	description?: string;
-	/** JSON Schema with `type: 'object'` at the top. */
-	inputSchema: Record<string, unknown>;
+	/** JSON Schema with `type: 'object'` at the top. Defaults to an object with no properties. */
+	inputSchema?: Record<string, unknown>;
 }
 
 /** Plain text inside a message. */
@@ -65,7 +65,7 @@ export interface ToolResultBlock {
 /** Model reasoning the provider needs back. `text` is for display; keep `state` unchanged. */
 export interface ReasoningBlock {
 	type: 'reasoning';
-	text: string;
+	text?: string;
 	state?: unknown;
 }
 
@@ -86,9 +86,14 @@ export type Message = UserMessage | AssistantMessage;
 
 export type StopReason = 'end_turn' | 'tool_use' | 'max_tokens' | 'stop_sequence' | 'refusal';
 
-/** Why a turn produced no message. `tools_unsupported` is decided before any provider call. */
+/**
+ * Why a turn produced no message. `tools_unsupported` and `invalid_request` are decided
+ * before any provider call. `invalid_request` is a mistake in the Question (a broken turn
+ * rule, or two tool names that become the same provider name): fix it, do not retry.
+ * `provider_error` gives only the exception type; the full text is in the engine log.
+ */
 export interface AnswerError {
-	code: 'tools_unsupported' | 'provider_error';
+	code: 'tools_unsupported' | 'invalid_request' | 'provider_error';
 	message: string;
 }
 
@@ -169,8 +174,11 @@ export class Answer {
 	 * A text entry, which an engine that predates turn mode returns, gives a text Answer.
 	 */
 	static fromResult(result: PIPELINE_RESULT, key = 'answers'): Answer {
-		const entries = result[key] as unknown[];
+		const entries = (result[key] ?? []) as unknown[];
 		const entry = entries[entries.length - 1];
+		if (entry === undefined) {
+			throw new Error(`no '${key}' entry in the result`);
+		}
 		const answer = new Answer();
 		if (typeof entry === 'string') {
 			answer.setAnswer(entry);
@@ -405,9 +413,56 @@ export class Question {
 
 	/**
 	 * Append a message to the conversation, switching the Question to turn mode.
+	 * Throws, leaving the Question as it was, if the Question uses a field turn mode does not allow.
 	 */
 	addMessage(message: Message): void {
 		this.messages.push(message);
+		const problem = this.turnConflict();
+		if (problem !== undefined) {
+			this.messages.pop();
+			throw new Error(problem);
+		}
+	}
+
+	/**
+	 * Check the turn-mode rules. `fromDict` runs this; call it after editing fields by hand.
+	 * Throws an Error naming the broken rule.
+	 */
+	checkTurn(): void {
+		let problem = this.turnConflict();
+		if (problem === undefined && this.messages.length > 0 && this.messages[this.messages.length - 1].role !== 'user') {
+			problem = 'the last message must be a user message';
+		}
+		if (problem !== undefined) {
+			throw new Error(problem);
+		}
+	}
+
+	private turnConflict(): string | undefined {
+		if (this.tools.length > 0 && this.messages.length === 0) {
+			return 'tools need messages: put the conversation in messages';
+		}
+		if (this.messages.length === 0) {
+			return undefined;
+		}
+		if (this.history.length > 0) {
+			return 'history cannot be used with messages';
+		}
+		if (this.questions.length > 0) {
+			return 'questions cannot be used with messages';
+		}
+		if (this.expectJson) {
+			return 'expectJson cannot be used with messages';
+		}
+		const names = this.tools.map((tool) => tool.name);
+		if (new Set(names).size !== names.length) {
+			return 'tool names must be unique';
+		}
+		const calls = this.messages.flatMap((message) => (message.role === 'assistant' && typeof message.content !== 'string' ? message.content : []));
+		if (calls.some((block) => block.type === 'tool_call' && (!block.id || !block.name))) {
+			return 'a tool call needs a non-empty id and name';
+		}
+		return undefined;
 	}
 
 	/**
@@ -648,6 +703,7 @@ export class Question {
 		question.questions = (data.questions || []) as QuestionText[];
 		question.messages = (data.messages || []) as Message[];
 		question.tools = (data.tools || []) as Tool[];
+		question.checkTurn();
 
 		return question;
 	}

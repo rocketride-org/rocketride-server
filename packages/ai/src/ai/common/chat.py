@@ -29,7 +29,16 @@ from ai.common.validation import (
 )
 from ai.common.llm_native_stream import PROMPT_CACHE_PREFIX_VAR, STOP_SEQUENCES_VAR, dispatch_native_chat_stream
 from ai.common.llm_adapter import LangChainAdapter, NativeOpenAIResponsesAdapter, drive_adapter
-from ai.common.llm_tools import ToolNames, from_langchain, is_turn, model_origin, to_langchain, tool_specs
+from ai.common.llm_tools import (
+    InvalidTurn,
+    ToolNames,
+    ToolsUnsupported,
+    from_langchain,
+    is_turn,
+    model_origin,
+    to_langchain,
+    tool_specs,
+)
 
 
 # Finish reasons that mean the model ran out of output budget, as the Responses API
@@ -623,7 +632,10 @@ class ChatBase:
         Streams when on_chunk is given, falling back to one invoke with retries if the stream
         fails before any text reached the caller. Reasoning goes to on_reasoning_chunk.
         """
-        question.checkTurn()
+        try:
+            question.checkTurn()
+        except ValueError as e:
+            raise InvalidTurn(str(e)) from e
         names = ToolNames.build(question.tools, question.messages)
         llm = self._turn_llm()
         origin = model_origin(llm)
@@ -694,6 +706,9 @@ class ChatBase:
         streaming callbacks unless expectJson, which needs the validated final answer.
         """
         if is_turn(question):
+            # Here as well as in LLMBase, so a caller holding the chat object gets the same refusal.
+            if not self.supports_tools:
+                raise ToolsUnsupported(self._model)
             return self.chat_turn(question, on_chunk, on_finish, on_reasoning_chunk)
 
         # No streaming for expectJson: repair retries would paint a bad first attempt.

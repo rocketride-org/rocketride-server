@@ -86,7 +86,7 @@ import { Answer, Question } from 'rocketride';
 const question = new Question({ role: 'You file GitHub issues.' });
 question.tools = [{ name: 'github.create_issue', description: 'Create an issue.', inputSchema: schema }];
 question.addMessage({ role: 'user', content: 'File an issue about the flaky test.' });
-for (;;) {
+for (let turn = 0; turn < MAX_TURNS; turn++) {
 	const answer = Answer.fromResult(await client.chat({ token, question }));
 	if (answer.error) throw new Error(answer.error.message);
 	question.addMessage(answer.message!);
@@ -95,25 +95,40 @@ for (;;) {
 		break;
 	}
 	for (const call of answer.toolCalls) {
-		question.addToolResult(call.id, await runTool(call.name, call.args));
+		try {
+			question.addToolResult(call.id, await runTool(call.name, call.args));
+		} catch (e) {
+			question.addToolResult(call.id, String(e), true);
+		}
 	}
 }
 ```
+
+Treat each call as untrusted input: a document or a tool result can carry a
+prompt injection. Keep a turn limit, and have `runTool` refuse a name you did
+not send and arguments that do not match the tool's `inputSchema`.
 
 - Tool names stay yours, dots included. The engine maps them to names the
   provider accepts and maps calls back.
 - `call.args` is an object, or the raw string when the model's arguments were
   not valid JSON. Answer a string with `addToolResult(call.id, '...', true)`.
 - The system prompt is `role`, instructions and examples. Context, documents and
-  goals are added to the last user message, so a RAG node upstream still works.
+  goals are added to the last user message. Retrieval nodes take their query from
+  `questions`, which turn mode rejects, so pass retrieved text in `context` yourself.
   `history`, `questions` and `expectJson` are rejected in turn mode.
+- Before the LLM node, a prompt node keeps the conversation and tools and adds its
+  instructions to the system prompt, and a guardrails node checks the text and tool
+  results of the last user message. Agent and context optimizer nodes read
+  `questions`, so they do not take a turn.
 - Reasoning blocks in `answer.message` carry provider state. Keep them as they
   are; the next request needs them.
 - With `cachePrefix: true`, the Anthropic node caches the system prompt and the
   conversation so far.
 - The Anthropic, OpenAI and OpenAI-Compatible API nodes support turn mode. Any
   other LLM node answers with `answer.error.code === 'tools_unsupported'` before
-  calling its model.
+  calling its model. A Question that breaks a turn rule, or two tool names that
+  become the same provider name, gets `invalid_request`: fix the Question rather
+  than retry it.
 - `toDict()` sends `messages` and `tools` only when set, so other questions go
   out exactly as before. An engine older than turn mode ignores `messages` and
   answers a near-empty prompt as text, so `fromResult` returns a text `Answer`

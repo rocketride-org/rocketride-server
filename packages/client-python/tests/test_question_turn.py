@@ -1,7 +1,8 @@
 """Turn mode on Question and Answer: a non-empty ``messages`` sends real provider turns.
 
-The fixture in ``fixtures/turn_blocks.json`` holds every block type and is read by the
-TypeScript tests too, so the two SDKs cannot drift apart on the wire shape.
+The fixture in ``fixtures/turn_blocks.json`` holds every block type, and ``turn_invalid.json``
+every broken turn rule. The TypeScript tests read both, so the two SDKs cannot drift apart
+on the wire shape or on what they refuse.
 """
 
 import json
@@ -13,7 +14,9 @@ from pydantic import ValidationError
 from rocketride.schema import Answer, AssistantMessage, Question, QuestionHistory, ToolCallBlock, UserMessage
 from rocketride.schema.doc import Doc
 
-FIXTURE = json.load(open(os.path.join(os.path.dirname(__file__), 'fixtures', 'turn_blocks.json')))
+FIXTURES = os.path.join(os.path.dirname(__file__), 'fixtures')
+FIXTURE = json.load(open(os.path.join(FIXTURES, 'turn_blocks.json')))
+INVALID = json.load(open(os.path.join(FIXTURES, 'turn_invalid.json')))
 
 LEGACY_PROMPT = (
     'You are an analyst.\r\n\r\n### System Instructions:\r\n    1) **JSON Response Format**:\r\n'
@@ -75,6 +78,12 @@ def test_answer_from_result_reads_the_turn_and_writes_the_same_entry():
     assert answer.model_dump(exclude={'answer', 'expectJson'}) == entry
 
 
+@pytest.mark.parametrize('result', [{}, {'answers': []}])
+def test_answer_from_a_result_without_the_key_names_it(result):
+    with pytest.raises(ValueError, match="no 'answers' entry in the result"):
+        Answer.fromResult(result)
+
+
 def test_answer_from_a_text_result_is_a_text_answer():
     answer = Answer.fromResult({'answers': ['plain text']})
 
@@ -85,12 +94,7 @@ def test_answer_from_a_text_result_is_a_text_answer():
 @pytest.mark.parametrize(
     'update, rule',
     [
-        ({'messages': [], 'tools': [{'name': 'a'}]}, 'tools need messages'),
-        ({'history': [{'role': 'user', 'content': 'x'}]}, 'history cannot be used with messages'),
-        ({'questions': [{'text': 'x'}]}, 'questions cannot be used with messages'),
-        ({'expectJson': True}, 'expectJson cannot be used with messages'),
-        ({'tools': [{'name': 'a'}, {'name': 'a'}]}, 'tool names must be unique'),
-        ({'messages': [{'role': 'user', 'content': 'x'}, {'role': 'assistant', 'content': 'y'}]}, 'last message'),
+        *[(case['update'], case['rule']) for case in INVALID],
         (
             {'messages': [{'role': 'user', 'content': [{'type': 'tool_call', 'id': '1', 'name': 'a', 'args': {}}]}]},
             'tool_call',

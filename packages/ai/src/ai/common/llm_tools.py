@@ -12,6 +12,7 @@ becomes LangChain messages, and how the model's AIMessage becomes an AssistantMe
 
 import hashlib
 import re
+import uuid
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -27,6 +28,7 @@ from ai.common.schema import (
     ToolCallBlock,
     ToolResultBlock,
 )
+from ai.common.utils.content_blocks import reasoning_text
 from ai.common.validation import sanitize_prompt
 
 
@@ -41,6 +43,10 @@ class ToolsUnsupported(Exception):
     def __init__(self, provider: str):
         """Name the node's provider in the message."""
         super().__init__(f'{provider} does not support native tool calling')
+
+
+class InvalidTurn(ValueError):
+    """A turn-mode Question the caller has to fix: a broken turn rule, or tool names that collide for the provider."""
 
 
 # The strictest rule among the providers (OpenAI: ^[a-zA-Z0-9_-]{1,64}$), so a tool keeps one
@@ -78,7 +84,7 @@ class ToolNames:
         """Rebuilt per request from the tools and every call in the history, so it keeps no state.
 
         Calls are included so a call to a tool the caller has since removed still maps back.
-        Raises ValueError when two caller names become the same provider name.
+        Raises InvalidTurn when two caller names become the same provider name.
         """
         names = {tool.name for tool in tools}
         for message in messages:
@@ -88,7 +94,7 @@ class ToolNames:
         for name in sorted(names):
             provider = provider_tool_name(name)
             if provider in to_caller:
-                raise ValueError(
+                raise InvalidTurn(
                     f'tool names {to_caller[provider]!r} and {name!r} both become {provider!r}; rename one'
                 )
             to_caller[provider] = name
@@ -242,15 +248,10 @@ def from_langchain(message: Any, names: ToolNames, origin: str) -> Tuple[Assista
             if kind == 'text':
                 texts.append(TextBlock(text=block if isinstance(block, str) else block.get('text', '')))
             elif kind in ('thinking', 'redacted_thinking', 'reasoning'):
-                reasoning.append(ReasoningBlock(text=_reasoning_text(block), state={'origin': origin, 'block': block}))
+                reasoning.append(ReasoningBlock(text=reasoning_text(block), state={'origin': origin, 'block': block}))
         blocks = [*reasoning, *texts]
-    calls = [
-        ToolCallBlock(id=call['id'], name=names.caller(call['name']), args=call['args']) for call in message.tool_calls
-    ]
-    calls += [
-        ToolCallBlock(id=call.get('id') or '', name=names.caller(call.get('name') or ''), args=call.get('args') or '')
-        for call in message.invalid_tool_calls
-    ]
+    calls = [_call_block(call, names) for call in [*message.tool_calls, *message.invalid_tool_calls]]
+    calls = [call for call in calls if call is not None]
     metadata = message.response_metadata or {}
     raw = (
         metadata.get('stop_reason')
@@ -261,7 +262,18 @@ def from_langchain(message: Any, names: ToolNames, origin: str) -> Tuple[Assista
     return AssistantMessage(content=[*blocks, *calls]), stop_reason(raw, bool(calls))
 
 
-def _reasoning_text(block: Dict[str, Any]) -> str:
-    if block.get('summary'):
-        return ''.join(part.get('text', '') for part in block['summary'] if isinstance(part, dict))
-    return block.get('thinking') or block.get('reasoning') or block.get('text') or ''
+def _call_block(call: Dict[str, Any], names: ToolNames) -> Optional[ToolCallBlock]:
+    """Decode one LangChain tool call, valid or not.
+
+    A call with no name names nothing to run, so it is dropped. A call with no id (a stream
+    cut off early) gets a unique one, so the caller can still answer it: the provider rejects
+    an empty id, and Anthropic also rejects an id used twice in one conversation.
+    """
+    if not call.get('name'):
+        return None
+    args = call.get('args')
+    return ToolCallBlock(
+        id=call.get('id') or f'call_{uuid.uuid4().hex}',
+        name=names.caller(call['name']),
+        args='' if args is None else args,
+    )

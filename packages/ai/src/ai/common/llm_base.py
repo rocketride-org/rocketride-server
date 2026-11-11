@@ -7,7 +7,20 @@ from rocketlib import IInstanceBase, invoke_function, warning
 from ai.common.schema import Question, Answer, AnswerError
 from ai.common.llm_native_stream import STOP_SEQUENCES_VAR
 from ai.common.llm_adapter import turn_usage
-from ai.common.llm_tools import ToolsUnsupported, is_turn
+from ai.common.llm_tools import InvalidTurn, ToolsUnsupported, is_turn
+
+
+def _turn_error(e: Exception) -> AnswerError:
+    """Type a failed turn, so a client can tell its own mistake from the provider failing.
+
+    Only our own messages go back. The provider's text can hold URLs, request ids and org
+    names, so a provider error names just the exception type; the full text is logged.
+    """
+    if isinstance(e, ToolsUnsupported):
+        return AnswerError(code='tools_unsupported', message=str(e))
+    if isinstance(e, InvalidTurn):
+        return AnswerError(code='invalid_request', message=str(e))
+    return AnswerError(code='provider_error', message=f'the model provider call failed ({type(e).__name__})')
 
 
 class LLMBase(IInstanceBase):
@@ -99,9 +112,7 @@ class LLMBase(IInstanceBase):
             except Exception as e:
                 warning(f'writeQuestions: LLM call failed: {type(e).__name__}: {e}')
                 if is_turn(question):
-                    # Typed, so a client can tell "no tools here" from "the provider failed".
-                    code = 'tools_unsupported' if isinstance(e, ToolsUnsupported) else 'provider_error'
-                    answer = Answer(error=AnswerError(code=code, message=f'{type(e).__name__}: {e}'))
+                    answer = Answer(error=_turn_error(e))
                 else:
                     err_msg = f'**LLM error** — {type(e).__name__}: {e}'
                     answer = Answer()

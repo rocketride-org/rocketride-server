@@ -25,7 +25,9 @@ from ai.common.config import Config
 from ai.common.llm_base import LLMBase
 
 from ai.common.llm_tools import (
+    InvalidTurn,
     ToolNames,
+    ToolsUnsupported,
     from_langchain,
     model_origin,
     provider_tool_name,
@@ -33,10 +35,10 @@ from ai.common.llm_tools import (
     to_langchain,
     tool_specs,
 )
-from ai.common.schema import AssistantMessage, Question, ReasoningBlock, TextBlock, ToolCallBlock, UserMessage
+from ai.common.schema import AssistantMessage, Question, ReasoningBlock, TextBlock, Tool, ToolCallBlock, UserMessage
 
 langchain_anthropic = pytest.importorskip('langchain_anthropic')
-from langchain_core.messages import AIMessage  # noqa: E402
+from langchain_core.messages import AIMessage, AIMessageChunk  # noqa: E402
 
 PROVIDER_NAME = re.compile(r'^[A-Za-z0-9_-]{1,64}$')
 SIG = 'EqQBCkYIBxgCKkBsig=='
@@ -200,6 +202,22 @@ def test_a_model_message_decodes_with_caller_names_and_its_reasoning_kept_whole(
     assert (bad.id, bad.name, bad.args) == ('call_4', 'memory.peek', '{oops')
 
 
+def test_a_streamed_call_without_an_id_gets_a_unique_one_and_a_call_without_a_name_is_dropped():
+    chunks = [
+        {'name': 'memory__peek', 'args': '{"key": "a"}', 'id': None, 'index': 0},
+        {'name': 'memory__peek', 'args': '{"key": "b"}', 'id': None, 'index': 1},
+        {'name': None, 'args': '{}', 'id': 'call_9', 'index': 2},
+    ]
+    names = ToolNames.build([Tool(name='memory.peek')], [])
+
+    message, stop = from_langchain(AIMessageChunk(content='', tool_call_chunks=chunks), names, 'ChatAnthropic')
+
+    first, second = message.content
+    assert (first.name, first.args, second.args) == ('memory.peek', {'key': 'a'}, {'key': 'b'})
+    assert first.id and second.id and first.id != second.id
+    assert stop == 'tool_use'
+
+
 def test_think_tags_in_plain_text_become_reasoning_not_text():
     message, stop = from_langchain(AIMessage(content='<think>plan</think>Done.'), ToolNames({}), 'ChatOpenAI')
 
@@ -338,15 +356,33 @@ def _turn(**fields) -> Question:
     )
 
 
-def test_tool_names_that_collide_for_the_provider_are_refused_before_any_request(monkeypatch):
-    transport = _Transport()
-    chat = _anthropic_driver(monkeypatch, transport)
+def _colliding_names() -> Question:
     q = Question(tools=[{'name': provider_tool_name('a/b')}], messages=[UserMessage(content='hi')])
     q.addMessage(AssistantMessage(content=[ToolCallBlock(id='call_1', name='a/b', args={})]))
     q.addToolResult('call_1', 'done')
+    return q
 
-    with pytest.raises(ValueError, match='a/b'):
-        chat.chat(q)
+
+def _edited_by_hand() -> Question:
+    q = _turn()
+    q.addQuestion('and this too')  # skips the turn rules; chat_turn checks them again
+    return q
+
+
+@pytest.mark.parametrize(
+    'build, problem', [(_colliding_names, 'a/b'), (_edited_by_hand, 'questions cannot be used with messages')]
+)
+def test_a_question_the_caller_must_fix_is_an_invalid_request_before_any_request(monkeypatch, build, problem):
+    transport = _Transport()
+    chat = _anthropic_driver(monkeypatch, transport)
+    node = _node(chat)
+
+    with pytest.raises(InvalidTurn, match=problem):
+        chat.chat(build())
+    node.writeQuestions(build())
+
+    error = node.instance.written[0].error
+    assert error.code == 'invalid_request' and problem in error.message
     assert transport.bodies == []
 
 
@@ -576,7 +612,19 @@ def test_a_failed_turn_is_a_typed_error_and_a_text_question_keeps_its_text_error
 
     turn_answer, text_answer = node.instance.written
     assert (turn_answer.error.code, turn_answer.message) == ('provider_error', None)
+    assert 'RuntimeError' in turn_answer.error.message and 'provider down' not in turn_answer.error.message
     assert text_answer.getText().startswith('**LLM error**') and text_answer.error is None
+
+
+def test_chat_refuses_a_turn_on_a_driver_without_native_tools():
+    from ai.common.chat import ChatBase
+
+    chat = ChatBase.__new__(ChatBase)
+    chat._model = 'some-model'
+    chat.chat_turn = lambda *_: pytest.fail('the turn must not run')
+
+    with pytest.raises(ToolsUnsupported, match='some-model'):
+        chat.chat(_turn())
 
 
 def test_a_question_like_object_takes_the_text_path():

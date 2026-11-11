@@ -28,7 +28,9 @@ import { describe, it, expect } from '@jest/globals';
 import { Answer, Question } from '../src/client/schema/Question';
 
 // The same fixture the Python SDK round-trips, so the two cannot drift on the wire shape.
-const FIXTURE = JSON.parse(readFileSync(join(__dirname, '../../client-python/tests/fixtures/turn_blocks.json'), 'utf8'));
+const FIXTURES = join(__dirname, '../../client-python/tests/fixtures');
+const FIXTURE = JSON.parse(readFileSync(join(FIXTURES, 'turn_blocks.json'), 'utf8'));
+const INVALID: Array<{ update: Record<string, unknown>; rule: string }> = JSON.parse(readFileSync(join(FIXTURES, 'turn_invalid.json'), 'utf8'));
 
 describe('Question.cachePrefix', () => {
 	it('is off unless the caller turns it on', () => {
@@ -97,5 +99,22 @@ describe('Question turn mode', () => {
 		expect(answer.getText()).toBe('plain');
 		expect(answer.toolCalls).toEqual([]);
 		expect(answer.message).toBeUndefined();
+	});
+
+	it('names the key when the result has no entry under it', () => {
+		expect(() => Answer.fromResult({} as never)).toThrow("no 'answers' entry in the result");
+		expect(() => Answer.fromResult({ answers: [] } as never)).toThrow("no 'answers' entry in the result");
+	});
+
+	it.each(INVALID)('refuses a broken turn rule at parse: $rule', ({ update, rule }) => {
+		expect(() => Question.fromDict({ ...FIXTURE.question, ...update })).toThrow(new RegExp(rule));
+	});
+
+	it('refuses a message on a question already using history, and leaves it as it was', () => {
+		const question = new Question();
+		question.addHistory({ role: 'user', content: 'old' });
+
+		expect(() => question.addMessage({ role: 'user', content: 'new' })).toThrow('history cannot be used with messages');
+		expect(question.messages).toEqual([]);
 	});
 });

@@ -89,8 +89,8 @@ class ToolCallBlock(BaseModel):
     """
 
     type: Literal['tool_call'] = 'tool_call'
-    id: str
-    name: str
+    id: str = Field(min_length=1)
+    name: str = Field(min_length=1)
     args: Union[Dict[str, Any], str]
 
 
@@ -145,10 +145,13 @@ class AnswerError(BaseModel):
     """
     Why a turn produced no message.
 
-    `tools_unsupported` is decided before any provider call, so it costs no tokens.
+    `tools_unsupported` and `invalid_request` are decided before any provider call, so
+    they cost no tokens. `invalid_request` is a mistake in the Question (a broken turn
+    rule, or two tool names that become the same provider name): fix it, do not retry.
+    `provider_error` gives only the exception type; the full text is in the engine log.
     """
 
-    code: Literal['tools_unsupported', 'provider_error']
+    code: Literal['tools_unsupported', 'invalid_request', 'provider_error']
     message: str
 
 
@@ -227,8 +230,14 @@ class Answer(BaseModel):
         Returns:
             Answer: With `message` and `stopReason` set, or `error` set. A text entry
             (an engine that predates turn mode answers as text) gives a text Answer.
+
+        Raises:
+            ValueError: If `result` has no entry under `key` (a blocked guardrail, or a wrong key).
         """
-        entry = result[key][-1]
+        entries = result.get(key) or []
+        if not entries:
+            raise ValueError(f"no '{key}' entry in the result")
+        entry = entries[-1]
         if isinstance(entry, dict):
             return cls.model_validate(entry)
         answer = cls()
