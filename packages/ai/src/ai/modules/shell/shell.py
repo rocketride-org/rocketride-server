@@ -61,7 +61,7 @@ import re
 import sys
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Dict, List, Optional
 from urllib.parse import urlsplit
 from xml.sax.saxutils import escape
 
@@ -820,7 +820,7 @@ async def llms_txt(request: Request):
     if site.get('blurb'):
         lines += [f'> {_md(site["blurb"])}', '']
     listed = dict(sitemap_entries())
-    sections: dict = {'': []}
+    sections: Dict[str, List[Page]] = {'': []}
     for path, page in listed.items():
         parent = path.rpartition('/')[0]
         sections.setdefault(parent if parent in listed else '', []).append(page)
