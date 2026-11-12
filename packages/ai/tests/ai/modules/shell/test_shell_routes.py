@@ -582,22 +582,25 @@ def test_a_swap_drops_the_resolved_shell_documents(shell_root):
 
 
 def test_a_render_cache_miss_renders_off_the_event_loop(shell_root, monkeypatch):
-    # Reading the shell file inside the async handler would block every other request.
+    # Reading the shell file or rewriting its head inside the async handler would block every other request.
     on_loop = []
-    real = pages_mod._render
 
-    def recording(*args):
-        try:
-            asyncio.get_running_loop()
-            on_loop.append(True)
-        except RuntimeError:
-            on_loop.append(False)
-        return real(*args)
+    def recording(real):
+        def call(*args, **kwargs):
+            try:
+                asyncio.get_running_loop()
+                on_loop.append(True)
+            except RuntimeError:
+                on_loop.append(False)
+            return real(*args, **kwargs)
 
-    monkeypatch.setattr(pages_mod, '_render', recording)
+        return call
+
+    monkeypatch.setattr(Path, 'read_text', recording(Path.read_text))
+    monkeypatch.setattr(pages_mod, 'inject_head', recording(pages_mod.inject_head))
     _use(Page('/pricing', 'rocketride.home', 'Pricing'))
     assert _client().get('/pricing', headers={'User-Agent': BROWSER}).status_code == 200
-    assert on_loop == [False]
+    assert on_loop == [False, False]
 
 
 def test_a_render_a_swap_overtakes_is_served_not_cached(shell_root, monkeypatch):
@@ -618,6 +621,8 @@ async def test_register_public_pages_installs_the_swap_listener_once(monkeypatch
     # Startup wiring, not an import-time side effect.
     registered = []
     monkeypatch.setattr(pp, 'on_swap', registered.append)
+    invalidations = []
+    monkeypatch.setattr(pages_mod.data_sources, 'on_invalidate', invalidations.append)
 
     async def built():
         return True
@@ -626,6 +631,7 @@ async def test_register_public_pages_installs_the_swap_listener_once(monkeypatch
     routes = []
     await pages_mod.register_public_pages(SimpleNamespace(add_catch_all=routes.append))
     assert registered == [pages_mod._clear_rendered]
+    assert invalidations == [pages_mod._drop_rendered_for]
     assert [route.path for route in routes] == [FALLBACK_PATH]
 
 

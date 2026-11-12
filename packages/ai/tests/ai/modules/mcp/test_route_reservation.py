@@ -64,6 +64,7 @@ def _web_server(monkeypatch, tmp_path, built):
     """
     pytest.importorskip('rocketlib')  # WebServer needs the engine env
     import ai.modules.mcp as mcp_module
+    import ai.modules.shell.data_sources as data_sources
     import ai.modules.shell.pages as pages
     import ai.modules.shell.public_pages as public_pages
     import ai.modules.shell.shell as shell_mod
@@ -74,10 +75,12 @@ def _web_server(monkeypatch, tmp_path, built):
     # Loading the shell wires the page map to this server: restore it after
     # the test, and keep the refresh backstop away from the real store.
     monkeypatch.setattr(pages, '_web_server', None)
-    # register_public_pages installs a swap listener: the fresh page map drops it with the test.
+    # register_public_pages installs a swap listener, which the fresh page map
+    # drops with the test, and a data-source listener, dropped the same way.
     fresh = public_pages.PageMap()
     fresh._built_at = float('inf')
     monkeypatch.setattr(public_pages, 'page_map', fresh)
+    monkeypatch.setattr(data_sources, '_listeners', [])
     monkeypatch.setattr(mcp_module, 'make_engine_client', _recording_factory(built))
 
     server = WebServer()

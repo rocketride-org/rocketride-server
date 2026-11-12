@@ -24,13 +24,16 @@
 Serve-time head metadata injection for public pages.
 
 Replaces (never duplicates) the document's title, meta description,
-canonical link, robots meta and Open Graph title/description/url. Every value
-is escaped for its context: page titles are manifest text entering a
-platform-origin document, so escaping is a security boundary.
+canonical link, robots meta and Open Graph title/description/url, and
+inserts JSON-LD blocks. Every value is escaped for its context: page
+titles are manifest text entering a platform-origin document, so escaping
+is a security boundary.
 """
 
 import html
+import json
 import re
+from typing import Any, Iterable, Mapping
 
 _FLAGS = re.IGNORECASE | re.DOTALL
 
@@ -70,6 +73,30 @@ def _attr(value: str) -> str:
     return html.escape(value, quote=True)
 
 
+def jsonld_script(obj: Mapping[str, Any]) -> str:
+    """One <script type="application/ld+json"> block, safe inside HTML.
+
+    <, > and & (and the JS line separators) are emitted as unicode escapes,
+    so no value can close the script element.
+
+    Args:
+        obj: The JSON-LD node.
+
+    Returns:
+        The ``<script>`` element, ready to put in a document head.
+    """
+    text = json.dumps(obj, ensure_ascii=False, separators=(',', ':'), sort_keys=True)
+    for raw, escaped in (
+        ('<', '\\u003c'),
+        ('>', '\\u003e'),
+        ('&', '\\u0026'),
+        ('\u2028', '\\u2028'),
+        ('\u2029', '\\u2029'),
+    ):
+        text = text.replace(raw, escaped)
+    return f'<script type="application/ld+json">{text}</script>'
+
+
 def inject_head(
     document: str,
     *,
@@ -77,6 +104,7 @@ def inject_head(
     description: str = '',
     canonical: str = '',
     noindex: bool = False,
+    jsonld: Iterable[Mapping[str, Any]] = (),
 ) -> str:
     """Return ``document`` with the page's head metadata in place.
 
@@ -91,6 +119,8 @@ def inject_head(
         description: The meta description and ``og:description``; none when empty.
         canonical: The absolute canonical URL and ``og:url``; none when empty.
         noindex: Whether to add ``<meta name="robots" content="noindex">``.
+        jsonld: JSON-LD nodes, one ``<script type="application/ld+json">``
+            each (``jsonld_script``).
 
     Returns:
         The document with the new block in its head.
@@ -122,6 +152,7 @@ def inject_head(
         parts.append(f'<meta property="og:url" content="{_attr(canonical)}">')
     if noindex:
         parts.append('<meta name="robots" content="noindex">')
+    parts.extend(jsonld_script(obj) for obj in jsonld)
     block = ''.join(parts)
     at = _insertion_point(document, start, start + len(region))
     return document[:at] + block + document[at:]

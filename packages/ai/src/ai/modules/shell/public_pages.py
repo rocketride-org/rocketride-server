@@ -46,14 +46,9 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Tuple
 
 from rocketlib import debug, warning
 
-from ai.account.app_rows import (
-    dist_dir_of,
-    holds_required_permissions,
-    manifest_of,
-    precedence_sorted,
-    serving_block_of,
-)
+from ai.account.app_rows import dist_dir_of, manifest_of, public_winners
 
+from . import data_sources
 from .contract import (
     MAX_SNAPSHOT_BYTES,
     Page,
@@ -228,7 +223,9 @@ async def load_published(
     enabled, deployment approved on a review-ladder server, build ok),
     anonymous permission reach (no requiredPermissions), platform namespace
     only. One winner per app id, chosen among its serving rows (lowest
-    publisher org, as the store walk resolves ties).
+    publisher org, as the store walk resolves ties) by
+    ``app_rows.public_winners``, which the ``plans:``/``app:`` data sources
+    read too.
 
     ``public: false`` apps never contribute. One app whose row or artifact
     cannot be read is skipped (logged) so it cannot freeze the map, and its
@@ -249,21 +246,10 @@ async def load_published(
     """
     if acct is None:
         from ai.account import account as acct
-
-    org = 'local'
-    if 'saas' in getattr(acct, 'capabilities', ()):
-        org = ''
-    review_ladder = getattr(acct, 'review_ladder', True)
-    winners: Dict[str, Dict[str, Any]] = {}
-    for row in precedence_sorted(await acct.publish_list(org, 'app', [{'type': 'public', 'id': ''}])):
-        # The store walk's order: a row that does not serve never competes,
-        # and the precedence winner among the rest lands last.
-        if serving_block_of(row, review_ladder) or not holds_required_permissions(row, set()):
-            continue
-        winners[str(row.get('appId') or '')] = row
+    org, winners = await public_winners(acct)
     out: List[Published] = []
     for app_id, row in sorted(winners.items()):
-        if app_id == exclude or (row.get('audience') or {}).get('type') != 'public' or not is_privileged(app_id):
+        if app_id == exclude or not is_privileged(app_id):
             continue
         if (row.get('snapshot') or {}).get('public', True) is False:
             continue
@@ -735,8 +721,22 @@ def maybe_refresh() -> None:
 def app_changed(app_id: str) -> None:
     """The app deployment-change hook (``broadcast_app_changed``).
 
-    Only a platform app's publish, unpublish or rung repoint can change the
-    page claims; any other app's is ignored.
+    A change to an app a page names (``plans:<appId>``, ``app:<appId>``) can
+    change what that page may show, so the data sources are invalidated; any
+    other app's change (a build, say) leaves bound renders cached. Only a
+    platform app's publish, unpublish or rung repoint can change the page
+    claims, so only those rebuild the aggregate.
+
+    Args:
+        app_id: The app whose deployment changed.
     """
+    if _named_by_a_page(app_id):
+        data_sources.invalidate('app')
     if is_privileged(app_id):
         schedule_rebuild()
+
+
+def _named_by_a_page(app_id: str) -> bool:
+    """Whether a page of the current aggregate binds ``app_id``'s data (``plans:<appId>`` or ``app:<appId>``)."""
+    entries = {f'plans:{app_id}', f'app:{app_id}'}
+    return any(entries.intersection(page.data) for page in current().exact.values())

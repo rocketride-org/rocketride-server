@@ -178,11 +178,13 @@ def _leaky_manifest(app_id: str, marker: str, *, public: bool = True, pages: boo
 
 
 class HostileAccount:
-    """The faked storage layer: cross-org publish rows + artifacts.
+    """The faked storage layer: cross-org publish rows, artifacts and plans.
 
     ``rows`` are publish rows in the contract shape the file/DB backends
     return; ``artifacts`` maps (org, app, version) to the app artifact with
-    ``metadata.manifest`` attached (both backends attach it).
+    ``metadata.manifest`` attached (both backends attach it); ``plans`` maps
+    an app id to what ``get_public_plans`` returns for it. ``fail`` makes
+    every read raise.
     """
 
     capabilities = ('saas',)
@@ -191,6 +193,7 @@ class HostileAccount:
     def __init__(self) -> None:
         self.rows: List[Dict[str, Any]] = []
         self.artifacts: Dict[tuple, Dict[str, Any]] = {}
+        self.plans: Dict[str, List[Dict[str, Any]]] = {}
         self.publish_list_calls = 0
         self.fail = False
 
@@ -274,6 +277,11 @@ class HostileAccount:
         if self.fail:
             raise RuntimeError('store down')
         return copy.deepcopy(self.artifacts[(org_id, app_id, version)])
+
+    async def get_public_plans(self, app_id: str) -> List[Dict[str, Any]]:
+        if self.fail:
+            raise RuntimeError('store down')
+        return copy.deepcopy(self.plans.get(app_id, []))
 
 
 def hostile_account(home: Dict[str, Any] = HOME_MANIFEST, home_version: int = 1) -> HostileAccount:
@@ -374,7 +382,7 @@ def install(monkeypatch, acct: HostileAccount) -> HostileAccount:
     """
     from ai.account import account as singleton
 
-    for name in ('publish_list', 'deployments_artifact'):
+    for name in ('publish_list', 'deployments_artifact', 'get_public_plans'):
         monkeypatch.setattr(singleton, name, getattr(acct, name), raising=False)
     monkeypatch.setattr(singleton, 'capabilities', acct.capabilities, raising=False)
     monkeypatch.setattr(singleton, 'review_ladder', acct.review_ladder, raising=False)

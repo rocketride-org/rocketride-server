@@ -25,7 +25,8 @@ Crawler snapshots, their template context and the render and snapshot caches.
 
 A crawler on a page that declares a ``snapshot`` gets that file from the
 production version's build output, rendered through the restricted template
-engine with ``assets`` (the version's URL base), under the page's head. A page
+engine with ``assets`` (the version's URL base) and the page's bound data
+sources (``test_data_sources.py``), under the page's head. A page
 without a snapshot, or with an unreadable one, serves crawlers the shell
 document; people always get the shell document. Rendered responses are cached
 per (path, UA class) under a byte budget and cleared on every aggregate swap;
@@ -176,7 +177,8 @@ def test_crawler_gets_the_rendered_snapshot_and_people_get_the_shell_document(sh
     assert '<img src="/apps/rocketride.home/v3/seo-assets/logo.svg" alt="RocketRide">' in crawler.text
     assert '<title>Pricing | RocketRide</title>' in crawler.text and '<title>snap</title>' not in crawler.text
     assert '<meta name="description" content="Plans and prices.">' in crawler.text
-    assert crawler.headers['cache-control'] == 'public, max-age=3600'
+    # The page binds plans: shared caches keep it no longer than the data's TTL.
+    assert crawler.headers['cache-control'] == 'public, max-age=300'
     assert crawler.headers['vary'] == 'User-Agent'
     human = client.get('/pricing', headers={'User-Agent': BROWSER})
     assert SHELL_BODY in human.text and 'Pricing plans' not in human.text
@@ -184,7 +186,9 @@ def test_crawler_gets_the_rendered_snapshot_and_people_get_the_shell_document(sh
     assert human.headers['cache-control'] == 'private, no-cache'
 
 
-def test_head_on_a_snapshot_page_answers_like_get(shell_root):
+def test_head_on_a_snapshot_page_answers_like_get(shell_root, monkeypatch):
+    # A bound page's max-age counts down on cache hits: keep the clock still.
+    monkeypatch.setattr(pages, 'time', SimpleNamespace(monotonic=lambda: 1000.0))
     _seed()
     _serve(_page())
     client = _client()
@@ -215,7 +219,8 @@ def test_snapshot_assets_resolve_to_the_production_version(shell_root):
     assert '<img src="/apps/rocketride.home/v4/x.png">' in text and '/v3/' not in text
 
 
-def test_data_sections_render_empty_until_their_source_is_bound(shell_root):
+def test_an_app_without_plans_renders_an_empty_plans_section(shell_root):
+    # OSS has no billing: the plans source binds [] for every app.
     _seed()
     _serve(_page())
     text = _crawl(_client()).text
@@ -257,7 +262,7 @@ def test_a_failed_snapshot_read_is_served_uncached_and_warned(shell_root, monkey
     # The read succeeds again: the next crawl gets the snapshot.
     monkeypatch.setattr(pp, 'read_artifact_file', read_file)
     resp = _crawl(client)
-    assert 'Pricing plans' in resp.text and resp.headers['cache-control'] == 'public, max-age=3600'
+    assert 'Pricing plans' in resp.text and resp.headers['cache-control'] == 'public, max-age=300'
 
 
 def test_a_storage_failure_warns_once_per_store_path_per_interval(shell_root, monkeypatch, warned):
@@ -571,7 +576,7 @@ def test_a_crawler_sweep_keeps_both_caches_under_their_byte_budgets(shell_root):
     assert f'{DIST}/pages/p0.html' not in pages._snapshot_cache
     # What each cache counts is what it holds: encoded bytes.
     snapshots = [pages._snapshot_cache.get(key) for key in pages._snapshot_cache.keys()]
-    bodies = [pages._render_cache.get(key)[0] for key in pages._render_cache.keys()]
+    bodies = [pages._render_cache.get(key).body for key in pages._render_cache.keys()]
     for held, cache in ((snapshots, pages._snapshot_cache), (bodies, pages._render_cache)):
         assert all(isinstance(value, bytes) for value in held)
         assert sum(map(len, held)) == cache.total

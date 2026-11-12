@@ -27,7 +27,7 @@ page aggregate (``ai.modules.shell.public_pages``) must load exactly the same
 apps. Both import from here, so neither imports the other.
 """
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 from .deployment_backend import artifact_content_dir
 
@@ -109,3 +109,40 @@ def holds_required_permissions(row: Dict[str, Any], sys_perms: Any) -> bool:
     """
     required = (row.get('snapshot') or {}).get('requiredPermissions') or []
     return not required or 'sys.admin' in sys_perms or all(p in sys_perms for p in required)
+
+
+async def public_winners(acct: Any) -> Tuple[str, Dict[str, Dict[str, Any]]]:
+    """
+    Each app's winning public binding, as the store walk resolves it for an anonymous caller.
+
+    The public rung is listed under ``''`` (every org) on a SaaS server and
+    ``'local'`` otherwise. A binding competes only when it is public, serves
+    (``serving_block_of``) and requires no permissions; among those, the
+    precedence winner (``precedence_sorted``) is each app's. The public page
+    map and the ``plans:``/``app:`` page data sources both read the rung
+    through here, so they can never disagree about which version serves.
+
+    Args:
+        acct: The account layer to read.
+
+    Returns:
+        ``(org, winners)``: the org the rung was listed under, which is also
+        the org of a winning row that names none; and each app id's winning row.
+
+    Raises:
+        Exception: the account layer could not list the public bindings.
+    """
+    org = 'local'
+    if 'saas' in getattr(acct, 'capabilities', ()):
+        org = ''
+    review_ladder = getattr(acct, 'review_ladder', True)
+    winners: Dict[str, Dict[str, Any]] = {}
+    for row in precedence_sorted(await acct.publish_list(org, 'app', [{'type': 'public', 'id': ''}])):
+        # Rows that do not serve an anonymous caller never compete; the
+        # precedence winner among the rest lands last.
+        if (row.get('audience') or {}).get('type') != 'public':
+            continue
+        if serving_block_of(row, review_ladder) or not holds_required_permissions(row, set()):
+            continue
+        winners[str(row.get('appId') or '')] = row
+    return org, winners

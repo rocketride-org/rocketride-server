@@ -33,7 +33,7 @@
 import os
 import re
 from abc import ABC, abstractmethod
-from typing import NamedTuple
+from typing import Any, Dict, List, NamedTuple
 
 # What clients see in place of a stored environment value. A secret is
 # written once and never read back; sending the mask back keeps the value.
@@ -207,6 +207,31 @@ class AccountBase(ABC):
 
         Returns:
             List of app manifest dicts (same shape as apps.json entries).
+        """
+        return []
+
+    async def get_public_plans(self, app_id: str) -> List[Dict[str, Any]]:
+        """
+        Return one app's public subscription plans (the ``plans`` page data source).
+
+        Shape (append-only): ``[{id, name, price, currency, period, features[]}]``,
+        the prices the app's live pricing page shows, with ``price`` a decimal
+        string (``"29"``, ``"29.50"``). OSS has no billing and returns []. The
+        SaaS edition serves its plan table and calls
+        ``ai.modules.shell.data_sources.invalidate('plans')`` after every
+        price change.
+
+        Args:
+            app_id: The app whose plans to list.
+
+        Returns:
+            The app's plans in the shape above; [] for an app without plans.
+
+        Raises:
+            Exception: the plan store could not be read (an override's own
+                error, of any type). The page is then served without its data
+                and uncached, so the next crawl asks again; an app without
+                plans returns [] instead of raising.
         """
         return []
 

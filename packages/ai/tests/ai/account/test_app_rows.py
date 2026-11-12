@@ -29,7 +29,7 @@ these rules are pinned here, once, for both callers.
 
 import pytest
 
-from ai.account.app_rows import precedence_sorted, serving_block_of
+from ai.account.app_rows import precedence_sorted, public_winners, serving_block_of
 
 AUD_USER = {'type': 'user', 'id': 'u1'}
 AUD_TEAM = {'type': 'team', 'id': 't1'}
@@ -100,3 +100,51 @@ def test_precedence_sorted_ranks_an_unknown_or_missing_audience_with_public():
     assert ordered[-1]['audience'] == AUD_TEAM
     # The three rank-0 rows keep the org order: highest first, so the lowest lands last among them.
     assert [r['orgId'] for r in ordered[:3]] == ['o3', 'o2', 'o1']
+
+
+class _Account:
+    """An account layer whose public rung lists ``rows``."""
+
+    def __init__(self, rows, capabilities=(), review_ladder=True):
+        self.rows = rows
+        self.capabilities = capabilities
+        self.review_ladder = review_ladder
+        self.listed = []
+
+    async def publish_list(self, org_id, kind, audiences):
+        self.listed.append((org_id, kind, audiences))
+        return [dict(r) for r in self.rows]
+
+
+def _public(app_id, org, **fields):
+    return {**_binding(AUD_PUBLIC), 'appId': app_id, 'orgId': org, **fields}
+
+
+@pytest.mark.parametrize('capabilities, org', [((), 'local'), (('saas',), '')], ids=['oss', 'saas'])
+async def test_public_winners_lists_the_public_rung_of_every_org_on_saas_only(capabilities, org):
+    acct = _Account([], capabilities)
+    assert await public_winners(acct) == (org, {})
+    assert acct.listed == [(org, 'app', [{'type': 'public', 'id': ''}])]
+
+
+async def test_public_winners_reads_the_account_it_is_given():
+    org, winners = await public_winners(_Account([_public('a.x', 'o1')]))
+    assert org == 'local' and list(winners) == ['a.x']
+
+
+async def test_public_winners_picks_each_apps_serving_precedence_winner():
+    rows = [
+        _public('a.x', 'org-b'),
+        _public('a.x', 'org-0', state='disabled'),
+        # An anonymous caller holds no permissions.
+        _public('a.x', 'org-1', snapshot={'requiredPermissions': ['billing.read']}),
+        _public('a.x', 'org-a'),
+        # Not the public rung, though it would outrank every public row.
+        {**_binding(AUD_TEAM), 'appId': 'a.x', 'orgId': 'org-z'},
+        _public('a.y', 'org-c', artifactState='submit'),
+    ]
+    _, winners = await public_winners(_Account(rows))
+    assert {app: row['orgId'] for app, row in winners.items()} == {'a.x': 'org-a'}
+    # Without a review ladder an unapproved public binding serves.
+    _, winners = await public_winners(_Account(rows, review_ladder=False))
+    assert {app: row['orgId'] for app, row in winners.items()} == {'a.x': 'org-a', 'a.y': 'org-c'}
