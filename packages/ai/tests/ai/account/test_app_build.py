@@ -1443,3 +1443,54 @@ def test_lockfile_check_reads_yaml_as_pnpm_does(lock):
     """
     with pytest.raises(app_build.BuildFailure):
         app_build._refuse_lockfile_paths(lock)
+
+
+def test_lockfile_aliases_are_refused_quickly():
+    """Lockfile aliases (which pnpm never writes) are refused before
+    any walk, so nested aliases cannot make the check run for hours.
+    """
+    import time
+
+    lines = ['a0: &a0 [x, x, x, x, x, x, x, x, x, x]']
+    for i in range(1, 8):
+        lines.append(f'a{i}: &a{i} [' + ', '.join([f'*a{i - 1}'] * 10) + ']')
+    started = time.monotonic()
+    with pytest.raises(app_build.BuildFailure):
+        app_build._refuse_lockfile_paths('\n'.join(lines) + '\n')
+    assert time.monotonic() - started < 1.0
+
+
+def test_lockfile_with_two_documents_is_read():
+    """A two-document lockfile (pnpm 10 can write one) is fully checked."""
+    ok = '---\nlockfileVersion: 9.0\n---\nlockfileVersion: 9.0\nimporters:\n  .:\n    dependencies: {}\n'
+    app_build._refuse_lockfile_paths(ok)
+    bad = '---\nlockfileVersion: 9.0\n---\npackages:\n  x@1.0.0:\n    resolution: {directory: ../../x}\n'
+    with pytest.raises(app_build.BuildFailure):
+        app_build._refuse_lockfile_paths(bad)
+
+
+@pytest.mark.parametrize(
+    'resolution,refused',
+    [
+        ('{repo: /tmp/elsewhere, commit: abc}', True),
+        ('{repo: ../../elsewhere, commit: abc}', True),
+        ('{tarball: /elsewhere/x.tgz}', True),
+        ("{tarball: 'https://registry.npmjs.org/x/-/x-1.0.0.tgz'}", False),
+        ("{repo: 'https://github.com/a/b.git', commit: abc}", False),
+        ('{tarball: codeload.github.com/a/b/tar.gz/abc}', False),
+    ],
+)
+def test_lockfile_local_repo_and_tarball_paths_are_checked(resolution, refused):
+    lock = f'packages:\n  x@1.0.0:\n    resolution: {resolution}\n'
+    if refused:
+        with pytest.raises(app_build.BuildFailure):
+            app_build._refuse_lockfile_paths(lock)
+    else:
+        app_build._refuse_lockfile_paths(lock)
+
+
+def test_patched_dependency_paths_are_checked():
+    lock = 'patchedDependencies:\n  x@1.0.0:\n    hash: abc\n    path: ../../x.patch\n'
+    with pytest.raises(app_build.BuildFailure):
+        app_build._refuse_lockfile_paths(lock)
+    app_build._refuse_lockfile_paths('patchedDependencies:\n  x@1.0.0:\n    hash: abc\n    path: patches/x.patch\n')

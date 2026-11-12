@@ -1253,13 +1253,25 @@ def _refuse_lockfile_paths(lock_text: str) -> None:
     import yaml
 
     try:
-        data = yaml.safe_load(lock_text)
+        # pnpm never writes YAML aliases; refusing them up front keeps the
+        # walk linear (a few aliased anchors would otherwise expand
+        # exponentially).
+        for event in yaml.parse(lock_text, Loader=yaml.SafeLoader):
+            if isinstance(event, yaml.AliasEvent):
+                raise BuildFailure('materialize', 'pnpm-lock.yaml uses YAML aliases, which pnpm never writes')
+        documents = [doc for doc in yaml.safe_load_all(lock_text) if doc is not None]
+    except BuildFailure:
+        raise
     except Exception as exc:
         raise BuildFailure('materialize', f'pnpm-lock.yaml could not be parsed: {exc}')
-    if data is None:
-        return
-    if not isinstance(data, dict):
-        raise BuildFailure('materialize', 'pnpm-lock.yaml is not a mapping')
+    for data in documents:
+        if not isinstance(data, dict):
+            raise BuildFailure('materialize', 'pnpm-lock.yaml is not a mapping')
+        _refuse_lockfile_document_paths(data)
+
+
+def _refuse_lockfile_document_paths(data: Dict[str, Any]) -> None:
+    """Check one decoded lockfile document (see _refuse_lockfile_paths)."""
     for section, body in data.items():
         if section == 'importers' and isinstance(body, dict):
             for importer, tables in body.items():
@@ -1295,12 +1307,22 @@ def _refuse_lockfile_paths(lock_text: str) -> None:
             _check_lock_value(value, '.')
 
 
+_LOCK_LOCAL_PATH_KEYS = ('directory', 'repo', 'tarball', 'path')
+
+
 def _walk_lock_resolutions(node: Any):
-    """Yield every ``directory`` value of a resolution mapping in the tree."""
+    """Yield every local-path value in the tree: a ``directory`` resolution,
+    and a ``repo`` / ``tarball`` / ``path`` (patched dependency) value that is
+    a filesystem path rather than a URL.
+    """
     if isinstance(node, dict):
         for key, value in node.items():
-            if key == 'directory' and isinstance(value, str):
-                yield value
+            if key in _LOCK_LOCAL_PATH_KEYS and isinstance(value, str):
+                text = value.strip()
+                if key == 'directory' or not (
+                    '://' in text or text.startswith(('git@', 'github:', 'gitlab:', 'bitbucket:'))
+                ):
+                    yield text
             else:
                 yield from _walk_lock_resolutions(value)
     elif isinstance(node, list):
