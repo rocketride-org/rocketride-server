@@ -486,10 +486,9 @@ class WebServer:
             # RR_BASE_URL will be set lazily by get_port() once resolved.
 
         # RR_SIGNING_KEY (the FileStore URL-signing secret) is deliberately
-        # NOT provisioned here: the operator sets it in .env/.config like
-        # every other deployment secret, and when unset the readers fall
-        # back to CONST_DEFAULT_SIGNING_KEY (a self-describing development
-        # value) so a fresh install works out of the box.
+        # NOT provisioned here: the operator sets it in .env like every other
+        # deployment secret, and when unset the engine signs with a random
+        # per-process key (file_store.fetch_signing_key).
 
         # Setup the Uvicorn configuration
         config = uvicorn.Config(

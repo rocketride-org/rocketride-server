@@ -734,3 +734,85 @@ class TestSignedFetchUrls:
 
         response = await handle_fetch(request)
         assert response.status_code == 401, label
+
+
+class TestFetchSigningKeyStaysInTheEngine:
+    """Issue #1070: pipeline code must not be able to mint /task/fetch tokens.
+
+    The fetch claim is a capability for any path under the store root, so the
+    key that signs it stays in the engine process: unset, it is random per
+    process rather than a value printed in the source, and a task process
+    asks the engine to sign instead of signing itself.
+    """
+
+    # The public development default develop fell back to when RR_SIGNING_KEY
+    # was unset (constants.CONST_DEFAULT_SIGNING_KEY): anyone could read it.
+    _PUBLIC_DEFAULT = '<your signing key here -- replace in production>'
+
+    @pytest.fixture(autouse=True)
+    def _engine_env(self, monkeypatch, store):
+        """No configured key, a base URL, and the fixture store as the process singleton."""
+        monkeypatch.delenv('RR_SIGNING_KEY', raising=False)
+        monkeypatch.setenv('RR_BASE_URL', 'http://localhost:5565')
+        monkeypatch.setattr(Store, '_instance', store)
+
+    @staticmethod
+    def _request(url: str) -> SimpleNamespace:
+        """The request handle_fetch reads: only its query_params."""
+        return SimpleNamespace(query_params={'token': url.split('token=', 1)[1]})
+
+    @pytest.mark.asyncio
+    async def test_unset_key_refuses_a_token_signed_with_the_public_default(self, store):
+        import time
+
+        import jwt
+
+        from ai.account.file_store import FETCH_CLAIM_VERSION
+        from ai.modules.task.fetch import handle_fetch
+
+        await _fs(store, _account(user_id='victim')).write('secret.txt', b'private')
+        claim = {
+            'sub': 'attacker',
+            'path': 'users/victim/files/secret.txt',
+            'v': FETCH_CLAIM_VERSION,
+            'exp': int(time.time()) + 600,
+        }
+        forged = jwt.encode(claim, self._PUBLIC_DEFAULT, algorithm='HS256')
+
+        response = await handle_fetch(SimpleNamespace(query_params={'token': forged}))
+
+        assert response.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_unset_key_still_serves_a_url_this_process_signed(self, store):
+        from ai.modules.task.fetch import handle_fetch
+
+        fs = _fs(store, _account())
+        await fs.write('reports/q1.csv', b'data')
+
+        response = await handle_fetch(self._request(await fs.get_url('reports/q1.csv')))
+
+        assert response.status_code == 200
+        assert response.path.endswith('users/user-1/files/reports/q1.csv')
+
+    @pytest.mark.asyncio
+    async def test_a_task_process_asks_the_engine_to_sign(self, monkeypatch, store):
+        """A task never signs, even when the key is in its environment."""
+        from ai.modules.data import channel
+        from ai.modules.data.channel import ChannelReply
+
+        monkeypatch.setenv('RR_SIGNING_KEY', _SIGNING_KEY)
+        asked = []
+
+        def request_sync(command, arguments=None, **kwargs):
+            asked.append((command, arguments))
+            return ChannelReply(body={'url': 'http://engine/task/fetch?token=signed-by-engine'})
+
+        monkeypatch.setattr(channel.task_channel, 'available', True)
+        monkeypatch.setattr(channel.task_channel, 'request_sync', request_sync)
+        fs = store._file_store(RequestContext.engine('user-1'), client_id='user-1', root='users/user-1/files')
+
+        url = await fs.get_url('reports/q1.csv', 600, download_name='q1.csv')
+
+        assert url == 'http://engine/task/fetch?token=signed-by-engine'
+        assert asked == [('store.url', {'path': 'reports/q1.csv', 'expires_in': 600, 'download_name': 'q1.csv'})]

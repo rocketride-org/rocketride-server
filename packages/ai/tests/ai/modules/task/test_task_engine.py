@@ -1318,8 +1318,9 @@ async def test_start_passes_only_the_operators_options(monkeypatch, saas, startu
 def test_filter_subprocess_env_is_an_allowlist():
     """Engine-tier configuration never reaches pipeline code: only the runtime
     baseline, the ROCKETRIDE_* namespace, the services the child reaches
-    itself (store, fetch URLs, OAuth broker) and README-documented node
-    fallbacks pass.
+    itself (store, OAuth broker) and README-documented node fallbacks pass.
+    The fetch signing key stays behind (#1070): the engine signs a task's
+    fetch URLs over the task channel.
     """
     env = filter_subprocess_env(
         {
@@ -1359,13 +1360,21 @@ def test_filter_subprocess_env_is_an_allowlist():
         'RR_STORE_URL': 's3://bucket',
         'RR_STORE_SECRET_KEY': 'store',
         'RR_BASE_URL': 'https://engine.example',
-        'RR_SIGNING_KEY': 'sign',
         'RR_OAUTH_BROKER_URL': 'https://broker.example',
         'RR_PROC_PRIVATE': '1',  # tasks must see the opt-in to act on it
         'AWS_ROLE_ARN': 'arn:aws:iam::1:role/engine',
         'MEDIA_TOOLKIT_FFMPEG': '/opt/ffmpeg',
         'NOTION_API_KEY': 'notion',
     }
+
+
+@pytest.mark.parametrize('opt_in', ['RR_SIGNING_KEY', 'rr_signing_key', 'RR_*', '*'])
+def test_filter_subprocess_env_never_passes_the_fetch_signing_key(opt_in):
+    """With the key, pipeline code could sign a /task/fetch claim for any path
+    under the store root (#1070), so no operator opt-in passes it either.
+    """
+    env = filter_subprocess_env({'RR_SUBPROCESS_ENV': opt_in, 'RR_SIGNING_KEY': 'sign', 'rr_signing_key': 'sign'})
+    assert not {name.upper() for name in env} & {'RR_SIGNING_KEY'}
 
 
 def test_filter_subprocess_env_opt_in_names_and_prefixes():
