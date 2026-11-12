@@ -74,6 +74,7 @@ import asyncio
 import glob
 import json
 import os
+import posixpath
 import re
 import shutil
 import stat
@@ -1200,14 +1201,42 @@ _LOCK_PATH_RESOLUTION = re.compile(
 
 def _refuse_lockfile_paths(lock_text: str) -> None:
     """Raise BuildFailure when the lockfile resolves a package to a local path
-    outside the source tree (``directory:``, ``tarball: file:``, ``link:``,
-    ``file:`` entries with an absolute or ``..`` path). The install keeps
-    lockfile resolutions, so the manifest check alone does not cover them.
+    outside the source tree.
+
+    ``directory:``, ``tarball: file:``, ``link:`` and ``file:`` values are
+    resolved the way pnpm writes them: entries under ``importers:`` are
+    relative to that importer's directory (a sibling workspace package is
+    ``link:../../packages/x`` from ``apps/x``), all others relative to the
+    workspace root. A path that is absolute, home-relative or resolves above
+    the workspace root is refused. The install keeps lockfile resolutions, so
+    the manifest check alone does not cover them.
     """
-    for match in _LOCK_PATH_RESOLUTION.finditer(lock_text):
-        target = match.group(1).strip().replace('\\', '/')
-        if target.startswith(('/', '~')) or re.match(r'^[a-zA-Z]:', target) is not None or '..' in target.split('/'):
-            raise BuildFailure('materialize', f'pnpm-lock.yaml resolves a package outside the source tree: {target!r}')
+    section = ''
+    importer = '.'
+    for raw in lock_text.splitlines():
+        line = raw.rstrip()
+        if not line.strip() or line.lstrip().startswith('#'):
+            continue
+        indent = len(line) - len(line.lstrip(' '))
+        if indent == 0:
+            section = line.split(':', 1)[0].strip().strip('\'"')
+            importer = '.'
+            continue
+        if section == 'importers' and indent == 2 and line.rstrip().endswith(':'):
+            importer = line.strip()[:-1].strip().strip('\'"') or '.'
+            continue
+        base = importer if section == 'importers' else '.'
+        for match in _LOCK_PATH_RESOLUTION.finditer(line):
+            target = match.group(1).strip().replace('\\', '/')
+            if target.startswith(('/', '~')) or re.match(r'^[a-zA-Z]:', target) is not None:
+                raise BuildFailure(
+                    'materialize', f'pnpm-lock.yaml resolves a package outside the source tree: {target!r}'
+                )
+            resolved = posixpath.normpath(posixpath.join(base, target))
+            if resolved == '..' or resolved.startswith('../'):
+                raise BuildFailure(
+                    'materialize', f'pnpm-lock.yaml resolves a package outside the source tree: {target!r}'
+                )
 
 
 def _lockfile_importer_pins(lock_text: str) -> Dict[str, Dict[str, str]]:

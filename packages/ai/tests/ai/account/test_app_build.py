@@ -1392,6 +1392,13 @@ def test_resolutions_table_is_checked_like_overrides(tmp_path):
             'importers:\n  .:\n    dependencies:\n      x:\n        specifier: file:./pkgs/x\n        version: file:pkgs/x\n',
             False,
         ),
+        (
+            # a monorepo app linking a sibling workspace package (relative to the importer)
+            "importers:\n  apps/x:\n    dependencies:\n      '@acme/ui':\n        specifier: workspace:*\n        version: link:../../packages/ui\n",
+            False,
+        ),
+        ('importers:\n  apps/x:\n    dependencies:\n      y:\n        version: link:../../../elsewhere\n', True),
+        ('packages:\n  x@1.0.0:\n    resolution: {directory: packages/x, type: directory}\n', False),
         ('packages:\n  react@18.2.0:\n    resolution: {integrity: sha512-AAAA}\n', False),
     ],
 )
