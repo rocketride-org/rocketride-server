@@ -9,6 +9,7 @@ Tests cover:
 - User isolation between different client_ids
 """
 
+import hashlib
 import pytest
 import tempfile
 import shutil
@@ -215,6 +216,45 @@ class TestReadWrite:
         """Reading a nonexistent file raises StorageError."""
         with pytest.raises(StorageError):
             await fs.read('does-not-exist.txt')
+
+
+def _sha256(text: str) -> str:
+    return hashlib.sha256(text.encode('utf-8')).hexdigest()
+
+
+class TestPutTextIfUnchanged:
+    """A write that lands only while the file is still the copy the writer read."""
+
+    @pytest.mark.asyncio
+    async def test_refused_after_another_connection_saves(self, fs, store):
+        """A save from another connection between the read and the write survives."""
+        await fs.write('app/prompt.txt', b'v1')
+        read = (await fs.read('app/prompt.txt')).decode('utf-8')
+        other_tab = FileStore(store, 'test-user-1', RequestContext.internal('other-tab'))
+        await other_tab.write('app/prompt.txt', b'v1 + the user line')
+
+        assert await fs.put_text_if_unchanged('app/prompt.txt', 'v1 + the agent edit', _sha256(read)) is None
+        assert await fs.read('app/prompt.txt') == b'v1 + the user line'
+
+    @pytest.mark.asyncio
+    async def test_writes_when_unchanged(self, fs):
+        """The hash covers the text a browser decodes, so CRLF line ends and a BOM still match."""
+        await fs.write('app/notes.md', b'\xef\xbb\xbfline 1\r\nline 2\r\n')
+
+        written = await fs.put_text_if_unchanged(
+            'app/notes.md', 'line 1\r\nline 3\r\n', _sha256('line 1\r\nline 2\r\n')
+        )
+
+        assert written == len(b'line 1\r\nline 3\r\n')
+        assert await fs.read('app/notes.md') == b'line 1\r\nline 3\r\n'
+        assert [entry['name'] for entry in (await fs.list_dir('app'))['entries']] == ['notes.md']
+
+    @pytest.mark.asyncio
+    async def test_no_base_hash_means_the_file_must_be_absent(self, fs):
+        """Without a base hash the write creates the file, and is refused once the file exists."""
+        assert await fs.put_text_if_unchanged('app/new.ts', 'first', None) is not None
+        assert await fs.put_text_if_unchanged('app/new.ts', 'second', None) is None
+        assert await fs.read('app/new.ts') == b'first'
 
 
 class TestDelete:

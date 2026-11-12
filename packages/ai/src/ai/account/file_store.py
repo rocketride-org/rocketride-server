@@ -23,6 +23,7 @@ Usage:
     shared = await fs.list_dir('@/Team/Development/reports')
 """
 
+import hashlib
 import json
 import uuid
 from dataclasses import dataclass, field
@@ -31,7 +32,7 @@ from pathlib import PurePosixPath
 from typing import Any, Optional
 
 from .models import RequestContext, resolve_task_permissions
-from .store import IStore, StorageError
+from .store import IStore, StorageError, StorageNotFoundError, VersionMismatchError
 
 # Sentinel file used to represent empty directories on object stores
 DIR_MARKER = '.dirmarker'
@@ -517,6 +518,13 @@ def _sanitize_download_name(name: str) -> str:
     return cleaned or 'download'
 
 
+def _text_hash(stored: Optional[bytes]) -> Optional[str]:
+    """SHA-256 (hex) of the text a browser's TextDecoder makes of ``stored``, which drops a leading BOM."""
+    if stored is None:
+        return None
+    return hashlib.sha256(stored.decode('utf-8-sig', errors='replace').encode('utf-8')).hexdigest()
+
+
 class FileHandleMode(Enum):
     """Mode for an open file handle."""
 
@@ -879,6 +887,46 @@ class FileStore:
         finally:
             self._write_locks.discard(full_path)
         return len(payload)
+
+    async def put_text_if_unchanged(self, path: str, text: str, base_hash: Optional[str]) -> Optional[int]:
+        """
+        Write a text file in ONE operation, only while it is still the copy the writer read.
+
+        A writer that checks the file and then writes it in a second message
+        loses any save that lands between the two. Here the backend's
+        ``write_file_atomic`` refuses the write if the file's version moved
+        after this method read it, and the shared write lock keeps this
+        process's other writers out until it is done.
+
+        Args:
+            path: Relative path within the account store.
+            text: The new content.
+            base_hash: SHA-256 (hex) of the text the writer read, or None when
+                the writer saw no file.
+
+        Returns:
+            Bytes written, or None when the file changed (or now exists) and
+            nothing was written.
+        """
+        full_path = self._full_path(path)
+        # Another writer holds the file open, so it is changing under this one.
+        if full_path in self._write_locks:
+            return None
+        self._write_locks.add(full_path)
+        try:
+            try:
+                _, version = await self._store.read_file_with_metadata(full_path)
+                stored = await self._store.read_bytes(full_path)
+            except StorageNotFoundError:
+                version, stored = None, None
+            if _text_hash(stored) != base_hash:
+                return None
+            await self._store.write_file_atomic(full_path, text, version)
+        except VersionMismatchError:
+            return None
+        finally:
+            self._write_locks.discard(full_path)
+        return len(text.encode('utf-8'))
 
     async def get_json(self, path: str) -> Any:
         """

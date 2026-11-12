@@ -840,13 +840,14 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 	}
 
 	/**
-	 * Writes a file on the base, counted in baseChanges. A copy an invalidate
-	 * dropped while the write was on its way is older than the write, so a
-	 * read that takes the write in counts nothing.
+	 * Writes a file on the base, counted in baseChanges, only while the base
+	 * still holds the copy that hashes to `baseHash` (null: no file). A copy an
+	 * invalidate dropped while the write was on its way is older than the
+	 * write, so a read that takes the write in counts nothing.
 	 */
-	private writeBase(p: string, content: unknown, origin?: string): Promise<void> {
+	private writeBase(p: string, content: unknown, baseHash: string | null, origin?: string): Promise<void> {
 		return this.changeBase([p], async () => {
-			await this.base.write(p, content, origin);
+			await this.base.writeIfUnchanged(p, content, baseHash, origin);
 			if (this.dropped.has(p)) this.dropped.set(p, content);
 		});
 	}
@@ -953,36 +954,6 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 	}
 
 	/**
-	 * Verifies the base has not moved under a path since it was read — the
-	 * freshness gate every write-through save passes. Baseline = the base
-	 * view's cached content (what the buffer was opened from); current =
-	 * a cache-preserving backend peek. Equal hashes (or both absent — a new
-	 * file) pass; anything else refuses with StaleWriteError and leaves the
-	 * baseline UNTOUCHED, so a blind retry refuses again — exactly VS Code's
-	 * behavior. Resolution is the caller's: re-read (adopts the new base as
-	 * baseline) then re-save to overwrite deliberately, or revert.
-	 *
-	 * @param p - The normalized path about to be written.
-	 */
-	private async guardFreshBase(p: string): Promise<void> {
-		// step: a copy an invalidate dropped guards the next save in its place, then is spent
-		const baseline = this.base.cachedContent(p) ?? this.dropped.get(p);
-		this.dropped.delete(p);
-		let current: unknown;
-		try {
-			current = await this.base.peekBase(p);
-		} catch {
-			current = undefined; // does not exist on the base
-		}
-		if (baseline === undefined && current === undefined) return; // new file
-		if (baseline !== undefined && current !== undefined) {
-			const [a, b] = await Promise.all([sha256Hex(String(baseline)), sha256Hex(String(current))]);
-			if (a === b) return;
-		}
-		throw new StaleWriteError(p);
-	}
-
-	/**
 	 * Stages a whole-file write (or passes through in write-through mode).
 	 * With `expect`, it is refused unless the path is still at that version.
 	 */
@@ -1010,10 +981,14 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 	private async writeNow(p: string, content: unknown, origin?: string, seq?: number): Promise<void> {
 		await this.ready;
 		if (this.writeThrough) {
-			// step: write-through IS the commit for this path — same freshness
-			// discipline commit() applies to staged layers, at save time.
-			await this.guardFreshBase(p);
-			return this.writeBase(p, content, origin);
+			// step: write-through IS the commit for this path. The base writes only
+			// while it holds the copy the buffer was read from (or a copy an
+			// invalidate dropped, which is then spent); otherwise StaleWriteError
+			// leaves that baseline untouched, so a blind retry refuses again.
+			// Re-reading adopts the server's copy as the new baseline.
+			const baseline = this.base.cachedContent(p) ?? this.dropped.get(p);
+			this.dropped.delete(p);
+			return this.writeBase(p, content, baseline === undefined ? null : await sha256Hex(String(baseline)), origin);
 		}
 		if (typeof content !== 'string') {
 			throw new Error(`Staged writes are text-only: ${p}`);
@@ -1740,6 +1715,8 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 		// and excluded from the replay (deleting a gone path would throw).
 		const conflicts: StagedConflict[] = [];
 		const converged = new Set<string>();
+		// step: each write lands only while the base holds what this check saw
+		const writes = new Map<string, { content: string; baseHash: string | null }>();
 		for (const [p, entry] of net) {
 			if (entry.kind === 'mkdir') continue;
 			// step: a DIRECTORY tombstone anchors on existence, not content —
@@ -1756,6 +1733,8 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 			} catch {
 				current = null;
 			}
+			const currentHash = current === null ? null : await sha256Hex(current);
+			if (entry.kind === 'write') writes.set(p, { content: entry.content, baseHash: currentHash });
 			// step: convergence — a base that already holds this entry's net
 			// OUTCOME (same content, or already deleted) is never a conflict;
 			// this is what lets a re-run finish a partially replayed commit
@@ -1768,7 +1747,7 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 				if (current !== null) conflicts.push({ path: p, reason: 'resurrected' });
 			} else if (current === null) {
 				conflicts.push({ path: p, reason: 'missing' });
-			} else if ((await sha256Hex(current)) !== entry.baseHash) {
+			} else if (currentHash !== entry.baseHash) {
 				conflicts.push({ path: p, reason: 'changed' });
 			}
 		}
@@ -1786,9 +1765,8 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 		for (const p of paths.filter((x) => net.get(x)!.kind === 'mkdir').sort((a, b) => depth(a) - depth(b))) {
 			await this.base.mkdir(p);
 		}
-		for (const p of paths.filter((x) => net.get(x)!.kind === 'write')) {
-			const entry = net.get(p)! as Extract<LayerEntry, { kind: 'write' }>;
-			await this.writeBase(p, entry.content);
+		for (const [p, { content, baseHash }] of writes) {
+			await this.writeBase(p, content, baseHash);
 		}
 
 		// step: sweep or retain the frozen layers; a working layer opened meanwhile stays

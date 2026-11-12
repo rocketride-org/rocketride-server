@@ -3034,6 +3034,24 @@ export class RocketRideClient extends DAPClient {
 		await this.call('rrext_store', { subcommand: 'fs_put_json', path, value: obj });
 	}
 
+	/**
+	 * Write a UTF-8 string only while the file is still the copy the caller read.
+	 *
+	 * ONE round trip (`fs_put_if_unchanged`). The server compares and writes
+	 * in one step, so a save from another connection cannot land between a
+	 * check and the write.
+	 *
+	 * @param path - Relative path within the account store
+	 * @param text - The new content
+	 * @param baseHash - SHA-256 (hex) of the text the caller read, or null when it saw no file
+	 * @returns False when the file changed (or now exists); nothing was written
+	 */
+	async fsWriteStringIfUnchanged(path: string, text: string, baseHash: string | null): Promise<boolean> {
+		this.validateStorePath(path);
+		const body = await this.call('rrext_store', { subcommand: 'fs_put_if_unchanged', path, text, base_hash: baseHash });
+		return body.written === true;
+	}
+
 	// ============================================================================
 	// PATH AND ID VALIDATION
 	// ============================================================================

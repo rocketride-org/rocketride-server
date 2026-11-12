@@ -80,9 +80,27 @@ class MockBase implements IWorkspaceBaseView {
 		return this.entryType(path);
 	}
 
+	/** Runs once, right before the next write lands: another connection's save. */
+	beforeWrite: (() => void) | null = null;
+
 	async write(path: string, content: unknown): Promise<void> {
+		this.landOtherSave();
 		this.files.set(path, String(content));
 		this.notify();
+	}
+
+	landOtherSave(): void {
+		const save = this.beforeWrite;
+		this.beforeWrite = null;
+		save?.();
+	}
+
+	/** The store's conditional write: refused unless the stored copy still hashes to baseHash (null: no file). */
+	async writeIfUnchanged(path: string, content: unknown, baseHash: string | null): Promise<void> {
+		this.landOtherSave();
+		const stored = this.files.get(path);
+		if ((stored === undefined ? null : await sha256Hex(stored)) !== baseHash) throw new StaleWriteError(path);
+		await this.write(path, content);
 	}
 
 	async rename(oldPath: string, newPath: string): Promise<void> {
@@ -623,6 +641,27 @@ test('write-through save is freshness-gated: a moved base refuses the save', asy
 	// A NEW file (no baseline, nothing on the base) saves cleanly.
 	await fs.write('new.ts', 'fresh');
 	assert.equal(base.files.get('new.ts'), 'fresh');
+});
+
+test('write-through save is refused when another connection saves after the check', async () => {
+	const base = new MockBase();
+	base.files.set('f.ts', 'v1');
+	const fs = new StagedFileSystem(base, null, { writeThrough: true });
+	assert.equal(await fs.read('f.ts'), 'v1');
+
+	base.beforeWrite = () => base.files.set('f.ts', 'v1 + the user line');
+	await assert.rejects(() => fs.write('f.ts', 'v1 + the agent edit'), (err: Error) => err.name === 'StaleWriteError');
+	assert.equal(base.files.get('f.ts'), 'v1 + the user line');
+});
+
+test('commit is refused when another connection saves between its check and its write', async () => {
+	const { base, fs } = makeStaged({ 'f.ts': 'v1' });
+	await fs.write('f.ts', 'v1 + the agent edit');
+
+	base.beforeWrite = () => base.files.set('f.ts', 'v1 + the user line');
+	await assert.rejects(() => fs.commit(), (err: Error) => err.name === 'StaleWriteError');
+	assert.equal(base.files.get('f.ts'), 'v1 + the user line');
+	assert.deepEqual((await fs.commit()).conflicts, [{ path: 'f.ts', reason: 'changed' }]);
 });
 
 test('delete of a staged directory swallows its staged children', async () => {

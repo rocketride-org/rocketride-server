@@ -410,6 +410,26 @@ export class CachedVfs implements IVirtualFileSystem {
 	 */
 	async write(path: string, content: unknown, origin?: string): Promise<void> {
 		await this.backend.write(path, content, origin);
+		this.cacheWritten(path, content);
+	}
+
+	/**
+	 * Writes one file only while the stored copy still hashes to `baseHash`
+	 * (null: still absent), then updates the caches like write().
+	 *
+	 * @param path - Relative file path.
+	 * @param content - The content to persist.
+	 * @param baseHash - SHA-256 (hex) of the text the writer read, or null when it saw no file.
+	 * @param origin - The writer's identity, forwarded to the backend.
+	 * @throws StaleWriteError (from the backend) when the file changed.
+	 */
+	async writeIfUnchanged(path: string, content: unknown, baseHash: string | null, origin?: string): Promise<void> {
+		if (!this.backend.writeIfUnchanged) throw new Error('This file system has no conditional write.');
+		await this.backend.writeIfUnchanged(path, content, baseHash, origin);
+		this.cacheWritten(path, content);
+	}
+
+	private cacheWritten(path: string, content: unknown): void {
 		this.ensureEntry(path, 'file');
 		this.markChanged(path);
 		this.contents.set(path, content);
