@@ -42,6 +42,9 @@ from ..utils.common import connect_client, run_cli_command
 from ..utils.env import NO_DEPLOY_TARGET_MESSAGE
 from ..utils.output import Output
 
+# Hard-stop message for a deploy target URI with no deploy API key
+NO_DEPLOY_APIKEY_MESSAGE = 'No deployment API key configured. Set ROCKETRIDE_DEPLOY_APIKEY (or pass --apikey) - the development key is never a deploy fallback.'
+
 
 def _format_when(seconds: Optional[float]) -> str:
     """
@@ -108,6 +111,9 @@ async def _connect_deploy(args, out: Output):
     """
     if not args.uri:
         out.fail(NO_DEPLOY_TARGET_MESSAGE)
+        return None
+    if not (args.apikey or '').strip():
+        out.fail(NO_DEPLOY_APIKEY_MESSAGE)
         return None
     return await connect_client(args.uri, args.apikey)
 

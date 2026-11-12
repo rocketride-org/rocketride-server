@@ -109,6 +109,9 @@ export async function connectClient(options: ConnectionOptions, onEvent?: (messa
 	return client;
 }
 
+/** Hard-stop message for a deploy target URI with no deploy API key. */
+export const NO_DEPLOY_APIKEY_MESSAGE = 'No deployment API key configured. Set ROCKETRIDE_DEPLOY_APIKEY (or pass --apikey) - the development key is never a deploy fallback.';
+
 /**
  * Connect to the DEPLOYMENT target, enforcing the hard stop: lifecycle
  * verbs (deploy, publish, review) never fall back to the development
@@ -121,6 +124,10 @@ export async function connectClient(options: ConnectionOptions, onEvent?: (messa
 export async function connectDeploy(options: ConnectionOptions, out: Output): Promise<RocketRideClient | null> {
 	if (!options.uri) {
 		out.fail(NO_DEPLOY_TARGET_MESSAGE);
+		return null;
+	}
+	if (!options.apikey?.trim()) {
+		out.fail(NO_DEPLOY_APIKEY_MESSAGE);
 		return null;
 	}
 	return connectClient(options);
