@@ -82,6 +82,10 @@ SNAPSHOT = (
 # Copies of home-ui's build output (apps/home-ui/public/pages/), as it ships.
 HOME_UI = Path(__file__).parent / 'fixtures' / 'home-ui'
 
+# The real store helpers; the autouse state fixture swaps in the in-memory ones.
+STORE_READ = pp.read_artifact_file
+STORE_STAT = pp.artifact_file_info
+
 
 @pytest.fixture
 def shell_root(tmp_path, monkeypatch):
@@ -296,6 +300,54 @@ def test_a_programming_error_reading_a_snapshot_is_raised_not_served(shell_root,
     with pytest.raises(KeyError):
         _crawl(_client())
     assert len(pages._render_cache) == 0 and warned == []
+
+
+class _UnreachableStore:
+    """A raw store whose transport fails, the way S3's does once its retries give up."""
+
+    def __init__(self, failure):
+        self.failure = failure
+
+    async def get_file_info(self, path):
+        raise self.failure
+
+    async def read_bytes(self, path):
+        raise self.failure
+
+
+def _transport_failures():
+    failures = [ConnectionError('connection reset'), TimeoutError('read timed out')]
+    try:
+        from botocore.exceptions import EndpointConnectionError
+    except ImportError:
+        return failures
+    failures.append(EndpointConnectionError(endpoint_url='https://s3.amazonaws.com'))
+    return failures
+
+
+@pytest.mark.parametrize('failure', _transport_failures(), ids=lambda failure: type(failure).__name__)
+@pytest.mark.parametrize('failing', ['stat', 'read'])
+def test_a_store_transport_failure_is_a_storage_failure(shell_root, monkeypatch, warned, failure, failing):
+    # The S3 store re-raises transport errors (botocore's own included) once its
+    # retries give up. They are storage failures, not bugs: crawlers get the
+    # shell document, uncached, instead of a 500.
+    from ai.account.store import Store
+
+    async def sized(path):
+        return {'size': 10, 'modified': 0.0}
+
+    _serve(_page())
+    raw = _UnreachableStore(failure)
+    monkeypatch.setattr(Store, 'instance', classmethod(lambda cls: SimpleNamespace(raw_store=lambda: raw)))
+    monkeypatch.setattr(pp, 'read_artifact_file', STORE_READ)
+    monkeypatch.setattr(pp, 'artifact_file_info', STORE_STAT)
+    if failing == 'read':
+        monkeypatch.setattr(pp, 'artifact_file_info', sized)
+    resp = _crawl(_client())
+    assert resp.status_code == 200 and SHELL_BODY in resp.text
+    assert resp.headers['cache-control'] == 'private, no-cache'
+    assert len(pages._render_cache) == 0
+    assert len(warned) == 1 and str(failure) in warned[0]
 
 
 def test_a_snapshot_the_engine_refuses_falls_back_cacheably_and_warns_once(shell_root, reads, warned):
