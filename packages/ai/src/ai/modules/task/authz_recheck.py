@@ -197,6 +197,9 @@ class AuthzRecheck:
         """Stop the sweep loop (it exits at its next wake-up) and end pending revoke notices."""
         self._stopping = True
         self._wake.set()
+        # Let notices scheduled but not yet started reach their send, so a
+        # cancel runs their finally (the disconnect) instead of skipping it.
+        await asyncio.sleep(0)
         notices = list(self._notices)
         for notice in notices:
             notice.cancel()
