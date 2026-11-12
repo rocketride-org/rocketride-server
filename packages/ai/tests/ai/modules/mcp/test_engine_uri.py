@@ -160,6 +160,9 @@ def test_public_bind_with_explicit_default_valued_identifier_derives_from_it(mon
         (None, 'ws://127.0.0.1:6000', 'http://127.0.0.1:6000'),
         # An IPv6 wildcard socket is IPv6-only: 127.0.0.1 would be refused.
         ('::', 'ws://[::1]:6000', 'http://[::1]:6000'),
+        ('::0', 'ws://[::1]:6000', 'http://[::1]:6000'),
+        ('0:0:0:0:0:0:0:0', 'ws://[::1]:6000', 'http://[::1]:6000'),
+        ('[::]', 'ws://[::1]:6000', 'http://[::1]:6000'),
     ],
 )
 def test_wildcard_bind_without_identifier_stays_on_the_local_engine(monkeypatch, fake_web_server, host, uri, origin):

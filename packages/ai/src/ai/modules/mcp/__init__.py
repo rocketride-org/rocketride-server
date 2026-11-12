@@ -345,8 +345,20 @@ def _refuse_cleartext_engine_uri(uri: str, source_value: str, source_name: str) 
     )
 
 
-# Bind hosts that listen on every interface of a family; see _resolve_engine_uri.
-_WILDCARD_HOSTS = ('', '0.0.0.0', '::')
+def _wildcard_family(bind_host: Optional[str]) -> Optional[int]:
+    """Return the IP version (4 or 6) of a bind-all host, or None if it is not one.
+
+    ``''`` and unset count as IPv4 (asyncio binds them to both families; 127.0.0.1
+    serves). Any spelling of the unspecified address counts (``0.0.0.0``, ``::``,
+    ``::0``, ``0:0:0:0:0:0:0:0``, bracketed ``[::]``); see _resolve_engine_uri.
+    """
+    if not bind_host:
+        return 4
+    try:
+        addr = ipaddress.ip_address(bind_host.strip('[]'))
+    except ValueError:
+        return None
+    return addr.version if addr.is_unspecified else None
 
 
 def _resolve_engine_uri(config: Dict[str, Any], bind_host: str, bind_port: int) -> Tuple[str, str]:
@@ -425,10 +437,11 @@ def _resolve_engine_uri(config: Dict[str, Any], bind_host: str, bind_port: int) 
     if not os.environ.get(oauth_resource.ENV_RESOURCE):
         # Only the built-in default would apply; it names RocketRide Cloud, not
         # this engine. A deployment that wants the derivation sets the variable.
-        if bind_host in _WILDCARD_HOSTS:
+        wildcard_family = _wildcard_family(bind_host)
+        if wildcard_family:
             # asyncio binds '' to IPv4 and IPv6, '0.0.0.0' to IPv4 only and '::'
             # to IPv6 only (IPV6_V6ONLY), so each needs the loopback it serves.
-            host = '[::1]' if bind_host == '::' else '127.0.0.1'
+            host = '[::1]' if wildcard_family == 6 else '127.0.0.1'
             return f'ws://{host}:{bind_port}', 'self default'
         try:
             ipaddress.ip_address(bind_host)
