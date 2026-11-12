@@ -348,19 +348,54 @@ def _reserved_container(app_id: str, module_id: str) -> bool:
     return module_id.startswith(f'{_PLATFORM_NAMESPACE}_') and not _is_first_party(app_id)
 
 
-async def _container_taken_by(account: Any, org_id: str, conn: Any, app_id: str, module_id: str) -> str:
-    """Another visible app id that derives ``module_id``, or ''.
+def _first_bound_at(rows: List[Dict[str, Any]]) -> Optional[float]:
+    """When an app was FIRST bound: the earliest ``createdAt`` of its rows.
 
-    Reads every caller-visible publish row (public rows from every org, plus
-    the caller's team and user rows). Raises on a registry error, so the
-    caller can refuse the deploy rather than skip the check.
+    ``createdAt`` is set once per binding (both backends keep it across
+    repoints), unlike ``publishedAt``, which every repoint moves forward and
+    would let a newcomer overtake an incumbent that merely shipped an update.
+    None when no row carries a number (unknown: callers fail closed).
+    """
+    times = [r.get('createdAt') for r in rows]
+    known = [float(t) for t in times if isinstance(t, (int, float)) and not isinstance(t, bool)]
+    return min(known) if known else None
+
+
+async def _container_claims(account: Any, org_id: str, conn: Any, app_id: str, module_id: str) -> Dict[str, Any]:
+    """Other visible app ids holding ``module_id`` -> when each was first bound.
+
+    An app holds a name when its id derives it OR an artifact of it stores it
+    (a legacy, non-derived moduleId). Reads every caller-visible publish row
+    (public rows from every org, plus the caller's team and user rows): the
+    engine cannot see other orgs' private apps. A stored name that is
+    reserved for the claimant (_reserved_container) is withheld at resolve
+    anyway and holds nothing. Raises on a registry error, so callers refuse
+    rather than skip the check.
     """
     rows = await account.publish_list(org_id, 'app', _audiences_of(conn))
+    by_app: Dict[str, List[Dict[str, Any]]] = {}
     for row in rows or []:
         other = str(row.get('appId') or '')
-        if other and other != app_id and module_id_of(other) == module_id:
-            return other
-    return ''
+        if other and other != app_id:
+            by_app.setdefault(other, []).append(row)
+    claims: Dict[str, Any] = {}
+    for other, other_rows in by_app.items():
+        holds = module_id_of(other) == module_id
+        if not holds:
+            for row in other_rows:
+                try:
+                    artifact = await account.deployments_artifact(
+                        str(row.get('orgId') or org_id), other, int(row.get('version') or 0)
+                    )
+                except Exception:
+                    continue
+                stored = str(artifact.get('moduleId') or '') if isinstance(artifact, dict) else ''
+                if stored == module_id and not _reserved_container(other, stored):
+                    holds = True
+                    break
+        if holds:
+            claims[other] = _first_bound_at(other_rows)
+    return claims
 
 
 # =============================================================================
@@ -487,19 +522,22 @@ async def handle_app_add(conn: Any, request: Dict[str, Any]) -> Dict[str, Any]:
             f'app id ({module_id!r} for {app_id!r}). Remove moduleId from package.json, or set it to '
             f'{module_id!r}.',
         )
-    # A name another app already derives (acme.foo vs the bare acme_foo, or
-    # acme.foo_bar vs acme_foo.bar) would make resolve withhold BOTH apps, so
-    # a newcomer could hide an existing one: refuse it here, fail closed.
+    # A name another visible app already holds (acme.foo vs the bare
+    # acme_foo, acme.foo_bar vs acme_foo.bar, or a legacy stored name) is
+    # refused, fail closed, so a newcomer cannot contest an existing app's
+    # container. An org that already deploys this app id is the incumbent and
+    # is never locked out (publish re-checks by first-bind time).
     try:
-        taken_by = await _container_taken_by(account, org_id, conn, app_id, module_id)
+        incumbent = bool(await account.deployments_versions(org_id, app_id))
+        claims = {} if incumbent else await _container_claims(account, org_id, conn, app_id, module_id)
     except Exception as exc:
         debug(f'[app_deploy] container-name check failed: {exc}')
         return conn.build_error(request, 'could not check the app id against existing apps; try again')
-    if taken_by:
+    if claims:
         return conn.build_error(
             request,
             f'App id {app_id!r} derives the container name {module_id!r}, which the existing app '
-            f'{taken_by!r} already uses. Choose a different app id.',
+            f'{sorted(claims)[0]!r} already uses. Choose a different app id.',
         )
 
     # ── Registry row first: version allocation names the content paths ────
@@ -906,6 +944,25 @@ async def handle_deploy_app(conn: Any, request: Dict[str, Any]) -> Dict[str, Any
         # the pointer would mint URLs to an empty directory.
         if not _is_built(entry):
             return conn.build_error(request, _not_built_error(app_id, version, entry))
+        # Container-name re-check (#1022): an app that slipped past receipt
+        # (the holder was not visible then) may not bind while an app bound
+        # EARLIER holds its name. The first-bound app keeps it, the same rule
+        # resolve applies; a never-bound app yields to any holder.
+        if developer:
+            module_id = str(artifact.get('moduleId') or module_id_of(app_id))
+            try:
+                claims = await _container_claims(account, home, conn, app_id, module_id)
+                own_first = _first_bound_at(await account.publish_of_app(home, 'app', app_id)) if claims else None
+            except Exception as exc:
+                debug(f'[app_deploy] container-name check failed: {exc}')
+                return conn.build_error(request, 'could not check the app id against existing apps; try again')
+            earlier = sorted(o for o, t in claims.items() if own_first is None or (t is not None and t < own_first))
+            if earlier:
+                return conn.build_error(
+                    request,
+                    f'{app_id} loads under the container name {module_id!r}, which {earlier[0]!r} already '
+                    'holds and was published first. Deploy it under a different app id.',
+                )
 
         row = await account.publish_set(
             home, 'app', app_id, audience, version, manifest_snapshot(entry, artifact), _actor_of(conn)
@@ -1491,6 +1548,10 @@ async def resolve_app_pins(org_id: str, user_id: Optional[str], team_ids: List[s
     # Precedence: sorted so each app id's winner lands LAST and the blind
     # dict-overwrite below keeps it (see _precedence_sorted).
     resolved: Dict[str, Dict[str, Any]] = {}
+    # app id -> its caller-visible rows, for first-bind ordering of containers.
+    rows_of: Dict[str, List[Dict[str, Any]]] = {}
+    for row in rows:
+        rows_of.setdefault(str(row.get('appId') or ''), []).append(row)
     for row in _precedence_sorted(rows):
         # The SERVING gate (binding live, deployment serveable for the rung,
         # build 'ok') — shared with the owner's where-list so App Builder
@@ -1564,10 +1625,13 @@ async def resolve_app_pins(org_id: str, user_id: Optional[str], team_ids: List[s
         if snapshot.get('configuration'):
             entry['configuration'] = snapshot.get('configuration')
         resolved[app_id] = entry
-    return _unique_containers(list(resolved.values()))
+    first_bound = {app_id: _first_bound_at(rows_of.get(app_id, [])) for app_id in resolved}
+    return _unique_containers(list(resolved.values()), first_bound)
 
 
-def _unique_containers(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _unique_containers(
+    entries: List[Dict[str, Any]], first_bound: Optional[Dict[str, Optional[float]]] = None
+) -> List[Dict[str, Any]]:
     """The entries with no two apps sharing one Module Federation container name.
 
     The shell registers every entry's moduleId with ``force: true``, so two
@@ -1575,8 +1639,11 @@ def _unique_containers(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     other's code (#1022). Receipt now derives the name (module_id_of), but
     artifacts stored before that carry whatever the manifest said. When a
     name is claimed more than once, the one app whose id derives it keeps
-    it; if no app, or more than one, derives it, nobody can be told apart
-    from an impostor and every claimant is dropped (fail closed). A name
+    it. If no app, or more than one, derives it, the contender bound FIRST
+    (``first_bound``: earliest binding creation time) keeps it and the later
+    ones are withheld, so a newcomer cannot hide an incumbent; a tie or an
+    unknown time cannot be ordered, and every claimant is withheld (fail
+    closed). A name
     claimed once is kept even when it is not derived, so a legacy build
     with its own name still loads — unless it is reserved
     (_reserved_container), which is withheld first, claimed or not.
@@ -1595,11 +1662,27 @@ def _unique_containers(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             keep.append(entry)
             continue
         owners = [e for e in group if module_id_of(str(e.get('id') or '')) == e.get('moduleId')]
-        if len(owners) == 1 and owners[0] is entry:
+        if len(owners) == 1:
+            winner = owners[0]
+        else:
+            winner = _first_bound_of(owners or group, first_bound or {})
+        if winner is entry:
             keep.append(entry)
         else:
             debug(f'[app_deploy] app {entry.get("id")!r} withheld: moduleId {entry.get("moduleId")!r} is shared')
     return keep
+
+
+def _first_bound_of(
+    contenders: List[Dict[str, Any]], first_bound: Dict[str, Optional[float]]
+) -> Optional[Dict[str, Any]]:
+    """The one contender bound strictly first, or None (a tie or an unknown time)."""
+    times = [first_bound.get(str(e.get('id') or '')) for e in contenders]
+    if any(t is None for t in times):
+        return None
+    earliest = min(times)
+    winners = [e for e, t in zip(contenders, times) if t == earliest]
+    return winners[0] if len(winners) == 1 else None
 
 
 # =============================================================================

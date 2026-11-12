@@ -171,7 +171,6 @@ def test_subresource_files_are_served_inline(monkeypatch, name):
     assert resp.content == b'payload'
     assert 'content-disposition' not in resp.headers
     assert 'sandbox' not in resp.headers.get('content-security-policy', '')
-    assert resp.headers.get('cache-control') == 'private, max-age=3600'
 
 
 def test_every_bundle_response_sets_nosniff_itself(monkeypatch):
@@ -234,3 +233,40 @@ def test_head_gets_the_same_policy_as_get(monkeypatch):
     assert _is_sandboxed_download(page), dict(page.headers)
     assert page.content == b''
     assert worker.status_code == 404
+
+
+# =============================================================================
+# HTTP CACHE: a cached script never answers a service-worker fetch
+# =============================================================================
+# A service-worker registration with updateViaCache: 'all' may be answered
+# from the HTTP cache. Without Vary, a 200 cached from an ordinary script
+# fetch would satisfy it and the refusal above would never run.
+
+
+@pytest.mark.parametrize('name', ['remoteEntry.js', 'index.html', 'static/image/logo.png', 'static/css/index.css'])
+def test_every_bundle_response_varies_on_service_worker(monkeypatch, name):
+    """Every bundle response names Service-Worker in Vary, so a cache keys a
+    service-worker fetch apart from an ordinary one.
+    """
+    resp = _get(monkeypatch, name)
+
+    vary = [v.strip().lower() for v in resp.headers.get('vary', '').split(',')]
+    assert 'service-worker' in vary, dict(resp.headers)
+
+
+@pytest.mark.parametrize('name', ['remoteEntry.js', 'static/js/async/123.mjs'])
+def test_dist_scripts_are_never_stored(monkeypatch, name):
+    """Scripts are served no-store, so no cache holds a copy a service-worker
+    registration could reuse.
+    """
+    resp = _get(monkeypatch, name)
+
+    assert resp.headers.get('cache-control') == 'no-store'
+
+
+@pytest.mark.parametrize('name', ['static/css/index.css', 'static/image/logo.png', 'mf-manifest.json', 'index.html'])
+def test_non_script_files_keep_the_bundle_cache(monkeypatch, name):
+    """Control: everything else keeps the one-hour private cache."""
+    resp = _get(monkeypatch, name)
+
+    assert resp.headers.get('cache-control') == 'private, max-age=3600'

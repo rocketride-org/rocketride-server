@@ -582,11 +582,21 @@ _INLINE_BUNDLE_TYPES = frozenset(
 )
 _INLINE_BUNDLE_PREFIXES = ('font/', 'audio/', 'video/', 'image/')
 _DOCUMENT_HEADERS = {'Content-Security-Policy': 'sandbox', 'Content-Disposition': 'attachment'}
+# Scripts are never stored: a service-worker registration with
+# updateViaCache: 'all' may be answered from the HTTP cache, and a script
+# cached from an ordinary fetch would then skip _serve_versioned's
+# Service-Worker refusal. Vary: Service-Worker on every response keeps any
+# cache that does store a bundle from mixing the two kinds of fetch.
+_SCRIPT_BUNDLE_TYPES = frozenset({'text/javascript', 'application/javascript', 'application/x-javascript'})
 
 
 def _bundle_headers(media_type: str) -> dict:
     """Response headers for one dist file of the given type (see above)."""
-    headers = {'Cache-Control': _BUNDLE_CACHE, 'X-Content-Type-Options': 'nosniff'}
+    headers = {
+        'Cache-Control': 'no-store' if media_type in _SCRIPT_BUNDLE_TYPES else _BUNDLE_CACHE,
+        'Vary': 'Service-Worker',
+        'X-Content-Type-Options': 'nosniff',
+    }
     inline = media_type in _INLINE_BUNDLE_TYPES or (
         media_type.startswith(_INLINE_BUNDLE_PREFIXES) and 'svg' not in media_type and 'xml' not in media_type
     )

@@ -1885,11 +1885,14 @@ def _install_pins(monkeypatch, apps):
             'snapshot': {'name': app_id},
             'publishedAt': 2000,
         }
-        for app_id, _module_id, org_id in apps
+        for app_id, _module_id, org_id, *_ in apps
     ]
+    for row, (_app_id, _module_id, _org_id, *created) in zip(rows, apps):
+        if created:
+            row['createdAt'] = created[0]
     artifacts = {
         (org_id, app_id): {'kind': 'app', 'appId': app_id, 'moduleId': module_id, 'appVersion': '1.0.0'}
-        for app_id, module_id, org_id in apps
+        for app_id, module_id, org_id, *_ in apps
     }
 
     async def publish_list(org_id, kind, audiences):
@@ -1965,8 +1968,14 @@ async def test_resolve_keeps_distinct_and_legacy_moduleids(registry, monkeypatch
 # ── Receipt: a new app may not derive an existing app's container name ──────
 
 
-def _existing_apps(monkeypatch, app_ids, fail=False):
-    """publish_list answers one public, enabled row per existing app id."""
+def _existing_apps(monkeypatch, app_ids, fail=False, stored=None):
+    """publish_list answers one public, enabled row per existing app id; each
+    row's artifact stores ``stored[app_id]`` as its moduleId (default: the
+    derived name).
+    """
+    from ai.account.app_deploy import module_id_of
+
+    stored = stored or {}
 
     async def publish_list(org_id, kind, audiences):
         if fail:
@@ -1976,7 +1985,11 @@ def _existing_apps(monkeypatch, app_ids, fail=False):
             for app_id in app_ids
         ]
 
+    async def deployments_artifact(org_id, project_id, version):
+        return {'kind': 'app', 'appId': project_id, 'moduleId': stored.get(project_id) or module_id_of(project_id)}
+
     monkeypatch.setattr(account_singleton, 'publish_list', publish_list, raising=False)
+    monkeypatch.setattr(account_singleton, 'deployments_artifact', deployments_artifact, raising=False)
 
 
 @pytest.mark.asyncio
@@ -2088,3 +2101,132 @@ async def test_resolve_fallback_name_uses_the_derivation(registry, monkeypatch):
     resolved = await resolve_app_pins('org1', 'u1', [])
 
     assert [e['moduleId'] for e in resolved] == ['acme_my_app']
+
+
+# ── Round 2: incumbents keep their names; stored names count; publish re-checks
+
+
+@pytest.mark.asyncio
+async def test_add_refuses_a_name_an_older_artifact_stores(registry, content_store, monkeypatch):
+    """An older app whose artifact STORES the name (a legacy, non-derived
+    moduleId) holds it too: a newcomer deriving it would hide that app.
+    """
+    _existing_apps(monkeypatch, ['xyz.old'], stored={'xyz.old': 'acme_brandy'})
+    conn = _FakeConn()
+
+    result = await handle_app_add(conn, _add_request(data=_app_zip()))
+
+    assert result['success'] is False
+    assert 'xyz.old' in result['message']
+    assert registry.publish_calls == []
+
+
+@pytest.mark.asyncio
+async def test_add_never_locks_out_an_incumbent(registry, content_store, monkeypatch):
+    """An org that already deploys this app id keeps deploying it, even when a
+    later app derives the same name.
+    """
+    registry.add_version(1, '1.0.0')  # org1 already has acme.brandy on its rail
+    _existing_apps(monkeypatch, ['acme_brandy'])
+    conn = _FakeConn()
+
+    result = await handle_app_add(conn, _add_request(data=_app_zip()))
+
+    assert result['success'] is True
+
+
+def _foreign_public_row(registry, app_id, created_at):
+    """A public binding of another org's app, visible through publish_list."""
+    registry.publishes[(app_id, 'public~')] = {
+        'orgId': 'org-other',
+        'appId': app_id,
+        'audience': dict(AUD_PUBLIC),
+        'version': 1,
+        'state': 'enabled',
+        'snapshot': {'name': app_id},
+        'publishedAt': created_at,
+        'createdAt': created_at,
+    }
+
+
+@pytest.mark.asyncio
+async def test_publish_refuses_a_name_an_earlier_app_holds(registry, quiet_push):
+    """The collision is re-checked at publish: a never-published app may not
+    bind while an earlier-bound app already holds its derived name (it may
+    have slipped past receipt while that app was not visible).
+    """
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready')
+    _foreign_public_row(registry, 'acme_brandy', 100.0)
+    owner = _FakeConn(teams=_TEAMS, developer_id='acme')
+
+    result = await handle_deploy_app(owner, _request('publish', version=1, target='@public'))
+
+    assert result['success'] is False
+    assert 'acme_brandy' in result['message']
+    assert registry.set_calls == []
+
+
+@pytest.mark.asyncio
+async def test_publish_lets_the_earlier_app_republish(registry, quiet_push):
+    """Control: the app bound first keeps publishing (repoints included)."""
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready')
+    registry.seed_publish(AUD_TEAM, 1)
+    registry.publishes[('acme.brandy', 'team~t1')]['createdAt'] = 50.0
+    _foreign_public_row(registry, 'acme_brandy', 100.0)
+    owner = _FakeConn(teams=_TEAMS, developer_id='acme')
+
+    result = await handle_deploy_app(owner, _request('publish', version=1, target='@public'))
+
+    assert result['success'] is True
+
+
+@pytest.mark.asyncio
+async def test_resolve_keeps_the_earlier_bound_app_on_a_derived_collision(registry, monkeypatch):
+    """Two apps deriving one name: the one bound first keeps it, the later one
+    is withheld (a newcomer cannot hide an incumbent).
+    """
+    _install_pins(
+        monkeypatch,
+        [
+            ('acme_foo.bar', 'acme_foo_bar', 'org-acmefoo', 200.0),
+            ('acme.foo_bar', 'acme_foo_bar', 'org-acme', 100.0),
+        ],
+    )
+
+    resolved = await resolve_app_pins('org1', 'u1', [])
+
+    assert [e['id'] for e in resolved] == ['acme.foo_bar']
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('first, second', [(100.0, 100.0), (100.0, None)])
+async def test_resolve_fails_closed_on_a_tie_or_unknown_time(registry, monkeypatch, first, second):
+    """A tie, or a binding with no creation time, cannot be ordered: both are
+    withheld, as before.
+    """
+    pins = [('acme.foo_bar', 'acme_foo_bar', 'org-acme', first), ('acme_foo.bar', 'acme_foo_bar', 'org-acmefoo')]
+    if second is not None:
+        pins[1] = pins[1] + (second,)
+    _install_pins(monkeypatch, pins + [('acme.brandy', 'acme_brandy', 'org-acme', 1.0)])
+
+    resolved = await resolve_app_pins('org1', 'u1', [])
+
+    assert [e['id'] for e in resolved] == ['acme.brandy']
+
+
+@pytest.mark.asyncio
+async def test_resolve_derived_owner_beats_an_earlier_impostor(registry, monkeypatch):
+    """Time never helps a stored (non-derived) name against the app whose id
+    derives it.
+    """
+    _install_pins(
+        monkeypatch,
+        [
+            ('xyz.lookalike', 'acme_brandy', 'org-xyz', 1.0),
+            ('acme.brandy', 'acme_brandy', 'org-acme', 900.0),
+        ],
+    )
+
+    resolved = await resolve_app_pins('org1', 'u1', [])
+
+    assert [e['id'] for e in resolved] == ['acme.brandy']
