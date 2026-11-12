@@ -33,9 +33,28 @@ Features:
     - No manual streaming — FastAPI/Starlette handles everything
 """
 
+import os
+
 import jwt
 from fastapi import Request
 from fastapi.responses import FileResponse, JSONResponse
+from rocketlib import warning
+
+
+def warn_if_signing_key_is_ephemeral() -> None:
+    """Warn at engine start when fetch URLs will not survive a restart.
+
+    Only the filesystem store backend signs /task/fetch URLs; S3 and Azure
+    presign. With RR_SIGNING_KEY unset the key is random per process, so a URL
+    stops verifying when the engine restarts, and on every other replica.
+    """
+    store_url = os.environ.get('RR_STORE_URL') or ''
+    if os.environ.get('RR_SIGNING_KEY') or (store_url and not store_url.startswith('filesystem://')):
+        return
+    warning(
+        'RR_SIGNING_KEY is not set: file download URLs stop working when the engine restarts, and on '
+        'other replicas. Set it, or use a shared s3:// or azureblob:// store (helm: sharedStoreConfigured).'
+    )
 
 
 def _decode_fetch_claim(token: str):

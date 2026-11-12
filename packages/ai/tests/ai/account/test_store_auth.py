@@ -816,3 +816,15 @@ class TestFetchSigningKeyStaysInTheEngine:
 
         assert url == 'http://engine/task/fetch?token=signed-by-engine'
         assert asked == [('store.url', {'path': 'reports/q1.csv', 'expires_in': 600, 'download_name': 'q1.csv'})]
+
+    @pytest.mark.asyncio
+    async def test_a_task_with_no_channel_refuses_rather_than_sign_a_dead_link(self, monkeypatch, store):
+        """No --data_port means no channel; a URL signed with the task's own random key would only 401."""
+        from ai.modules.data import channel
+
+        monkeypatch.setattr(channel.task_channel, 'available', False)
+        monkeypatch.setattr(Store, '_get_current_task', staticmethod(lambda: {'identity': {'userId': 'user-1'}}))
+        fs = store._file_store(RequestContext.engine('user-1'), client_id='user-1', root='users/user-1/files')
+
+        with pytest.raises(RuntimeError, match='no channel'):
+            await fs.get_url('reports/q1.csv')

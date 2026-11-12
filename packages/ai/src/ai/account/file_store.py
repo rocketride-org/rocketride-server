@@ -60,6 +60,7 @@ FETCH_CLAIM_VERSION = 2
 # leaves it unset: random per process, so URLs verify until the engine restarts.
 # Never a value written down anywhere (#1070) — anyone holding the key can sign
 # a claim for any path under the store root.
+# Assumes one web worker per engine: a second worker process would draw its own key.
 _PROCESS_FETCH_SIGNING_KEY = secrets.token_urlsafe(32)
 
 
@@ -1303,12 +1304,18 @@ class FileStore:
         # engine signs, resolving the path again under the task's own identity.
         from ai.modules.data.channel import task_channel
 
+        from .store import Store
+
         if task_channel.available:
             import asyncio
 
             arguments = {'path': path, 'expires_in': expires_in, 'download_name': download_name}
             reply = await asyncio.to_thread(task_channel.request_sync, 'store.url', arguments)
             return reply.body['url']
+        if Store._get_current_task() is not None:
+            # A task with no channel (no --data_port) would sign with its own
+            # random key: a URL the engine refuses. Say so instead.
+            raise RuntimeError('a fetch URL needs the engine, and this task has no channel to it')
 
         import time
         import jwt
