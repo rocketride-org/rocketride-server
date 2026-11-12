@@ -79,7 +79,7 @@ TEST_CASE("store::validatePipeline") {
 
     SECTION("valid") { REQUIRE(reported(root).empty()); }
 
-    // edit-03: a typo in the provider
+    // A typo in the provider
     SECTION("provider:unknown") {
         llm["provider"] = "llm_opnai";
 
@@ -91,8 +91,21 @@ TEST_CASE("store::validatePipeline") {
                     "provider from the service catalog"});
     }
 
-    // build-04: the control entry on the node that calls the LLM, not on the
-    // LLM, so the run fails with "No control listeners registered for llm"
+    // An unknown provider reports once; its wires are not checked against it
+    SECTION("provider:unknown, wired") {
+        llm["provider"] = "llm_opnai";
+        llm["input"] = R"([{"lane": "text", "from": "parse_1"}])"_json;
+        components[5]["input"].append(
+            R"({"lane": "answers", "from": "llm_openai_1"})"_json);
+
+        runAccepts();
+        auto errors = reported(root);
+        REQUIRE(errors.size() == 1);
+        CHECK(errors[0].startsWith("llm_openai_1: "));
+    }
+
+    // The control entry on the node that calls the LLM, not on the LLM, so
+    // the run fails with "No control listeners registered for llm"
     SECTION("control:backwards") {
         llm.removeMember("control");
         extract["control"] =
@@ -107,7 +120,7 @@ TEST_CASE("store::validatePipeline") {
                     "being called, with from naming the node that calls it"});
     }
 
-    // build-03: the chunker fed documents by a node that never writes them
+    // The chunker fed documents by a node that never writes them
     SECTION("lane:not produced") {
         chunker["input"][0]["from"] = "parse_1";
 
@@ -119,7 +132,7 @@ TEST_CASE("store::validatePipeline") {
                     "produces text, table, image, video, audio"});
     }
 
-    // edit-03's other fault: a lane the node never reads
+    // A lane the node never reads
     SECTION("lane:not taken") {
         llm["input"] = R"([{"lane": "text", "from": "parse_1"}])"_json;
 
@@ -182,7 +195,7 @@ TEST_CASE("store::validatePipeline") {
             components.append(component);
         };
 
-        // A "*" lane takes and forwards any lane (#2667)
+        // A "*" lane takes and forwards any lane
         SECTION("any lane") {
             add("forward_1", "fx_forward", "table", "parse_1");
             add("text_1", "fx_text", "text", "forward_1");
