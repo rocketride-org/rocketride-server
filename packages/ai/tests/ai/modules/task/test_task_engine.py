@@ -1969,6 +1969,24 @@ async def test_a_restart_teardown_keeps_the_restart_meaning_it_started_with():
 
 
 @pytest.mark.asyncio
+async def test_a_teardown_outside_a_restart_clears_a_stale_end_deferred():
+    """A teardown that is not part of a restart sends the run's end itself. It
+    must clear an _end_deferred left by an earlier restart, or a stop during
+    the next restart's wait would end the run a second time.
+    """
+    t = _task()
+    t._terminated_called = False
+    t._is_restarting = False
+    t._end_deferred = True  # left by an earlier restart's teardown
+    t._status = SimpleNamespace(status='', state=0)
+    t._send_status_update = AsyncMock(side_effect=RuntimeError('stop here'))
+
+    with pytest.raises(RuntimeError, match='stop here'):
+        await Task._terminated(t)
+    assert t._end_deferred is False
+
+
+@pytest.mark.asyncio
 async def test_an_engine_that_exits_during_a_restarts_start_ends_the_new_run(monkeypatch):
     """Once the new engine is spawned, a termination is the new run's end: an
     engine that exits while start_task still awaits (its stdio disconnect runs
