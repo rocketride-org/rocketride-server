@@ -146,7 +146,9 @@ def _allowed_domains(raw) -> list[str]:
     for position, name in enumerate(_names(raw, 'allow_domains'), 1):
         domain = name.lower().rstrip('.')
         # ASCII is checked before lowercasing could make it so (the Kelvin sign lowercases to "k").
-        if not name.isascii() or len(domain) > _MAX_DOMAIN_CHARS or not _DOMAIN.match(domain):
+        # An IP literal passes the label rule, but Tenki's egress filter matches hostnames, so it would never allow anything.
+        ip_literal = domain.rsplit('.', 1)[-1].isdigit()
+        if not name.isascii() or len(domain) > _MAX_DOMAIN_CHARS or not _DOMAIN.match(domain) or ip_literal:
             # An entry with an "@" may be a URL that carries credentials: say where it is, not what it says.
             refused.append(f'entry {position} (not shown: it may hold a credential)' if '@' in name else name)
             positions.append(str(position))

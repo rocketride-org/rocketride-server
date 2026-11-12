@@ -706,7 +706,7 @@ def test_allowed_domains_are_sent_as_tenki_normalizes_them(monkeypatch, logs):
 
 
 @pytest.mark.parametrize(
-    'entry', ['https://pypi.org', 'pypi.org:443', 'under_score.org', '*.*.org', '10.0.0.0/8', 'ｐypi.org']
+    'entry', ['https://pypi.org', 'pypi.org:443', 'under_score.org', '*.*.org', '10.0.0.0/8', '1.1.1.1', 'ｐypi.org']
 )
 def test_an_allowlist_entry_tenki_refuses_stops_startup_naming_the_rule_first(monkeypatch, logs, entry):
     glb, _ = _global(monkeypatch, {'apikey': _KEY, 'allow_domains': ['ok.org', entry]})
