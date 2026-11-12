@@ -41,6 +41,9 @@ claude plugin marketplace add rocketride-org/rocketride-server
 claude plugin install rocketride@rocketride
 ```
 
+This is a large monorepo. To check out only the plugin files, add
+`--sparse .claude-plugin docs/agents` to the `marketplace add` command.
+
 Self-hosted engines serve the same MCP at `http://localhost:5565/mcp` on the same machine, or at `https://<host>/mcp` behind a TLS proxy for any other host. The plugin registers only the hosted server, so add your own server by hand; see [MCP self-hosting](https://docs.rocketride.org/connect/mcp/http/self-hosting).
 
 ## Install in Codex
