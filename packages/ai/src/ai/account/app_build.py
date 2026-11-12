@@ -1194,22 +1194,24 @@ def _safe_asset_rel(rel: str) -> Optional[str]:
 # =============================================================================
 
 
-_LOCK_PATH_RESOLUTION = re.compile(
-    r"(?:\bdirectory:\s*|\btarball:\s*file:|\blink:|\bfile:)\s*['\"]?([^'\"\s,}]+)", re.IGNORECASE
-)
+_LOCK_PATH_RESOLUTION = re.compile(r"(directory:|tarball:\s*file:|link:|file:)\s*['\"]?([^'\"\s,}]+)", re.IGNORECASE)
+# A block-style importer key, alone on its line: `  apps/x:` or `  'apps/x':`.
+_LOCK_IMPORTER_KEY = re.compile(r"""^  (['"]?)([^'"#:{}\[\]\s][^'"#{}\[\]]*?)\1:\s*$""")
 
 
 def _refuse_lockfile_paths(lock_text: str) -> None:
     """Raise BuildFailure when the lockfile resolves a package to a local path
     outside the source tree.
 
-    ``directory:``, ``tarball: file:``, ``link:`` and ``file:`` values are
-    resolved the way pnpm writes them: entries under ``importers:`` are
-    relative to that importer's directory (a sibling workspace package is
-    ``link:../../packages/x`` from ``apps/x``), all others relative to the
-    workspace root. A path that is absolute, home-relative or resolves above
-    the workspace root is refused. The install keeps lockfile resolutions, so
-    the manifest check alone does not cover them.
+    Paths are resolved the way pnpm writes them. Under ``importers:``, a
+    ``link:`` value or a ``specifier:`` line is relative to that importer's
+    directory (a workspace sibling is ``link:../../packages/x`` from
+    ``apps/x``); every other path (``version: file:``, ``directory:``,
+    ``tarball: file:``) is relative to the workspace root. The importer is
+    taken only from a strict block-style key line; any other line at that
+    level resets it to the root, so the check never runs against a stale or
+    guessed directory. A path that is absolute, home-relative or resolves
+    above the workspace root is refused.
     """
     section = ''
     importer = '.'
@@ -1222,16 +1224,22 @@ def _refuse_lockfile_paths(lock_text: str) -> None:
             section = line.split(':', 1)[0].strip().strip('\'"')
             importer = '.'
             continue
-        if section == 'importers' and indent == 2 and line.rstrip().endswith(':'):
-            importer = line.strip()[:-1].strip().strip('\'"') or '.'
-            continue
-        base = importer if section == 'importers' else '.'
+        if section == 'importers' and indent <= 2:
+            key = _LOCK_IMPORTER_KEY.match(line)
+            importer = key.group(2).strip() if key else '.'
+            if key:
+                continue
         for match in _LOCK_PATH_RESOLUTION.finditer(line):
-            target = match.group(1).strip().replace('\\', '/')
+            kind = match.group(1).lower()
+            target = match.group(2).strip().replace('\\', '/')
             if target.startswith(('/', '~')) or re.match(r'^[a-zA-Z]:', target) is not None:
                 raise BuildFailure(
                     'materialize', f'pnpm-lock.yaml resolves a package outside the source tree: {target!r}'
                 )
+            importer_relative = section == 'importers' and (
+                kind == 'link:' or line.lstrip().lower().startswith('specifier:')
+            )
+            base = importer if importer_relative else '.'
             resolved = posixpath.normpath(posixpath.join(base, target))
             if resolved == '..' or resolved.startswith('../'):
                 raise BuildFailure(

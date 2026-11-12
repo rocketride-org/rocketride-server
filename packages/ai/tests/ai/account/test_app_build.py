@@ -1399,6 +1399,19 @@ def test_resolutions_table_is_checked_like_overrides(tmp_path):
         ),
         ('importers:\n  apps/x:\n    dependencies:\n      y:\n        version: link:../../../elsewhere\n', True),
         ('packages:\n  x@1.0.0:\n    resolution: {directory: packages/x, type: directory}\n', False),
+        # a flow-style importer after a block one must not inherit its directory
+        (
+            'importers:\n  apps/a/b:\n    dependencies: {}\n'
+            "  .: {dependencies: {y: {specifier: 'workspace:*', version: 'link:../../../evil'}}}\n",
+            True,
+        ),
+        # a comment on the key line resets to the root
+        (
+            'importers:\n  apps/a/b:\n    dependencies: {}\n  .: # root\n    dependencies:\n      y:\n        version: link:../../../evil\n',
+            True,
+        ),
+        # version: file: under importers is root-relative
+        ('importers:\n  apps/a/b:\n    dependencies:\n      y:\n        version: file:../x\n', True),
         ('packages:\n  react@18.2.0:\n    resolution: {integrity: sha512-AAAA}\n', False),
     ],
 )
