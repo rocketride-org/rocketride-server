@@ -61,7 +61,7 @@ import { createRetainedRegistry, localRetainedPort } from '../ops/retained';
 import type { IRetainedPort, RetainedSubscriber } from '../ops/retained';
 import { isEmbeddedDevShell, isSameOriginEmbed, isDevHooksEnabled, isFramedShell, tokenStore, tabSession, updateTabSession } from '../util/devGate';
 import { TelemetryChannel, type TelemetryFact } from '../util/telemetryChannel';
-import { shellReporter } from '../telemetry/host';
+import { dropTelemetryHold, shellReporter } from '../telemetry/host';
 import { AUTH_START_STAMP_KEY, getStoredVerifier, clearStoredVerifier, getStoredRedirectUri, clearStoredRedirectUri } from '../util/pkce';
 import { getAuthPhase, setAuthPhase } from './authPhase';
 import {
@@ -1716,7 +1716,10 @@ export class ConnectionManager implements IConnectionManager {
 
 	/**
 	 * Drop the held telemetry facts and, in a tab, their sessionStorage mirror and the round-trip
-	 * stamp (an embedded dev preview holds neither there; see newTelemetryChannel). Never throws.
+	 * stamp (an embedded dev preview holds neither there; see newTelemetryChannel), and the
+	 * telemetry host's capture hold: every caller (sign-out, a rejected credential, another tab's
+	 * sign-out) ends the session, and a capture held for it must never be replayed by a later SDK
+	 * start under the next account. Never throws.
 	 */
 	private dropHeldTelemetry(): void {
 		this.telemetryDrops++;
@@ -1724,6 +1727,11 @@ export class ConnectionManager implements IConnectionManager {
 			this.telemetry.clear();
 			this.mirroredHeldFacts = [];
 			this.publishTelemetrySnapshot(null);
+		} catch {
+			// telemetry must never break the shell
+		}
+		try {
+			dropTelemetryHold();
 		} catch {
 			// telemetry must never break the shell
 		}

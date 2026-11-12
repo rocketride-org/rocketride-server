@@ -8,9 +8,11 @@
 // then bottom-right, each narrowed to the free gutter beside what it would
 // cover; a toast narrowed below COMPACT_BELOW carries the short phone copy.
 // Phones: a slim bar at the bottom, raised just above an obstacle it would
-// cover. When no clear spot exists yet (on a laptop the hero terminal
-// fills the bottom of the first screen), the banner waits until the visitor
-// scrolls one free. Once shown, nextPlacement decides how it follows the page.
+// cover; at rest it always fits, however short the viewport (a phone held
+// sideways, a zoomed page). When no clear spot exists yet (on a laptop the
+// hero terminal fills the bottom of the first screen), the banner waits until
+// the visitor scrolls one free; it never covers what it must keep clear. Once
+// shown, nextPlacement decides how it follows the page.
 // =============================================================================
 
 /** A box in viewport pixels (getBoundingClientRect's edges). */
@@ -28,7 +30,7 @@ export const TOAST_MAX = 380;
 export const TOAST_MIN = 260;
 /** Clearance kept around every obstacle. */
 export const GAP = 8;
-/** The phone bar never rises above this share of the screen height: it waits instead. */
+/** A RAISED phone bar never rises above this share of the screen height: it waits instead (at rest it always fits). */
 export const BAR_MAX_TOP_SHARE = 0.45;
 /** A toast narrower than this carries the short phone copy instead of the heading and body. */
 export const COMPACT_BELOW = 320;
@@ -237,18 +239,20 @@ export type BarPlacement = { bottom: number };
 
 /**
  * The phone bar at the bottom; raised just above an obstacle it would cover (the footer's Privacy
- * settings link, a primary action).
+ * settings link, a primary action). At rest (PHONE_MARGIN from the bottom) it is placed whatever share of a
+ * short viewport it takes: it is the only consent prompt, and nothing would be gained by hiding it there.
  *
  * @param view      The viewport.
  * @param obstacles What the bar may not cover, on screen.
  * @param height    The bar's height (px).
- * @returns The bar's distance from the bottom, or null when it would have to rise above BAR_MAX_TOP_SHARE of the screen.
+ * @returns The bar's distance from the bottom, or null when it would have to RISE above BAR_MAX_TOP_SHARE of the screen.
  */
 export function placeBar(view: View, obstacles: Rect[], height: number): BarPlacement | null {
 	let bottom = PHONE_MARGIN;
 	for (let tries = 0; tries < 4; tries++) {
-		const rect = { left: PHONE_MARGIN, right: view.width - PHONE_MARGIN, top: view.height - bottom - height, bottom: view.height - bottom };
-		if (rect.top < view.height * BAR_MAX_TOP_SHARE) {
+		const rect = barRect(view, bottom, height);
+		const isRaised = bottom > PHONE_MARGIN;
+		if (isRaised && rect.top < view.height * BAR_MAX_TOP_SHARE) {
 			return null;
 		}
 		const hits = obstacles.filter((o) => {
@@ -263,6 +267,18 @@ export function placeBar(view: View, obstacles: Rect[], height: number): BarPlac
 		bottom = Math.ceil(view.height - highest + GAP);
 	}
 	return null;
+}
+
+/**
+ * The rect the phone bar covers at a distance from the bottom.
+ *
+ * @param view   The viewport.
+ * @param bottom The bar's distance from the bottom (px).
+ * @param height The bar's height (px).
+ * @returns The bar's rect in viewport coordinates.
+ */
+function barRect(view: View, bottom: number, height: number): Rect {
+	return { left: PHONE_MARGIN, right: view.width - PHONE_MARGIN, top: view.height - bottom - height, bottom: view.height - bottom };
 }
 
 /**
@@ -294,14 +310,15 @@ export type PlacementDecision = Placement | null | 'keep';
  * Where the banner goes, on its first placement and on every scroll or resize after it.
  *
  * - The phone bar on screen rises above an obstacle marked "always" and settles back once it has
- *   passed; it never vanishes.
+ *   passed; where it cannot clear one it steps aside (null) rather than cover it.
  * - A toast on screen keeps its corner and width (no layout shift while the page scrolls) until
  *   something it must not cover comes under it; then it takes the other corner at the same width if
  *   that is clear, else it is placed again from scratch (it may narrow), else it steps aside (null)
  *   until a corner is clear again.
  * - With nothing placed for this viewport (the first placement, or the window changed size), it is
  *   placed against every obstacle. With no clear spot it waits (null); a placement from before the
- *   resize stays where it is ('keep').
+ *   resize stays where it is ('keep') only while it is still the right variant and still clear in the
+ *   new viewport, else it is hidden (null) until a clear spot exists.
  *
  * @param input The placement on screen, the viewport, the obstacles and the banner's height.
  * @returns The new placement, null to hide the banner, or 'keep'.
@@ -311,29 +328,54 @@ export function nextPlacement(input: PlacementInput): PlacementDecision {
 	const variant = variantFor(input.view);
 	if (current !== null && input.isSameView && current.variant === variant) {
 		if (current.variant === 'phone') {
-			return barOnScreen(input);
+			return barOnScreen(current, input);
 		}
 		return toastOnScreen(current, input);
 	}
 	const first = firstPlacement(variant, input);
-	if (first === null && current !== null) {
+	if (first === null && current !== null && current.variant === variant && stillClear(current, input)) {
 		return 'keep';
 	}
 	return first;
 }
 
 /**
+ * Whether a placement made for an earlier viewport still fits this one: inside the viewport and
+ * covering nothing it must keep clear.
+ *
+ * @param placement The placement on screen.
+ * @param input     The new viewport, the obstacles and the banner's height.
+ * @returns True when it may stay where it is.
+ */
+function stillClear(placement: Placement, input: PlacementInput): boolean {
+	const { view, obstacles, height } = input;
+	if (placement.variant === 'phone') {
+		return !coversAny(barRect(view, placement.bottom, height), obstacles.all);
+	}
+	const rect = toastRect(view, placement.side, placement.width, height);
+	if (rect.left < 0 || rect.right > view.width) {
+		return false;
+	}
+	return !coversAny(rect, obstacles.all);
+}
+
+/**
  * The phone bar on screen, against the obstacles marked "always" only.
  *
+ * @param shown The bar's placement.
  * @param input The viewport, the obstacles and the bar's height.
- * @returns The bar raised or settled back, or 'keep' where it cannot move (it never vanishes).
+ * @returns The bar raised or settled back; where it cannot move, 'keep' while its spot covers nothing marked
+ *          "always", else null (hidden until a clear spot exists).
  */
-function barOnScreen(input: PlacementInput): PlacementDecision {
+function barOnScreen(shown: { variant: 'phone'; bottom: number }, input: PlacementInput): PlacementDecision {
 	const bar = placeBar(input.view, input.obstacles.always, input.height);
-	if (bar === null) {
-		return 'keep';
+	if (bar !== null) {
+		return { variant: 'phone', bottom: bar.bottom };
 	}
-	return { variant: 'phone', bottom: bar.bottom };
+	if (coversAny(barRect(input.view, shown.bottom, input.height), input.obstacles.always)) {
+		return null;
+	}
+	return 'keep';
 }
 
 /**

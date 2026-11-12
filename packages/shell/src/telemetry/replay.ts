@@ -162,6 +162,25 @@ export type ReplayGate = 'save_data' | 'slow_network' | 'low_memory' | null;
 export type ReplayGateReason = Exclude<ReplayGate, null> | 'no_home_block' | 'none';
 
 /**
+ * The rr_replay_gate value for what is known now: a device gate wins; else whether the recording can keep to the
+ * home content decides. Asked at arming and again by the deferred check that decides whether recording starts, so
+ * the value events carry follows the outcome (a home root that mounted after arming turns no_home_block to none).
+ *
+ * @param gate - The device gate (replayGate()), or null.
+ * @param hasHomeBlock - Whether the block outside the home root applies now (homeBlockApplies).
+ * @returns The reason replay is skipped, or 'none' when it may run.
+ */
+export function replayGateReasonFor(gate: ReplayGate, hasHomeBlock: boolean): ReplayGateReason {
+	if (gate !== null) {
+		return gate;
+	}
+	if (!hasHomeBlock) {
+		return 'no_home_block';
+	}
+	return 'none';
+}
+
+/**
  * Device memory (GB, as Chromium reports it: rounded down to a power of two) at
  * or below which replay is skipped. Set from measurements on throttled phone
  * profiles: the recorder's per-interaction work fits the budget on a

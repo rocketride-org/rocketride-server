@@ -86,6 +86,17 @@ export function subscribeConsent(fn: (state: ConsentState, origin: ConsentOrigin
 }
 
 /**
+ * Whether this page's consent decision lives in memory only (no usable storage,
+ * or its write failed): the sign-in path reads it before carrying any context
+ * across the OAuth redirect, which the decision would not survive.
+ *
+ * @returns True when the page decided and storage does not hold that decision.
+ */
+export function consentDecisionUnsaved(): boolean {
+	return consentStore.hasUnsavedDecision();
+}
+
+/**
  * Accepted consent expiry in milliseconds, or null when not accepted/valid.
  * Pure localStorage read — experiment gates (home-ui's roulette) use it
  * without starting any SDK.

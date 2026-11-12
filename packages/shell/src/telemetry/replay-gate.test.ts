@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { replayGate, startReplay, homeBlockApplies, LOW_MEMORY_GB, REPLAY_INIT_CONFIG, HOME_ROOT_ATTRIBUTE, OUTSIDE_HOME_SELECTOR, type BlockTarget } from './replay.ts';
+import { replayGate, replayGateReasonFor, startReplay, homeBlockApplies, LOW_MEMORY_GB, REPLAY_INIT_CONFIG, HOME_ROOT_ATTRIBUTE, OUTSIDE_HOME_SELECTOR, type BlockTarget } from './replay.ts';
 
 test('replayGate: Save-Data, a 2G/3G connection or low device memory skip replay; no signals keep it', () => {
 	assert.equal(replayGate(undefined), null);
@@ -102,4 +102,11 @@ test('replay config: network headers and bodies pinned off on the client (it ove
 	const rec = REPLAY_INIT_CONFIG.session_recording;
 	assert.equal(rec.recordHeaders, false);
 	assert.equal(rec.recordBody, false);
+});
+
+test('replayGateReasonFor: a device gate wins; else the home block decides, so a root that mounts after arming turns no_home_block to none', () => {
+	assert.equal(replayGateReasonFor('save_data', true), 'save_data');
+	assert.equal(replayGateReasonFor('low_memory', false), 'low_memory');
+	assert.equal(replayGateReasonFor(null, false), 'no_home_block', 'at arming, before the home root mounted');
+	assert.equal(replayGateReasonFor(null, true), 'none', 'at the deferred check, the root is there: recording may start');
 });

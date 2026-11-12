@@ -23,6 +23,7 @@
 import { isEmbeddedDevShell } from './devGate';
 import { normalizeSignupProperties, type SignupProperties } from 'rocketride';
 import { CONSENT_KEY, parseConsent, privacySignalOn } from 'rocketride/analytics';
+import { consentDecisionUnsaved } from '../telemetry/consentState';
 
 /** Tab-scoped, single-use signup context retained across the native OAuth redirect. */
 export const SIGNUP_CONTEXT_KEY = 'rr:auth:signup';
@@ -45,12 +46,23 @@ function hasPrivacySignal(): boolean {
  * The visitor's choice on the SaaS consent banner, read from its record.
  *
  * The ONE consent-record parser (rocketride/analytics) owns the key, version,
- * TTL and clock-skew rules; a record it rejects reads as undecided.
+ * TTL and clock-skew rules; a record it rejects reads as undecided. This page's
+ * own decision comes first: one whose write failed (or that had no storage to
+ * go to) lives in memory only, the stored record no longer reflects it, and it
+ * would not survive the redirect either, so it shows no usable choice.
  *
  * @returns The choice of a valid, current record; 'undecided' when the record is missing, malformed or expired;
- *          null when storage cannot be read, which shows neither a choice nor its absence.
+ *          null when storage cannot be read or this page's decision is not stored, which shows neither a choice
+ *          nor its absence.
  */
 function consentChoice(): 'accepted' | 'rejected' | 'undecided' | null {
+	// Step 1: a decision this page could not store fails closed (a stored-looking 'undecided' would be a lie).
+	try {
+		if (consentDecisionUnsaved()) return null;
+	} catch {
+		return null;
+	}
+	// Step 2: the stored record, through the one parser.
 	let raw: string | null;
 	try {
 		raw = localStorage.getItem(CONSENT_KEY);

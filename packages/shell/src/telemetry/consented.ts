@@ -19,7 +19,7 @@ import { installStorageGuard, persistenceProto, scrubStoredProps } from './stora
 import { WEB_VITALS_CONFIG, enableWebVitals, webVitalsLoaded } from './vitals';
 import { onIdleAfterLoad } from './settle';
 import { ACCEPTED_CAPTURE_CONFIG, ACCEPTED_EXTENSION_CONFIG, SIGNED_IN_CAPTURE_OFF, loadAcceptedExtensions, signedOutCaptureConfig } from './extensions';
-import { REPLAY_INIT_CONFIG, homeBlockApplies, inIdle, loadRecorder, replayGate, startReplay, type ReplayGateReason } from './replay';
+import { REPLAY_INIT_CONFIG, homeBlockApplies, inIdle, loadRecorder, replayGate, replayGateReasonFor, startReplay, type ReplayGateReason } from './replay';
 import { richEventGate } from './surface';
 import { BridgeLog, CONTINUED_KEY, normalizeContinued, planBridge } from './bridge';
 import { probe } from './probe';
@@ -304,6 +304,21 @@ export function createConsented(): SdkLike | null {
 	return instance;
 }
 
+/**
+ * Set rr_replay_gate to what is known now, on the instance and for consentedProperties.
+ *
+ * @param sdk - The consented instance.
+ * @param reason - The current reason (replayGateReasonFor).
+ * @param always - Register even when unchanged (arming: a revived instance gets it again); else a no-op then.
+ */
+function noteReplayGate(sdk: SdkLike, reason: ReplayGateReason, always = false): void {
+	if (!always && replayGateReason === reason) {
+		return;
+	}
+	replayGateReason = reason;
+	try { sdk.register({ rr_replay_gate: reason }); } catch { /* never throws */ }
+}
+
 /** True while `sdk` is the active consented instance (a withdrawal or a later instance ends it). */
 function stillActive(sdk: SdkLike): boolean {
 	const mode = host?.mode();
@@ -313,17 +328,10 @@ function stillActive(sdk: SdkLike): boolean {
 /** Extensions and the recorder on idle, each only while this instance is still the active consented one. */
 function armConsented(sdk: SdkLike): void {
 	// Whether this device skips replay, on every accepted event, so the excluded share is measurable
-	// (also registered again by the mode after a sign-out reset: consentedProperties)
+	// (also registered again by the mode after a sign-out reset: consentedProperties). A page where the recording
+	// could not keep to the home content records nothing (no_home_block); the deferred check updates the value.
 	const gate = replayGate();
-	let reason: ReplayGateReason = 'none';
-	if (gate !== null) {
-		reason = gate;
-	} else if (!homeBlockApplies(document)) {
-		// a page where the recording could not keep to the home content: nothing is recorded, and it is measurable
-		reason = 'no_home_block';
-	}
-	replayGateReason = reason;
-	try { sdk.register({ rr_replay_gate: replayGateReason }); } catch { /* never throws */ }
+	noteReplayGate(sdk, replayGateReasonFor(gate, homeBlockApplies(document)), true);
 	// Dead clicks and exceptions once their chunks are in; set_config restarts both captures.
 	onIdleAfterLoad(() => {
 		void loadAcceptedExtensions().then((ok) => {
@@ -365,7 +373,10 @@ function replayAllowed(sdk: SdkLike): boolean {
  * @param label - The probe outcome when it starts: 'started' for a first recording, 'resumed' after a sign-out.
  */
 function startReplayWhenIdle(sdk: SdkLike, label: 'started' | 'resumed'): void {
-	if (!homeBlockApplies(document)) {
+	// The deferred check: the home root may have mounted (or gone) since arming, so the gate value follows it.
+	const hasHomeBlock = homeBlockApplies(document);
+	noteReplayGate(sdk, replayGateReasonFor(replayGate(), hasHomeBlock));
+	if (!hasHomeBlock) {
 		probe('replay', 'skipped no_home_block');
 		return;
 	}

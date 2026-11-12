@@ -563,6 +563,22 @@ test('a fact whose listener leaves before the dispatch is held as logged, id inc
 	assert.deepEqual(manager.drainTelemetry(), [], 'a fact raised before a drop is not held after it');
 });
 
+test("a rejected credential drops the telemetry host's capture hold too: nothing queued for that session replays at a later SDK start", async () => {
+	const tab = recordingSession();
+	await withGlobals({ window: topLevelWindow({ location: { search: '', pathname: '/pricing' } }), sessionStorage: tab.storage }, async () => {
+		resetTelemetryHostForTests();
+		const { manager } = createTestManager();
+		manager.authProvider = { signIn: async () => {} };
+		await manager.startOAuth(true, { appId: 'rocketride.home' });
+		assert.equal(peekQueuedCaptures().length, 1, 'auth:start queued for the SDK start');
+		assert.ok(tab.data.has(HOLD_STORAGE_KEY));
+		manager.clearToken = () => {};
+		manager.dropRejectedCredential(); // the same drop another tab's sign-out runs (dropHeldTelemetry)
+		assert.deepEqual(peekQueuedCaptures(), [], 'the pending capture is gone');
+		assert.equal(tab.data.has(HOLD_STORAGE_KEY), false, 'and its mirror');
+	});
+});
+
 test('facts on their way to a listener keep their order and are delivered or held exactly once', async () => {
 	const { manager } = createTestManager();
 	delete (manager as { emit?: unknown }).emit; // the shell's own event bus, so the test holds however reportTelemetry dispatches

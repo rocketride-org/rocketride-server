@@ -15,6 +15,18 @@ function captures(calls: Call[]): CaptureCall[] {
 	});
 }
 
+/**
+ * The calls with each replayed capture's uuid option removed (an options object left empty reads as
+ * undefined), so a test can compare the rest exactly; the uuid itself is asserted where it matters.
+ */
+function withoutUuid(calls: Call[]): Call[] {
+	return calls.map((c) => {
+		if (c.kind !== 'capture' || !c.options || typeof c.options !== 'object') return c;
+		const { uuid: _uuid, ...rest } = c.options as Record<string, unknown>;
+		return { ...c, options: Object.keys(rest).length ? rest : undefined };
+	});
+}
+
 /** A queue over a recording fake SDK; `initThrows` makes the init fail. */
 function harness(initThrows = false) {
 	const calls: Call[] = [];
@@ -70,7 +82,7 @@ test('a queued event carries the super properties of its own moment, and the sta
 	queue.register({ is_authed: false, rr_traffic_activated: true });
 	queue.capture('cta:click', { cta_id: 'hero' });
 	queue.start();
-	assert.deepEqual(calls, [
+	assert.deepEqual(withoutUuid(calls), [
 		{ kind: 'init' },
 		{ kind: 'capture', event: '$pageview', props: { app: 'home-ui', rr_traffic: 'hidden', page: 'home' }, options: undefined },
 		{ kind: 'capture', event: 'cta:click', props: { app: 'home-ui', rr_traffic: 'hidden', is_authed: false, rr_traffic_activated: true, cta_id: 'hero' }, options: undefined },
@@ -83,7 +95,7 @@ test("an event's own property wins over a super property of the same name", () =
 	queue.register({ is_authed: true });
 	queue.capture('cta:click', { is_authed: false });
 	queue.start();
-	assert.deepEqual(calls[1], { kind: 'capture', event: 'cta:click', props: { is_authed: false }, options: undefined });
+	assert.deepEqual(withoutUuid(calls)[1], { kind: 'capture', event: 'cta:click', props: { is_authed: false }, options: undefined });
 });
 
 test('after the start, captures and registrations go straight to the SDK', () => {
@@ -114,7 +126,7 @@ test('a start while the page unloads replays the queue by sendBeacon, keeping ot
 	queue.capture('engagement', { secs: 3 });
 	queue.capture('cta:click', { cta_id: 'hero' }, { transport: 'sendBeacon' });
 	queue.start(true);
-	assert.deepEqual(captures(calls).map((c) => {
+	assert.deepEqual(captures(withoutUuid(calls)).map((c) => {
 		return c.options;
 	}), [{ transport: 'sendBeacon' }, { transport: 'sendBeacon' }]);
 });
@@ -249,7 +261,7 @@ test('the next page load drains the inherited hold with original timestamps and 
 	assert.equal(options.timestamp?.getTime(), 1_000_000, 'original time, not the drain time');
 	assert.match(options.uuid ?? '', POSTHOG_UUID, 'the fact id rides as the event uuid in the shape posthog-js keeps, so a replay dedupes');
 	assert.equal(sent[1].event, '$pageview');
-	assert.equal((sent[1].options as undefined | object), undefined, 'this load\'s own replay keeps start-time semantics');
+	assert.equal((sent[1].options as { timestamp?: Date }).timestamp, undefined, 'this load\'s own replay keeps start-time semantics');
 	assert.equal(storage.getItem(HOLD_STORAGE_KEY), null, 'cleared after the drain (capture first, clear after)');
 });
 
@@ -279,6 +291,33 @@ test('the hold is bounded: oldest entries are dropped first beyond HOLD_MAX', ()
 	const held = JSON.parse(storage.getItem(HOLD_STORAGE_KEY) as string) as Array<{ event: string }>;
 	assert.equal(held.length, HOLD_MAX);
 	assert.equal(held[0].event, 'e5', 'the oldest were dropped first');
+});
+
+test('a pending capture and its mirrored entry share one uuid: a load that died before clearing the mirror is deduped at the next drain', () => {
+	const storage = memoryStorage();
+	const first = heldHarness(storage, () => 1_000_000);
+	first.queue.capture('cta:click', { intent: 'register' });
+	const snapshot = storage.getItem(HOLD_STORAGE_KEY) as string;
+	const mirrored = (JSON.parse(snapshot) as Array<{ id: string }>)[0].id;
+	// This load replays its queue, then dies before clearMirror() took effect (simulated by restoring the mirror).
+	first.queue.start();
+	storage.setItem(HOLD_STORAGE_KEY, snapshot);
+	assert.equal((captures(first.calls)[0].options as { uuid?: string }).uuid, mirrored, 'the original capture carries the mirrored uuid');
+	// The next load drains the stale mirror with the same uuid, so PostHog dedupes it.
+	const second = heldHarness(storage, () => 1_010_000);
+	second.queue.start();
+	assert.equal((captures(second.calls)[0].options as { uuid?: string }).uuid, mirrored);
+});
+
+test('clearHold drops pending captures too: an event queued before sign-out never reaches a later start', () => {
+	const storage = memoryStorage();
+	const h = heldHarness(storage, () => 1_000_000);
+	h.queue.capture('cta:click', { cta_id: 'nav' });
+	h.queue.clearHold(); // sign-out before the SDK started
+	assert.deepEqual(h.queue.peekPending(), []);
+	h.queue.start(); // the next account's session starts the SDK on this tab
+	assert.deepEqual(captures(h.calls), [], 'the earlier session capture is not forwarded');
+	assert.equal(storage.getItem(HOLD_STORAGE_KEY), null);
 });
 
 test('clearHold drops the hold and its mirror without delivering (sign-out)', () => {

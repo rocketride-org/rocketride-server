@@ -17,7 +17,7 @@ import { getConsentState } from './consentState';
 import { CaptureMode, clearPostHogStorage, quietly, type SdkLike } from './mode';
 import { sanitizeEvent } from './sanitize';
 import { Identity } from './identity';
-import { enableWebVitals, loadWebVitalsExtension } from './vitals';
+import { VitalsStart, enableWebVitals, loadWebVitalsExtension } from './vitals';
 import { onIdleAfterLoad } from './settle';
 import { SIGNED_IN_CAPTURE_OFF, signedOutCaptureConfig } from './extensions';
 import { newJourneyKey } from './bridge';
@@ -110,20 +110,34 @@ export function active(): SdkLike {
 	return posthog;
 }
 
-/** Web vitals for every consent state: once the page has settled, the extension chunk, then the capture switched on. */
+/**
+ * The web-vitals start of this page load: gated by the LIVE page state (a shell screen measures nothing, as the
+ * init's capture_performance: false and consentedVitals intend) and re-tried when an app page becomes active.
+ */
+const vitalsStart = new VitalsStart({
+	sdkStarted: () => {
+		return Boolean(deps?.queue.started);
+	},
+	isPage: () => {
+		return Boolean(deps?.isPage());
+	},
+	// Only the active instance measures, so an accepted visitor's vitals are not reported twice.
+	enable: () => {
+		return enableWebVitals(active());
+	},
+	// the harness reads this to prove the extension path (probe.ts: a no-op in production)
+	report: (detail) => {
+		probe('web vitals', detail);
+	},
+});
+
+/** Web vitals for every consent state: once the page has settled, the extension chunk, then the capture switched on (app pages only). */
 export function startWebVitals(): void {
 	onIdleAfterLoad(() => {
 		void loadWebVitalsExtension().then((ok) => {
-			if (!ok || !deps?.queue.started) {
-				return;
+			if (ok) {
+				vitalsStart.extensionLoaded();
 			}
-			// Only the active instance measures, so an accepted visitor's vitals are not reported twice.
-			let detail = 'no web-vitals autocapture';
-			if (enableWebVitals(active())) {
-				detail = 'started';
-			}
-			// the harness reads this to prove the extension path (probe.ts: a no-op in production)
-			probe('web vitals', detail);
 		});
 	});
 }
@@ -286,6 +300,10 @@ export function syncPageActive(active: boolean): void {
 		quietly(() => {
 			consented.set_config(config);
 		});
+	}
+	// A load that settled on a shell screen measured nothing: the app page that follows is measured now.
+	if (active) {
+		vitalsStart.pageActivated();
 	}
 }
 

@@ -111,11 +111,40 @@ test('the cap starts the work regardless of a stalled resource or marker', () =>
 test('the wait starts at load, not before', () => {
 	const p = fakePage({ loaded: false });
 	new SettleWatcher(p.deps).run(() => {});
-	p.advance(SETTLE_CAP_MS * 2);
+	p.advance(SETTLE_CAP_MS - 1000);
 	assert.equal(p.idles.length, 0, 'nothing before load');
 	p.fireLoad();
-	p.advance(SETTLE_CAP_MS * 2 + SETTLE_QUIET_MS);
-	assert.equal(p.idles.length, 1);
+	p.advance(SETTLE_CAP_MS - 1000 + SETTLE_QUIET_MS);
+	assert.equal(p.idles.length, 1, 'settled after load');
+	p.advance(SETTLE_CAP_MS * 3);
+	assert.equal(p.idles.length, 1, 'the bound on a missing load does not run the work again');
+});
+
+test('a load that never fires does not hold the work: it starts SETTLE_CAP_MS after run, once', () => {
+	const p = fakePage({ loaded: false });
+	let ran = 0;
+	new SettleWatcher(p.deps).run(() => { ran++; });
+	p.advance(SETTLE_CAP_MS - 1);
+	assert.equal(p.idles.length, 0);
+	p.advance(SETTLE_CAP_MS);
+	assert.equal(p.idles.length, 1, 'the stalled load is bounded');
+	p.runIdle();
+	assert.equal(ran, 1);
+	p.fireLoad(); // the stalled resource finally loads
+	p.advance(SETTLE_CAP_MS * 3);
+	assert.equal(p.idles.length, 0, 'the post-load settle does not run the work a second time');
+});
+
+test('a load that fires shortly before the bound keeps its full settle wait', () => {
+	const p = fakePage({ loaded: false });
+	p.page.lcpPending = true;
+	new SettleWatcher(p.deps).run(() => {});
+	p.advance(SETTLE_CAP_MS - 10);
+	p.fireLoad();
+	p.advance(SETTLE_CAP_MS + 5_000);
+	assert.equal(p.idles.length, 0, 'the run-time bound applies only while load has not fired');
+	p.advance(SETTLE_CAP_MS - 10 + SETTLE_CAP_MS);
+	assert.equal(p.idles.length, 1, "the settle wait's own cap after load");
 });
 
 test('without requestIdleCallback the idle step is a fixed delay', () => {

@@ -24,8 +24,10 @@
 // The id is minted as an RFC 4122-shaped UUID because posthog-js keeps an
 // explicit uuid only when it matches that shape (it mints a fresh one
 // otherwise), and PostHog drops an event whose uuid it already ingested — so
-// an at-least-once replay of the same entry dedupes instead of double-counting. This load's
-// own replay keeps start-time stamps as before: posthog-js keys its page-view
+// an at-least-once replay of the same entry dedupes instead of double-counting. A pending
+// capture and its mirrored entry share ONE uuid, and this load's replay passes it too, so a
+// load that captured and then died before clearing the mirror is deduped by the next load's
+// drain. This load's own replay keeps start-time stamps as before: posthog-js keys its page-view
 // state on the $pageview's timestamp, and an explicit earlier timestamp broke
 // web vitals and replay. Accepted loss windows are stated in the plan: a tab
 // closed forever before the chunk lands, storage-disabled visitors, and
@@ -74,7 +76,8 @@ export const HOLD_TTL_MS = 30 * 60 * 1000;
 /** sessionStorage key of the hold (per tab; survives the OAuth round trip). */
 export const HOLD_STORAGE_KEY = 'rr:shell:capture-hold';
 
-type Pending = { event: string; props: Record<string, unknown>; options?: CaptureOptions };
+/** A capture waiting for this load's start; `id` is the uuid its mirrored entry carries too. */
+type Pending = { event: string; props: Record<string, unknown>; options?: CaptureOptions; id: string };
 /** A mirrored capture: what a next page load needs to replay it truthfully. */
 type Held = { event: string; props: Record<string, unknown>; ts: number; id: string };
 
@@ -202,10 +205,13 @@ export class SdkQueue {
 			return;
 		}
 		const stamped = { ...this.superProps, ...props };
-		this.pending.push({ event, props: stamped, options });
+		// One uuid for both representations: the replay below and a next load's drain of the mirror
+		// send the same event uuid, so PostHog dedupes a capture whose mirror was never cleared.
+		const id = newEventUuid();
+		this.pending.push({ event, props: stamped, options, id });
 		// Mirror AT ENQUEUE: a redirect or crash a moment later still finds the entry.
 		const ts = this.now();
-		this.held.push({ event, props: stamped, ts, id: newEventUuid() });
+		this.held.push({ event, props: stamped, ts, id });
 		this.persist();
 	}
 
@@ -228,7 +234,8 @@ export class SdkQueue {
 	 * Inherited entries (an earlier page load's mirror — the OAuth round trip's other half) are
 	 * replayed FIRST, each with its original timestamp and its id (a v4 uuid, which posthog-js keeps)
 	 * as the event uuid: at-least-once with dedupe, and a prior load's event is never stamped with this load's time. This load's own
-	 * entries keep start-time stamps — posthog-js keys page-view state on the $pageview timestamp.
+	 * entries keep start-time stamps — posthog-js keys page-view state on the $pageview timestamp —
+	 * and carry the uuid their mirrored entry holds.
 	 * The mirror is cleared only after the drain captured everything (capture first, clear after).
 	 *
 	 * @param unloading - The page is going away: the replay goes out by sendBeacon, not the batch queue.
@@ -262,11 +269,12 @@ export class SdkQueue {
 			}
 		}
 		for (const entry of this.pending.splice(0)) {
-			let options = entry.options;
+			// The mirrored entry's uuid: a crash between this capture and clearMirror() is deduped at the next drain.
+			const options: CaptureOptions = { ...entry.options, uuid: entry.id };
 			if (unloading) {
 				// One beacon per event: posthog-js has no public batched beacon, and the queue holds only what was
 				// captured before the first frame, a few small events, well under the in-flight beacon budget.
-				options = { ...entry.options, transport: 'sendBeacon' };
+				options.transport = 'sendBeacon';
 			}
 			// Replayed at the start time, not the original time: posthog-js keys its page-view state (which web
 			// vitals and replay read) on the $pageview's timestamp, and an earlier explicit timestamp broke both. The
@@ -297,11 +305,13 @@ export class SdkQueue {
 	}
 
 	/**
-	 * Drop the hold and its mirror without delivering. A sign-out calls this: captures observed for
-	 * one session must never be forwarded under the next account that signs in on this tab.
+	 * Drop the hold, this load's pending captures and the mirror without delivering. A sign-out calls
+	 * this: captures observed for one session must never be forwarded under the next account that
+	 * signs in on this tab, and a later start would otherwise replay the pending ones.
 	 */
 	clearHold(): void {
 		this.inherited = [];
+		this.pending.length = 0;
 		this.held.length = 0;
 		this.clearMirror();
 	}

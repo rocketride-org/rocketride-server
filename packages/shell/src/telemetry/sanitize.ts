@@ -159,6 +159,31 @@ function looksLikeAddress(value: string): boolean {
 	return /^\s*(https?:)?\/\//i.test(value) || /^\s*\/[^\s]*[?#]/.test(value);
 }
 
+/**
+ * An unrooted relative address whose query or fragment carries a parameter ("account?code=...", "cb#token=...").
+ * A parameter (an '=') is required, so plain text that merely ends in '?' ("Ready?") is not taken for one.
+ */
+function looksLikeRelativeAddress(value: string): boolean {
+	return /^\s*[^\s?#]*[?#][^\s]*=/.test(value);
+}
+
+/**
+ * A string property value that is an address, reduced: an absolute one keeps only utm_* (sanitizeUrl), a
+ * protocol-relative or rooted relative one is reduced like an element's address (reduceHref).
+ *
+ * @param value - The property value.
+ * @returns The reduced address, or null when the value is not an address.
+ */
+function reducePropertyAddress(value: string): string | null {
+	if (/^\s*https?:\/\//i.test(value)) {
+		return sanitizeUrl(value.trim());
+	}
+	if (looksLikeAddress(value)) {
+		return reduceHref(value);
+	}
+	return null;
+}
+
 /** Element attributes whose value is an address. */
 const ADDRESS_ATTRIBUTES = new Set(['href', 'src', 'action', 'formaction', 'poster', 'data', 'xlink:href', 'cite', 'background', 'ping', 'longdesc', 'manifest', 'codebase', 'archive']);
 
@@ -199,8 +224,8 @@ export function maskReplayAttribute(name: string, value: string): string {
 			});
 		}
 		// Any other attribute holding a full address (og:url in a meta tag's content, a data-* attribute), or a
-		// relative one with a query or a fragment.
-		if (looksLikeAddress(value)) {
+		// relative one (rooted or not) with a query or a fragment.
+		if (looksLikeAddress(value) || looksLikeRelativeAddress(value)) {
 			return reduceHref(value);
 		}
 		return value;
@@ -299,6 +324,12 @@ function scrub(bag: Record<string, unknown>): void {
 		// instance adds to every event, `$session_entry_url` and `$session_entry_referrer`.
 		if (key.endsWith('_url') && typeof value === 'string') { bag[key] = sanitizeUrl(value); continue; }
 		if (key.endsWith('referrer') && typeof value === 'string') { bag[key] = referrerOrigin(value); continue; }
+		// Any other property holding an address, whatever its key: an app's reporter takes free-form properties,
+		// so `{ url: 'https://.../cb?code=...' }` must lose its query like `$current_url` does.
+		if (typeof value === 'string') {
+			const address = reducePropertyAddress(value);
+			if (address !== null) { bag[key] = address; continue; }
+		}
 		if ((key === '$set' || key === '$set_once') && value && typeof value === 'object') scrub(value as Record<string, unknown>);
 	}
 }
@@ -325,9 +356,12 @@ const STORED_VISIT_KEYS = new Set(['$initial_person_info', '$client_session_prop
 /**
  * Keys posthog-js stores that hold a bag of person or group properties, which it sends to /flags: the `$set` of an
  * identified visitor's capture lands in `$stored_person_properties` before before_send runs (it can carry the
- * Meta click id posthog-js derives from an fbclid), so each bag is reduced with the same rules, one level down.
+ * Meta click id posthog-js derives from an fbclid), so each bag is reduced with the same rules, all the way down.
  */
 const STORED_PROPERTY_BAGS = new Set(['$stored_person_properties', '$stored_group_properties']);
+
+/** How deep a stored property bag is reduced; a value nested deeper is not stored, never stored unread. */
+const STORED_BAG_MAX_DEPTH = 4;
 
 /**
  * What posthog-js may write to its storage (its cookie, localStorage, sessionStorage), reduced first: the stored
@@ -384,7 +418,8 @@ function isBag(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * A stored property bag, reduced: person properties are one flat bag, group properties one bag per group type.
+ * A stored property bag, reduced: person properties are one bag, group properties one bag per group type. Every
+ * level is reduced (a group's `metadata: { callback_url }` included), down to STORED_BAG_MAX_DEPTH.
  *
  * @param key - `$stored_person_properties` or `$stored_group_properties`.
  * @param bag - Its value.
@@ -392,27 +427,67 @@ function isBag(value: unknown): value is Record<string, unknown> {
  */
 function reduceStoredBag(key: string, bag: Record<string, unknown>): Record<string, unknown> {
 	if (key === '$stored_group_properties') {
-		return reduceGroupBags(bag);
+		// One level more: the group type, then that group's properties.
+		return reduceBagProps(bag, -1);
 	}
-	return reduceStoredProps(bag);
+	return reduceBagProps(bag, 0);
 }
 
 /**
- * Stored group properties: each group type's bag reduced like person properties.
+ * One level of a stored property bag: click ids and Meta ids dropped, every other value reduced (reduceBagValue).
  *
- * @param bag - The `$stored_group_properties` value.
- * @returns One reduced bag per group type; a value that is not a bag is kept as it is.
+ * @param bag - The properties at this level.
+ * @param depth - How deep this level sits below the bag.
+ * @returns The reduced properties; a value that cannot be reduced is left out (fail closed).
  */
-function reduceGroupBags(bag: Record<string, unknown>): Record<string, unknown> {
-	const groups: Record<string, unknown> = {};
-	for (const [type, groupProps] of Object.entries(bag)) {
-		if (isBag(groupProps)) {
-			groups[type] = reduceStoredProps(groupProps);
-		} else {
-			groups[type] = groupProps;
+function reduceBagProps(bag: Record<string, unknown>, depth: number): Record<string, unknown> {
+	const out: Record<string, unknown> = {};
+	for (const [key, value] of Object.entries(bag)) {
+		if (isClickIdKey(key) || STORED_DERIVED_ID_KEYS.includes(key)) {
+			continue;
+		}
+		let reduced: unknown;
+		try {
+			reduced = reduceBagValue(key, value, depth);
+		} catch {
+			continue;
+		}
+		if (reduced !== NOT_STORED) {
+			out[key] = reduced;
 		}
 	}
-	return groups;
+	return out;
+}
+
+/**
+ * One value inside a stored property bag: a nested object or array is reduced one level down (past
+ * STORED_BAG_MAX_DEPTH it is not stored); a *_url or *referrer string by its key's rules (reduceStoredValue), and
+ * any other string that is an address loses its query whatever its key.
+ *
+ * @param key - The value's key.
+ * @param value - The value.
+ * @param depth - How deep the value's holder sits below the bag.
+ * @returns The reduced value, or NOT_STORED.
+ */
+function reduceBagValue(key: string, value: unknown, depth: number): unknown {
+	if (value && typeof value === 'object') {
+		if (depth + 1 >= STORED_BAG_MAX_DEPTH) {
+			return NOT_STORED;
+		}
+		if (Array.isArray(value)) {
+			return value.map((item) => {
+				return reduceBagValue(key, item, depth + 1);
+			}).filter((item) => {
+				return item !== NOT_STORED;
+			});
+		}
+		return reduceBagProps(value as Record<string, unknown>, depth + 1);
+	}
+	// An address under a key without its own rule (not *_url, not *referrer) loses its query too.
+	if (typeof value === 'string' && !key.endsWith('_url') && !key.endsWith('referrer')) {
+		return reducePropertyAddress(value) ?? value;
+	}
+	return reduceStoredValue(key, value);
 }
 
 /**

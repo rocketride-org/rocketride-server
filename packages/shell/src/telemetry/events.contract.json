@@ -213,7 +213,7 @@
 		}
 	},
 	"sdkEvents": {
-		"$comment": "Events posthog-js emits on its own for visitors who accepted (consent_state accepted, the persistent instance); never from the cookieless instance. Their shapes are the SDK's; the sanitiser reduces every URL in them, drops click ids, drops a data-rr-private element chain and keeps no copied text or form content. Listed so dashboard queries and reviewers know the full event surface.",
+		"$comment": "Events posthog-js emits on its own. Every one listed here except $web_vitals comes only from the persistent instance of visitors who accepted (consent_state accepted). Two SDK events also come from the cookieless instance for undecided and rejected visitors, on app pages only (never on a shell screen): $web_vitals (below, all three states) and $pageleave (listed with the events above); the cookieless instance sends neither while the consented one is active. Their shapes are the SDK's; the sanitiser reduces every URL in them, drops click ids, drops a data-rr-private element chain and keeps no copied text or form content. Listed so dashboard queries and reviewers know the full event surface.",
 		"$web_vitals": {
 			"states": [
 				"undecided",

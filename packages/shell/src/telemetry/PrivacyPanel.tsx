@@ -35,6 +35,7 @@ import { decideConsent, getConsentState, subscribeConsent, withdrawConsent } fro
 import { privacySignalOn } from 'rocketride/analytics';
 import type { ConsentState } from './consent';
 import { COOKIE_POLICY_PATH, PRIVACY_POLICY_PATH } from './ConsentBanner';
+import { privacyToggleAction } from './consentUi';
 
 // ==== styles ================================================================
 
@@ -89,20 +90,22 @@ export const PrivacyPanel: React.FC = () => {
 	}, []);
 
 	const isOn = state === 'accepted';
+	// A privacy signal blocks the opt-in only; an earlier acceptance can always be withdrawn.
+	const action = privacyToggleAction(state, signal);
+	const isDisabled = action === null;
 	const onToggle = (): void => {
-		if (signal) {
-			return;
-		}
-		if (isOn) {
+		if (action === 'withdraw') {
 			// The full withdrawal: recording stopped, PostHog storage scrubbed, fresh journey key.
 			withdrawConsent();
-		} else {
+		} else if (action === 'accept') {
 			decideConsent('accepted');
 		}
 	};
 
 	let statusDetail = 'You have not decided yet; only anonymous, cookieless measurement runs.';
-	if (signal) {
+	if (signal && isOn) {
+		statusDetail = 'Your browser sends a privacy signal (Do Not Track / Global Privacy Control), so nothing is captured; you can still turn off the analytics cookies you allowed earlier.';
+	} else if (signal) {
 		statusDetail = 'Your browser sends a privacy signal (Do Not Track / Global Privacy Control), so nothing is captured and the opt-in is unavailable.';
 	} else if (state === 'accepted') {
 		statusDetail = 'Analytics cookies are on for this browser: product analytics and session replay on signed-out pages.';
@@ -122,8 +125,9 @@ export const PrivacyPanel: React.FC = () => {
 					role="switch"
 					aria-checked={isOn}
 					aria-label="Analytics cookies"
-					tabIndex={signal ? -1 : 0}
-					style={styles.toggle(isOn, signal)}
+					aria-disabled={isDisabled}
+					tabIndex={isDisabled ? -1 : 0}
+					style={styles.toggle(isOn, isDisabled)}
 					onClick={onToggle}
 					onKeyDown={(e) => {
 						if (e.key === 'Enter' || e.key === ' ') {

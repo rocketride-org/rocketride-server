@@ -16,7 +16,10 @@
 /** The events a bridge re-sends: what funnels and section reach are built from. */
 export const BRIDGE_EVENTS: ReadonlySet<string> = new Set(['$pageview', 'section:view']);
 
-/** At most this many events are kept for one page load (the landing page view is the first one kept). */
+/**
+ * At most this many events are kept for one page load. The first one (the landing page view) is always
+ * kept; beyond the cap the oldest event after it is evicted, so the latest page view is never lost.
+ */
 export const MAX_BRIDGED = 100;
 
 /** Marks a re-sent copy. */
@@ -74,8 +77,9 @@ export class BridgeLog {
 	private isClosed = false;
 
 	/**
-	 * Record an event as it was sent (after sanitising). Only bridge events, at most MAX_BRIDGED, and nothing once
-	 * the log was taken.
+	 * Record an event as it was sent (after sanitising). Only bridge events, and nothing once the log was taken.
+	 * At MAX_BRIDGED the oldest entry after the landing one makes room: planBridge keys the journey's end on the
+	 * LAST page view, so dropping the newest instead would leave the current page out of the bridged journey.
 	 *
 	 * @param event The event as sent, or null when it was dropped.
 	 */
@@ -84,7 +88,7 @@ export class BridgeLog {
 			return;
 		}
 		if (this.entries.length >= MAX_BRIDGED) {
-			return;
+			this.entries.splice(1, 1); // keep the landing entry; evict the oldest one after it
 		}
 		this.entries.push({ event: event.event, properties: copyableProperties(event.properties) });
 	}

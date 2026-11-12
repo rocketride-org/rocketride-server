@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { CaptureMode, clearPostHogStorage, type SdkLike } from './mode.ts';
+import { CaptureMode, INERT_CONFIG, clearPostHogStorage, type SdkLike } from './mode.ts';
 
 function fakeSdk(name: string, log: string[]): SdkLike & { registered: Record<string, unknown> } {
 	const registered: Record<string, unknown> = {};
@@ -119,6 +119,22 @@ test('resetIdentity (sign-out) resets the consented instance and registers the s
 	assert.deepEqual(log, ['consented:reset', 'consented:register:app,consent_state,rr_traffic']);
 	assert.equal(consented.registered.consent_state, 'accepted');
 	assert.equal(mode.active(), consented);
+});
+
+test('a sign-out reset that throws makes the consented instance inert and routes captures to the cookieless one for the rest of the page load', () => {
+	const { mode, cookieless, consented, log, created } = setup();
+	mode.apply('accepted');
+	consented.reset = () => { log.push('consented:reset'); throw new Error('flushBeforeIdentityReset failed'); };
+	mode.resetIdentity();
+	assert.equal(mode.isConsented(), false, 'the instance that may hold the previous identity is out');
+	assert.equal(mode.active(), cookieless, 'later captures go to the cookieless instance');
+	assert.ok(log.includes('consented:opt_out'), 'opted out');
+	assert.ok(log.includes('consented:set_config:' + Object.keys(INERT_CONFIG).join(',')), 'made inert');
+	assert.ok(log.includes('clearStorage'), 'the stored identified identity is cleared');
+	assert.equal(mode.state(), 'accepted', 'the consent record is not changed');
+	mode.apply('accepted');
+	assert.equal(mode.active(), cookieless, 'no acceptance revives it in this page load');
+	assert.equal(created(), 1);
 });
 
 test('withdraw then accept again in one page load asks for the consented instance again and routes to it', () => {

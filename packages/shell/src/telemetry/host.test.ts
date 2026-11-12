@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Identity, type IdentityMode } from './identity.ts';
-import { clearTelemetryOnSignOut, initTelemetryHost, knownSignedOutForTests, loadTransportForTests, markTelemetrySignedIn, resetTelemetryHostForTests, setPageActive, setTelemetryIdentity } from './host.ts';
+import { clearTelemetryOnSignOut, dropTelemetryHold, initTelemetryHost, peekQueuedCaptures, shellReporter, trackConsentShown, knownSignedOutForTests, loadTransportForTests, markTelemetrySignedIn, resetTelemetryHostForTests, setPageActive, setTelemetryIdentity } from './host.ts';
 import { HOLD_STORAGE_KEY } from './sdkQueue.ts';
 import { resetDevGateForTests } from '../util/devGate.ts';
 
@@ -96,6 +96,7 @@ function fakeTransport(userState: string) {
 		active: () => sdk,
 		registerOnInstances: () => {},
 		syncPageActive: (active: boolean) => { log.push(`syncPageActive:${active}`); },
+		trackConsentShown: () => { log.push('consentShown'); },
 	};
 	return { log, module: module as unknown as Parameters<typeof loadTransportForTests>[0] };
 }
@@ -196,6 +197,46 @@ test('an unchanged page-active value, or one set before the SDK start, pushes no
 		runTimers();
 		setPageActive(true); // unchanged after the start
 		assert.deepEqual(t.log.filter((entry) => entry.startsWith('syncPageActive')), []);
+	});
+});
+
+test('a consent:shown reported before the chunk binds is held and flushed once at the bind; after it, it goes straight through', async () => {
+	const { win, runTimers } = page();
+	await withGlobals({ window: win, document: docHidden }, () => {
+		resetTelemetryHostForTests();
+		trackConsentShown(); // the banner mounted before the transport import resolved
+		const t = fakeTransport('anonymous');
+		loadTransportForTests(t.module);
+		assert.deepEqual(t.log.filter((entry) => entry === 'bind' || entry === 'consentShown'), ['bind', 'consentShown'], 'flushed right after the bind');
+		runTimers();
+		trackConsentShown();
+		assert.equal(t.log.filter((entry) => entry === 'consentShown').length, 2, 'a later report is forwarded, not held; the transport dedupes per page load');
+	});
+});
+
+test('a consent:shown reported while telemetry is off is not held for a later bind', async () => {
+	const { win } = page();
+	await withGlobals({ window: win, document: docHidden }, () => {
+		resetTelemetryHostForTests();
+		initTelemetryHost({ key: '', host: '', consentSource: 'stored' }); // keyless: disabled
+		trackConsentShown();
+		const t = fakeTransport('anonymous');
+		loadTransportForTests(t.module);
+		assert.ok(!t.log.includes('consentShown'));
+	});
+});
+
+test('dropTelemetryHold drops pending captures and the mirrored hold without delivering', async () => {
+	const tab = session();
+	const { win } = page();
+	await withGlobals({ window: win, document: docHidden, sessionStorage: tab.storage }, () => {
+		resetTelemetryHostForTests();
+		shellReporter()('auth:start', { register: false, auto: false });
+		assert.equal(peekQueuedCaptures().length, 1);
+		assert.ok(tab.data.has(HOLD_STORAGE_KEY));
+		dropTelemetryHold();
+		assert.deepEqual(peekQueuedCaptures(), []);
+		assert.equal(tab.data.has(HOLD_STORAGE_KEY), false);
 	});
 });
 

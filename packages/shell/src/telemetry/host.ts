@@ -53,6 +53,11 @@ let attributionGate: (event: unknown) => boolean = () => true;
  * record. null = not yet received: captures stay gated off until it arrives.
  */
 let hostTelemetryEnabled: boolean | null = null;
+/**
+ * A consent:shown exposure the banner reported before the transport chunk bound:
+ * flushed once at the bind, so a banner that mounts first is still counted.
+ */
+let consentShownPending = false;
 /** The bound reporters, one per app id, handed to apps and never re-pointed. */
 const reporters = new Map<string, Reporter>();
 /** The SDK starts by then at the latest, even when no frame comes (a throttled or occluded window). */
@@ -192,6 +197,11 @@ function onTransportLoaded(module: typeof Transport): void {
 			return attributionGate(event);
 		},
 	});
+	// The banner rendered before the chunk landed: its exposure goes out now (queued like any capture).
+	if (consentShownPending) {
+		consentShownPending = false;
+		module.trackConsentShown();
+	}
 	// Replay the auth state resolved before the chunk landed, BEFORE the
 	// SDK starts: the init then identifies a signed-in accepted visitor
 	// and drops a stored identified identity only on a known sign-out.
@@ -368,8 +378,18 @@ export function markTelemetrySignedIn(): void {
  * never forward under the next account) and the transport resets identity.
  */
 export function clearTelemetryOnSignOut(): void {
-	queue.clearHold();
+	dropTelemetryHold();
 	transport?.transportIdentity().shellSignedOut();
+}
+
+/**
+ * Drop the queue's held captures (this load's pending ones, the inherited hold
+ * and its sessionStorage mirror) without delivering them. Every path that
+ * invalidates the session calls it: an explicit sign-out (above), a credential
+ * the server rejected, and another tab's sign-out (ConnectionManager).
+ */
+export function dropTelemetryHold(): void {
+	queue.clearHold();
 }
 
 /**
@@ -401,9 +421,18 @@ export function consentPromptNeeded(): boolean {
 	return telemetryEnabled() && getConsentState() === 'undecided';
 }
 
-/** Captures consent:shown once per page load, when the banner renders (routed to the transport when it is in). */
+/**
+ * Captures consent:shown once per page load, when the banner renders: routed to
+ * the transport when it is in, else held and flushed when the chunk binds.
+ */
 export function trackConsentShown(): void {
-	transport?.trackConsentShown();
+	if (transport) {
+		transport.trackConsentShown();
+		return;
+	}
+	if (enabled !== false) {
+		consentShownPending = true;
+	}
 }
 
 /**
@@ -451,6 +480,7 @@ export function resetTelemetryHostForTests(): void {
 	lastAuth = null;
 	attributionGate = () => true;
 	hostTelemetryEnabled = null;
+	consentShownPending = false;
 	reporters.clear();
 	queue = newQueue();
 }
@@ -460,7 +490,7 @@ export function resetTelemetryHostForTests(): void {
  * does (replay, then the start schedule), without fetching posthog-js. The
  * host counts as enabled, as it is whenever the chunk import runs.
  */
-export function loadTransportForTests(module: Pick<typeof Transport, 'bindTransport' | 'transportIdentity' | 'startWebVitals' | 'initPostHog' | 'active' | 'registerOnInstances' | 'syncPageActive'>): void {
+export function loadTransportForTests(module: Pick<typeof Transport, 'bindTransport' | 'transportIdentity' | 'startWebVitals' | 'initPostHog' | 'active' | 'registerOnInstances' | 'syncPageActive' | 'trackConsentShown'>): void {
 	enabled = true;
 	onTransportLoaded(module as typeof Transport);
 }

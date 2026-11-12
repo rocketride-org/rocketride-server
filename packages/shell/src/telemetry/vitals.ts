@@ -48,6 +48,58 @@ export function enableWebVitals(instance: VitalsCapable): boolean {
 	}
 }
 
+/** What the vitals start reads and does: the live page state and the SDK, injected (tests pass fakes). */
+export type VitalsStartDeps = {
+	/** Whether posthog-js started (the queue drained). */
+	sdkStarted(): boolean;
+	/** Whether an app page is active NOW (false on shell screens: waitlist, loading). */
+	isPage(): boolean;
+	/** Switch web vitals on for the active instance (enableWebVitals); true when the autocapture started. */
+	enable(): boolean;
+	/** Report the outcome (the harness probe). */
+	report(detail: string): void;
+};
+
+/**
+ * Starts web vitals once per page load, and only on an app page: a shell screen (waitlist, loading) is not a
+ * page, so nothing is measured there. The start is attempted when the extension has loaded and again whenever an
+ * app page becomes active, so a load that settles on a shell screen still measures the app page that follows.
+ */
+export class VitalsStart {
+	private readonly deps: VitalsStartDeps;
+	private isLoaded = false;
+	private isStarted = false;
+
+	/** @param deps - The live page state, the SDK and the report. */
+	constructor(deps: VitalsStartDeps) {
+		this.deps = deps;
+	}
+
+	/** The extension chunk loaded: start now if the page allows it. */
+	extensionLoaded(): void {
+		this.isLoaded = true;
+		this.tryStart();
+	}
+
+	/** An app page became active: start now if the extension is in and nothing started yet. */
+	pageActivated(): void {
+		this.tryStart();
+	}
+
+	/** Start once every condition holds: extension in, SDK started, an app page active now. */
+	private tryStart(): void {
+		if (!this.isLoaded || this.isStarted || !this.deps.sdkStarted() || !this.deps.isPage()) {
+			return;
+		}
+		this.isStarted = true;
+		let detail = 'no web-vitals autocapture';
+		if (this.deps.enable()) {
+			detail = 'started';
+		}
+		this.deps.report(detail);
+	}
+}
+
 let loading: Promise<boolean> | null = null;
 
 /**

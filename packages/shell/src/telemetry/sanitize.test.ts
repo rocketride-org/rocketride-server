@@ -295,7 +295,7 @@ test('reduceStoredProps: stored visit addresses and referrers reduced, click and
 
 
 
-test('reduceStoredProps: stored person and group property bags (sent to /flags) are reduced one level down', () => {
+test('reduceStoredProps: stored person and group property bags (sent to /flags) are reduced', () => {
 	const out = reduceStoredProps({
 		$stored_person_properties: { $fbc: 'fb.1.1.secret', $fbp: 'fb.1.1.secret', gclid: 'secret', $current_url: 'https://x.test/?k=secret', plan: 'pro' },
 		$stored_group_properties: { company: { $referrer: 'https://g.test/?q=secret', name: 'Acme' } },
@@ -377,4 +377,34 @@ test('web vitals: an object nested past the depth cap is removed, never sent unr
 	const l4 = lcp.l1.l2.l3.l4 as Record<string, unknown>;
 	assert.equal(l4.url, 'https://cloud.rocketride.ai/a?utm_source=s', 'within the cap a URL is reduced as before');
 	assert.equal('l5' in l4, false, 'the object past the cap is removed');
+});
+
+test('reduceStoredProps: a nested object inside a stored property bag is reduced too, and one nested too deep is not stored', () => {
+	const out = reduceStoredProps({
+		$stored_group_properties: {
+			company: { metadata: { callback_url: 'https://x.test/?token=secret', link: 'https://y.test/p?code=secret&utm_source=s', tags: ['a', 'https://z.test/?k=secret'] }, name: 'Acme' },
+		},
+		$stored_person_properties: { profile: { next: '/cb?code=secret', ref: { $referrer: 'https://g.test/?q=secret' } }, deep: { a: { b: { c: { url: 'https://w.test/?k=secret' } } } } },
+	});
+	assert.deepEqual(out, {
+		$stored_group_properties: {
+			company: { metadata: { callback_url: 'https://x.test/', link: 'https://y.test/p?utm_source=s', tags: ['a', 'https://z.test/'] }, name: 'Acme' },
+		},
+		$stored_person_properties: { profile: { next: '/cb', ref: { $referrer: 'https://g.test' } }, deep: { a: { b: {} } } },
+	});
+	assert.equal(JSON.stringify(out).includes('secret'), false, 'no raw query reaches storage or /flags');
+});
+
+test('sanitizeEvent: a URL in a free-form property is reduced whatever its key', () => {
+	const out = sanitizeEvent({ event: 'app:action', properties: { url: 'https://cloud.rocketride.ai/cb?code=secret&utm_source=s', next: '/account?code=secret', target: 'https://x.test/#token=secret', label: 'Ready?', count: 3, $referrer: 'https://g.test' } } as CaptureLike)!;
+	assert.deepEqual(out.properties, { url: 'https://cloud.rocketride.ai/cb?utm_source=s', next: '/account', target: 'https://x.test/', label: 'Ready?', count: 3, $referrer: 'https://g.test' });
+});
+
+test('maskReplayAttribute: an unrooted relative address with a parameter is reduced; plain text with a question mark is not', () => {
+	assert.equal(maskReplayAttribute('data-next', 'account?code=secret'), 'account');
+	assert.equal(maskReplayAttribute('data-next', 'account?code=secret&utm_source=s'), 'account?utm_source=s');
+	assert.equal(maskReplayAttribute('data-cb', 'cb#access_token=secret'), 'cb');
+	assert.equal(maskReplayAttribute('title', 'Ready?'), 'Ready?');
+	assert.equal(maskReplayAttribute('aria-label', 'Why? Because'), 'Why? Because');
+	assert.equal(maskReplayAttribute('content', 'width=device-width, initial-scale=1'), 'width=device-width, initial-scale=1');
 });

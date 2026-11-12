@@ -12,6 +12,20 @@ test('copyableProperties keeps the page context and drops the sending instance\'
 	assert.deepEqual(copyableProperties(null), {});
 });
 
+test('a full BridgeLog keeps the landing view and the newest page view: the oldest entry after the landing one is evicted', () => {
+	const log = new BridgeLog();
+	log.record(pv('/'));
+	for (let i = 0; i < MAX_BRIDGED - 1; i++) log.record(sv('features', i));
+	log.record(pv('/pricing')); // the log is full: this page view must not be dropped
+	const taken = log.take();
+	assert.equal(taken.length, MAX_BRIDGED);
+	assert.equal(taken[0].properties.path, '/', 'the landing view stays first');
+	assert.equal(taken.at(-1)?.properties.path, '/pricing', 'the current page view is kept');
+	assert.equal(taken[1].properties.order, 1, 'the oldest section view after the landing one made room');
+	const steps = planBridge(taken);
+	assert.equal(steps.at(-1)?.offsetMs, null, 'planBridge treats the current page view as the last one');
+});
+
 test('BridgeLog records only page views and section views, at most MAX_BRIDGED, and only until it is taken', () => {
 	const kinds = new BridgeLog();
 	kinds.record(pv('/'));
@@ -27,6 +41,7 @@ test('BridgeLog records only page views and section views, at most MAX_BRIDGED, 
 	const taken = log.take();
 	assert.equal(taken[0].event, '$pageview', 'the landing page view is the first one kept');
 	assert.equal(taken.length, MAX_BRIDGED);
+	assert.equal(taken.filter((e) => e.event === '$pageview').length, 1);
 	log.record(pv('/pricing'));
 	assert.deepEqual(log.take(), [], 'one bridge per page load: nothing is recorded after take()');
 });

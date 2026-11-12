@@ -8,7 +8,9 @@
 // identity and its session manager is never created). It captures the same
 // events as the cookieless one. Withdrawal opts the consented instance out,
 // resets it, clears PostHog's storage and routes captures back to the
-// cookieless instance. Pure: the instances are injected; unit-tested under
+// cookieless instance. A sign-out reset that fails does the same and keeps the
+// instance out for the rest of the page load: it may still carry the previous
+// account's identity. Pure: the instances are injected; unit-tested under
 // node:test.
 // =============================================================================
 
@@ -82,6 +84,11 @@ export type ModeDeps = {
 export class CaptureMode {
 	private consented: SdkLike | null = null;
 	private current: ConsentState = 'undecided';
+	/**
+	 * Set when a sign-out reset threw: the instance may still hold the previous account's distinct id, so it was
+	 * made inert and no acceptance revives it in this page load (the next load starts from cleared storage).
+	 */
+	private isResetFailed = false;
 
 	private readonly deps: ModeDeps;
 
@@ -148,6 +155,9 @@ export class CaptureMode {
 	 * @returns Whether the consented instance is active now; false when it could not be created.
 	 */
 	private accept(): boolean {
+		if (this.isResetFailed) {
+			return false; // the instance kept an identity it could not drop: captures stay cookieless
+		}
 		if (!this.consented) {
 			this.consented = this.createConsentedSafely();
 		}
@@ -205,7 +215,11 @@ export class CaptureMode {
 	/**
 	 * Sign-out: the consented instance drops the identified distinct id (a fresh
 	 * anonymous one) so the visitor's later signed-out events never carry the
-	 * engine user id; the super properties are registered again afterwards.
+	 * engine user id; the super properties are registered again afterwards. A
+	 * reset that throws may have stopped before clearing that id (posthog-js
+	 * flushes the recording first): the instance is then torn down like a
+	 * withdrawal (inert, storage cleared) and captures fall back to the
+	 * cookieless instance for the rest of the page load.
 	 */
 	resetIdentity(): void {
 		if (!this.consented) {
@@ -214,7 +228,9 @@ export class CaptureMode {
 		try {
 			this.consented.reset?.();
 		} catch {
-			/* never throws */
+			this.isResetFailed = true;
+			this.teardown();
+			return;
 		}
 		this.registerConsentedProperties(this.consented);
 	}

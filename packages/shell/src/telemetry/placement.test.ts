@@ -123,12 +123,30 @@ test('nextPlacement, first placement: a clear corner places the toast, the phone
 	assert.deepEqual(nextPlacement(input({ view: PHONE, height: 130 })), BAR);
 });
 
-test('nextPlacement, first placement: no clear spot waits (null); after a resize, the placement on screen stays (keep)', () => {
+test('nextPlacement, first placement: no clear spot waits (null); after a resize, a placement on screen stays only while still clear', () => {
 	const { view, obstacles } = LAPTOP_1280;
 	const all = onScreen(view, obstacles);
 	assert.equal(nextPlacement(input({ view, obstacles: { all, always: [] } })), null);
-	assert.equal(nextPlacement(input({ view, obstacles: { all, always: [] }, current: LEFT, isSameView: false })), 'keep');
+	// the full-width toast from before the resize would cover the terminal in the new viewport: hidden, not kept
+	assert.equal(nextPlacement(input({ view, obstacles: { all, always: [] }, current: LEFT, isSameView: false })), null);
 	assert.equal(nextPlacement(input({ view: PHONE, height: 130, obstacles: { all: [r(0, 420, 390, 844)], always: [] } })), null);
+	// a raised bar from before the resize that is still clear stays where it is, though a fresh one would have to
+	// rise past BAR_MAX_TOP_SHARE
+	const tall = r(0, 450, 390, 844);
+	const raisedBar: Placement = { variant: 'phone', bottom: 500 };
+	assert.equal(nextPlacement(input({ view: PHONE, height: 100, obstacles: { all: [tall], always: [] }, current: raisedBar, isSameView: false })), 'keep');
+});
+
+test('nextPlacement: a desktop toast that becomes a phone viewport with no clear bar spot is hidden, never kept as a toast', () => {
+	const obstacle = r(0, 420, 390, 844);
+	assert.equal(nextPlacement(input({ view: PHONE, height: 130, current: LEFT, isSameView: false, obstacles: { all: [obstacle], always: [obstacle] } })), null);
+});
+
+test('placeBar: a short viewport still gets the bar at rest; only a RAISED bar is held below BAR_MAX_TOP_SHARE', () => {
+	const short = { width: 390, height: 240 };
+	assert.deepEqual(placeBar(short, [], 130), { bottom: PHONE_MARGIN }, 'the only consent prompt is never hidden for lack of height');
+	assert.deepEqual(nextPlacement(input({ view: short, height: 130 })), BAR);
+	assert.equal(placeBar(short, [r(0, 200, 390, 230)], 130), null, 'raising it past the share still waits');
 });
 
 test('nextPlacement, a toast on screen: keeps its corner and width while the page scrolls and nothing comes under it', () => {
@@ -155,15 +173,19 @@ test('nextPlacement, a toast on screen: steps aside (null) when no corner is cle
 	assert.equal(nextPlacement(input({ current: LEFT, isSameView: true, obstacles: { all: [r(0, 600, 1440, 900)], always: [] } })), null);
 });
 
-test('nextPlacement, the phone bar on screen: rises above the footer link, settles back once it has passed, never vanishes', () => {
+test('nextPlacement, the phone bar on screen: rises above the footer link, settles back once it has passed, never covers it', () => {
 	const link = r(72, 740, 318, 756);
 	const raised = nextPlacement(input({ view: PHONE, height: 130, current: BAR, isSameView: true, obstacles: { all: [link], always: [link] } }));
 	assert.deepEqual(raised, { variant: 'phone', bottom: 844 - 740 + GAP });
 	assert.deepEqual(nextPlacement(input({ view: PHONE, height: 130, current: { variant: 'phone', bottom: 112 }, isSameView: true })), BAR);
 	// once shown, only what is marked "always" moves it: the hero's actions under the bar do not
 	assert.deepEqual(nextPlacement(input({ view: PHONE, height: 130, current: BAR, isSameView: true, obstacles: { all: [r(16, 700, 374, 760)], always: [] } })), BAR);
-	// it would have to climb past mid-screen: it stays where it is rather than vanish
-	assert.equal(nextPlacement(input({ view: PHONE, height: 130, current: BAR, isSameView: true, obstacles: { all: [r(0, 420, 390, 844)], always: [r(0, 420, 390, 844)] } })), 'keep');
+	// it would have to climb past mid-screen and its spot covers the obstacle: it steps aside rather than cover it
+	assert.equal(nextPlacement(input({ view: PHONE, height: 130, current: BAR, isSameView: true, obstacles: { all: [r(0, 420, 390, 844)], always: [r(0, 420, 390, 844)] } })), null);
+	// it cannot move (a fresh spot would rise past the share), but its own spot is clear: it stays
+	const raisedBar: Placement = { variant: 'phone', bottom: 500 };
+	const tall = [r(0, 450, 390, 844)];
+	assert.equal(nextPlacement(input({ view: PHONE, height: 100, current: raisedBar, isSameView: true, obstacles: { all: tall, always: tall } })), 'keep');
 });
 
 test('nextPlacement: a new viewport size or variant is a first placement again', () => {
