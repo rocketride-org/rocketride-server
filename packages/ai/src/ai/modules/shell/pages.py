@@ -333,6 +333,11 @@ _STORAGE_WARNING_INTERVAL = 300.0
 _STORAGE_WARNED_MAX = 1024
 _storage_warned = _FifoCache(_STORAGE_WARNED_MAX, _STORAGE_WARNED_MAX)
 
+# How long a crawler request waits for a snapshot the snapshot cache does not
+# hold. The S3 store retries a failing read for minutes, each try holding a
+# worker thread; past this the crawler gets the shell document, uncached.
+_SNAPSHOT_READ_SECONDS = 5.0
+
 
 class _SnapshotTooLarge(Exception):
     """A stored snapshot over ``MAX_SNAPSHOT_BYTES`` (never read)."""
@@ -382,16 +387,30 @@ async def _snapshot_bytes(path: str) -> bytes:
 
     Raises:
         _SnapshotTooLarge: the stored file is over ``MAX_SNAPSHOT_BYTES``.
-        StorageError: a storage failure (``StorageNotFoundError`` included).
+        StorageError: a storage failure (``StorageNotFoundError`` included),
+            or no answer from the store within ``_SNAPSHOT_READ_SECONDS``.
     """
     raw = _snapshot_cache.get(path)
     if raw is None:
-        size = (await public_pages.artifact_file_info(path))['size']
-        if size > MAX_SNAPSHOT_BYTES:
-            raise _SnapshotTooLarge(f'{size} bytes, over the {MAX_SNAPSHOT_BYTES}-byte limit')
-        raw = await public_pages.read_artifact_file(path)
+        try:
+            raw = await asyncio.wait_for(_stored_snapshot(path), _SNAPSHOT_READ_SECONDS)
+        except asyncio.TimeoutError as exc:
+            raise StorageError(f'the store did not answer within {_SNAPSHOT_READ_SECONDS:g} s') from exc
         _snapshot_cache.put(path, raw, len(raw))
     return raw
+
+
+async def _stored_snapshot(path: str) -> bytes:
+    """Read the snapshot at store ``path`` after a stat, so one over the cap is never downloaded.
+
+    Raises:
+        _SnapshotTooLarge: the stored file is over ``MAX_SNAPSHOT_BYTES``.
+        StorageError: a storage failure (``StorageNotFoundError`` included).
+    """
+    size = (await public_pages.artifact_file_info(path))['size']
+    if size > MAX_SNAPSHOT_BYTES:
+        raise _SnapshotTooLarge(f'{size} bytes, over the {MAX_SNAPSHOT_BYTES}-byte limit')
+    return await public_pages.read_artifact_file(path)
 
 
 def _warn_fallback(page: Page, reason: Any) -> None:
@@ -406,8 +425,8 @@ async def _crawler_snapshot(page: Page) -> Tuple[Optional[str], bool]:
     snapshot, a malformed snapshot path or no production version, a snapshot
     over ``MAX_SNAPSHOT_BYTES``, or a template the engine refuses (the last
     two are remembered by store path and warned about once). A storage
-    failure (a snapshot the store does not have yet included) falls back
-    uncached, so the next request tries again, and is warned about at most
+    failure (a snapshot the store does not have yet, or no answer within
+    ``_SNAPSHOT_READ_SECONDS``, included) falls back uncached, so the next request tries again, and is warned about at most
     once per store path per ``_STORAGE_WARNING_INTERVAL``. Anything else is
     a bug and propagates.
 

@@ -350,6 +350,28 @@ def test_a_store_transport_failure_is_a_storage_failure(shell_root, monkeypatch,
     assert len(warned) == 1 and str(failure) in warned[0]
 
 
+def test_a_store_that_does_not_answer_in_time_falls_back_uncached(shell_root, monkeypatch, warned):
+    # The S3 store retries a failing read for minutes; a crawler waits at most
+    # _SNAPSHOT_READ_SECONDS, then gets the shell document, uncached.
+    _seed()
+    _serve(_page())
+
+    async def hanging(path):
+        await asyncio.sleep(60)
+
+    monkeypatch.setattr(pp, 'artifact_file_info', hanging)
+    monkeypatch.setattr(pages, '_SNAPSHOT_READ_SECONDS', 0.05)
+    client = _client()
+    resp = _crawl(client)
+    assert resp.status_code == 200 and SHELL_BODY in resp.text
+    assert resp.headers['cache-control'] == 'private, no-cache'
+    assert len(pages._render_cache) == 0 and len(pages._snapshot_cache) == 0
+    assert len(warned) == 1 and 'did not answer within 0.05 s' in warned[0]
+    # The store answers again: the next crawl gets the snapshot.
+    monkeypatch.setattr(pp, 'artifact_file_info', file_info)
+    assert 'Pricing plans' in _crawl(client).text
+
+
 def test_a_snapshot_the_engine_refuses_falls_back_cacheably_and_warns_once(shell_root, reads, warned):
     # A version's snapshot never changes, so neither does the template error.
     _seed('{{#plans}}' * (MAX_SECTION_DEPTH + 1) + 'deep')
