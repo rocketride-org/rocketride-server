@@ -1,0 +1,61 @@
+name: Validate MCP server.json
+
+# Runs on pull requests that change server.json or package.json. Downloads the
+# same pinned mcp-publisher release that publish-mcp-registry.yml uses, verifies
+# it with cosign, and runs `mcp-publisher validate`. Read-only: no secrets and
+# no OIDC. Keep the download and verify steps identical to the publish workflow.
+on:
+  pull_request:
+    paths:
+      - server.json
+      - package.json
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate server.json
+    runs-on: ubuntu-latest
+    env:
+      MCP_PUBLISHER_VERSION: v1.8.1
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Download and verify mcp-publisher
+        run: |
+          set -euo pipefail
+          os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+          arch="$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
+          archive="mcp-publisher_${os}_${arch}.tar.gz"
+          base_url="https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}"
+
+          curl --fail --location --silent --show-error --output "$archive" "$base_url/$archive"
+          curl --fail --location --silent --show-error --output "$archive.sigstore.json" "$base_url/$archive.sigstore.json"
+          cosign verify-blob \
+            --bundle "$archive.sigstore.json" \
+            --certificate-identity "https://github.com/modelcontextprotocol/registry/.github/workflows/release.yml@refs/tags/${MCP_PUBLISHER_VERSION}" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "$archive"
+          tar xzf "$archive" mcp-publisher
+          rm -f "$archive" "$archive.sigstore.json"
+
+      - name: Check server.json version matches package.json
+        run: |
+          set -euo pipefail
+          pkg="$(jq -r '.version // empty' package.json)"
+          srv="$(jq -r '.version // empty' server.json)"
+          if [ -z "$pkg" ] || [ "$pkg" != "$srv" ]; then
+            echo "::error::server.json version ($srv) must equal package.json version ($pkg)."
+            exit 1
+          fi
+
+      - name: Validate server.json
+        run: ./mcp-publisher validate
