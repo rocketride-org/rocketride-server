@@ -35,7 +35,7 @@
  *   token of a `use` or `deploy.run` result, which stays readable.
  */
 
-import type { RocketRideClient } from 'rocketride';
+import { Question, type RocketRideClient } from 'rocketride';
 
 import type { IWorkspaceFileSystem } from '../../vfs/vfsTypes';
 import { AgentTool, AgentToolkit, type ToolStep } from '../tools';
@@ -50,7 +50,6 @@ import { clip, isJsonObject, isWalkable, messageOf, pipelineArg, redactSecrets, 
 const NOT_JSON: Record<string, string> = {
 	pipe: 'it returns a live data pipe; send text with send(token, text)',
 	sendFiles: 'it needs browser File objects; send text with send(token, text)',
-	chat: 'it needs a Question instance; send the question as text with send(token, text)',
 	addMonitor: 'it delivers events to a callback nothing reads; poll getTaskStatus(token) instead',
 	'log.openEventStream': 'it returns a live stream; read the log with log.read or log.segment',
 	'database.drizzle': 'it needs a constructor; run SQL with database.query',
@@ -191,6 +190,22 @@ async function withPipelineFile(method: string, params: unknown[], vfs: IWorkspa
 	return options === params[0] ? params : [options, ...params.slice(1)];
 }
 
+/**
+ * chat's arguments as the client takes them: the question as a `Question`, which JSON can't carry.
+ * A plain string, and each string in `questions`, is a question's text. `onSSE` is a callback, so it is left out.
+ *
+ * @throws When the question is neither text nor an object; the message names the shape that works.
+ */
+function chatParams([options]: unknown[]): unknown[] {
+	const given = isJsonObject(options) ? options.question : undefined;
+	const data = typeof given === 'string' ? { questions: [given] } : given;
+	if (!isJsonObject(options) || !isJsonObject(data)) {
+		throw new Error('Pass chat one argument, {"token": ..., "question": {"questions":[{"text":"..."}]}}, with the run token from use. The question can also be plain text.');
+	}
+	const questions = Array.isArray(data.questions) ? data.questions.map((q) => (typeof q === 'string' ? { text: q } : q)) : data.questions;
+	return [{ token: options.token, question: Question.fromDict({ ...data, questions }) }];
+}
+
 // =============================================================================
 // RESULTS
 // =============================================================================
@@ -302,12 +317,13 @@ export class RocketRideClientToolkit extends AgentToolkit {
 		const given = paramsOf(args.params);
 		const { owner, fn } = resolveMethod(requireClient(this.client), method);
 		const params = await withPipelineFile(method, given, this.vfs);
+		const clientParams = method === 'chat' ? chatParams(params) : params;
 		return {
 			act: { name: method, params },
 			run: async () => {
 				let result: unknown;
 				try {
-					result = await fn.apply(owner, params);
+					result = await fn.apply(owner, clientParams);
 				} catch (err) {
 					const reason = messageOf(err);
 					throw new Error(`${method} failed: ${reason}.${method === 'use' && ALREADY_RUNNING.test(reason) ? ` ${RERUN_GUIDANCE}` : ''}`);

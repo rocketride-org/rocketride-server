@@ -270,7 +270,7 @@ const CLIENT_POLICY: ClientPolicy = {
 	send: FREE,
 	sendFiles: never(NOT_JSON),
 	pipe: never(NOT_JSON),
-	chat: never(NOT_JSON),
+	chat: FREE,
 	tool: FREE,
 	getTasks: FREE,
 	getTaskStatus: FREE,
