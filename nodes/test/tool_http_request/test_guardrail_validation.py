@@ -421,6 +421,13 @@ def test_canonical_match_rejects_python_314_terminal_z(monkeypatch):
         (r'^https://api.example.com/', 'https://api.example.com/private'),
         (r'^https://(?:[a-z0-9-]+\.)*example\.com(?:/|$)', 'https://sub.api.example.com/data'),
         (r'.+/private$', 'https://any.public.example/private'),
+        (r'^https://(a\.com|b\.com)?/', 'https://a.com/x'),
+        (r'^https://(a\.com|b\.com)+/', 'https://a.com/x'),
+        (r'^https://(a\.com|)/', 'https://a.com/x'),
+        (r'^https://(a\.com|b\.com)\.evil\.net/', 'https://a.com.evil.net/x'),
+        (r'^https://(?P<h>a\.com|b\.com)/', 'https://a.com/x'),
+        (r'^https://(?i:a\.com|b\.com)/', 'https://a.com/x'),
+        (r'^https://(a\.com|[^/]+)/', 'https://a.com/x'),
         (
             '^https://api\\.example\\.com/never(?x:# (\n)|^https://api\\.example\\.com/private(?x:# )\n)',
             'https://api.example.com/private',
@@ -467,6 +474,15 @@ def test_canonical_match_rejects_unsupported_authority_syntax(monkeypatch, patte
         (r'^https://api\.example\.com\?key=[a-z]+$', 'https://api.example.com?key=value'),
         (r'^https://api\.example\.com$', 'https://api.example.com'),
         (r'^https://api\.example\.com\Z', 'https://api.example.com'),
+        (r'^https://(hn\.algolia\.com|api\.github\.com)/', 'https://hn.algolia.com/api/v1/search'),
+        (r'^https://(hn\.algolia\.com|api\.github\.com)/', 'https://api.github.com/users'),
+        (
+            r'^https://(hn\.algolia\.com|api\.github\.com|api\.stackexchange\.com)/',
+            'https://api.stackexchange.com/questions',
+        ),
+        (r'^https://(?:hn\.algolia\.com|api\.github\.com)/', 'https://hn.algolia.com/api/v1/search'),
+        (r'^https://(?:api\.a\.com|api\.b\.com)(?::[0-9]+)?(?:/|$)', 'https://api.a.com:443/x'),
+        (r'^https://(?:api\.a\.com|api\.b\.com)(?::[0-9]+)?(?:/|$)', 'https://api.b.com/x'),
     ],
 )
 def test_canonical_match_preserves_safe_full_url_patterns(monkeypatch, pattern, url):
