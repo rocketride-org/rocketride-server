@@ -94,7 +94,7 @@ def hint_for(err: Exception, uri: Optional[str] = None) -> str:
     """
     own_hint = getattr(err, 'hint', None)
     if isinstance(own_hint, str) and own_hint.strip() and '\n' not in own_hint.strip():
-        return own_hint
+        return own_hint.strip()
     message = str(err)
     if re.search(
         r'invalid api key|not authenticated|unauthorized|authentication failed|account is waitlisted',

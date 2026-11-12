@@ -182,7 +182,7 @@ export function takeInterrupt(): boolean {
 export function hintFor(err: unknown, uri?: string): string {
 	const ownHint = (err as { hint?: unknown } | null | undefined)?.hint;
 	if (typeof ownHint === 'string' && ownHint.trim() && !ownHint.trim().includes('\n')) {
-		return ownHint;
+		return ownHint.trim();
 	}
 	const message = err instanceof Error ? err.message : String(err);
 	if (/invalid api key|not authenticated|unauthorized|authentication failed|account is waitlisted/i.test(message)) {

@@ -58,6 +58,11 @@ test('the CLI hint helper returns the error own hint first', () => {
 	assert.equal(hintFor(error, 'http://x'), 'Set the key.');
 });
 
+test('the CLI hint helper returns the error own hint without surrounding whitespace', () => {
+	const error = new AuthenticationException({ message: 'Invalid API key', hint: 'Set the key.\n' });
+	assert.equal(hintFor(error, 'http://x'), 'Set the key.');
+});
+
 test('a multi-line error hint falls through to the message-based hint', () => {
 	const error = new AuthenticationException({ message: 'Invalid API key', hint: 'Common causes:\n- one\n- two' });
 	const expected = hintFor(new Error('Invalid API key'), 'http://x');

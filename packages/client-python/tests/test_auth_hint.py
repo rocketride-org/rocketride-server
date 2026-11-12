@@ -83,6 +83,10 @@ class TestCliHintFor(unittest.TestCase):
         err = AuthenticationException({'message': 'Invalid API key', 'hint': 'Set the key.'})
         self.assertEqual(hint_for(err, 'http://x'), 'Set the key.')
 
+    def test_exception_hint_is_returned_without_surrounding_whitespace(self) -> None:
+        err = AuthenticationException({'message': 'Invalid API key', 'hint': 'Set the key.\n'})
+        self.assertEqual(hint_for(err, 'http://x'), 'Set the key.')
+
     def test_multi_line_exception_hint_falls_through_to_the_message_hint(self) -> None:
         err = AuthenticationException({'message': 'Invalid API key', 'hint': 'Common causes:\n- one\n- two'})
         expected = hint_for(Exception('Invalid API key'), 'http://x')
