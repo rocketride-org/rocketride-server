@@ -49,6 +49,7 @@ Usage:
     await client.set_events(token, ['apaevt_status_upload', 'apaevt_status_processing'])
 """
 
+import inspect
 import json
 import sys
 from typing import Callable, Dict, Any, Optional, List
@@ -181,7 +182,9 @@ class EventMixin(DAPClient):
 
         if self._caller_on_connected is not None:
             try:
-                await self._caller_on_connected(connection_info)
+                result = self._caller_on_connected(connection_info)
+                if inspect.isawaitable(result):
+                    await result
             except Exception as e:
                 self.debug_message(f'Error {e} in user connected event handler')
                 raise
@@ -211,7 +214,9 @@ class EventMixin(DAPClient):
         """
         if self._caller_on_disconnected is not None:
             try:
-                await self._caller_on_disconnected(reason, has_error)
+                result = self._caller_on_disconnected(reason, has_error)
+                if inspect.isawaitable(result):
+                    await result
             except Exception as e:
                 self.debug_message(f'Error {e} in user disconnected event handler')
                 raise
@@ -237,7 +242,9 @@ class EventMixin(DAPClient):
         """
         if self._caller_on_connect_error is not None:
             try:
-                await self._caller_on_connect_error(str(error))
+                result = self._caller_on_connect_error(str(error))
+                if inspect.isawaitable(result):
+                    await result
             except Exception as e:
                 self.debug_message(f'Error {e} in user on_connect_error handler')
                 raise
@@ -302,14 +309,18 @@ class EventMixin(DAPClient):
             callback = self._sse_pipe_callbacks.get(pipe_id)
             if callback is not None:
                 try:
-                    await callback(event_body.get('type', ''), event_body.get('data', {}))
+                    result = callback(event_body.get('type', ''), event_body.get('data', {}))
+                    if inspect.isawaitable(result):
+                        await result
                 except Exception as e:
                     self.debug_message(f'Error in SSE callback for pipe {pipe_id}: {e}')
 
         # Call user-provided event handler if available
         if self._caller_on_event is not None:
             try:
-                await self._caller_on_event(message)
+                result = self._caller_on_event(message)
+                if inspect.isawaitable(result):
+                    await result
             except Exception as e:
                 # Log errors but don't let user code break the connection
                 self.debug_message(f'Error in user event handler for {event_type} (seq {seq_num}): {e}')

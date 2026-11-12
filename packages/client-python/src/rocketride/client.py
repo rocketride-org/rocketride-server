@@ -314,7 +314,7 @@ class RocketRideClient(
         if self.did_fail(response):
             if self._on_trace:
                 self._on_trace(self.TRACE_ERROR, response)
-            raise RuntimeError(response.get('message', f'{command} failed'))
+            raise RuntimeError(response.get('message') or f'{command} failed')
 
         # Trace: success response
         if self._on_trace:
@@ -478,7 +478,7 @@ class RocketRideClient(
             response = await client.request(message, timeout=timeout)
 
             if client.did_fail(response):
-                raise RuntimeError(response.get('message', 'Server info request failed'))
+                raise RuntimeError(response.get('message') or 'Server info request failed')
 
             # `or {}` (not a default) — a present-but-None body must also
             # normalize, exactly like call() and the TS SDK's `?? {}`.

@@ -151,16 +151,16 @@ Callback function for handling real-time events from the server.
 Events include pipeline status updates, processing progress,
 error notifications, and system alerts.
 """
-EventCallback = Callable[[DAPMessage], Awaitable[None]]
+EventCallback = Callable[[DAPMessage], None | Awaitable[None]]
 
 """Callback function for connection establishment events."""
-ConnectCallback = Callable[[Optional[str]], Awaitable[None]]
+ConnectCallback = Callable[[Optional[str]], None | Awaitable[None]]
 
-"""Callback function for connection attempt failure (e.g. connect or reconnect failed). Async."""
-ConnectErrorCallback = Callable[[str], Awaitable[None]]
+"""Callback function for connection attempt failure (e.g. connect or reconnect failed). Sync or async."""
+ConnectErrorCallback = Callable[[str], None | Awaitable[None]]
 
 """Callback function for disconnection events."""
-DisconnectCallback = Callable[[Optional[str], Optional[bool]], Awaitable[None]]
+DisconnectCallback = Callable[[Optional[str], Optional[bool]], None | Awaitable[None]]
 
 
 class RocketRideClientConfig(TypedDict, total=False):
