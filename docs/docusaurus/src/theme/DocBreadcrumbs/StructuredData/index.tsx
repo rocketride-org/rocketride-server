@@ -2,6 +2,7 @@ import React, { type ReactNode } from 'react';
 import Head from '@docusaurus/Head';
 import { useBreadcrumbsStructuredData } from '@docusaurus/plugin-content-docs/client';
 import type { Props } from '@theme/DocBreadcrumbs/StructuredData';
+import { withTrailingSlash } from '../../../lib/format.mjs';
 
 /**
  * BreadcrumbList JSON-LD, same as the stock component except every `item` URL
@@ -15,7 +16,7 @@ export default function DocBreadcrumbsStructuredData(props: Props): ReactNode {
 		...structuredData,
 		itemListElement: (structuredData.itemListElement as unknown as { item?: unknown }[]).map((entry) => ({
 			...entry,
-			item: typeof entry.item === 'string' && !entry.item.endsWith('/') ? `${entry.item}/` : entry.item,
+			item: withTrailingSlash(entry.item),
 		})),
 	};
 	return (
