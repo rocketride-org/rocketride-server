@@ -62,6 +62,7 @@ import { registerDeployCommands } from './commands/deploy';
 import { registerProfileCommands } from './commands/profile';
 import { disconnectAll, takeInterrupt } from './common';
 import { SDK_VERSION } from '../client/constants';
+import { DAPException } from '../client/exceptions/index';
 
 // The workspace .env must be in process.env before the command groups
 // REGISTER (their option defaults read it) — registration happens inside
@@ -151,6 +152,10 @@ export async function main(): Promise<void> {
 		await program.parseAsync(process.argv);
 	} catch (error) {
 		console.error(`Error: ${error instanceof Error ? error.message : String(error)}`);
+		// The hint is advice kept out of `message` (#3187); print it under the
+		// error so a failing command says what to do next.
+		const hint = error instanceof DAPException ? error.hint : undefined;
+		if (hint) console.error(hint);
 		process.exit(1);
 	}
 }

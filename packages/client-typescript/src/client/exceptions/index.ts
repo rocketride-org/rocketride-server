@@ -92,6 +92,40 @@ export class ConnectionException extends RocketRideException {
 }
 
 /**
+ * The engine's answer when a client connects without sending a key.
+ *
+ * Server-authored: kept as a literal so both SDKs recognise the same words.
+ */
+export const NO_AUTHORIZATION_MESSAGE = 'No authorization provided';
+
+/**
+ * Advice for {@link NO_AUTHORIZATION_MESSAGE}.
+ *
+ * The server text names what went wrong; this says what to do about it, and is
+ * attached as the exception's `hint` rather than folded into `message`, which
+ * stays server-authored so both SDKs report the same words (#3187).
+ */
+export const NO_AUTHORIZATION_HINT =
+	'No API key was sent. Set ROCKETRIDE_APIKEY or pass `auth` when connecting: a local ' +
+	'engine accepts any non-empty value unless ROCKETRIDE_APIKEY is set on the engine, and ' +
+	'RocketRide Cloud needs a key from `rocketride login`.';
+
+/**
+ * Attach the missing-API-key advice to a failed auth response.
+ *
+ * Returns a copy of `response` with `hint` set to {@link NO_AUTHORIZATION_HINT},
+ * but only when the server answered exactly {@link NO_AUTHORIZATION_MESSAGE} and
+ * did not already send a hint of its own - a server hint is never overwritten,
+ * and the `message` is never touched, so both SDKs report the same words (#3187).
+ */
+export function withNoAuthorizationHint(response: Record<string, unknown>): Record<string, unknown> {
+	if (response.message === NO_AUTHORIZATION_MESSAGE && typeof response.hint !== 'string') {
+		return { ...response, hint: NO_AUTHORIZATION_HINT };
+	}
+	return response;
+}
+
+/**
  * Exception raised when authentication fails (bad API key or credentials).
  */
 export class AuthenticationException extends ConnectionException {

@@ -53,6 +53,7 @@ import asyncio
 import os
 import sys
 
+from ..core.exceptions import RocketRideException
 from .utils.env import (
     ENV_DEPLOY_APIKEY,
     ENV_DEPLOY_URI,
@@ -748,6 +749,14 @@ def main() -> None:
     except KeyboardInterrupt:
         print('\nOperation interrupted by user', file=sys.stderr)
         sys.exit(130)
+    except RocketRideException as exc:
+        # Report the message and its hint rather than a traceback: a first-time
+        # user needs the advice, not the frames that led to it (#3187). An
+        # uncaught script gets the same advice from the exception's note.
+        print(f'Error: {exc}', file=sys.stderr)
+        if exc.hint:
+            print(exc.hint, file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == '__main__':

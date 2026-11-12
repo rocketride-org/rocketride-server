@@ -53,6 +53,17 @@ Usage:
 from typing import Any, Dict, Optional
 
 
+# Advice for the engine's "No authorization provided". The server text names
+# what went wrong; this says what to do about it, and is attached as the
+# exception's hint (#3187) rather than folded into the message, which stays
+# server-authored so both SDKs report the same words.
+NO_AUTHORIZATION_HINT = (
+    'No API key was sent. Set ROCKETRIDE_APIKEY or pass `auth` when connecting: a local '
+    'engine accepts any non-empty value unless ROCKETRIDE_APIKEY is set on the engine, and '
+    'RocketRide Cloud needs a key from `rocketride login`.'
+)
+
+
 class DAPException(Exception):
     """
     Base exception class for Debug Adapter Protocol (DAP) errors.
@@ -99,6 +110,14 @@ class DAPException(Exception):
 
         # Store complete DAP result for detailed error analysis
         self.dap_result = dap_result or {}
+
+        # Show the hint under the error in an uncaught traceback (PEP 678), so
+        # a crashed script answers "what do I do next" without the caller
+        # printing it. Python 3.10 has no add_note; there the hint stays
+        # reachable through the property below.
+        hint = self.dap_result.get('hint')
+        if isinstance(hint, str) and hasattr(self, 'add_note'):
+            self.add_note(hint)
 
     @property
     def code(self) -> Optional[str]:

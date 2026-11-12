@@ -36,7 +36,7 @@ import { BillingApi } from './billing.js';
 import { DatabaseApi } from './database.js';
 import { DeployApi } from './deploy.js';
 import { LogApi } from './log.js';
-import { AuthenticationException, ConnectionException, DAPException, LoginAttemptCancelledError, type LoginAttemptCancellationReason, PipeException } from './exceptions/index.js';
+import { AuthenticationException, ConnectionException, DAPException, LoginAttemptCancelledError, type LoginAttemptCancellationReason, PipeException, withNoAuthorizationHint } from './exceptions/index.js';
 
 // Global counter for generating unique client IDs
 let clientId = 0;
@@ -850,7 +850,10 @@ export class RocketRideClient extends DAPClient {
 			const response = await this.request({ type: 'request', command: 'auth', seq: 0, arguments: authArguments }, timeout);
 			this._assertCurrentOperation(operation);
 			if (response.success !== true) {
-				throw new AuthenticationException(response as unknown as Record<string, unknown>);
+				// The engine's text says only what went wrong; withNoAuthorizationHint adds
+				// what to do about it (#3187). The message itself stays as sent, so both
+				// SDKs report the same words.
+				throw new AuthenticationException(withNoAuthorizationHint(response as unknown as Record<string, unknown>));
 			}
 
 			const result = response.body as unknown as ConnectResult;

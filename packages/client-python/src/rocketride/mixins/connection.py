@@ -61,7 +61,7 @@ from ..core import (
     CONST_DEFAULT_WEB_PORT,
     CONST_DEFAULT_WEB_PROTOCOL,
 )
-from ..core.exceptions import AuthenticationException
+from ..core.exceptions import NO_AUTHORIZATION_HINT, AuthenticationException
 from ..types.client import ConnectResult
 
 
@@ -159,7 +159,13 @@ class ConnectionMixin(DAPClient):
             raise
         if not response.get('success', False):
             message = response.get('message', 'Authentication failed')
-            raise AuthenticationException({'message': message})
+            dap_result: Dict[str, Any] = {'message': message}
+            if message == 'No authorization provided':
+                # The engine's text says only what went wrong; the hint says
+                # what to do about it (#3187). The message stays server-authored
+                # so both SDKs report the same words.
+                dap_result['hint'] = NO_AUTHORIZATION_HINT
+            raise AuthenticationException(dap_result)
 
         auth_body = response.get('body') or {}
         self._connect_result = auth_body  # type: ignore[assignment]
