@@ -117,7 +117,9 @@ unencrypted. Three rules apply:
 A reverse proxy in front of an engine bound to localhost makes remote callers look local:
 `send_files`, which uploads files from the engine host's own disk, is then offered to anyone
 with a valid key. Behind a proxy, run the engine on a bind that is not localhost, so
-`send_files` is not offered.
+`send_files` is not offered. Then limit the engine port to the proxy with a host firewall
+or a private network; otherwise clients can reach the engine directly and skip the TLS
+proxy and its access rules.
 
 More: https://docs.rocketride.org/connect/mcp/http/ and
 https://docs.rocketride.org/connect/mcp/http/self-hosting/.
