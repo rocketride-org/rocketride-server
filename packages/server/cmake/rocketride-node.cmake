@@ -21,8 +21,6 @@
 # SOFTWARE.
 # =============================================================================
 
-cmake_minimum_required(VERSION 3.20 FATAL_ERROR)
-
 #
 # Everything a node needs from the server project, for a node built on its own:
 # the CMake project is nodes/src/nodes/<node-dir>, and the engine it imports is

@@ -21,9 +21,6 @@
 # SOFTWARE.
 # =============================================================================
 
-# Require 3.16 for the built-in unity support
-cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
-
 # Upstream BoostConfig.cmake package config
 if(POLICY CMP0167)
     cmake_policy(SET CMP0167 NEW)

@@ -9,9 +9,9 @@
 
 # -----------------------------------------------------------------------------
 # CMake minimum version requirement
-# We require CMake 3.19+ (vcpkg manifest mode + modern CMake features)
+# We require CMake 3.22+ - set once here for the whole server build
 # -----------------------------------------------------------------------------
-cmake_minimum_required(VERSION 3.19 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.22 FATAL_ERROR)
 
 # -----------------------------------------------------------------------------
 # Project directories
