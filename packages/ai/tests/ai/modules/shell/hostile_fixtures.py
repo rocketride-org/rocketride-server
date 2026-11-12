@@ -276,11 +276,15 @@ class HostileAccount:
         return copy.deepcopy(self.artifacts[(org_id, app_id, version)])
 
 
-def hostile_account() -> HostileAccount:
-    """The full hostile platform state (see module docstring)."""
+def hostile_account(home: Dict[str, Any] = HOME_MANIFEST, home_version: int = 1) -> HostileAccount:
+    """The full hostile platform state (see module docstring).
+
+    ``home`` is the root claimant's manifest and ``home_version`` the
+    registry version its public row serves.
+    """
     acct = HostileAccount()
     platform = '00000000-platform'
-    acct.add(platform, 'rocketride.home', HOME_MANIFEST, published_at=1_700_000_100.0, emit=True)
+    acct.add(platform, 'rocketride.home', home, version=home_version, published_at=1_700_000_100.0, emit=True)
     acct.add(
         platform, 'rocketride.secret', _leaky_manifest('rocketride.secret', 'LEAKSECRET'), state='disabled', emit=True
     )

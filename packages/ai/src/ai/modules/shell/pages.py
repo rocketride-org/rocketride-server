@@ -37,32 +37,47 @@ private API routes included, to anonymous callers. The web server consults
 (the catch-all answers them with a page, a redirect or a 404) skip
 authentication; a path any real route matches still needs credentials.
 
-A page is the document the shell boots from (the route's prerendered
-capture when the shell build carries one, else ``index.html``) with the
-page's head metadata injected (title, description, canonical URL, robots),
-for people and crawlers alike, so the shell boots and routes as before.
+A page answers people with the document the shell boots from (the route's
+prerendered capture when the shell build carries one, else ``index.html``),
+so the shell boots and routes as before. A crawler (``crawlers.classify``)
+gets the page's ``snapshot`` instead: that file of the production version's
+build output, rendered by the restricted template engine (``template.py``)
+with ``assets``, the version's URL base. A page without a snapshot, or with
+one that cannot be read or rendered, serves crawlers the shell document too.
+Either way the page's head metadata (title, description, canonical URL,
+robots) is injected. Only a rendered snapshot may sit in shared caches; the
+shell document names the current build's bundles, so it is
+``private, no-cache`` for everyone.
 
 Rendered responses are cached per (path, UA class) under a byte budget and
-dropped on every aggregate swap.
+dropped on every aggregate swap; snapshot bytes, immutable per version, are
+cached by store path under its own byte budget. A snapshot over
+``MAX_SNAPSHOT_BYTES`` (sized by a stat) is never read.
 """
 
 import asyncio
+import sys
 from pathlib import Path
+from time import monotonic
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from fastapi import HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from starlette.routing import Route, WebSocketRoute
 
+from ai.account.store import StorageError
 from ai.web import Request, WebServer
 from ai.web.middleware import route_path
 
+from rocketlib import warning
+
 from . import public_pages
-from .contract import Page, with_slash_twin
+from .contract import MAX_SNAPSHOT_BYTES, Page, snapshot_error, with_slash_twin
 from .crawlers import CRAWLER, classify
 from .head import inject_head
 from .settings import app_url
-from .shell import shell_document_path, shell_static
+from .shell import CACHE_CONTROL, shell_document_path, shell_static
+from .template import TemplateError, render
 
 # The web server whose route table the auth predicate and the live-route
 # collision check read (set by initModule).
@@ -229,7 +244,7 @@ class _FifoCache:
     than the whole budget is never stored.
     """
 
-    def __init__(self, max_bytes: int, max_entries: int) -> None:
+    def __init__(self, max_bytes: int, max_entries: int = sys.maxsize) -> None:
         self.max_bytes = max_bytes
         self.max_entries = max_entries
         self.total = 0
@@ -237,6 +252,9 @@ class _FifoCache:
 
     def __len__(self) -> int:
         return len(self._entries)
+
+    def __contains__(self, key: Any) -> bool:
+        return key in self._entries
 
     def keys(self) -> List[Any]:
         """The keys, oldest first."""
@@ -295,6 +313,170 @@ def _clear_rendered(old: Any, new: Any) -> None:
     _generation += 1
     _render_cache.clear()
     _documents.clear()
+
+
+# Snapshot bytes by store path. A version's build output never changes, so
+# entries are only ever evicted, never invalidated.
+_SNAPSHOT_CACHE_MAX_BYTES = 16 * 1024 * 1024
+_snapshot_cache = _FifoCache(_SNAPSHOT_CACHE_MAX_BYTES)
+
+# Store paths of snapshots that can never render: over MAX_SNAPSHOT_BYTES, or a
+# template the engine refuses. A version's build output never changes, so each
+# is warned about once and never read again, across swaps too.
+_UNUSABLE_SNAPSHOTS_MAX = 1024
+_unusable_snapshots = _FifoCache(_UNUSABLE_SNAPSHOTS_MAX, _UNUSABLE_SNAPSHOTS_MAX)
+
+# Store path -> when (monotonic seconds) its last storage failure was warned
+# about. While a store is down every crawler request retries the read, so each
+# path warns at most once per interval, not once per request.
+_STORAGE_WARNING_INTERVAL = 300.0
+_STORAGE_WARNED_MAX = 1024
+_storage_warned = _FifoCache(_STORAGE_WARNED_MAX, _STORAGE_WARNED_MAX)
+
+# How long a crawler request waits for a snapshot the snapshot cache does not
+# hold. The S3 store retries a failing read for minutes, each try holding a
+# worker thread; past this the crawler gets the shell document, uncached.
+_SNAPSHOT_READ_SECONDS = 5.0
+
+
+class _SnapshotTooLarge(Exception):
+    """A stored snapshot over ``MAX_SNAPSHOT_BYTES`` (never read)."""
+
+
+def snapshot_path(page: Page) -> str:
+    """The store path of a page's snapshot inside its production version's build output.
+
+    The snapshot grammar (a relative path without dot segments, re-checked
+    here) keeps the path inside that tree.
+
+    Args:
+        page: A page of the aggregate, with its production version's
+            ``dist_dir`` and ``version``.
+
+    Returns:
+        The snapshot's store path, ``<dist_dir>/<snapshot>``.
+
+    Raises:
+        ValueError: the page has no production version, or the snapshot path
+            is malformed.
+    """
+    if not page.dist_dir or page.version is None:
+        raise ValueError('the page has no production version to read a snapshot from')
+    if snapshot_error(page.snapshot):
+        raise ValueError(f'unusable snapshot path {page.snapshot!r}')
+    return f'{page.dist_dir.rstrip("/")}/{page.snapshot}'
+
+
+def assets_base(page: Page) -> str:
+    """The URL of the page's production build output: the snapshot's ``{{assets}}``.
+
+    Args:
+        page: A page of the aggregate, with its production ``version``.
+
+    Returns:
+        ``/apps/<appId>/v<N>``, where that version's build output is served.
+    """
+    return f'/apps/{page.app_id}/v{page.version}'
+
+
+async def _snapshot_bytes(path: str) -> bytes:
+    """The snapshot at store ``path``, from the snapshot cache or the store.
+
+    On a miss the file is sized by a stat first, so a snapshot over the cap
+    is never downloaded.
+
+    Raises:
+        _SnapshotTooLarge: the stored file is over ``MAX_SNAPSHOT_BYTES``.
+        StorageError: a storage failure (``StorageNotFoundError`` included),
+            or no answer from the store within ``_SNAPSHOT_READ_SECONDS``.
+    """
+    raw = _snapshot_cache.get(path)
+    if raw is None:
+        try:
+            raw = await asyncio.wait_for(_stored_snapshot(path), _SNAPSHOT_READ_SECONDS)
+        except asyncio.TimeoutError as exc:
+            raise StorageError(f'the store did not answer within {_SNAPSHOT_READ_SECONDS:g} s') from exc
+        _snapshot_cache.put(path, raw, len(raw))
+    return raw
+
+
+async def _stored_snapshot(path: str) -> bytes:
+    """Read the snapshot at store ``path`` after a stat, so one over the cap is never downloaded.
+
+    Raises:
+        _SnapshotTooLarge: the stored file is over ``MAX_SNAPSHOT_BYTES``.
+        StorageError: a storage failure (``StorageNotFoundError`` included).
+    """
+    size = (await public_pages.artifact_file_info(path))['size']
+    if size > MAX_SNAPSHOT_BYTES:
+        raise _SnapshotTooLarge(f'{size} bytes, over the {MAX_SNAPSHOT_BYTES}-byte limit')
+    return await public_pages.read_artifact_file(path)
+
+
+def _warn_fallback(page: Page, reason: Any) -> None:
+    """Log that crawlers get the shell document in place of the page's snapshot."""
+    warning(f'[public_pages] {page.path}: snapshot {page.snapshot!r} unavailable, serving the shell document: {reason}')
+
+
+async def _crawler_snapshot(page: Page) -> Tuple[Optional[str], bool]:
+    """The page's rendered snapshot for crawlers, or None for the shell document: ``(html, cacheable)``.
+
+    A fallback is cacheable when it is final for the page's version: no
+    snapshot, a malformed snapshot path or no production version, a snapshot
+    over ``MAX_SNAPSHOT_BYTES``, or a template the engine refuses (the last
+    two are remembered by store path and warned about once). A storage
+    failure (a snapshot the store does not have yet, or no answer within
+    ``_SNAPSHOT_READ_SECONDS``, included) falls back uncached, so the next request tries again, and is warned about at most
+    once per store path per ``_STORAGE_WARNING_INTERVAL``. Anything else is
+    a bug and propagates.
+
+    Args:
+        page: A page of the aggregate.
+
+    Returns:
+        ``(html, cacheable)``: the rendered snapshot, or None when crawlers
+        get the shell document, and whether the render cache may keep it.
+    """
+    if not page.snapshot:
+        return None, True
+    try:
+        path = snapshot_path(page)
+    except ValueError as exc:
+        _warn_fallback(page, exc)
+        return None, True
+    if path in _unusable_snapshots:
+        return None, True
+    try:
+        raw = await _snapshot_bytes(path)
+        # A 2 MiB snapshot takes tens of milliseconds to render: off the event loop.
+        html = await asyncio.to_thread(render, raw.decode('utf-8', errors='replace'), {'assets': assets_base(page)})
+        return html, True
+    except (_SnapshotTooLarge, TemplateError) as exc:
+        _unusable_snapshots.put(path, True, 1)
+        _warn_fallback(page, exc)
+        return None, True
+    except StorageError as exc:
+        if _storage_warning_due(path):
+            _warn_fallback(page, exc)
+        return None, False
+
+
+def _storage_warning_due(path: str) -> bool:
+    """Whether a storage failure reading ``path`` is warned about now; if so, not again for an interval.
+
+    Args:
+        path: The snapshot's store path.
+
+    Returns:
+        True when ``path`` has no storage failure warned about in the last
+        ``_STORAGE_WARNING_INTERVAL`` seconds.
+    """
+    now = monotonic()
+    last = _storage_warned.get(path)
+    if last is not None and now - last < _STORAGE_WARNING_INTERVAL:
+        return False
+    _storage_warned.put(path, now, 1)
+    return True
 
 
 def _moved(request: Request, path: str) -> Response:
@@ -397,8 +579,10 @@ async def _render_page(request: Request, path: str, page: Page) -> Response:
     """The page from the render cache, rendered off the event loop on a miss.
 
     Keyed by (path, UA class, shell document, its mtime and size,
-    ``RR_APP_URL``), so a new shell build or origin renders afresh. A render
-    that a swap overtook is served, not cached.
+    ``RR_APP_URL``), so a new shell build or origin renders afresh. A
+    crawler's copy is the page's rendered snapshot (``_crawler_snapshot``). A
+    render that falls back uncacheably, or that a swap overtook, is served,
+    not cached.
 
     Returns:
         The page's response.
@@ -412,8 +596,12 @@ async def _render_page(request: Request, path: str, page: Page) -> Response:
     cached = _render_cache.get(key)
     if cached is None:
         generation = _generation
-        cached = await asyncio.to_thread(_render, path, page, crawler, document)
-        if generation == _generation:
+        snapshot = None
+        cacheable = True
+        if crawler:
+            snapshot, cacheable = await _crawler_snapshot(page)
+        cached = await asyncio.to_thread(_render, path, page, document, snapshot)
+        if cacheable and generation == _generation:
             _render_cache.put(key, cached, len(cached[0]))
     return HTMLResponse(cached[0], headers=dict(cached[1]))
 
@@ -450,21 +638,28 @@ def _unchanged(document: Path, mtime_ns: int, size: int) -> bool:
     return stat.st_mtime_ns == mtime_ns and stat.st_size == size
 
 
-def _render(path: str, page: Page, crawler: bool, document: Path) -> Tuple[bytes, Dict[str, str]]:
+def _render(path: str, page: Page, document: Path, snapshot: Optional[str]) -> Tuple[bytes, Dict[str, str]]:
     """Render one page as the render cache holds it: ``(body, headers)``.
 
-    The body is the shell document with the page's head metadata injected.
+    The body is a crawler's rendered ``snapshot`` (``_crawler_snapshot``), or
+    the shell document when it is None, people's always. Either way the
+    page's head metadata is injected.
     """
+    # Only a rendered snapshot may sit in shared caches: the shell document
+    # names the current build's bundles. Caches key on the UA.
+    body = snapshot
+    cache_control = CACHE_CONTROL
+    if body is None:
+        body = document.read_text(encoding='utf-8')
+        cache_control = 'private, no-cache'
     body = inject_head(
-        document.read_text(encoding='utf-8'),
+        body,
         title=page.head_title or page.title,
         description=page.description,
         canonical=canonical_url(path),
         noindex=not page.listed,
     )
-    # No shared cache may keep either class's copy: the document names the
-    # current build's hashed bundles, which a deploy removes. Caches key on the UA.
-    headers = {'Vary': 'User-Agent', 'Cache-Control': 'private, no-cache'}
+    headers = {'Vary': 'User-Agent', 'Cache-Control': cache_control}
     if not page.listed:
         headers['X-Robots-Tag'] = 'noindex'
     return body.encode('utf-8'), headers

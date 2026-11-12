@@ -55,6 +55,7 @@ from ai.account.app_rows import (
 )
 
 from .contract import (
+    MAX_SNAPSHOT_BYTES,
     Page,
     check_manifest,
     check_redirects,
@@ -67,12 +68,17 @@ from .contract import (
 
 @dataclass(frozen=True)
 class Published:
-    """One production-rung (public) app version's manifest, as the loader read it."""
+    """One production-rung (public) app version's manifest, as the loader read it.
+
+    ``version`` is the registry version the public rung serves; ``dist_dir``
+    is that version's build output.
+    """
 
     app_id: str
     manifest: Mapping[str, Any]
     dist_dir: str = ''
     published_at: Optional[float] = None
+    version: Optional[int] = None
 
 
 @dataclass(frozen=True)
@@ -125,7 +131,7 @@ def _claims(
             if owner is not None:
                 warning(f'[public_pages] {pub.app_id}: {page.path} already claimed by {owner.app_id} (page skipped)')
                 continue
-            exact[page.path] = replace(page, dist_dir=pub.dist_dir, published_at=pub.published_at)
+            exact[page.path] = replace(page, dist_dir=pub.dist_dir, version=pub.version, published_at=pub.published_at)
         if site is not None:
             sites[pub.app_id] = site
     return exact, sites
@@ -287,7 +293,15 @@ async def load_published(
         published_at: Optional[float] = None
         if isinstance(bound_at, (int, float)):
             published_at = float(bound_at)
-        out.append(Published(app_id=app_id, manifest=manifest, dist_dir=dist_dir, published_at=published_at))
+        out.append(
+            Published(
+                app_id=app_id,
+                manifest=manifest,
+                dist_dir=dist_dir,
+                published_at=published_at,
+                version=version,
+            )
+        )
     return out
 
 
@@ -331,10 +345,26 @@ async def page_manifest(metadata_manifest: Any, dist_dir: str) -> Mapping[str, A
 
 
 async def read_artifact_file(path: str) -> bytes:
-    """Read one file of a version's store tree (snapshots and the emitted manifest live under ``dist/``)."""
-    from ai.account.store import Store
+    """Read one file of a version's store tree (snapshots and the emitted manifest live under ``dist/``).
 
-    return await Store.instance().raw_store().read_bytes(path)
+    Args:
+        path: The file's store path.
+
+    Returns:
+        The file's bytes.
+
+    Raises:
+        StorageNotFoundError: the file does not exist.
+        StorageError: any other storage failure, a transport failure the
+            store stopped retrying included.
+    """
+    from ai.account.store import StorageError, Store
+    from ai.account.store_providers.s3.s3 import TRANSIENT_ERRORS
+
+    try:
+        return await Store.instance().raw_store().read_bytes(path)
+    except TRANSIENT_ERRORS as exc:
+        raise StorageError(f'Failed to read {path}: {exc}') from exc
 
 
 async def artifact_file_info(path: str) -> Dict[str, Any]:
@@ -351,11 +381,16 @@ async def artifact_file_info(path: str) -> Dict[str, Any]:
 
     Raises:
         StorageNotFoundError: the file does not exist.
-        StorageError: any other storage failure.
+        StorageError: any other storage failure, a transport failure the
+            store stopped retrying included.
     """
-    from ai.account.store import Store
+    from ai.account.store import StorageError, Store
+    from ai.account.store_providers.s3.s3 import TRANSIENT_ERRORS
 
-    return await Store.instance().raw_store().get_file_info(path)
+    try:
+        return await Store.instance().raw_store().get_file_info(path)
+    except TRANSIENT_ERRORS as exc:
+        raise StorageError(f'Failed to stat {path}: {exc}') from exc
 
 
 # =============================================================================
@@ -373,7 +408,8 @@ async def gate_errors(app_id: str, manifest: Mapping[str, Any], dist_dir: str, a
     paths and redirect sources) against every OTHER published platform
     manifest (first claim wins; ownership is derived from published
     manifests, so unpublishing releases it, with no table), and snapshot
-    files missing from the built version.
+    files missing from the built version or over ``MAX_SNAPSHOT_BYTES``
+    (sized by a stat, never read).
 
     The collision check sees only what is already published: two platform
     apps publishing the same path at the same moment can both pass. The
@@ -439,11 +475,18 @@ async def gate_errors(app_id: str, manifest: Mapping[str, Any], dist_dir: str, a
         if not page.snapshot:
             continue
         try:
-            await artifact_file_info(f'{dist_dir}/{page.snapshot}')
+            info = await artifact_file_info(f'{dist_dir}/{page.snapshot}')
         except StorageNotFoundError:
             errors.append(
                 f'publicPages path {page.path!r}: snapshot {page.snapshot!r} is not in the built version; '
                 'emit it into the build output or drop the field'
+            )
+            continue
+        if info['size'] > MAX_SNAPSHOT_BYTES:
+            errors.append(
+                f'publicPages path {page.path!r}: snapshot {page.snapshot!r} is {info["size"]} bytes, over the '
+                f'{MAX_SNAPSHOT_BYTES}-byte limit; move images, styles and scripts into the build output and '
+                'reference them through {{assets}}'
             )
     return errors
 

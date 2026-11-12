@@ -113,6 +113,11 @@ _MAX_TITLE = 300
 _MAX_DESCRIPTION = 1000
 _MAX_REDIRECTS = 100
 
+# The largest snapshot the publish gate accepts and the server reads. A crawler
+# request is cheap to send and its UA trivially spoofed, so every snapshot must
+# fit the snapshot and render caches many times over.
+MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024
+
 # The page keys this engine validates; every other key lands in ``Page.extra``.
 _PAGE_KEYS = frozenset({'path', 'title', 'description', 'listed', 'snapshot', 'data'})
 
@@ -123,9 +128,10 @@ class Page:
 
     ``data`` holds the raw ``data`` entries; ``extra`` the page's unknown
     keys, read-only. ``dist_dir`` (the version's servable store tree, where
-    snapshots live) and ``published_at`` (the production binding's time) are
-    filled by the aggregate loader; ``head_title`` is set only by the legacy
-    adapter (empty = use ``title``).
+    snapshots live), ``version`` (the registry version on the production
+    rung, whose build ``dist_dir`` is) and ``published_at`` (the production
+    binding's time) are filled by the aggregate loader; ``head_title`` is set
+    only by the legacy adapter (empty = use ``title``).
     """
 
     path: str
@@ -136,6 +142,7 @@ class Page:
     snapshot: str = ''
     data: Tuple[str, ...] = ()
     dist_dir: str = ''
+    version: Optional[int] = None
     published_at: Optional[float] = None
     head_title: str = ''
     # Out of the hash (a mapping is not hashable), still compared.
@@ -193,7 +200,7 @@ def _reserved_error(path: str) -> Optional[str]:
     return None
 
 
-def _snapshot_error(snapshot: Any) -> Optional[str]:
+def snapshot_error(snapshot: Any) -> Optional[str]:
     """Why ``snapshot`` is not a relative ``.html`` path inside the artifact, or None."""
     if not isinstance(snapshot, str) or not _SNAPSHOT.fullmatch(snapshot):
         return 'must be a relative path inside the artifact ending in .html (e.g. "pages/pricing.html")'
@@ -294,7 +301,7 @@ def _check_page(
         return None, f'{where}.data: {err}'
     snapshot = raw.get('snapshot', '')
     if snapshot != '':
-        err = _snapshot_error(snapshot)
+        err = snapshot_error(snapshot)
         if err:
             return None, f'{where}.snapshot {snapshot!r}: {err}'
     page = Page(

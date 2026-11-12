@@ -269,7 +269,7 @@ interface PublicPage {
   description?: string;
   /** Default true. false marks the page unlisted: not meant to be advertised or indexed. */
   listed?: boolean;
-  /** Crawler document inside the app's build output, e.g. 'pages/pricing.html'. */
+  /** The document crawlers get, inside the app's build output, e.g. 'pages/pricing.html'. */
   snapshot?: string;
   /** Server data the page names: 'plans' (this app's plans), 'plans:<appId>' or 'app:<appId>'. */
   data?: string[];
@@ -296,7 +296,8 @@ publish fails with a message naming the field):
   releases it).
 - Each `data` entry is `plans`, `plans:<appId>` or `app:<appId>`, and a page
   names each source (`plans`, `app`) at most once.
-- `snapshot` must be a relative `.html` path that exists in the built version.
+- `snapshot` must be a relative `.html` path that exists in the built version,
+  at most 2 MiB.
 - `site.docsUrl` must be an `https://` URL, with `<`, `>`, `"`, `'` and
   `` ` `` percent-encoded.
 - `site.redirects` (at most 100): each `from` is one exact path in the `path`
@@ -316,6 +317,29 @@ The server answers `GET` and `HEAD` on each page with the shell's document
 (the route's prerendered capture when the shell build carries one, else
 `index.html`), its head carrying the page's `title`, `description`, a
 canonical URL on `RR_APP_URL`, and `noindex` for an unlisted page.
+Crawlers (search, AI and link-preview bots, by user agent) get the page's
+`snapshot` instead, read from the production version's build output, with the
+same head. A page without a snapshot, or whose snapshot cannot be read or
+rendered, serves crawlers the shell's document; so does a stored snapshot over
+2 MiB, which the server never reads.
+
+A snapshot is a template with exactly three kinds of tag, each on one line:
+`{{name}}` and `{{a.b}}` insert a value, HTML-escaped; `{{#name}}...{{/name}}`
+repeats its content for each item of a list, enters an object, and renders
+nothing for an absent, empty or false value. Sections nest at most 16 deep.
+There is no `{{.}}`: a list item that is not an object adds no names, so a tag
+inside its section reads the enclosing values (`{{b}}` inside `{{#a}}` over
+`["x"]` renders the outer `b`).
+Any other tag renders nothing, as does a tag naming a value the server does
+not provide; a `{{` that does not form a tag stays as text. Escaping makes a
+value safe in HTML text and in quoted attributes that are not URLs; it does not
+make a value safe in a URL attribute (`href`, `src`), an event handler,
+`style`, `<script>` or an unquoted attribute, so only server-derived URLs such
+as `{{assets}}` belong there. `{{assets}}` is the URL of the version's build
+output, `/apps/<appId>/v<N>`, so a snapshot references its images as
+`{{assets}}/seo-assets/logo.svg`, served from the same version it was read
+from. The shell's own document is never treated as a template.
+
 `/sitemap.xml` and `/llms.txt` list the listed pages, and `/llms.txt` takes
 its heading, blurb and docs link from `site`; redirects never appear in
 either. `GET` and `HEAD` on a redirect's `from` answer `301` with

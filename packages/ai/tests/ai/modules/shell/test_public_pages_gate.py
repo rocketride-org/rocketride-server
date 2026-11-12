@@ -33,6 +33,8 @@ import pytest
 
 import ai.modules.shell.public_pages as pp
 
+from ai.modules.shell.contract import MAX_SNAPSHOT_BYTES
+
 # Bound at import, before conftest swaps the module attribute for the FILES double.
 from ai.modules.shell.public_pages import artifact_file_info, gate_errors
 
@@ -109,6 +111,17 @@ async def test_missing_snapshot_rejected_present_snapshot_allowed():
     assert len(errors) == 1 and "snapshot 'pages/fresh.html' is not in the built version" in errors[0]
     FILES[f'{DIST}/pages/fresh.html'] = b'<html></html>'
     assert await gate_errors('rocketride.other', manifest, DIST, hostile_account()) == []
+
+
+async def test_a_snapshot_over_the_size_cap_is_refused_by_its_stat():
+    manifest = {'publicPages': [{'path': '/fresh', 'title': 'F', 'snapshot': 'pages/fresh.html'}]}
+    FILES[f'{DIST}/pages/fresh.html'] = b'x' * MAX_SNAPSHOT_BYTES
+    assert await gate_errors('rocketride.other', manifest, DIST, hostile_account()) == []
+    FILES[f'{DIST}/pages/fresh.html'] = b'x' * (MAX_SNAPSHOT_BYTES + 1)
+    errors = await gate_errors('rocketride.other', manifest, DIST, hostile_account())
+    size = MAX_SNAPSHOT_BYTES + 1
+    assert len(errors) == 1
+    assert f"snapshot 'pages/fresh.html' is {size} bytes, over the {MAX_SNAPSHOT_BYTES}-byte limit" in errors[0]
 
 
 async def test_every_problem_is_reported_at_once():
