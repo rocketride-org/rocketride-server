@@ -76,6 +76,28 @@ _WRITING_CLAUSE = re.compile(
 )
 
 # ClickHouse's SETTINGS clause (SETTINGS name = value), which changes settings for the query, such as its time limit
+# Session-scoped lock functions and MySQL user-variable assignment change state of the
+# session, not of one transaction, so a rollback does not undo them and the pooled
+# connection keeps them. `pg_advisory_xact_lock` is transaction-scoped and stays allowed.
+# PostgreSQL folds a quoted identifier to lower case, so a quoted pg_advisory_lock name
+# is a call; masking blanks the name before the pattern below can see it, so the quoted
+# form is checked on the raw text. A quoted name without a following `(` is a string, not
+# a call, which keeps a literal that names the function out of the rule.
+# Anything PostgreSQL accepts as whitespace between the name and `(` — spaces, a block
+# comment, a line comment — still makes it a call.
+_SESSION_FUNCTION_NAMES = frozenset(
+    {'pg_advisory_lock', 'pg_advisory_lock_shared', 'pg_try_advisory_lock', 'pg_try_advisory_lock_shared'}
+)
+# MySQL resolves a backtick-quoted built-in function name, and the maskers remove it.
+_MYSQL_SESSION_FUNCTION_NAMES = frozenset({'get_lock'})
+
+_SESSION_STATE_CLAUSE = re.compile(
+    r'\bpg_(?:try_)?advisory_lock(?:_shared)?\s*\('
+    r'|\bget_lock\s*\('
+    r'|@\s*(?:`[^`]*`|\x22[^\x22]*\x22|\x27[^\x27]*\x27|[a-z0-9_$]+(?:\.[a-z0-9_$]+)*)\s*:=',
+    re.IGNORECASE,
+)
+
 _SETTINGS_CLAUSE = re.compile(r'\bsettings\s+(?:[a-z_][a-z0-9_]*|`[^`]*`|"[^"]*")\s*=', re.IGNORECASE)
 
 
@@ -290,16 +312,166 @@ def _is_read_shaped(masked: str | None) -> bool:
         _ALLOWED_STATEMENT.match(statement)
         and not _WRITING_CLAUSE.search(statement)
         and not _SETTINGS_CLAUSE.search(statement)
+        and not _SESSION_STATE_CLAUSE.search(statement)
         for statement in statements
     )
+
+
+def _decode_pg_identifier(name: str, escape: str = chr(92)) -> str:
+    """Decode ``U&"..."`` escapes (``ESCAPEXXXX``) into the identifier they name.
+
+    ``escape`` is the character the statement's ``UESCAPE`` clause names; PostgreSQL
+    defaults it to the backslash.
+    """
+    pattern = re.compile(re.escape(escape) + r'(?:\+(?P<long>[0-9a-fA-F]{6})|(?P<short>[0-9a-fA-F]{4}))')
+
+    def replace(match: 're.Match[str]') -> str:
+        codepoint = match.group('long') or match.group('short')
+        try:
+            return chr(int(codepoint, 16))
+        except (TypeError, ValueError):
+            return match.group(0)
+
+    return pattern.sub(replace, name)
+
+
+def _skip_gap(sql: str, index: int) -> int:
+    """Return the index after whitespace and comments, whose block form nests."""
+    n = len(sql)
+    while index < n:
+        char = sql[index]
+        if char.isspace():
+            index += 1
+        elif sql.startswith('--', index):
+            # A line comment ends at either line terminator: a document that uses
+            # CR-only line endings would otherwise hide everything after it.
+            while index < n and sql[index] not in ('\r', '\n'):
+                index += 1
+        elif sql.startswith('/*', index):
+            depth = 1
+            index += 2
+            while index < n and depth:
+                if sql.startswith('/*', index):
+                    depth += 1
+                    index += 2
+                elif sql.startswith('*/', index):
+                    depth -= 1
+                    index += 2
+                else:
+                    index += 1
+        else:
+            break
+    return index
+
+
+def _skip_literal(sql: str, index: int) -> int:
+    """Return the index after the single-quoted literal that starts at ``index``."""
+    n = len(sql)
+    backslash_escapes = index > 0 and sql[index - 1] in 'eE'
+    index += 1
+    while index < n:
+        if backslash_escapes and sql[index] == chr(92):
+            index += 2
+            continue
+        if sql[index] == "'":
+            if index + 1 < n and sql[index + 1] == "'":
+                index += 2
+                continue
+            return index + 1
+        index += 1
+    return n
+
+
+_DOLLAR_TAG = re.compile(r'\$([A-Za-z_\u0080-\U0010FFFF][A-Za-z0-9_\u0080-\U0010FFFF]*)?\$')
+
+
+def _skip_dollar_quoted(sql: str, index: int) -> int:
+    """Return the index after the dollar-quoted body that starts at ``index``.
+
+    A dollar-quoted body is text, like a single-quoted literal, so a quoted function
+    name inside it must not be read as a call. Returns ``index`` when the text there is
+    not a tag (a bare ``$`` or a placeholder).
+    """
+    match = _DOLLAR_TAG.match(sql, index)
+    if not match:
+        return index
+    delimiter = match.group(0)
+    end = sql.find(delimiter, match.end())
+    return len(sql) if end == -1 else end + len(delimiter)
+
+
+def _quoted_session_call(sql: str) -> bool:
+    """True when a quoted identifier resolves to a session-lock function.
+
+    Covers PostgreSQL's double-quoted and ``U&"..."`` identifiers (including a
+    ``UESCAPE`` clause) and MySQL's backtick form. The statement is walked instead of
+    matched with a regex: a string literal must never be read as an identifier, block
+    comments nest, and ``UESCAPE`` sits between the name and the call.
+
+    Args:
+        sql: The generated SQL, unmasked.
+
+    Returns:
+        Whether a quoted session-lock function name is used as a function.
+    """
+    n = len(sql)
+    index = 0
+    while index < n:
+        char = sql[index]
+        if sql.startswith('--', index) or sql.startswith('/*', index):
+            # A comment comes first: an apostrophe inside it opens nothing, and a
+            # quoted name after it is still a name.
+            index = _skip_gap(sql, index)
+            continue
+        if char == "'":
+            index = _skip_literal(sql, index)
+            continue
+        if char == '$':
+            after_dollar = _skip_dollar_quoted(sql, index)
+            index = after_dollar if after_dollar > index else index + 1
+            continue
+        unicode_name = sql[index : index + 2].lower() == 'u&'
+        quote_at = index + 2 if unicode_name else index
+        if quote_at < n and sql[quote_at] == '"':
+            close = sql.find('"', quote_at + 1)
+            if close == -1:
+                return False
+            name = sql[quote_at + 1 : close]
+            cursor = _skip_gap(sql, close + 1)
+            escape = chr(92)
+            if sql[cursor : cursor + 7].lower() == 'uescape':
+                literal = _skip_gap(sql, cursor + 7)
+                if literal + 2 < n and sql[literal] == "'" and sql[literal + 2] == "'":
+                    escape = sql[literal + 1]
+                    cursor = _skip_gap(sql, literal + 3)
+            if cursor < n and sql[cursor] == '(':
+                resolved = _decode_pg_identifier(name, escape) if unicode_name else name
+                if resolved.strip().lower() in _SESSION_FUNCTION_NAMES:
+                    return True
+            index = close + 1
+            continue
+        if char == '`':
+            close = sql.find('`', index + 1)
+            if close == -1:
+                return False
+            after = _skip_gap(sql, close + 1)
+            if after < n and sql[after] == '(':
+                if sql[index + 1 : close].strip().lower() in _MYSQL_SESSION_FUNCTION_NAMES:
+                    return True
+            index = close + 1
+            continue
+        index += 1
+    return False
 
 
 def is_sql_safe(sql: str) -> bool:
     """Return False unless the SQL is one statement shaped like a read: ``SELECT``, optionally behind ``EXPLAIN``.
 
     A whitelist: anything else (SET, COPY, PREPARE / EXECUTE, DO, HANDLER, WITH, ...) is rejected, and so
-    is a SELECT with ``INTO``, a row lock (``FOR UPDATE``, ``FOR SHARE``, ``LOCK IN SHARE MODE``) or a
-    ClickHouse ``SETTINGS`` clause, which can lift the time limit. So is
+    is a SELECT with ``INTO``, a row lock (``FOR UPDATE``, ``FOR SHARE``, ``LOCK IN SHARE MODE``), a
+    ClickHouse ``SETTINGS`` clause, which can lift the time limit, or session-scoped state that a
+    rollback does not undo: ``pg_advisory_lock`` (and its ``try_``/``_shared`` forms), MySQL
+    ``GET_LOCK``, or a MySQL user-variable assignment (``@x :=``). So is
     a ``;``-chain of more than one statement, reads included: on PostgreSQL a later statement could end
     the read-only transaction or lift its time limit, and a generated query is one statement. A trailing
     ``;`` is fine. The text is read under PostgreSQL rules with ``standard_conforming_strings`` on and off,
@@ -318,4 +490,5 @@ def is_sql_safe(sql: str) -> bool:
         _is_read_shaped(_mask_postgres(sql, backslash_strings=False))
         and _is_read_shaped(_mask_postgres(sql, backslash_strings=True))
         and _is_read_shaped(_mask_mysql(sql))
+        and not _quoted_session_call(sql)
     )

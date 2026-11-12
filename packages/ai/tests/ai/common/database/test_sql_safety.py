@@ -371,3 +371,154 @@ def test_ordinary_reads_with_quotes_and_comments_pass(sql):
         sql: The SQL under test.
     """
     assert is_sql_safe(sql) is True
+
+
+# ---------------------------------------------------------------------------
+# Session state a rollback does not undo
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    'sql',
+    [
+        'SELECT pg_advisory_lock(42)',
+        'select PG_TRY_ADVISORY_LOCK(42)',
+        'SELECT pg_advisory_lock_shared(42)',
+        'SELECT pg_try_advisory_lock_shared(42)',
+        "SELECT GET_LOCK('k', 0)",
+        'SELECT @x := 1',
+        'SELECT id, @x := id FROM t',
+    ],
+)
+def test_session_scoped_state_is_rejected(sql):
+    """A session lock or user variable outlives the rollback, so a generated SELECT may not take one."""
+    assert is_sql_safe(sql) is False
+
+
+@pytest.mark.parametrize(
+    'sql',
+    [
+        'SELECT pg_advisory_xact_lock(42)',
+        'SELECT @x',
+        'SELECT count(*) FROM t',
+    ],
+)
+def test_transaction_scoped_lock_and_variable_reads_still_pass(sql):
+    """The transaction-scoped lock ends with the rollback, and reading a variable sets nothing."""
+    assert is_sql_safe(sql) is True
+
+
+@pytest.mark.parametrize(
+    'sql',
+    [
+        'SELECT "pg_advisory_lock"(42)',
+        'SELECT "PG_ADVISORY_LOCK"(42)',
+        'SELECT "pg_try_advisory_lock_shared"(42)',
+    ],
+)
+def test_a_quoted_lock_function_name_is_rejected(sql):
+    """PostgreSQL folds a quoted identifier to lower case, so quoting does not make it another function."""
+    assert is_sql_safe(sql) is False
+
+
+@pytest.mark.parametrize(
+    'sql',
+    [
+        'SELECT @x.y := 1',
+        "SELECT @'my-var' := 1",
+        'SELECT @`my-var` := 1',
+    ],
+)
+def test_every_mysql_user_variable_name_form_is_rejected(sql):
+    """MySQL accepts dotted and quoted variable names; all of them set session state."""
+    assert is_sql_safe(sql) is False
+
+
+@pytest.mark.parametrize(
+    'sql',
+    [
+        "SELECT 'pg_advisory_lock(42)'",
+        'SELECT "plain identifier" FROM t',
+    ],
+)
+def test_a_literal_or_identifier_that_names_the_function_still_passes(sql):
+    """Only a quoted name used as a call is refused; a string or a plain identifier is not."""
+    assert is_sql_safe(sql) is True
+
+
+@pytest.mark.parametrize(
+    'sql',
+    [
+        'SELECT "pg_advisory_lock"/* a comment */(42)',
+        'SELECT "pg_advisory_lock" -- a comment\n(42)',
+        'SELECT "pg_try_advisory_lock_shared" /*a*/ --b\n (42)',
+    ],
+)
+def test_a_comment_between_a_quoted_name_and_its_parenthesis_is_rejected(sql):
+    """PostgreSQL treats the comment as whitespace, so the call still happens."""
+    assert is_sql_safe(sql) is False
+
+
+def test_a_backtick_quoted_mysql_lock_name_is_rejected():
+    """MySQL resolves a backtick-quoted built-in name, and masking removes it."""
+    assert is_sql_safe("SELECT `GET_LOCK`('k', 0)") is False
+
+
+def test_a_unicode_escaped_postgresql_lock_name_is_rejected():
+    """A U&"..." escape names the same function."""
+    assert is_sql_safe('SELECT U&"pg_advisory_\\006cock"(42)') is False
+
+
+@pytest.mark.parametrize(
+    'sql',
+    [
+        'SELECT "plain_name"(1)',
+        'SELECT `plain_name`(1)',
+        'SELECT "pg_advisory_lock"',
+    ],
+)
+def test_ordinary_quoted_names_still_pass(sql):
+    """Only the lock family is refused: a quoted name is not a call on its own."""
+    assert is_sql_safe(sql) is True
+
+
+def test_a_nested_block_comment_between_the_name_and_its_parenthesis_is_rejected():
+    """PostgreSQL lets block comments nest; the gap must skip the whole comment."""
+    assert is_sql_safe('SELECT "pg_advisory_lock" /* outer /* inner */ outer */ (42)') is False
+
+
+def test_a_uescape_clause_cannot_hide_the_function_name():
+    """`UESCAPE '!'` picks the escape character the identifier uses."""
+    assert is_sql_safe('SELECT U&"pg_advisory_!006cock" UESCAPE \'!\'(42)') is False
+
+
+def test_a_string_literal_that_spells_a_lock_call_still_passes():
+    """The text of a string literal is not an identifier, so it is not a call."""
+    assert is_sql_safe('SELECT \'"pg_advisory_lock"(42)\'') is True
+
+
+@pytest.mark.parametrize(
+    'sql',
+    [
+        'SELECT $$"pg_advisory_lock"(42)$$',
+        'SELECT $tag$"pg_advisory_lock"(42)$tag$',
+    ],
+)
+def test_a_dollar_quoted_body_is_text_not_a_call(sql):
+    """A dollar-quoted body is text, so a quoted function name inside it is not a call."""
+    assert is_sql_safe(sql) is True
+
+
+def test_a_placeholder_is_still_a_placeholder():
+    """Skipping dollar quotes must not swallow a positional placeholder."""
+    assert is_sql_safe('SELECT * FROM t WHERE id = $1') is True
+
+
+def test_a_line_comment_ends_at_a_carriage_return_too():
+    """A CR-only line ending must not swallow the call that follows it."""
+    assert is_sql_safe('SELECT "pg_advisory_lock" --x\r(42)') is False
+
+
+def test_an_apostrophe_inside_a_comment_opens_nothing():
+    """The comment comes first: its quote is not the start of a literal."""
+    assert is_sql_safe('SELECT /* \' */ "pg_advisory_lock"(42)') is False
