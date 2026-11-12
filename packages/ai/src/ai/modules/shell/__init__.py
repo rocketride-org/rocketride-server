@@ -130,13 +130,18 @@ def initModule(server: WebServer, config: Dict[str, Any]):
     # ── IndexNow ────────────────────────────────────────────────────────
     # With a valid RR_INDEXNOW_KEY and an https RR_APP_URL: the key file
     # (registered here, so ahead of the catch-all) and a submission of the
-    # changed pages after each swap.
+    # changed pages after each swap. A key that is set but unusable says why
+    # once, here: otherwise IndexNow would be off without a word.
     if indexnow.enabled():
         for method in ('GET', 'HEAD'):
             server.add_route(
                 path=f'/{indexnow.key()}.txt', routeHandler=indexnow.key_file, methods=[method], public=True
             )
         public_pages.on_swap(indexnow.on_swap)
+    else:
+        reason = indexnow.misconfiguration()
+        if reason:
+            warning(f'[shell] RR_INDEXNOW_KEY is set but IndexNow is off: {reason}')
 
     # ── Shell assets ──────────────────────────────────────────────────
     # Catch-all for everything under /shell/ — JS, CSS, themes, favicon.
