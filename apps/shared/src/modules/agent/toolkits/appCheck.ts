@@ -881,6 +881,8 @@ const INSTRUCTIONS = `## Checking apps
 /** What the model reads about the tool: when to use it, when not to, one example. */
 const DESCRIPTION = `Run the full check on an app and record what it saw: its TypeScript errors, then a rebuild in its Design preview with the build, runtime and console errors. The result lists every step that ran, its output, and whether it passed.
 
+It doesn't run the app's pipelines. You can test one with rocketride_client: start it with use on its .pipe file, give it a realistic input, read what comes back, then terminate it.
+
 Use it:
 - after your last change to an app, before you tell the user you're done;
 - again after fixing a failed check.
