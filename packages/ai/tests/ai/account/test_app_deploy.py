@@ -1814,3 +1814,149 @@ async def test_resolve_publisher_falls_back_to_the_developer_namespace(registry,
 def test_publisher_of_never_returns_empty(app_id, manifest, snapshot, expected):
     """The publisher resolver's order and its namespace floor."""
     assert _publisher_of(app_id, manifest, snapshot) == expected
+
+
+# =============================================================================
+# MODULE ID — one Module Federation container name per app (#1022)
+# =============================================================================
+# The shell registers every manifest entry's moduleId as an MF remote name
+# with force: true, so two entries sharing one name are one container: the
+# later registration replaces the earlier, and the earlier app's tile loads
+# the other app's code. The moduleId is therefore derived from the app id
+# (which the developer namespace makes unique), never taken from the
+# developer's manifest, and the manifest scope walk never hands the shell two
+# apps that claim one container name.
+
+
+@pytest.mark.asyncio
+async def test_add_rejects_a_moduleid_not_derived_from_the_app_id(registry, content_store):
+    """A manifest naming another app's container (here a first-party one) is
+    refused before anything is recorded or written.
+    """
+    conn = _FakeConn()
+    data = _app_zip(manifest={'id': 'acme.brandy', 'name': 'Brandy', 'moduleId': 'rocketride_pipeBuilder'})
+
+    result = await handle_app_add(conn, _add_request(data=data))
+
+    assert result['success'] is False
+    assert 'moduleId' in result['message']
+    assert 'acme_brandy' in result['message']
+    assert registry.publish_calls == []
+    assert _written(content_store) == {}
+
+
+@pytest.mark.asyncio
+async def test_add_accepts_the_derived_moduleid(registry, content_store):
+    """Declaring the derived name explicitly is fine (control)."""
+    conn = _FakeConn()
+    data = _app_zip(manifest={'id': 'acme.brandy', 'name': 'Brandy', 'moduleId': 'acme_brandy'})
+
+    result = await handle_app_add(conn, _add_request(data=data))
+
+    assert result['success'] is True
+    assert registry.publish_calls[0]['artifact']['moduleId'] == 'acme_brandy'
+
+
+@pytest.mark.asyncio
+async def test_add_derives_the_moduleid_when_absent(registry, content_store):
+    """No declared moduleId: the server derives it, with the same rule the
+    scaffold, the pack and the shell use (every non-identifier char -> '_').
+    """
+    conn = _FakeConn()
+    data = _app_zip(manifest={'id': 'acme.my-app', 'name': 'Mine'})
+
+    result = await handle_app_add(conn, _add_request(data=data))
+
+    assert result['success'] is True
+    assert registry.publish_calls[0]['artifact']['moduleId'] == 'acme_my_app'
+
+
+def _install_pins(monkeypatch, apps):
+    """Serve one enabled, ready, built public binding per (app_id, module_id, org_id)."""
+    rows = [
+        {
+            'orgId': org_id,
+            'appId': app_id,
+            'audience': dict(AUD_PUBLIC),
+            'version': 1,
+            'state': 'enabled',
+            'artifactState': 'ready',
+            'artifactBuild': 'ok',
+            'snapshot': {'name': app_id},
+            'publishedAt': 2000,
+        }
+        for app_id, _module_id, org_id in apps
+    ]
+    artifacts = {
+        (org_id, app_id): {'kind': 'app', 'appId': app_id, 'moduleId': module_id, 'appVersion': '1.0.0'}
+        for app_id, module_id, org_id in apps
+    }
+
+    async def publish_list(org_id, kind, audiences):
+        return [dict(r) for r in rows]
+
+    async def deployments_artifact(org_id, project_id, version):
+        return artifacts[(org_id, project_id)]
+
+    monkeypatch.setattr(account_singleton, 'publish_list', publish_list, raising=False)
+    monkeypatch.setattr(account_singleton, 'deployments_artifact', deployments_artifact, raising=False)
+
+
+@pytest.mark.asyncio
+async def test_resolve_drops_an_app_claiming_another_apps_container(registry, monkeypatch):
+    """A stored artifact whose moduleId is another app's derived name (deployed
+    before the receipt check) never reaches the shell beside that app: the
+    rightful owner keeps the name.
+    """
+    _install_pins(
+        monkeypatch,
+        [
+            ('rocketride.pipeBuilder', 'rocketride_pipeBuilder', 'org-platform'),
+            ('xyz.lookalike', 'rocketride_pipeBuilder', 'org-xyz'),
+        ],
+    )
+
+    resolved = await resolve_app_pins('org1', 'u1', [])
+
+    assert [(e['id'], e['moduleId']) for e in resolved] == [('rocketride.pipeBuilder', 'rocketride_pipeBuilder')]
+
+
+@pytest.mark.asyncio
+async def test_resolve_fails_closed_when_two_apps_derive_one_container(registry, monkeypatch):
+    """Two app ids that derive the same name (acme.foo_bar and acme_foo.bar,
+    from two developer namespaces) cannot be told apart, so neither is handed
+    to the shell rather than letting one load under the other's tile.
+    """
+    _install_pins(
+        monkeypatch,
+        [
+            ('acme.foo_bar', 'acme_foo_bar', 'org-acme'),
+            ('acme_foo.bar', 'acme_foo_bar', 'org-acmefoo'),
+            ('acme.brandy', 'acme_brandy', 'org-acme'),
+        ],
+    )
+
+    resolved = await resolve_app_pins('org1', 'u1', [])
+
+    assert [e['id'] for e in resolved] == ['acme.brandy']
+
+
+@pytest.mark.asyncio
+async def test_resolve_keeps_distinct_and_legacy_moduleids(registry, monkeypatch):
+    """Control: distinct names all serve, including a legacy non-derived name
+    that collides with nothing (existing builds keep working).
+    """
+    _install_pins(
+        monkeypatch,
+        [
+            ('acme.brandy', 'acme_brandy', 'org-acme'),
+            ('acme.legacy', 'acmeLegacyRemote', 'org-acme'),
+        ],
+    )
+
+    resolved = await resolve_app_pins('org1', 'u1', [])
+
+    assert sorted((e['id'], e['moduleId']) for e in resolved) == [
+        ('acme.brandy', 'acme_brandy'),
+        ('acme.legacy', 'acmeLegacyRemote'),
+    ]

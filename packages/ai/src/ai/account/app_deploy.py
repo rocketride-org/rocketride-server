@@ -64,6 +64,7 @@ org/user 'local') and SaaS alike — no marketplace dependency.
 """
 
 import hashlib
+import re
 import time
 from typing import Any, Dict, List, Optional
 
@@ -300,6 +301,24 @@ def _assert_owns_namespace(conn: Any, app_id: str) -> None:
         )
 
 
+# Every char that cannot appear in a JS identifier. The shell's own fallback
+# (appLoader), the scaffold and the pack all derive with this same rule.
+_NON_IDENTIFIER = re.compile(r'[^A-Za-z0-9_$]')
+
+
+def module_id_of(app_id: str) -> str:
+    """The Module Federation container name an app is built and loaded under.
+
+    DERIVED from the app id, never taken from the developer's manifest: the
+    shell registers each manifest entry's moduleId as a remote name with
+    ``force: true``, so an app that could choose its own name could take over
+    another app's container (a first-party one included) and run its code
+    under that app's tile (#1022). The app id is unique by the developer
+    namespace, so the derived name is the app's own.
+    """
+    return _NON_IDENTIFIER.sub('_', app_id)
+
+
 # =============================================================================
 # DAP HANDLER
 # =============================================================================
@@ -413,12 +432,23 @@ async def handle_app_add(conn: Any, request: Dict[str, Any]) -> Dict[str, Any]:
     guard_error = _zip_guard(archive)
     if guard_error:
         return conn.build_error(request, guard_error)
+    # The container name is the app id's, full stop: a declared moduleId may
+    # only restate it (see module_id_of).
+    module_id = module_id_of(app_id)
+    declared = manifest.get('moduleId')
+    if declared not in (None, '') and str(declared) != module_id:
+        return conn.build_error(
+            request,
+            f'appManifest.moduleId {str(declared)!r} is not allowed: the moduleId is derived from the '
+            f'app id ({module_id!r} for {app_id!r}). Remove moduleId from package.json, or set it to '
+            f'{module_id!r}.',
+        )
 
     # ── Registry row first: version allocation names the content paths ────
     artifact = {
         'kind': 'app',
         'appId': app_id,
-        'moduleId': str(manifest.get('moduleId') or app_id.replace('.', '_').replace('-', '_')),
+        'moduleId': module_id,
         'name': str(manifest.get('name') or app_id),
         'appVersion': app_version,
         'bundleSha256': hashlib.sha256(data).hexdigest(),
@@ -1476,7 +1506,37 @@ async def resolve_app_pins(org_id: str, user_id: Optional[str], team_ids: List[s
         if snapshot.get('configuration'):
             entry['configuration'] = snapshot.get('configuration')
         resolved[app_id] = entry
-    return list(resolved.values())
+    return _unique_containers(list(resolved.values()))
+
+
+def _unique_containers(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """The entries with no two apps sharing one Module Federation container name.
+
+    The shell registers every entry's moduleId with ``force: true``, so two
+    entries with one name are one container and one app would load the
+    other's code (#1022). Receipt now derives the name (module_id_of), but
+    artifacts stored before that carry whatever the manifest said. When a
+    name is claimed more than once, the one app whose id derives it keeps
+    it; if no app, or more than one, derives it, nobody can be told apart
+    from an impostor and every claimant is dropped (fail closed). A name
+    claimed once is kept even when it is not derived, so a legacy build
+    with its own name still loads.
+    """
+    claimants: Dict[str, List[Dict[str, Any]]] = {}
+    for entry in entries:
+        claimants.setdefault(str(entry.get('moduleId') or ''), []).append(entry)
+    keep = []
+    for entry in entries:
+        group = claimants[str(entry.get('moduleId') or '')]
+        if len(group) == 1:
+            keep.append(entry)
+            continue
+        owners = [e for e in group if module_id_of(str(e.get('id') or '')) == e.get('moduleId')]
+        if len(owners) == 1 and owners[0] is entry:
+            keep.append(entry)
+        else:
+            debug(f'[app_deploy] app {entry.get("id")!r} withheld: moduleId {entry.get("moduleId")!r} is shared')
+    return keep
 
 
 # =============================================================================

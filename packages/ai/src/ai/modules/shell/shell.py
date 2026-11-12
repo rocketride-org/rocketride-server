@@ -558,6 +558,43 @@ async def _authorize_app(token: str, app_id: str) -> bool:
 _VERSION_SEG = re.compile(r'^v(\d{1,9})$')
 _APP_ID_SEG = re.compile(r'^[A-Za-z0-9_][A-Za-z0-9_.\-]*$')
 _BUNDLE_CACHE = 'private, max-age=3600'
+
+# A version's dist/ is THIRD-PARTY code served on the MAIN origin (#1022).
+# The shell loads only subresources from it (JS, CSS, JSON, fonts, images,
+# wasm); anything a browser would render as a document when its URL is opened
+# directly (HTML, SVG, XML, PDF, an unknown type) would run the developer's
+# script with the shell's origin and the signed-in user's storage. Those are
+# served as a download inside an opaque-origin sandbox. The type keeps its
+# real value, so an <img> (which ignores both headers) still shows an SVG icon.
+# Only the listed subresource types serve inline, and they get no sandbox
+# policy: a worker started from a dist script takes its CSP from the script's
+# response, and a sandbox there would break it.
+_INLINE_BUNDLE_TYPES = frozenset(
+    {
+        'text/javascript',
+        'application/javascript',
+        'application/x-javascript',
+        'text/css',
+        'application/json',
+        'application/wasm',
+        'text/plain',
+    }
+)
+_INLINE_BUNDLE_PREFIXES = ('font/', 'audio/', 'video/', 'image/')
+_DOCUMENT_HEADERS = {'Content-Security-Policy': 'sandbox', 'Content-Disposition': 'attachment'}
+
+
+def _bundle_headers(media_type: str) -> dict:
+    """Response headers for one dist file of the given type (see above)."""
+    headers = {'Cache-Control': _BUNDLE_CACHE, 'X-Content-Type-Options': 'nosniff'}
+    inline = media_type in _INLINE_BUNDLE_TYPES or (
+        media_type.startswith(_INLINE_BUNDLE_PREFIXES) and 'svg' not in media_type and 'xml' not in media_type
+    )
+    if not inline:
+        headers.update(_DOCUMENT_HEADERS)
+    return headers
+
+
 # sha256('<token>.<app_id>') -> {'dirs': {version: dist_dir}, 'expiry',
 # 'resolvedAt', 'floor', 'appId'} — HARD expiry (contrast _app_auth_cache's
 # sliding window); every deploy change also drops the app's entries
@@ -686,7 +723,7 @@ async def _serve_versioned(request: Request, app_id: str, version: int, rest: li
     except Exception:
         raise HTTPException(status_code=404, detail='Not found')
     media_type = mimetypes.guess_type(rest[-1])[0] or 'application/octet-stream'
-    return Response(content=data, media_type=media_type, headers={'Cache-Control': _BUNDLE_CACHE})
+    return Response(content=data, media_type=media_type, headers=_bundle_headers(media_type))
 
 
 async def apps_session(request: Request):
