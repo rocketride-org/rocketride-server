@@ -81,8 +81,8 @@ carry the engine's API key (the `ROCKETRIDE_APIKEY` you set for the CLI) as a
 bearer token. A request without it is refused with 401.
 
 The LLM in this pipeline listens on the `questions` lane, so send the question
-as `application/rocketride-question` with this JSON body. Plain text goes to the
-`text` lane and gets no answer from this pipeline.
+as `application/rocketride-question` with this JSON body. Plain text is not treated
+as a question, so it gets no answer from this pipeline.
 
 curl reads the key from your shell, not from `.env`. It is the `ROCKETRIDE_APIKEY`
 you exported before `start`:
@@ -125,6 +125,10 @@ Restart the pipeline. The chat page is on the engine port, at
 `http://localhost:5565/chat/webhook-example/source_1?auth=<task token>`. Use the
 task token that `rocketride start` prints. `start` does not print the address
 itself.
+
+The task token is private, so do not share this link. A link for other people
+must use the public key (`pk_...`) that the chat node publishes; the VS Code
+extension shows it.
 
 Open that URL in a browser and start typing. The `?auth=` query parameter is a
 convenience for supplying the credential to the browser; the Chat UI stores it

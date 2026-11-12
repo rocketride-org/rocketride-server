@@ -159,8 +159,8 @@ curl -X POST http://localhost:5565/webhook/rag-example/source_1 \
 ## Ask a question
 
 Send the question to the same endpoint as `application/rocketride-question`, so
-that it arrives on the `questions` lane (plain text goes to the `text` lane and
-is not treated as a question):
+that it arrives on the `questions` lane (plain text is not treated as a
+question):
 
 ```bash
 curl -X POST http://localhost:5565/webhook/rag-example/source_1 \

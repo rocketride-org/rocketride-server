@@ -82,7 +82,7 @@ Save this as `extract.pipe`:
 | `parser_1` | `parse` | Converts each file (PDF, Word, image, etc.) into clean text on the `text` lane. |
 | `extract_1` | `extract_data` | Uses an LLM to pull the four named fields out of each document and emits the result as structured JSON on the `answers` lane. |
 | `llm_1` | `llm_openai` | Answers `extract_1`'s extraction prompts over the `llm` invoke channel. |
-| `target_1` | `response_answers` | Returns the extracted JSON to the caller. |
+| `target_1` | `response_answers` | Returns the extracted JSON in the reply when a request is sent (the webhook variant below). |
 
 ## Start the pipeline
 
@@ -107,7 +107,10 @@ Stop it with: rocketride stop --token <task-token>
 ```
 
 The engine scans the directory and processes each file through the pipeline.
-The extracted JSON for each file has this shape:
+This pipeline sends no reply: `start` exits after it prints the token, and no
+request is made, so nothing comes back to you. To get each file's JSON back,
+use the webhook variant below, where it is returned in the reply. The extracted
+JSON for each file has this shape:
 
 ```json
 {
@@ -118,8 +121,8 @@ The extracted JSON for each file has this shape:
 }
 ```
 
-In the reply this object is inside the `answers` array of the result, as
-`"answers": [[ { ... } ]]`.
+In the reply of the webhook variant below, this object is inside the `answers`
+array of the result, as `"answers": [[ { ... } ]]`.
 
 ## Upload files on demand
 
@@ -147,6 +150,10 @@ Or via the Drag & Drop UI by using the `dropper` provider:
 one `start` prints. The engine key does not work for uploads: the page opens
 with it, but dropped files fail because it does not identify the task. Drop
 files there and see results in JSON, text, and table tabs.
+
+The task token is private, so do not share this link. A link for other people
+must use the public key (`pk_...`) that the dropper node publishes; the VS Code
+extension shows it.
 
 ## Next steps
 
