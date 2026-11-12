@@ -14,7 +14,7 @@ ghcr.io/rocketride-org/rocketride-engine
 ## Quickstart
 
 ```bash
-docker run -d --name rocketride-engine \
+docker run -d --name rocketride-engine --platform linux/amd64 \
   -p 127.0.0.1:5565:5565 \
   -v rocketride-data:/opt/data \
   --restart unless-stopped \
@@ -23,8 +23,8 @@ docker run -d --name rocketride-engine \
 
 This command is enough for the CLI and SDK. For the built-in MCP server use the
 command in [MCP on this engine](#mcp-on-this-engine) instead, which adds two `-e`
-settings, and on Apple Silicon add `--platform linux/amd64` (see
-[The image](#the-image)).
+settings. Both commands carry `--platform linux/amd64`, which Apple Silicon needs
+and Intel and AMD machines ignore (see [The image](#the-image)).
 
 Point any client at it and go. A client needs a non-empty key, and an engine
 started without one accepts any value:
@@ -116,7 +116,7 @@ answers 401.)
 Upgrading is pull-and-replace; state lives in the volume:
 
 ```bash
-docker pull ghcr.io/rocketride-org/rocketride-engine:latest
+docker pull --platform linux/amd64 ghcr.io/rocketride-org/rocketride-engine:latest
 docker rm -f rocketride-engine
 # re-run the same docker run command you started it with
 ```
