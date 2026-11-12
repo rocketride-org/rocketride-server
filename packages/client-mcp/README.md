@@ -315,19 +315,24 @@ python -m rocketride_mcp
 
 ### Worked example
 
-**1. Start the MCP server** (if not already running via a client config):
+The stdio server turns each running pipeline into a tool that takes one
+argument, `filepath`, and sends that file to the pipeline.
+
+**1. Start the MCP server** (if not already running via a client config). The
+`rocketride` command in step 2 reads `ROCKETRIDE_APIKEY` too, so set that one:
 
 ```bash
 export ROCKETRIDE_URI=ws://localhost:5565
-export ROCKETRIDE_AUTH=your-api-key
+export ROCKETRIDE_APIKEY=your-api-key
 rocketride-mcp
 ```
 
-**2. Start a pipeline** — for example, a simple chat pipeline (`chat.pipe`):
+**2. Start a pipeline**, for example one that reads a file and returns its text
+(`file-text.pipe`). It needs no model provider key:
 
 ```json
 {
-  "project_id": "webhook-example",
+  "project_id": "file-text-example",
   "source": "source_1",
   "components": [
     {
@@ -336,22 +341,19 @@ rocketride-mcp
       "config": {}
     },
     {
-      "id": "llm_1",
-      "provider": "llm_openai",
-      "config": {
-        "profile": "openai-4o-mini",
-        "apikey": "${ROCKETRIDE_OPENAI_API_KEY}"
-      },
+      "id": "parse_1",
+      "provider": "parse",
+      "config": {},
       "input": [
-        { "lane": "questions", "from": "source_1" }
+        { "lane": "tags", "from": "source_1" }
       ]
     },
     {
       "id": "target_1",
-      "provider": "response_answers",
+      "provider": "response_text",
       "config": {},
       "input": [
-        { "lane": "answers", "from": "llm_1" }
+        { "lane": "text", "from": "parse_1" }
       ]
     }
   ]
@@ -359,20 +361,19 @@ rocketride-mcp
 ```
 
 ```bash
-export ROCKETRIDE_OPENAI_API_KEY=sk-...
-
-rocketride start --pipeline ./chat.pipe
+rocketride start --pipeline ./file-text.pipe
 ```
 
 **3. Ask Claude to use it.** Open Claude Desktop (configured with the
-`mcpServers` block above) and type:
+`mcpServers` block above) and type, with a real path on the machine that runs
+the MCP server:
 
-> Use the RocketRide pipeline to answer: what is the boiling point of water?
+> Use the RocketRide pipeline to read /path/to/report.pdf and summarize it.
 
-Claude discovers the tool, calls it with the question, and returns the answer
-streamed from your pipeline.
+Claude discovers the tool, calls it with the file path, gets the file's text
+back from your pipeline, and summarizes it.
 
-**4. Inspect resources** — Claude can also list your pipelines and check server
+**4. Inspect resources.** Claude can also list your pipelines and check server
 status using MCP resources:
 
 > Show me the available RocketRide pipelines.
