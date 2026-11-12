@@ -104,6 +104,10 @@ class Aggregate:
         """Every claimed page, sorted by path (deterministic output order)."""
         return sorted(self.exact.values(), key=lambda p: p.path)
 
+    def serves_published_pages(self) -> bool:
+        """Whether platform apps publish pages here; the legacy list and an empty map publish none."""
+        return not self.legacy and bool(self.exact)
+
 
 def _claim_key(pub: Published) -> Tuple[float, str]:
     """Sort key of one claim: its production binding time, then its app id. An unknown time sorts last."""

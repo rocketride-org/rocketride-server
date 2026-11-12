@@ -48,9 +48,11 @@ manifests (``public_pages``), never from constants here.
 The three crawler files key off ``RR_APP_URL`` — the env var that pins the
 public base URL of the hosted SaaS deployment. When it is unset (OSS,
 self-hosted, desktop engines) /sitemap.xml and /llms.txt return 404,
-/robots.txt disallows all crawling, and every response carries
-``X-Robots-Tag: noindex, nofollow`` (``ungated_noindex``); absolute URLs are
-never derived from request headers.
+every response carries ``X-Robots-Tag: noindex, nofollow``
+(``ungated_noindex``), and /robots.txt disallows all crawling, unless the
+engine serves published pages (a staging deployment): then it allows
+crawling, so crawlers read that noindex. Absolute URLs are never derived
+from request headers.
 """
 
 import hashlib
@@ -686,9 +688,10 @@ async def ungated_noindex(request: Request, call_next):
     the public site. robots.txt ``Disallow: /`` stops crawling, not
     indexing: a disallowed URL found through links is still indexed by URL,
     and the disallow keeps crawlers from ever reading a noindex in the page.
-    The header covers every response (pages, shell assets, 404s, auth
-    refusals) for any crawler that does fetch; only auth or an IP allowlist
-    in front keeps a non-public host out entirely.
+    So an engine that serves published pages (staging, the linked one)
+    allows crawling in robots.txt (``robots_txt``). The header covers every
+    response (pages, shell assets, 404s, auth refusals); only auth or an IP
+    allowlist in front keeps a non-public host out entirely.
     """
     response = await call_next(request)
     response.headers['X-Robots-Tag'] = 'noindex, nofollow'
@@ -779,9 +782,13 @@ async def robots_txt(request: Request):
     Hosted SaaS (``RR_APP_URL`` set): allow all crawlers and point at the
     sitemap, with one named group per rostered crawler (the roster that
     also classifies requesters) plus ``*``; every group carries the same
-    rule (RFC 9309), so the policy equals ``*`` alone. Otherwise (OSS,
-    self-hosted, desktop): a customer engine is not a marketing site —
-    tell crawlers to stay out entirely.
+    rule (RFC 9309), so the policy equals ``*`` alone. Otherwise every
+    response is ``noindex, nofollow`` (``ungated_noindex``). An engine that
+    serves published pages (staging, or production without its
+    ``RR_APP_URL``) is linked from elsewhere and indexed, so crawlers may
+    fetch its pages and read that noindex. Any other engine (OSS,
+    self-hosted, desktop) is not a marketing site: crawlers stay out
+    entirely.
 
     Args:
         request: Incoming HTTP request.
@@ -790,11 +797,14 @@ async def robots_txt(request: Request):
         PlainTextResponse with the robots policy.
     """
     from .crawlers import robots_groups
+    from .public_pages import current
 
     base_url = app_url()
 
     if base_url:
         content = f'{robots_groups("Allow: /")}Sitemap: {base_url}/sitemap.xml\n'
+    elif current().serves_published_pages():
+        content = 'User-agent: *\nDisallow:\n'
     else:
         content = 'User-agent: *\nDisallow: /\n'
 

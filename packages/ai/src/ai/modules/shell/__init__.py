@@ -80,12 +80,12 @@ def _warn_noindex_with_published_pages(old: public_pages.Aggregate, new: public_
         new: The aggregate swapped in; the legacy list and an empty map publish nothing.
     """
     global _warned_noindex
-    if _warned_noindex or new.legacy or not new.exact:
+    if _warned_noindex or not new.serves_published_pages():
         return
     _warned_noindex = True
     warning(
         '[shell] RR_APP_URL is not set but public pages are published: every response carries '
-        'X-Robots-Tag: noindex, nofollow and robots.txt disallows all crawling; '
+        'X-Robots-Tag: noindex, nofollow, and robots.txt lets crawlers fetch pages to read it; '
         'set RR_APP_URL on an engine that serves the public site'
     )
 
