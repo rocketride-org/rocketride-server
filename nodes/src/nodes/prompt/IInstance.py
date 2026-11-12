@@ -44,6 +44,35 @@ _ABSTAIN_INSTRUCTION = (
 )
 
 
+def _document_text(doc) -> str:
+    """The text a document carries, whichever shape the lane delivered it in."""
+    if hasattr(doc, 'page_content'):
+        content = doc.page_content
+    elif isinstance(doc, dict):
+        content = doc.get('page_content')
+    else:
+        content = doc
+    if not content:
+        return ''
+    return str(content).strip()
+
+
+def _carries_material(question: Question) -> bool:
+    """Whether the question holds text the model could answer from.
+
+    A blank context entry or a document with no content is an empty container, not
+    material: a search that returned only those still missed, so the model gets the
+    abstain instruction. Guardrails decides the same way for its grounding check.
+    """
+    for text in question.context or []:
+        if str(text).strip():
+            return True
+    for doc in question.documents or []:
+        if _document_text(doc):
+            return True
+    return False
+
+
 class IInstance(IInstanceBase):
     IGlobal: IGlobal
 
@@ -167,7 +196,7 @@ class IInstance(IInstanceBase):
             # merging branches is left exactly as it was. A miss forces an abstention
             # only when no other lane supplied context that could answer the question.
             if self.retrieval_ran:
-                if self.question.documents or self.question.context:
+                if _carries_material(self.question):
                     self.question.addInstruction('Grounding', _GROUNDING_INSTRUCTION)
                 else:
                     self.question.addInstruction('Grounding', _ABSTAIN_INSTRUCTION)

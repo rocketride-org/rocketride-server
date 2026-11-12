@@ -61,8 +61,12 @@ class _FakeQuestion:
         return ''
 
 
-def _load_iinstance():
-    """Load the node's IInstance with its engine dependencies stubbed."""
+def _load_iinstance(question_class=_FakeQuestion):
+    """Load the node's IInstance with its engine dependencies stubbed.
+
+    *question_class* is the Question the node builds; pass the real schema class to
+    run the node against it.
+    """
     stubs = {
         'rocketlib': types.ModuleType('rocketlib'),
         'ai': types.ModuleType('ai'),
@@ -92,7 +96,7 @@ def _load_iinstance():
     stubs['rocketlib'].OPEN_MODE = type('OPEN_MODE', (), {'CONFIG': 'config'})
     stubs['rocketlib'].debug = lambda *a, **kw: None
     stubs['rocketlib'].error = lambda *a, **kw: None
-    stubs['ai.common.schema'].Question = _FakeQuestion
+    stubs['ai.common.schema'].Question = question_class
     stubs['ai.common.config'].Config = type('Config', (), {'getNodeConfig': staticmethod(lambda lt, cc: {})})
     stubs['depends'].depends = lambda *a, **kw: None
 

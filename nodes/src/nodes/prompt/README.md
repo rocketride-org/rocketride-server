@@ -72,12 +72,12 @@ When the `documents` lane is connected the node appends a `Grounding` instructio
 
 | Documents lane | Documents received | Other context | Appended instruction |
 |---|---|---|---|
-| connected | one or more | any | answer from the documents and context provided |
-| connected | none | text or table | answer from the documents and context provided |
-| connected | none | none | say so rather than answering from memory, if the question needs that material |
+| connected | one or more with text | any | answer from the documents and context provided |
+| connected | none with text | text or table with text | answer from the documents and context provided |
+| connected | none with text | none with text | say so rather than answering from memory, if the question needs that material |
 | not connected | n/a | any | none, the question is left exactly as before |
 
-The third row leaves the judgement to the model, because the node cannot tell a question that needs retrieval from a greeting or a follow-up. The last row keeps a prompt node used to merge branches unchanged.
+A document with no content and a blank text or table entry do not count, so a search that returned only those is still a miss. The third row leaves the judgement to the model, because the node cannot tell a question that needs retrieval from a greeting or a follow-up. The last row keeps a prompt node used to merge branches unchanged.
 
 Nothing is blocked here. The instruction only asks; the [guardrails](/nodes/guardrails) node with `require_grounding` is what refuses delivery if the model answers anyway.
 

@@ -44,6 +44,35 @@ _GROUNDING_CHECK = (
 )
 
 
+def _document_text(doc) -> str:
+    """The text a document carries, whichever shape the lane delivered it in."""
+    if hasattr(doc, 'page_content'):
+        content = doc.page_content
+    elif isinstance(doc, dict):
+        content = doc.get('page_content')
+    else:
+        content = doc
+    if not content:
+        return ''
+    return str(content).strip()
+
+
+def _carries_material(question: Question) -> bool:
+    """Whether the question holds text the model could answer from.
+
+    A blank context entry or a document with no content is an empty container, not
+    material, so it leaves a retrieval miss a miss. The prompt node decides the same
+    way when it picks the instruction it gives the model.
+    """
+    for text in question.context or []:
+        if str(text).strip():
+            return True
+    for doc in question.documents or []:
+        if _document_text(doc):
+            return True
+    return False
+
+
 class IInstance(IInstanceBase):
     IGlobal: IGlobal
 
@@ -90,7 +119,7 @@ class IInstance(IInstanceBase):
         self.question_text = full_text
         # The model may answer from material handed to it in the question, so an empty
         # search is not a miss then, as the prompt node also decides.
-        self.question_has_material = bool(question.context or question.documents)
+        self.question_has_material = _carries_material(question)
 
         if not full_text.strip():
             # Nothing to check, forward as-is
@@ -167,7 +196,7 @@ class IInstance(IInstanceBase):
         result = engine.evaluate(text, mode='output', context=context)
 
         if result['action'] == 'block':
-            replacement = self._replacement_for(answer, result['violations'])
+            replacement = self._replacement_for(answer, result['violations'], engine)
             if replacement:
                 for violation in result['violations']:
                     warning(f'Guardrails output replaced: {violation["rule"]} \u2014 {violation["details"]}')
@@ -185,14 +214,15 @@ class IInstance(IInstanceBase):
         # Forward the answer downstream
         self._forward_answer(answer)
 
-    def _replacement_for(self, answer: Answer, violations: List[Dict[str, Any]]) -> Optional[Answer]:
+    def _replacement_for(self, answer: Answer, violations: List[Dict[str, Any]], engine) -> Optional[Answer]:
         """Return the answer to deliver in place of a blocked one, or None for nothing.
 
         Blocking is otherwise silent, so the user of a chat gets no reply at all. A
         violation can name a reply to stand in, and that reply is used only when
         every violation names the same one: a refusal can stand in for an ungrounded
         figure, not for leaked PII. A JSON answer is still dropped, since a consumer
-        parsing it would fail on a sentence.
+        parsing it would fail on a sentence, and so is any stand-in that this node's
+        own output rules would refuse, such as a sentence under a configured format.
         """
         if answer.expectJson:
             return None
@@ -203,8 +233,14 @@ class IInstance(IInstanceBase):
         # Violations that name different stand-ins cannot both be honoured.
         if len(replies) != 1:
             return None
+        text = replies.pop()
+        # The stand-in is this node's own text, not a model answer, so there is no
+        # retrieval to ground it in; every other output rule applies to it as it would
+        # to the answer it replaces.
+        if not engine.evaluate(text, mode='output', context={'retrieval_ran': False})['passed']:
+            return None
         reply = Answer()
-        reply.setAnswer(replies.pop())
+        reply.setAnswer(text)
         # The model still ran, so its usage stays on the turn.
         reply.tokens = answer.tokens
         return reply
@@ -234,11 +270,13 @@ class IInstance(IInstanceBase):
         if result is None:
             return None
 
-        # A verdict wrapped in markdown or punctuation is still a verdict.
+        # A verdict wrapped in markdown or punctuation is still a verdict, but only the
+        # whole word counts: "NONE of the claims are supported" or "Nonetheless, ..."
+        # would otherwise clear the answer they were meant to fail.
         verdict = result.getText().strip().strip('*`_."\' ').upper()
-        if verdict.startswith('SOURCE'):
+        if verdict == 'SOURCE':
             return True
-        if verdict.startswith('NONE'):
+        if verdict == 'NONE':
             return False
         warning(f'Guardrails grounding check got no verdict from the llm: {verdict[:80]!r}')
         return None
@@ -264,14 +302,9 @@ class IInstance(IInstanceBase):
         self.retrieval_ran = True
 
         for doc in documents:
-            if hasattr(doc, 'page_content'):
-                content = doc.page_content
-            elif isinstance(doc, dict):
-                content = doc.get('page_content')
-            else:
-                content = doc
-            if content and str(content).strip():
-                self.source_documents.append(str(content))
+            content = _document_text(doc)
+            if content:
+                self.source_documents.append(content)
 
         # Forward documents downstream. See `_forward_question` for why
         # preventDefault() must come after the forward, not before -- it

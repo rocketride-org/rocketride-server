@@ -1085,7 +1085,14 @@ class TestIInstanceLifecycle:
     def test_a_reply_that_is_not_a_verdict_falls_back_to_the_figure_rule(self):
         """A chatty or empty reply from the checker must not decide anything."""
         IInstance, EngineClass, FakeQuestion, FakeQuestionText, FakeAnswer = self._load_iinstance_class()
-        for reply in ('', 'Maybe? It depends on the context.', 'NO'):
+        for reply in (
+            '',
+            'Maybe? It depends on the context.',
+            'NO',
+            'NONE of the claims are supported by the documents.',
+            'Nonetheless, this needs a source.',
+            'SOURCES are not needed here.',
+        ):
             inst = self._grounding_node(IInstance, EngineClass, llm=lambda q, r=reply: r)
 
             assert self._miss(inst, FakeQuestion, FakeQuestionText, FakeAnswer, 'Q?', 'It was $94.7B.') == [
@@ -1231,16 +1238,18 @@ class TestIInstanceLifecycle:
 
     def test_a_replacement_is_used_only_when_every_violation_names_the_same_one(self):
         """Pinned on the method itself, so the outcome never depends on set order."""
-        IInstance, _, _, _, FakeAnswer = self._load_iinstance_class()
+        IInstance, EngineClass, _, _, FakeAnswer = self._load_iinstance_class()
         inst = IInstance()
+        engine = EngineClass({})
 
-        assert inst._replacement_for(FakeAnswer('x'), [{'replacement': 'r'}, {'replacement': 'r'}]).getText() == 'r'
+        replacement = inst._replacement_for(FakeAnswer('x'), [{'replacement': 'r'}, {'replacement': 'r'}], engine)
+        assert replacement.getText() == 'r'
         for violations in (
             [{'replacement': 'r'}, {'rule': 'pii_leak'}],
             [{'rule': 'pii_leak'}, {'replacement': 'r'}],
             [{'replacement': 'r'}, {'replacement': 'other'}],
         ):
-            assert inst._replacement_for(FakeAnswer('x'), violations) is None, violations
+            assert inst._replacement_for(FakeAnswer('x'), violations, engine) is None, violations
 
     def test_a_json_answer_is_dropped_rather_than_replaced(self):
         """A consumer parsing JSON would fail on a sentence, so the old block stands."""
@@ -1251,6 +1260,56 @@ class TestIInstanceLifecycle:
         inst.writeAnswers(FakeAnswer('{"net_income": "$94.7B"}', expectJson=True))
 
         assert inst.forwarded == []
+
+    def test_a_replacement_that_breaks_the_configured_format_is_dropped(self):
+        """The refusal is a sentence, so under a format contract nothing is delivered.
+
+        The answer is ordinary text as far as the Answer says (expectJson is off), and
+        it satisfies the format; only its figure fails. A refusal in its place would
+        hand the consumer exactly what the format rule exists to stop.
+        """
+        IInstance, EngineClass, FakeQuestion, FakeQuestionText, FakeAnswer = self._load_iinstance_class()
+        for fmt, answer in (
+            ('json', '{"net_income": "$94.7B"}'),
+            ('bullet_list', '- Net income was $94.7B.'),
+            ('numbered_list', '1. Net income was $94.7B.'),
+            ('markdown', '**Net income** was $94.7B.'),
+        ):
+            inst = self._grounding_node(IInstance, EngineClass, expected_format=fmt)
+
+            delivered = self._miss(inst, FakeQuestion, FakeQuestionText, FakeAnswer, 'What was net income?', answer)
+
+            assert delivered == [], fmt
+            # The question, the documents, and the blocked answer each suppress the
+            # engine's default forward; without the third the original would go out.
+            assert len(inst.prevented) == 3, fmt
+
+    def test_a_refusal_is_still_delivered_when_no_format_is_required(self):
+        IInstance, EngineClass, FakeQuestion, FakeQuestionText, FakeAnswer = self._load_iinstance_class()
+        inst = self._grounding_node(IInstance, EngineClass, expected_format='')
+
+        delivered = self._miss(inst, FakeQuestion, FakeQuestionText, FakeAnswer, 'Q?', '{"net_income": "$94.7B"}')
+
+        assert delivered == [EngineClass.UNGROUNDED_REPLY]
+
+    def test_blank_question_material_leaves_a_retrieval_miss_a_miss(self):
+        """An empty context entry or an empty document is not something to answer from."""
+        IInstance, EngineClass, FakeQuestion, FakeQuestionText, FakeAnswer = self._load_iinstance_class()
+        blank = (
+            {'context': ['']},
+            {'context': ['   ', '\n']},
+            {'documents': [types.SimpleNamespace(page_content='  ')]},
+            {'documents': [types.SimpleNamespace(page_content=None)]},
+            {'documents': [{'page_content': ''}]},
+        )
+        for material in blank:
+            inst = self._grounding_node(IInstance, EngineClass)
+            inst.open(None)
+            inst.writeQuestions(FakeQuestion(questions=[FakeQuestionText('What was net income?')], **material))
+            inst.writeDocuments([])
+            inst.writeAnswers(FakeAnswer('Net income was $94.7B.'))
+
+            assert [a.getText() for a in inst.forwarded] == [EngineClass.UNGROUNDED_REPLY], material
 
     def test_warn_mode_still_forwards_the_original(self):
         """Replacement is what block does; warn keeps delivering the model's answer."""

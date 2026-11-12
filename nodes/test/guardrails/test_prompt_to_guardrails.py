@@ -25,6 +25,18 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(_HERE), 'prompt'))
 from test_grounding_instruction import _load_iinstance  # noqa: E402
 
+# The real schema, for the cases where a fake would hide what an empty container is.
+_REPO = os.path.dirname(os.path.dirname(os.path.dirname(_HERE)))
+for _path in (
+    os.path.join(_REPO, 'packages', 'ai', 'src'),
+    os.path.join(_REPO, 'packages', 'client-python', 'src'),
+    os.path.join(_REPO, 'packages', 'server', 'engine-lib', 'rocketlib-python', 'lib'),
+):
+    if _path not in sys.path:
+        sys.path.insert(0, _path)
+from ai.common.schema import Doc  # noqa: E402
+from ai.common.schema import Question as SchemaQuestion  # noqa: E402
+
 # Loaded by path: several nodes have a test_all.py, so the bare name is ambiguous.
 _spec = importlib.util.spec_from_file_location('guardrails_test_all', os.path.join(_HERE, 'test_all.py'))
 _guardrails_tests = importlib.util.module_from_spec(_spec)
@@ -84,6 +96,18 @@ def guardrails():
     )
 
 
+@pytest.fixture
+def schema_prompt_node():
+    """The prompt node building a real schema Question."""
+    module = _load_iinstance(question_class=SchemaQuestion)
+    inst = module.IInstance()
+    inst.IGlobal = types.SimpleNamespace(config={})
+    inst.emitted = []
+    inst.instance = types.SimpleNamespace(writeQuestions=inst.emitted.append)
+    inst.open(None)
+    return inst
+
+
 def _turn(node, question, documents):
     """One retrieval turn, returning the instruction the model would be given."""
     node.writeQuestions(types.SimpleNamespace(questions=[types.SimpleNamespace(text=question)]))
@@ -93,8 +117,8 @@ def _turn(node, question, documents):
     return next((i.instructions for i in emitted.instructions if i.subtitle == 'Grounding'), None)
 
 
-def _delivered(g, answer, question=QUESTION, retrieved=True, **overrides):
-    """What the user receives when *answer* passes a Strict guardrails node."""
+def _strict_guardrails(g, **overrides):
+    """A Strict guardrails node and the list it delivers answers into."""
     inst = g.IInstance()
     settings = {'policy_mode': 'block', 'require_grounding': True}
     settings.update(overrides)
@@ -108,9 +132,38 @@ def _delivered(g, answer, question=QUESTION, retrieved=True, **overrides):
     )
     inst.preventDefault = lambda: None
     inst.open(None)
+    return inst, delivered
+
+
+def _delivered(g, answer, question=QUESTION, retrieved=True, **overrides):
+    """What the user receives when *answer* passes a Strict guardrails node."""
+    inst, delivered = _strict_guardrails(g, **overrides)
     inst.writeQuestions(g.Question(questions=[g.QuestionText(question)]))
     if retrieved:
         inst.writeDocuments([])
+    inst.writeAnswers(g.Answer(answer))
+    return [a.getText() for a in delivered]
+
+
+def _schema_turn(node, documents, context):
+    """One turn through the prompt node on the real schema; returns the question it emits."""
+    node.writeQuestions(types.SimpleNamespace(questions=[types.SimpleNamespace(text=QUESTION)]))
+    node.writeDocuments(documents)
+    for text in context:
+        node.writeText(text)
+    node.closing()
+    return node.emitted[-1]
+
+
+def _grounding_of(question):
+    return next((i.instructions for i in question.instructions if i.subtitle == 'Grounding'), None)
+
+
+def _delivered_for(g, question, documents, answer):
+    """What the user receives when guardrails sees the prompt node's question and the store's batch."""
+    inst, delivered = _strict_guardrails(g)
+    inst.writeQuestions(question)
+    inst.writeDocuments(documents)
     inst.writeAnswers(g.Answer(answer))
     return [a.getText() for a in delivered]
 
@@ -181,3 +234,51 @@ def test_a_pipeline_that_never_retrieves_is_untouched(prompt_node, guardrails):
 
     assert [i.subtitle for i in emitted.instructions] == ['User Instruction']
     assert _delivered(guardrails, 'Revenue was $94.7B.', retrieved=False) == ['Revenue was $94.7B.']
+
+
+# Containers that hold no text: what a store or a text lane can hand over without
+# handing over anything to answer from.
+BLANK_MATERIAL = {
+    'empty context': ([], ['']),
+    'whitespace context': ([], ['   ']),
+    'blank document': ([Doc(page_content='  \n ')], []),
+    'empty document': ([Doc(page_content='')], []),
+}
+
+
+@pytest.mark.parametrize('documents, context', BLANK_MATERIAL.values(), ids=list(BLANK_MATERIAL))
+def test_blank_material_leaves_a_retrieval_miss_a_miss(schema_prompt_node, guardrails, documents, context):
+    """An empty container is not something to answer from, for either node.
+
+    The prompt node must still give the abstain instruction, and guardrails, seeing
+    the question the prompt node built, must still replace a figure with one refusal.
+    """
+    question = _schema_turn(schema_prompt_node, documents, context)
+
+    assert 'No documents were retrieved' in _grounding_of(question)
+    assert _delivered_for(guardrails, question, documents, 'Net income was $94.7B.') == [
+        guardrails.Engine.UNGROUNDED_REPLY
+    ]
+
+
+def test_a_document_without_content_is_not_material(guardrails):
+    """A Doc whose page_content was never set, on the question guardrails receives."""
+    question = SchemaQuestion()
+    question.addQuestion(QUESTION)
+    question.addDocuments([Doc()])
+
+    assert _delivered_for(guardrails, question, [], 'Net income was $94.7B.') == [guardrails.Engine.UNGROUNDED_REPLY]
+
+
+@pytest.mark.parametrize(
+    'documents, context',
+    [([], ['Net income for FY2024 was $94.7B.']), ([Doc(page_content='Net income for FY2024 was $94.7B.')], [])],
+    ids=['context', 'document'],
+)
+def test_real_material_still_exempts_the_turn(schema_prompt_node, guardrails, documents, context):
+    """The control for the blank cases: actual text is answered from, not refused."""
+    question = _schema_turn(schema_prompt_node, documents, context)
+    answer = 'Net income was $94.7B.'
+
+    assert 'Base your answer on the documents' in _grounding_of(question)
+    assert _delivered_for(guardrails, question, documents, answer) == [answer]
