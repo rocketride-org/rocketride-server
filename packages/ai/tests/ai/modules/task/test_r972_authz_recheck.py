@@ -503,19 +503,22 @@ async def test_r972_1b_stuck_client_does_not_delay_other_stamps(monkeypatch):
     """
     from ai.modules.task import task_conn as task_conn_module
 
-    monkeypatch.setattr(task_conn_module, 'NOTICE_SEND_TIMEOUT', 0.05)
+    monkeypatch.setattr(task_conn_module, 'NOTICE_SEND_TIMEOUT', 0.1)
     account, server, clock = _setup(monkeypatch, {'ok': (True, ADMIN)})
     stuck = [_admin(server, clock, f'gone-{i}', connection_id=i) for i in range(1, 4)]
     for conn in stuck:
         conn._transport.send = never_returns
     fine = _admin(server, clock, 'ok', connection_id=9, verified=False)
 
-    await asyncio.wait_for(server._authz.sweep_once(), 0.2)
+    sweep = asyncio.ensure_future(server._authz.sweep_once())
+    await asyncio.sleep(0.02)  # well inside the first stuck notice's bound
 
+    assert sweep.done()
     assert fine._authz_verified_at == clock.now
     for conn in stuck:
         assert conn._revoked is True and conn._authenticated is False
-    await asyncio.sleep(0.2)
+    await asyncio.wait_for(sweep, 1)
+    await asyncio.sleep(0.3)
     for conn in stuck:
         conn._transport.disconnect.assert_called_once()
 
