@@ -130,6 +130,26 @@ def _add_json_arg(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _sdk_version() -> str:
+    """
+    Return the installed SDK version for ``--version``.
+
+    Read from package metadata so it always matches the installed wheel
+    rather than a hard-coded constant. Falls back to ``unknown`` when the
+    metadata is unavailable (e.g. an editable install without a build step),
+    so the flag still answers instead of raising.
+
+    Returns:
+        The version string, or ``'unknown'`` if it cannot be determined.
+    """
+    try:
+        from .. import __version__
+
+        return __version__ or 'unknown'
+    except Exception:  # noqa: BLE001 - a version flag must never crash the CLI
+        return 'unknown'
+
+
 def setup_parser() -> argparse.ArgumentParser:
     """
     Build the argument parser with every command group registered.
@@ -140,6 +160,18 @@ def setup_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description='RocketRide Unified Pipeline and File Management CLI',
         epilog='Use "rocketride <command> --help" for command-specific help',
+    )
+    # Parity with the TypeScript CLI, which registers commander's
+    # .version(SDK_VERSION) on a program named 'rocketride': checking the
+    # installed version is the first command anyone runs after an install
+    # (#3186). The name is a literal rather than %(prog)s because prog is
+    # derived from argv[0] and would read 'python.exe' under any interpreter
+    # invocation, printing a different answer than the console script does.
+    parser.add_argument(
+        '--version',
+        action='version',
+        version=f'rocketride {_sdk_version()}',
+        help='Print the SDK version and exit',
     )
     subparsers = parser.add_subparsers(dest='command', help='Available commands', metavar='COMMAND')
 

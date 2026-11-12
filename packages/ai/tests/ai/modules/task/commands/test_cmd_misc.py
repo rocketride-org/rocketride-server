@@ -283,6 +283,67 @@ async def test_on_rrext_validate_no_source_anywhere_omits_field(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_on_rrext_validate_no_source_returns_warning(monkeypatch):
+    """A pipeline with no source anywhere still validates, but says what is
+    missing and how to set it instead of answering a bare ok (#3186).
+    """
+    monkeypatch.setattr(cmd_misc, 'resolve_implied_source', lambda p: None)
+    monkeypatch.setattr(cmd_misc, 'validatePipeline', lambda payload: {'ok': True})
+
+    conn = _make_conn()
+    reply = await MiscCommands.on_rrext_validate(conn, {'arguments': {'pipeline': {'components': []}}})
+
+    body = reply['body']
+    # The verdict is unchanged: a warning, never an error.
+    assert not body.get('errors')
+    assert body['warnings'], 'a pipeline with no source should be warned about'
+    message = body['warnings'][0]['message']
+    assert 'source' in message
+    assert 'top-level "source"' in message
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_validate_with_source_has_no_missing_warning(monkeypatch):
+    """A pipeline that already names a source gets no missing-source warning."""
+    monkeypatch.setattr(cmd_misc, 'validatePipeline', lambda payload: {'ok': True})
+
+    conn = _make_conn()
+    reply = await MiscCommands.on_rrext_validate(
+        conn, {'arguments': {'pipeline': {'components': [], 'source': 'webhook_1'}}}
+    )
+
+    assert not reply['body'].get('warnings')
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_validate_missing_source_warning_survives_substitution(monkeypatch):
+    """When ${...} references were expanded the diagnostics are rebuilt from
+    the submitted config; the missing-source warning must survive that pass.
+    """
+    monkeypatch.setattr(cmd_misc, 'resolve_implied_source', lambda p: None)
+    monkeypatch.setattr(
+        cmd_misc,
+        'substituted_env',
+        lambda pipeline, env: {'ROCKETRIDE_TOKEN': 'abc'},
+    )
+    monkeypatch.setattr(cmd_misc, 'resolve_pipeline_env', lambda pipeline, env: dict(pipeline))
+    # Structural config the echo pass accepts, so the substituted branch runs.
+    component = {
+        'id': 'llm_1',
+        'provider': 'llm_openai',
+        'config': {'profile': 'default', 'parameters': {}},
+    }
+    monkeypatch.setattr(cmd_misc, 'validatePipeline', lambda payload: {'pipeline': {'components': [component]}})
+
+    conn = _make_conn()
+    reply = await MiscCommands.on_rrext_validate(conn, {'arguments': {'pipeline': {'components': [component]}}})
+
+    body = reply['body']
+    assert body['warnings'], 'the warning must survive the substitution rebuild'
+    assert 'source' in body['warnings'][0]['message']
+
+
+@pytest.mark.asyncio
 async def test_on_rrext_validate_wraps_config_in_pipeline_envelope(monkeypatch):
     """The C++ payload is {'pipeline': <config>} — the same envelope pipe_Validate
     (modules/pipe) builds. Regression test: passing the config flat makes
@@ -632,7 +693,11 @@ async def test_on_rrext_validate_drops_diagnostics_the_caller_sends(monkeypatch)
 
 @pytest.mark.asyncio
 async def test_on_rrext_validate_without_substitution_validates_once(monkeypatch):
-    """Nothing expanded, no second pass: the reply is the validator's result as before."""
+    """Nothing expanded, no second pass: the reply is the validator's result.
+
+    The pipeline names no source anywhere, so it additionally carries the
+    missing-source warning (#3186); the validator is still called exactly once.
+    """
     calls = []
     monkeypatch.setattr(cmd_misc, 'validatePipeline', lambda payload: calls.append(payload) or {'ok': True})
     conn = _validate_conn(monkeypatch, env={})
@@ -641,7 +706,11 @@ async def test_on_rrext_validate_without_substitution_validates_once(monkeypatch
     result = await MiscCommands.on_rrext_validate(conn, request)
 
     assert len(calls) == 1
-    assert result == {'type': 'response', 'body': {'ok': True}}
+    assert result['type'] == 'response'
+    assert result['body']['ok'] is True
+    # The verdict is unchanged, but the reply now names the missing source
+    # instead of answering a bare ok.
+    assert result['body']['warnings']
 
 
 @pytest.mark.asyncio

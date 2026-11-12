@@ -64,6 +64,16 @@ if TYPE_CHECKING:
 # Root keys where the validator writes its own diagnostics
 _DIAGNOSTICS = ('errors', 'warnings')
 
+# A pipeline with no source anywhere passes structural validation but cannot
+# start until one is supplied (#3186). Both `rocketride validate` and the MCP
+# `validate_pipeline` tool answer through this handler, so a warning here
+# reaches each of them without changing the verdict.
+_MISSING_SOURCE_WARNING = (
+    'No source is set for this pipeline: it validates, but it cannot start until one is '
+    'provided. Add a top-level "source" field naming the id of the component that generates '
+    'the data, or pass a source explicitly when the run is started.'
+)
+
 
 def _submitted_ids(resolved: Any, submitted: Any) -> Dict[str, Any]:
     """Map validated component ids to the ids the caller sent.
@@ -420,6 +430,13 @@ class MiscCommands(DAPConn):
                     echoed = validatePipeline({'pipeline': echo})['pipeline'] if _can_validate_echo(echo) else echo
                     ids = _submitted_ids(pipeline.get('components'), submitted.get('components'))
                     data = {'pipeline': echoed, **_restored_diagnostics(data, substituted, ids)}
+
+                # Name the missing source instead of answering a bare ok (#3186).
+                # Appended after the substitution rebuild above so it survives as
+                # its own message rather than being rewritten into the fixed
+                # template text, and only when the pipeline otherwise validates.
+                if not source and isinstance(data, dict) and not data.get('errors'):
+                    data.setdefault('warnings', []).append({'message': _MISSING_SOURCE_WARNING})
 
             # Return the results
             return self.build_response(request, body=data)
