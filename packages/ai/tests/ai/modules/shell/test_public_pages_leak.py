@@ -143,8 +143,9 @@ def test_an_unpublished_root_app_stops_serving_its_pages_after_the_rebuild(world
         if row['appId'] == 'rocketride.home':
             row['state'] = 'disabled'
     assert asyncio.run(pp.rebuild())
-    # No visible platform manifest is left: the legacy page list serves.
-    assert pp.current().legacy
+    # No visible platform manifest is left: nothing is public.
+    assert pp.current().exact == {}
+    assert client.get('/pricing').status_code == 404
     assert 'Plans and prices.' not in client.get('/pricing').text
     llms = client.get('/llms.txt').text
     assert 'The blurb.' not in llms

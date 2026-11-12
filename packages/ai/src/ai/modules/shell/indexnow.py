@@ -39,12 +39,12 @@ to another version; a read that fails counts as a change. A page without a
 production version has no snapshot to read, so it shows none.
 
 Changes are measured against the last real build this process read in
-full. The first one is a baseline (a restart submits nothing), a build that
-fell back to the legacy page list is ignored, and the pages of an app absent
-from a build (unpublished, made non-public, or skipped for a store error)
-are kept from the last build instead of reported gone, so a transient skip
-and its recovery submit nothing. The cost: a wholly unpublished app's URLs
-are never submitted as removed.
+full. The first one is a baseline (a restart submits nothing), a build with
+no page (nothing is public, or the root app could not be read) is ignored,
+and the pages of an app absent from a build (unpublished, made non-public,
+or skipped for a store error) are kept from the last build instead of
+reported gone, so a transient skip and its recovery submit nothing. The
+cost: a wholly unpublished app's URLs are never submitted as removed.
 
 One background task does the work, off the request path, in swap order; a
 build swapped in while it works is coalesced with any later one. Snapshot
@@ -319,7 +319,7 @@ async def _drain() -> None:
 def on_swap(old: Aggregate, new: Aggregate) -> None:
     """Aggregate swap listener: queue a real build for the background diff and submission.
 
-    Nothing is queued for the legacy page list or when IndexNow is off.
+    Nothing is queued for a build with no pages or when IndexNow is off.
     Called with no running event loop, it queues nothing: the build is
     diffed with the next swap.
 
@@ -328,7 +328,7 @@ def on_swap(old: Aggregate, new: Aggregate) -> None:
         new: The aggregate swapped in.
     """
     global _pending, _worker
-    if new.legacy or not enabled():
+    if not new.exact or not enabled():
         return
     _pending = new
     if _worker is not None and not _worker.done():

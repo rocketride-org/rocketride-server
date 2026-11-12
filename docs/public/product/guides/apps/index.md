@@ -344,11 +344,12 @@ publish fails with a message naming the field):
   `https://` `url`; `logo` is an `https://` URL, `description` at most 1000
   characters, and `sameAs` a list of at most 20 `https://` URLs.
 
-Until a published platform app contributes a valid page, the page map holds
-the server's built-in page list instead. A published app whose storage cannot
-be read keeps the pages of its last readable build while the server runs;
-after a restart it has none until its storage can be read again. Kept pages
-still compete with other apps' claims under the same first-claim rule.
+Until a published platform app contributes a valid page, the page map is
+empty: no public pages, redirects or feeds, and `/sitemap.xml` and `/llms.txt`
+list nothing. `/` still serves the app shell. A published app whose storage
+cannot be read keeps the pages of its last readable build while the server
+runs; after a restart it has none until its storage can be read again. Kept
+pages still compete with other apps' claims under the same first-claim rule.
 
 A server without `RR_APP_URL` is not the public site: every response carries
 `X-Robots-Tag: noindex, nofollow`, so a host found through links stays out of

@@ -21,7 +21,7 @@
 # SOFTWARE.
 
 """
-Aggregate tests: build from published manifests, legacy fallback, atomic
+Aggregate tests: build from published manifests, the empty map, atomic
 rebuild on publish/unpublish/rung-repoint, pre-release isolation, and the
 hooks that keep it current (startup build, deploy-change rebuild).
 """
@@ -35,7 +35,7 @@ import pytest
 
 import ai.modules.shell.public_pages as pp
 import ai.modules.task.deploy_events as deploy_events
-from ai.modules.shell.public_pages import Published, build_aggregate, legacy_aggregate, load_published
+from ai.modules.shell.public_pages import Aggregate, Published, build_aggregate, load_published
 
 from .hostile_fixtures import HOME_MANIFEST, LEAK_MARKERS, dist_of, hostile_account
 
@@ -47,6 +47,9 @@ ALL_ROOTS = 'rocketride.home,rocketride.secret,rocketride.review,rocketride.buil
 @pytest.fixture(autouse=True)
 def _roots(monkeypatch):
     monkeypatch.setenv('RR_PUBLIC_ROOT_APPS', ALL_ROOTS)
+
+
+EMPTY = Aggregate(exact={})
 
 
 def _paths(agg):
@@ -89,7 +92,6 @@ async def test_loader_keeps_only_the_served_platform_manifests():
 
 async def test_aggregate_from_hostile_state_has_no_leaks():
     agg = build_aggregate(await load_published(hostile_account()))
-    assert not agg.legacy
     assert _paths(agg) == ['/', '/marketplace', '/pricing', '/store']
     assert agg.site == {k: HOME_MANIFEST['site'][k] for k in ('title', 'blurb', 'docsUrl', 'organization')}
     blob = repr(agg)
@@ -102,7 +104,7 @@ async def test_third_party_root_squatter_never_claims_anything():
     # Even alone on the platform (no home app), the squatter gets nothing.
     acct.rows = [r for r in acct.rows if r['appId'] == 'evil.squatter']
     agg = build_aggregate(await load_published(acct))
-    assert agg.legacy
+    assert agg == EMPTY
 
 
 async def test_pre_release_rungs_never_affect_the_aggregate():
@@ -128,46 +130,23 @@ async def test_a_blocked_row_that_wins_precedence_does_not_hide_a_serving_one(bl
 
 
 # ---------------------------------------------------------------------------
-# Legacy fallback
+# The empty map
 # ---------------------------------------------------------------------------
 
 
-def test_legacy_fallback_when_no_manifest_declares_pages():
+def test_no_manifest_gives_an_empty_aggregate():
     agg = build_aggregate([])
-    assert agg.legacy
-    assert '/pricing' in agg.exact and agg.exact['/store'].listed is False
-    assert agg.exact['/pricing'].head_title == 'Pricing | RocketRide'
-    assert agg.exact['/'].head_title == 'RocketRide'
-    assert agg.site['docsUrl'] == 'https://docs.rocketride.org/llms.txt'
+    assert agg == EMPTY and agg.pages() == [] and not agg.redirects and not agg.feeds and not agg.site
 
 
-def test_legacy_fallback_when_every_declared_page_is_invalid():
-    agg = build_aggregate([Published('rocketride.home', {'publicPages': [{'path': '/Bad', 'title': 'x'}]})])
-    assert agg.legacy
+def test_an_empty_aggregate_when_every_declared_page_is_invalid():
+    site = {'title': 'T', 'redirects': [{'from': '/old', 'to': '/new'}]}
+    bad = {'publicPages': [{'path': '/Bad', 'title': 'x'}], 'site': site}
+    assert build_aggregate([Published('rocketride.home', bad)]) == EMPTY
 
 
-def test_the_legacy_aggregate_is_the_legacy_page_list_with_its_unlisted_pages():
-    from ai.modules.shell.legacy_manifest import _LEGACY_ROUTES
-
-    agg = legacy_aggregate()
-    assert [(p.path, p.title, p.description) for p in agg.exact.values()] == _LEGACY_ROUTES
-    assert len(agg.exact) == 25
-    assert {p.path for p in agg.pages() if not p.listed} == {
-        '/oss',
-        '/mcp-server',
-        '/store',
-        '/marketplace',
-        '/build-publish-earn',
-    }
-
-
-def test_legacy_fallback_is_filtered_against_live_routes():
-    agg = build_aggregate([], live_conflict=lambda p: 'GET /contact' if p == '/contact' else None)
-    assert agg.legacy and '/contact' not in agg.exact and '/pricing' in agg.exact
-
-
-def test_current_is_the_legacy_aggregate_before_the_first_build():
-    assert pp.current().legacy and pp.current() is pp.current()
+def test_current_is_the_empty_aggregate_before_the_first_build():
+    assert pp.current() == EMPTY and pp.current() is pp.current()
 
 
 # ---------------------------------------------------------------------------
@@ -245,7 +224,7 @@ async def test_rebuild_tracks_publish_unpublish_and_repoint():
     acct = hostile_account()
     swaps = []
     pp.on_swap(lambda old, new: swaps.append((old, new)))
-    assert pp.current().legacy  # before the first build: the legacy map serves
+    assert pp.current() == EMPTY  # before the first build nothing is public
 
     assert await pp.rebuild(acct)
     assert '/pricing' in pp.current().exact and len(swaps) == 1
@@ -257,12 +236,12 @@ async def test_rebuild_tracks_publish_unpublish_and_repoint():
     assert await pp.rebuild(acct)
     assert _paths(pp.current()) == ['/', '/about']
 
-    # Unpublish (binding disabled): back to the legacy fallback.
+    # Unpublish (binding disabled): back to the empty map.
     for row in acct.rows:
         if row['appId'] == 'rocketride.home':
             row['state'] = 'disabled'
     assert await pp.rebuild(acct)
-    assert pp.current().legacy and len(swaps) == 3
+    assert pp.current() == EMPTY and len(swaps) == 3
 
 
 async def test_rebuild_failure_keeps_the_previous_aggregate():
@@ -336,7 +315,7 @@ async def test_a_failing_swap_listener_never_stops_the_swap():
     pp.on_swap(boom)
     pp.on_swap(lambda old, new: seen.append(new))
     assert await pp.rebuild(hostile_account())
-    assert seen == [pp.current()] and not pp.current().legacy
+    assert seen == [pp.current()] and pp.current() != EMPTY
 
 
 async def test_one_unreadable_app_is_skipped_and_never_freezes_the_map(monkeypatch, warnings):
@@ -352,7 +331,7 @@ async def test_one_unreadable_app_is_skipped_and_never_freezes_the_map(monkeypat
         if row['appId'] == 'rocketride.other':
             row['state'] = 'disabled'
     assert await pp.rebuild(acct)
-    assert pp.current().legacy
+    assert pp.current() == EMPTY
 
 
 async def test_an_unreadable_app_keeps_its_current_pages_until_it_reads_again(monkeypatch, warnings):
@@ -422,7 +401,7 @@ async def test_malformed_rows_are_skipped():
         if row['appId'] == 'rocketride.home':
             row['artifactPath'] = ''  # would map every app to '/dist'
     assert await pp.rebuild(acct)
-    assert pp.current().legacy
+    assert pp.current() == EMPTY
 
 
 async def test_the_gate_loader_is_strict_for_root_claimants_and_names_the_app(monkeypatch):
@@ -445,12 +424,12 @@ async def test_public_false_platform_apps_contribute_nothing():
         if row['appId'] == 'rocketride.home':
             row['snapshot']['public'] = False
     assert await pp.rebuild(acct)
-    assert pp.current().legacy
+    assert pp.current() == EMPTY
     # The DB edition drops the snapshot flag: the manifest's own flag counts too.
     acct2 = hostile_account()
     acct2.artifacts[('00000000-platform', 'rocketride.home', 1)]['metadata']['manifest']['public'] = False
     assert await pp.rebuild(acct2)
-    assert pp.current().legacy
+    assert pp.current() == EMPTY
 
 
 async def test_schedule_rebuild_coalesces_events(monkeypatch):
@@ -501,8 +480,8 @@ async def test_an_unchanged_map_is_not_swapped():
     built = pp.current()
     assert await pp.rebuild(acct)
     assert pp.current() is built and len(swaps) == 1
-    # The legacy list rebuilt over the legacy list: no swap either.
-    pp.swap(pp.legacy_aggregate())
+    # An empty map rebuilt over an empty map: no swap either.
+    pp.swap(EMPTY)
     acct.rows = []
     assert await pp.rebuild(acct)
     assert len(swaps) == 2
@@ -574,7 +553,7 @@ async def test_a_swap_restarts_the_refresh_clock(monkeypatch):
     scheduled = []
     monkeypatch.setattr(pp.page_map, 'schedule_rebuild', lambda: scheduled.append(1))
     monkeypatch.setattr(pp.page_map, '_built_at', pp.time.monotonic() - pp.REFRESH_SECONDS - 1)
-    pp.swap(pp.legacy_aggregate())
+    pp.swap(EMPTY)
     pp.maybe_refresh()
     assert scheduled == []
 
@@ -636,41 +615,6 @@ def test_a_manifest_without_redirects_has_none():
     assert build_aggregate([_root('rocketride.home', ['/'], [], 1)]).redirects == {}
 
 
-# home-ui's src/redirects.ts (rocketride-saas), entry for entry: the legacy map
-# answers these URLs until home-ui's manifest carries its own.
-LEGACY_REDIRECTS = {
-    '/terms': '/legal/terms',
-    '/terms/': '/legal/terms',
-    '/privacy-policy': '/legal/privacy-policy',
-    '/privacy-policy/': '/legal/privacy-policy',
-    '/privacy': '/legal/privacy-policy',
-    '/privacy/': '/legal/privacy-policy',
-}
-
-
-def test_the_legacy_redirect_map_is_home_uis():
-    from ai.modules.shell.legacy_manifest import legacy_page_manifest
-
-    redirects = legacy_page_manifest()['site']['redirects']
-    assert [(r['from'], r['to']) for r in redirects] == list(LEGACY_REDIRECTS.items())
-
-
-def test_the_legacy_aggregate_carries_the_legacy_redirect_map():
-    agg = legacy_aggregate()
-    assert agg.redirects == LEGACY_REDIRECTS
-    assert 'redirects' not in agg.site
-    assert build_aggregate([]).redirects == LEGACY_REDIRECTS
-
-
-def test_legacy_redirects_are_filtered_against_live_routes():
-    live = {'/terms': 'GET /terms', '/legal/privacy-policy': 'GET /legal/privacy-policy'}
-    agg = build_aggregate([], live_conflict=live.get)
-    # /terms is a live route (so /terms/, its slash twin, goes too); the
-    # privacy-policy target page is gone with its claim.
-    dropped = {'/terms', '/terms/', '/privacy-policy', '/privacy-policy/', '/privacy', '/privacy/'}
-    assert set(agg.redirects) == set(LEGACY_REDIRECTS) - dropped
-
-
 # ---------------------------------------------------------------------------
 # Hooks: the startup build and the deploy-change rebuild
 # ---------------------------------------------------------------------------
@@ -726,7 +670,7 @@ def test_the_engine_builds_the_page_map_before_it_serves(monkeypatch):
     catch_all = ('route', '/{public_page_path:path}')
     assert modules and events[:-1] == ['module'] * modules + ['account', catch_all, 'build']
     serve, served = events[-1]
-    assert serve == 'serve' and not served.legacy and served.exact['/'].title == 'Home'
+    assert serve == 'serve' and served != EMPTY and served.exact['/'].title == 'Home'
 
 
 def test_a_failing_first_build_never_stops_the_boot(monkeypatch):
@@ -735,10 +679,10 @@ def test_a_failing_first_build_never_stops_the_boot(monkeypatch):
 
     events = _boot(monkeypatch, down)
     serve, served = events[-1]
-    assert events[-2] == 'build' and serve == 'serve' and served.legacy
+    assert events[-2] == 'build' and serve == 'serve' and served == EMPTY
 
 
-async def test_a_slow_first_build_starts_on_the_legacy_list_and_lands_later(monkeypatch):
+async def test_a_slow_first_build_starts_with_no_pages_and_lands_later(monkeypatch):
     release = asyncio.Event()
 
     async def load(acct=None, strict=False, exclude='', unreadable=None):
@@ -748,10 +692,10 @@ async def test_a_slow_first_build_starts_on_the_legacy_list_and_lands_later(monk
     monkeypatch.setattr(pp, 'load_published', load)
     monkeypatch.setattr(pp, 'STARTUP_BUILD_SECONDS', 0.01)
     assert await pp.build_at_startup() is False
-    assert pp.current().legacy  # the engine starts here
+    assert pp.current() == EMPTY  # the engine starts here
     release.set()
     await pp.page_map._rebuild_task
-    assert not pp.current().legacy and pp.current().exact['/'].title == 'Home'
+    assert pp.current().exact['/'].title == 'Home'
 
 
 def test_deploy_change_broadcast_schedules_an_aggregate_rebuild(monkeypatch):

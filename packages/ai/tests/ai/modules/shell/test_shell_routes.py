@@ -6,9 +6,9 @@ way ``initModule`` + ``register_public_pages`` do (``/`` and the SEO files
 first, the public-page catch-all LAST) and drives them through the
 synchronous ``TestClient``:
 
-  - every page the aggregate claims (the legacy page list until a published
-    manifest declares pages) serves the shell document with its head
-    metadata injected, so deep links survive a hard reload;
+  - every page the aggregate claims (here home-ui's manifest) serves the
+    shell document with its head metadata injected, so deep links survive a
+    hard reload;
   - /sitemap.xml and /llms.txt 404 unless RR_APP_URL is set, and derive
     all absolute URLs exclusively from it (never from request headers);
   - served-vs-advertised is driven by each page's ``listed`` flag;
@@ -39,13 +39,15 @@ import ai.modules.shell.public_pages as pp
 import ai.modules.shell.shell as shell_mod
 from ai.modules.shell.crawlers import CRAWLERS
 from ai.modules.shell.pages import FALLBACK_PATH, public_page
-from ai.modules.shell.public_pages import Aggregate, Page, legacy_aggregate
+from ai.modules.shell.public_pages import Aggregate, Page, Published, build_aggregate
 from ai.modules.shell.shell import (
     llms_txt,
     robots_txt,
     shell_static,
     sitemap_xml,
 )
+
+from .home_ui_fixture import home_ui_manifest
 
 # Base URL used whenever the hosted-SaaS mode (RR_APP_URL set) is under test.
 BASE = 'https://rocketride.example'
@@ -126,40 +128,22 @@ def _use(*pages, site=None, redirects=None):
     pp.swap(Aggregate(exact={p.path: p for p in pages}, site=site or {}, redirects=redirects or {}))
 
 
-LEGACY = legacy_aggregate()
-LEGACY_PATHS = [p.path for p in LEGACY.pages()]
-LISTED_PATHS = [p.path for p in LEGACY.pages() if p.listed]
-UNLISTED_PATHS = [p.path for p in LEGACY.pages() if not p.listed]
+# rocketride.home claims root by default.
+HOME_UI = build_aggregate([Published('rocketride.home', home_ui_manifest())])
+HOME_UI_PATHS = [p.path for p in HOME_UI.pages()]
+LISTED_PATHS = [p.path for p in HOME_UI.pages() if p.listed]
+UNLISTED_PATHS = [p.path for p in HOME_UI.pages() if not p.listed]
+
+
+@pytest.fixture(autouse=True)
+def _published_home_ui():
+    """Start every test with home-ui's manifest published, as in production."""
+    pp.swap(HOME_UI)
 
 
 # ---------------------------------------------------------------------------
-# Public pages: the legacy page list (until a published manifest declares pages)
+# The home-ui fixture: sanity checks for the tests below, which iterate it
 # ---------------------------------------------------------------------------
-
-
-def test_legacy_pages_contain_home_ui_pages():
-    # Mirrors the home-ui route manifest (apps/home-ui/src/routes.ts): a page
-    # deep-linkable on the client must also be served here, or a hard reload
-    # 404s before the client can take over.
-    for route in (
-        '/',
-        '/pricing',
-        '/marketplace',
-        '/build-publish-earn',
-        '/store',
-        '/oss',
-        '/cloud',
-        '/mcp-server',
-        '/extension',
-        '/sdk',
-        '/blog',
-        '/events',
-        '/about',
-        '/careers',
-        '/contact',
-        '/superfans',
-    ):
-        assert route in LEGACY.exact
 
 
 LEGAL_PAGES = (
@@ -175,89 +159,44 @@ LEGAL_PAGES = (
 )
 
 
-def test_legal_pages_are_public_pages_and_listed():
-    for route in LEGAL_PAGES:
-        assert route in LEGACY.exact
-        assert route in LISTED_PATHS
+def test_fixture_has_listed_and_unlisted_pages_each_with_a_title_and_description():
+    assert LISTED_PATHS and UNLISTED_PATHS
+    for page in HOME_UI.pages():
+        assert page.title and page.description, page.path
 
 
-def test_legal_pages_are_exact_paths():
-    # Only the published documents are pages: a slug that is not a document (a
-    # typo, an unpublished slug) is a 404 like any other unclaimed path.
-    legal = [route for route in LEGACY_PATHS if route == '/legal' or route.startswith('/legal/')]
+def test_fixture_lists_the_legal_documents_and_superfans_and_hides_the_marketplace_pair():
+    legal = [route for route in HOME_UI_PATHS if route == '/legal' or route.startswith('/legal/')]
     assert sorted(legal) == sorted(LEGAL_PAGES)
-    assert '/legal/not-a-document' not in LEGACY.exact
+    assert set(LEGAL_PAGES + ('/superfans',)) <= set(LISTED_PATHS)
+    assert {'/marketplace', '/store', '/build-publish-earn'} <= set(UNLISTED_PATHS)
 
 
-def test_legal_index_description_mirrors_the_client_manifest():
-    # The description is the client's string (routes.ts), character for character.
-    assert LEGACY.exact['/legal'].description == (
-        'The policies and terms that govern RocketRide Cloud - each document with its version, '
-        'effective date, and latest change.'
-    )
+# ---------------------------------------------------------------------------
+# Public pages: home-ui's published manifest
+# ---------------------------------------------------------------------------
 
 
-def test_careers_description_mirrors_the_client_manifest():
-    # It describes the page, not a roster: the page lists no roles when there are none.
-    assert LEGACY.exact['/careers'].description == (
-        'How the RocketRide team works and what we build: the leading AI meta-harness for agents that '
-        'scale in production. Open roles are listed here when we have them.'
-    )
-
-
-def test_superfans_page_is_an_exact_public_listed_page():
-    assert '/superfans' in LEGACY.exact
-    assert '/superfans' in LISTED_PATHS
-    assert [route for route in LEGACY_PATHS if route.startswith('/superfans')] == ['/superfans']
-
-
-def test_superfans_entry_mirrors_the_client_manifest():
-    page = LEGACY.exact['/superfans']
-    assert page.title == 'Superfans'
-    assert page.head_title == 'Superfans | RocketRide'  # routes.ts document title
-    assert page.description == (
-        'The developers who build with RocketRide and tell us the truth. Earn early builds, '
-        'a hand on the roadmap, and artifacts you can only be given.'
-    )
-
-
-def test_mcp_api_paths_are_not_shell_pages():
-    # /mcp and /mcp/* are the MCP API (a Starlette Mount in ai.modules.mcp).
-    for route in LEGACY_PATHS:
-        assert route != '/mcp' and not route.startswith('/mcp/'), route
-
-
-def test_unlisted_pages_are_served_but_not_listed():
-    # /oss, /mcp-server, /marketplace and /build-publish-earn are `unlisted` on
-    # the client, and /store is the legacy alias of /marketplace.
-    assert sorted(UNLISTED_PATHS) == sorted(['/oss', '/mcp-server', '/store', '/marketplace', '/build-publish-earn'])
-
-
-def test_marketplace_pair_is_hidden_for_now():
-    for route in ('/marketplace', '/store', '/build-publish-earn'):
-        assert route in LEGACY.exact
-        assert route not in LISTED_PATHS
-
-
-def test_pages_have_titles_and_descriptions():
-    for page in LEGACY.pages():
-        assert page.path.startswith('/')
-        assert page.title
-        assert page.description
-
-
-@pytest.mark.parametrize('route', LEGACY_PATHS)
+@pytest.mark.parametrize('route', HOME_UI_PATHS)
 def test_public_pages_serve_the_shell_document(shell_root, route):
     resp = _client().get(route)
     assert resp.status_code == 200
     assert SHELL_BODY in resp.text
-    assert f'<title>{LEGACY.exact[route].head_title}</title>' in resp.text.replace('&amp;', '&')
+    assert f'<title>{HOME_UI.exact[route].title}</title>' in resp.text.replace('&amp;', '&')
 
 
 def test_googlebot_gets_the_page_title_not_the_shells(shell_root):
     resp = _client().get('/pricing', headers={'User-Agent': GOOGLEBOT})
     assert resp.status_code == 200
     assert '<title>Pricing | RocketRide</title>' in resp.text and '<title>shell</title>' not in resp.text
+
+
+def test_unlisted_pages_are_served_but_not_listed(shell_root, app_url):
+    sitemap = _client().get('/sitemap.xml').text
+    llms = _client().get('/llms.txt').text
+    for route in UNLISTED_PATHS:
+        assert _client().get(route).status_code == 200, route
+        assert f'<loc>{BASE}{route}</loc>' not in sitemap and f']({BASE}{route})' not in llms, route
 
 
 # ---------------------------------------------------------------------------
@@ -323,9 +262,21 @@ def test_lastmod_is_the_page_date_and_absent_without_one(app_url):
     assert f'<url><loc>{BASE}/unbound</loc></url>' in text
 
 
-def test_legacy_pages_have_no_lastmod(app_url):
-    assert pp.current().legacy
+def test_pages_without_a_binding_time_have_no_lastmod(app_url):
+    assert pp.current() is HOME_UI
     assert '<lastmod>' not in _client().get('/sitemap.xml').text
+
+
+def test_with_no_published_pages_the_sitemap_and_llms_answer_but_list_nothing(app_url):
+    pp.swap(Aggregate(exact={}))
+    sitemap = _client().get('/sitemap.xml')
+    assert sitemap.status_code == 200 and '<loc>' not in sitemap.text
+    llms = _client().get('/llms.txt')
+    # The header still renders (from the origin's host, with no site block); the Pages section, if any, is empty.
+    assert llms.status_code == 200 and llms.text.startswith('# rocketride.example\n')
+    assert '- [' not in llms.text.partition('## Pages')[2].partition('\n## ')[0]
+    assert _client().get('/pricing').status_code == 404
+    assert _client().get('/terms').status_code == 404
 
 
 def test_sitemap_sets_cache_control(app_url):
@@ -339,6 +290,8 @@ def test_sitemap_sets_cache_control(app_url):
 
 
 def test_robots_disallows_all_without_app_url(no_app_url):
+    # An engine that publishes no pages (OSS, self-hosted, desktop).
+    pp.swap(Aggregate(exact={}))
     resp = _client().get('/robots.txt')
     assert resp.status_code == 200
     assert resp.headers['content-type'].startswith('text/plain')
@@ -350,9 +303,8 @@ def test_robots_disallows_all_without_app_url(no_app_url):
     [
         (Aggregate(exact={'/': Page('/', 'rocketride.home', title='Home')}), True),
         (Aggregate(exact={}), False),
-        (legacy_aggregate(), False),
     ],
-    ids=['published-pages', 'empty-map', 'legacy-list'],
+    ids=['published-pages', 'empty-map'],
 )
 def test_robots_without_app_url_allows_crawling_only_where_pages_are_published(no_app_url, aggregate, allowed):
     # Staging serves published pages and is linked from elsewhere: crawlers must
@@ -405,7 +357,7 @@ def test_llms_lists_listed_pages_with_absolute_urls(app_url):
     assert resp.headers['content-type'] == 'text/plain; charset=utf-8'
     assert resp.text.startswith('# RocketRide\n\n> Build, run, and harness AI at rocket speed.')
     assert '## Pages' in resp.text
-    for page in LEGACY.pages():
+    for page in HOME_UI.pages():
         line = f'- [{page.title}]({BASE}{page.path}): {page.description}'
         assert (line in resp.text) == page.listed, page.path
     assert resp.text.endswith('## Documentation\n\n- [Docs](https://docs.rocketride.org/llms.txt)\n')
@@ -507,67 +459,6 @@ def test_llms_group_headings_are_neutralised_like_every_manifest_string(app_url)
 def test_llms_sets_cache_control(app_url):
     resp = _client().get('/llms.txt')
     assert resp.headers['cache-control'] == 'public, max-age=3600'
-
-
-def test_sitemap_and_llms_list_the_legal_and_superfans_pages(app_url):
-    # Named here rather than read from the aggregate, so the test fails if one
-    # of these pages drops out of the advertised subset. The expected titles and
-    # descriptions are pinned copies of the client's strings (routes.ts and the
-    # documents' front matter).
-    expected = {
-        '/legal': (
-            'Legal',
-            'The policies and terms that govern RocketRide Cloud - each document with its version, effective '
-            'date, and latest change.',
-        ),
-        '/legal/terms': (
-            'RocketRide Cloud Terms of Service',
-            'The agreement governing use of RocketRide Cloud, including accounts, payments, and acceptable '
-            'service use.',
-        ),
-        '/legal/privacy-policy': (
-            'Privacy Policy',
-            'How RocketRide collects, uses, and shares personal information across its websites and RocketRide Cloud.',
-        ),
-        '/legal/dpa': (
-            'Data Processing Agreement',
-            'The data processing terms that apply when RocketRide processes personal data on behalf of business '
-            'customers.',
-        ),
-        '/legal/acceptable-use': (
-            'Acceptable Use Policy',
-            'The rules for what may and may not be done with RocketRide Cloud and its services.',
-        ),
-        '/legal/subprocessors': (
-            'RocketRide Cloud Sub-processors',
-            'The third-party sub-processors RocketRide uses to provide RocketRide Cloud, and how the list changes.',
-        ),
-        '/legal/trademark-policy': (
-            'Trademark & Brand Usage Policy',
-            'How the RocketRide name, logo, and brand assets may and may not be used.',
-        ),
-        '/legal/cookie-policy': (
-            'Cookie Policy',
-            'How RocketRide uses cookies, similar technologies, and website analytics on its websites and '
-            'RocketRide Cloud, and the choices you have.',
-        ),
-        '/legal/marketplace-terms': (
-            'Marketplace Publisher Terms',
-            'The terms for publishing apps on the RocketRide Marketplace, including eligibility, revenue share, '
-            'payouts, and taxes.',
-        ),
-        '/superfans': (
-            'Superfans',
-            'The developers who build with RocketRide and tell us the truth. Earn early builds, a hand on the '
-            'roadmap, and artifacts you can only be given.',
-        ),
-    }
-    assert sorted(expected) == sorted(LEGAL_PAGES + ('/superfans',))
-    sitemap = _client().get('/sitemap.xml').text
-    llms = _client().get('/llms.txt').text
-    for route, (title, description) in expected.items():
-        assert f'<loc>{BASE}{route}</loc>' in sitemap
-        assert f'- [{title}]({BASE}{route}): {description}' in llms
 
 
 @pytest.mark.parametrize('fixture', ['no_app_url', 'app_url'])
@@ -898,8 +789,11 @@ async def _real_route(request: Request):
     return PlainTextResponse('real route')
 
 
-def _start_engine(web_server, monkeypatch, *, before_fallback=()):
-    """Start the engine routes in eaas order: initModule, other routes, register_public_pages (no store reads)."""
+def _start_engine(web_server, monkeypatch, *, before_fallback=(), published=HOME_UI):
+    """Start the engine routes in eaas order: initModule, other routes, register_public_pages (no store reads).
+
+    ``published`` is what the first build gives; None leaves the page map empty.
+    """
     from ai.modules.shell import initModule, register_public_pages
 
     async def no_rebuild(acct=None):
@@ -910,6 +804,8 @@ def _start_engine(web_server, monkeypatch, *, before_fallback=()):
     for path, handler, methods, kwargs in before_fallback:
         web_server.add_route(path, handler, methods, **kwargs)
     asyncio.run(register_public_pages(web_server))
+    if published is not None:
+        pp.swap(published)  # what the first build gives, with the store stubbed out
     return TestClient(web_server.app, follow_redirects=False)
 
 
@@ -1053,7 +949,7 @@ def test_unknown_methods_404_off_pages_and_405_on_them(web_server, shell_root, m
 
 def test_pages_answer_405_to_methods_other_than_get_and_head(web_server, shell_root, monkeypatch):
     client = _start_engine(web_server, monkeypatch)
-    for path in ('/', '/pricing'):  # '/' and a (legacy) page, both public
+    for path in ('/', '/pricing'):  # '/' and a page, both public
         for method in ('POST', 'DELETE', 'PUT'):
             resp = client.request(method, path)
             assert resp.status_code == 405 and resp.headers['allow'] == 'GET, HEAD', (method, path)
@@ -1124,10 +1020,12 @@ def test_live_route_conflict_reads_the_route_table(web_server, shell_root, monke
     assert pp.live_conflict() is pages_mod.live_route_conflict
 
 
-def test_boot_serves_the_legacy_list_filtered_against_the_route_table(web_server, shell_root, monkeypatch):
-    # The store is down at boot, and a later module owns a legacy path as a
-    # PRIVATE route: the legacy page must not open it to anonymous callers.
+def test_boot_with_the_store_down_serves_no_pages_and_opens_no_private_route(web_server, shell_root, monkeypatch):
+    # The store is down at boot, and a later module owns a page path as a
+    # PRIVATE route: the empty map must not open it to anonymous callers.
     from ai.modules.shell import initModule, register_public_pages
+
+    pp.swap(Aggregate(exact={}))  # a fresh process: nothing built yet
 
     async def failed_rebuild(acct=None):
         return False
@@ -1138,7 +1036,9 @@ def test_boot_serves_the_legacy_list_filtered_against_the_route_table(web_server
     asyncio.run(register_public_pages(web_server))
     client = TestClient(web_server.app)
     assert client.get('/contact').status_code == 401
-    assert '/contact' not in pp.current().exact and '/pricing' in pp.current().exact
+    assert pp.current().exact == {}
+    assert client.get('/pricing').status_code == 404
+    assert client.get('/').status_code == 200  # the root is the shell's own
 
 
 # ---------------------------------------------------------------------------
@@ -1306,7 +1206,9 @@ def test_no_capture_falls_back_to_spa(web_server, shell_root, monkeypatch):
     _capture(shell_root, 'pricing', 'captured pricing')
     r = _start_engine(web_server, monkeypatch).get('/cloud')
     assert r.status_code == 200
-    assert SHELL_BODY in r.text and '<title>Cloud | RocketRide</title>' in r.text
+    assert (
+        SHELL_BODY in r.text and '<title>RocketRide Cloud: Run AI Pipelines on Managed Infrastructure</title>' in r.text
+    )
 
 
 def test_an_unclaimed_root_still_gets_its_capture(web_server, shell_root, monkeypatch):
@@ -1362,6 +1264,7 @@ def test_an_ungated_engine_sends_noindex_nofollow_on_every_response(web_server, 
     assert statuses == {200, 301, 401, 404, 405}
     # With no published pages robots.txt stays Disallow-all; with some, crawlers
     # may fetch them, and every response, robots.txt included, says noindex.
+    pp.swap(pp.Aggregate(exact={}))
     assert client.get('/robots.txt').text == 'User-agent: *\nDisallow: /\n'
     pp.swap(pp.Aggregate(exact={'/': pp.Page('/', 'rocketride.home', title='Home')}))
     robots = client.get('/robots.txt')
@@ -1388,7 +1291,7 @@ def test_only_an_ungated_engine_registers_the_noindex_middleware(
     request.getfixturevalue(fixture)
     lines = []
     monkeypatch.setattr(shell_pkg, 'warning', lines.append)
-    _start_engine(web_server, monkeypatch)
+    _start_engine(web_server, monkeypatch, published=None)
     dispatches = [m.kwargs.get('dispatch') for m in web_server.app.user_middleware]
     assert (shell_mod.ungated_noindex in dispatches) is registered
     # Startup stays quiet: OSS and desktop engines have nothing published to deindex.
@@ -1406,10 +1309,9 @@ def test_a_published_page_without_rr_app_url_warns_once_at_the_swap(
     lines = []
     monkeypatch.setattr(shell_pkg, 'warning', lines.append)
     monkeypatch.setattr(shell_pkg, '_warned_noindex', False)
-    _start_engine(web_server, monkeypatch)
+    _start_engine(web_server, monkeypatch, published=None)
     published = pp.Aggregate(exact={'/': pp.Page('/', 'rocketride.home', title='Home')})
     pp.swap(pp.Aggregate(exact={}))
-    pp.swap(pp.legacy_aggregate())
     assert lines == []
     pp.swap(published)
     pp.swap(pp.Aggregate(exact={'/a': pp.Page('/a', 'rocketride.home', title='A')}))

@@ -230,8 +230,8 @@ async def run(config: Dict[str, Any] = None) -> None:
     # The public-page catch-all registers LAST, after every module and account
     # route, so every real route wins (FastAPI matches in registration order).
     # It then builds the first page aggregate from the published app manifests.
-    # Bounded: a slow store starts the engine on the legacy page list while the
-    # build finishes in the background; a failed build keeps the legacy list
+    # Bounded: a slow store starts the engine with no public pages while the
+    # build finishes in the background; a failed build keeps the empty map
     # until the next platform app deploy event or the refresh backstop.
     from ai.modules.shell import register_public_pages
 

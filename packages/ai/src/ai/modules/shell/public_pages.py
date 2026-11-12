@@ -30,8 +30,8 @@ pages, ``/sitemap.xml`` and ``/llms.txt`` are served from it (``pages.py``,
 ``shell.py``). It is built at startup, rebuilt in the background on every
 platform app's publish, unpublish or rung repoint (and at least every
 ``REFRESH_SECONDS`` on traffic), and kept as it was when the store cannot be
-read. Until a published manifest contributes a valid page, it holds the legacy
-page list (``legacy_manifest.py``).
+read. Until a published manifest contributes a valid page it is empty: no
+public page, redirect or feed (``/`` still serves the shell).
 
 The publish gate (``gate_errors``) refuses a public publish whose page claims
 are invalid. The aggregate re-checks every manifest anyway: seeded platform
@@ -53,7 +53,6 @@ from .contract import (
     MAX_SNAPSHOT_BYTES,
     Page,
     check_manifest,
-    check_redirects,
     is_privileged,
     may_claim_root,
     slash_twin_label,
@@ -95,7 +94,6 @@ class Aggregate:
     exact: Mapping[str, Page]
     site: Mapping[str, Any] = field(default_factory=dict)
     published: Mapping[str, Published] = field(default_factory=dict, compare=False, repr=False)
-    legacy: bool = False
     redirects: Mapping[str, str] = field(default_factory=dict)
     feeds: Mapping[str, Mapping[str, str]] = field(default_factory=dict)
     built_at: float = field(default_factory=time.time, compare=False)
@@ -105,8 +103,8 @@ class Aggregate:
         return sorted(self.exact.values(), key=lambda p: p.path)
 
     def serves_published_pages(self) -> bool:
-        """Whether platform apps publish pages here; the legacy list and an empty map publish none."""
-        return not self.legacy and bool(self.exact)
+        """Whether platform apps publish pages here; an empty map publishes none."""
+        return bool(self.exact)
 
 
 def _claim_key(pub: Published) -> Tuple[float, str]:
@@ -152,12 +150,9 @@ def build_aggregate(
     claim wins). ``site`` and its redirects come only from the app owning
     ``/``; a redirect whose source (or its slash twin) another app's page
     serves is dropped, and so is a feed at another app's page. When no page
-    survives, the aggregate is the legacy page list (a broken manifest falls
-    back instead of removing every page).
+    survives, the aggregate is empty.
     """
     exact, sites = _claims(published, live_conflict)
-    if not exact:
-        return legacy_aggregate(live_conflict)
     site: Dict[str, Any] = {}
     root = exact.get('/')
     if root is not None:
@@ -182,38 +177,6 @@ def build_aggregate(
         redirects=redirects,
         feeds=feeds,
     )
-
-
-def legacy_aggregate(live_conflict: Optional[Callable[[str], Optional[str]]] = None) -> Aggregate:
-    """The aggregate of the legacy page list and its redirects: trusted engine constants.
-
-    Filtered through ``live_conflict`` like any claim, when one is given.
-    """
-    from .legacy_manifest import legacy_head_title, legacy_page_manifest
-
-    manifest = legacy_page_manifest()
-    exact: Dict[str, Page] = {}
-    for raw in manifest['publicPages']:
-        if live_conflict is not None:
-            conflict = live_conflict(raw['path'])
-            if conflict:
-                debug(
-                    f'[public_pages] legacy page {raw["path"]} collides with the live route {conflict} (page skipped)'
-                )
-                continue
-        exact[raw['path']] = Page(
-            path=raw['path'],
-            app_id='',
-            title=raw['title'],
-            description=raw['description'],
-            listed=raw['listed'],
-            head_title=legacy_head_title(raw['path'], raw['title']),
-        )
-    site = dict(manifest['site'])
-    redirects, errors = check_redirects(site.pop('redirects'), list(exact.values()), live_conflict)
-    for err in errors:
-        debug(f'[public_pages] legacy {err} (redirect skipped)')
-    return Aggregate(exact=exact, site=site, legacy=True, redirects=redirects)
 
 
 def _skip_unreadable(
@@ -556,7 +519,7 @@ async def _stored_snapshot_error(path: str) -> Optional[str]:
 # manifests is a store listing plus two small reads per platform app, well under
 # a second on a healthy store; a slow or hanging store must not hold the engine
 # off its port (and its health checks) for longer. On timeout the engine boots
-# on the legacy page list and the build finishes in the background.
+# with no public pages and the build finishes in the background.
 STARTUP_BUILD_SECONDS = 10.0
 
 # One build (the store listing and every read) may take at most this long. A
@@ -574,7 +537,7 @@ class PageMap:
     """The page map in effect: the current aggregate, its swap listeners and the one-at-a-time rebuild.
 
     The engine runs one, ``page_map``; the module functions below delegate to
-    it. A fresh instance holds the legacy aggregate until its first swap, has
+    it. A fresh instance holds an empty aggregate until its first swap, has
     no listeners and runs no rebuild.
     """
 
@@ -595,14 +558,14 @@ class PageMap:
 
         Returns:
             True when the build finished in time. Otherwise the engine starts
-            on the legacy page list and the build carries on in the background.
+            with no public pages and the build carries on in the background.
         """
         self.schedule_rebuild()
         done, _ = await asyncio.wait({self._rebuild_task}, timeout=STARTUP_BUILD_SECONDS)
         if not done:
             warning(
                 f'[public_pages] the first build is still running after {STARTUP_BUILD_SECONDS:g}s; '
-                'starting on the legacy page list'
+                'starting with no public pages'
             )
         return bool(done)
 
@@ -697,13 +660,13 @@ class PageMap:
                 warning(f'[public_pages] swap listener failed: {exc}')
 
     def current(self) -> Aggregate:
-        """The aggregate in effect right now (the legacy one until the first build).
+        """The aggregate in effect right now (empty until the first build lands).
 
         Returns:
             The current aggregate.
         """
         if self._current is None:
-            self._current = legacy_aggregate()
+            self._current = Aggregate(exact={})
         return self._current
 
 
@@ -711,7 +674,7 @@ page_map = PageMap()
 
 
 def current() -> Aggregate:
-    """The aggregate in effect right now (the legacy one until the first build).
+    """The aggregate in effect right now (empty until the first build lands).
 
     Returns:
         ``page_map.current()``.
@@ -778,8 +741,8 @@ async def build_at_startup() -> bool:
     """Build the first aggregate before the engine serves (``PageMap.build_at_startup``).
 
     Returns:
-        True when the build finished in time; otherwise the engine starts on
-        the legacy page list and the build carries on in the background.
+        True when the build finished in time; otherwise the engine starts with
+        no public pages and the build carries on in the background.
     """
     return await page_map.build_at_startup()
 

@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **server**: a task that crashes ends as `Stopped unexpectedly` instead of `Stopped`, shows `Unexpected termination: <what happened>` in its console and records the run's outcome as `error`, not `cancelled`. The engine's crash handlers on Linux, macOS and Windows and the JVM's abort and exit hooks end with `>EXIT*Crash*...`, a new error code, instead of `Fatality`; a fatal error given a single error keeps that error's code, and every fatal `>EXIT` names the place it was raised rather than the monitor. `eaas.py` shows the engine's `>DUMP` as `Crash dump: <file>` instead of `Unknown control`, and treats a task process that ends without a word as crashed when a crash signal or an OOM kill (`SIGKILL`) ended it, or on Windows a crash exception code, as a fast fail does (#2879)
 
 ### Changed
+- **shell**: the built-in public page list is removed. Public pages come only from published apps' manifests.
 - **shell**: an engine without `RR_APP_URL` sends `X-Robots-Tag: noindex, nofollow` on every response, so a staging engine stays out of search indexes.
 - **shell**: one catch-all route serves public pages from the page map, with each page's title, description, canonical and `og:` tags in the head. `sitemap.xml`, `robots.txt` and `llms.txt` come from the same map, and `site.redirects` adds 301s.
 - **shell**: a dev relay owns the OAuth `state` when relaying, so an undecided visitor's cookieless signup context is not sent through it (#2978).

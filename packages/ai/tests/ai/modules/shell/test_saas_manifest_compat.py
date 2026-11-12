@@ -39,25 +39,25 @@ import pytest
 
 import ai.modules.shell.public_pages as pp
 from ai.modules.shell.contract import check_manifest
-from ai.modules.shell.legacy_manifest import legacy_page_manifest
 from ai.modules.shell.public_pages import load_published
 
+from .home_ui_fixture import home_ui_manifest
 from .hostile_fixtures import FILES, HostileAccount, dist_of
 
 PLATFORM = '00000000-platform'
 
 
 def _emitted():
-    """The saas emitter's output for home-ui: the legacy 25 paths, named data entries, the pricing snapshot."""
+    """The saas emitter's output for home-ui: its 25 paths, named data entries, the pricing snapshot."""
+    manifest = home_ui_manifest()
     pages = []
-    for page in legacy_page_manifest()['publicPages']:
-        page = dict(page)
+    for page in manifest['publicPages']:
         if page['path'] == '/pricing':
             page.update(data=['plans:rocketride.pipeBuilder'], snapshot='pages/pricing.html')
         if page['path'] == '/':
             page.update(data=['app:rocketride.pipeBuilder'])
         pages.append(page)
-    return {'publicPages': pages, 'site': dict(legacy_page_manifest()['site'])}
+    return {'publicPages': pages, 'site': manifest['site']}
 
 
 def _newer():
@@ -88,7 +88,7 @@ def test_the_saas_emitted_manifest_validates_cleanly():
     pages, site, errors = check_manifest('rocketride.home', _emitted())
     assert errors == []
     assert len(pages) == 25 and site['title'] == 'RocketRide'
-    # The legacy redirect map passes the same validator a manifest's does.
+    # home-ui's redirect map passes the same validator a manifest's does.
     assert site['redirects']['/terms'] == '/legal/terms' and len(site['redirects']) == 6
     by_path = {p.path: p for p in pages}
     assert by_path['/pricing'].data == ('plans:rocketride.pipeBuilder',)

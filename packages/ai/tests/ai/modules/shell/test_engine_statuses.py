@@ -27,12 +27,14 @@ middleware in front) and only ``serve`` is stubbed out.
 
 Without the catch-all, every path no route claimed answered 401 from the auth
 middleware before routing: unknown paths, trailing-slash variants of pages
-and legacy URLs alike, and every page got the shell's generic title. These
-pin what an anonymous caller gets instead. The aggregate is the legacy one,
-as in production until home-ui publishes its manifest.
+and moved URLs alike, and every page got the shell's generic title. These
+pin what an anonymous caller gets instead. The aggregate is a trimmed view of
+home-ui's manifest; ``bare_engine`` has none, as an OSS engine without home-ui.
 """
 
 from __future__ import annotations
+
+import asyncio
 
 import pytest
 from fastapi.testclient import TestClient
@@ -40,17 +42,34 @@ from fastapi.testclient import TestClient
 import ai.modules.shell.public_pages as pp
 
 from .engine_boot import SHELL_BODY, boot_engine
+from .home_ui_fixture import home_ui_manifest
 
 GOOGLEBOT = 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)'
 BROWSER = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/131.0 Safari/537.36'
 
 
+HOME_MANIFEST = home_ui_manifest('/', '/pricing', '/legal/terms', '/legal/privacy-policy')
+
+
+def _engine(monkeypatch, tmp_path, published):
+    """The app ``eaas.run`` serves, over the given published manifests."""
+    return TestClient(boot_engine(monkeypatch, tmp_path, published).app, follow_redirects=False)
+
+
 @pytest.fixture
 def engine(monkeypatch, tmp_path):
-    """The app ``eaas.run`` serves, with no published manifests (the legacy aggregate)."""
-    server = boot_engine(monkeypatch, tmp_path)
-    assert pp.current().legacy
-    return TestClient(server.app, follow_redirects=False)
+    """The engine with home-ui's manifest published."""
+    client = _engine(monkeypatch, tmp_path, [pp.Published('rocketride.home', HOME_MANIFEST)])
+    assert pp.current().exact
+    return client
+
+
+@pytest.fixture
+def bare_engine(monkeypatch, tmp_path):
+    """The engine with no published manifest: an OSS engine without home-ui."""
+    client = _engine(monkeypatch, tmp_path, [])
+    assert not pp.current().exact
+    return client
 
 
 @pytest.fixture
@@ -102,7 +121,7 @@ def test_a_pages_trailing_slash_twin_is_301_to_the_page(engine, method):
 
 
 @pytest.mark.parametrize('method', ['GET', 'HEAD'])
-def test_legacy_urls_are_301_to_their_documents(engine, method):
+def test_moved_urls_are_301_to_their_documents(engine, method):
     for path, location in (
         ('/terms', '/legal/terms'),
         ('/terms/', '/legal/terms'),
@@ -145,3 +164,31 @@ def test_a_real_routes_slash_twin_redirects_relatively_never_via_the_host_header
     for path, location in (('/status/', '/status'), ('/status/?a=1', '/status?a=1')):
         resp = engine.get(path, headers={'host': 'evil.example'})
         assert resp.status_code == 307 and resp.headers['location'] == location, path
+
+
+@pytest.mark.parametrize('method', ['GET', 'HEAD'])
+@pytest.mark.parametrize('ua', [GOOGLEBOT, BROWSER])
+def test_the_root_still_serves_the_shell_without_a_root_owner_manifest(bare_engine, method, ua):
+    resp = bare_engine.request(method, '/', headers={'User-Agent': ua})
+    assert resp.status_code == 200
+    if method == 'GET':
+        assert SHELL_BODY in resp.text
+
+
+def test_without_a_root_owner_manifest_public_paths_and_moved_urls_are_404(bare_engine):
+    for path in ('/pricing', '/legal/terms', '/terms', '/privacy'):
+        assert bare_engine.get(path).status_code == 404, path
+    # Real routes stay behind auth.
+    assert bare_engine.get('/status').status_code == 401
+
+
+def test_a_root_app_the_store_cannot_read_keeps_every_page_and_redirect(engine, monkeypatch):
+    async def unreadable_home(acct=None, strict=False, exclude='', unreadable=None):
+        unreadable.add('rocketride.home')  # still published, its manifest unreadable for now
+        return []
+
+    monkeypatch.setattr(pp, 'load_published', unreadable_home)
+    assert asyncio.run(pp.rebuild())
+    for path in ('/', '/pricing', '/legal/terms', '/legal/privacy-policy'):
+        assert engine.get(path).status_code == 200, path
+    assert engine.get('/terms').headers['location'] == '/legal/terms'
