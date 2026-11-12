@@ -136,6 +136,20 @@ def enabled() -> bool:
     return bool(key()) and app_url().startswith('https://')
 
 
+def misconfiguration() -> str:
+    """Why a set ``RR_INDEXNOW_KEY`` leaves IndexNow off; never names the key.
+
+    Returns:
+        A reason for the startup warning, or '' when the key is unset or
+        IndexNow is on.
+    """
+    if not indexnow_key() or enabled():
+        return ''
+    if not key():
+        return 'RR_INDEXNOW_KEY must be 8 to 128 letters, digits or "-" (a JSON secret value is not a key)'
+    return 'RR_APP_URL must be an https:// origin'
+
+
 async def _content(page: Page, last: Optional[_Content], reads: asyncio.Semaphore) -> _Content:
     entry = replace(page, dist_dir='', version=None, published_at=None)
     if not page.snapshot:

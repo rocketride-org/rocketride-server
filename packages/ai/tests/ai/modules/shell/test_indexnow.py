@@ -493,14 +493,34 @@ def test_the_key_file_and_submissions_are_wired_when_enabled(monkeypatch):
     assert indexnow.on_swap in pp.page_map.listeners
 
 
-@pytest.mark.parametrize('key,app_url', [(KEY, None), (KEY, 'http://cloud.example'), ('bad key', BASE)])
-def test_no_key_file_and_no_submissions_unless_enabled(monkeypatch, key, app_url):
+@pytest.mark.parametrize(
+    'key,app_url,reason',
+    [
+        (KEY, None, 'RR_APP_URL must be an https:// origin'),
+        (KEY, 'http://cloud.example', 'RR_APP_URL must be an https:// origin'),
+        ('bad key', BASE, 'RR_INDEXNOW_KEY must be 8 to 128'),
+        (f'{{"value": "{KEY}"}}', BASE, 'a JSON secret value is not a key'),
+        ('', BASE, ''),
+    ],
+    ids=['no-app-url', 'http-app-url', 'bad-key', 'json-secret', 'no-key'],
+)
+def test_no_key_file_and_no_submissions_unless_enabled(monkeypatch, key, app_url, reason):
+    import ai.modules.shell as shell_pkg
+
     monkeypatch.setenv('RR_INDEXNOW_KEY', key)
     if app_url is None:
         monkeypatch.delenv('RR_APP_URL', raising=False)
     else:
         monkeypatch.setenv('RR_APP_URL', app_url)
+    lines = []
+    monkeypatch.setattr(shell_pkg, 'warning', lines.append)
     client = _engine(monkeypatch)
     assert client.get(f'/{key}.txt').status_code == 404
     assert client.head(f'/{key}.txt').status_code == 404
     assert indexnow.on_swap not in pp.page_map.listeners
+    # A set but unusable key says why, once, without naming the key; no key, no word.
+    off = [line for line in lines if 'IndexNow is off' in line]
+    if reason:
+        assert len(off) == 1 and reason in off[0] and key not in off[0], lines
+    else:
+        assert off == [], lines
