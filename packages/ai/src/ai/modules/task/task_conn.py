@@ -256,6 +256,8 @@ class TaskConn(
     # When this connection's platform authority was last verified, on the
     # live re-check's monotonic clock (``TaskServer._authz``); 0 = never.
     _authz_verified_at: float = 0.0
+    # When the last ``[AUTHZ] denied`` warning for this connection was logged
+    _authz_denied_logged_at: float = float('-inf')
 
     def __init__(
         self,
@@ -385,11 +387,7 @@ class TaskConn(
         # refuse, keep the socket; the next good read resumes it.
         authz = getattr(self._server, '_authz', None)
         if authz is not None and not authz.gate_ok(self):
-            denied = self._server.count_authz('denied_unavailable')
-            warning(
-                f'[AUTHZ] denied conn={self.get_connection_id()} user={self._account_info.userId} '
-                f'command={cmd} denied_unavailable={denied}'
-            )
+            authz.gate_denied(self, cmd)
             await self.send(self.build_error(message, 'Authorization temporarily unavailable'))
             return
 

@@ -51,7 +51,7 @@ revokes within 9 s; the gate's ``THRESHOLD`` = 1.2 T + (R + 1) + 1 = 10 s.
 import asyncio
 import random
 import time
-from typing import TYPE_CHECKING, Any, Callable, List, Tuple
+from typing import TYPE_CHECKING, Any, Callable, List, Set, Tuple
 
 from rocketlib import debug, warning
 
@@ -65,6 +65,8 @@ if TYPE_CHECKING:
 # backstop at R + 1) and the gate threshold (s): 1.2 T + (R + 1) + 1.
 T, R, THRESHOLD = 5.0, 2.0, 10.0
 JITTER = 0.2
+# At most one ``[AUTHZ] denied`` warning per connection per this many seconds.
+DENY_LOG_INTERVAL = 60.0
 
 
 class AuthzRecheck:
@@ -93,6 +95,8 @@ class AuthzRecheck:
         self._rng = rng
         self._stopping = False
         self._wake = asyncio.Event()
+        # Revoke notices in flight (strong references until they finish)
+        self._notices: Set[asyncio.Task] = set()
 
     def clock(self) -> float:
         """The monotonic clock every verification stamp is read from."""
@@ -131,21 +135,39 @@ class AuthzRecheck:
             self._read_failed(len(user_ids), 'no result')
             return
 
+        # Decide every subject, stamp every verified one, then revoke the
+        # rest, all with no await: no client can delay another's stamp or
+        # its own revoke. Only the notices (bounded sends + disconnect) run
+        # afterwards, as independent tasks.
+        narrowed: List[Tuple['TaskConn', Any, str]] = []
         for conn, info in captured:
             row = rows.get(info.userId)
             if row is None:
-                reason = 'user row gone'
+                narrowed.append((conn, info, 'user row gone'))
             elif not row[0]:
-                reason = 'user disabled'
+                narrowed.append((conn, info, 'user disabled'))
             elif set(info.sysPermissions) - set(row[1]):
-                reason = 'sysPermissions narrowed'
-            else:
+                narrowed.append((conn, info, 'sysPermissions narrowed'))
+            elif conn._account_info is info:
                 # Verified as of the sweep start, if the identity read is still the one held
-                if conn._account_info is info:
-                    conn._authz_verified_at = max(getattr(conn, '_authz_verified_at', 0.0), start)
-                continue
-            # No await between this decision and revoke's synchronous part
-            await conn.revoke(info, f'live authority: {reason}')
+                conn._authz_verified_at = max(getattr(conn, '_authz_verified_at', 0.0), start)
+        for conn, info, reason in narrowed:
+            if conn.revoke_authority(info, f'live authority: {reason}'):
+                notice = asyncio.ensure_future(conn.send_revoke_notice())
+                self._notices.add(notice)
+                notice.add_done_callback(self._notices.discard)
+
+    def gate_denied(self, conn: 'TaskConn', command: Any) -> None:
+        """Count a refused request; warn at most once per connection per DENY_LOG_INTERVAL."""
+        denied = self._server.count_authz('denied_unavailable')
+        now = self.clock()
+        if now - getattr(conn, '_authz_denied_logged_at', float('-inf')) < DENY_LOG_INTERVAL:
+            return
+        conn._authz_denied_logged_at = now
+        warning(
+            f'[AUTHZ] denied conn={conn.get_connection_id()} user={conn._account_info.userId} '
+            f'command={command} denied_unavailable={denied}'
+        )
 
     def _read_failed(self, users: int, why: str) -> None:
         """Count and log a failed read; nothing is decided on it."""
