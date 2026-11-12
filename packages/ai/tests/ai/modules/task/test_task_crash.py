@@ -1,14 +1,15 @@
 """A real eaas.py runs a pipeline whose Python node crashes its task process.
 
-The node is written into a temporary --node_path workspace. The server passes
-that path, and its own --dumps, on to the task process it starts, so the node
-never enters dist.
+Each server writes the node, under a name of its own, where the engine looks
+for nodes, and removes it when it stops. The name starts with `_`, which the
+node contract tests skip.
 """
 
 import asyncio
 import contextlib
 import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -29,13 +30,10 @@ pytestmark = pytest.mark.skipif(
 
 _SERVICES = {
     'title': 'Crash Probe',
-    'protocol': 'crash_probe://',
     'classType': ['text'],
     'capabilities': [],
     'register': 'filter',
     'node': 'python',
-    'path': 'local_nodes.crash_probe',
-    'prefix': 'crash_probe',
     'description': ['Ends its task process the way the text asks.'],
     'documentation': 'https://docs.rocketride.org',
     'lanes': {'text': ['text']},
@@ -73,32 +71,42 @@ class IInstance(IInstanceBase):
             os._exit(-1)
 """
 
-_PIPELINE = {
-    'components': [
-        {
-            'id': 'webhook_1',
-            'provider': 'webhook',
-            'name': 'Webhook',
-            'config': {'hideForm': True, 'mode': 'Source', 'type': 'webhook'},
-        },
-        {
-            'id': 'crash_probe_1',
-            'provider': 'crash_probe',
-            'config': {},
-            'input': [{'lane': 'text', 'from': 'webhook_1'}],
-        },
-    ],
-    'source': 'webhook_1',
-    'project_id': '6f1c2b9e-3d4a-4c8e-9b7f-2a5d8e1f0c43',
-}
+
+def _pipeline(provider: str) -> dict:
+    return {
+        'components': [
+            {
+                'id': 'webhook_1',
+                'provider': 'webhook',
+                'name': 'Webhook',
+                'config': {'hideForm': True, 'mode': 'Source', 'type': 'webhook'},
+            },
+            {
+                'id': 'crash_probe_1',
+                'provider': provider,
+                'config': {},
+                'input': [{'lane': 'text', 'from': 'webhook_1'}],
+            },
+        ],
+        'source': 'webhook_1',
+        'project_id': '6f1c2b9e-3d4a-4c8e-9b7f-2a5d8e1f0c43',
+    }
 
 
-def _write_node(workspace: Path) -> None:
-    node = workspace / 'local_nodes' / 'crash_probe'
-    node.mkdir(parents=True)
-    (workspace / 'local_nodes' / '__init__.py').write_text('')
+def _nodes_dir() -> Path:
+    """Where the engine looks for nodes (services.cpp): the source tree's, when it runs from <repo>/dist/server."""
+    if _SERVER_DIR.parts[-2:] == ('dist', 'server'):
+        source = _SERVER_DIR.parents[1] / 'nodes' / 'src' / 'nodes'
+        if source.is_dir():
+            return source
+    return _SERVER_DIR / 'nodes'
+
+
+def _write_node(node: Path, provider: str) -> None:
+    node.mkdir(exist_ok=True)  # only a killed run with the same PID leaves one
+    services = dict(_SERVICES, protocol=f'{provider}://', prefix=provider, path=f'nodes._{provider}')
     (node / '__init__.py').write_text('from .IGlobal import IGlobal\nfrom .IInstance import IInstance\n')
-    (node / 'services.json').write_text(json.dumps(_SERVICES))
+    (node / 'services.json').write_text(json.dumps(services))
     (node / 'IGlobal.py').write_text(_IGLOBAL)
     (node / 'IInstance.py').write_text(_IINSTANCE)
 
@@ -121,35 +129,45 @@ def server(request, tmp_path_factory):
     """A real server with the crash node, without and with --dumps."""
     dumps = request.param
     workspace = tmp_path_factory.mktemp('crash-node')
-    _write_node(workspace)
-
-    port = _free_port()
-    # Task ports too, apart from those of the builder's test servers, which start at 20000
-    args = [sys.executable, 'ai/eaas.py', f'--port={port}', f'--base_port={_free_port()}', f'--node_path={workspace}']
-    if dumps:
-        args.append('--dumps')
-
-    # Its own crash database, so no other engine's dump reaches the test task
-    env = dict(os.environ, ROCKETRIDE_APIKEY=_APIKEY, ROCKETRIDE_CRASHDB_DIR=str(workspace / 'crashdb'))
-    log = open(workspace / 'server.log', 'wb')
-    proc = subprocess.Popen(
-        args,
-        cwd=_SERVER_DIR,
-        env=env,
-        stdout=log,
-        stderr=subprocess.STDOUT,
-        preexec_fn=None if os.name == 'nt' else _no_core_file,
-    )
+    # Its own name: xdist may run both servers at once, in two processes
+    provider = f'crash_probe_{os.getpid()}_{int(dumps)}'
+    node = _nodes_dir() / f'_{provider}'
     try:
-        yield {'uri': f'http://127.0.0.1:{port}', 'dumps': dumps, 'log': workspace / 'server.log'}
+        _write_node(node, provider)
+
+        port = _free_port()
+        # Task ports too, apart from those of the builder's test servers, which start at 20000
+        args = [sys.executable, 'ai/eaas.py', f'--port={port}', f'--base_port={_free_port()}']
+        if dumps:
+            args.append('--dumps')
+
+        # Its own crash database, so no other engine's dump reaches the test task
+        env = dict(os.environ, ROCKETRIDE_APIKEY=_APIKEY, ROCKETRIDE_CRASHDB_DIR=str(workspace / 'crashdb'))
+        with open(workspace / 'server.log', 'wb') as log:
+            proc = subprocess.Popen(
+                args,
+                cwd=_SERVER_DIR,
+                env=env,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                preexec_fn=None if os.name == 'nt' else _no_core_file,
+            )
+            try:
+                yield {
+                    'uri': f'http://127.0.0.1:{port}',
+                    'provider': provider,
+                    'dumps': dumps,
+                    'log': workspace / 'server.log',
+                }
+            finally:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=30)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
     finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=30)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
-        log.close()
+        shutil.rmtree(node, ignore_errors=True)
 
 
 async def _connect(uri: str, on_event) -> RocketRideClient:
@@ -165,7 +183,7 @@ async def _connect(uri: str, on_event) -> RocketRideClient:
             await asyncio.sleep(1)
 
 
-async def _run(uri: str, text: str):
+async def _run(server, text: str):
     """Send the text to the crash node; return the final status and the console lines."""
     lines = []
 
@@ -173,9 +191,9 @@ async def _run(uri: str, text: str):
         if message.get('event') == 'output':
             lines.append(message.get('body', {}).get('output', ''))
 
-    client = await _connect(uri, on_event)
+    client = await _connect(server['uri'], on_event)
     try:
-        token = (await client.use(pipeline=_PIPELINE))['token']
+        token = (await client.use(pipeline=_pipeline(server['provider'])))['token']
         await client.add_monitor({'token': token}, ['output'])
 
         # The task dies while it handles the text, so the send itself may fail
@@ -206,7 +224,7 @@ def _dump_lines(lines):
 
 @pytest.mark.asyncio
 async def test_a_node_that_crashes_stops_its_task_unexpectedly(server):
-    token, status, lines = await _run(server['uri'], 'segv')
+    token, status, lines = await _run(server, 'segv')
     dumps = _dumps_of(token)
     try:
         assert status['status'] == 'Stopped unexpectedly', server['log'].read_text(errors='replace')
@@ -237,7 +255,7 @@ async def test_a_crash_past_the_handlers_stops_its_task_unexpectedly(server):
         if os.name == 'nt'
         else ('sigkill', 'SIGKILL (code 9)')
     )
-    token, status, lines = await _run(server['uri'], text)
+    token, status, lines = await _run(server, text)
     assert status['status'] == 'Stopped unexpectedly', server['log'].read_text(errors='replace')
     assert _crash_lines(lines) == [f'Unexpected termination: {crash}']
     assert _dump_lines(lines) == []
@@ -247,7 +265,7 @@ async def test_a_crash_past_the_handlers_stops_its_task_unexpectedly(server):
 @pytest.mark.asyncio
 async def test_a_node_that_exits_stops_its_task(server):
     """exit(-1) is no crash, although on Windows its code 0xffffffff looks like an exception's."""
-    token, status, lines = await _run(server['uri'], 'exit')
+    token, status, lines = await _run(server, 'exit')
     assert status['status'] == 'Stopped', server['log'].read_text(errors='replace')
     assert _crash_lines(lines) == []
     assert _dumps_of(token) == []
