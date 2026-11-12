@@ -1422,3 +1422,24 @@ def test_lockfile_path_resolutions_outside_the_tree_are_refused(lock, refused):
             app_build._refuse_lockfile_paths(lock)
     else:
         app_build._refuse_lockfile_paths(lock)
+
+
+@pytest.mark.parametrize(
+    'lock',
+    [
+        # an escaped importer key decodes to the root importer
+        'importers:\n  "\\x2e":\n    dependencies:\n      y:\n        specifier: workspace:*\n        version: link:../evil\n',
+        # a flow mapping split over lines
+        "importers: {\n  a/b/c:\n   x, .: {dependencies: {y: {version: 'link:../../../evil'}}}}\n",
+        # an unparsable lockfile
+        'importers:\n  .: [\n',
+        # an importer directory outside the tree
+        'importers:\n  ../..:\n    dependencies:\n      y:\n        version: link:x\n',
+    ],
+)
+def test_lockfile_check_reads_yaml_as_pnpm_does(lock):
+    """The lockfile is decoded as YAML, so escapes, flow style and parse
+    errors cannot steer the path check.
+    """
+    with pytest.raises(app_build.BuildFailure):
+        app_build._refuse_lockfile_paths(lock)
