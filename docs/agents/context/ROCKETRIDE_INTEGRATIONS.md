@@ -74,8 +74,21 @@ sign-in happens in the browser:
 }
 ```
 
-If you need an API key header instead, keep the key out of files that are committed: put it
-in your user-level config or in an environment variable your client expands.
+If you need an API key header instead, add a `headers` entry:
+
+```json
+{
+	"mcpServers": {
+		"rocketride": {
+			"url": "https://api.rocketride.ai/mcp",
+			"headers": { "Authorization": "Bearer rr_..." }
+		}
+	}
+}
+```
+
+Keep the key out of files that are committed: put it in your user-level config or in an
+environment variable your client expands.
 
 ### Self-hosted engine
 
@@ -97,8 +110,8 @@ unencrypted. Three rules apply:
    they fail with `Invalid or revoked API key`.
 3. `ROCKETRIDE_URI` and `MCP_RESOURCE_IDENTIFIER` are not interchangeable.
    `MCP_RESOURCE_IDENTIFIER` is the public URL of your `/mcp` endpoint. For OAuth sign-in on
-   a self-hosted engine it must equal that URL exactly, and `MCP_EXPECTED_AUDIENCE` must be
-   set too. API key sign-in needs neither.
+   a self-hosted engine it must equal that URL exactly. `MCP_EXPECTED_AUDIENCE` is also
+   needed, but only when the engine is not bound to localhost. API key sign-in needs neither.
 
 More: https://docs.rocketride.org/connect/mcp/http/ and
 https://docs.rocketride.org/connect/mcp/http/self-hosting/.
