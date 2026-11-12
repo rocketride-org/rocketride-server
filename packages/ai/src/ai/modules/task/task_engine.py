@@ -486,9 +486,9 @@ async def _sign_store_url(task: 'Task', arguments: Dict[str, Any], data: Optiona
     if not task.client_id:
         raise ChannelRefused('no storage')
 
-    root = task._storage_root() or None
-    file_store = Store.file_store(RequestContext.engine(task.client_id), client_id=task.client_id, root=root)
     try:
+        root = task._storage_root() or None
+        file_store = Store.file_store(RequestContext.engine(task.client_id), client_id=task.client_id, root=root)
         url = await file_store.get_url(path, expires_in, download_name=download_name)
     except (PermissionError, ValueError, StorageError):
         raise ChannelRefused('not allowed') from None

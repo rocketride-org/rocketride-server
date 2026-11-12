@@ -618,6 +618,9 @@ class FileStore:
         self._client_id = client_id
         self._ctx = ctx
         self._root = root
+        # Set by Store.engine_file_store: this view belongs to a task process,
+        # which must never sign a fetch URL itself (#1070).
+        self._task_process = False
 
     # Shared single-process guards live on the owning Store so every
     # FileStore instance — regardless of which user or identity constructed
@@ -1304,17 +1307,17 @@ class FileStore:
         # engine signs, resolving the path again under the task's own identity.
         from ai.modules.data.channel import task_channel
 
-        from .store import Store
-
         if task_channel.available:
             import asyncio
 
             arguments = {'path': path, 'expires_in': expires_in, 'download_name': download_name}
             reply = await asyncio.to_thread(task_channel.request_sync, 'store.url', arguments)
             return reply.body['url']
-        if Store._get_current_task() is not None:
+        if self._task_process:
             # A task with no channel (no --data_port) would sign with its own
-            # random key: a URL the engine refuses. Say so instead.
+            # random key: a URL the engine refuses. Say so instead. The flag was
+            # set when the view was built, so worker threads never read the
+            # engine's current-task slot (main task thread only, task.cpp).
             raise RuntimeError('a fetch URL needs the engine, and this task has no channel to it')
 
         import time

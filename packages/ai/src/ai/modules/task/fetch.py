@@ -48,7 +48,7 @@ def warn_if_signing_key_is_ephemeral() -> None:
     presign. With RR_SIGNING_KEY unset the key is random per process, so a URL
     stops verifying when the engine restarts, and on every other replica.
     """
-    store_url = os.environ.get('RR_STORE_URL') or ''
+    store_url = (os.environ.get('RR_STORE_URL') or '').lower()
     if os.environ.get('RR_SIGNING_KEY') or (store_url and not store_url.startswith('filesystem://')):
         return
     warning(

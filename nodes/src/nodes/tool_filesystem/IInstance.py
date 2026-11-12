@@ -440,11 +440,16 @@ class IInstance(IInstanceBase):
         """Reference dict for a persisted file, resolving a signed URL if configured."""
         url = None
         if self.IGlobal.emit_url:
-            url = _run_async(
-                self.IGlobal.file_store.get_url,
-                path,
-                expires_in=self.IGlobal.url_expires_in,
-            )
+            try:
+                url = _run_async(
+                    self.IGlobal.file_store.get_url,
+                    path,
+                    expires_in=self.IGlobal.url_expires_in,
+                )
+            except Exception as e:
+                # The file is already written; a URL the engine could not sign
+                # (channel down, timeout, refusal) must not fail the step.
+                warning(f'tool_filesystem: no download URL for {path!r}: {e}')
         return {'storePath': path, 'url': url, 'name': os.path.basename(path), 'mime': mime}
 
     def _sink_write(self, data: bytes, filename: str, *, index: int | None = None) -> dict | None:
